@@ -38,6 +38,17 @@ def create_app(
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
 
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+
+    from proxploy.api.auth import limiter
+    from proxploy.middleware import CSRFMiddleware
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(CSRFMiddleware, cookie_name=settings.csrf_cookie,
+                       secure=settings.cookie_secure)
+
     from proxploy.api import api_router
 
     app.include_router(api_router)
