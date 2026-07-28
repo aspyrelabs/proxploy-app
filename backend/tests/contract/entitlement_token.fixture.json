@@ -1,0 +1,14 @@
+{
+  "_comment": "Shared app<->api entitlement-token contract fixture (doc 09). TEST-ONLY keypair - never used outside contract tests. Do not edit without amending docs/09 in proxploy-app and updating BOTH repos in the same change.",
+  "kid": "test-fixture-1",
+  "claims": {
+    "sub": "lic_01HTESTFIXTURE",
+    "tier": "pro",
+    "features": {"hosts.multi": true, "store.install": true, "auth.oidc": false},
+    "iat": 1690000000,
+    "exp": 1690259200,
+    "grace_until": 1692592000
+  },
+  "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIFneR1tFGj+1+w3hwJLWPU6e01fJVoQtS/qszF4UPjK5\n-----END PRIVATE KEY-----\n",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwGxpY83XmGduLOnfz/4EG3SrK2leHuTQ0c6z8nDT/tM=\n-----END PUBLIC KEY-----\n"
+}

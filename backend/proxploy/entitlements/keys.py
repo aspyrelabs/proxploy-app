@@ -4,7 +4,10 @@ exist in this repo."""
 import json
 
 BUNDLED_PUBLIC_KEYS: dict[str, str] = {
-    # "dev-2026-07": pasted in Task 9 from proxploy-api's gen_signing_key.py output
+    "dev-2026-07": """-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAurBzDvib5NysbwvfTbH03wWhhadmH3xgPQ11TdEE5DQ=
+-----END PUBLIC KEY-----
+""",
 }
 
 

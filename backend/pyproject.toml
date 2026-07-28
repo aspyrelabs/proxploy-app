@@ -30,4 +30,7 @@ build-backend = "setuptools.build_meta"
 include = ["proxploy*"]
 
 [tool.pytest.ini_options]
-markers = ["pve_integration: needs a disposable live PVE (PROXPLOY_TEST_PVE_* env)"]
+markers = [
+  "pve_integration: needs a disposable live PVE (PROXPLOY_TEST_PVE_* env)",
+  "e2e: cross-repo roundtrip against a local proxploy-api",
+]

@@ -1,6 +1,12 @@
-from fastapi import APIRouter, Depends
+import uuid
 
-from proxploy.api.deps import get_current_user, get_entitlements
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+
+from proxploy.api.deps import get_current_user, get_db, get_entitlements, require_role
+from proxploy.models import AppSetting, EntitlementCache, utcnow
+from proxploy.services.audit import write_audit
+from proxploy.services.license_client import LicenseApiError
 
 router = APIRouter(prefix="/entitlements", tags=["entitlements"])
 
@@ -13,3 +19,104 @@ def entitlements(ent=Depends(get_entitlements)):
         grace = {"expires_at": st.expires_at.isoformat(),
                  "grace_until": st.grace_until.isoformat(), "in_grace": st.in_grace}
     return {"tier": st.tier, "features": ent.snapshot(), "grace": grace}
+
+
+class LicenseIn(BaseModel):
+    license_key: str
+
+
+def _setting(db, key, default=None):
+    row = db.query(AppSetting).filter_by(key=key).one_or_none()
+    return row.value if row else default
+
+
+def _set_setting(db, key, value):
+    row = db.query(AppSetting).filter_by(key=key).one_or_none()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+    db.commit()
+
+
+def apply_new_token(request: Request, db, token: str) -> None:
+    """Verify, then persist (encrypted) + reload the in-memory client."""
+    from proxploy.entitlements.client import _ts
+
+    ent = request.app.state.entitlements
+    claims = ent.verify(token)
+    ent.apply_claims(claims)
+    ss = request.app.state.secretstore
+    enc, _ = ss.encrypt(token.encode())
+    row = db.get(EntitlementCache, 1)
+    if not row:
+        row = EntitlementCache(id=1)
+        db.add(row)
+    row.token = enc.decode()
+    row.tier = claims["tier"]
+    row.features = claims["features"]
+    row.issued_at = _ts(claims["iat"])
+    row.expires_at = _ts(claims["exp"])
+    row.grace_until = _ts(claims["grace_until"])
+    row.fetched_at = row.last_verified_at = utcnow()
+    db.commit()
+
+
+@router.post("/license")
+def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
+                user=Depends(require_role("owner"))):
+    install_id = _setting(db, "license.install_id")
+    if not install_id:
+        install_id = str(uuid.uuid4())
+        _set_setting(db, "license.install_id", install_id)
+    lc = request.app.state.license_client
+    try:
+        out = lc.activate(body.license_key, install_id)
+    except LicenseApiError as e:
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="entitlement.license.set", result="error")
+        raise HTTPException(502, f"licensing service: {e}")
+    apply_new_token(request, db, out["token"])
+    # doc note (Task 8 review): refresh_credential is null on an idempotent
+    # same-install reactivation — only non-null on first-ever activation for
+    # this license. Keep whatever we already have on file in that case.
+    cred = out.get("refresh_credential")
+    if cred:
+        enc, _ = request.app.state.secretstore.encrypt(cred.encode())
+        _set_setting(db, "license.refresh_credential.enc", enc.decode())
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="entitlement.license.set")
+    return {"ok": True, "tier": request.app.state.entitlements.status().tier}
+
+
+@router.post("/refresh")
+def force_refresh(request: Request, db=Depends(get_db),
+                  user=Depends(require_role("owner"))):
+    enc = _setting(db, "license.refresh_credential.enc")
+    if not enc:
+        raise HTTPException(409, "no license configured")
+    cred = request.app.state.secretstore.decrypt(enc.encode()).decode()
+    try:
+        out = request.app.state.license_client.refresh(cred)
+    except LicenseApiError as e:
+        raise HTTPException(502, f"licensing service: {e}")
+    apply_new_token(request, db, out["token"])
+    write_audit(db, actor_type="user", actor_id=user.id, action="entitlement.refresh")
+    return {"ok": True}
+
+
+@router.delete("/license")
+def remove_license(request: Request, db=Depends(get_db),
+                   user=Depends(require_role("owner"))):
+    row = db.get(EntitlementCache, 1)
+    if row:
+        row.token = None
+        row.tier = "builtin"
+        row.features = {}
+    for key in ("license.refresh_credential.enc", "license.install_id"):
+        db.query(AppSetting).filter_by(key=key).delete()
+    db.commit()
+    request.app.state.entitlements.reset_builtin()
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="entitlement.license.remove")
+    return {"ok": True}

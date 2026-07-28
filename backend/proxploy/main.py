@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from proxploy.config import Settings, get_settings
 from proxploy.db import make_engine, make_sessionmaker, run_migrations
+from proxploy.models import AppSetting
 
 
 def create_app(
@@ -21,6 +22,7 @@ def create_app(
 
     from proxploy.entitlements.client import Entitlements
     from proxploy.entitlements.keys import load_public_keys
+    from proxploy.services.license_client import LicenseClient
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -36,13 +38,45 @@ def create_app(
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
         with app.state.sessionmaker() as db:
             app.state.entitlements.load(db, app.state.secretstore)
+
+        import asyncio
+
+        async def _refresh_loop():
+            import random
+
+            from proxploy.api.entitlements import apply_new_token  # helper reuse
+            while True:
+                await asyncio.sleep(3600 * 24 + random.uniform(0, 600))  # ~half of 72h exp is fine at Phase 1 granularity; jittered
+                try:
+                    with app.state.sessionmaker() as db:
+                        row = (db.query(AppSetting)
+                               .filter_by(key="license.refresh_credential.enc").one_or_none())
+                        if not row:
+                            return
+                        cred = app.state.secretstore.decrypt(row.value.encode()).decode()
+                        out = app.state.license_client.refresh(cred)
+                        # apply via a fake-request shim: the helper only needs .app
+                        class _Req:  # noqa: N801 — minimal shim
+                            pass
+                        req = _Req(); req.app = app
+                        apply_new_token(req, db, out["token"])
+                except Exception:
+                    continue  # doc 07 §8: transient failure = keep serving, retry later
+
+        with app.state.sessionmaker() as db:
+            licensed = (db.query(AppSetting)
+                        .filter_by(key="license.refresh_credential.enc").one_or_none())
+        refresh_task = asyncio.create_task(_refresh_loop()) if licensed else None
         yield
+        if refresh_task:
+            refresh_task.cancel()
         app.state.engine.dispose()
 
     app = FastAPI(title="Proxploy", docs_url="/api/docs",
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
+    app.state.license_client = license_client or LicenseClient(settings.api_base_url)
 
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware
