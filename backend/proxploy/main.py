@@ -38,14 +38,13 @@ def create_app(
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
 
-    from slowapi import _rate_limit_exceeded_handler
-    from slowapi.errors import RateLimitExceeded
-
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware
 
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # No dedicated RateLimitExceeded handler: it subclasses Starlette's HTTPException
+    # (status_code=429, detail=<limit string>), so the problem_handler below already
+    # covers it with the same RFC 9457 problem+json shape as every other error path.
     app.add_middleware(CSRFMiddleware, cookie_name=settings.csrf_cookie,
                        secure=settings.cookie_secure)
 

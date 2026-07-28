@@ -27,6 +27,8 @@ def test_first_user_bootstrap_then_login_me_logout(client, csrf_header):
 
 
 def test_bad_password_rejected_and_audited(client, csrf_header):
+    from proxploy.models import AuditEvent
+
     client.post("/api/v1/users", json={
         "email": "a@example.com", "password": "correct-horse-battery"},
         headers=csrf_header(client))
@@ -34,6 +36,10 @@ def test_bad_password_rejected_and_audited(client, csrf_header):
         "email": "a@example.com", "password": "wrong-wrong-wrong"},
         headers=csrf_header(client))
     assert r.status_code == 401
+
+    db = client.app.state.sessionmaker()
+    row = db.query(AuditEvent).filter_by(action="auth.login", result="error").one()
+    assert row.result == "error"
 
 
 def test_csrf_required_for_mutations(client):
@@ -51,6 +57,8 @@ def test_login_rate_limited(client, csrf_header):
         "email": "nobody@example.com", "password": "nope-nope-nope"},
         headers=csrf_header(client))
     assert r.status_code == 429
+    assert r.headers["content-type"].startswith("application/problem+json")
+    assert r.json()["status"] == 429
 
 
 def test_admin_creates_user(client, csrf_header, bootstrap_admin):
