@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 168
     cookie_secure: bool = False  # installer flips on when TLS terminates at the app
     api_base_url: str = "https://api.proxploy.com"
+    ent_extra_keys_file: Path | None = None
 
 
 @lru_cache

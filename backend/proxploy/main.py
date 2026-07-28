@@ -19,6 +19,9 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
 
+    from proxploy.entitlements.client import Entitlements
+    from proxploy.entitlements.keys import load_public_keys
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -31,12 +34,15 @@ def create_app(
         run_migrations(settings)
         app.state.engine = make_engine(settings)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
+        with app.state.sessionmaker() as db:
+            app.state.entitlements.load(db, app.state.secretstore)
         yield
         app.state.engine.dispose()
 
     app = FastAPI(title="Proxploy", docs_url="/api/docs",
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
+    app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
 
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware

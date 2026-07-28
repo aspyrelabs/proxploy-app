@@ -44,3 +44,15 @@ def default_team(db) -> Team:
         db.add(team)
         db.commit()
     return team
+
+
+def get_entitlements(request: Request):
+    return request.app.state.entitlements
+
+
+def require_entitlement(key: str):
+    """Doc 07 §2 backend enforcement — stack after auth/role deps on every gated route."""
+    def dep(request: Request):
+        if not request.app.state.entitlements.enabled(key):
+            raise HTTPException(403, {"error": "entitlement_required", "feature": key})
+    return dep
