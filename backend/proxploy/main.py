@@ -1,10 +1,12 @@
 import http.client
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from proxploy.config import Settings, get_settings
+from proxploy.db import make_engine, make_sessionmaker, run_migrations
 
 
 def create_app(
@@ -15,7 +17,18 @@ def create_app(
     license_client=None,
 ) -> FastAPI:
     settings = settings or get_settings()
-    app = FastAPI(title="Proxploy", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        run_migrations(settings)
+        app.state.engine = make_engine(settings)
+        app.state.sessionmaker = make_sessionmaker(app.state.engine)
+        yield
+        app.state.engine.dispose()
+
+    app = FastAPI(title="Proxploy", docs_url="/api/docs",
+                  openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
 
     from proxploy.api import api_router
