@@ -1,5 +1,6 @@
 import http.client
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -21,6 +22,12 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
+        from proxploy.secretstore import SecretStore
+
+        db_file = settings.db_url.removeprefix("sqlite:///")
+        db_exists = settings.db_url.startswith("sqlite") and Path(db_file).exists()
+        SecretStore.ensure_key_file(settings.master_key_file, db_file_exists=db_exists)
+        app.state.secretstore = SecretStore(settings.master_key_file)
         run_migrations(settings)
         app.state.engine = make_engine(settings)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
