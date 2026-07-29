@@ -1,23 +1,29 @@
+import { useQuery } from '@tanstack/react-query'
 import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
 import { useEntitlements, useMe } from '../api/hooks'
-import { useActivity } from '../api/jobs'
+import { api } from '../api/client'
+import type { JobRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
 
 export function Topbar() {
   const { data: me } = useMe()
   const { has } = useEntitlements()
   const drawer = useActivityDrawer()
-  // Doc 06 §d gates the ['jobs'] 10s poll to "while the activity drawer is
-  // open, else never" — useJobs({enabled}) couples fetch-at-all to that same
-  // poll, so the always-mounted bell can't use it without leaving a poll
-  // running on every page. useActivity already polls unconditionally at 30s
-  // (a separate, pre-existing budget line) and carries running jobs, so the
-  // bell rides that instead of opening a second permanent ['jobs'] poll.
-  const { data: activity } = useActivity()
-  const count = activity?.filter(
-    (a) => a.kind === 'job' && (a.status === 'running' || a.status === 'queued'),
-  ).length ?? 0
+  // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
+  // created_at desc, so a long-running job older (by creation time) than the
+  // 20 most-recently-created jobs would silently drop out of that feed while
+  // still running. The bell's count needs to be unbounded, so it runs its own
+  // one-shot query against /jobs?status=running instead of riding useActivity
+  // or useJobs({status}) — the latter couples fetch-at-all to the drawer's
+  // 10s-while-open poll (doc 06 §d), which this always-mounted bell must not
+  // trigger unconditionally.
+  const { data: running } = useQuery({
+    queryKey: ['jobs', 'running-count'],
+    queryFn: () => api<JobRow[]>('/jobs?status=running'),
+    refetchInterval: 30_000,
+  })
+  const count = running?.length ?? 0
   return (
     <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-[rgba(11,15,22,.82)] px-5 py-2.5 backdrop-blur-[10px]">
       {has('notify.inapp') && (
