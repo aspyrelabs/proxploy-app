@@ -7,7 +7,7 @@ from proxploy.models import App, Host, HostCredential, Job, JobEvent, Vm
 
 def _seed_host(app, fake_token="s3cret"):
     with app.state.sessionmaker() as db:
-        host = Host(name="host-01", address="https://pve1:8006", node_name="pve1",
+        host = Host(name="host-01", address="https://10.0.0.7:8006", node_name="pve1",
                     status="connected", pve_version="8.4.1")
         db.add(host)
         db.commit()
@@ -428,7 +428,7 @@ def test_missing_credential_fails_the_job(tmp_path):
         import proxploy.services.lifecycle  # noqa: F401
         backend = JobBackend(app)
         with app.state.sessionmaker() as db:
-            host = Host(name="host-01", address="https://pve1:8006", node_name="pve1",
+            host = Host(name="host-01", address="https://10.0.0.7:8006", node_name="pve1",
                        status="connected", pve_version="8.4.1")
             db.add(host)
             db.commit()

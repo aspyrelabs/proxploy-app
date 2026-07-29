@@ -103,3 +103,49 @@ def test_host_test_endpoint_updates_status(pve_client, csrf_header):
     fake.version._fail = False
     assert c.post(f"/api/v1/hosts/{hid}/test",
                   headers=csrf_header(c)).json()["status"] == "connected"
+
+
+def test_probe_is_auth_and_rbac_gated_before_it_touches_the_network(pve_client,
+                                                                    csrf_header):
+    """The SSRF guard is the second line; the first is that only an admin can
+    reach the probe at all. Anonymous must be 401 (not 403 — a session-less
+    caller has no role state to leak), an authenticated viewer must be 403.
+    """
+    from fastapi.testclient import TestClient
+
+    c, _ = pve_client
+    with TestClient(c.app) as anon:
+        r = anon.post("/api/v1/hosts/probe", json=HOST | {"name": None},
+                      headers=csrf_header(anon))
+        assert r.status_code == 401, r.text
+
+    c.post("/api/v1/users", json={"email": "viewer@example.com",
+                                  "password": "correct-horse-battery",
+                                  "display_name": "V", "role": "viewer"},
+           headers=csrf_header(c))
+    c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
+                                       "password": "correct-horse-battery"},
+           headers=csrf_header(c))
+    r = c.post("/api/v1/hosts/probe", json=HOST | {"name": None},
+               headers=csrf_header(c))
+    assert r.status_code == 403, r.text
+
+
+def test_probe_refuses_the_cloud_metadata_address(pve_client, csrf_header):
+    """End of the SSRF path as an operator sees it: an admin-supplied address
+    that would reach instance metadata is refused before any connection."""
+    c, fake = pve_client
+    r = c.post("/api/v1/hosts/probe",
+               json=HOST | {"name": None, "address": "https://169.254.169.254:8006"},
+               headers=csrf_header(c))
+    assert r.status_code == 502
+    assert "refusing to connect" in r.json()["detail"]
+    assert not fake.kwargs, "the client was constructed despite the refusal"
+
+
+def test_creating_a_host_at_a_denied_address_stores_nothing(pve_client, csrf_header):
+    c, _ = pve_client
+    r = c.post("/api/v1/hosts", json=HOST | {"address": "https://127.0.0.1:8006"},
+               headers=csrf_header(c))
+    assert r.status_code == 502 and "loopback" in r.json()["detail"]
+    assert c.get("/api/v1/hosts").json() == []

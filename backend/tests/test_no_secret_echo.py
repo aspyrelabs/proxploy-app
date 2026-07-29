@@ -219,7 +219,7 @@ def test_proxmox_error_never_echoes_the_authorization_header(tmp_path, csrf_head
     with TestClient(app) as c, _root_log_capture() as records:
         bootstrap_admin(c)
         r = c.post("/api/v1/hosts/probe",
-                   json={"address": "https://pve.invalid:8006",
+                   json={"address": "https://10.0.0.5:8006",
                          "token_id": "root@pam!proxploy",
                          "token_secret": PVE_TOKEN_SECRET, "verify_tls": False},
                    headers=csrf_header(c))
@@ -244,7 +244,7 @@ def test_a_token_secret_that_cannot_be_a_header_is_refused_without_echoing_it():
             called.append(kwargs)
             return None
 
-        client = ProxmoxClient("https://pve.invalid:8006", "root@pam!proxploy", bad,
+        client = ProxmoxClient("https://10.0.0.5:8006", "root@pam!proxploy", bad,
                                factory=factory)
         try:
             client.version()
@@ -271,7 +271,7 @@ def test_pasted_pveapitoken_never_reaches_an_unencrypted_sink(tmp_path, csrf_hea
     with TestClient(make_app(tmp_path, fake=FakePVE())) as c, _root_log_capture() as records:
         bootstrap_admin(c)
         created = c.post("/api/v1/hosts",
-                         json={"name": "pve1", "address": "https://pve.invalid:8006",
+                         json={"name": "pve1", "address": "https://10.0.0.5:8006",
                                "token_id": pasted, "token_secret": "irrelevant",
                                "verify_tls": False},
                          headers=csrf_header(c))

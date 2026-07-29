@@ -3,6 +3,8 @@ PVE-8-vs-9 behavioural branch lives here — never in routers, pollers, or jobs.
 (No version branches exist yet; when PVE 9 diverges, branch on self.version()["release"]
 inside this module only.) Scoped API tokens, never root@pam passwords (doc 00 §8)."""
 import hashlib
+import ipaddress
+import os
 import re
 import socket
 import ssl
@@ -66,11 +68,67 @@ def default_factory(**kwargs):
     return ProxmoxAPI(**kwargs)
 
 
+# Onboarding hands us an operator-supplied address and we open a socket to it —
+# with CERT_NONE, on the fingerprint path — and the outcome (success, failure,
+# latency, the returned fingerprint) comes back to the caller. That is an SSRF
+# primitive unless the target class is constrained.
+#
+# RFC1918 and IPv6 unique-local are DELIBERATELY ALLOWED and always will be:
+# this is a self-hosted LAN product and a node on 192.168.x.x / 10.x.x.x is the
+# normal case, not the attack. Only classes that are never a Proxmox node and
+# are dangerous to reach are refused — chiefly link-local, which is where cloud
+# instance metadata lives (169.254.169.254).
+#
+# Loopback is refused by default but is a legitimate target when Proxploy runs
+# on the PVE node itself, so it has an opt-in escape hatch. Read at import so a
+# test can flip the module attribute; an operator sets the env var.
+ALLOW_LOOPBACK_TARGET = os.environ.get("PROXPLOY_ALLOW_LOOPBACK_TARGET") == "1"
+
+_DENIED_CLASSES = (
+    ("a link-local address", "is_link_local"),  # 169.254.169.254 lives here
+    ("a loopback address", "is_loopback"),
+    ("the unspecified address", "is_unspecified"),
+    ("a multicast address", "is_multicast"),
+    ("a reserved address", "is_reserved"),
+)
+
+
+def resolve_target(host: str, port: int) -> str:
+    """Resolve `host`, refuse the dangerous address classes, return one literal IP.
+
+    EVERY resolved address must pass, not just the first — a name with an A
+    record for a real node and a second for 169.254.169.254 is refused outright.
+    The returned literal is what the caller must connect to, so the socket goes
+    to an address we actually checked.
+    """
+    if not host:
+        raise ProxmoxError("address is missing a hostname")
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as e:
+        raise ProxmoxError(f"cannot resolve {host!r}") from e
+    chosen = None
+    for info in infos:
+        literal = info[4][0].partition("%")[0]  # drop any IPv6 zone id
+        ip = ipaddress.ip_address(literal)
+        ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:169.254.169.254
+        for label, attr in _DENIED_CLASSES:
+            if getattr(ip, attr) and not (attr == "is_loopback" and ALLOW_LOOPBACK_TARGET):
+                raise ProxmoxError(
+                    f"refusing to connect to {host!r}: it resolves to {ip}, "
+                    f"which is {label}")
+        chosen = chosen or literal
+    return chosen
+
+
 def tls_fingerprint_sha256(host: str, port: int = 8006) -> str:
+    ip = resolve_target(host, port)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE  # we are fetching the cert to pin it, not trusting it
-    with socket.create_connection((host, port), timeout=10) as sock:
+    # Connect to the literal we validated, not to `host` again: socket.create_connection
+    # would re-resolve and a second answer could differ from the one we checked.
+    with socket.create_connection((ip, port), timeout=10) as sock:
         with ctx.wrap_socket(sock, server_hostname=host) as tls:
             der = tls.getpeercert(binary_form=True)
     digest = hashlib.sha256(der).hexdigest().upper()
@@ -118,6 +176,10 @@ class ProxmoxClient:
                                "a line break, or a non-Latin-1 character)")
         url = urlparse(self.address)
         host, port = url.hostname, url.port or 8006
+        # Gate every outbound path, not just the CERT_NONE one below: proxmoxer
+        # opens its own connection and would otherwise reach 169.254.169.254 all
+        # the same, with the outcome still visible to the caller.
+        resolve_target(host, port)
         if not self.verify_tls and self.tls_fingerprint:
             seen = tls_fingerprint_sha256(host, port)
             if seen != self.tls_fingerprint.upper():

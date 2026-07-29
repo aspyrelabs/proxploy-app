@@ -11,7 +11,7 @@ def _client(fake):
     from proxploy.services.proxmox import ProxmoxClient
     from tests.fakes.pve import make_fake_factory
 
-    return ProxmoxClient("https://pve1:8006", "proxploy@pve!mon", "s3cret",
+    return ProxmoxClient("https://10.0.0.7:8006", "proxploy@pve!mon", "s3cret",
                          factory=make_fake_factory(fake))
 
 

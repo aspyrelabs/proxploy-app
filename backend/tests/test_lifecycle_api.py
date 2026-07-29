@@ -8,7 +8,7 @@ from proxploy.models import App, AuditEvent, Host, HostCredential, Job, Vm
 
 def _seed(app, ctid=150, vmid=201):
     with app.state.sessionmaker() as db:
-        host = Host(name="host-01", address="https://pve1:8006", node_name="pve1",
+        host = Host(name="host-01", address="https://10.0.0.7:8006", node_name="pve1",
                     status="connected")
         db.add(host)
         db.commit()

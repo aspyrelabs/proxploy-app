@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 FIX = Path(__file__).parent / "fixtures" / "pve"
-HOST = {"name": "host-01", "address": "https://pve1:8006",
+HOST = {"name": "host-01", "address": "https://10.0.0.7:8006",
         "token_id": "proxploy@pve!mon", "token_secret": "s3cret",
         "verify_tls": True}
 
