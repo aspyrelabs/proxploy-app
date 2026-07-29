@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
+import { ActivityFeed } from '../components/ActivityFeed'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LivePulse } from '../components/LiveProvider'
@@ -129,8 +130,8 @@ export function ClusterPage() {
           </div>
           <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
           <div className="mt-4 border-t border-line-soft pt-3">
-            <EmptyState title="Activity feed lands in Phase 3 (Act)"
-              note="Jobs, lifecycle actions and alerts stream here once the JobBackend exists." />
+            <div className="mb-1 text-[13px] uppercase text-text-3">Recent activity</div>
+            <ActivityFeed />
           </div>
         </div>
       </div>

@@ -45,6 +45,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 }))
 
 import { ActivityDrawer } from '../components/ActivityDrawer'
+import { ActivityFeed } from '../components/ActivityFeed'
 import { TerminalPanel } from '../components/TerminalPanel'
 
 const wrap = (ui: React.ReactNode) => {
@@ -75,5 +76,14 @@ describe('ActivityDrawer', () => {
     expect(screen.getByText('app.start')).toBeInTheDocument()
     const rows = screen.getAllByTestId('drawer-job')
     expect(rows[0]).toHaveTextContent('vm.stop')
+  })
+})
+
+describe('ActivityFeed', () => {
+  it('renders merged job and audit rows with their actor', async () => {
+    wrap(<ActivityFeed />)
+    expect(await screen.findByText('app.start')).toBeInTheDocument()
+    expect(screen.getByText('host.create')).toBeInTheDocument()
+    expect(screen.getAllByText(/admin@example.com/).length).toBe(2)
   })
 })

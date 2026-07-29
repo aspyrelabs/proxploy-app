@@ -28,6 +28,7 @@ vi.mock('../api/client', () => ({
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'host:1', metric: 'net_in_bps', resolution: 'raw', ts: [], value: [] })
     }
+    if (path.startsWith('/cluster/activity')) return Promise.resolve([])
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},
@@ -38,6 +39,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
   Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
   useNavigate: () => () => {},
+  useSearch: () => ({}),
 }))
 
 import { ClusterPage } from '../routes/cluster'
@@ -48,6 +50,6 @@ describe('ClusterPage', () => {
     render(<QueryClientProvider client={qc}><ClusterPage /></QueryClientProvider>)
     expect(await screen.findByText('host-01')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
-    expect(screen.getByText(/Activity feed lands in Phase 3/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
   })
 })
