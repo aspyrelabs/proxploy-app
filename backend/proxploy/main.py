@@ -67,6 +67,12 @@ def create_app(
             licensed = (db.query(AppSetting)
                         .filter_by(key="license.refresh_credential.enc").one_or_none())
         refresh_task = asyncio.create_task(_refresh_loop()) if licensed else None
+
+        from proxploy.events import EventBus
+
+        app.state.bus = EventBus()
+        app.state.loop = asyncio.get_running_loop()  # test seam for cross-thread publishes
+
         yield
         if refresh_task:
             refresh_task.cancel()
