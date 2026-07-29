@@ -14,6 +14,13 @@ class ProxmoxError(RuntimeError):
     pass
 
 
+# Proxmox's own status verbs. Proxploy's user-facing vocabulary maps onto these
+# in services/lifecycle.py — the gap is stated once, there.
+LXC_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend", "resume"})
+QEMU_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend",
+                          "resume", "reset"})
+
+
 def parse_token_id(token_id: str) -> tuple[str, str]:
     user, sep, name = token_id.partition("!")
     if not sep or "@" not in user or not name:
@@ -108,3 +115,40 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise ProxmoxError(f"rrddata failed for node {node!r}: {e}") from e
+
+    # --- per-guest, user-triggered calls -----------------------------------
+    # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered by
+    # a human clicking a button and are explicitly outside that budget.
+
+    def guest_action(self, kind: str, node: str, vmid: int, action: str) -> str:
+        """POST /nodes/{node}/{lxc|qemu}/{vmid}/status/{action} -> UPID."""
+        allowed = LXC_ACTIONS if kind == "lxc" else QEMU_ACTIONS
+        if action not in allowed:
+            raise ProxmoxError(f"{action!r} is not a {kind} lifecycle action")
+        try:
+            status = getattr(self._connect().nodes(node), kind)(vmid).status
+            return getattr(status, action).post()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+            raise ProxmoxError(f"{kind}/{vmid} {action} failed on {node}: {e}") from e
+
+    def task_status(self, node: str, upid: str) -> dict:
+        """GET /nodes/{node}/tasks/{upid}/status — `stopped` + exitstatus == done."""
+        try:
+            return self._connect().nodes(node).tasks(upid).status.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProxmoxError(f"task status failed for {upid}: {e}") from e
+
+    def task_log(self, node: str, upid: str, start: int = 0,
+                 limit: int = 500) -> list[dict]:
+        """GET /nodes/{node}/tasks/{upid}/log — rows of {"n": seq, "t": line}."""
+        try:
+            return self._connect().nodes(node).tasks(upid).log.get(
+                start=start, limit=limit)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProxmoxError(f"task log failed for {upid}: {e}") from e

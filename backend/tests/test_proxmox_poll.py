@@ -41,7 +41,7 @@ def test_poll_reads_wrap_errors_as_proxmox_error():
 
     fake = FakePVE()
     fake.cluster.resources._fail = True
-    fake.nodes._fail = True
+    fake.fail = True
     with pytest.raises(ProxmoxError):
         _client(fake).cluster_resources()
     with pytest.raises(ProxmoxError):
