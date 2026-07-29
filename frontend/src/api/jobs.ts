@@ -1,0 +1,120 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from './client'
+import type { ApiError } from './client'
+
+export type JobStatus =
+  | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted'
+
+export const TERMINAL: JobStatus[] = ['succeeded', 'failed', 'canceled', 'interrupted']
+
+export type JobRow = {
+  id: number; kind: string; status: JobStatus
+  target_type: string | null; target_id: number | null
+  params: Record<string, unknown> | null
+  result: Record<string, unknown> | null
+  error: string | null; progress_pct: number | null
+  requested_by: number | null; schedule_id: number | null
+  started_at: string | null; finished_at: string | null; created_at: string
+}
+
+export type JobEventRow = { seq: number; ts: string; stream: string; message: string }
+
+export type ActivityRow = {
+  kind: 'job' | 'audit'; id: number; at: string; title: string
+  status: string | null; target_type: string | null; target_id: number | null
+  actor: string | null; job_id: number | null; progress_pct: number | null
+}
+
+export function jobLabel(j: { kind: string; status: string }): string {
+  return `${j.kind} ${j.status}`
+}
+
+/** Doc 06 §d: 10s while the activity drawer is open, never otherwise. */
+export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
+  const { enabled = true, status } = opts
+  return useQuery({
+    queryKey: ['jobs', { status }],
+    enabled,
+    refetchInterval: enabled ? 10_000 : false,
+    queryFn: () => api<JobRow[]>(status ? `/jobs?status=${status}` : '/jobs'),
+  })
+}
+
+export function useJob(id: number | null) {
+  return useQuery({
+    queryKey: ['jobs', id],
+    enabled: id != null,
+    queryFn: () => api<JobRow>(`/jobs/${id}`),
+  })
+}
+
+/** Archived transcript. The live tail is the SSE stream in JobLog. */
+export function useJobEvents(id: number | null) {
+  return useQuery({
+    queryKey: ['jobs', id, 'events'],
+    enabled: id != null,
+    queryFn: () => api<JobEventRow[]>(`/jobs/${id}/events`),
+  })
+}
+
+export function useActivity(limit = 20) {
+  return useQuery({
+    queryKey: ['cluster', 'activity'],
+    refetchInterval: 30_000,
+    queryFn: () => api<ActivityRow[]>(`/cluster/activity?limit=${limit}`),
+  })
+}
+
+export function useCancelJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<{ id: number; status: string }>(`/jobs/${id}/cancel`, { method: 'POST' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+  })
+}
+
+export type LifecycleVars = {
+  target: 'app' | 'vm'; id: number; action: string; confirm?: string
+}
+
+/**
+ * Optimistic status patch + SSE reconciliation (plan decision 13): the truth
+ * arrives with the job's terminal `resource` delta or the next 30s poll, so
+ * there is no rollback cache to keep in sync — only an invalidate on error.
+ *
+ * onSuccess also seeds `['jobs', id]` with the created row. The SSE `job`
+ * delta never carries `target_type` (backend.py's `_publish` only forwards
+ * id/status/kind/progress_pct — see JobBackend._finish), so `applyJob` in
+ * `api/live.ts` falls back to this cache entry to know which resource list
+ * to invalidate on the job's terminal event.
+ */
+export function useLifecycle() {
+  const qc = useQueryClient()
+  const key = (t: 'app' | 'vm') => (t === 'app' ? 'apps' : 'vms')
+  return useMutation<{ job: JobRow }, ApiError, LifecycleVars>({
+    mutationFn: (v) =>
+      api<{ job: JobRow }>(`/${key(v.target)}/${v.id}/${v.action}`, {
+        method: 'POST',
+        body: JSON.stringify(v.confirm ? { confirm: v.confirm } : {}),
+      }),
+    onMutate: (v) => {
+      qc.setQueriesData({ queryKey: [key(v.target)] }, (data: unknown) => {
+        if (Array.isArray(data)) {
+          return data.map((r: any) => (r.id === v.id ? { ...r, status: 'pending' } : r))
+        }
+        const row = data as { id?: number } | undefined
+        return row && row.id === v.id ? { ...row, status: 'pending' } : data
+      })
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['jobs', data.job.id], data.job)
+    },
+    onError: (_e, v) => { qc.invalidateQueries({ queryKey: [key(v.target)] }) },
+    onSettled: (_d, _e, v) => {
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
+      qc.invalidateQueries({ queryKey: [key(v.target)] })
+    },
+  })
+}

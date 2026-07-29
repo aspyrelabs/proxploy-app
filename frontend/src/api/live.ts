@@ -1,4 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
+import { TERMINAL, jobLabel } from './jobs'
+import type { JobRow } from './jobs'
 
 type MetricTarget = { t: 'host' | 'app' | 'vm'; id: number; cpu_pct: number; mem_pct: number }
 type ResourceEvent = { type: string; id?: number; change: string; status?: string }
@@ -52,4 +54,36 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
     return
   }
   qc.invalidateQueries({ queryKey: [key] })
+}
+
+type JobDelta = {
+  id: number; kind?: string; status?: string
+  progress_pct?: number; target_type?: string | null
+}
+type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number }) => void
+
+/** SSE `job` event → patch ['jobs'], and on a terminal state invalidate the
+ *  affected resource + activity feed and raise a toast (doc 06 §d). */
+export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
+  qc.setQueriesData({ queryKey: ['jobs'] }, (data: unknown) =>
+    Array.isArray(data)
+      ? data.map((r: any) => (r.id === d.id ? { ...r, ...d } : r))
+      : data)
+  if (!d.status || !TERMINAL.includes(d.status as never)) return
+  qc.invalidateQueries({ queryKey: ['jobs'] })
+  qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
+  // The backend's SSE `job` payload never includes `target_type` (see
+  // JobBackend._publish in backend/proxploy/jobs/backend.py — every call site
+  // passes only id/status/kind/progress_pct). Fall back to the job row
+  // useLifecycle seeds into ['jobs', id] on mutation success, so the terminal
+  // event still invalidates the right resource list in the real app.
+  const targetType = d.target_type ??
+    qc.getQueryData<JobRow>(['jobs', d.id])?.target_type
+  if (targetType === 'app') qc.invalidateQueries({ queryKey: ['apps'] })
+  if (targetType === 'vm') qc.invalidateQueries({ queryKey: ['vms'] })
+  toast?.({
+    kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
+    text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),
+    jobId: d.id,
+  })
 }

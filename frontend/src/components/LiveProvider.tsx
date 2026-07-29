@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { applyMetrics, applyResource } from '../api/live'
+import { toast } from 'sonner'
+import { applyJob, applyMetrics, applyResource } from '../api/live'
+import { useEntitlements } from '../api/hooks'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
 
@@ -13,6 +15,12 @@ export function useLive() {
 export function LiveProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient()
   const [lastEventAt, setLastEventAt] = useState<number | null>(null)
+  // notify.inapp gates the toast surface, not the data — a ref keeps the
+  // effect below from re-subscribing (and dropping the EventSource) every
+  // time the entitlements query refetches.
+  const { has } = useEntitlements()
+  const inApp = useRef(true)
+  inApp.current = has('notify.inapp')
   useEffect(() => {
     if (typeof EventSource === 'undefined') return // jsdom / stripped proxies
     const es = new EventSource('/api/v1/events/stream')
@@ -23,6 +31,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       })
     wire('metrics', (d) => applyMetrics(qc, d))
     wire('resource', (d) => applyResource(qc, d))
+    wire('job', (d) => applyJob(qc, d, (t) => {
+      if (!inApp.current) return   // notify.inapp gates the surface, not the data
+      const show = t.kind === 'ok' ? toast.success : t.kind === 'err' ? toast.error : toast
+      show(t.text, { description: `job #${t.jobId}` })
+    }))
     return () => es.close()
   }, [qc])
   return <LiveCtx.Provider value={{ lastEventAt }}>{children}</LiveCtx.Provider>
