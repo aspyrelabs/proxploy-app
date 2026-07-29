@@ -12,7 +12,7 @@ function LoginPage() {
   const navigate = useNavigate()
   return (
     <div className="grid min-h-screen place-items-center">
-      {/* '/cluster' lands in the route tree in Task 14; cast until then */}
+      {/* cast: circular import with router.tsx blocks full route-tree inference here */}
       <LoginForm onSuccess={() => navigate({ to: '/cluster' as never })} />
     </div>
   )
