@@ -112,14 +112,27 @@ class JobBackend:
     # --- lifecycle ---------------------------------------------------------
 
     def sweep_orphans(self) -> int:
-        """Boot-time reconciliation (doc 02 §3). Marks; never resumes."""
+        """Boot-time reconciliation (doc 02 §3). Marks; never resumes.
+
+        Called from lifespan startup once the loop is running (main.py sets
+        `app.state.loop` just before this). `job.interrupted` still owes each
+        orphan a Notifier courtesy, but Apprise is blocking (~8s/channel
+        worst case) and must never stall the app from starting — so this
+        routes through the same fire-and-forget `_notify` every other
+        terminal state uses, never awaited here.
+        """
         with self.app.state.sessionmaker() as db:
+            orphans = (db.query(Job.id, Job.kind)
+                       .filter(Job.status.in_(("queued", "running")))
+                       .all())
             n = (db.query(Job)
                  .filter(Job.status.in_(("queued", "running")))
                  .update({"status": "interrupted", "finished_at": utcnow()},
                          synchronize_session=False))
             db.commit()
-            return n
+        for job_id, kind in orphans:
+            self._notify(job_id, kind, "interrupted", "interrupted by restart")
+        return n
 
     def stop(self) -> None:
         for task in list(self._tasks.values()):

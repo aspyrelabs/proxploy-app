@@ -10,7 +10,15 @@ event loop wrap it in asyncio.to_thread.
 """
 from __future__ import annotations
 
+import logging
+import re
+
 from proxploy.models import NotificationChannel, utcnow
+
+# Apprise's logger propagates to the root logger by default, which would defeat
+# "never logged" (see module docstring) the moment any handler is configured —
+# set once at import; this doesn't require apprise itself to be imported yet.
+logging.getLogger("apprise").propagate = False
 
 # Display label from the URL scheme (doc 04 `kind`). Unknown schemes keep their
 # own scheme as the label rather than being coerced into "webhook".
@@ -25,10 +33,22 @@ KIND_FROM_SCHEME = {
     "xml": "webhook", "xmls": "webhook",
 }
 
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*$")
+
 
 def kind_for(url: str) -> str:
+    """Doc 04: `kind` is a display label parsed from the URL *scheme* only.
+
+    A URL with no `://` has no scheme — `split` then returns the whole
+    string, which for a URL-shaped secret (no scheme separator typed) is the
+    token itself. Only accept the split result when it actually looks like a
+    scheme; anything else falls back to "webhook" rather than writing a
+    plaintext secret into the unencrypted `kind` column.
+    """
     scheme = url.split("://", 1)[0].strip().lower()
-    return KIND_FROM_SCHEME.get(scheme, scheme or "webhook")
+    if scheme in KIND_FROM_SCHEME:
+        return KIND_FROM_SCHEME[scheme]
+    return scheme if _SCHEME_RE.match(scheme) else "webhook"
 
 
 def send_one(url: str, title: str, body: str) -> bool:
@@ -51,17 +71,33 @@ def notify(app, event: str, title: str, body: str) -> int:
     """Fan a single event out to every subscribed channel. Returns channels reached.
 
     A channel that is misconfigured, unreachable or slow must never fail the
-    job that triggered it — each send is isolated.
+    job that triggered it — each send is isolated. Decryption happens inside
+    the session (cheap); the blocking Apprise sends happen outside it, so a
+    slow/hanging channel doesn't hold a DB connection checked out for
+    ~8s-per-channel (Apprise's default connect+read timeout) while every
+    other channel's `last_notified_at` stamp waits behind it.
     """
-    sent = 0
     with app.state.sessionmaker() as db:
+        targets = []
         for channel in channels_for(db, event):
             try:
                 url = app.state.secretstore.decrypt(channel.url_enc).decode()
-                if send_one(url, title, body):
-                    channel.last_notified_at = utcnow()
-                    sent += 1
             except Exception:  # noqa: BLE001 — never let one channel poison the rest
                 continue
-        db.commit()
-    return sent
+            targets.append((channel.id, url))
+
+    reached = []
+    for channel_id, url in targets:
+        try:
+            if send_one(url, title, body):
+                reached.append(channel_id)
+        except Exception:  # noqa: BLE001 — never let one channel poison the rest
+            continue
+
+    if reached:
+        with app.state.sessionmaker() as db:
+            (db.query(NotificationChannel)
+             .filter(NotificationChannel.id.in_(reached))
+             .update({"last_notified_at": utcnow()}, synchronize_session=False))
+            db.commit()
+    return len(reached)
