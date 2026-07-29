@@ -294,6 +294,79 @@ def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
 
 
 
+def test_license_api_error_never_relays_the_remote_body(tmp_path, csrf_header,
+                                                        bootstrap_admin, monkeypatch):
+    """`refresh()` sends a credential the caller never sees (decrypted from
+    license.refresh_credential.enc). The client used to interpolate the remote
+    response body into LicenseApiError, and api/entitlements.py puts that
+    straight into a 502 `detail` — so a licensing API that names the offending
+    value in its error handed the credential to the browser."""
+    import httpx
+
+    from proxploy.services.settings import set_setting
+    from tests.support import make_app
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(400, json={"error": f"unknown credential {REFRESH_CRED}"},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c, _root_log_capture() as records:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            enc, _ = app.state.secretstore.encrypt(REFRESH_CRED.encode())
+            set_setting(db, "license.refresh_credential.enc", enc.decode())
+        r = c.post("/api/v1/entitlements/refresh", headers=csrf_header(c))
+        assert r.status_code == 502
+        assert REFRESH_CRED not in r.text
+        assert REFRESH_CRED not in c.get("/api/v1/audit?per_page=100").text
+    assert REFRESH_CRED not in _messages(records)
+    assert REFRESH_CRED not in _db_cells(tmp_path / "t.db")
+
+
+def test_httpx_request_logging_cannot_reach_a_root_handler():
+    """httpx logs `HTTP Request: POST <full url>` at INFO with the URL's
+    userinfo intact, so an api_base_url carrying basic-auth credentials — an
+    ordinary reverse-proxy setup — puts the password on the root logger. Same
+    shape as the urllib3 case in test_notifier.py; a local server is used so a
+    REAL request/response cycle emits the real log line.
+    """
+    import http.server
+    import threading
+
+    from proxploy.services.license_client import LicenseApiError, LicenseClient
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(400)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    secret = "S3NTINEL-URL-PASSWORD-123"
+    try:
+        with _root_log_capture() as records:
+            client = LicenseClient(f"http://pxu:{secret}@127.0.0.1:{server.server_port}")
+            try:
+                client.activate("LKEY", "install-1")
+            except LicenseApiError:
+                pass
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert logging.getLogger("httpx").propagate is False
+    assert secret not in _messages(records)
+
+
+
 def test_migrations_survive_a_percent_in_the_dsn(tmp_path):
     """Alembic keeps this URL in a ConfigParser, where "%" is interpolation
     syntax: an unescaped DSN whose password contains "%" raised
