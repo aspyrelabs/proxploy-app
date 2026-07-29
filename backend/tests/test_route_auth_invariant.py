@@ -72,10 +72,10 @@ def test_no_gated_route_answers_403_to_an_anonymous_caller(tmp_path, csrf_header
                 r = c.request(method, probe_path, **kwargs)
                 checked.append((method, path))
                 if (method, path) not in PUBLIC:
-                    assert r.status_code != 403, (
-                        f"{method} {path} answered an anonymous caller with 403 "
-                        f"(expected 401, or add it to PUBLIC with a reason) — "
-                        f"got {r.status_code}: {r.text}")
+                    assert r.status_code == 401, (
+                        f"{method} {path} answered an anonymous caller with "
+                        f"{r.status_code} (expected 401, or add it to PUBLIC "
+                        f"with a reason): {r.text}")
         # Sanity: the walk actually walked the API, not an empty schema.
         assert len(checked) >= 30
         assert any(m == "GET" and p == "/api/v1/jobs" for m, p in checked)

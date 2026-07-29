@@ -99,7 +99,7 @@ class JobBackend:
         #   call_soon_threadsafe gap the `wait()` fix above works around) — a
         #   cancel() that lands in this window has no Task to call .cancel() on.
         # - _cancel_requested: job ids cancelled while still in _pending; _run
-        #   checks this right after acquiring the semaphore and finishes the
+        #   checks this before acquiring the semaphore and finishes the
         #   job as canceled instead of ever invoking the handler.
         # - _done: one Event per in-flight job, set (and popped) in _run's
         #   finally. wait() awaits this instead of polling _tasks, which also
@@ -185,7 +185,7 @@ class JobBackend:
         if job_id in self._pending:
             # `_spawn` hasn't run yet (still in the call_soon_threadsafe gap):
             # no Task exists to cancel. Record the intent; `_run` checks this
-            # right after acquiring the semaphore and finishes without ever
+            # before acquiring the semaphore and finishes without ever
             # calling the handler.
             self._cancel_requested.add(job_id)
             return True

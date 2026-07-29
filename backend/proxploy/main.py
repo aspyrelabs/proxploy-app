@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -132,8 +133,8 @@ def create_app(
         # the 422). Three routes take a secret in the body (ChannelIn.url,
         # HostIn.token_secret, LicenseIn.license_key) — strip `input` from
         # every error repo-wide rather than patching each route.
-        return JSONResponse(status_code=422, content={
-            "detail": [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]})
+        return JSONResponse(status_code=422, content=jsonable_encoder({
+            "detail": [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]}))
 
     @app.exception_handler(StarletteHTTPException)
     async def problem_handler(request, exc):

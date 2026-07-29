@@ -7,6 +7,9 @@ required field leaks that secret in the validation-error response unless the
 handler strips `input`. Three routes take a secret in the body: ChannelIn.url,
 HostIn.token_secret, LicenseIn.license_key.
 """
+import asyncio
+
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
 CHANNEL_SECRET = "ntfy://secretuser:sup3rsecret@ntfy.sh/private-topic"
@@ -54,6 +57,30 @@ def test_license_missing_key_does_not_echo_a_mistyped_secret_field(tmp_path, csr
         assert r.status_code == 422
         assert LICENSE_SECRET not in r.text
         assert "input" not in r.json()["detail"][0]
+
+
+def test_validation_handler_survives_a_raw_exception_in_ctx(tmp_path):
+    """Pydantic v2 puts the raw exception object in an error's `ctx` when a
+    field_validator/model_validator raises ValueError (e.g. `ctx: {'error':
+    ValueError(...)}`) — that object isn't JSON-serializable on its own, so
+    building the response with a plain dict (skipping jsonable_encoder, as
+    FastAPI's own default handler does not) raises TypeError instead of
+    returning 422. This repo has no field_validator/model_validator today, so
+    call the registered handler directly with a fake exc carrying that shape
+    rather than routing a real request through one."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    handler = app.exception_handlers[RequestValidationError]
+
+    class _FakeExc:
+        def errors(self):
+            return [{"type": "value_error", "loc": ("body", "name"),
+                     "msg": "Value error, boom", "ctx": {"error": ValueError("boom")}}]
+
+    response = asyncio.run(handler(None, _FakeExc()))
+    assert response.status_code == 422
+    assert b"boom" in response.body  # would have raised TypeError pre-fix
 
 
 def test_problem_json_handler_for_http_exceptions_is_unaffected(tmp_path, csrf_header,
