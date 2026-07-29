@@ -77,6 +77,7 @@ def create_app(
     app.state.settings = settings
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
     app.state.license_client = license_client or LicenseClient(settings.api_base_url)
+    app.state.proxmox_factory = proxmox_factory
 
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware
