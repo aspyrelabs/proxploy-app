@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
-from proxploy.models import NotificationChannel, User
+from proxploy.models import NotificationChannel, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.notifier import kind_for, send_one
 
@@ -105,8 +105,9 @@ def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="notify.channel.update", target_type="notification_channel",
                 target_id=row.id,
-                params={"name": row.name, "enabled": row.enabled,
-                        "url_rotated": body.url is not None},
+                params={"name": row.name, "enabled": row.enabled, "kind": row.kind,
+                        "url_rotated": body.url is not None,
+                        "events_changed": body.events is not None},
                 ip=_ip(request))
     return _out(row)
 
@@ -144,7 +145,6 @@ def test_channel(request: Request, channel_id: int, db=Depends(get_db),
     except Exception:  # noqa: BLE001 — a bad target is a report, not a 500
         sent = False
     if sent:
-        from proxploy.models import utcnow
         row.last_notified_at = utcnow()
         db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="notify.channel.test",

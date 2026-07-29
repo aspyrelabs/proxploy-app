@@ -6,11 +6,74 @@ from proxploy.models import AuditEvent, NotificationChannel
 URL = "ntfy://ntfy.sh/proxploy-test"
 
 
-def test_channels_require_admin(tmp_path):
+def test_anonymous_get_is_401(tmp_path):
+    """Only covers the anonymous path (no session at all) -> 401. Does NOT
+    exercise require_role("admin")'s actual role comparison — see
+    test_viewer_role_is_refused for that, and
+    test_entitlement_gate_runs_after_auth_not_before for the ordering fix."""
     from tests.support import make_app
 
     with TestClient(make_app(tmp_path)) as c:
         assert c.get("/api/v1/notifications/channels").status_code == 401
+
+
+def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
+    """Mirrors test_jobs_api.py::test_entitlement_gate_runs_after_auth_not_before.
+    FastAPI resolves a route's dependencies=[...] in list order, so
+    require_role must be listed ahead of require_entitlement — otherwise an
+    anonymous caller gets a 403 revealing which flags are armed instead of a
+    401, before we've even established who they are. Disable notify.channels
+    and hit every gated route with no session cookie: each must still 401.
+    csrf_header is supplied on the mutating calls only to get past the
+    unrelated CSRF-cookie gate (doc 08 §5), which 403s any no-cookie mutation
+    before routing even starts — it is not standing in for a session."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        h = csrf_header(c)
+        c.app.state.entitlements._features["notify.channels"] = False
+        assert c.get("/api/v1/notifications/channels").status_code == 401
+        assert c.post("/api/v1/notifications/channels",
+                      json={"name": "n", "url": URL}, headers=h).status_code == 401
+        assert c.patch("/api/v1/notifications/channels/1",
+                       json={"enabled": False}, headers=h).status_code == 401
+        assert c.delete("/api/v1/notifications/channels/1", headers=h).status_code == 401
+        assert c.post("/api/v1/notifications/channels/1/test",
+                      headers=h).status_code == 401
+
+
+def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
+    """require_role("admin") must actually refuse a logged-in user whose role
+    is below admin. A plain signup defaults to "viewer" (UserIn.role)."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        h = csrf_header(c)
+        c.post("/api/v1/users", json={"email": "viewer@example.com",
+                                      "password": "correct-horse-battery",
+                                      "display_name": "Viewer", "role": "viewer"},
+               headers=h)
+        c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
+                                           "password": "correct-horse-battery"},
+               headers=h)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "n", "url": URL}, headers=csrf_header(c))
+        assert r.status_code == 403
+
+
+def test_admin_with_entitlement_disabled_is_403(tmp_path, csrf_header, bootstrap_admin):
+    """A real admin session, but notify.channels gated off -> 403, not 401 —
+    the flip side of test_entitlement_gate_runs_after_auth_not_before."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        app.state.entitlements._features["notify.channels"] = False
+        assert c.get("/api/v1/notifications/channels").status_code == 403
 
 
 def test_create_list_patch_delete(tmp_path, csrf_header, bootstrap_admin):
