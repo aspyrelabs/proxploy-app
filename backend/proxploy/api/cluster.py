@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from proxploy.api.deps import get_db, require_role
-from proxploy.models import App, Host, User, Vm
+from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.models import App, AuditEvent, Host, Job, User, Vm
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
 
@@ -98,3 +98,66 @@ def cluster_nodes(request: Request, db=Depends(get_db),
             "last_seen_at": _iso(h.last_seen_at),
         })
     return out
+
+
+ACTIVITY_MAX = 100
+
+
+# Reused as BOTH the route-level dependency and the parameter-level one so
+# FastAPI's dependency cache (keyed on the callable) collapses them into a
+# single call that runs first. A bare `dependencies=[Depends(require_entitlement(...))]`
+# would sit at position 0 of the dependant and run BEFORE this auth/role check,
+# leaking 403 to an anonymous caller who should see 401 (Tasks 3, 5, 7 hit this
+# in jobs.py/apps.py/notifications.py — see apps.py._require_operator).
+_require_viewer = require_role("viewer")
+
+
+@router.get("/activity",
+            dependencies=[Depends(_require_viewer),
+                          Depends(require_entitlement("cluster.activity_feed"))])
+def activity(limit: int = 20, db=Depends(get_db),
+            user: User = Depends(_require_viewer)):
+    """Jobs + audit highlights, merged newest-first (doc 05, doc 06 ActivityFeed).
+
+    An audit row that spawned a job is skipped: the job entry already represents
+    it, and showing both would double every lifecycle action. Alerts join this
+    feed in Phase 7 when the evaluator exists — the `kind` discriminator is here
+    so that is additive.
+
+    Paging: each source is independently queried with `LIMIT limit` (not
+    `limit // 2`), so the merged-then-sliced result is always the true
+    top-`limit` rows across both kinds — the top `limit` merged rows can
+    contain at most `limit` rows from either source, and each source already
+    supplies that many. A source can only return fewer than `limit` rows
+    (including zero) than the feed asks for when it genuinely has fewer
+    displayable rows, e.g. every audit row in view is a job-spawned dupe that
+    gets skipped — that is the intended dedup, not starvation.
+
+    The merge sorts on the raw `datetime`, not the serialized `.isoformat()`
+    string used for the `at` field: Python's `isoformat()` drops the
+    microsecond component when it is exactly 0, which would make a same-instant
+    row from one source sort inconsistently against a row from the other if
+    compared as strings.
+    """
+    limit = max(1, min(limit, ACTIVITY_MAX))
+    emails = {u.id: u.email for u in db.query(User).all()}
+
+    jobs = (db.query(Job).order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(limit).all())
+    job_rows = [(j.created_at, {
+        "kind": "job", "id": j.id, "at": j.created_at.isoformat() + "Z",
+        "title": j.kind, "status": j.status, "target_type": j.target_type,
+        "target_id": j.target_id, "actor": emails.get(j.requested_by),
+        "job_id": j.id, "progress_pct": j.progress_pct}) for j in jobs]
+
+    audits = (db.query(AuditEvent).filter(AuditEvent.job_id.is_(None))
+              .order_by(AuditEvent.ts.desc(), AuditEvent.id.desc())
+              .limit(limit).all())
+    audit_rows = [(a.ts, {
+        "kind": "audit", "id": a.id, "at": a.ts.isoformat() + "Z",
+        "title": a.action, "status": a.result, "target_type": a.target_type,
+        "target_id": a.target_id, "actor": emails.get(a.actor_id),
+        "job_id": None, "progress_pct": None}) for a in audits]
+
+    merged = sorted(job_rows + audit_rows, key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in merged[:limit]]
