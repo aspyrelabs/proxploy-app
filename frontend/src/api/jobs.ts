@@ -82,12 +82,6 @@ export type LifecycleVars = {
  * Optimistic status patch + SSE reconciliation (plan decision 13): the truth
  * arrives with the job's terminal `resource` delta or the next 30s poll, so
  * there is no rollback cache to keep in sync — only an invalidate on error.
- *
- * onSuccess also seeds `['jobs', id]` with the created row. The SSE `job`
- * delta never carries `target_type` (backend.py's `_publish` only forwards
- * id/status/kind/progress_pct — see JobBackend._finish), so `applyJob` in
- * `api/live.ts` falls back to this cache entry to know which resource list
- * to invalidate on the job's terminal event.
  */
 export function useLifecycle() {
   const qc = useQueryClient()
@@ -106,9 +100,6 @@ export function useLifecycle() {
         const row = data as { id?: number } | undefined
         return row && row.id === v.id ? { ...row, status: 'pending' } : data
       })
-    },
-    onSuccess: (data) => {
-      qc.setQueryData(['jobs', data.job.id], data.job)
     },
     onError: (_e, v) => { qc.invalidateQueries({ queryKey: [key(v.target)] }) },
     onSettled: (_d, _e, v) => {

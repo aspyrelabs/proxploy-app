@@ -52,4 +52,38 @@ describe('applyJob', () => {
     applyJob(qc, { id: 3, kind: 'app.start', status: 'running' }, (t) => toasts.push(t))
     expect(toasts).toEqual([])
   })
+
+  it('does not invalidate anything for a non-terminal delta', () => {
+    const qc = client()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyJob(qc, { id: 3, kind: 'app.start', status: 'running', progress_pct: 60 })
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the resource cache from the delta alone, no cache seeded', () => {
+    // Regression guard: the backend's SSE `job` payload carries target_type
+    // directly (doc 05 §Streaming 4 / JobBackend._publish) — invalidation
+    // must not depend on any job row already sitting in the cache.
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyJob(qc, { id: 9, kind: 'vm.start', status: 'succeeded', target_type: 'vm' })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['vms'] })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['apps'] })
+  })
+
+  it('patches the single-job detail cache (object shape), not just list caches', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['jobs', 3], { id: 3, kind: 'app.start', status: 'running', progress_pct: 10 })
+    applyJob(qc, { id: 3, kind: 'app.start', status: 'running', progress_pct: 70 })
+    expect((qc.getQueryData(['jobs', 3]) as any).progress_pct).toBe(70)
+  })
+
+  it('toasts once for a terminal delta, not again for a duplicate delivery', () => {
+    const qc = client()
+    const toasts: unknown[] = []
+    const delta = { id: 3, kind: 'app.start', status: 'succeeded', target_type: 'app' } as const
+    applyJob(qc, delta, (t) => toasts.push(t))
+    applyJob(qc, delta, (t) => toasts.push(t))
+    expect(toasts).toHaveLength(1)
+  })
 })

@@ -109,6 +109,43 @@ def test_vm_pause_uses_qemu_and_the_suspend_verb(tmp_path):
     asyncio.run(run())
 
 
+def test_job_bus_events_carry_target_type(tmp_path):
+    """doc 05 §Streaming 4: the `job` SSE delta must carry target_type so a
+    tab that didn't initiate the job (another tab, another user, the Phase 7
+    scheduler) can still invalidate the right resource cache on completion."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        q = app.state.bus.subscribe()
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        # Every status-bearing `job` delta (queued/running/succeeded) is
+        # published from _spawn/_run/_finish and must carry target_type; the
+        # bare progress_pct ticks from JobContext.progress() are a separate,
+        # smaller delta and don't need it (applyJob only reads target_type
+        # off a terminal delta).
+        status_events = []
+        while not q.empty():
+            name, data = q.get_nowait()
+            if name == "job" and "status" in data:
+                status_events.append(data)
+        assert status_events, "expected at least one status-bearing job bus event"
+        assert all(d.get("target_type") == "app" for d in status_events)
+        assert any(d.get("status") == "succeeded" for d in status_events)
+
+    asyncio.run(run())
+
+
 def test_nonzero_exitstatus_fails_the_job(tmp_path):
     from proxploy.jobs import JobBackend
     from tests.fakes.pve import FakePVE

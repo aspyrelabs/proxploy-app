@@ -1,6 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { TERMINAL, jobLabel } from './jobs'
-import type { JobRow } from './jobs'
 
 type MetricTarget = { t: 'host' | 'app' | 'vm'; id: number; cpu_pct: number; mem_pct: number }
 type ResourceEvent = { type: string; id?: number; change: string; status?: string }
@@ -62,25 +61,29 @@ type JobDelta = {
 }
 type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number }) => void
 
-/** SSE `job` event → patch ['jobs'], and on a terminal state invalidate the
- *  affected resource + activity feed and raise a toast (doc 06 §d). */
+/** SSE `job` event → patch ['jobs'] (list AND detail shapes), and on a
+ *  terminal state invalidate the affected resource + activity feed and raise
+ *  a toast (doc 06 §d, doc 05 §Streaming 4 — the payload carries target_type). */
 export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
-  qc.setQueriesData({ queryKey: ['jobs'] }, (data: unknown) =>
-    Array.isArray(data)
-      ? data.map((r: any) => (r.id === d.id ? { ...r, ...d } : r))
-      : data)
-  if (!d.status || !TERMINAL.includes(d.status as never)) return
+  let wasTerminal = false
+  const patch = (r: any) => {
+    if (r.status && (TERMINAL as string[]).includes(r.status)) wasTerminal = true
+    return { ...r, ...d }
+  }
+  qc.setQueriesData({ queryKey: ['jobs'] }, (data: unknown) => {
+    if (Array.isArray(data)) return data.map((r: any) => (r.id === d.id ? patch(r) : r))
+    const row = data as { id?: number } | undefined
+    return row && row.id === d.id ? patch(row) : data
+  })
+  if (!d.status || !(TERMINAL as string[]).includes(d.status)) return
+  // A duplicate delivery of the same terminal delta (SSE has no replay/dedup
+  // today — see the job-log stream's Last-Event-ID for the pattern if that
+  // changes) would otherwise re-invalidate and re-toast for nothing.
+  if (wasTerminal) return
   qc.invalidateQueries({ queryKey: ['jobs'] })
   qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
-  // The backend's SSE `job` payload never includes `target_type` (see
-  // JobBackend._publish in backend/proxploy/jobs/backend.py — every call site
-  // passes only id/status/kind/progress_pct). Fall back to the job row
-  // useLifecycle seeds into ['jobs', id] on mutation success, so the terminal
-  // event still invalidates the right resource list in the real app.
-  const targetType = d.target_type ??
-    qc.getQueryData<JobRow>(['jobs', d.id])?.target_type
-  if (targetType === 'app') qc.invalidateQueries({ queryKey: ['apps'] })
-  if (targetType === 'vm') qc.invalidateQueries({ queryKey: ['vms'] })
+  if (d.target_type === 'app') qc.invalidateQueries({ queryKey: ['apps'] })
+  if (d.target_type === 'vm') qc.invalidateQueries({ queryKey: ['vms'] })
   toast?.({
     kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
     text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),

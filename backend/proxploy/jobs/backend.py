@@ -165,13 +165,15 @@ class JobBackend:
         # call_soon_threadsafe works from the loop thread AND from FastAPI's
         # threadpool, which is where every `def` route handler runs.
         self.app.state.loop.call_soon_threadsafe(
-            self._spawn, job.id, kind, dict(params or {}))
+            self._spawn, job.id, kind, dict(params or {}), target_type)
         return job
 
-    def _spawn(self, job_id: int, kind: str, params: dict) -> None:
+    def _spawn(self, job_id: int, kind: str, params: dict,
+               target_type: str | None = None) -> None:
         self._pending.discard(job_id)
-        self._publish(job_id, status="queued", kind=kind)
-        self._tasks[job_id] = asyncio.create_task(self._run(job_id, kind, params))
+        self._publish(job_id, status="queued", kind=kind, target_type=target_type)
+        self._tasks[job_id] = asyncio.create_task(
+            self._run(job_id, kind, params, target_type))
 
     def cancel(self, job_id: int) -> bool:
         task = self._tasks.get(job_id)
@@ -234,7 +236,8 @@ class JobBackend:
 
     # --- the runner --------------------------------------------------------
 
-    async def _run(self, job_id: int, kind: str, params: dict) -> None:
+    async def _run(self, job_id: int, kind: str, params: dict,
+                    target_type: str | None = None) -> None:
         ctx = JobContext(self, job_id)
         try:
             # `try` wraps the semaphore acquire itself: a job cancelled while
@@ -247,20 +250,23 @@ class JobBackend:
             async with self._sem:
                 if job_id in self._cancel_requested:
                     self._cancel_requested.discard(job_id)
-                    self._finish(ctx, kind, "canceled", error="canceled by user")
+                    self._finish(ctx, kind, "canceled", error="canceled by user",
+                                 target_type=target_type)
                     return
                 self._set_running(job_id)
-                self._publish(job_id, status="running", kind=kind)
+                self._publish(job_id, status="running", kind=kind, target_type=target_type)
                 result = await HANDLERS[kind](ctx, params)
         except asyncio.CancelledError:
-            self._finish(ctx, kind, "canceled", error="canceled by user")
+            self._finish(ctx, kind, "canceled", error="canceled by user",
+                         target_type=target_type)
             raise
         except JobFailed as e:
-            self._finish(ctx, kind, "failed", error=str(e))
+            self._finish(ctx, kind, "failed", error=str(e), target_type=target_type)
         except Exception as e:  # noqa: BLE001 — a handler bug is a failed job
-            self._finish(ctx, kind, "failed", error=f"{type(e).__name__}: {e}")
+            self._finish(ctx, kind, "failed", error=f"{type(e).__name__}: {e}",
+                         target_type=target_type)
         else:
-            self._finish(ctx, kind, "succeeded", result=result or {})
+            self._finish(ctx, kind, "succeeded", result=result or {}, target_type=target_type)
         finally:
             # Bound _tasks/_done to in-flight jobs only — otherwise a daemon
             # running for months holds every completed Task (and its retained
@@ -278,7 +284,8 @@ class JobBackend:
                 db.commit()
 
     def _finish(self, ctx: JobContext, kind: str, status: str, *,
-                result: dict | None = None, error: str | None = None) -> None:
+                result: dict | None = None, error: str | None = None,
+                target_type: str | None = None) -> None:
         """Synchronous on purpose: the cancel path cannot await (see JobContext)."""
         job_id = ctx.job_id
         with self.app.state.sessionmaker() as db:
@@ -298,7 +305,7 @@ class JobBackend:
         if error:
             payload["error"] = error
         self._fanout(job_id, {"event": "status", "data": payload})
-        self._publish(job_id, status=status, kind=kind)
+        self._publish(job_id, status=status, kind=kind, target_type=target_type)
         self._notify(job_id, kind, status, error)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:

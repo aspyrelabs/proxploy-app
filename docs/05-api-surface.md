@@ -332,7 +332,7 @@ for bidirectional or binary** (terminals, VNC).
   data: {"type":"app","id":103,"change":"status","status":"running"}
 
   event: job
-  data: {"id":88,"kind":"app.install","status":"running","progress_pct":40}
+  data: {"id":88,"kind":"app.install","status":"running","progress_pct":40,"target_type":"app"}
 
   event: alert
   data: {"id":12,"state":"firing","severity":"warning","message":"host-02 CPU > 85% for 5m"}
