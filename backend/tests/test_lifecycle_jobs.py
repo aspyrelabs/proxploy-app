@@ -246,3 +246,165 @@ print("OK")
                        text=True, cwd=backend_dir)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "OK" in r.stdout
+
+
+# --- Fix round 1 (code review) -------------------------------------------
+
+
+def test_task_log_lines_are_not_dropped_or_duplicated_across_polls(tmp_path):
+    """A broken `seen` cursor would either re-send every line each poll
+    (duplicates) or skip newly appended lines (drops). Assert the exact
+    ordered job_events messages for a task log that grows across polls."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    class GrowingLogPVE(FakePVE):
+        """Appends one new task-log line per status poll (up to running_ticks),
+        instead of a single static line — proves the cursor advances rather
+        than reprocessing lines it already emitted."""
+
+        def _task_status(self, upid):
+            n = self._polls.get(upid, 0)
+            if n < self.running_ticks:
+                self.task_lines[upid].append(f"progress {n}")
+            return super()._task_status(upid)
+
+    async def run():
+        fake = GrowingLogPVE(running_ticks=3)
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle as lc
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        original = lc.TASK_POLL_S
+        lc.TASK_POLL_S = 0.01
+        try:
+            with app.state.sessionmaker() as db:
+                job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                         target_id=app_id,
+                                         params={"target_id": app_id}).id
+            await backend.wait(job_id, timeout=10)
+        finally:
+            lc.TASK_POLL_S = original
+
+        [upid] = fake.task_lines.keys()
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "succeeded"
+            messages = [e.message for e in db.query(JobEvent)
+                        .filter_by(job_id=job_id).order_by(JobEvent.seq)]
+        assert messages[:2] == [
+            "start Immich (lxc 150) on node pve1",
+            f"proxmox task {upid}",
+        ]
+        # every task-log line the fake ever produced, in order, exactly once
+        expected = fake.task_lines[upid]
+        assert messages[2:2 + len(expected)] == expected
+
+    asyncio.run(run())
+
+
+def test_cancel_mid_poll_reports_the_proxmox_task_is_still_running(tmp_path):
+    """A cancelled job must never claim the infra mutation was undone — the
+    stop/start/etc POST already reached proxmox and keeps running there
+    regardless of what happens to the local asyncio task."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(running_ticks=10_000)  # never finishes within the test
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle as lc
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        original = lc.TASK_POLL_S
+        lc.TASK_POLL_S = 0.02
+        try:
+            with app.state.sessionmaker() as db:
+                job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                         target_id=app_id,
+                                         params={"target_id": app_id}).id
+            await asyncio.sleep(0.05)  # let it issue the action and start polling
+            assert backend.cancel(job_id)
+            await backend.wait(job_id, timeout=10)
+        finally:
+            lc.TASK_POLL_S = original
+
+        assert fake.actions == [("lxc", 150, "stop")]  # the POST really fired
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "canceled"
+            messages = [(e.message, e.stream) for e in db.query(JobEvent)
+                        .filter_by(job_id=job_id).order_by(JobEvent.seq)]
+        assert any("keeps running" in m and stream == "stderr"
+                   for m, stream in messages)
+
+    asyncio.run(run())
+
+
+def test_task_timeout_fails_the_job(tmp_path):
+    """TASK_TIMEOUT_S branch: a task that never stops must fail the job
+    rather than poll forever, and must say the node-side task is untouched."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(running_ticks=10_000)
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle as lc
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        orig_poll, orig_timeout = lc.TASK_POLL_S, lc.TASK_TIMEOUT_S
+        lc.TASK_POLL_S, lc.TASK_TIMEOUT_S = 0.01, 0.0
+        try:
+            with app.state.sessionmaker() as db:
+                job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                         target_id=app_id,
+                                         params={"target_id": app_id}).id
+            await backend.wait(job_id, timeout=10)
+        finally:
+            lc.TASK_POLL_S, lc.TASK_TIMEOUT_S = orig_poll, orig_timeout
+
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+            assert "still running" in job.error
+
+    asyncio.run(run())
+
+
+def test_missing_credential_fails_the_job(tmp_path):
+    """_resolve's "no API token credential" branch: a host with no
+    HostCredential row must fail the job cleanly instead of KeyError-ing on
+    a missing token."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=FakePVE())
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            host = Host(name="host-01", address="https://pve1:8006", node_name="pve1",
+                       status="connected", pve_version="8.4.1")
+            db.add(host)
+            db.commit()
+            host_id = host.id
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                     target_id=app_id,
+                                     params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+            assert "no API token credential" in job.error
+
+    asyncio.run(run())

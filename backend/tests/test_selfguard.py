@@ -48,3 +48,24 @@ def test_vms_are_never_self(tmp_path):
     db = make_db(tmp_path)
     set_setting(db, "self.ctid", 150)
     assert is_self(db, "vm", 1) is False
+
+
+# --- Fix round 1 (code review) --------------------------------------------
+
+
+def test_malformed_ctid_setting_fails_open_instead_of_raising(tmp_path):
+    """A non-numeric self.ctid (e.g. hand-edited or corrupted) must return
+    False, same as an unset one — not throw ValueError up into the route."""
+    db = make_db(tmp_path)
+    a = _app(db, seed_host_row(db))
+    set_setting(db, "self.ctid", "ct-150")
+    assert is_self(db, "app", a.id) is False
+
+
+def test_malformed_host_id_setting_fails_open_instead_of_raising(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    a = _app(db, host, ctid=150)
+    set_setting(db, "self.ctid", 150)
+    set_setting(db, "self.host_id", "")
+    assert is_self(db, "app", a.id) is False

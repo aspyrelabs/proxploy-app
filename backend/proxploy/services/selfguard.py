@@ -23,7 +23,14 @@ def is_self(db, target_type: str, target_id: int) -> bool:
     if ctid is None:
         return False
     app = db.get(App, target_id)
-    if app is None or app.ctid != int(ctid):
+    if app is None:
         return False
-    host_id = get_setting(db, "self.host_id")
-    return host_id is None or app.host_id == int(host_id)
+    try:
+        if app.ctid != int(ctid):
+            return False
+        host_id = get_setting(db, "self.host_id")
+        return host_id is None or app.host_id == int(host_id)
+    except (TypeError, ValueError):
+        # A malformed setting (e.g. "" or "ct-150") must fail open, same as an
+        # unset one — see the module docstring's asymmetry.
+        return False

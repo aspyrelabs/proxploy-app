@@ -75,31 +75,52 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
         _resolve, app, target_type, target_id)
 
     ctx.log(f"{action} {name} ({kind} {vmid}) on node {node}")
-    upid = await asyncio.to_thread(client.guest_action, kind, node, vmid,
-                                   PVE_VERB[action])
+    try:
+        upid = await asyncio.to_thread(client.guest_action, kind, node, vmid,
+                                       PVE_VERB[action])
+    except asyncio.CancelledError:
+        # to_thread cannot interrupt the thread once it has started — the POST
+        # may already have reached proxmox, but the UPID it would return is
+        # discarded here, so there is no task to point at. Leave a breadcrumb
+        # even without one, rather than pretending the job vanished cleanly.
+        ctx.log(f"canceled while issuing {action} on {kind} {vmid} at {node} — "
+                f"the request may have already reached proxmox; no task id was "
+                f"captured to track it", stream="stderr")
+        raise
     ctx.log(f"proxmox task {upid}")
     ctx.progress(10)
 
     seen = 0
     deadline = asyncio.get_running_loop().time() + TASK_TIMEOUT_S
-    while True:
-        status = await asyncio.to_thread(client.task_status, node, upid)
-        rows = await asyncio.to_thread(client.task_log, node, upid, seen)
-        for r in rows:
-            ctx.log(str(r.get("t", "")))
-            seen = max(seen, int(r.get("n", seen)))
-        if status.get("status") != "running":
-            break
-        if asyncio.get_running_loop().time() > deadline:
-            raise JobFailed(f"proxmox task {upid} still running after "
-                            f"{TASK_TIMEOUT_S:.0f}s — giving up on the log, the "
-                            f"task itself is untouched on the node")
-        ctx.progress(50)
-        await asyncio.sleep(TASK_POLL_S)
+    ctx.progress(50)
+    try:
+        while True:
+            status = await asyncio.to_thread(client.task_status, node, upid)
+            rows = await asyncio.to_thread(client.task_log, node, upid, seen)
+            for r in rows:
+                ctx.log(str(r.get("t", "")))
+                seen = max(seen, int(r.get("n", seen)))
+            if status.get("status") != "running":
+                break
+            if asyncio.get_running_loop().time() > deadline:
+                raise JobFailed(f"proxmox task {upid} still running after "
+                                f"{TASK_TIMEOUT_S:.0f}s — giving up on the log, the "
+                                f"task itself is untouched on the node")
+            await asyncio.sleep(TASK_POLL_S)
+    except asyncio.CancelledError:
+        # The status/action POST already reached proxmox and is unaffected by a
+        # local cancel — telling the user it was "canceled" without this line
+        # would read as "nothing happened", which is false.
+        ctx.log(f"canceled locally; proxmox task {upid} keeps running on {node}",
+               stream="stderr")
+        raise
 
-    exitstatus = status.get("exitstatus") or "OK"
+    exitstatus = status.get("exitstatus")
     if exitstatus != "OK":
-        raise JobFailed(f"{action} failed: {exitstatus}")
+        # Fail closed: a stopped task with a missing/None exitstatus is an
+        # unknown outcome, not a success, contra proxmox.py's own contract.
+        reason = exitstatus if exitstatus else "no exitstatus reported"
+        raise JobFailed(f"{action} failed: {reason}")
 
     ctx.progress(100)
     # Nudge every open tab to refetch rather than assert a status we have not
