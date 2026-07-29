@@ -13,8 +13,7 @@ export const shellRoute = createRoute({
   component: AppShell,
   beforeLoad: async () => {
     const ob = await api<Onboarding>('/meta/onboarding')
-    // '/onboarding' lands in the route tree in Task 15; cast until then
-    if (!ob.complete) throw redirect({ to: '/onboarding' as never })
+    if (!ob.complete) throw redirect({ to: '/onboarding' })
     try { await api('/auth/me') } catch { throw redirect({ to: '/login' }) }
   },
 })
@@ -48,11 +47,13 @@ export const backupsRoute = page('/backups', 'Backups', 'Phase 6 (Infra pages)',
   'PBS integration arrives in Phase 6.')
 
 import { loginRoute } from './routes/login'
+import { onboardingRoute } from './routes/onboarding'
+import { settingsRoute } from './routes/settings'
 
 export const routeTree = rootRoute.addChildren([
-  indexRoute, loginRoute,
+  indexRoute, loginRoute, onboardingRoute,
   shellRoute.addChildren([clusterRoute, appsRoute, storeRoute, vmsRoute,
-                          storageRoute, networkRoute, backupsRoute]),
+                          storageRoute, networkRoute, backupsRoute, settingsRoute]),
 ])
 export const router = createRouter({ routeTree })
 

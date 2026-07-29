@@ -25,7 +25,8 @@ export function SidebarNav() {
           <div key={group.label} className="mb-4">
             <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[.08em] text-text-3">{group.label}</div>
             {group.items.map(item => (
-              // '/settings' lands in the route tree in Task 15; cast until then
+              // cast: circular router-tree imports across route files defeat
+              // full inference of the nav's `to` union in this TS/router version
               <Link key={item.to} to={item.to as never}
                 className="relative block rounded-tile px-3 py-2 text-[13.5px] text-text-2 hover:bg-panel-2 hover:text-text"
                 activeProps={{ className: 'bg-panel-2 !text-text before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded before:bg-amber' }}>
