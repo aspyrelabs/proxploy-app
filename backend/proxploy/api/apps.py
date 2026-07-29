@@ -123,6 +123,12 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
 _require_operator = require_role("operator")
 
 
+# WARNING: this wildcard is registered last and Starlette matches routes in
+# registration order, so it will silently swallow any future two-segment
+# sibling under /apps/{id}/... — e.g. doc 05's still-unbuilt /apps/{id}/update
+# (Phase 4) and /apps/{id}/migrate (Phase 8). Register those routes with their
+# literal action segments BEFORE this one, or they'll hit this handler instead
+# and 422 with "action must be one of start, stop, restart, shutdown".
 @router.post("/{app_id}/{action}", status_code=202,
              dependencies=[Depends(_require_operator),
                           Depends(require_entitlement("apps.lifecycle"))])

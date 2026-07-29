@@ -23,13 +23,15 @@ def _seed(app, ctid=150, vmid=201):
         return host.id, a.id, v.id
 
 
-def test_lifecycle_requires_operator(tmp_path, csrf_header, bootstrap_admin):
+def test_missing_session_is_401_not_403(tmp_path, csrf_header, bootstrap_admin):
     """A missing session must 401, never 403 — even with the entitlement gate
     stacked on the route. The CSRF double-submit is a separate, mutation-only
     gate (doc 08 §5): a bare POST with no cookie at all trips CSRF first, so
     the CSRF pair is supplied here (same as every other unauth-POST-is-401
     test in this suite, e.g. test_auth.py) to isolate the check this test is
-    actually about — auth must run before the entitlement gate."""
+    actually about — auth must run before the entitlement gate. (This does
+    NOT exercise the operator-role branch — see test_viewer_role_is_refused
+    below for that.)"""
     from tests.fakes.pve import FakePVE
     from tests.support import make_app
 
@@ -38,6 +40,32 @@ def test_lifecycle_requires_operator(tmp_path, csrf_header, bootstrap_admin):
         _, app_id, _ = _seed(app)
         assert c.post(f"/api/v1/apps/{app_id}/start",
                       headers=csrf_header(c)).status_code == 401
+
+
+def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
+    """require_role("operator") must actually refuse a logged-in user whose
+    role is below operator — a plain signup defaults to "viewer" (UserIn.role)
+    same as a user with no team membership at all defaults to "viewer" via
+    user_role()'s `default=` (deps.py:26-27). Covers both the apps and vms
+    routes: this is the endpoint that stops a customer's container, and
+    "operator required" was previously asserted nowhere in the suite."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, app_id, vm_id = _seed(app)
+        c.post("/api/v1/users", json={"email": "viewer@example.com",
+                                      "password": "correct-horse-battery",
+                                      "display_name": "Viewer"},
+               headers=csrf_header(c))  # role omitted -> defaults to "viewer"
+        c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
+                                           "password": "correct-horse-battery"},
+               headers=csrf_header(c))
+        for url in (f"/api/v1/apps/{app_id}/start", f"/api/v1/vms/{vm_id}/start"):
+            r = c.post(url, headers=csrf_header(c))
+            assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
 
 
 def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
@@ -102,7 +130,11 @@ def test_vm_accepts_pause_and_resume(tmp_path, csrf_header, bootstrap_admin):
         for action in ("pause", "resume", "shutdown"):
             r = c.post(f"/api/v1/vms/{vm_id}/{action}", headers=csrf_header(c))
             assert r.status_code == 202, action
-            assert r.json()["job"]["kind"] == f"vm.{action}"
+            job = r.json()["job"]
+            assert job["kind"] == f"vm.{action}"
+            with app.state.sessionmaker() as db:
+                row = db.query(AuditEvent).filter_by(action=f"vm.{action}").one()
+                assert row.target_type == "vm" and row.job_id == job["id"]
 
 
 def test_missing_target_is_404(tmp_path, csrf_header, bootstrap_admin):
