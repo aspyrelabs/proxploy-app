@@ -19,7 +19,12 @@ export const EVENT_CHOICES = [
 const input = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
 export function ChannelForm({ onSaved }: { onSaved: () => void }) {
-  const { has } = useEntitlements()
+  const ent = useEntitlements()
+  // Same wait-for-first-fetch pattern as LifecycleActions.tsx: `has()`
+  // defaults to false until /entitlements resolves, so gating the fieldset
+  // on `!has(...)` directly locked event routing for every plan (Pro
+  // included) during the initial fetch, not just for plans that lack it.
+  const routingAllowed = ent.data != null && ent.has('notify.routing')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [events, setEvents] = useState<string[]>(['job.failed'])
@@ -58,9 +63,9 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
           Slack and generic webhooks are all supported.
         </p>
       </div>
-      <fieldset disabled={!has('notify.routing')}>
+      <fieldset disabled={!routingAllowed}>
         <legend className="text-[12px] text-text-3">
-          Send on {!has('notify.routing') && '(Pro — event routing)'}
+          Send on {!routingAllowed && '(Pro — event routing)'}
         </legend>
         <div className="mt-1 flex flex-wrap gap-3">
           {EVENT_CHOICES.map((e) => (

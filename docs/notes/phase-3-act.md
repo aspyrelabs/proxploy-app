@@ -176,6 +176,16 @@ RESULT: ALL DoD CLAUSES PROVED
   built.** Doc 10 Phase 3 names JobBackend, lifecycle, activity feed and
   notifications; those two doc-05 rows belong to host management and have no
   Phase 3 dependency. Left unbuilt rather than half-built.
+- **The channels table only wires an enable/disable toggle to `PATCH
+  /notifications/channels/{id}`, not full editing.** The final fix-wave
+  review found `PATCH` implemented and tested on the backend with no UI
+  caller at all — an admin could not silence a noisy channel without
+  destroying its token. The toggle (`{enabled}`) closes that hole, the worst
+  of the gap. Still missing from the UI: editing a channel's `events` list
+  after creation, and rotating its `url` without delete-and-recreate. Both
+  are cheap PATCH calls away given the backend support already exists;
+  deferred rather than built speculatively since no reviewer or DoD clause
+  named them.
 - **The activity bell's running-job count uses a dedicated
   `['jobs', 'running-count']` query** rather than `useJobs({status: 'running'})`,
   because `useJobs` couples `enabled` to `refetchInterval` — the brief's

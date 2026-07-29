@@ -29,16 +29,23 @@ function Card({ title, children, action }: { title: string; children: React.Reac
   )
 }
 
-function SettingsPage() {
-  const { tier, grace } = useEntitlements()
+export function SettingsPage() {
+  const ent = useEntitlements()
+  const { tier, grace } = ent
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
 
+  // Wait for the first entitlements fetch before deciding — `has()` defaults
+  // to false until then, which would 403 the query and open an "Add channel"
+  // form that always errors for the sliver of a second before the flag
+  // resolves true.
+  const channelsAllowed = ent.data != null && ent.has('notify.channels')
   const [addingChannel, setAddingChannel] = useState(false)
   const channels = useQuery({
     queryKey: ['notifications', 'channels'],
     queryFn: () => api<ChannelRow[]>('/notifications/channels'),
+    enabled: channelsAllowed,
   })
   const testChannel = useMutation({
     mutationFn: (id: number) =>
@@ -50,8 +57,25 @@ function SettingsPage() {
   const deleteChannel = useMutation({
     mutationFn: (id: number) =>
       api(`/notifications/channels/${id}`, { method: 'DELETE' }),
+    onError: () => toast.error('Could not remove that channel — try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
+  const toggleChannel = useMutation({
+    mutationFn: (ch: ChannelRow) =>
+      api(`/notifications/channels/${ch.id}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !ch.enabled }),
+      }),
+    onError: () => toast.error('Could not update that channel — try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
+  })
+  const removeChannel = (ch: ChannelRow) => {
+    // The URL is genuinely unrecoverable once deleted (never shown again
+    // after creation) — one misclick next to Test would otherwise cost a
+    // bot token with no undo.
+    if (window.confirm(`Remove notification channel "${ch.name}"? This cannot be undone.`)) {
+      deleteChannel.mutate(ch.id)
+    }
+  }
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -88,44 +112,57 @@ function SettingsPage() {
       </Card>
 
       <Card title="Notifications"
-            action={<Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
+            action={channelsAllowed && <Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
               {addingChannel ? 'Close' : 'Add channel'}
             </Button>}>
-        <table className="w-full text-left text-[13px]">
-          <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-            <th className="pb-2">Name</th><th>Kind</th><th>Events</th><th>State</th><th /></tr></thead>
-          <tbody>
-            {(channels.data ?? []).map(ch => (
-              <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
-                <td className="py-2">{ch.name}</td>
-                <td className="font-mono text-text-2">{ch.kind}</td>
-                <td className="font-mono text-[11.5px] text-text-3">
-                  {ch.events.length ? ch.events.join(', ') : 'all events'}
-                </td>
-                <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
-                  {ch.enabled ? 'enabled' : 'disabled'}
-                </td>
-                <td className="py-2 text-right">
-                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                          onClick={() => testChannel.mutate(ch.id)}>Test</Button>
-                  <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
-                          onClick={() => deleteChannel.mutate(ch.id)}>Remove</Button>
-                </td>
-              </tr>
-            ))}
-            {!channels.data?.length && (
-              <tr><td colSpan={5} className="py-4 text-text-3">
-                No channels yet. Add one to get told when a job fails.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-        {addingChannel && <div className="mt-4 border-t border-line-soft pt-4">
-          <ChannelForm onSaved={() => {
-            setAddingChannel(false)
-            qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
-          }} />
-        </div>}
+        {!channelsAllowed ? (
+          <p className="text-[12.5px] text-text-3">
+            {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
+          </p>
+        ) : (
+          <>
+            <table className="w-full text-left text-[13px]">
+              <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+                <th className="pb-2">Name</th><th>Kind</th><th>Events</th><th>State</th><th /></tr></thead>
+              <tbody>
+                {(channels.data ?? []).map(ch => (
+                  <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
+                    <td className="py-2">{ch.name}</td>
+                    <td className="font-mono text-text-2">{ch.kind}</td>
+                    <td className="font-mono text-[11.5px] text-text-3">
+                      {ch.events.length ? ch.events.join(', ') : 'all events'}
+                    </td>
+                    <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
+                      {ch.enabled ? 'enabled' : 'disabled'}
+                    </td>
+                    <td className="py-2 text-right">
+                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                              disabled={toggleChannel.isPending}
+                              onClick={() => toggleChannel.mutate(ch)}>
+                        {ch.enabled ? 'Disable' : 'Enable'}
+                      </Button>
+                      <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                              onClick={() => testChannel.mutate(ch.id)}>Test</Button>
+                      <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                              onClick={() => removeChannel(ch)}>Remove</Button>
+                    </td>
+                  </tr>
+                ))}
+                {!channels.data?.length && (
+                  <tr><td colSpan={5} className="py-4 text-text-3">
+                    No channels yet. Add one to get told when a job fails.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+            {addingChannel && <div className="mt-4 border-t border-line-soft pt-4">
+              <ChannelForm onSaved={() => {
+                setAddingChannel(false)
+                qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
+              }} />
+            </div>}
+          </>
+        )}
       </Card>
 
       <Card title="General">
