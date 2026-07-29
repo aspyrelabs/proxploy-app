@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { api } from './api/client'
 import { AppShell } from './components/AppShell'
+import { LiveProvider } from './components/LiveProvider'
 import { PlaceholderPage } from './routes/placeholder'
 
 export const rootRoute = createRootRoute({ component: () => <Outlet /> })
@@ -10,7 +11,11 @@ type Onboarding = { admin_exists: boolean; host_added: boolean; complete: boolea
 export const shellRoute = createRoute({
   id: 'shell',
   getParentRoute: () => rootRoute,
-  component: AppShell,
+  component: () => (
+    <LiveProvider>
+      <AppShell />
+    </LiveProvider>
+  ),
   beforeLoad: async () => {
     const ob = await api<Onboarding>('/meta/onboarding')
     if (!ob.complete) throw redirect({ to: '/onboarding' })
