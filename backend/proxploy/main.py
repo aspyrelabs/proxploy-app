@@ -75,6 +75,7 @@ def create_app(
 
         from proxploy.jobs import JobBackend
         from proxploy.pollers import Poller
+        from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
         from proxploy.services.metrics import metrics_loop
 
         app.state.jobs = JobBackend(app)
