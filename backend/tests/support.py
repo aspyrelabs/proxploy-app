@@ -34,7 +34,17 @@ def make_app(tmp_path, fake=None, **overrides):
     if fake is not None:
         from tests.fakes.pve import make_fake_factory
         kwargs["proxmox_factory"] = make_fake_factory(fake)
+    overrides.setdefault("poll_enabled", False)
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
-                 master_key_file=tmp_path / "master.key",
-                 poll_enabled=False, **overrides)
+                 master_key_file=tmp_path / "master.key", **overrides)
     return create_app(s, **kwargs)
+
+
+def seed_snapshot(app, host_id, **kw):
+    """Endpoint tests stuff a snapshot instead of running poll loops."""
+    from proxploy.models import utcnow
+    from proxploy.pollers import HostSnapshot
+
+    snap = HostSnapshot(host_id=host_id, ts=kw.pop("ts", utcnow()), **kw)
+    app.state.poller.snapshots[host_id] = snap
+    return snap

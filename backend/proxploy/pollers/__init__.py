@@ -7,12 +7,17 @@ the fresh in-memory snapshot plus the SSE deltas to publish. The Poller class
 """
 from __future__ import annotations
 
+import asyncio
+import json as jsonlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from proxploy.models import App, CatalogEntry, Host, MetricSample, Vm
+from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, utcnow
 from proxploy.services.metrics import write_samples
+from proxploy.services.proxmox import ProxmoxClient
+
+POLL_BACKOFF_CAP_S = 300
 
 
 @dataclass
@@ -191,3 +196,103 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                             net={"in_bps": net_in, "out_bps": net_out},
                             guests=guests, discovered=discovered)
     return CycleResult(snapshot=snapshot, events=events)
+
+
+class Poller:
+    """Supervisor + one long-lived task per host (doc 02 §3).
+
+    All blocking work (proxmoxer, SQLAlchemy) runs in asyncio.to_thread with a
+    per-host timeout, so one slow/dead host can never stall the event loop or
+    its sibling loops.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.snapshots: dict[int, HostSnapshot] = {}
+        self._tasks: dict[int, asyncio.Task] = {}
+
+    async def run(self) -> None:
+        interval = self.app.state.settings.poll_interval_s
+        while True:
+            try:
+                ids = await asyncio.to_thread(self._host_ids)
+                for hid in ids:
+                    if hid not in self._tasks or self._tasks[hid].done():
+                        self._tasks[hid] = asyncio.create_task(self._host_loop(hid))
+                for hid in list(self._tasks):
+                    if hid not in ids:
+                        self._tasks.pop(hid).cancel()
+                        self.snapshots.pop(hid, None)
+            except Exception:  # noqa: BLE001 — supervisor never dies
+                pass
+            await asyncio.sleep(interval)
+
+    def stop(self) -> None:
+        for t in self._tasks.values():
+            t.cancel()
+        self._tasks.clear()
+
+    def _host_ids(self) -> list[int]:
+        with self.app.state.sessionmaker() as db:
+            return [h.id for h in db.query(Host).all()]
+
+    async def _host_loop(self, host_id: int) -> None:
+        settings = self.app.state.settings
+        fails = 0
+        while True:
+            try:
+                events = await asyncio.wait_for(
+                    asyncio.to_thread(self._poll_once, host_id),
+                    timeout=settings.poll_timeout_s)
+                fails = 0
+                for name, data in events:
+                    self.app.state.bus.publish(name, data)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — degrade this host only
+                fails += 1
+                evt = await asyncio.to_thread(self._mark_unreachable, host_id)
+                if evt:
+                    self.app.state.bus.publish(*evt)
+            delay = (min(settings.poll_interval_s * (2 ** min(fails, 4)),
+                         POLL_BACKOFF_CAP_S)
+                     if fails else settings.poll_interval_s)
+            await asyncio.sleep(delay)
+
+    def _poll_once(self, host_id: int) -> list[tuple[str, dict]]:
+        """Blocking: one full cycle for one host. Runs in a worker thread."""
+        app = self.app
+        with app.state.sessionmaker() as db:
+            host = db.get(Host, host_id)
+            if host is None:
+                return []
+            cred = (db.query(HostCredential)
+                    .filter_by(host_id=host.id, kind="api_token").one())
+            tok = jsonlib.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
+            client = ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
+                                  verify_tls=host.verify_tls,
+                                  tls_fingerprint=host.tls_fingerprint,
+                                  factory=app.state.proxmox_factory)
+            resources = client.cluster_resources()
+            node_names = [r["node"] for r in resources if r.get("type") == "node"]
+            rrd = {n: client.node_rrddata(n) for n in node_names}
+
+            prev = self.snapshots.get(host_id)
+            result = ingest_cycle(db, host, resources, rrd, utcnow())
+            events = result.events
+            if prev is not None and (
+                    {d["ctid"] for d in prev.discovered}
+                    != {d["ctid"] for d in result.snapshot.discovered}):
+                events.append(("resource", {"type": "app", "change": "discovered"}))
+            self.snapshots[host_id] = result.snapshot
+            return events
+
+    def _mark_unreachable(self, host_id: int):
+        with self.app.state.sessionmaker() as db:
+            host = db.get(Host, host_id)
+            if host is None or host.status == "unreachable":
+                return None
+            host.status = "unreachable"
+            db.commit()
+            return ("resource", {"type": "host", "id": host_id,
+                                 "change": "status", "status": "unreachable"})

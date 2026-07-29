@@ -73,9 +73,23 @@ def create_app(
         app.state.bus = EventBus()
         app.state.loop = asyncio.get_running_loop()  # test seam for cross-thread publishes
 
+        from proxploy.pollers import Poller
+        from proxploy.services.metrics import metrics_loop
+
+        app.state.poller = Poller(app)
+        poller_task = metrics_task = None
+        if settings.poll_enabled:
+            poller_task = asyncio.create_task(app.state.poller.run())
+            metrics_task = asyncio.create_task(metrics_loop(app))
+
         yield
         if refresh_task:
             refresh_task.cancel()
+        if poller_task:
+            poller_task.cancel()
+        if metrics_task:
+            metrics_task.cancel()
+        app.state.poller.stop()
         app.state.engine.dispose()
 
     app = FastAPI(title="Proxploy", docs_url="/api/docs",
