@@ -7,6 +7,8 @@ from proxploy.api.deps import get_current_user, get_db, get_entitlements, requir
 from proxploy.models import AppSetting, EntitlementCache, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.license_client import LicenseApiError
+from proxploy.services.settings import get_setting as _setting
+from proxploy.services.settings import set_setting as _set_setting
 
 router = APIRouter(prefix="/entitlements", tags=["entitlements"])
 
@@ -23,20 +25,6 @@ def entitlements(ent=Depends(get_entitlements)):
 
 class LicenseIn(BaseModel):
     license_key: str
-
-
-def _setting(db, key, default=None):
-    row = db.query(AppSetting).filter_by(key=key).one_or_none()
-    return row.value if row else default
-
-
-def _set_setting(db, key, value):
-    row = db.query(AppSetting).filter_by(key=key).one_or_none()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
-    db.commit()
 
 
 def apply_new_token(request: Request, db, token: str) -> None:
