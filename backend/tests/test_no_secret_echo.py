@@ -122,3 +122,174 @@ def test_audit_redact_covers_near_miss_secret_key_names():
     assert redact(kept) == kept
 
 
+
+
+# --- secret-bearing input echoed into a plaintext sink -----------------------
+#
+# Same class as the two already-fixed cases (notifier.kind_for writing a
+# malformed URL into the unencrypted `kind` column; urllib3 logging a
+# token-bearing request line). Each test below forces one leak path and
+# asserts a sentinel appears in neither the response nor any log record
+# reaching a root handler.
+
+import contextlib
+import logging
+import sqlite3
+
+PVE_TOKEN_SECRET = "S3NTINEL-TOKEN-SECRET-abc123"
+REFRESH_CRED = "S3NTINEL-REFRESH-CRED-www"
+
+
+@contextlib.contextmanager
+def _root_log_capture():
+    """A handler on the ROOT logger only — the way an operator's
+    `logging.basicConfig()` behaves. Deliberately not `caplog`, which attaches
+    itself to non-propagating loggers directly and so cannot observe a
+    `propagate = False` guarantee (see test_notifier.py for the long form).
+    """
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    root = logging.getLogger()
+    orig = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(orig)
+
+
+def _messages(records):
+    out = []
+    for r in records:
+        try:
+            out.append(r.getMessage())
+        except Exception:  # noqa: BLE001 — a mis-formatted record is still evidence
+            out.append(f"{r.msg!r}{r.args!r}")
+    return "\n".join(out)
+
+
+def _db_cells(db_path):
+    """Every text/blob cell in the database, so a test can assert no
+    *unencrypted* column anywhere picked the secret up."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cells = []
+        for (table,) in conn.execute(
+                "select name from sqlite_master where type='table'"):
+            cur = conn.execute(f"select * from '{table}'")  # noqa: S608 — table names from sqlite_master
+            for row in cur.fetchall():
+                for value in row:
+                    if isinstance(value, bytes):
+                        cells.append(value.decode("utf-8", "replace"))
+                    elif isinstance(value, str):
+                        cells.append(value)
+        return "\n".join(cells)
+    finally:
+        conn.close()
+
+
+def test_proxmox_error_never_echoes_the_authorization_header(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    """urllib3 rejects a header value it cannot send by raising InvalidHeader
+    with the WHOLE header inline — for proxmoxer that header is
+    `PVEAPIToken=user@realm!name=<secret>`. services/proxmox.py wraps whatever
+    the client raised into ProxmoxError, api/hosts.py turns that into
+    `HTTPException(502, str(e))`, and main.py::problem_handler serialises the
+    detail straight into the body, so the secret reached the caller verbatim.
+
+    The factory here raises the exact message a real urllib3 produced (captured
+    from a live TLS server against real proxmoxer 2.3.0 / requests 2.34.2) —
+    that keeps the regression pinned without a network, and it also covers
+    every OTHER third-party message shape that might carry the credential,
+    which a `_header_safe` input check alone would not.
+    """
+    from tests.support import make_app
+
+    header_echo = (f"Invalid header value "
+                   f"b'PVEAPIToken=root@pam!proxploy={PVE_TOKEN_SECRET}\\n'")
+
+    def exploding_factory(**kwargs):
+        raise ValueError(header_echo)
+
+    app = make_app(tmp_path)
+    app.state.proxmox_factory = exploding_factory
+    with TestClient(app) as c, _root_log_capture() as records:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe",
+                   json={"address": "https://pve.invalid:8006",
+                         "token_id": "root@pam!proxploy",
+                         "token_secret": PVE_TOKEN_SECRET, "verify_tls": False},
+                   headers=csrf_header(c))
+    assert r.status_code == 502
+    assert PVE_TOKEN_SECRET not in r.text
+    assert "***" in r.json()["detail"]  # scrubbed, not merely absent by luck
+    assert PVE_TOKEN_SECRET not in _messages(records)
+
+
+def test_a_token_secret_that_cannot_be_a_header_is_refused_without_echoing_it():
+    """The root cause of the InvalidHeader above: a copy-pasted secret with a
+    trailing newline. Rejected before it reaches urllib3 at all — asserted by
+    the factory never being called, since `_wrap`'s redaction would otherwise
+    make the resulting message look clean either way."""
+    from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
+
+    for bad in (PVE_TOKEN_SECRET + "\n", PVE_TOKEN_SECRET + "\r\nX-Evil: 1",
+                " " + PVE_TOKEN_SECRET, PVE_TOKEN_SECRET + "中"):
+        called = []
+
+        def factory(**kwargs):
+            called.append(kwargs)
+            return None
+
+        client = ProxmoxClient("https://pve.invalid:8006", "root@pam!proxploy", bad,
+                               factory=factory)
+        try:
+            client.version()
+        except ProxmoxError as e:
+            assert PVE_TOKEN_SECRET not in str(e)
+        else:
+            raise AssertionError(f"{bad!r} should not have been accepted")
+        assert not called, f"{bad!r} was handed to the HTTP client anyway"
+
+
+def test_pasted_pveapitoken_never_reaches_an_unencrypted_sink(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """Proxmox's own copy button yields `PVEAPIToken=user@realm!name=<secret>`.
+    Pasting that whole string into `token_id` used to satisfy the old shape
+    check, and `token_id` is written verbatim to the UNENCRYPTED
+    `host_credentials.public_meta`, returned by GET /hosts/{id} to any viewer,
+    and stored in `audit_events.params` (which `redact` missed, because
+    "token_id" is not an exact member of REDACT_KEYS) and served by GET /audit.
+    """
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    pasted = f"PVEAPIToken=root@pam!proxploy={PVE_TOKEN_SECRET}"
+    with TestClient(make_app(tmp_path, fake=FakePVE())) as c, _root_log_capture() as records:
+        bootstrap_admin(c)
+        created = c.post("/api/v1/hosts",
+                         json={"name": "pve1", "address": "https://pve.invalid:8006",
+                               "token_id": pasted, "token_secret": "irrelevant",
+                               "verify_tls": False},
+                         headers=csrf_header(c))
+        assert created.status_code == 502, "the allowlist must refuse this token id"
+        assert PVE_TOKEN_SECRET not in created.text
+        assert PVE_TOKEN_SECRET not in c.get("/api/v1/hosts").text
+        assert PVE_TOKEN_SECRET not in c.get("/api/v1/audit?per_page=100").text
+    assert PVE_TOKEN_SECRET not in _messages(records)
+    assert PVE_TOKEN_SECRET not in _db_cells(tmp_path / "t.db")
+
+
+def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
+    """The allowlist must not break onboarding — pinned so a future tightening
+    cannot quietly reject the shapes Proxmox actually issues."""
+    from proxploy.services.proxmox import parse_token_id
+
+    for good in ("root@pam!proxploy", "proxploy@pve!monitor-01",
+                 "svc.account@ldap!token_2", "a+b@pam!t"):
+        assert parse_token_id(good)[0].endswith(good.split("@")[1].split("!")[0])
+
+
