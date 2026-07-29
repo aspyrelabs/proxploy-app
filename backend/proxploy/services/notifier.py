@@ -14,10 +14,21 @@ import logging
 
 from proxploy.models import KIND_FROM_SCHEME, NotificationChannel, utcnow
 
+logger = logging.getLogger(__name__)
+
 # Apprise's logger propagates to the root logger by default, which would defeat
 # "never logged" (see module docstring) the moment any handler is configured —
 # set once at import; this doesn't require apprise itself to be imported yet.
+#
+# This alone is NOT sufficient: Apprise's plugins send over `requests`, whose
+# connection pooling logs the request line (method + full path/query — for
+# schemes where the token lives in the path, e.g. json/form/xml webhooks, that
+# IS the token) via a separate "urllib3" logger tree that never touches
+# "apprise" at all. Silencing "apprise" alone leaves that tree fully live —
+# confirmed by capturing a real failed send at DEBUG with propagation on
+# before this line existed: the token showed up under "urllib3.connectionpool".
 logging.getLogger("apprise").propagate = False
+logging.getLogger("urllib3").propagate = False
 
 
 def kind_for(url: str) -> str:
@@ -34,6 +45,19 @@ def kind_for(url: str) -> str:
     """
     scheme = url.split("://", 1)[0].strip().lower() if "://" in url else ""
     return KIND_FROM_SCHEME.get(scheme, "webhook")
+
+
+def redact_url(url: str) -> str:
+    """Safe-to-log/safe-to-show stand-in for an Apprise URL — use this
+    anywhere a channel URL would otherwise reach a log line or a human-visible
+    string. Same allowlist discipline as `kind_for`: the visible scheme label
+    is never echoed input, only a fixed label from `KIND_FROM_SCHEME` (or
+    "webhook"). With no "://" at all there's nothing safe to show, so this
+    returns a bare "***".
+    """
+    if "://" not in url:
+        return "***"
+    return f"{kind_for(url)}://***"
 
 
 def send_one(url: str, title: str, body: str) -> bool:
@@ -74,10 +98,20 @@ def notify(app, event: str, title: str, body: str) -> int:
     reached = []
     for channel_id, url in targets:
         try:
-            if send_one(url, title, body):
-                reached.append(channel_id)
+            ok = send_one(url, title, body)
         except Exception:  # noqa: BLE001 — never let one channel poison the rest
+            # Log the redacted URL, never the exception object: a channel is
+            # free to raise with the raw URL interpolated into its message
+            # (send_one's own caller — the HTTP test endpoint — sees exactly
+            # that from real Apprise plugin errors), and `str(exc)`/`repr(exc)`
+            # would carry it straight into this log line otherwise.
+            logger.debug("channel %s raised during send: %s",
+                        channel_id, redact_url(url))
             continue
+        if ok:
+            reached.append(channel_id)
+        else:
+            logger.debug("channel %s did not deliver: %s", channel_id, redact_url(url))
 
     if reached:
         with app.state.sessionmaker() as db:

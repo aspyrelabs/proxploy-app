@@ -136,6 +136,39 @@ def test_test_send_reports_failure_without_raising(tmp_path, csrf_header,
         assert r.status_code == 200 and r.json()["sent"] is False
 
 
+def test_test_send_never_leaks_the_url_on_failure(tmp_path, csrf_header,
+                                                   bootstrap_admin, monkeypatch):
+    """Forces a realistic Apprise-style failure -- send_one raising with the
+    URL interpolated straight into its own exception message, exactly what a
+    real plugin error looks like -- and confirms the secret survives nowhere
+    reachable from this request: not in the HTTP response body, not in the
+    audit row `test_test_send_reports_failure_without_raising` (above)
+    doesn't check either of those."""
+    from proxploy.api import notifications
+    from proxploy.models import AuditEvent
+    from tests.support import make_app
+
+    secret = "tokenSECRET1234"
+    secret_url = f"ntfy://{secret}@ntfy.sh/x"
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        h = csrf_header(c)
+        made = c.post("/api/v1/notifications/channels",
+                      json={"name": "n", "url": secret_url}, headers=h).json()
+
+        def blow_up(url, title, body):
+            raise RuntimeError(f"failed to reach {url}")
+
+        monkeypatch.setattr(notifications, "send_one", blow_up)
+        r = c.post(f"/api/v1/notifications/channels/{made['id']}/test", headers=h)
+        assert r.status_code == 200 and r.json() == {"sent": False}
+        assert secret not in r.text
+        with app.state.sessionmaker() as db:
+            audit = db.query(AuditEvent).filter_by(action="notify.channel.test").one()
+            assert secret not in str(audit.params)
+
+
 def test_an_unparseable_url_is_rejected(tmp_path, csrf_header, bootstrap_admin):
     from tests.support import make_app
 

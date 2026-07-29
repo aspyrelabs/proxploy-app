@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from proxploy.models import NotificationChannel
-from proxploy.services.notifier import KIND_FROM_SCHEME, channels_for, kind_for
+from proxploy.services.notifier import KIND_FROM_SCHEME, channels_for, kind_for, redact_url
 
 
 def _channel(db, secretstore, url, *, name="ntfy", events=None, enabled=True):
@@ -76,6 +76,26 @@ def test_kind_for_codomain_is_closed_over_the_allowlist():
         assert kind_for(candidate) in ALLOWED_KINDS
 
 
+def test_redact_url_format_for_a_legitimate_scheme():
+    assert redact_url("ntfy://ntfy.sh/mytopic") == "ntfy://***"
+    assert redact_url("tgram://123456:AAH-BOTTOKEN/chatid") == "telegram://***"
+
+
+def test_redact_url_bare_stars_when_no_scheme_can_be_derived():
+    assert redact_url("AAH-SUPERSECRETBOTTOKEN") == "***"
+    assert redact_url("") == "***"
+
+
+@pytest.mark.parametrize("candidate,secret_fragment", CREDENTIAL_SHAPED_INPUTS)
+def test_redact_url_never_echoes_caller_supplied_text(candidate, secret_fragment):
+    """Same claim as `kind_for`'s adversarial test, for the helper that
+    exists specifically to make a URL safe to put in a log line: whatever
+    walks in, no fragment of it walks back out."""
+    result = redact_url(candidate)
+    assert secret_fragment.lower() not in result.lower()
+    assert result in ({"***"} | {f"{k}://***" for k in ALLOWED_KINDS})
+
+
 def test_send_one_actually_calls_apprise_offline():
     """The one Apprise call site — every other test in this file monkeypatches
     it away, so this pins that the real dependency is actually exercised.
@@ -86,6 +106,123 @@ def test_send_one_actually_calls_apprise_offline():
 
     assert send_one("bogus://x", "t", "b") is False
     assert logging.getLogger("apprise").propagate is False
+    # Apprise's own logger being silenced isn't enough: its plugins send over
+    # `requests`, whose connection pooling logs the request line (including
+    # the full path/query -- where a token-bearing webhook URL keeps its
+    # secret) on a wholly separate "urllib3" logger tree. See
+    # test_a_real_failed_send_never_reaches_a_configured_root_handler for the
+    # end-to-end proof.
+    assert logging.getLogger("urllib3").propagate is False
+
+
+def test_a_real_failed_send_never_reaches_a_configured_root_handler():
+    """The load-bearing regression test for the "apprise propagate=False
+    isn't enough" gap: a REAL (unmocked) send through send_one -> Apprise ->
+    requests -> urllib3, against a local server that accepts the connection
+    and returns an error, so urllib3.connectionpool actually emits its
+    request-line debug log (confirmed, before the urllib3 propagate=False fix
+    landed, to contain the token verbatim: "POST /<token> HTTP/1.1").
+
+    Deliberately does NOT use pytest's `caplog`: `_pytest.logging.catching_logs`
+    explicitly walks every non-propagating logger and attaches its capture
+    handler directly to each one (so caplog can still show them to test
+    authors) -- which would make this test pass even with the urllib3 fix
+    reverted, because caplog structurally bypasses the exact `propagate =
+    False` mechanism under test. A handler attached only to the root logger,
+    the way a real operator's `logging.basicConfig()` would, is what actually
+    exercises the guarantee.
+    """
+    import http.server
+    import logging
+    import threading
+
+    from proxploy.services.notifier import send_one
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(500)
+            self.end_headers()
+
+        def log_message(self, *a):  # silence the stdlib server's own stderr logging
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    records: list[logging.LogRecord] = []
+    root_handler = logging.Handler()
+    root_handler.emit = records.append
+    root_logger = logging.getLogger()
+    orig_level = root_logger.level
+    root_logger.addHandler(root_handler)
+    root_logger.setLevel(logging.DEBUG)
+    try:
+        secret = "BOTTOKENSUPERSECRETVALUE12345"
+        url = f"json://127.0.0.1:{server.server_port}/{secret}"
+        assert send_one(url, "t", "b") is False
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        root_logger.removeHandler(root_handler)
+        root_logger.setLevel(orig_level)
+
+    text = "\n".join(r.getMessage() for r in records)
+    assert secret not in text
+
+
+def test_notify_never_logs_the_url_when_send_one_raises(tmp_path, monkeypatch, caplog):
+    """`notify`'s per-channel except-continue must not just swallow the
+    exception from the caller's perspective (covered by
+    test_a_channel_failure_never_leaks_the_url_into_job_error_or_events) --
+    the debug log it emits about the failure must also never carry the raw
+    URL, even though the raised exception's own message does (a real Apprise
+    plugin error can and does interpolate the URL)."""
+    import logging
+
+    from proxploy.services import notifier
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path)
+        secret = "tokenSECRET1234"
+        secret_url = f"ntfy://{secret}@ntfy.sh/x"
+        with app.state.sessionmaker() as db:
+            _channel(db, app.state.secretstore, secret_url, name="leaky")
+
+        def blow_up(url, title, body):
+            raise RuntimeError(f"failed to reach {url}")
+
+        monkeypatch.setattr(notifier, "send_one", blow_up)
+        caplog.set_level(logging.DEBUG)
+        assert notifier.notify(app, "job.failed", "t", "b") == 0
+        assert secret not in caplog.text
+
+    asyncio.run(run())
+
+
+def test_notify_never_logs_the_url_when_send_one_returns_false(tmp_path, monkeypatch,
+                                                                caplog):
+    """The other failure mode: send_one returning False (no exception at
+    all) must be equally silent about the raw URL."""
+    import logging
+
+    from proxploy.services import notifier
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path)
+        secret = "tokenSECRET1234"
+        secret_url = f"ntfy://{secret}@ntfy.sh/x"
+        with app.state.sessionmaker() as db:
+            _channel(db, app.state.secretstore, secret_url, name="rejected")
+
+        monkeypatch.setattr(notifier, "send_one", lambda url, title, body: False)
+        caplog.set_level(logging.DEBUG)
+        assert notifier.notify(app, "job.failed", "t", "b") == 0
+        assert secret not in caplog.text
+
+    asyncio.run(run())
 
 
 def test_empty_events_means_all_events(tmp_path):
