@@ -16,6 +16,20 @@ type Onboarding = { admin_exists: boolean; host_added: boolean; complete: boolea
 export const shellRoute = createRoute({
   id: 'shell',
   getParentRoute: () => rootRoute,
+  // The activity drawer overlays any page (doc 06), so its params live on the
+  // pathless layout route — TanStack Router merges search schemas parent->child
+  // (each route's validated search is spread onto the accumulated search, so a
+  // child's own keys never strip a parent's), so declaring them once here
+  // makes them legal and present on every page it wraps.
+  // Explicit optional-property return type (`drawer?`/`job?`, not `T | undefined`)
+  // — shellRoute is the parent of the whole tree, so an inferred type with
+  // required-but-possibly-undefined keys would make `search` mandatory on
+  // every `<Link to>`/`navigate` in the app, including ones with no idea
+  // this route exists (e.g. TierPill's `to: '/settings'`).
+  validateSearch: (s: Record<string, unknown>): { drawer?: 'activity'; job?: number } => ({
+    drawer: s.drawer === 'activity' ? ('activity' as const) : undefined,
+    job: s.job != null && !Number.isNaN(Number(s.job)) ? Number(s.job) : undefined,
+  }),
   component: () => (
     <LiveProvider>
       <AppShell />

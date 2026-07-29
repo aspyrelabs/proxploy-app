@@ -1,10 +1,9 @@
 import { Outlet } from '@tanstack/react-router'
 import { Toaster } from 'sonner'
+import { ActivityDrawer } from './ActivityDrawer'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 
-// ActivityDrawer lands in Task 10 — its import and element are added there,
-// not here, so this task builds on its own (controller ruling, task-9 brief).
 export function AppShell() {
   return (
     <div className="flex min-h-screen">
@@ -13,6 +12,7 @@ export function AppShell() {
         <Topbar />
         <main className="p-6"><Outlet /></main>
       </div>
+      <ActivityDrawer />
       <Toaster
         position="bottom-right"
         duration={2600}
