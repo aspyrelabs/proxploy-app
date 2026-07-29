@@ -93,6 +93,21 @@ class JobBackend:
         self._subs: dict[int, set[asyncio.Queue]] = {}
         self._sem = asyncio.Semaphore(MAX_CONCURRENT)
         self._side: set[asyncio.Task] = set()  # keeps fire-and-forget tasks alive
+        # doc 02 §3 DoD "a cancelled job stops cleanly" needs three small pieces
+        # of bookkeeping beyond _tasks:
+        # - _pending: enqueued, `_spawn` hasn't had its loop turn yet (the same
+        #   call_soon_threadsafe gap the `wait()` fix above works around) — a
+        #   cancel() that lands in this window has no Task to call .cancel() on.
+        # - _cancel_requested: job ids cancelled while still in _pending; _run
+        #   checks this right after acquiring the semaphore and finishes the
+        #   job as canceled instead of ever invoking the handler.
+        # - _done: one Event per in-flight job, set (and popped) in _run's
+        #   finally. wait() awaits this instead of polling _tasks, which also
+        #   fixes the busy-spin and lets both dicts stay bounded to in-flight
+        #   jobs only (see the finally block in _run).
+        self._pending: set[int] = set()
+        self._cancel_requested: set[int] = set()
+        self._done: dict[int, asyncio.Event] = {}
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -125,6 +140,8 @@ class JobBackend:
                   requested_by=requested_by, schedule_id=schedule_id)
         db.add(job)
         db.commit()
+        self._pending.add(job.id)
+        self._done[job.id] = asyncio.Event()
         # call_soon_threadsafe works from the loop thread AND from FastAPI's
         # threadpool, which is where every `def` route handler runs.
         self.app.state.loop.call_soon_threadsafe(
@@ -132,34 +149,43 @@ class JobBackend:
         return job
 
     def _spawn(self, job_id: int, kind: str, params: dict) -> None:
+        self._pending.discard(job_id)
         self._publish(job_id, status="queued", kind=kind)
         self._tasks[job_id] = asyncio.create_task(self._run(job_id, kind, params))
 
     def cancel(self, job_id: int) -> bool:
         task = self._tasks.get(job_id)
-        if task is None or task.done():
-            return False
-        self.app.state.loop.call_soon_threadsafe(task.cancel)
-        return True
+        if task is not None:
+            if task.done():
+                return False
+            self.app.state.loop.call_soon_threadsafe(task.cancel)
+            return True
+        if job_id in self._pending:
+            # `_spawn` hasn't run yet (still in the call_soon_threadsafe gap):
+            # no Task exists to cancel. Record the intent; `_run` checks this
+            # right after acquiring the semaphore and finishes without ever
+            # calling the handler.
+            self._cancel_requested.add(job_id)
+            return True
+        return False  # never enqueued here, or already terminal
 
-    async def wait(self, job_id: int, timeout: float = 30.0) -> None:
-        """Test/DoD helper: block until the job's task settles.
+    async def wait(self, job_id: int, timeout: float = 30.0) -> bool:
+        """Test/DoD helper: block until the job settles. Returns True if it
+        did, False on timeout — lets a caller tell "settled" from "gave up".
 
-        ponytail-deviation: `enqueue` spawns via `call_soon_threadsafe`, which
-        only *schedules* `_spawn` — it hasn't run yet when `wait` is called
-        back-to-back on the same loop (every test in this suite does exactly
-        that). The brief's version read `self._tasks` before that callback
-        ever got a turn and returned instantly with nothing to wait on. Poll
-        with `asyncio.sleep(0)` until the task exists (or timeout) so the
-        loop gets a turn to run `_spawn` first.
+        Waits on a per-job Event set (and popped) in `_run`'s finally, rather
+        than polling `_tasks` — that dict is pruned on completion (see `_run`)
+        so a poll-based wait would busy-spin its full timeout on a job that
+        already finished.
         """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while job_id not in self._tasks:
-            if loop.time() >= deadline:
-                return
-            await asyncio.sleep(0)
-        await asyncio.wait([self._tasks[job_id]], timeout=timeout)
+        ev = self._done.get(job_id)
+        if ev is None:
+            return True  # unknown to this backend, or already cleaned up: settled
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
 
     # --- per-job fanout ----------------------------------------------------
 
@@ -190,20 +216,39 @@ class JobBackend:
 
     async def _run(self, job_id: int, kind: str, params: dict) -> None:
         ctx = JobContext(self, job_id)
-        async with self._sem:
-            self._set_running(job_id)
-            self._publish(job_id, status="running", kind=kind)
-            try:
+        try:
+            # `try` wraps the semaphore acquire itself: a job cancelled while
+            # still queued behind MAX_CONCURRENT running jobs raises
+            # CancelledError out of `await self._sem.acquire()`, before the
+            # `with` block below is entered. If `try` only wrapped the body,
+            # that CancelledError escaped uncaught and the row was stranded
+            # in `queued` forever — no finished_at, no status event, no
+            # terminal frame for any subscriber.
+            async with self._sem:
+                if job_id in self._cancel_requested:
+                    self._cancel_requested.discard(job_id)
+                    self._finish(ctx, kind, "canceled", error="canceled by user")
+                    return
+                self._set_running(job_id)
+                self._publish(job_id, status="running", kind=kind)
                 result = await HANDLERS[kind](ctx, params)
-            except asyncio.CancelledError:
-                self._finish(ctx, kind, "canceled", error="canceled by user")
-                raise
-            except JobFailed as e:
-                self._finish(ctx, kind, "failed", error=str(e))
-            except Exception as e:  # noqa: BLE001 — a handler bug is a failed job
-                self._finish(ctx, kind, "failed", error=f"{type(e).__name__}: {e}")
-            else:
-                self._finish(ctx, kind, "succeeded", result=result or {})
+        except asyncio.CancelledError:
+            self._finish(ctx, kind, "canceled", error="canceled by user")
+            raise
+        except JobFailed as e:
+            self._finish(ctx, kind, "failed", error=str(e))
+        except Exception as e:  # noqa: BLE001 — a handler bug is a failed job
+            self._finish(ctx, kind, "failed", error=f"{type(e).__name__}: {e}")
+        else:
+            self._finish(ctx, kind, "succeeded", result=result or {})
+        finally:
+            # Bound _tasks/_done to in-flight jobs only — otherwise a daemon
+            # running for months holds every completed Task (and its retained
+            # result/exception) and every Event forever.
+            self._tasks.pop(job_id, None)
+            ev = self._done.pop(job_id, None)
+            if ev is not None:
+                ev.set()
 
     def _set_running(self, job_id: int) -> None:
         with self.app.state.sessionmaker() as db:
