@@ -33,9 +33,8 @@ vi.mock('../api/client', () => {
 
 import { LifecycleActions } from '../components/LifecycleActions'
 
-const wrap = (ui: React.ReactNode) => {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+const wrap = (ui: React.ReactNode, qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) => {
+  return { ...render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>), qc }
 }
 
 describe('LifecycleActions', () => {
@@ -75,5 +74,27 @@ describe('LifecycleActions', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
     await waitFor(() => expect(calls.length).toBe(2))
     expect(calls[1].body).toEqual({ confirm: 'Immich' })
+  })
+
+  it('shows a single disabled "Working…" affordance instead of guessing an action set while pending', () => {
+    calls.length = 0; selfGuard = false
+    wrap(<LifecycleActions target="app" id={5} name="Immich" status="pending" />)
+    expect(screen.getByRole('button', { name: 'Working…' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+  })
+
+  it('does not invalidate the resource cache on a successful mutation, so the optimistic patch survives', async () => {
+    calls.length = 0; selfGuard = false
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    qc.setQueryData(['apps'], [{ id: 5, name: 'Immich', status: 'running' }])
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    wrap(<LifecycleActions target="app" id={5} name="Immich" status="running" />, qc)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['jobs'] }))
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['apps'] })
+    const rows = qc.getQueryData(['apps']) as any[]
+    expect(rows[0].status).toBe('pending')
   })
 })
