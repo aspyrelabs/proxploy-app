@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -123,6 +124,16 @@ def create_app(
     dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if dist.exists():
         app.mount("/", StaticFiles(directory=dist, html=True), name="spa")
+
+    @app.exception_handler(RequestValidationError)
+    async def _no_echo_validation_errors(request, exc):
+        # Pydantic v2's "missing" error carries the whole parent body as
+        # `input` (e.g. omit HostIn.name and token_secret rides back out in
+        # the 422). Three routes take a secret in the body (ChannelIn.url,
+        # HostIn.token_secret, LicenseIn.license_key) — strip `input` from
+        # every error repo-wide rather than patching each route.
+        return JSONResponse(status_code=422, content={
+            "detail": [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]})
 
     @app.exception_handler(StarletteHTTPException)
     async def problem_handler(request, exc):
