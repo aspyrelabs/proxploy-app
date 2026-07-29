@@ -5,7 +5,7 @@ Autonomous build loop: cycles `/superpowers:writing-plans` (Fable 5) then
 `docs/10-build-sequence.md`, fully unattended, no phase-gate pauses.
 Driven by `bin/build-cycle.sh` on the `proxploy-build.timer` systemd user timer.
 
-<!-- STATE: phase=2 step=execute -->
+<!-- STATE: phase=3 step=execute -->
 
 ### 2026-07-29T01:22:23+05:30 — Phase 1 — write-plan FAILED (exit 1)
 
@@ -101,3 +101,44 @@ Noted deviations (documented in the relevant commit messages): a few TS `as neve
 ### 2026-07-29T08:58:52+05:30 — Phase 2 — write-plan completed (fable-5)
 
 Plan: /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/docs/superpowers/plans/2026-07-29-phase-2-observe.md
+
+### 2026-07-29T10:24:02+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+
+See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
+
+### 2026-07-29T10:24:06+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+
+See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
+
+### 2026-07-29T10:30:08+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+
+See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
+
+### 2026-07-29T11:00:05+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+
+See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
+
+### 2026-07-29T11:30:04+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+
+See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
+
+### 2026-07-29T11:45:00+05:30 — Phase 2 — execute-plan completed (Friday)
+
+Phase 2 was built by Claude Code during a single 84-minute run (9:00–10:24 AM)
+that hit the session limit mid-verification. All code was written; only Task 14
+(benchmark + notes) remained. Friday completed the benchmark and wrote the
+verification notes.
+
+**Verification:**
+- Backend: 63 passed, 1 skipped
+- Frontend: 13 passed, build clean
+- Executor isolation: OK
+- Bench: 8×100 fleet writes at p50=154.7ms (well under 30s budget)
+
+**What was built (by Claude Code):**
+- Poller subsystem: per-host 30s asyncio poll loops, bulk cluster/resources + per-node rrddata
+- MetricsStore: batched writes, 5m/1h rollups, retention pruning, range query API
+- Read-only caches: apps (with discovered-CT heuristics), vms, storage/network snapshots
+- SSE event stream for live cache invalidation
+- 6 Phase 2 REST endpoints: cluster/summary, cluster/nodes, apps, apps/discovered, vms, metrics/query
+- Frontend: Cluster page (rings + node cards), node detail, Apps grid + discovered panel, VMs table + detail overview, uPlot charts via Sparkline component, LiveProvider for SSE-to-QueryCache invalidation
