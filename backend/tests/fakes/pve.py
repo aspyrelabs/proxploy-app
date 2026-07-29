@@ -109,7 +109,8 @@ class _TaskFactory:
 
 class _NodeNS:
     def __init__(self, owner, name):
-        self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []), owner.fail)
+        self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
+                                owner.fail or owner.rrd_fail)
         self.tasks = _TaskFactory(owner)
         self.lxc = _GuestFactory(owner, "lxc")
         self.qemu = _GuestFactory(owner, "qemu")
@@ -125,8 +126,11 @@ class _NodesNS:
 
 class FakePVE:
     def __init__(self, version=None, permissions=None, fail=False,
-                 resources=None, rrddata=None, task_exit="OK", running_ticks=0):
+                 resources=None, rrddata=None, task_exit="OK", running_ticks=0,
+                 rrd_fail=False):
         self.fail = fail
+        self.rrd_fail = rrd_fail  # independent of `fail`: lets tests fail the
+        # rrddata leaf alone, since `fail` also gates _connect() itself.
         self.rrd_by_node = rrddata or {}
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
         self.access = _Access(permissions or {}, fail)
