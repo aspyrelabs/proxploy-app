@@ -1,0 +1,8 @@
+[
+  {"time": 1753759800, "cpu": 0.40, "maxcpu": 8, "memtotal": 33822867456,
+   "memused": 13500000000, "netin": 1250000.5, "netout": 4800000.25,
+   "iowait": 0.01, "loadavg": 1.2},
+  {"time": 1753759860, "cpu": 0.42, "maxcpu": 8, "memtotal": 33822867456,
+   "memused": 13743895347, "netin": 1300000.0, "netout": 5000000.0,
+   "iowait": 0.01, "loadavg": 1.3}
+]

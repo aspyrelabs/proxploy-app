@@ -86,3 +86,25 @@ class ProxmoxClient:
             raise
         except Exception as e:
             raise ProxmoxError(f"permission read failed: {e}") from e
+
+    def cluster_resources(self) -> list[dict]:
+        """One bulk call: every node/CT/VM/storage row for this endpoint.
+
+        The poll loop's only guest-state source — per-guest calls are
+        forbidden in the poller (doc 02 §3 O(nodes) budget).
+        """
+        try:
+            return self._connect().cluster.resources.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+            raise ProxmoxError(f"cluster/resources failed: {e}") from e
+
+    def node_rrddata(self, node: str, timeframe: str = "hour") -> list[dict]:
+        """History-quality per-node series (netin/netout/cpu/mem), doc 02 §11.1."""
+        try:
+            return self._connect().nodes(node).rrddata.get(timeframe=timeframe)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProxmoxError(f"rrddata failed for node {node!r}: {e}") from e
