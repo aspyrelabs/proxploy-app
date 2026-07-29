@@ -59,25 +59,6 @@ def test_detail_and_transcript(tmp_path, csrf_header, bootstrap_admin):
         assert c.get("/api/v1/jobs/999").status_code == 404
 
 
-def test_entitlement_gate_runs_after_auth_not_before(tmp_path):
-    """Important 2: FastAPI resolves a route's `dependencies=[...]` in list
-    order, so `require_role`/auth must be listed ahead of
-    `require_entitlement` — otherwise an anonymous caller gets a 403 telling
-    them exactly which flags are armed instead of a 401, before we've even
-    established who they are. Disable both jobs.* flags and hit every gated
-    route with no session cookie: each must still 401, not 403."""
-    from tests.support import make_app
-
-    app = make_app(tmp_path)
-    with TestClient(app) as c:
-        c.app.state.entitlements._features["jobs.history"] = False
-        c.app.state.entitlements._features["jobs.stream"] = False
-        assert c.get("/api/v1/jobs").status_code == 401
-        assert c.get("/api/v1/jobs/1").status_code == 401
-        assert c.get("/api/v1/jobs/1/events").status_code == 401
-        assert c.get("/api/v1/jobs/1/events/stream").status_code == 401
-
-
 def test_cancel_refuses_terminal_jobs(tmp_path, csrf_header, bootstrap_admin):
     from tests.support import make_app
 

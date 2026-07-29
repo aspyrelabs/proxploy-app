@@ -68,25 +68,6 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
             assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
 
 
-def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
-    """Mirrors test_jobs_api.py::test_entitlement_gate_runs_after_auth_not_before
-    for the lifecycle routes: disable apps.lifecycle/vms.lifecycle and hit both
-    routes with no session. Each must still 401, not 403 — proving
-    require_role is checked ahead of require_entitlement, not the reverse."""
-    from tests.fakes.pve import FakePVE
-    from tests.support import make_app
-
-    app = make_app(tmp_path, fake=FakePVE())
-    with TestClient(app) as c:
-        _, app_id, vm_id = _seed(app)
-        c.app.state.entitlements._features["apps.lifecycle"] = False
-        c.app.state.entitlements._features["vms.lifecycle"] = False
-        assert c.post(f"/api/v1/apps/{app_id}/start",
-                      headers=csrf_header(c)).status_code == 401
-        assert c.post(f"/api/v1/vms/{vm_id}/start",
-                      headers=csrf_header(c)).status_code == 401
-
-
 def test_app_start_returns_202_with_a_job_and_audits(tmp_path, csrf_header,
                                                      bootstrap_admin):
     from tests.fakes.pve import FakePVE

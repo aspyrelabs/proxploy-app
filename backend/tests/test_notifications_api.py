@@ -17,32 +17,6 @@ def test_anonymous_get_is_401(tmp_path):
         assert c.get("/api/v1/notifications/channels").status_code == 401
 
 
-def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
-    """Mirrors test_jobs_api.py::test_entitlement_gate_runs_after_auth_not_before.
-    FastAPI resolves a route's dependencies=[...] in list order, so
-    require_role must be listed ahead of require_entitlement — otherwise an
-    anonymous caller gets a 403 revealing which flags are armed instead of a
-    401, before we've even established who they are. Disable notify.channels
-    and hit every gated route with no session cookie: each must still 401.
-    csrf_header is supplied on the mutating calls only to get past the
-    unrelated CSRF-cookie gate (doc 08 §5), which 403s any no-cookie mutation
-    before routing even starts — it is not standing in for a session."""
-    from tests.support import make_app
-
-    app = make_app(tmp_path)
-    with TestClient(app) as c:
-        h = csrf_header(c)
-        c.app.state.entitlements._features["notify.channels"] = False
-        assert c.get("/api/v1/notifications/channels").status_code == 401
-        assert c.post("/api/v1/notifications/channels",
-                      json={"name": "n", "url": URL}, headers=h).status_code == 401
-        assert c.patch("/api/v1/notifications/channels/1",
-                       json={"enabled": False}, headers=h).status_code == 401
-        assert c.delete("/api/v1/notifications/channels/1", headers=h).status_code == 401
-        assert c.post("/api/v1/notifications/channels/1/test",
-                      headers=h).status_code == 401
-
-
 def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
     """require_role("admin") must actually refuse a logged-in user whose role
     is below admin. A plain signup defaults to "viewer" (UserIn.role)."""

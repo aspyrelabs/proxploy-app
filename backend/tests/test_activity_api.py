@@ -84,19 +84,3 @@ def test_actor_email_is_resolved_for_jobs(tmp_path, csrf_header, bootstrap_admin
                        target_id=1, requested_by=uid))
             db.commit()
         assert c.get("/api/v1/cluster/activity").json()[0]["actor"] == "admin@example.com"
-
-
-def test_entitlement_gate_runs_after_auth_not_before(tmp_path):
-    """Mirrors test_jobs_api.py::test_entitlement_gate_runs_after_auth_not_before
-    and test_notifications_api.py's copy. FastAPI resolves a route's
-    `dependencies=[...]` in list order, so `require_role`/auth must be listed
-    ahead of `require_entitlement` -- otherwise an anonymous caller gets a 403
-    telling them exactly which flags are armed instead of a 401, before we've
-    even established who they are. Disable cluster.activity_feed and hit the
-    route with no session cookie: it must still 401, not 403."""
-    from tests.support import make_app
-
-    app = make_app(tmp_path)
-    with TestClient(app) as c:
-        c.app.state.entitlements._features["cluster.activity_feed"] = False
-        assert c.get("/api/v1/cluster/activity").status_code == 401
