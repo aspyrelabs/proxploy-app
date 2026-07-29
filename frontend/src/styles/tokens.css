@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+:root, [data-theme="dark"] {
+  --ink:#0B0F16; --panel:#121924; --panel-2:#161F2A; --elev:#1B2531;
+  --line:#243040; --line-soft:#1A2330;
+  --text:#E8EDF4; --text-2:#93A0B1; --text-3:#5C6979;
+  --amber:#F5B544; --amber-dim:rgba(245,181,68,.13);
+  --green:#3FCF8E; --green-dim:rgba(63,207,142,.13);
+  --red:#F26D6D;   --red-dim:rgba(242,109,109,.13);
+  --blue:#5B9DF9;  --blue-dim:rgba(91,157,249,.12);
+  --violet:#A78BFA; --cyan:#34D3C6;
+}
+
+[data-theme="light"] {
+  --ink:#F5F7FA; --panel:#FFFFFF; --panel-2:#F0F3F7; --elev:#E7ECF2;
+  --line:#D9E0E8; --line-soft:#E4E9EF;
+  --text:#16202C; --text-2:#4E5D6E; --text-3:#8896A6;
+  --amber:#C77E14; --amber-dim:rgba(199,126,20,.13);
+  --green:#1F9D63; --green-dim:rgba(31,157,99,.13);
+  --red:#D9463F;   --red-dim:rgba(217,70,63,.13);
+  --blue:#2F6FE0;  --blue-dim:rgba(47,111,224,.12);
+  --violet:#7C5CFB; --cyan:#0FA8A0;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-elev: var(--elev);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-amber: var(--amber);   --color-amber-dim: var(--amber-dim);
+  --color-green: var(--green);   --color-green-dim: var(--green-dim);
+  --color-red: var(--red);       --color-red-dim: var(--red-dim);
+  --color-blue: var(--blue);     --color-blue-dim: var(--blue-dim);
+  --color-violet: var(--violet);
+  --color-cyan: var(--cyan);
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius-card: 14px;
+  --radius-tile: 9px;
+  --radius-ctl: 10px;
+}
+
+body {
+  @apply bg-ink text-text font-ui text-[14px] leading-[1.45];
+  background-image:
+    radial-gradient(1100px 480px at 74% -8%, rgba(245,181,68,.06), transparent 60%),
+    radial-gradient(760px 420px at 8% 4%, rgba(91,157,249,.05), transparent 55%);
+  background-attachment: fixed;
+}
