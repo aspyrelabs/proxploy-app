@@ -247,7 +247,16 @@ def test_sweep_orphans_marks_interrupted_and_never_resumes(tmp_path):
                         Job(kind="app.stop", status="queued"),
                         Job(kind="app.stop", status="succeeded")])
             db.commit()
-        assert JobBackend(app).sweep_orphans() == 2
+        backend = JobBackend(app)
+        assert backend.sweep_orphans() == 2
+        # Drain the fire-and-forget notify task before the loop closes —
+        # hermetic teardown (no channels here, so it's a no-op notify(), but
+        # asyncio.run() tearing down a still-pending task is exactly the
+        # "does real work during teardown" hazard this test should not risk).
+        for _ in range(50):
+            if not backend._side:
+                break
+            await asyncio.sleep(0.05)
         with app.state.sessionmaker() as db:
             states = sorted(j.status for j in db.query(Job).all())
             assert states == ["interrupted", "interrupted", "succeeded"]

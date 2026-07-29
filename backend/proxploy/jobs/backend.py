@@ -115,11 +115,15 @@ class JobBackend:
         """Boot-time reconciliation (doc 02 §3). Marks; never resumes.
 
         Called from lifespan startup once the loop is running (main.py sets
-        `app.state.loop` just before this). `job.interrupted` still owes each
-        orphan a Notifier courtesy, but Apprise is blocking (~8s/channel
-        worst case) and must never stall the app from starting — so this
-        routes through the same fire-and-forget `_notify` every other
-        terminal state uses, never awaited here.
+        `app.state.loop` just before this). `job.interrupted` still owes the
+        orphans a Notifier courtesy, but Apprise is blocking (~8s/channel
+        worst case) and a restart can orphan an arbitrarily large backlog —
+        one `_notify` per orphan would queue that many blocking sends onto
+        the loop's shared default executor (poller, metrics loop and SSE
+        auth hops all use it too) all at once. Send a single aggregate
+        notification instead: one send regardless of backlog size, and a
+        better message for a human than N separate pings. Never awaited
+        here either way, so it can't stall startup.
         """
         with self.app.state.sessionmaker() as db:
             orphans = (db.query(Job.id, Job.kind)
@@ -130,8 +134,11 @@ class JobBackend:
                  .update({"status": "interrupted", "finished_at": utcnow()},
                          synchronize_session=False))
             db.commit()
-        for job_id, kind in orphans:
-            self._notify(job_id, kind, "interrupted", "interrupted by restart")
+        if orphans:
+            kinds = ", ".join(sorted({kind for _, kind in orphans}))
+            title = f"Proxploy: {n} job(s) interrupted by restart"
+            body = f"{n} job(s) interrupted by restart: {kinds}"
+            self._notify_async("job.interrupted", title, body)
         return n
 
     def stop(self) -> None:
@@ -295,20 +302,23 @@ class JobBackend:
         self._notify(job_id, kind, status, error)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:
-        """Route the terminal result to the Notifier, off the event loop.
+        """Route the terminal result to the Notifier, off the event loop."""
+        title = f"Proxploy: {kind} {status}"
+        body = error or f"job {job_id} ({kind}) {status}"
+        self._notify_async(f"job.{status}", title, body)
 
-        Fire-and-forget: a notification is a courtesy, never part of the job's
-        own success. `_side` holds a reference so the task is not GC'd mid-flight.
+    def _notify_async(self, event: str, title: str, body: str) -> None:
+        """Fire the Notifier off the event loop, fire-and-forget.
+
+        A notification is a courtesy, never part of the job's own success (or,
+        for `sweep_orphans`, part of app startup). `_side` holds a reference
+        so the task is not GC'd mid-flight.
         """
         from proxploy.services import notifier
 
-        title = f"Proxploy: {kind} {status}"
-        body = error or f"job {job_id} ({kind}) {status}"
-
         async def go():
             try:
-                await asyncio.to_thread(notifier.notify, self.app,
-                                        f"job.{status}", title, body)
+                await asyncio.to_thread(notifier.notify, self.app, event, title, body)
             except Exception:  # noqa: BLE001 — notifications never fail a job
                 pass
 

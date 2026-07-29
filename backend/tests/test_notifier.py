@@ -31,6 +31,20 @@ def test_kind_for_never_leaks_a_secret_into_the_plaintext_kind_column():
     assert "AAH-SUPERSECRETBOTTOKEN" not in leaked
     assert leaked == "webhook"
 
+    # Residual of the same bug: a bare token with no "://" at all, that
+    # happens to be letter-initial and scheme-charset-only, must not be
+    # echoed verbatim just because it "looks like" a scheme.
+    bare = kind_for("AAH-SUPERSECRETBOTTOKEN")
+    assert "supersecret" not in bare.lower()
+    assert bare == "webhook"
+
+    # No "://" at all short-circuits regardless of length.
+    assert kind_for("a" * 5000) == "webhook"
+
+    # A huge "scheme" *with* a "://" separator still hits the length cap —
+    # the longest real Apprise scheme is nowhere near 32 chars.
+    assert kind_for("a" * 5000 + "://host") == "webhook"
+
 
 def test_send_one_actually_calls_apprise_offline():
     """The one Apprise call site — every other test in this file monkeypatches
@@ -270,12 +284,14 @@ def test_a_cancelled_job_still_gets_its_notification_scheduled_and_delivered(
     asyncio.run(run())
 
 
-def test_sweep_orphans_fires_job_interrupted_without_blocking_startup(
+def test_sweep_orphans_fires_one_aggregate_notification_without_blocking_startup(
         tmp_path, monkeypatch):
     """`sweep_orphans` runs during lifespan startup; the bulk UPDATE that
     marks orphans is the only writer of `interrupted` in the backend, so it
-    must be the one that schedules the Notifier — but as a background task,
-    same as every other terminal state, never awaited inline."""
+    must be the one that schedules the Notifier — but as a single background
+    task regardless of backlog size (not one send per orphan, which would
+    queue N blocking Apprise calls onto the shared default executor that the
+    poller/metrics/SSE hops also use), and never awaited inline."""
     from proxploy.jobs import JobBackend
     from proxploy.models import Job
     from proxploy.services import notifier
@@ -289,17 +305,21 @@ def test_sweep_orphans_fires_job_interrupted_without_blocking_startup(
             db.commit()
 
         seen = []
-        monkeypatch.setattr(notifier, "notify",
-                            lambda a, event, title, body: seen.append(event) or 1)
+        monkeypatch.setattr(
+            notifier, "notify",
+            lambda a, event, title, body: seen.append((event, body)) or 1)
 
         backend = JobBackend(app)
         n = backend.sweep_orphans()  # must return immediately, not await sends
         assert n == 2
 
         for _ in range(50):  # the notify hop is a background thread
-            if len(seen) >= 2:
+            if seen:
                 break
             await asyncio.sleep(0.05)
-        assert seen == ["job.interrupted", "job.interrupted"]
+        assert len(seen) == 1  # one aggregate call, not one per orphan
+        event, body = seen[0]
+        assert event == "job.interrupted"
+        assert "app.start" in body and "app.stop" in body
 
     asyncio.run(run())

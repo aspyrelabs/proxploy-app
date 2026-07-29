@@ -39,16 +39,21 @@ _SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*$")
 def kind_for(url: str) -> str:
     """Doc 04: `kind` is a display label parsed from the URL *scheme* only.
 
-    A URL with no `://` has no scheme — `split` then returns the whole
-    string, which for a URL-shaped secret (no scheme separator typed) is the
-    token itself. Only accept the split result when it actually looks like a
-    scheme; anything else falls back to "webhook" rather than writing a
-    plaintext secret into the unencrypted `kind` column.
+    A string with no `://` has no scheme at all — reject it outright rather
+    than deriving anything from it, so a bare pasted token (Gotify token,
+    hex API key, `xoxb-...` Slack token, ...) never becomes the "scheme".
+    The shape guard on what *is* split off a real `://` still applies too
+    (length-capped, scheme-charset-only) so a URL with a garbage prefix
+    before `://` can't smuggle an oversized/odd string into `kind` either.
+    Anything that doesn't qualify falls back to "webhook" rather than
+    writing a plaintext secret into the unencrypted `kind` column.
     """
+    if "://" not in url:
+        return "webhook"
     scheme = url.split("://", 1)[0].strip().lower()
     if scheme in KIND_FROM_SCHEME:
         return KIND_FROM_SCHEME[scheme]
-    return scheme if _SCHEME_RE.match(scheme) else "webhook"
+    return scheme if len(scheme) <= 32 and _SCHEME_RE.match(scheme) else "webhook"
 
 
 def send_one(url: str, title: str, body: str) -> bool:
