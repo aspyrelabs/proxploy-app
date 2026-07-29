@@ -170,6 +170,66 @@ def test_cancel_of_a_still_queued_job_finishes_it_and_keeps_the_pool_healthy(
     asyncio.run(run())
 
 
+def test_cancel_of_a_job_still_in__pending_is_honoured_even_with_the_pool_full(
+        tmp_path, monkeypatch):
+    """Distinct from test_cancel_of_a_still_queued_job_...: that test lets
+    `_spawn` run first (job already in `_tasks`, blocked on `_sem.acquire()`)
+    before cancelling, which `cancel()` handles via a direct `task.cancel()`.
+    Here `cancel()` is called in the same synchronous breath as `enqueue()`,
+    before the loop has had a turn to run `_spawn` — job_id is still in
+    `_pending`, so `cancel()` can only record intent in `_cancel_requested`.
+    With MAX_CONCURRENT hogs holding every slot and never releasing them
+    during this test, the old code (which checked `_cancel_requested` only
+    after acquiring the semaphore) would leave this job stuck `queued`
+    forever. It must land `canceled` promptly regardless of pool pressure."""
+    from proxploy.jobs import HANDLERS, JobBackend
+    from proxploy.jobs.backend import MAX_CONCURRENT
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path)
+        backend = JobBackend(app)
+        gate = asyncio.Event()
+        started = [asyncio.Event() for _ in range(MAX_CONCURRENT)]
+
+        async def hog(ctx, params):
+            started[params["i"]].set()
+            await gate.wait()
+            return {}
+
+        monkeypatch.setitem(HANDLERS, "test.hog", hog)
+        with app.state.sessionmaker() as db:
+            hog_ids = [backend.enqueue(db, kind="test.hog", params={"i": i}).id
+                      for i in range(MAX_CONCURRENT)]
+        await asyncio.gather(*(asyncio.wait_for(e.wait(), timeout=5) for e in started))
+
+        async def victim(ctx, params):
+            return {}  # must never run: cancelled before it even got a Task
+
+        monkeypatch.setitem(HANDLERS, "test.victim", victim)
+        with app.state.sessionmaker() as db:
+            victim_id = backend.enqueue(db, kind="test.victim").id
+        # No `await` between enqueue and cancel: `_spawn` (scheduled via
+        # call_soon_threadsafe) has not run yet, so victim_id is still in
+        # `_pending`, not `_tasks` — this is the pre-spawn window.
+        assert backend.cancel(victim_id) is True
+
+        assert await backend.wait(victim_id, timeout=1) is True  # not 0.5s of `queued`
+        with app.state.sessionmaker() as db:
+            row = db.get(Job, victim_id)
+            assert row.status == "canceled"
+            assert row.finished_at is not None
+
+        gate.set()  # release the hogs; pool must still work for them
+        for hid in hog_ids:
+            assert await backend.wait(hid, timeout=5) is True
+        with app.state.sessionmaker() as db:
+            for hid in hog_ids:
+                assert db.get(Job, hid).status == "succeeded"
+
+    asyncio.run(run())
+
+
 def test_semaphore_caps_concurrency_at_four(tmp_path, monkeypatch):
     from proxploy.jobs import HANDLERS, JobBackend
     from tests.support import make_job_app

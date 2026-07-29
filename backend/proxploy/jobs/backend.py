@@ -240,6 +240,23 @@ class JobBackend:
                     target_type: str | None = None) -> None:
         ctx = JobContext(self, job_id)
         try:
+            # Checked BEFORE the semaphore acquire, not inside it: a job
+            # cancelled while still in `_pending` (the `_spawn` call_soon_
+            # threadsafe gap) only ever sets `_cancel_requested` — nothing
+            # re-checks it once the pool is full, so gating this check on
+            # having already acquired a slot means a pre-spawn cancel of a
+            # job stuck behind MAX_CONCURRENT running jobs is silently
+            # never honoured (the row sits `queued` forever) even though
+            # `cancel()` already told the caller "canceled". A cancel that
+            # arrives AFTER this point finds the job in `_tasks` and calls
+            # `task.cancel()` directly instead (see `cancel()`), which
+            # raises CancelledError out of the semaphore acquire below —
+            # that path is unaffected by hoisting this check.
+            if job_id in self._cancel_requested:
+                self._cancel_requested.discard(job_id)
+                self._finish(ctx, kind, "canceled", error="canceled by user",
+                             target_type=target_type)
+                return
             # `try` wraps the semaphore acquire itself: a job cancelled while
             # still queued behind MAX_CONCURRENT running jobs raises
             # CancelledError out of `await self._sem.acquire()`, before the
@@ -248,11 +265,6 @@ class JobBackend:
             # in `queued` forever — no finished_at, no status event, no
             # terminal frame for any subscriber.
             async with self._sem:
-                if job_id in self._cancel_requested:
-                    self._cancel_requested.discard(job_id)
-                    self._finish(ctx, kind, "canceled", error="canceled by user",
-                                 target_type=target_type)
-                    return
                 self._set_running(job_id)
                 self._publish(job_id, status="running", kind=kind, target_type=target_type)
                 result = await HANDLERS[kind](ctx, params)
