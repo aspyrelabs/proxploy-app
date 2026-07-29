@@ -48,3 +48,37 @@ def seed_snapshot(app, host_id, **kw):
     snap = HostSnapshot(host_id=host_id, ts=kw.pop("ts", utcnow()), **kw)
     app.state.poller.snapshots[host_id] = snap
     return snap
+
+
+def make_job_app(tmp_path, fake=None):
+    """Minimal app-shaped namespace for JobBackend/handler unit tests.
+
+    MUST be called from inside a running event loop — `state.loop` is the
+    cross-thread hop `JobBackend.enqueue` uses (main.py:74 precedent).
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from proxploy.config import Settings
+    from proxploy.db import make_engine, make_sessionmaker, run_migrations
+    from proxploy.events import EventBus
+    from proxploy.secretstore import SecretStore
+
+    s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
+                 master_key_file=tmp_path / "master.key")
+    run_migrations(s)
+    SecretStore.ensure_key_file(s.master_key_file, db_file_exists=False)
+    factory = None
+    if fake is not None:
+        from tests.fakes.pve import make_fake_factory
+        factory = make_fake_factory(fake)
+    state = SimpleNamespace(
+        settings=s,
+        sessionmaker=make_sessionmaker(make_engine(s)),
+        bus=EventBus(),
+        loop=asyncio.get_running_loop(),
+        proxmox_factory=factory,
+        secretstore=SecretStore(s.master_key_file),
+        jobs=None,
+    )
+    return SimpleNamespace(state=state)
