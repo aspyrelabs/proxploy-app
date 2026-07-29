@@ -9,6 +9,7 @@ HostIn.token_secret, LicenseIn.license_key.
 """
 import asyncio
 
+import pytest
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
@@ -275,11 +276,48 @@ def test_pasted_pveapitoken_never_reaches_an_unencrypted_sink(tmp_path, csrf_hea
                                "token_id": pasted, "token_secret": "irrelevant",
                                "verify_tls": False},
                          headers=csrf_header(c))
-        assert created.status_code == 502, "the allowlist must refuse this token id"
+        assert created.status_code == 422, "unparseable token id must be refused"
         assert PVE_TOKEN_SECRET not in created.text
         assert PVE_TOKEN_SECRET not in c.get("/api/v1/hosts").text
         assert PVE_TOKEN_SECRET not in c.get("/api/v1/audit?per_page=100").text
     assert PVE_TOKEN_SECRET not in _messages(records)
+    assert PVE_TOKEN_SECRET not in _db_cells(tmp_path / "t.db")
+
+
+def test_public_meta_is_rebuilt_from_parsed_parts_not_the_submitted_string(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The onboarding half of the same fix, from the other direction: when the
+    operator DOES paste correctly, the row that lands in the unencrypted
+    `host_credentials.public_meta` must be the one we constructed from the
+    parsed user/realm/name — not the caller's string, however validated.
+
+    Proven by feeding a token id whose secret half is separated only by an
+    invisible-to-a-denylist difference and asserting the sentinel is in none of
+    the three plaintext sinks: public_meta, the API response, audit_events.
+    """
+    from proxploy.models import HostCredential
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        created = c.post("/api/v1/hosts",
+                         json={"name": "pve1", "address": "https://10.0.0.5:8006",
+                               "token_id": "root@pam!proxploy",
+                               "token_secret": PVE_TOKEN_SECRET,
+                               "verify_tls": True},
+                         headers=csrf_header(c))
+        assert created.status_code == 201, created.text
+        detail = c.get(f"/api/v1/hosts/{created.json()['id']}").json()
+        meta = [cred["public_meta"] for cred in detail["credentials"]
+                if cred["kind"] == "api_token"]
+        assert meta == ["root@pam!proxploy"]
+        assert PVE_TOKEN_SECRET not in c.get(f"/api/v1/hosts/{created.json()['id']}").text
+        assert PVE_TOKEN_SECRET not in c.get("/api/v1/audit?per_page=100").text
+    with app.state.sessionmaker() as db:
+        for cred in db.query(HostCredential):
+            assert PVE_TOKEN_SECRET not in (cred.public_meta or "")
     assert PVE_TOKEN_SECRET not in _db_cells(tmp_path / "t.db")
 
 
@@ -291,6 +329,40 @@ def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
     for good in ("root@pam!proxploy", "proxploy@pve!monitor-01",
                  "svc.account@ldap!token_2", "a+b@pam!t"):
         assert parse_token_id(good)[0].endswith(good.split("@")[1].split("!")[0])
+
+
+def test_an_ldap_username_with_spaces_and_non_ascii_is_accepted(tmp_path, csrf_header,
+                                                                bootstrap_admin):
+    """Review item 6: the username class must stay WIDE. An AD/LDAP login is
+    routinely `Ana Sofía Ruiz` — a tightened allowlist would reject a legitimate
+    operator. Widening is safe only because the separators are what carry the
+    secret, so the same test pins that the pasted-secret shape is STILL refused
+    with the wide class in force, and that the widened name survives the round
+    trip into public_meta intact.
+    """
+    from proxploy.services.proxmox import ProxmoxError, token_public_meta
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    wide = "Ana Sofía Ruiz@ldap!monitor-01"
+    assert token_public_meta(wide) == wide
+
+    for still_banned in (f"PVEAPIToken=Ana Sofía Ruiz@ldap!monitor-01={PVE_TOKEN_SECRET}",
+                         f"Ana Sofía Ruiz@ldap!monitor-01={PVE_TOKEN_SECRET}",
+                         f"Ana Sofía Ruiz@ldap!monitor-01!{PVE_TOKEN_SECRET}",
+                         "Ana Sofía Ruiz@ldap!moni\ntor"):
+        with pytest.raises(ProxmoxError):
+            token_public_meta(still_banned)
+
+    with TestClient(make_app(tmp_path, fake=FakePVE())) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts",
+                   json={"name": "pve1", "address": "https://10.0.0.5:8006",
+                         "token_id": wide, "token_secret": PVE_TOKEN_SECRET},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        detail = c.get(f"/api/v1/hosts/{r.json()['id']}").json()
+        assert any(cred["public_meta"] == wide for cred in detail["credentials"])
 
 
 

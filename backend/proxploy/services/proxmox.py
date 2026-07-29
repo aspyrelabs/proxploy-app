@@ -24,26 +24,51 @@ QEMU_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend",
                           "resume", "reset"})
 
 
-# Strict allowlist, same discipline as notifier.kind_for: `token_id` is stored
-# UNENCRYPTED (host_credentials.public_meta), returned by GET /hosts/{id} to any
-# viewer, and written to audit_events.params — so it must be provably free of a
-# credential, not merely "looks like a token id". Proxmox's own copy button
-# yields `PVEAPIToken=user@realm!name=<uuid-secret>`; pasting that whole string
-# into token_id used to pass the old shape check ("@" in user, non-empty name)
-# and carried the secret into every one of those plaintext sinks. Banning "="
-# and everything else outside this set makes that unrepresentable.
-TOKEN_ID_RE = re.compile(r"^[A-Za-z0-9._+-]+@[A-Za-z0-9._-]+![A-Za-z0-9._-]+$")
+# The submitted token id is OPAQUE AND SECRET on ingest — Proxmox's own copy
+# button yields `PVEAPIToken=user@realm!name=<uuid-secret>`, so any caller
+# string may be carrying a credential. Nothing derived from it is stored in the
+# clear except what this regex names: user, realm and token name, re-joined by
+# token_public_meta() below. A previous fix banned "=" — a denylist, and
+# denylists in this codebase have failed twice already (notifier.kind_for).
+#
+# The user class is deliberately WIDE: LDAP/AD logins legitimately carry spaces
+# and non-ASCII, and rejecting them broke real onboarding. What keeps the secret
+# unrepresentable is structural, not a character blacklist — the three
+# separators "=", "@" and "!" cannot appear inside any component, so a string
+# rebuilt as `user@realm!name` can never carry the `=<secret>` half no matter
+# how wide the user class gets. Control characters (\x00-\x1f, \x7f) stay out
+# because they are header-injection shaped, not because they hide a secret.
+_COMPONENT = r"[^=@!\x00-\x1f\x7f]+"
+TOKEN_ID_RE = re.compile(rf"^(?P<user>{_COMPONENT})@(?P<realm>[A-Za-z0-9._-]+)"
+                         rf"!(?P<name>[A-Za-z0-9._-]+)$")
 
 
 def parse_token_id(token_id: str) -> tuple[str, str]:
-    if not TOKEN_ID_RE.match(token_id):
+    """-> ("user@realm", "tokenname"), both rebuilt from the parsed components."""
+    m = TOKEN_ID_RE.match(token_id)
+    if not m:
         # Never echo the input: it is exactly the malformed case that may be a
         # pasted `PVEAPIToken=...=<secret>`, and this message reaches the caller
-        # as an HTTP 502 detail (api/hosts.py -> main.py::problem_handler).
-        raise ProxmoxError("token id must look like user@realm!tokenname "
-                           "(letters, digits, dot, dash, underscore only)")
-    user, _, name = token_id.partition("!")
-    return user, name
+        # as an HTTP 422/502 detail (api/hosts.py -> main.py::problem_handler).
+        raise ProxmoxError("token id must look like user@realm!tokenname — the "
+                           "realm and token name are letters, digits, dot, dash "
+                           "and underscore, and none of the three parts may "
+                           "contain '=' (if you pasted the whole "
+                           "PVEAPIToken=... line, paste only the part before "
+                           "the second '=', and put the secret in token_secret)")
+    return f"{m['user']}@{m['realm']}", m["name"]
+
+
+def token_public_meta(token_id: str) -> str:
+    """The ONLY value allowed into the unencrypted `host_credentials.public_meta`.
+
+    Built by pulling the known-safe fields forward — user, realm, token name —
+    and re-joining them; the caller's string never passes through, validated or
+    not. Anything unparseable raises rather than falling back to a stripped or
+    truncated form of the raw input.
+    """
+    user, name = parse_token_id(token_id)
+    return f"{user}!{name}"
 
 
 def _header_safe(secret: str) -> bool:

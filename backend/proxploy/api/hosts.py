@@ -3,12 +3,13 @@ auth -> RBAC stub -> entitlement -> work -> audit. Later phases copy this shape.
 import json as jsonlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import get_db, require_role
 from proxploy.models import Host, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
+from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
+                                       token_public_meta)
 from proxploy.services.sshkeys import generate_ed25519
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
@@ -27,6 +28,19 @@ class ProbeIn(BaseModel):
     verify_tls: bool = True
     tls_fingerprint: str | None = None
     name: str | None = None
+
+    @field_validator("token_id")
+    @classmethod
+    def _parseable_into_known_safe_parts(cls, v: str) -> str:
+        """Reject at the door with a 422 rather than letting an unparseable
+        token id travel as far as _connect()'s 502. Safe to surface: the message
+        never echoes the input, and main.py strips pydantic's `input` field from
+        every validation error body."""
+        try:
+            parse_token_id(v)
+        except ProxmoxError as e:
+            raise ValueError(str(e)) from None
+        return v
 
 
 class HostIn(ProbeIn):
@@ -84,7 +98,8 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     blob, ver = ss.encrypt(jsonlib.dumps(
         {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
     db.add(HostCredential(host_id=host.id, kind="api_token", encrypted_blob=blob,
-                          key_version=ver, public_meta=body.token_id))
+                          key_version=ver,
+                          public_meta=token_public_meta(body.token_id)))
 
     out = {"id": host.id, "name": host.name, "address": host.address,
            "node_name": host.node_name, "pve_version": host.pve_version,

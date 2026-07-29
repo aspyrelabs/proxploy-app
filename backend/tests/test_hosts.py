@@ -149,3 +149,14 @@ def test_creating_a_host_at_a_denied_address_stores_nothing(pve_client, csrf_hea
                headers=csrf_header(c))
     assert r.status_code == 502 and "loopback" in r.json()["detail"]
     assert c.get("/api/v1/hosts").json() == []
+
+
+def test_an_unparseable_token_id_is_a_422_not_a_502(pve_client, csrf_header):
+    """Rejected at the door as bad input, not surfaced as an upstream failure —
+    and nothing derived from the raw string is stored on the way."""
+    c, _ = pve_client
+    r = c.post("/api/v1/hosts", json=HOST | {"token_id": "root@pam!tok=deadbeef"},
+               headers=csrf_header(c))
+    assert r.status_code == 422, r.text
+    assert "deadbeef" not in r.text
+    assert c.get("/api/v1/hosts").json() == []
