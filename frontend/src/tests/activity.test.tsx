@@ -11,11 +11,13 @@ vi.mock('../api/client', () => ({
       ])
     }
     if (path.startsWith('/jobs')) {
+      // Realistic GET /jobs order: newest-first, exactly as the server
+      // returns it — the drawer must not need to re-sort this itself.
       return Promise.resolve([
-        { id: 12, kind: 'app.start', status: 'succeeded', target_type: 'app',
-          target_id: 1, progress_pct: 100, error: null, created_at: '2026-07-29T09:00:00Z' },
         { id: 13, kind: 'vm.stop', status: 'running', target_type: 'vm',
           target_id: 2, progress_pct: 40, error: null, created_at: '2026-07-29T09:01:00Z' },
+        { id: 12, kind: 'app.start', status: 'succeeded', target_type: 'app',
+          target_id: 1, progress_pct: 100, error: null, created_at: '2026-07-29T09:00:00Z' },
       ])
     }
     if (path.startsWith('/cluster/activity')) {

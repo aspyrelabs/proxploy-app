@@ -59,7 +59,7 @@ export function useJobEvents(id: number | null) {
 
 export function useActivity(limit = 20) {
   return useQuery({
-    queryKey: ['cluster', 'activity'],
+    queryKey: ['cluster', 'activity', limit],
     refetchInterval: 30_000,
     queryFn: () => api<ActivityRow[]>(`/cluster/activity?limit=${limit}`),
   })

@@ -63,13 +63,14 @@ function JobItem({ job, expanded, onExpand }:
 
 export function ActivityDrawer() {
   const { open, jobId, openJob, close } = useActivityDrawer()
+  // GET /jobs already orders newest-first server-side (doc 06). Do not
+  // re-sort here: string-comparing ISO created_at timestamps client-side
+  // reproduces the zero-microsecond tie bug the backend explicitly avoids —
+  // a bare 'Z' sorts after a fractional-second suffix like '.123456Z', so a
+  // zero-microsecond row would sort as newer than a genuinely later
+  // same-second row.
   const { data: jobs } = useJobs({ enabled: open })
-  // Newest-first (doc 06 "listing jobs newest-first"). GET /jobs already
-  // orders this way server-side, but sort defensively rather than trust
-  // response order — created_at ISO strings compare lexically, id breaks ties.
-  const sorted = [...(jobs ?? [])].sort(
-    (a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id,
-  )
+  const sorted = jobs ?? []
   if (!open) return null
   return (
     <aside
