@@ -12,44 +12,12 @@ from __future__ import annotations
 
 import logging
 
-from proxploy.models import NotificationChannel, utcnow
+from proxploy.models import KIND_FROM_SCHEME, NotificationChannel, utcnow
 
 # Apprise's logger propagates to the root logger by default, which would defeat
 # "never logged" (see module docstring) the moment any handler is configured —
 # set once at import; this doesn't require apprise itself to be imported yet.
 logging.getLogger("apprise").propagate = False
-
-# Display label from the URL scheme (doc 04 `kind`). An ALLOWLIST, not a
-# shape check: `kind_for` below never echoes caller-supplied text, only a
-# fixed label from this dict (or "webhook"). Tokens verified at v1.12.0 via
-# `apprise.plugins.N_MGR.schemas()` / each plugin's `service_name` — not
-# guessed. `http`/`https` are not real Apprise schemes (its generic-webhook
-# plugins are the json/form/xml entries below); MS Teams' current scheme is
-# `workflow(s)` (Power Automate), not `msteams`.
-KIND_FROM_SCHEME = {
-    "ntfy": "ntfy", "ntfys": "ntfy",
-    "gotify": "gotify", "gotifys": "gotify",
-    "mailto": "email", "mailtos": "email",
-    "tgram": "telegram",
-    "slack": "slack",
-    "json": "webhook", "jsons": "webhook",
-    "form": "webhook", "forms": "webhook",
-    "xml": "webhook", "xmls": "webhook",
-    "discord": "discord",
-    "matrix": "matrix", "matrixs": "matrix",
-    "mmost": "mattermost", "mmosts": "mattermost",
-    "rocket": "rocketchat", "rockets": "rocketchat",
-    "pover": "pushover",
-    "pbul": "pushbullet",
-    "signal": "signal", "signals": "signal",
-    "workflow": "msteams", "workflows": "msteams",
-    "twilio": "twilio",
-    "whatsapp": "whatsapp",
-    "zulip": "zulip",
-    "apprise": "apprise", "apprises": "apprise",
-    "ses": "ses",
-    "sendgrid": "sendgrid",
-}
 
 
 def kind_for(url: str) -> str:

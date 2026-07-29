@@ -39,7 +39,16 @@ CREDENTIAL_SHAPED_INPUTS = [
     ("://leadingslashsecret", "leadingslashsecret"),      # leading "://"
     ("trailingslashsecret://", "trailingslashsecret"),    # trailing "://"
     ("abc://doubledslashsecretvalue://xyz", "doubledslashsecretvalue"),  # doubled "://"
+    ("se://cret-inter://leaved-tokenvalue", "leaved-tokenvalue"),  # interleaved "://"
+    ("K" * 100_000, "K" * 100),                           # 100KB, no "://"
+    ("K" * 100_000 + "://", "K" * 100),                   # 100KB, trailing "://"
 ]
+
+# The closed set kind_for's return value must always belong to, regardless of
+# input. Computed the same way the DB CHECK constraint is (proxploy.models
+# .ALLOWED_NOTIFICATION_KINDS) so this test and the schema invariant can't
+# silently diverge.
+ALLOWED_KINDS = set(KIND_FROM_SCHEME.values()) | {"webhook"}
 
 
 @pytest.mark.parametrize("candidate,secret_fragment", CREDENTIAL_SHAPED_INPUTS)
@@ -52,6 +61,19 @@ def test_kind_for_never_echoes_caller_supplied_text(candidate, secret_fragment):
     result = kind_for(candidate)
     assert secret_fragment.lower() not in result.lower()
     assert result == "webhook"
+
+
+def test_kind_for_codomain_is_closed_over_the_allowlist():
+    """The structural claim behind `kind_for`, pinned directly: its codomain
+    is exactly `KIND_FROM_SCHEME`'s values plus "webhook" — nothing else can
+    ever come out, for a legitimate scheme, an adversarial credential-shaped
+    string, or anything in between. This is what `ALLOWED_NOTIFICATION_KINDS`
+    (proxploy.models) mirrors into the DB CHECK constraint; if this test and
+    that constraint ever disagree, one of them is wrong."""
+    for scheme in KIND_FROM_SCHEME:
+        assert kind_for(f"{scheme}://x") in ALLOWED_KINDS
+    for candidate, _ in CREDENTIAL_SHAPED_INPUTS:
+        assert kind_for(candidate) in ALLOWED_KINDS
 
 
 def test_send_one_actually_calls_apprise_offline():

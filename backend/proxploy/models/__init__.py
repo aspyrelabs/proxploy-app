@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON,
-    LargeBinary, Text, UniqueConstraint,
+    BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index,
+    Integer, JSON, LargeBinary, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -258,8 +258,61 @@ class Schedule(TimestampMixin, Base):
 
 # --- Notifications & alerting ----------------------------------------------
 
+# Display label from the Apprise URL scheme (doc 04 `notification_channels.kind`,
+# unencrypted). This is the single source of truth for `kind`'s allowlist:
+# `notifier.kind_for()` imports this dict rather than defining its own copy, and
+# migration 0002 imports `ALLOWED_NOTIFICATION_KINDS` to build the DB-level
+# CHECK constraint — one Python constant, never two literals that can drift.
+# Tokens verified at v1.12.0 via `apprise.plugins.N_MGR.schemas()` / each
+# plugin's `service_name` — not guessed. `http`/`https` are not real Apprise
+# schemes (its generic-webhook plugins are the json/form/xml entries below);
+# MS Teams' current scheme is `workflow(s)` (Power Automate), not `msteams`.
+KIND_FROM_SCHEME = {
+    "ntfy": "ntfy", "ntfys": "ntfy",
+    "gotify": "gotify", "gotifys": "gotify",
+    "mailto": "email", "mailtos": "email",
+    "tgram": "telegram",
+    "slack": "slack",
+    "json": "webhook", "jsons": "webhook",
+    "form": "webhook", "forms": "webhook",
+    "xml": "webhook", "xmls": "webhook",
+    "discord": "discord",
+    "matrix": "matrix", "matrixs": "matrix",
+    "mmost": "mattermost", "mmosts": "mattermost",
+    "rocket": "rocketchat", "rockets": "rocketchat",
+    "pover": "pushover",
+    "pbul": "pushbullet",
+    "signal": "signal", "signals": "signal",
+    "workflow": "msteams", "workflows": "msteams",
+    "twilio": "twilio",
+    "whatsapp": "whatsapp",
+    "zulip": "zulip",
+    "apprise": "apprise", "apprises": "apprise",
+    "ses": "ses",
+    "sendgrid": "sendgrid",
+}
+
+# "webhook" is also `kind_for`'s fallback for an unrecognised-but-legitimate
+# scheme, so it belongs in the allowlist even though it's already present as
+# a value above (json/form/xml).
+ALLOWED_NOTIFICATION_KINDS = frozenset(KIND_FROM_SCHEME.values()) | {"webhook"}
+
+
+def notification_kind_check_sql(column: str = "kind") -> str:
+    """CHECK-constraint condition text for `column`, closed over
+    `ALLOWED_NOTIFICATION_KINDS`. Shared verbatim by the model's
+    `__table_args__` below and migration 0002 so the DB-enforced set can
+    never independently drift from the Python constant it's built from."""
+    values = ", ".join(f"'{v}'" for v in sorted(ALLOWED_NOTIFICATION_KINDS))
+    return f"{column} IS NULL OR {column} IN ({values})"
+
+
 class NotificationChannel(TimestampMixin, Base):
     __tablename__ = "notification_channels"
+    __table_args__ = (
+        CheckConstraint(notification_kind_check_sql(),
+                        name="ck_notification_channels_kind_allowlist"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str | None] = mapped_column(Text)
