@@ -11,7 +11,6 @@ event loop wrap it in asyncio.to_thread.
 from __future__ import annotations
 
 import logging
-import re
 
 from proxploy.models import NotificationChannel, utcnow
 
@@ -20,8 +19,13 @@ from proxploy.models import NotificationChannel, utcnow
 # set once at import; this doesn't require apprise itself to be imported yet.
 logging.getLogger("apprise").propagate = False
 
-# Display label from the URL scheme (doc 04 `kind`). Unknown schemes keep their
-# own scheme as the label rather than being coerced into "webhook".
+# Display label from the URL scheme (doc 04 `kind`). An ALLOWLIST, not a
+# shape check: `kind_for` below never echoes caller-supplied text, only a
+# fixed label from this dict (or "webhook"). Tokens verified at v1.12.0 via
+# `apprise.plugins.N_MGR.schemas()` / each plugin's `service_name` — not
+# guessed. `http`/`https` are not real Apprise schemes (its generic-webhook
+# plugins are the json/form/xml entries below); MS Teams' current scheme is
+# `workflow(s)` (Power Automate), not `msteams`.
 KIND_FROM_SCHEME = {
     "ntfy": "ntfy", "ntfys": "ntfy",
     "gotify": "gotify", "gotifys": "gotify",
@@ -31,29 +35,37 @@ KIND_FROM_SCHEME = {
     "json": "webhook", "jsons": "webhook",
     "form": "webhook", "forms": "webhook",
     "xml": "webhook", "xmls": "webhook",
+    "discord": "discord",
+    "matrix": "matrix", "matrixs": "matrix",
+    "mmost": "mattermost", "mmosts": "mattermost",
+    "rocket": "rocketchat", "rockets": "rocketchat",
+    "pover": "pushover",
+    "pbul": "pushbullet",
+    "signal": "signal", "signals": "signal",
+    "workflow": "msteams", "workflows": "msteams",
+    "twilio": "twilio",
+    "whatsapp": "whatsapp",
+    "zulip": "zulip",
+    "apprise": "apprise", "apprises": "apprise",
+    "ses": "ses",
+    "sendgrid": "sendgrid",
 }
-
-_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*$")
 
 
 def kind_for(url: str) -> str:
     """Doc 04: `kind` is a display label parsed from the URL *scheme* only.
 
-    A string with no `://` has no scheme at all — reject it outright rather
-    than deriving anything from it, so a bare pasted token (Gotify token,
-    hex API key, `xoxb-...` Slack token, ...) never becomes the "scheme".
-    The shape guard on what *is* split off a real `://` still applies too
-    (length-capped, scheme-charset-only) so a URL with a garbage prefix
-    before `://` can't smuggle an oversized/odd string into `kind` either.
-    Anything that doesn't qualify falls back to "webhook" rather than
-    writing a plaintext secret into the unencrypted `kind` column.
+    Never returns caller-supplied text. `kind` is an unencrypted `Text`
+    column, so any fallback that echoes part of the input (the scheme, or
+    even a length/shape-filtered version of it) is a plaintext-secret leak
+    the moment a channel URL is malformed or a bare credential is pasted
+    without a scheme at all — a URL-shaped guard can always be walked around
+    by appending "://" or picking a short lowercase-and-dashes token. An
+    unrecognised-but-legitimate scheme showing as "webhook" is a fine
+    outcome; there is no other fallback.
     """
-    if "://" not in url:
-        return "webhook"
-    scheme = url.split("://", 1)[0].strip().lower()
-    if scheme in KIND_FROM_SCHEME:
-        return KIND_FROM_SCHEME[scheme]
-    return scheme if len(scheme) <= 32 and _SCHEME_RE.match(scheme) else "webhook"
+    scheme = url.split("://", 1)[0].strip().lower() if "://" in url else ""
+    return KIND_FROM_SCHEME.get(scheme, "webhook")
 
 
 def send_one(url: str, title: str, body: str) -> bool:

@@ -1,8 +1,10 @@
 """Notifier seam -> Apprise (brief §5, doc 03 notifications row)."""
 import asyncio
 
+import pytest
+
 from proxploy.models import NotificationChannel
-from proxploy.services.notifier import channels_for, kind_for
+from proxploy.services.notifier import KIND_FROM_SCHEME, channels_for, kind_for
 
 
 def _channel(db, secretstore, url, *, name="ntfy", events=None, enabled=True):
@@ -14,36 +16,42 @@ def _channel(db, secretstore, url, *, name="ntfy", events=None, enabled=True):
     return row
 
 
-def test_kind_is_parsed_from_the_url_scheme():
-    assert kind_for("ntfy://ntfy.sh/proxploy") == "ntfy"
-    assert kind_for("tgram://bottoken/chatid") == "telegram"
-    assert kind_for("mailto://user:pw@example.com") == "email"
-    assert kind_for("gotify://host/token") == "gotify"
-    assert kind_for("json://example.com/hook") == "webhook"
-    assert kind_for("slack://a/b/c") == "slack"
+@pytest.mark.parametrize("scheme,label", sorted(KIND_FROM_SCHEME.items()))
+def test_every_known_scheme_maps_to_its_expected_label(scheme, label):
+    assert kind_for(f"{scheme}://example.invalid/x") == label
 
 
-def test_kind_for_never_leaks_a_secret_into_the_plaintext_kind_column():
-    """A URL with no `://` has no scheme at all — `kind` is `Text`, unbounded
-    and never encrypted, so a bare token must fall back to "webhook" rather
-    than being written to the DB in plaintext."""
-    leaked = kind_for("tgram//123456:AAH-SUPERSECRETBOTTOKEN/chatid")
-    assert "AAH-SUPERSECRETBOTTOKEN" not in leaked
-    assert leaked == "webhook"
+# kind_for's invariant, pinned: it returns ONLY a fixed label from
+# KIND_FROM_SCHEME or "webhook" — NEVER any text derived from the input.
+# Every credential-shaped candidate below must produce "webhook" and must
+# not leak any fragment of itself, regardless of case, script, embedded NUL,
+# length, or where/how many times "://" appears.
+CREDENTIAL_SHAPED_INPUTS = [
+    ("AAH-SUPERSECRETBOTTOKEN://", "SUPERSECRET"),
+    ("aah-super-secret-bot-token-123://x", "secret-bot-token"),
+    ("xoxb-1234-5678-abcdefghijklmnop://", "abcdefghijklmnop"),
+    ("AAH-SUPERSECRETBOTTOKEN", "SUPERSECRET"),          # no "://" at all
+    ("K" * 5000, "KKKKK"),                               # 5000 chars, no "://"
+    ("K" * 5000 + "://", "KKKKK"),                       # 5000 chars, trailing "://"
+    ("SECRETVALUEUPPERCASE://x", "SECRETVALUEUPPERCASE"),  # uppercase
+    ("sécret-tökén-üñíçødé://x", "tökén"),                # unicode
+    ("secret\x00nullbyte://x", "nullbyte"),               # embedded NUL byte
+    ("://leadingslashsecret", "leadingslashsecret"),      # leading "://"
+    ("trailingslashsecret://", "trailingslashsecret"),    # trailing "://"
+    ("abc://doubledslashsecretvalue://xyz", "doubledslashsecretvalue"),  # doubled "://"
+]
 
-    # Residual of the same bug: a bare token with no "://" at all, that
-    # happens to be letter-initial and scheme-charset-only, must not be
-    # echoed verbatim just because it "looks like" a scheme.
-    bare = kind_for("AAH-SUPERSECRETBOTTOKEN")
-    assert "supersecret" not in bare.lower()
-    assert bare == "webhook"
 
-    # No "://" at all short-circuits regardless of length.
-    assert kind_for("a" * 5000) == "webhook"
-
-    # A huge "scheme" *with* a "://" separator still hits the length cap —
-    # the longest real Apprise scheme is nowhere near 32 chars.
-    assert kind_for("a" * 5000 + "://host") == "webhook"
+@pytest.mark.parametrize("candidate,secret_fragment", CREDENTIAL_SHAPED_INPUTS)
+def test_kind_for_never_echoes_caller_supplied_text(candidate, secret_fragment):
+    """`kind` is an unencrypted `Text` column — kind_for must never return
+    anything derived from the input, only a fixed allowlisted label. A
+    shape/length guard on the derived scheme is not enough (it can always be
+    walked around by appending "://" or picking a short lowercase token);
+    only an allowlist closes this off for good."""
+    result = kind_for(candidate)
+    assert secret_fragment.lower() not in result.lower()
+    assert result == "webhook"
 
 
 def test_send_one_actually_calls_apprise_offline():
