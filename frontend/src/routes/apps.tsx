@@ -7,6 +7,7 @@ import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
+import { LifecycleActions } from '../components/LifecycleActions'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { RAM_GRADIENT, UsageBar } from '../components/UsageBar'
@@ -163,7 +164,10 @@ export function AppDetail() {
             CT {app.ctid} · {app.host_name}{app.ip ? ` · ${app.ip}${app.web_port ? `:${app.web_port}` : ''}` : ''}
           </div>
         </div>
-        <div className="ml-auto"><StatusPill status={app.status} /></div>
+        <div className="ml-auto flex items-center gap-3">
+          <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} />
+          <StatusPill status={app.status} />
+        </div>
       </div>
       <div className="mb-5 flex gap-1 border-b border-line-soft">
         {TABS.map((t) => (

@@ -5,6 +5,7 @@ import type { VmRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
+import { LifecycleActions } from '../components/LifecycleActions'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
@@ -37,6 +38,7 @@ export function VmsPage() {
                 <th scope="col" className="pb-2 font-medium">vCPU / RAM</th>
                 <th scope="col" className="pb-2 font-medium">CPU</th>
                 <th scope="col" className="pb-2 font-medium">Status</th>
+                <th scope="col" className="pb-2 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -53,6 +55,9 @@ export function VmsPage() {
                   </td>
                   <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                   <td className="py-2.5"><StatusPill status={v.status} /></td>
+                  <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} size="sm" />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -90,7 +95,10 @@ export function VmDetail() {
             VMID {vm.vmid} · {vm.host_name} · {vm.cpu_cores ?? '?'} vCPU / {fmtBytes(vm.mem_bytes)}
           </div>
         </div>
-        <div className="ml-auto"><StatusPill status={vm.status} /></div>
+        <div className="ml-auto flex items-center gap-3">
+          <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} />
+          <StatusPill status={vm.status} />
+        </div>
       </div>
       <div className="mb-5 flex gap-1 border-b border-line-soft">
         {TABS.map((t) => (

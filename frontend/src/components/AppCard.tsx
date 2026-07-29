@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtPct } from '../lib/format'
+import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
 
@@ -51,6 +52,9 @@ export function AppCard({ app }: { app: AppRow }) {
           <div className="flex-1"><UsageBar pct={memPct} gradient={RAM_GRADIENT} /></div>
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(memPct)}</span>
         </div>
+      </div>
+      <div className="mt-3 border-t border-line-soft pt-3" onClick={(e) => e.stopPropagation()}>
+        <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} size="sm" />
       </div>
     </div>
   )
