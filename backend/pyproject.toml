@@ -20,7 +20,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pip-licenses>=5", "psycopg[binary]>=3.2"]
+dev = ["pytest>=8", "pip-licenses>=5"]
+# LGPL-3.0 (doc 00 §3: never linked into the shipped app) — installed only for
+# the opt-in Postgres CI leg, kept out of the license-audited `dev` extra.
+postgres = ["psycopg[binary]>=3.2"]
 
 [build-system]
 requires = ["setuptools>=68"]

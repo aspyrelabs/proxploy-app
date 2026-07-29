@@ -93,6 +93,12 @@ def create_app(
 
     app.include_router(api_router)
 
+    from fastapi.staticfiles import StaticFiles
+
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if dist.exists():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="spa")
+
     @app.exception_handler(StarletteHTTPException)
     async def problem_handler(request, exc):
         body = {

@@ -1,0 +1,75 @@
+name: ci
+on:
+  push: {branches: [main]}
+  workflow_dispatch:
+  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: backend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest tests/ -q -m "not pve_integration and not e2e"
+      - run: python scripts/check_executor_isolation.py
+      - name: license audit (doc 03 protocol — fails on anything outside brief §3)
+        run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;The Unlicense;CMU License (MIT-CMU)"
+
+  backend-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_PASSWORD: pp, POSTGRES_DB: proxploy}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults: {run: {working-directory: backend}}
+    env:
+      PROXPLOY_TEST_PG_DSN: postgresql+psycopg://postgres:pp@localhost:5432/proxploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e '.[dev,postgres]'
+      - run: python -m pytest tests/test_migrations.py -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: license audit (npm)
+        run: >
+          npx license-checker-rseidelsohn --production
+          --excludePackages "frontend@0.0.0" --onlyAllow
+          "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;MPL-2.0;0BSD;CC0-1.0;Unlicense;OFL-1.1"
+
+  pve-integration:
+    # Doc 10 Phase 1 (b): disposable-PVE matrix. Wired now; runs when the repo
+    # secrets point at throwaway PVE 8/9 boxes (doc 11 §7). The PVE 9 leg may be
+    # added incrementally through Phase 2 per the DoD.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    strategy: {matrix: {pve: [pve8, pve9]}}
+    defaults: {run: {working-directory: backend}}
+    env:
+      PROXPLOY_TEST_PVE_URL: ${{ secrets[format('{0}_URL', matrix.pve)] }}
+      PROXPLOY_TEST_PVE_TOKEN_ID: ${{ secrets[format('{0}_TOKEN_ID', matrix.pve)] }}
+      PROXPLOY_TEST_PVE_TOKEN_SECRET: ${{ secrets[format('{0}_TOKEN_SECRET', matrix.pve)] }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e '.[dev]'
+      - name: run against disposable PVE (skips cleanly when secrets are absent)
+        run: python -m pytest tests/ -q -m pve_integration
