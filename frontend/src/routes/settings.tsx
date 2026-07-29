@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { ChannelForm } from '../components/ChannelForm'
+import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
 import { Button } from '../components/ui/button'
 
@@ -31,6 +34,24 @@ function SettingsPage() {
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+
+  const [addingChannel, setAddingChannel] = useState(false)
+  const channels = useQuery({
+    queryKey: ['notifications', 'channels'],
+    queryFn: () => api<ChannelRow[]>('/notifications/channels'),
+  })
+  const testChannel = useMutation({
+    mutationFn: (id: number) =>
+      api<{ sent: boolean }>(`/notifications/channels/${id}/test`, { method: 'POST' }),
+    onSuccess: (r) => toast[r.sent ? 'success' : 'error'](
+      r.sent ? 'Test notification sent' : 'Channel unreachable'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
+  })
+  const deleteChannel = useMutation({
+    mutationFn: (id: number) =>
+      api(`/notifications/channels/${id}`, { method: 'DELETE' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
+  })
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -66,10 +87,51 @@ function SettingsPage() {
         </div>}
       </Card>
 
+      <Card title="Notifications"
+            action={<Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
+              {addingChannel ? 'Close' : 'Add channel'}
+            </Button>}>
+        <table className="w-full text-left text-[13px]">
+          <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+            <th className="pb-2">Name</th><th>Kind</th><th>Events</th><th>State</th><th /></tr></thead>
+          <tbody>
+            {(channels.data ?? []).map(ch => (
+              <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
+                <td className="py-2">{ch.name}</td>
+                <td className="font-mono text-text-2">{ch.kind}</td>
+                <td className="font-mono text-[11.5px] text-text-3">
+                  {ch.events.length ? ch.events.join(', ') : 'all events'}
+                </td>
+                <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
+                  {ch.enabled ? 'enabled' : 'disabled'}
+                </td>
+                <td className="py-2 text-right">
+                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                          onClick={() => testChannel.mutate(ch.id)}>Test</Button>
+                  <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                          onClick={() => deleteChannel.mutate(ch.id)}>Remove</Button>
+                </td>
+              </tr>
+            ))}
+            {!channels.data?.length && (
+              <tr><td colSpan={5} className="py-4 text-text-3">
+                No channels yet. Add one to get told when a job fails.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+        {addingChannel && <div className="mt-4 border-t border-line-soft pt-4">
+          <ChannelForm onSaved={() => {
+            setAddingChannel(false)
+            qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
+          }} />
+        </div>}
+      </Card>
+
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
-          Scheduled auto-updates, notifications and catalog sync configuration arrive in
-          Phases 3–7; this page grows with them.
+          Scheduled auto-updates and catalog sync configuration arrive in
+          Phases 4–7; this page grows with them.
         </p>
       </Card>
     </div>
