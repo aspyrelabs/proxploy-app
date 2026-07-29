@@ -293,3 +293,17 @@ def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
         assert parse_token_id(good)[0].endswith(good.split("@")[1].split("!")[0])
 
 
+
+def test_migrations_survive_a_percent_in_the_dsn(tmp_path):
+    """Alembic keeps this URL in a ConfigParser, where "%" is interpolation
+    syntax: an unescaped DSN whose password contains "%" raised
+    `ValueError: invalid interpolation syntax in '<the whole DSN>'` at startup,
+    printing the password in the traceback. sqlite stands in for postgres here
+    — the ConfigParser behaviour is dialect-independent."""
+    from proxploy.config import Settings
+    from proxploy.db import run_migrations
+
+    db_path = tmp_path / "pct%s100%.db"
+    run_migrations(Settings(db_url=f"sqlite:///{db_path}", data_dir=tmp_path,
+                            master_key_file=tmp_path / "master.key"))
+    assert db_path.exists()

@@ -27,5 +27,11 @@ def make_sessionmaker(engine):
 def run_migrations(settings: Settings) -> None:
     cfg = AlembicConfig()
     cfg.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", settings.db_url)
+    # Alembic stores this in a ConfigParser, which treats "%" as interpolation
+    # syntax. A Postgres DSN whose password contains "%" — ordinary for a
+    # generated password — otherwise fails at startup with
+    # `ValueError: invalid interpolation syntax in '<the whole DSN>'`, printing
+    # the password in the traceback. Escaping is alembic's documented answer and
+    # incidentally makes such a password work at all.
+    cfg.set_main_option("sqlalchemy.url", settings.db_url.replace("%", "%%"))
     command.upgrade(cfg, "head")
