@@ -99,3 +99,26 @@ def test_problem_json_handler_for_http_exceptions_is_unaffected(tmp_path, csrf_h
         body = r.json()
         assert body["type"] == "about:blank" and body["status"] == 422
         assert "url must be an Apprise URL" in body["detail"]
+
+
+
+
+def test_audit_redact_covers_near_miss_secret_key_names():
+    """`k.lower() in REDACT_KEYS` was exact membership, so any key name that
+    merely CONTAINS a secret marker sailed into the unencrypted
+    `audit_events.params` column and out of GET /audit."""
+    from proxploy.services.audit import redact
+
+    leaky = {"token_id": "PVEAPIToken=root@pam!p=s3cret", "apprise_url": "ntfy://a:b@h/t",
+             "db_url": "postgresql://u:pw@h/d", "dsn": "postgresql://u:pw@h/d",
+             "secret_key": "sk", "api_credential": "c", "private_pem": "p",
+             "user_password": "hunter2", "totp_secret": "t"}
+    assert set(redact(leaky).values()) == {"[redacted]"}
+
+    # ...while the keys that carry no value stay legible. settings.update
+    # audits {"keys": [...]} — the NAMES of the settings changed, never their
+    # values — and redacting that would blind the audit trail for nothing.
+    kept = {"keys": ["a.b", "c.d"], "name": "ntfy", "kind": "webhook", "role": "admin"}
+    assert redact(kept) == kept
+
+
