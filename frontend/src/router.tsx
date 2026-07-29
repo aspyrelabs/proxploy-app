@@ -1,27 +1,8 @@
-import { Outlet, createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
-import { api } from './api/client'
-import { AppShell } from './components/AppShell'
-import { LiveProvider } from './components/LiveProvider'
+import { createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { PlaceholderPage } from './routes/placeholder'
+import { rootRoute, shellRoute } from './routes/shell'
 
-export const rootRoute = createRootRoute({ component: () => <Outlet /> })
-
-type Onboarding = { admin_exists: boolean; host_added: boolean; complete: boolean }
-
-export const shellRoute = createRoute({
-  id: 'shell',
-  getParentRoute: () => rootRoute,
-  component: () => (
-    <LiveProvider>
-      <AppShell />
-    </LiveProvider>
-  ),
-  beforeLoad: async () => {
-    const ob = await api<Onboarding>('/meta/onboarding')
-    if (!ob.complete) throw redirect({ to: '/onboarding' })
-    try { await api('/auth/me') } catch { throw redirect({ to: '/login' }) }
-  },
-})
+export { rootRoute, shellRoute }
 
 const page = (path: string, title: string, phase: string, note: string) =>
   createRoute({
@@ -36,8 +17,6 @@ export const indexRoute = createRoute({
   beforeLoad: () => { throw redirect({ to: '/cluster' as never }) },
 })
 
-export const clusterRoute = page('/cluster', 'Cluster', 'Phase 2 (Observe)',
-  'Fleet rings, node cards and the live dashboard arrive with the poller subsystem.')
 export const appsRoute = page('/apps', 'Apps', 'Phase 2 (Observe)',
   'Installed apps are discovered by the poller; the grid renders here.')
 export const storeRoute = page('/store', 'App Store', 'Phase 4 (Store)',
@@ -54,10 +33,11 @@ export const backupsRoute = page('/backups', 'Backups', 'Phase 6 (Infra pages)',
 import { loginRoute } from './routes/login'
 import { onboardingRoute } from './routes/onboarding'
 import { settingsRoute } from './routes/settings'
+import { clusterRoute, nodeDetailRoute } from './routes/cluster'
 
 export const routeTree = rootRoute.addChildren([
   indexRoute, loginRoute, onboardingRoute,
-  shellRoute.addChildren([clusterRoute, appsRoute, storeRoute, vmsRoute,
+  shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, storeRoute, vmsRoute,
                           storageRoute, networkRoute, backupsRoute, settingsRoute]),
 ])
 export const router = createRouter({ routeTree })

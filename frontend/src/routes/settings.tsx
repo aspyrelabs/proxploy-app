@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { shellRoute } from '../router'
+import { shellRoute } from './shell'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { HostForm } from '../components/HostForm'
