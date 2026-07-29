@@ -19,8 +19,6 @@ export const indexRoute = createRoute({
 
 export const storeRoute = page('/store', 'App Store', 'Phase 4 (Store)',
   'The community-scripts catalog is fetched and cached server-side, never from the browser.')
-export const vmsRoute = page('/vms', 'Virtual Machines', 'Phase 2 (Observe)',
-  'The VM table renders from the poller cache.')
 export const storageRoute = page('/storage', 'Storage', 'Phase 6 (Infra pages)',
   'Datastore cards and the content browser arrive in Phase 6.')
 export const networkRoute = page('/network', 'Network', 'Phase 6 (Infra pages)',
@@ -33,12 +31,14 @@ import { onboardingRoute } from './routes/onboarding'
 import { settingsRoute } from './routes/settings'
 import { clusterRoute, nodeDetailRoute } from './routes/cluster'
 import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
+import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute } from './routes/vms'
 
 const appDetailTree = appDetailRoute.addChildren([appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute])
+const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute])
 
 export const routeTree = rootRoute.addChildren([
   indexRoute, loginRoute, onboardingRoute,
-  shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute,
+  shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
                           storageRoute, networkRoute, backupsRoute, settingsRoute]),
 ])
 export const router = createRouter({ routeTree })
