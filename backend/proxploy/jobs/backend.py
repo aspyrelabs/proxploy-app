@@ -282,5 +282,23 @@ class JobBackend:
         self._notify(job_id, kind, status, error)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:
-        """Route the terminal result through the Notifier. Wired in Task 6."""
-        return
+        """Route the terminal result to the Notifier, off the event loop.
+
+        Fire-and-forget: a notification is a courtesy, never part of the job's
+        own success. `_side` holds a reference so the task is not GC'd mid-flight.
+        """
+        from proxploy.services import notifier
+
+        title = f"Proxploy: {kind} {status}"
+        body = error or f"job {job_id} ({kind}) {status}"
+
+        async def go():
+            try:
+                await asyncio.to_thread(notifier.notify, self.app,
+                                        f"job.{status}", title, body)
+            except Exception:  # noqa: BLE001 — notifications never fail a job
+                pass
+
+        task = asyncio.ensure_future(go())
+        self._side.add(task)
+        task.add_done_callback(self._side.discard)

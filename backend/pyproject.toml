@@ -17,6 +17,7 @@ dependencies = [
   "requests>=2.32",
   "slowapi>=0.1.9",
   "email-validator>=2.0",
+  "apprise>=1.9",
 ]
 
 [project.optional-dependencies]
