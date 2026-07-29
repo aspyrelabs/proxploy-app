@@ -5,7 +5,7 @@ Autonomous build loop: cycles `/superpowers:writing-plans` (Fable 5) then
 `docs/10-build-sequence.md`, fully unattended, no phase-gate pauses.
 Driven by `bin/build-cycle.sh` on the `proxploy-build.timer` systemd user timer.
 
-<!-- STATE: phase=3 step=execute -->
+<!-- STATE: phase=4 step=plan -->
 
 ### 2026-07-29T01:22:23+05:30 — Phase 1 — write-plan FAILED (exit 1)
 
@@ -142,3 +142,41 @@ verification notes.
 - SSE event stream for live cache invalidation
 - 6 Phase 2 REST endpoints: cluster/summary, cluster/nodes, apps, apps/discovered, vms, metrics/query
 - Frontend: Cluster page (rings + node cards), node detail, Apps grid + discovered panel, VMs table + detail overview, uPlot charts via Sparkline component, LiveProvider for SSE-to-QueryCache invalidation
+
+### 2026-07-29T15:00:00+05:30 — Phase 3 — execute-plan completed
+
+Plan: `docs/superpowers/plans/2026-07-29-phase-3-act.md`. All 14 tasks
+implemented and committed directly to `main`, tasks 1-8 backend/1-10
+individually reviewed, 11-13 batched with the review folded into the final
+whole-branch pass. Full details, DoD proof and deviations in
+`docs/notes/phase-3-act.md`.
+
+**What was built:**
+- JobBackend: in-process asyncio job runner (`Semaphore(4)`, `jobs` +
+  `job_events` persistence, per-job SSE log stream, orphan sweep on boot)
+- Lifecycle: `ProxmoxClient.guest_action`/`task_status`/`task_log`,
+  `app.*`/`vm.*` job handlers, self-management guardrail (typed confirm),
+  `POST /apps/{id}/{action}` and `POST /vms/{id}/{action}`
+- Notifications: Apprise-backed `Notifier`, `notification_channels` CRUD +
+  test-send, job-terminal-state routing (`job.succeeded/failed/canceled/interrupted`)
+- Activity feed: `GET /cluster/activity` (jobs + audit, deduped, newest-first)
+- Frontend: job hooks + SSE `job`-delta cache binding, TerminalPanel/JobLog/
+  ActivityDrawer/topbar bell, lifecycle action buttons with optimistic UI +
+  self-target confirm dialog, dashboard activity feed, Settings notification
+  channels card
+
+**Verification:**
+- Backend: 190 passed, 1 skipped, 2 deselected — `pytest -q -m "not pve_integration and not e2e"`
+- Backend: executor isolation OK; license audit OK
+- Frontend: 33 passed (11 files); build clean; license audit OK
+- `docs/notes/phase-3-act.md`'s `dod_verify.py` run: all 4 doc-10 DoD clauses
+  proved against `tests.support.make_app` + `FakePVE` (no live PVE, no
+  Docker, no browser on this box — clause 1's UI half is covered by
+  `frontend/src/tests/lifecycle.test.tsx` under jsdom, not a visual run)
+
+**Deviations** (full list + rationale in the notes doc): lifecycle verbs are
+a documented superset of doc 05's paths; jobs/activity endpoints carry
+additional entitlement gates doc 05 left blank; doc 05 §Streaming 4 was
+amended to add `target_type` to the `job` SSE event; job-row writes are
+inline on the event loop by design; `hosts/{id}/tasks` and `hosts/{id}/sync`
+were deliberately not built (no Phase 3 dependency).
