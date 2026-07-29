@@ -13,7 +13,7 @@ export type ChannelRow = {
 // fresh ntfy target shouldn't buzz on every start/stop, so the form defaults
 // to job.failed (plan decision 8).
 export const EVENT_CHOICES = [
-  'job.failed', 'job.succeeded', 'job.canceled', 'alert.fired', 'app.updated',
+  'job.failed', 'job.succeeded', 'job.canceled', 'job.interrupted', 'alert.fired', 'app.updated',
 ] as const
 
 const input = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
