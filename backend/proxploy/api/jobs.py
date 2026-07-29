@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.jobs import TERMINAL
-from proxploy.models import Job, JobEvent, User
+from proxploy.models import Job, JobEvent, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.authn import resolve_session
 
@@ -43,10 +43,11 @@ def backlog(db, job_id: int, after: int = 0, limit: int = 5000) -> list[dict]:
              "stream": e.stream, "message": e.message} for e in rows]
 
 
-@router.get("", dependencies=[Depends(require_entitlement("jobs.history"))])
+@router.get("", dependencies=[Depends(require_role("viewer")),
+                              Depends(require_entitlement("jobs.history"))])
 def list_jobs(response: Response, status: str | None = None, kind: str | None = None,
               target: str | None = None, page: int = 1, per_page: int = 50,
-              db=Depends(get_db), user: User = Depends(require_role("viewer"))):
+              db=Depends(get_db)):
     q = db.query(Job)
     if status:
         q = q.filter(Job.status == status)
@@ -64,9 +65,9 @@ def list_jobs(response: Response, status: str | None = None, kind: str | None = 
     return [job_out(j) for j in rows]
 
 
-@router.get("/{job_id}", dependencies=[Depends(require_entitlement("jobs.history"))])
-def job_detail(job_id: int, db=Depends(get_db),
-               user: User = Depends(require_role("viewer"))):
+@router.get("/{job_id}", dependencies=[Depends(require_role("viewer")),
+                                       Depends(require_entitlement("jobs.history"))])
+def job_detail(job_id: int, db=Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
@@ -74,9 +75,9 @@ def job_detail(job_id: int, db=Depends(get_db),
 
 
 @router.get("/{job_id}/events",
-            dependencies=[Depends(require_entitlement("jobs.history"))])
-def job_events(job_id: int, after: int = 0, limit: int = 5000, db=Depends(get_db),
-               user: User = Depends(require_role("viewer"))):
+            dependencies=[Depends(require_role("viewer")),
+                          Depends(require_entitlement("jobs.history"))])
+def job_events(job_id: int, after: int = 0, limit: int = 5000, db=Depends(get_db)):
     if db.get(Job, job_id) is None:
         raise HTTPException(404, "job not found")
     return backlog(db, job_id, after=after, limit=limit)
@@ -92,11 +93,18 @@ def cancel_job(request: Request, job_id: int, db=Depends(get_db),
         raise HTTPException(409, f"job is already {job.status}")
     # Ask the runner first; if no task owns it (e.g. enqueued by a process that
     # has since restarted), mark it canceled here so the row never dangles.
+    # The status check above and this update are two round trips, so a
+    # conditional UPDATE (not a blind write) guards the TOCTOU window where
+    # the runner's _finish lands in between: if the row is no longer
+    # cancelable by the time we get here, refuse instead of clobbering it.
     if not request.app.state.jobs.cancel(job_id):
-        from proxploy.models import utcnow
-        job.status, job.finished_at = "canceled", utcnow()
-        job.error = "canceled by user"
+        n = (db.query(Job).filter(Job.id == job_id, Job.status.notin_(TERMINAL))
+             .update({"status": "canceled", "finished_at": utcnow(),
+                      "error": "canceled by user"}, synchronize_session=False))
         db.commit()
+        if n == 0:
+            db.expire_all()
+            raise HTTPException(409, f"job is already {db.get(Job, job_id).status}")
     write_audit(db, actor_type="user", actor_id=user.id, action="job.cancel",
                 target_type="job", target_id=job_id, job_id=job_id,
                 ip=request.client.host if request.client else None)
@@ -106,23 +114,28 @@ def cancel_job(request: Request, job_id: int, db=Depends(get_db),
 @router.get("/{job_id}/events/stream")
 async def job_stream(request: Request, job_id: int, last_event_id: int | None = None):
     """Doc 05 §Streaming 1. `line` frames carry `id:` (the resume cursor);
-    `progress` and `status` do not. A terminal `status` closes the stream."""
+    `progress` and `status` do not. A terminal `status` closes the stream.
+
+    Auth is resolved once via a short-lived session in a thread — never a
+    `Depends(get_db)` seam, which for a StreamingResponse would stay open for
+    the life of the connection. `require_role`/`require_entitlement` are
+    still the ones enforcing it (called directly, not through FastAPI's DI)
+    so this route stays on the same auth -> RBAC -> entitlement seam as its
+    siblings, in that order, and picks up the Phase-8 pycasbin swap for free.
+    """
     raw = request.cookies.get(request.app.state.settings.session_cookie)
 
     def check():
         with request.app.state.sessionmaker() as db:
             user = resolve_session(db, raw) if raw else None
             if user is None:
-                return None, None
-            return user, db.get(Job, job_id) is not None
+                raise HTTPException(401, "authentication required")
+            require_role("viewer")(request, db, user)
+            require_entitlement("jobs.stream")(request)
+            if db.get(Job, job_id) is None:
+                raise HTTPException(404, "job not found")
 
-    user, exists = await asyncio.to_thread(check)
-    if user is None:
-        raise HTTPException(401, "authentication required")
-    if not request.app.state.entitlements.enabled("jobs.stream"):
-        raise HTTPException(403, {"error": "entitlement_required", "feature": "jobs.stream"})
-    if not exists:
-        raise HTTPException(404, "job not found")
+    await asyncio.to_thread(check)
 
     header = request.headers.get("Last-Event-ID")
     after = int(header) if header and header.isdigit() else (last_event_id or 0)
@@ -133,22 +146,40 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
         return out + f"event: {f['event']}\ndata: {json.dumps(f['data'])}\n\n"
 
     async def gen():
-        # Subscribe BEFORE reading the backlog so a line written between the two
-        # is duplicated (harmless, seq-keyed) rather than lost.
+        # Subscribe BEFORE reading the backlog so a line written between the
+        # two is at worst replayed twice (deduped below via the high-water
+        # mark) rather than lost.
         q = backend.subscribe(job_id)
         try:
             def read():
                 with request.app.state.sessionmaker() as db:
                     job = db.get(Job, job_id)
-                    return backlog(db, job_id, after=after), job.status
-            rows, status = await asyncio.to_thread(read)
+                    if job is None:
+                        return [], None, None, None
+                    return (backlog(db, job_id, after=after), job.status,
+                            job.result, job.error)
+            rows, status, result, error = await asyncio.to_thread(read)
+            if status is None:
+                return  # job row vanished between the auth check and this read
+            # High-water mark over the replay window, not the fixed resume
+            # cursor: a line written between subscribe() (above) and this
+            # read has seq > `after` and would otherwise be replayed here AND
+            # re-delivered live — the frontend log client appends by frame,
+            # it does not dedup by seq, so that duplicate is user-visible.
+            last = after
             for r in rows:
                 if r["stream"] == "status":
-                    yield frame({"event": "status", "data": {"status": status}})
+                    payload = {"status": status}
+                    if result:
+                        payload["result"] = result
+                    if error:
+                        payload["error"] = error
+                    yield frame({"event": "status", "data": payload})
                 else:
                     yield frame({"event": "line", "id": r["seq"],
                                  "data": {"stream": r["stream"], "ts": r["ts"],
                                           "message": r["message"]}})
+                last = max(last, r["seq"])
             if status in TERMINAL:
                 return
             while True:
@@ -157,7 +188,7 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
                     continue
-                if f["event"] == "line" and f["id"] <= after:
+                if f["event"] == "line" and f["id"] <= last:
                     continue
                 yield frame(f)
                 if f["event"] == "status":
