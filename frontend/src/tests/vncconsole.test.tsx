@@ -13,7 +13,13 @@ vi.mock('@novnc/novnc', () => ({
     target: HTMLElement
     url: string
     addEventListener = vi.fn()
-    disconnect = vi.fn()
+    // Real noVNC fires its own 'disconnect' event when RFB.disconnect() is
+    // called (see node_modules/@novnc/novnc/docs/API.md ~L274-278) — replicate
+    // that here so tests can't pass by having a guard that's never exercised.
+    disconnect = vi.fn(function (this: any) {
+      const [, handler] = this.addEventListener.mock.calls.find((c: any[]) => c[0] === 'disconnect') ?? []
+      handler?.()
+    })
     sendCtrlAltDel = vi.fn()
     constructor(target: HTMLElement, url: string) {
       this.target = target
