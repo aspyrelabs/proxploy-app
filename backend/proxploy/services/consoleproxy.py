@@ -11,6 +11,13 @@ import websockets
 from proxploy.services.proxmox import open_validated_tcp_socket, tls_fingerprint_sha256
 
 
+class ConsoleProxyError(RuntimeError):
+    """Mirrors PtyBridgeError's role for the VNC path -- raised on a TLS-pin
+    mismatch so callers (api/consoles.py's vm_vnc_ws) can catch this
+    specifically and send the browser a clean signal instead of an unhandled
+    exception and a bare abnormal close."""
+
+
 async def connect_upstream_vnc(*, address: str, node: str, vmid: int,
                                 upstream_ticket: str, upstream_port: str,
                                 verify_tls: bool, tls_fingerprint: str | None,
@@ -18,18 +25,33 @@ async def connect_upstream_vnc(*, address: str, node: str, vmid: int,
     if ws_connect is None:
         url = urlparse(address)
         host = url.hostname
-        uri = (f"wss://{host}:8006/api2/json/nodes/{node}/qemu/{vmid}"
+        port = url.port or 8006  # match ProxmoxClient._connect's own fallback
+        uri = (f"wss://{host}:{port}/api2/json/nodes/{node}/qemu/{vmid}"
                f"/vncwebsocket?port={upstream_port}&vncticket={upstream_ticket}")
         if not verify_tls and tls_fingerprint:
-            seen = tls_fingerprint_sha256(host, 8006)
+            # Blocking socket/TLS I/O -- must not run directly on the event
+            # loop (a slow/unreachable PVE host would otherwise stall every
+            # other request this uvicorn worker is serving).
+            seen = await asyncio.to_thread(tls_fingerprint_sha256, host, port)
             if seen != tls_fingerprint.upper():
-                raise RuntimeError(
+                raise ConsoleProxyError(
                     f"TLS fingerprint mismatch: pinned {tls_fingerprint}, got {seen}")
         ctx = ssl.create_default_context() if verify_tls else ssl._create_unverified_context()
-        sock = open_validated_tcp_socket(host, 8006)
+        sock = await asyncio.to_thread(open_validated_tcp_socket, host, port)
         ws_connect = lambda: websockets.connect(
             uri, subprotocols=["binary"], sock=sock, ssl=ctx, server_hostname=host)
     return await ws_connect()
+
+
+async def _best_effort(coro) -> None:
+    """Same best-effort cleanup helper as ptybridge.py's -- kept local rather
+    than shared since each bridge's finally block is only two/three lines and
+    the two modules already duplicate this shape deliberately (see the
+    comments in bridge_binary/bridge_pty)."""
+    try:
+        await coro
+    except Exception:
+        pass
 
 
 async def bridge_binary(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None:
@@ -71,5 +93,9 @@ async def bridge_binary(browser_ws, upstream_ws, *, idle_timeout_s: float) -> No
     except (TimeoutError, websockets.ConnectionClosed):
         pass
     finally:
-        await browser_ws.close()
-        await upstream_ws.close()
+        # Isolated best-effort steps -- see ptybridge.bridge_pty's identical
+        # comment: if the browser is already gone, close() raising here must
+        # not prevent upstream_ws.close() from running (a live VNC/termproxy
+        # session leaking per abandoned tab otherwise).
+        await _best_effort(browser_ws.close())
+        await _best_effort(upstream_ws.close())

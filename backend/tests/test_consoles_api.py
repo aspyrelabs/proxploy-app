@@ -1,7 +1,9 @@
 """App console + VM VNC ticket/websocket routes (doc 05 Console rows, Task 5)."""
 import json
 
+import pytest
 from fastapi.testclient import TestClient
+from fastapi.websockets import WebSocketDisconnect
 
 from tests.fakes.pve import FakePVE
 from tests.support import make_app, seed_host_row
@@ -139,8 +141,10 @@ def test_console_ws_bridges_after_redeeming_ticket(tmp_path, csrf_header, bootst
                                  headers=csrf_header(client)).json()["ticket"]
 
             with client.websocket_connect(f"/api/v1/apps/{app_id}/console/ws?ticket={ticket}") as ws:
-                first = ws.receive_text()
-                assert first == "OK"
+                # No literal "OK" sentinel is sent (finding #7) -- the fake
+                # upstream here has no scripted output_lines, so there is no
+                # buffered prompt to flush either (finding #2); the first
+                # thing the browser should see is the echo of what it sends.
                 ws.send_text("ls\n")
                 echoed = ws.receive_text()
                 assert "echo:ls" in echoed
@@ -190,3 +194,100 @@ def test_shell_ticket_mints_after_toggling_on_and_audits(tmp_path, csrf_header, 
             from proxploy.models import AuditEvent
             row = db.query(AuditEvent).filter_by(action="console.open").one()
             assert row.target_type == "host" and row.target_id == host_id
+
+
+def test_mismatched_ticket_kind_is_rejected(tmp_path, csrf_header, bootstrap_admin):
+    """Finding #14: an app_console ticket must not be redeemable at the
+    node-shell WS route (or vice versa) just because _run_pty_ws is shared
+    and would otherwise permissively dispatch on whatever kind it finds."""
+    fake = FakePVE()
+    fake.termproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:abc",
+                                "port": "5900", "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            a = _seed_app(db, host)
+            app_id, host_id = a.id, host.id
+        _seed_credential(app, host)
+
+        ticket = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                             headers=csrf_header(client)).json()["ticket"]
+
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(f"/api/v1/hosts/{host_id}/shell/ws?ticket={ticket}"):
+                pass
+
+
+def test_deleted_app_during_ticket_ttl_closes_cleanly_not_500(tmp_path, csrf_header, bootstrap_admin):
+    """Finding #17: if the App row a ticket points at is deleted during the
+    ticket's short TTL window, redemption must not AttributeError-crash on
+    `db.get(App, row.target_id).host_id` -- it should close with a clean
+    4404, same shape as an unknown/expired ticket."""
+    fake = FakePVE()
+    fake.termproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:abc",
+                                "port": "5900", "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            a = _seed_app(db, host)
+            app_id = a.id
+        _seed_credential(app, host)
+
+        ticket = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                             headers=csrf_header(client)).json()["ticket"]
+
+        with app.state.sessionmaker() as db:
+            from proxploy.models import App
+            db.query(App).filter_by(id=app_id).delete()
+            db.commit()
+
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(f"/api/v1/apps/{app_id}/console/ws?ticket={ticket}"):
+                pass
+
+
+def test_vm_vnc_ws_closes_with_reason_on_connect_upstream_vnc_error(tmp_path, csrf_header,
+                                                                     bootstrap_admin, monkeypatch):
+    """Finding #8: a ConsoleProxyError from connect_upstream_vnc (e.g. a
+    TLS-pin mismatch) must not be an unhandled exception / bare abnormal
+    close -- vm_vnc_ws should catch it and close with a code/reason the
+    browser can show."""
+    from proxploy.models import Vm
+
+    fake = FakePVE()
+    fake.vncproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:def",
+                              "port": "5902", "cert": "-----BEGIN CERTIFICATE-----...",
+                              "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            v = Vm(host_id=host.id, vmid=200, name="win11", status="running")
+            db.add(v)
+            db.commit()
+            vm_id = v.id
+        _seed_credential(app, host)
+
+        ticket = client.post(f"/api/v1/vms/{vm_id}/console/tickets",
+                             headers=csrf_header(client)).json()["ticket"]
+
+        import proxploy.api.consoles as consoles_mod
+        from proxploy.services.consoleproxy import ConsoleProxyError
+
+        async def boom(**kwargs):
+            raise ConsoleProxyError("TLS fingerprint mismatch: pinned AA, got BB")
+        monkeypatch.setattr(consoles_mod, "connect_upstream_vnc", boom)
+
+        # accept() already happened by this point (host resolution succeeded),
+        # so the reject is a close *after* handshake, not a denial during
+        # it -- receive_bytes() is what surfaces that as WebSocketDisconnect.
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(f"/api/v1/vms/{vm_id}/vnc/ws?ticket={ticket}") as ws:
+                ws.receive_bytes()
+        assert exc_info.value.code == 1011
+        assert "mismatch" in exc_info.value.reason

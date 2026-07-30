@@ -136,3 +136,45 @@ def test_bridge_binary_propagates_unexpected_task_exceptions():
         finally:
             await fake.stop()
     asyncio.run(run())
+
+
+def test_bridge_binary_closes_upstream_even_if_browser_side_raises():
+    """Same close-ordering leak as ptybridge's bridge_pty (see
+    test_ptybridge.py's identically-named test): the finally block used to
+    await browser_ws.close() then upstream_ws.close() sequentially with no
+    isolation -- if the browser is already gone, the first await raises and
+    upstream_ws.close() never runs, leaking a live VNC session upstream."""
+    async def run():
+        fake = FakeRfbUpstream()
+        url = await fake.start()
+        try:
+            upstream = await connect_upstream_vnc(
+                address="unused", node="pve1", vmid=200, upstream_ticket="PVEVNC:def",
+                upstream_port="5902", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda: websockets.connect(url, subprotocols=["binary"]),
+            )
+            await upstream.recv()  # consume the greeting
+
+            closed = {"upstream": False}
+            orig_close = upstream.close
+
+            async def tracking_close(*a, **k):
+                closed["upstream"] = True
+                await orig_close(*a, **k)
+            upstream.close = tracking_close
+
+            class BrowserGoneWs:
+                async def receive(self):
+                    return {"type": "websocket.disconnect"}
+
+                async def send_bytes(self, data):
+                    pass
+
+                async def close(self, code=1000):
+                    raise RuntimeError("browser already disconnected")
+
+            await bridge_binary(BrowserGoneWs(), upstream, idle_timeout_s=5.0)
+            assert closed["upstream"] is True
+        finally:
+            await fake.stop()
+    asyncio.run(run())

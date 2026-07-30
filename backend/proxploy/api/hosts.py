@@ -130,7 +130,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 def list_hosts(db=Depends(get_db), user: User = Depends(require_role("viewer"))):
     return [{"id": h.id, "name": h.name, "address": h.address,
              "node_name": h.node_name, "status": h.status,
-             "pve_version": h.pve_version,
+             "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]
 

@@ -32,7 +32,9 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.Column("redeemed_at", sa.DateTime(), nullable=True),
     )
-    op.create_index("ix_console_tickets_token_hash", "console_tickets", ["token_hash"])
+    # No separate op.create_index for token_hash: the column's unique=True
+    # above already creates one -- an explicit second index here would be
+    # redundant.
     with op.batch_alter_table("hosts") as batch:
         batch.add_column(sa.Column("node_shell_enabled", sa.Boolean(), nullable=False,
                                    server_default=sa.false()))
@@ -41,5 +43,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.batch_alter_table("hosts") as batch:
         batch.drop_column("node_shell_enabled")
-    op.drop_index("ix_console_tickets_token_hash", table_name="console_tickets")
     op.drop_table("console_tickets")

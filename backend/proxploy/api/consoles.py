@@ -15,7 +15,7 @@ from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.models import App, Host, HostCredential, User, Vm
 from proxploy.services import ptybridge
 from proxploy.services.audit import write_audit
-from proxploy.services.consoleproxy import bridge_binary, connect_upstream_vnc
+from proxploy.services.consoleproxy import ConsoleProxyError, bridge_binary, connect_upstream_vnc
 from proxploy.services.consoletickets import mint_ticket, redeem_ticket
 from proxploy.services.ptybridge import PtyBridgeError, bridge_pty
 from proxploy.services.proxmox import ProxmoxClient
@@ -65,33 +65,52 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
     return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
 
 
-# row.kind -> callable resolving the Host.id the ticket's node/guest lives on.
-# "node_shell" is Task 6's kind (a ticket minted directly against a host), kept
-# here so _run_pty_ws already dispatches on it without Task 6 touching this
-# function at all -- it only needs to add the POST/WS routes that mint that kind.
+# row.kind -> callable resolving the Host.id the ticket's node/guest lives on,
+# or None if the ticket's own target row was deleted during the ticket's TTL
+# window (a real race, not just theoretical -- doc 08's short TTL narrows but
+# doesn't close it). "node_shell" is Task 6's kind (a ticket minted directly
+# against a host), kept here so _run_pty_ws already dispatches on it without
+# Task 6 touching this function at all -- it only needs to add the POST/WS
+# routes that mint that kind.
+def _app_console_host_id(db, row):
+    a = db.get(App, row.target_id)
+    return a.host_id if a is not None else None
+
+
+def _node_shell_host_id(db, row):
+    return row.target_id
+
+
 _HOST_ID_RESOLVERS = {
-    "app_console": lambda db, row: db.get(App, row.target_id).host_id,
-    "node_shell": lambda db, row: row.target_id,
+    "app_console": _app_console_host_id,
+    "node_shell": _node_shell_host_id,
 }
 
 
-async def _run_pty_ws(websocket: WebSocket, ticket: str | None):
+async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *, expected_kind: str):
     if ticket is None:
         await websocket.close(code=4401)
         return
     db = websocket.app.state.sessionmaker()
     try:
         row = redeem_ticket(db, ticket)
-        resolver = _HOST_ID_RESOLVERS.get(row.kind) if row is not None else None
-        if resolver is None:
+        if row is None or row.kind != expected_kind:
             # No row, or a ticket minted for a different kind of console (e.g. a
-            # vm_vnc ticket replayed here) -- reject the same way an absent/expired
-            # ticket does, rather than KeyError-ing on the dict lookup below.
+            # node_shell ticket redeemed at /apps/{id}/console/ws) -- reject the
+            # same way an absent/expired ticket does, never trusting a ticket
+            # kind this route didn't itself mint.
             await websocket.close(code=4401)
             return
-        host = db.get(Host, resolver(db, row))
+        host_id = _HOST_ID_RESOLVERS[row.kind](db, row)
+        host = db.get(Host, host_id) if host_id is not None else None
     finally:
         db.close()
+    if host is None:
+        # The app/host row this ticket points at was deleted during the
+        # ticket's short TTL window -- a clean 404-equivalent close, not an
+        # AttributeError crash.
+        await websocket.close(code=4404)
+        return
     await websocket.accept()
     try:
         # Module-qualified call (not a bare name from a `from-import`) so that
@@ -100,7 +119,7 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None):
         # keep pointing at the original function no matter what the test
         # reassigns on the module, and silently exercise the real wss:// path
         # instead of the fake upstream.
-        upstream = await ptybridge.connect_upstream_pty(
+        upstream, buffered = await ptybridge.connect_upstream_pty(
             address=host.address, node=row.node, guest_kind=row.guest_kind, vmid=row.vmid,
             upstream_user=row.upstream_user, upstream_ticket=row.upstream_ticket,
             upstream_port=row.upstream_port, verify_tls=host.verify_tls,
@@ -109,7 +128,11 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None):
         await websocket.send_text(jsonlib.dumps({"type": "exit", "code": 1, "error": str(e)}))
         await websocket.close()
         return
-    await websocket.send_text("OK")
+    if buffered:
+        # Whatever PTY output was already buffered upstream (e.g. the shell
+        # prompt) -- never a literal "OK" sentinel, which used to land as
+        # garbage in the user's terminal.
+        await websocket.send_text(buffered)
     idle_s = websocket.app.state.settings.console_idle_timeout_s
     try:
         await bridge_pty(websocket, upstream, idle_timeout_s=idle_s)
@@ -119,7 +142,7 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None):
 
 @router.websocket("/apps/{app_id}/console/ws")
 async def app_console_ws(websocket: WebSocket, app_id: int, ticket: str | None = None):
-    await _run_pty_ws(websocket, ticket)
+    await _run_pty_ws(websocket, ticket, expected_kind="app_console")
 
 
 @router.post("/hosts/{host_id}/shell/tickets",
@@ -149,7 +172,7 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
 
 @router.websocket("/hosts/{host_id}/shell/ws")
 async def node_shell_ws(websocket: WebSocket, host_id: int, ticket: str | None = None):
-    await _run_pty_ws(websocket, ticket)
+    await _run_pty_ws(websocket, ticket, expected_kind="node_shell")
 
 
 @router.post("/vms/{vm_id}/console/tickets",
@@ -188,14 +211,26 @@ async def vm_vnc_ws(websocket: WebSocket, vm_id: int, ticket: str | None = None)
             await websocket.close(code=4401)
             return
         v = db.get(Vm, row.target_id)
-        host = db.get(Host, v.host_id)
+        host = db.get(Host, v.host_id) if v is not None else None
     finally:
         db.close()
+    if host is None:
+        # The VM row this ticket points at was deleted during the ticket's
+        # short TTL window -- a clean 404-equivalent close, not an
+        # AttributeError crash on `v.host_id`.
+        await websocket.close(code=4404)
+        return
     await websocket.accept()
-    upstream = await connect_upstream_vnc(
-        address=host.address, node=row.node, vmid=row.vmid,
-        upstream_ticket=row.upstream_ticket, upstream_port=row.upstream_port,
-        verify_tls=host.verify_tls, tls_fingerprint=host.tls_fingerprint)
+    try:
+        upstream = await connect_upstream_vnc(
+            address=host.address, node=row.node, vmid=row.vmid,
+            upstream_ticket=row.upstream_ticket, upstream_port=row.upstream_port,
+            verify_tls=host.verify_tls, tls_fingerprint=host.tls_fingerprint)
+    except ConsoleProxyError as e:
+        # VNC has no JSON control-frame channel like PtyBridge's exit frame --
+        # the close code/reason is the only signal available to the browser.
+        await websocket.close(code=1011, reason=str(e))
+        return
     idle_s = websocket.app.state.settings.console_idle_timeout_s
     try:
         await bridge_binary(websocket, upstream, idle_timeout_s=idle_s)

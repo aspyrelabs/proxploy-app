@@ -137,6 +137,21 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     return _app_out(a, host, request.app.state.poller.snapshots)
 
 
+@router.get("/{app_id}/logs")
+def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(require_role("viewer"))):
+    """Doc 05: 'Recent CT log lines (journal tail via pct exec / console
+    channel)'. No such exec/journal channel exists anywhere in this codebase
+    yet -- services/lifecycle.py and executor/ only ever run install/update
+    scripts over SSH on the HOST, never a command inside a guest CT, and
+    ProxmoxClient has no pct-exec-equivalent call. Rather than fabricate log
+    lines, this is a real, deliberate 501 so the frontend can render an honest
+    gap (see AppLogs) instead of silently polling a 404 forever."""
+    if db.get(App, app_id) is None:
+        raise HTTPException(404, "app not found")
+    raise HTTPException(501, "CT log tailing is not implemented yet — there is no "
+                             "journal/exec channel to the guest in this backend")
+
+
 def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
     """Doc 05/10: diff the pinned app_scripts row against the *current*
     catalog_entries.raw.install_script for this app's catalog_slug — not just

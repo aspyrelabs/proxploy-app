@@ -27,6 +27,7 @@ class FakeXtermUpstream:
         self.received_auth_line: str | None = None
         self.received_frames: list[str] = []
         self.received_resizes: list[tuple[int, int]] = []
+        self.keepalive_count = 0
         self._server = None
 
     async def _handler(self, ws):
@@ -40,6 +41,7 @@ class FakeXtermUpstream:
         try:
             async for frame in ws:
                 if frame == "2":
+                    self.keepalive_count += 1
                     continue  # keepalive, no reply
                 if frame.startswith("1:"):
                     _, cols, rows, _ = frame.split(":", 3)

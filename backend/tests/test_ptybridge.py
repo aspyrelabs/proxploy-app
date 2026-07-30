@@ -6,26 +6,32 @@ import pytest
 import websockets
 
 from proxploy.services.ptybridge import PtyBridgeError, bridge_pty, connect_upstream_pty
+import proxploy.services.ptybridge as ptybridge_mod
 from tests.fakes.pve_ws import FakeXtermUpstream
 
 
-async def _connect_direct(url):
-    """Bypass the SSRF/TLS-pinning wrapper for handshake-only tests — a plain
-    ws:// loopback fake server, so this exercises connect_upstream_pty's
-    protocol logic without also re-testing Task 1's already-covered TLS path."""
-    return await websockets.connect(url, subprotocols=["binary"])
-
-
 def test_handshake_succeeds_and_flushes_buffered_output():
+    """Regression test for the bug where connect_upstream_pty discarded
+    everything after the literal "OK" prefix: Proxmox's first server->client
+    frame on a successful handshake is "OK" immediately followed by any
+    already-buffered PTY output (e.g. the shell prompt) -- that buffered text
+    is real output the caller must forward to the browser, not something to
+    throw away. This calls connect_upstream_pty itself (not a raw
+    `websockets.connect`) so it actually exercises -- and can fail against --
+    the production handshake code."""
     async def run():
         fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n",
                                  output_lines=["Welcome\n"])
         url = await fake.start()
         try:
-            ws = await _connect_direct(url)
-            await ws.send("proxploy@pve!console:PVEVNC:abc\n")
-            first = await ws.recv()
-            assert first == "OKWelcome\n"
+            upstream, buffered = await connect_upstream_pty(
+                address="unused", node="pve1", guest_kind="lxc", vmid=150,
+                upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
+                upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda *a, **k: websockets.connect(url, subprotocols=["binary"]),
+            )
+            assert buffered == "Welcome\n"
+            await upstream.close()
         finally:
             await fake.stop()
     asyncio.run(run())
@@ -53,7 +59,7 @@ def test_bridge_pty_translates_resize_and_keystrokes():
         fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n")
         url = await fake.start()
         try:
-            upstream = await connect_upstream_pty(
+            upstream, _buffered = await connect_upstream_pty(
                 address="unused", node="pve1", guest_kind="lxc", vmid=150,
                 upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
                 upstream_port="5900", verify_tls=True, tls_fingerprint=None,
@@ -117,7 +123,7 @@ def test_bridge_pty_reports_exit_code_1_on_abnormal_upstream_close():
                                   abort_after_frames=1)
         url = await fake.start()
         try:
-            upstream = await connect_upstream_pty(
+            upstream, _buffered = await connect_upstream_pty(
                 address="unused", node="pve1", guest_kind="lxc", vmid=150,
                 upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
                 upstream_port="5900", verify_tls=True, tls_fingerprint=None,
@@ -158,6 +164,128 @@ def test_bridge_pty_reports_exit_code_1_on_abnormal_upstream_close():
             assert elapsed < 5.0, "took the idle-timeout path, not the abnormal-close path"
             assert sent, "browser never received an exit frame"
             assert json.loads(sent[-1]) == {"type": "exit", "code": 1}
+        finally:
+            await fake.stop()
+    asyncio.run(run())
+
+
+def test_bridge_pty_sends_periodic_keepalive(monkeypatch):
+    """Proxmox's own pve-xtermjs client sends a bare "2" every 30s so idle
+    PVE-side timeouts don't fire under a silent terminal (plan's wire-protocol
+    note) -- bridge_pty must do the same. KEEPALIVE_INTERVAL_S is monkeypatched
+    down so this doesn't need a real 30s wait."""
+    monkeypatch.setattr(ptybridge_mod, "KEEPALIVE_INTERVAL_S", 0.05)
+
+    async def run():
+        fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n")
+        url = await fake.start()
+        try:
+            upstream, _buffered = await connect_upstream_pty(
+                address="unused", node="pve1", guest_kind="lxc", vmid=150,
+                upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
+                upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda *a, **k: websockets.connect(url, subprotocols=["binary"]),
+            )
+
+            class FakeBrowserWs:
+                async def receive(self):
+                    await asyncio.sleep(0.3)
+                    return {"type": "websocket.disconnect"}
+
+                async def send_text(self, data):
+                    pass
+
+                async def close(self, code=1000):
+                    pass
+
+            await bridge_pty(FakeBrowserWs(), upstream, idle_timeout_s=5.0)
+            assert fake.keepalive_count >= 3
+        finally:
+            await fake.stop()
+    asyncio.run(run())
+
+
+def test_bridge_pty_closes_upstream_even_if_browser_side_raises():
+    """Regression test for the close-ordering leak: the finally block used to
+    await browser_ws.send_text(...) then browser_ws.close() then
+    upstream_ws.close() sequentially with no isolation -- if the browser is
+    already gone (common: user just closed the tab) the first await raises
+    and upstream_ws.close() never runs, leaking a live Proxmox termproxy
+    session. Proves upstream_ws.close() still runs even when every browser-
+    side step raises."""
+    async def run():
+        fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n")
+        url = await fake.start()
+        try:
+            upstream, _buffered = await connect_upstream_pty(
+                address="unused", node="pve1", guest_kind="lxc", vmid=150,
+                upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
+                upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda *a, **k: websockets.connect(url, subprotocols=["binary"]),
+            )
+            closed = {"upstream": False}
+            orig_close = upstream.close
+
+            async def tracking_close(*a, **k):
+                closed["upstream"] = True
+                await orig_close(*a, **k)
+            upstream.close = tracking_close
+
+            class BrowserGoneWs:
+                async def receive(self):
+                    return {"type": "websocket.disconnect"}
+
+                async def send_text(self, data):
+                    raise RuntimeError("browser already disconnected")
+
+                async def close(self, code=1000):
+                    raise RuntimeError("browser already disconnected")
+
+            await bridge_pty(BrowserGoneWs(), upstream, idle_timeout_s=5.0)
+            assert closed["upstream"] is True
+        finally:
+            await fake.stop()
+    asyncio.run(run())
+
+
+def test_bridge_pty_ignores_malformed_resize_instead_of_crashing():
+    """Trust-boundary validation: a malformed {"type":"resize"} (missing
+    cols/rows) must not KeyError-crash the bridge, and a payload with
+    non-numeric cols/rows must never be forwarded verbatim into Proxmox's
+    line-oriented "1:{cols}:{rows}:" control channel."""
+    async def run():
+        fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n")
+        url = await fake.start()
+        try:
+            upstream, _buffered = await connect_upstream_pty(
+                address="unused", node="pve1", guest_kind="lxc", vmid=150,
+                upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
+                upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda *a, **k: websockets.connect(url, subprotocols=["binary"]),
+            )
+            recv_calls = []
+
+            class FakeBrowserWs:
+                async def receive(self):
+                    n = len(recv_calls)
+                    recv_calls.append(None)
+                    if n == 0:
+                        return {"type": "websocket.receive", "text": '{"type":"resize"}'}
+                    if n == 1:
+                        return {"type": "websocket.receive",
+                                "text": '{"type":"resize","cols":"80:24:\\ninjected","rows":40}'}
+                    return {"type": "websocket.disconnect"}
+
+                async def send_text(self, data):
+                    pass
+
+                async def close(self, code=1000):
+                    pass
+
+            # Must not raise (no KeyError/ValueError escaping bridge_pty).
+            await bridge_pty(FakeBrowserWs(), upstream, idle_timeout_s=5.0)
+            assert fake.received_resizes == []
+            assert fake.received_frames == []
         finally:
             await fake.stop()
     asyncio.run(run())
