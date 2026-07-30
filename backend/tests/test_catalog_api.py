@@ -1,6 +1,5 @@
 from proxploy.models import CatalogEntry
 from tests.conftest import client  # noqa: F401 fixture
-from tests.support import make_db
 
 
 def _seed_entry(db, **overrides):

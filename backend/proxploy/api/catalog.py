@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from proxploy.api.deps import get_db, require_role
+from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
 from proxploy.models import CatalogEntry, User
+from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
+
+# Reused as BOTH the route-level dependency and the parameter-level one below
+# so FastAPI's dependency cache (keyed on the callable) collapses them into a
+# single call, and so `require_entitlement` in `dependencies=[...]` runs AFTER
+# auth/role rather than at position 0 — a bare `Depends(require_entitlement(...))`
+# there would leak 403 to an anonymous caller who should see 401 (same fix as
+# jobs.py/apps.py/vms.py/notifications.py; see their comments).
+_require_viewer = require_role("viewer")
+_require_admin = require_role("admin")
 
 
 def _serialize(r: CatalogEntry) -> dict:
@@ -24,9 +34,10 @@ def _serialize(r: CatalogEntry) -> dict:
     }
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(_require_viewer),
+                              Depends(require_entitlement("store.catalog"))])
 def list_catalog(category: str | None = None, q: str | None = None,
-                 db=Depends(get_db), user: User = Depends(require_role("viewer"))):
+                 db=Depends(get_db), user: User = Depends(_require_viewer)):
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
@@ -35,18 +46,23 @@ def list_catalog(category: str | None = None, q: str | None = None,
     return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
 
 
-@router.get("/{slug}")
+@router.get("/{slug}", dependencies=[Depends(_require_viewer),
+                                     Depends(require_entitlement("store.catalog"))])
 def get_catalog_entry(slug: str, db=Depends(get_db),
-                      user: User = Depends(require_role("viewer"))):
+                      user: User = Depends(_require_viewer)):
     row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
     if row is None:
         raise HTTPException(404, "not found")
     return _serialize(row) | {"raw": row.raw}
 
 
-@router.post("/refresh", status_code=202)
+@router.post("/refresh", status_code=202,
+             dependencies=[Depends(_require_admin),
+                          Depends(require_entitlement("store.refresh"))])
 def refresh_catalog(request: Request, db=Depends(get_db),
-                    user: User = Depends(require_role("admin"))):
+                    user: User = Depends(_require_admin)):
     job = request.app.state.jobs.enqueue(db, kind="catalog.refresh",
                                          requested_by=user.id)
+    write_audit(db, actor_type="user", actor_id=user.id, action="catalog.refresh",
+                job_id=job.id, ip=request.client.host if request.client else None)
     return {"job": job_out(job)}
