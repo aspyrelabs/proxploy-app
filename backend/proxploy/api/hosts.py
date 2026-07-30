@@ -145,6 +145,7 @@ def host_detail(host_id: int, db=Depends(get_db),
     return {"id": h.id, "name": h.name, "address": h.address,
             "node_name": h.node_name, "status": h.status,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
+            "node_shell_enabled": h.node_shell_enabled,
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": c.last_used_at.isoformat()
                              if c.last_used_at else None} for c in creds]}

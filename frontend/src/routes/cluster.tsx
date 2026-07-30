@@ -1,10 +1,13 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, useParams } from '@tanstack/react-router'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
-import { useMetrics } from '../api/hooks'
+import { useEntitlements, useMetrics } from '../api/hooks'
+import { consoleWsUrl, useConsoleTicket } from '../api/consoles'
 import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
+import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LivePulse } from '../components/LiveProvider'
@@ -12,6 +15,7 @@ import { NodeCard } from '../components/NodeCard'
 import { Sparkline } from '../components/charts/Sparkline'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
+import { Terminal } from '../components/terminal/Terminal'
 import { fmtBps, fmtBytes, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -139,11 +143,49 @@ export function ClusterPage() {
   )
 }
 
+// Minimal slice of GET /hosts/{id} — this page only needs the opt-in flag;
+// the fleet-overview fields (status, uptime, etc.) already come from `node`.
+type HostDetail = { id: number; name: string; node_shell_enabled: boolean }
+
+function useHostDetail(id: number) {
+  return useQuery({
+    queryKey: ['hosts', id],
+    queryFn: () => api<HostDetail>(`/hosts/${id}`),
+    enabled: Number.isFinite(id),
+  })
+}
+
+function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeShellEnabled: boolean }) {
+  const ent = useEntitlements()
+  const [open, setOpen] = useState(false)
+  const ticket = useConsoleTicket('host', hostId)
+  const allowed = ent.has('terminal.node') && nodeShellEnabled
+  if (open && ticket.data) {
+    return (
+      <Terminal key={ticket.data.ticket}
+        wsUrl={consoleWsUrl('host', hostId, ticket.data.ticket)}
+        onDrop={() => ticket.mutate()} />
+    )
+  }
+  return (
+    <div className={card}>
+      <h2 className="mb-2 text-[13px] uppercase text-text-3">Node shell</h2>
+      <Button variant="ghost" disabled={!allowed}
+        title={!ent.has('terminal.node') ? 'Pro — Node shells'
+             : !nodeShellEnabled ? 'Enable node shell in host settings first' : undefined}
+        onClick={() => { setOpen(true); ticket.mutate() }}>
+        Open node shell
+      </Button>
+    </div>
+  )
+}
+
 export function NodeDetailPage() {
   const { hostId } = useParams({ strict: false }) as { hostId: string }
   const id = Number(hostId)
   const { data: nodes } = useNodes()
   const node = nodes?.find((n) => n.host_id === id)
+  const { data: host } = useHostDetail(id)
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   const mem = useMetrics(`host:${id}`, 'mem_bytes', 24)
   const { data: apps } = useQuery({
@@ -156,37 +198,46 @@ export function NodeDetailPage() {
     queryFn: () => api<VmRow[]>(`/vms?host=${id}`),
     refetchInterval: 30_000,
   })
-  if (!node) return <EmptyState title="Node not found" note="It may have been removed." />
+  if (!node && !host) return <EmptyState title="Node not found" note="It may have been removed." />
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="font-mono text-[20px] font-semibold">{node.name}</h1>
-          <div className="text-[12px] text-text-3">
-            {node.cluster ? `cluster · ${node.cluster}` : 'standalone'} · PVE {node.pve_version ?? '?'}
+          <h1 className="font-mono text-[20px] font-semibold">{node?.name ?? host?.name}</h1>
+          {node && (
+            <div className="text-[12px] text-text-3">
+              {node.cluster ? `cluster · ${node.cluster}` : 'standalone'} · PVE {node.pve_version ?? '?'}
+            </div>
+          )}
+        </div>
+        {node && <StatusPill status={node.status} />}
+      </div>
+      {node && (
+        <>
+          <div className={card}>
+            <KVGrid items={[
+              ['Node', node.node],
+              ['PVE version', node.pve_version ?? '—'],
+              ['Uptime', fmtUptime(node.uptime_s)],
+              ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
+              ['Apps', `${node.apps_running}/${node.apps} running`],
+              ['VMs', `${node.vms_running}/${node.vms} running`],
+            ]} />
           </div>
-        </div>
-        <StatusPill status={node.status} />
-      </div>
-      <div className={card}>
-        <KVGrid items={[
-          ['Node', node.node],
-          ['PVE version', node.pve_version ?? '—'],
-          ['Uptime', fmtUptime(node.uptime_s)],
-          ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
-          ['Apps', `${node.apps_running}/${node.apps} running`],
-          ['VMs', `${node.vms_running}/${node.vms} running`],
-        ]} />
-      </div>
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className={card}>
-          <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
-          <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
-        </div>
-        <div className={card}>
-          <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
-          <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
-        </div>
+          <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className={card}>
+              <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
+              <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
+            </div>
+            <div className={card}>
+              <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
+              <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
+            </div>
+          </div>
+        </>
+      )}
+      <div className="mt-5">
+        <NodeShellSection hostId={id} nodeShellEnabled={host?.node_shell_enabled ?? false} />
       </div>
       <div className="mt-5">
         <h2 className="mb-3 font-display text-[16px] font-semibold">
