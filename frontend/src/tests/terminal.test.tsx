@@ -1,6 +1,9 @@
 import { render, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Terminal } from '../components/terminal/Terminal'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+vi.mock('../api/client', () => ({ api: vi.fn().mockResolvedValue({ ticket: 'tix', expires_at: '2026-01-01T00:00:00Z' }) }))
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
@@ -49,5 +52,19 @@ describe('Terminal', () => {
     onDrop.mockClear()
     unmount()  // cleanup also calls ws.close(), which must NOT re-fire onDrop
     expect(onDrop).not.toHaveBeenCalled()
+  })
+})
+
+describe('AppConsole', () => {
+  it('requests a ticket on mount and opens the terminal at the ticketed url', async () => {
+    const { AppConsole } = await import('../routes/apps')
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <AppConsole appId={42} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+    expect(FakeWebSocket.instances[0].url).toContain('/apps/42/console/ws?ticket=tix')
   })
 })

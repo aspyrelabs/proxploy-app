@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { useConsoleTicket, consoleWsUrl } from '../api/consoles'
 import type { AppRow, DiscoveredRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
@@ -9,6 +10,7 @@ import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
+import { Terminal } from '../components/terminal/Terminal'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { RAM_GRADIENT, UsageBar } from '../components/UsageBar'
@@ -271,10 +273,27 @@ export const appOverviewRoute = createRoute({
   path: '/',
   component: AppOverview,
 })
+export function AppConsole({ appId }: { appId: number }) {
+  const ticket = useConsoleTicket('app', appId)
+  useEffect(() => { ticket.mutate() }, [appId])
+  if (!ticket.data) return <EmptyState title="Opening console…" note="" />
+  return (
+    <Terminal key={ticket.data.ticket}
+      wsUrl={consoleWsUrl('app', appId, ticket.data.ticket)}
+      onDrop={() => ticket.mutate()} />
+  )
+}
+
+function AppConsoleTab() {
+  const { appId } = useParams({ strict: false }) as { appId: string }
+  return <AppConsole appId={Number(appId)} />
+}
+
 export const appLogsRoute = phaseTab('logs', 'Phase 5 (Console)',
   'Live CT logs share the log-viewer with job transcripts.')
-export const appConsoleRoute = phaseTab('console', 'Phase 5 (Console)',
-  'xterm.js over the proxied Proxmox termproxy websocket.')
+export const appConsoleRoute = createRoute({
+  getParentRoute: () => appDetailRoute, path: 'console', component: AppConsoleTab,
+})
 
 const AppConfigTab = () => {
   const { appId } = useParams({ strict: false }) as { appId: string }

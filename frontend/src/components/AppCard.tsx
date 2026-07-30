@@ -3,6 +3,7 @@ import type { AppRow } from '../api/hooks'
 import { fmtPct } from '../lib/format'
 import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
+import { Button } from './ui/button'
 import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
 
 function initials(app: AppRow): string {
@@ -53,8 +54,12 @@ export function AppCard({ app }: { app: AppRow }) {
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(memPct)}</span>
         </div>
       </div>
-      <div className="mt-3 border-t border-line-soft pt-3" onClick={(e) => e.stopPropagation()}>
+      <div className="mt-3 border-t border-line-soft pt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} size="sm" />
+        <Button variant="ghost" className="px-2 py-1 text-[11px]"
+          onClick={() => navigate({ to: '/apps/$appId/console' as never, params: { appId: String(app.id) } as never })}>
+          Console
+        </Button>
       </div>
     </div>
   )
