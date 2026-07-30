@@ -13,10 +13,17 @@ class FakeXtermUpstream:
     would for API-token auth (doc's spike-correction note)."""
 
     def __init__(self, expected_auth_line: str, output_lines: list[str] | None = None,
-                 reject: bool = False):
+                 reject: bool = False, abort_after_frames: int | None = None):
         self.expected_auth_line = expected_auth_line
         self.output_lines = output_lines or []
         self.reject = reject
+        # If set, raise inside the handler after this many `0:` data frames
+        # instead of echoing -- an unhandled handler exception makes
+        # `websockets` close the connection with code 1011 and no clean
+        # handshake, so the client observes ConnectionClosedError (abnormal
+        # close), not ConnectionClosedOK. Used to test bridge_pty's
+        # abnormal-termination path (exit_code=1).
+        self.abort_after_frames = abort_after_frames
         self.received_auth_line: str | None = None
         self.received_frames: list[str] = []
         self.received_resizes: list[tuple[int, int]] = []
@@ -41,6 +48,9 @@ class FakeXtermUpstream:
                 if frame.startswith("0:"):
                     _, _length, data = frame.split(":", 2)
                     self.received_frames.append(data)
+                    if (self.abort_after_frames is not None
+                            and len(self.received_frames) >= self.abort_after_frames):
+                        raise RuntimeError("simulated abnormal upstream close")
                     await ws.send(f"echo:{data}")
         except websockets.ConnectionClosed:
             pass

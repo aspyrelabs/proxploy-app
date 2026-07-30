@@ -1,4 +1,6 @@
 import asyncio
+import json
+import time
 
 import pytest
 import websockets
@@ -96,6 +98,66 @@ def test_bridge_pty_translates_resize_and_keystrokes():
             assert fake.received_frames == ["ls\n"]
             assert any("echo:ls" in s for s in sent)
             assert closed
+        finally:
+            await fake.stop()
+    asyncio.run(run())
+
+
+def test_bridge_pty_reports_exit_code_1_on_abnormal_upstream_close():
+    """Regression test for the asyncio.wait() exception-swallowing bug: a
+    task's exception raised inside asyncio.wait()'s task set is never
+    propagated to the awaiting coroutine unless explicitly retrieved via
+    task.exception(). The fake upstream here raises inside its handler after
+    one frame, which makes `websockets` close the connection abnormally
+    (code 1011, no clean handshake) -- `from_upstream`'s `async for` then
+    raises ConnectionClosedError instead of just ending the iteration. Proves
+    bridge_pty distinguishes this from a clean close (exit_code=1, not 0)."""
+    async def run():
+        fake = FakeXtermUpstream(expected_auth_line="proxploy@pve!console:PVEVNC:abc\n",
+                                  abort_after_frames=1)
+        url = await fake.start()
+        try:
+            upstream = await connect_upstream_pty(
+                address="unused", node="pve1", guest_kind="lxc", vmid=150,
+                upstream_user="proxploy@pve!console", upstream_ticket="PVEVNC:abc",
+                upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+                ws_connect=lambda *a, **k: websockets.connect(url, subprotocols=["binary"]),
+            )
+
+            sent = []
+
+            class FakeBrowserWs:
+                def __init__(self):
+                    self._sent_keystroke = False
+
+                async def receive(self):
+                    if not self._sent_keystroke:
+                        self._sent_keystroke = True
+                        return {"type": "websocket.receive", "text": "ls\n"}
+                    # Block far longer than the abnormal close should take,
+                    # so this task is still in-flight (and gets cancelled)
+                    # when from_upstream's ConnectionClosedError wins
+                    # FIRST_COMPLETED -- not because the idle timeout fired.
+                    await asyncio.Event().wait()
+
+                async def send_text(self, data):
+                    sent.append(data)
+
+                async def close(self, code=1000):
+                    pass
+
+            start = time.monotonic()
+            # Generous idle_timeout_s: if the abnormal-close detection ever
+            # regresses back to the dead-code exception-swallowing bug, the
+            # bridge would instead fall through to this timeout, and the
+            # elapsed-time assertion below would catch that.
+            await bridge_pty(FakeBrowserWs(), upstream, idle_timeout_s=30.0)
+            elapsed = time.monotonic() - start
+
+            assert fake.received_frames == ["ls\n"]
+            assert elapsed < 5.0, "took the idle-timeout path, not the abnormal-close path"
+            assert sent, "browser never received an exit frame"
+            assert json.loads(sent[-1]) == {"type": "exit", "code": 1}
         finally:
             await fake.stop()
     asyncio.run(run())
