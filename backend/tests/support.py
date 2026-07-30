@@ -23,7 +23,7 @@ def seed_host_row(db, name="host-01", node="pve1", status="connected"):
     return h
 
 
-def make_app(tmp_path, fake=None, **overrides):
+def make_app(tmp_path, fake=None, ssh_factory=None, **overrides):
     """App with poller/metrics loops OFF by default; FakePVE optional."""
     from proxploy.api.auth import limiter
     from proxploy.config import Settings
@@ -34,6 +34,8 @@ def make_app(tmp_path, fake=None, **overrides):
     if fake is not None:
         from tests.fakes.pve import make_fake_factory
         kwargs["proxmox_factory"] = make_fake_factory(fake)
+    if ssh_factory is not None:
+        kwargs["ssh_factory"] = ssh_factory
     overrides.setdefault("poll_enabled", False)
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key", **overrides)
@@ -50,7 +52,7 @@ def seed_snapshot(app, host_id, **kw):
     return snap
 
 
-def make_job_app(tmp_path, fake=None):
+def make_job_app(tmp_path, fake=None, ssh_factory=None):
     """Minimal app-shaped namespace for JobBackend/handler unit tests.
 
     MUST be called from inside a running event loop — `state.loop` is the
@@ -78,6 +80,7 @@ def make_job_app(tmp_path, fake=None):
         bus=EventBus(),
         loop=asyncio.get_running_loop(),
         proxmox_factory=factory,
+        ssh_connect_factory=ssh_factory,
         secretstore=SecretStore(s.master_key_file),
         jobs=None,
     )

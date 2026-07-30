@@ -113,6 +113,7 @@ class Host(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(Text, default="connected", nullable=False)
     pve_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(Text)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
 
 

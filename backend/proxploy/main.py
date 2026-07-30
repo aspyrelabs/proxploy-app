@@ -18,6 +18,7 @@ def create_app(
     *,
     public_keys: dict[str, str] | None = None,
     proxmox_factory=None,
+    ssh_factory=None,
     license_client=None,
 ) -> FastAPI:
     settings = settings or get_settings()
@@ -35,6 +36,8 @@ def create_app(
         db_exists = settings.db_url.startswith("sqlite") and Path(db_file).exists()
         SecretStore.ensure_key_file(settings.master_key_file, db_file_exists=db_exists)
         app.state.secretstore = SecretStore(settings.master_key_file)
+        from proxploy.executor.ssh import default_connect_factory
+        app.state.ssh_connect_factory = ssh_factory or default_connect_factory
         run_migrations(settings)
         app.state.engine = make_engine(settings)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
