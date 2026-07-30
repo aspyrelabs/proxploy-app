@@ -114,6 +114,7 @@ class Host(TimestampMixin, Base):
     pve_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
     ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(Text)
+    node_shell_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
 
 
@@ -435,6 +436,29 @@ class AuditEvent(Base):
         Index("ix_audit_actor", "actor_type", "actor_id", "ts"),
         Index("ix_audit_target", "target_type", "target_id", "ts"),
     )
+
+
+class ConsoleTicket(Base):
+    """Single-use, short-TTL. Only `token_hash` is stored — never the raw,
+    browser-facing ticket (SessionRow's exact pattern, doc 04). `upstream_ticket`
+    IS stored in the clear: it's Proxmox's own short-TTL ticket, never reaches
+    the browser (doc 02 §5), and is meaningless without a live upstream socket
+    to present it to within its own few-second window."""
+    __tablename__ = "console_tickets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    node: Mapped[str] = mapped_column(Text, nullable=False)
+    guest_kind: Mapped[str | None] = mapped_column(Text)
+    vmid: Mapped[int | None] = mapped_column(Integer)
+    upstream_user: Mapped[str] = mapped_column(Text, nullable=False)
+    upstream_ticket: Mapped[str] = mapped_column(Text, nullable=False)
+    upstream_port: Mapped[str] = mapped_column(Text, nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class EntitlementCache(TimestampMixin, Base):

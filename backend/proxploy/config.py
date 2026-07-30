@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     poll_enabled: bool = True
     poll_interval_s: float = 30.0
     poll_timeout_s: float = 20.0
+    console_ticket_ttl_s: float = 30.0
+    console_idle_timeout_s: float = 1800.0
 
 
 @lru_cache
