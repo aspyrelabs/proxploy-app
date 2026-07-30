@@ -241,6 +241,40 @@ by any of the deviations above.
   `hosts.node_shell_enabled`) — nothing in this phase added Postgres-specific
   exercises beyond Phase 1/2's generic schema-portability CI leg.
 
+## Final whole-branch review — two parked findings
+
+The final review (after the 12 task-level reviews above) found 1 Critical +
+11 Important cross-task integration gaps — all fixed in one wave (see
+buildlog.md), raising the suite to 340 backend / 71 frontend tests. The
+scoped re-review of that fix wave found two of the fixes themselves
+introduce narrow new issues, both adjudicated as real-but-deferred (not
+blocking, nothing later in this phase depends on either):
+
+- **Keepalive teardown can skip the close-ordering fix's cleanup**
+  (`backend/proxploy/services/ptybridge.py:162-167`). The 30s keepalive task
+  added to satisfy the wire-protocol's keepalive requirement is torn down
+  with `except asyncio.CancelledError: pass` only — if the keepalive's own
+  `send("2")` had already failed with a different exception (e.g.
+  `websockets.ConnectionClosed`) right as teardown begins, that exception
+  re-raises through the `finally` block and skips the browser/upstream close
+  steps, reopening the same-shaped leak the close-ordering fix addressed.
+  Narrow window (requires the keepalive's own send to race the primary
+  teardown path within the same moment `from_upstream` notices the
+  closure — in most abnormal-close cases `from_upstream` gets there first).
+  Fix: wrap `await keepalive_task` the same best-effort way the other three
+  close steps already are.
+- **Reconnect give-up screen erases the actionable error it was built to
+  show** (`frontend/src/routes/apps.tsx`, `cluster.tsx`). `Terminal.tsx`
+  correctly renders `control.error` now, but a fatal `PtyBridgeError` (e.g.
+  the documented API-token-vs-termproxy PVE limitation) triggers the
+  reconnect cap's `giveUp()`, which immediately unmounts the `Terminal`
+  holding that message and replaces it with a generic "gave up after
+  repeated attempts" state — so the specific, actionable text is visible for
+  under a frame. Deterministic in the fatal-error case, UX/diagnostics-only
+  (the user still sees *some* failure indication). Fix: thread
+  `{fatal, error}` out of the reconnect hook's state and render `error` in
+  the give-up `EmptyState`'s note instead of the generic message.
+
 ## What Phase 9 (docs) should write
 
 - User-facing docs for the Console feature: what a console ticket is (a
