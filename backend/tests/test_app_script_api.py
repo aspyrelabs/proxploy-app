@@ -111,3 +111,23 @@ def test_upstream_moving_on_after_pin_also_surfaces_a_diff(client, csrf_header, 
     # stayed put, so v2 (upstream-only) is the "-" side; the important
     # assertion is that a diff exists at all despite no local edit.
     assert diff is not None and "-msg_ok done v2" in diff
+
+
+# --- I4: ordinary bad input must not surface as a raw 500 ---
+
+
+def test_put_script_without_content_is_a_422_not_a_500(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db).id
+
+    r = client.put(f"/api/v1/apps/{app_id}/script", json={},
+                   headers=csrf_header(client))
+    assert r.status_code == 422
+
+
+def test_put_script_for_an_unknown_app_is_a_404_not_a_500(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    r = client.put("/api/v1/apps/9999/script", json={"content": "x\n"},
+                   headers=csrf_header(client))
+    assert r.status_code == 404

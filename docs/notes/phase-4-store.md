@@ -13,6 +13,20 @@ until this phase) mechanically forbids any module outside `proxploy/executor/`
 from importing `asyncssh` or referencing `get_ssh_private_key` by name —
 enforced by an AST walk, not a convention.
 
+*Corrected in the final-review fix wave (Critical #1B):* `SSHExecutor.run`
+passed its `env` dict to asyncssh's `create_process(env=…)`, which sends each
+variable as an SSH protocol `env` channel request. Stock OpenSSH `sshd`
+silently discards every variable not listed in its `AcceptEnv` directive, and
+that directive is empty by default (only `LANG`/`LC_*` survive on most builds).
+So on a default-configured Proxmox node, `MODE`, `PHS_SILENT` and every `var_*`
+override vanished before `build.func` ever saw them, with no error anywhere —
+i.e. the whole "export `MODE=default` for a genuinely unattended install"
+design the Phase 4 spike's classifier work rests on did not work over a real
+SSH connection. `run` now composes the vars as a `shlex.quote`d
+`KEY=value … <command>` prefix on the command string itself and no longer
+passes `env=` to `create_process` at all. Fixed in the executor rather than at
+the `appstore.py` call site so every present and future caller gets it.
+
 **Install-feasibility classifier** — `backend/proxploy/services/classifier.py`,
 `classify_install_feasibility(ct_script, install_script) -> (bool, str | None)`.
 Mechanical, not a guess: every community-scripts install script runs under
@@ -22,16 +36,50 @@ defaulting. A prompt only counts as safe if it's env-var guarded or its `read`
 short-circuits via `||`. Also rejects any `ct/*.sh` that doesn't call
 `build_container` exactly once (multi-CT / docker-compose pattern).
 
+*Corrected in the final-review fix wave (I1):* prompt detection used to
+require a `-p`-shaped flag, so a bare `read ANSWER` or a `read -s PASS` — both
+of which block on stdin identically — were missed entirely. It now flags any
+`read` in command position, excluding the cases that plainly aren't prompts (a
+`while read` stream loop, an explicit `<` redirect, a `| read` pipe, a `read -u`
+non-stdin fd), matched against the line with quoted strings stripped so a `<`
+inside prompt text (`<y/N>`) isn't read as a redirect. Guard detection used to
+accept *any* `${X:-…}` within three lines above a prompt as a guard for that
+prompt; it now requires the guard to name a variable the `read` itself assigns
+into (case-insensitive), with the "any guard-shaped line counts" fallback kept
+only for `whiptail`/`dialog`, which have no assignment target to correlate
+against. The `||`-on-the-same-line exemption is unchanged. The real 24-slug
+measurement below was re-run after this change and is still 15/24 — the
+broadening caught no additional slug in this seed list, but it closes a real
+false-negative class for future ones.
+
 **CatalogSource ingest** — `backend/proxploy/services/catalog.py`
 (`parse_ct_script`, `run_ingest`, `refresh_catalog` job handler),
 `backend/proxploy/services/catalog_categories.py` (hand-maintained
-slug→category map). Fetches `ct/<slug>.sh` + `install/<slug>-install.sh`
-straight from `raw.githubusercontent.com/community-scripts/ProxmoxVE/main`
-(doc 01 §3's "community-scripts metadata API" framing was corrected during
-planning — no such public bulk-read API exists; this is the concrete,
-verified mechanism), parses `APP=`/`# Source:`/`var_*` defaults, classifies
-feasibility, and upserts into `catalog_entries`. ETag-cached: an unchanged
-`ct/<slug>.sh` skips the re-write.
+slug→category map). Each refresh makes exactly ONE
+`GET api.github.com/repos/community-scripts/ProxmoxVE/commits/main` call to
+resolve the repo's HEAD commit SHA (unauthenticated, 60/hr/IP — one per
+refresh job, never one per slug), then fetches
+`ct/<slug>.sh` + `install/<slug>-install.sh` from
+`raw.githubusercontent.com/community-scripts/ProxmoxVE/<sha>/…` — pinned to
+that immutable commit, never to the moving `main` ref (doc 01 §3's
+"community-scripts metadata API" framing was corrected during planning — no
+such public bulk-read API exists; this is the concrete, verified mechanism).
+Parses `APP=`/`# Source:`/`var_*` defaults, classifies feasibility, and
+upserts into `catalog_entries` with `upstream_sha = <that commit>`.
+Idempotency is keyed on that commit SHA: if the repo hasn't moved since the
+last refresh, every slug short-circuits before any fetch.
+
+*Corrected in the final-review fix wave (Critical #2, I2, I3):* ingest
+previously fetched from `main` and tracked the `ct/` file's HTTP ETag as
+`upstream_sha`. That was two bugs — the ETag never changed when only
+`install/<slug>-install.sh` moved (so a real upstream change never
+re-triggered a sync), and nothing tied the classified content to a fixed
+commit, which is what made the `app_scripts` "pin" decorative (see the DoD
+table's diff/pin row). `run_ingest` also used to let a single slug's
+`JobFailed` (404, network hiccup) abort the whole batch, leaving every later
+slug in the 24-slug list unprocessed; it now records `{slug, reason}` per
+failure, continues, and returns `{synced, failed, upstream_sha}`, with each
+failure narrated into the job transcript on `stderr`.
 
 **Catalog API** — `backend/proxploy/api/catalog.py`: `GET /catalog`
 (category/`q` filters), `GET /catalog/{slug}`, `POST /catalog/refresh`
@@ -39,13 +87,23 @@ feasibility, and upserts into `catalog_entries`. ETag-cached: an unchanged
 (`backend/proxploy/config.py`) is the 24-slug v1 seed list.
 
 **Install job handler (`app.install`)** — `backend/proxploy/services/appstore.py`.
-Resolves the catalog entry + host, refuses unsupported entries, runs the
-pinned install script over SSH via `SSHExecutor.run_for_host` with output
+Resolves the catalog entry + host, refuses unsupported entries and entries with
+no pinned `upstream_sha`, curls `ct/<slug>.sh` **from the pinned commit** and
+runs it over SSH via `SSHExecutor.run_for_host` with output
 streamed line-by-line into `ctx.log`, archives the script into `app_scripts`
 (version 1, `source="upstream"`), creates the `App` row
 (`slug = f"{catalog_slug}-{host_id}-{ctid}"` — corrected from the plan's
 `{catalog_slug}-{ctid}` since `App.slug` has a global UNIQUE constraint and
 two hosts could install the same app onto the same CTID).
+
+*Corrected in the final-review fix wave (Critical #1A):* the operator's chosen
+`ctid` was never sent to the remote script at all — `env` carried
+`MODE`/`PHS_SILENT` and the `var_*` resource overrides but no `var_ctid`, so
+`misc/build.func`'s `local requested_id="${var_ctid:-$NEXTID}"` silently
+auto-picked the next free ID while the `App` row recorded whatever the operator
+typed as fact. `env["var_ctid"] = str(ctid)` is now set last, so it also wins
+over any `overrides` entry. Compounding it, none of that `env` dict reached the
+remote process at all — see the `SSHExecutor` note above (Critical #1B).
 
 **Install route + root-consent gate** — `POST /catalog/{slug}/install`
 (`backend/proxploy/api/catalog.py`): two independent 400 gates, either can
@@ -60,6 +118,8 @@ loops items, flushes per-item so a `(host_id, ctid)` collision raises
 
 **Script view/edit/diff/history** — `GET/PUT /apps/{id}/script`,
 `GET /apps/{id}/script/versions` (`backend/proxploy/api/apps.py`).
+Note: `PUT` has an API but **no frontend caller** — the Config tab is
+view-only, see "What was NOT verified".
 `_diff_vs_upstream` computes a real `difflib.unified_diff` against the
 catalog entry's current `raw.install_script` every time the script is read —
 never cached — so an edited (or upstream-moved-on) script always shows a
@@ -72,8 +132,13 @@ audits `apps.script_edit`.
 counts in the header), `InstallDialog.tsx` (host select, root-consent
 checkbox gating a genuinely-`disabled` Install button, live `JobLog` once
 the job starts), `BulkAdoptDialog.tsx` wired into `routes/apps.tsx`'s
-discovered-CT panel, and the app detail Config tab (script view/edit + diff
-rendering, Task 14).
+discovered-CT panel, and the app detail Config tab (`ScriptPanel.tsx`:
+**view-only** pinned-script + diff rendering, Task 14 — there is no edit UI,
+see "What was NOT verified"). `routes/store.tsx` also fetches `/apps` and
+derives each card's `installed` prop from the real set of installed
+`catalog_slug`s (fix wave I6 — it was previously hardcoded `false`, which made
+`StoreCard`'s own tested "Installed" disabled state unreachable in the real
+page).
 
 ## DoD verification map (doc 10 Phase 4)
 
@@ -89,8 +154,8 @@ and bulk-adopts cleanly."*
 | Clause | Proving artifact | Verdict |
 |---|---|---|
 | Real app installs onto a chosen host as exactly one CT, with live log, archived log, audit row, and consent step | `dod_verify_phase4.py` (below): drives the real `POST /catalog/{slug}/install` → 202 → polled via `GET /jobs/{id}` to `succeeded`; asserts exactly one `App` row for `(host_id, ctid)`, one `AppScript` version=1 source=upstream, an `AuditEvent` row carrying the job id, `GET /jobs/{id}/events` containing the install narration line, and that `consent: false` 400s before any job is enqueued. Backend unit coverage: `tests/test_appstore_install.py` (3 tests), `tests/test_catalog_install_api.py` (3 tests) | PROVED |
-| Catalog survives upstream being unreachable (serves cache with staleness banner) | `GET /catalog` reads only from the `catalog_entries` table (`backend/proxploy/api/catalog.py::list_catalog`) — it never calls upstream on a read, so an unreachable GitHub cannot affect a browse/search request; `run_ingest` (`backend/proxploy/services/catalog.py`) raises `JobFailed` per-slug on fetch failure without touching any other row, so a failed refresh leaves the existing cache exactly as it was. `tests/test_catalog_ingest.py::test_run_ingest_is_idempotent_on_unchanged_etag` covers the ETag-cache half | PROVED (cache-survival) BY CODE INSPECTION, NOT BY A DEDICATED "GITHUB DOWN" TEST — **and no staleness banner exists in the UI**: `synced_at` is returned by the API and typed in `frontend/src/api/catalog.ts` but never rendered anywhere in `routes/store.tsx`. Real, undelivered gap — see "What was NOT verified" |
-| An edited script shows its diff against upstream before every run | `tests/test_app_script_api.py` (6 tests, real `difflib.unified_diff` output asserted, not stubbed): a matching script has no diff, an edited script's diff shows real `-`/`+` lines, and a script whose *upstream* moved on (the app's own content never changed) still surfaces a diff — proving the diff is computed live from current upstream every read, not cached at pin time | PROVED |
+| Catalog survives upstream being unreachable (serves cache with staleness banner) | `GET /catalog` reads only from the `catalog_entries` table (`backend/proxploy/api/catalog.py::list_catalog`) — it never calls upstream on a read, so an unreachable GitHub cannot affect a browse/search request; `run_ingest` (`backend/proxploy/services/catalog.py`) records a per-slug fetch failure and moves on without touching any other row, so a failed refresh leaves the existing cache exactly as it was, and a single bad slug no longer aborts the other 23 (`tests/test_catalog_ingest.py::test_one_bad_slug_does_not_abort_the_batch`). `::test_run_ingest_is_idempotent_on_an_unchanged_head_commit` covers the commit-SHA-cache half | PROVED (cache-survival) BY CODE INSPECTION + THE PER-SLUG-FAILURE TEST, NOT BY A DEDICATED "GITHUB DOWN" TEST — **and no staleness banner exists in the UI**: `synced_at` is returned by the API and typed in `frontend/src/api/catalog.ts` but never rendered anywhere in `routes/store.tsx`. Real, undelivered gap — see "What was NOT verified" |
+| An edited script shows its diff against upstream before every run | `tests/test_app_script_api.py` (8 tests, real `difflib.unified_diff` output asserted, not stubbed): a matching script has no diff, an edited script's diff shows real `-`/`+` lines, and a script whose *upstream* moved on (the app's own content never changed) still surfaces a diff — proving the diff is computed live from current upstream every read, not cached at pin time. **The pin half of this clause was broken until the final-review fix wave and is now real:** ingest fetches, classifies and pins content from an immutable commit SHA, `catalog_entries.upstream_sha` records that commit, and `run_install` curls `ct/<slug>.sh` from *that same commit* — previously it archived the ingested `install_script` into `app_scripts` while separately curling a live, unpinned `…/main/{script_path}` (a *different* file, re-fetched at execution time), so the "pin" had zero effect on what actually ran. Proof: `tests/test_catalog_ingest.py::test_ingest_fetches_both_files_by_commit_sha_not_main` + `tests/test_appstore_install.py::test_install_sends_var_ctid_and_overrides_inline_on_the_command` (asserts the real composed command contains the SHA-pinned URL and no `/ProxmoxVE/main/`), and `::test_install_refuses_an_entry_with_no_pinned_commit` (never silently falls back to `main`) | PROVED for the diff, and for the pin **at one level only** — see the named residual gap under "What was NOT verified": the pinned `ct/*.sh` still `source`s `misc/build.func` and friends live from `main` at execution time |
 | The store reports the true installable count — no "300+ scripts" placeholder — with unsupported entries counted and shown separately | `frontend/src/routes/store.tsx`: header line computes `installableCount`/`unsupportedCount` from the real `GET /catalog` response, not a hardcoded string. This task's own real 24-slug live classification run (see below) is the concrete proof the classifier produces a real, non-round number, not an estimate | PROVED — see the real 15/24 (62.5%) measurement below |
 | A host with pre-existing CTs shows them in the discovered panel and bulk-adopts cleanly | `GET /apps/discovered` (Phase 2) feeds `routes/apps.tsx`'s discovered panel; `BulkAdoptDialog.tsx` (Task 13) posts `POST /apps/adopt`; backend: `tests/test_apps_adopt.py` (2 tests — creates rows for each item, 409s a duplicate `(host_id, ctid)` with the whole batch rolled back); frontend: `frontend/src/tests/adopt.test.tsx` | PROVED BY TEST, NOT BY BROWSER — see "What was NOT verified" |
 
@@ -164,6 +229,13 @@ reason** (`install script requires interactive input, no non-interactive
 entrypoint` — none hit the multi-CT/docker-compose path in this particular
 24-slug set).
 
+**Re-measured after the fix wave's I1 classifier broadening**, this time
+fetching by pinned HEAD commit `d7bc6b5` rather than `main`: still 15/24
+installable, 9/24 unsupported, 0 fetch failures, same per-slug verdicts as the
+table above. The broader `read` detection changed no verdict in this particular
+seed list; it closes a false-negative class (bare `read VAR`, `read -s VAR`)
+that would otherwise misclassify future slugs as installable.
+
 This is the real, measured number for exactly the 24 scripts this build
 ships — not a rounded-up or extrapolated figure, and explicitly not the
 spike's 493/559 placeholder (that estimate applies to the ~559-script full
@@ -173,12 +245,12 @@ upstream corpus, which this v1 catalog does not attempt to ingest).
 
 | Gate | Command | Result |
 |---|---|---|
-| Backend tests | `pytest tests/ -q -m "not pve_integration and not e2e"` | **290 passed, 2 skipped, 2 deselected** |
+| Backend tests | `pytest tests/ -q -m "not pve_integration and not e2e"` | **306 passed, 2 skipped, 2 deselected** (was 290 before the final-review fix wave added 16) |
 | Executor isolation | `scripts/check_executor_isolation.py` | **OK** |
-| Isolation lint + executor unit tests | `pytest tests/test_isolation_lint.py tests/test_executor.py -v` | **8 passed** |
-| Classifier unit tests | `pytest tests/test_classifier.py -v` | **6 passed** |
+| Isolation lint + executor unit tests | `pytest tests/test_isolation_lint.py tests/test_executor.py -v` | **10 passed** |
+| Classifier unit tests | `pytest tests/test_classifier.py -v` | **11 passed** |
 | Backend license audit | `pip-licenses --partial-match --ignore-packages proxploy --allow-only "..."` (doc 03 protocol) | **FAILS locally** on `psycopg:3.3.4` (LGPL-3.0-only) — expected: `psycopg` lives in the `postgres` extras group (`pyproject.toml`), not `dev`; CI's `backend` job only installs `.[dev]`, so this package is never present when the real gate runs. This local venv has `postgres` extras installed too (for Postgres-portability testing), so it sees a package CI never does. Pre-existing, documented in Phase 1's notes; not a Phase 4 regression |
-| Frontend tests | `npx vitest run` | **49 passed (16 files)** |
+| Frontend tests | `npx vitest run` | **52 passed (16 files)** (was 49) |
 | Frontend build | `npm run build` | **clean** (`tsc -b` + vite build) |
 | Frontend license audit | `npx license-checker-rseidelsohn --production --excludePackages "frontend@0.0.0" --onlyAllow "..."` | **OK, exit 0** — `asyncssh` is backend-only so it doesn't appear here; no new frontend dependency this phase needed a licensing exception |
 
@@ -189,10 +261,10 @@ upstream corpus, which this v1 catalog does not attempt to ingest).
 | `GET /api/v1/catalog` | viewer | `store.catalog` | `category`/`q` filters |
 | `GET /api/v1/catalog/{slug}` | viewer | `store.catalog` | includes `raw` (ct + install script text) |
 | `POST /api/v1/catalog/refresh` | admin | `store.refresh` | enqueues `catalog.refresh`, ~24 GitHub fetches |
-| `POST /api/v1/catalog/{slug}/install` | admin | `store.install` | root-consent + enrolled-ssh_key gates, enqueues `app.install` |
+| `POST /api/v1/catalog/{slug}/install` | admin | `store.install` | root-consent + enrolled-ssh_key gates, 409 if `(host_id, ctid)` is already tracked, enqueues `app.install` |
 | `POST /api/v1/apps/adopt` | admin | `apps.adopt` | bulk-adopt, single-batch commit + audit |
 | `GET /api/v1/apps/{id}/script` | operator | `apps.script_edit` | latest pinned version + live diff-vs-upstream |
-| `PUT /api/v1/apps/{id}/script` | admin | `apps.script_edit` | new version, `source="edited"` |
+| `PUT /api/v1/apps/{id}/script` | admin | `apps.script_edit` | new version, `source="edited"`; `ScriptIn` body model (422 on missing `content`), 404 on unknown app. **No frontend caller** — API only |
 | `GET /api/v1/apps/{id}/script/versions` | operator | `apps.script_edit` | full version history, newest first |
 
 ## Deviations from the plan (controller decisions during the build)
@@ -258,6 +330,34 @@ upstream corpus, which this v1 catalog does not attempt to ingest).
   the same root-consent-as-final-gate intent than the plan's snippet, not a
   weakening.
 
+No documented DoD clause or non-negotiable acceptance criterion was loosened by
+any of the deviations above — every fix made the real behavior match its own
+stated intent more closely, not less.
+
+## Final whole-branch review fix wave (2026-07-30)
+
+All 15 tasks were individually implemented and reviewed; a final cross-task
+read of the whole install pipeline (catalog ingest → SSH executor → install job
+handler) found issues only visible when the three are read together. One fix
+wave, all landed:
+
+| # | Finding | Fix |
+|---|---|---|
+| C1A | `ctid` never sent to the remote script — CT landed on whatever `build.func` auto-picked while the `App` row claimed otherwise | `env["var_ctid"] = str(ctid)` in `run_install`, set after `overrides` so it wins |
+| C1B | The whole `env` dict was dropped in transit: asyncssh `env=` → SSH env channel requests → discarded by default sshd `AcceptEnv` | `SSHExecutor.run` inlines `shlex.quote`d `KEY=value` onto the command; `env=` kwarg removed. Fixed in the executor, so every caller benefits |
+| C2 | The "pinned" script was not what executed: pin archived the ingested `install/` file while execution curled a live `…/main/{ct_path}` | One HEAD-commit lookup per refresh; ingest fetches/classifies/pins by that SHA; `run_install` curls that SHA. Residual one-level-down gap named in "What was NOT verified" |
+| I1 | Prompt regex too narrow (`read -p` only), guard regex too loose (any nearby `${X:-}`) | Any `read` in command position minus non-prompt contexts; guards must name a variable the `read` assigns into |
+| I2 | Per-`ct`-file ETag never re-triggered when only `install/…` changed | Resolved as a side effect of C2 — repo-wide commit SHA replaces the ETag entirely |
+| I3 | One bad slug aborted the whole 24-slug refresh | Per-slug try/except, `{synced, failed: [{slug, reason}]}`, each failure narrated to the transcript on `stderr` |
+| I4 | `PUT /apps/{id}/script` 500'd on a missing `content` or an unknown `app_id` | `ScriptIn` Pydantic body (422) + `db.get(App, …)` 404 |
+| I6 | Duplicate install ran the script to completion on a real node, then `IntegrityError`'d — untracked container left behind. Store cards also hardcoded `installed={false}` | 409 pre-flight on `(host_id, ctid)` before enqueue; `store.tsx` derives `installed` from the real `/apps` list (needed `catalog_slug` added to `_app_out`) |
+| M1 | Header read "showing 2 of 1 installable scripts" | "1 of 2 scripts installable (1 unsupported)" |
+| M2 | `useRefreshCatalog` invalidated `['jobs']` only; `useInstall` invalidated `['catalog']`, which an install cannot change | Swapped: refresh → `['catalog']` + `['jobs']`; install → `['apps']` + `['jobs']` |
+
+Deliberately **not** attempted here and left as named gaps: full transitive
+vendoring of the community-scripts framework (see "What was NOT verified"), the
+staleness banner (I5-adjacent, still open below), and minor findings M3-M10.
+
 No documented DoD clause or non-negotiable acceptance criterion was loosened
 by any of the above — every fix made the real behavior match its own stated
 intent more closely, not less.
@@ -280,10 +380,36 @@ the plan's header note, not hidden) — every new catalog slug added to
 
 ## What was NOT verified
 
+- **Script pinning stops one level down — the community-scripts framework is
+  still fetched live.** The `ct/<slug>.sh` that executes is now byte-pinned to
+  the commit that was classified and diffed. But that file's own first line is
+  a literal `source <(curl -fsSL …/ProxmoxVE/main/misc/build.func)`. Fetching
+  the `ct/` file by commit SHA freezes that line's *text* (including its `main`
+  reference), but the framework files it names — `misc/build.func`,
+  `misc/error_handler.func`, `install/<slug>-install.sh` as sourced by the
+  framework, etc. — are still fetched from `main` **at execution time**, by
+  that line, one level down. So an upstream change to `build.func` between
+  ingest and install still changes what runs. Full transitive vendoring (mirror
+  the whole framework at a commit and rewrite the `source` lines to point at
+  the mirror) is a real, separate, larger undertaking and is deliberately NOT
+  attempted in this fix wave — it is a named open gap, not a solved problem.
+  Flagged in a code comment at
+  `backend/proxploy/services/appstore.py::run_install`.
 - **No live Proxmox host.** Every proof above runs against
   `tests/fakes/ssh.py`'s `FakeSSHConnection`, matching every prior phase's
   no-live-PVE approach. The install flow's actual root-shell execution
-  against a real node has never run in this environment.
+  against a real node has never run in this environment. In particular the
+  Critical #1 fixes are proved by asserting on the exact command string handed
+  to `create_process` (`FakeSSHConnection.last_command`) — `var_ctid=150` is
+  demonstrably *sent*, and `build.func`'s
+  `local requested_id="${var_ctid:-$NEXTID}"` was read from the real upstream
+  source to confirm it is honoured, but no container has actually been created
+  at a chosen CTID on a real node from this environment.
+- **No real sshd.** The `AcceptEnv` behaviour that motivated inlining env vars
+  into the command string is standard, documented OpenSSH behaviour (and the
+  reason asyncssh's `env=` silently no-ops), but it was not reproduced against
+  a live `sshd` here. The fix is strictly safer either way: an inlined
+  `KEY=value` prefix works regardless of the server's `AcceptEnv` config.
 - **No real SSH connection.** `tests/test_executor.py`'s
   `test_default_connect_factory_pins_then_accepts_then_rejects_changed_key`
   is the closest this phase gets — a real `asyncssh` client against a real
@@ -295,6 +421,16 @@ the plan's header note, not hidden) — every new catalog slug added to
   proved by `frontend/src/tests/{store,install,adopt}.test.tsx` under jsdom,
   **not by a visual run in an actual browser.** No screenshot, no manual
   click-through happened or is claimed to have happened.
+- **The Config tab is view-only — there is no script-edit UI.**
+  `PUT /apps/{id}/script` exists, is entitlement-gated, audited and tested
+  (`tests/test_app_script_api.py`), but **no frontend code calls it**:
+  `frontend/src/components/ScriptPanel.tsx` renders the pinned content and the
+  diff as read-only `<pre>` blocks with no textarea, no Save control and no
+  mutation hook. Earlier wording in this doc said "script view/edit", which
+  overstated what shipped; corrected. The DoD clause it serves ("an edited
+  script shows its diff against upstream") is still satisfied — the diff is
+  computed live on every read and an edit made via the API surfaces
+  immediately — but a user cannot make that edit from the UI today.
 - **No staleness banner exists.** The DoD clause asks for the catalog to
   serve "cache with staleness banner" when upstream is unreachable. The
   cache-survival half is real (`GET /catalog` never touches upstream; a

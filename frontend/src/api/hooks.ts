@@ -48,7 +48,7 @@ export type NodeRow = {
 
 export type AppRow = {
   id: number; name: string; slug: string; host_id: number; host_name: string
-  node: string; ctid: number; category: string | null
+  node: string; ctid: number; category: string | null; catalog_slug: string | null
   icon_initials: string | null; icon_colors: { c1: string; c2: string } | null
   web_port: number | null; web_protocol: string | null; web_path: string | null
   status: string; ip: string | null; cpu_pct: number | null

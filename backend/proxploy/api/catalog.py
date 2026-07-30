@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
-from proxploy.models import CatalogEntry, HostCredential, User
+from proxploy.models import App, CatalogEntry, HostCredential, User
 from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -100,6 +100,13 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
         raise HTTPException(404, "not found")
     if not entry.installable:
         raise HTTPException(400, f"not installable: {entry.unsupported_reason}")
+    # Pre-flight the (host_id, ctid) uniqueness the DB enforces anyway. Without
+    # it a repeat install runs the whole script to completion on the real node
+    # and only then hits IntegrityError inside the job handler — leaving an
+    # untracked container behind. Cheap check, real node mutation avoided.
+    if (db.query(App).filter_by(host_id=body.host_id, ctid=body.ctid)
+            .one_or_none()) is not None:
+        raise HTTPException(409, f"CT {body.ctid} on host {body.host_id} is already tracked")
     job = request.app.state.jobs.enqueue(
         db, kind="app.install", requested_by=user.id,
         params={"catalog_slug": slug, "host_id": body.host_id, "name": body.name,

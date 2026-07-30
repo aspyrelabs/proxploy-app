@@ -39,7 +39,15 @@ export function useRefreshCatalog() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api<{ job: { id: number; kind: string } }>('/catalog/refresh', { method: 'POST' }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      // A refresh is what actually rewrites catalog_entries, so this is the
+      // mutation that has to drop the ['catalog'] cache. Invalidating on
+      // settle (i.e. once the job is enqueued, not finished) is deliberate:
+      // the refetch that follows the job's completion event picks up the new
+      // rows, and this at least clears the 5-minute staleTime immediately.
+      qc.invalidateQueries({ queryKey: ['catalog'] })
+    },
   })
 }
 
@@ -59,7 +67,10 @@ export function useInstall() {
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['catalog'] })
+      // An install creates an App row; it does not touch catalog_entries.
+      // ['apps'] is what goes stale here — including the Store page's own
+      // installed-slug lookup.
+      qc.invalidateQueries({ queryKey: ['apps'] })
     },
   })
 }

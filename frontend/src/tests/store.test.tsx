@@ -39,6 +39,39 @@ describe('useCatalog', () => {
   })
 })
 
+describe('cache invalidation keys', () => {
+  const withQc = <T,>(hook: () => T) => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    const { result } = renderHook(hook, { wrapper })
+    return { result, spy }
+  }
+
+  it('useRefreshCatalog invalidates catalog (a refresh is what rewrites it)', async () => {
+    const { api } = await import('../api/client')
+    const { useRefreshCatalog } = await import('../api/catalog')
+    vi.mocked(api).mockResolvedValue({ job: { id: 1, kind: 'catalog.refresh' } })
+    const { result, spy } = withQc(useRefreshCatalog)
+    result.current.mutate()
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['catalog'] }))
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['jobs'] })
+  })
+
+  it('useInstall invalidates apps, not catalog (an install adds an App row)', async () => {
+    const { api } = await import('../api/client')
+    const { useInstall } = await import('../api/catalog')
+    vi.mocked(api).mockResolvedValue({ job: { id: 2, kind: 'app.install' } })
+    const { result, spy } = withQc(useInstall)
+    result.current.mutate({ slug: 'redis', host_id: 1, name: 'Redis', ctid: 150,
+                            overrides: {}, consent: true })
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['apps'] }))
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['jobs'] })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['catalog'] })
+  })
+})
+
 const REDIS: CatalogRow = {
   slug: 'redis', name: 'Redis', category: 'Databases', description: null,
   icon_url: null, popularity: 42, website: 'https://redis.io/',
@@ -96,8 +129,26 @@ describe('StorePage', () => {
       ],
     } as any)
     withQuery(<StorePage />)
-    expect(screen.getByText(/showing 2 of 1 installable/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 of 2 scripts installable/i)).toBeInTheDocument()
     expect(screen.getByText(/1 unsupported/i)).toBeInTheDocument()
+  })
+
+  it('derives the real installed state per entry from the /apps list', async () => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({
+      data: [REDIS, { ...REDIS, slug: 'gitea', name: 'Gitea' }],
+    } as any)
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockResolvedValue([
+      { id: 1, name: 'Redis', catalog_slug: 'redis', ctid: 150, host_id: 1 },
+    ])
+
+    withQuery(<StorePage />)
+
+    // redis is installed -> disabled "Installed"; gitea is not -> "Install"
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled())
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
 
   it('filters by category chip', async () => {

@@ -37,7 +37,7 @@ def _app_out(a: App, host: Host, snapshots) -> dict:
     return {
         "id": a.id, "name": a.name, "slug": a.slug,
         "host_id": a.host_id, "host_name": host.name, "node": host.node_name,
-        "ctid": a.ctid, "category": a.category,
+        "ctid": a.ctid, "category": a.category, "catalog_slug": a.catalog_slug,
         "icon_initials": a.icon_initials, "icon_colors": a.icon_colors,
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
@@ -175,11 +175,20 @@ def get_app_script(app_id: int, db=Depends(get_db)):
            "diff_vs_upstream": _diff_vs_upstream(db, app_row, latest.content)}
 
 
+class ScriptIn(BaseModel):
+    content: str
+
+
 @router.put("/{app_id}/script", dependencies=[Depends(_require_admin),
                                               Depends(require_entitlement("apps.script_edit"))])
-def put_app_script(app_id: int, body: dict, request: Request, db=Depends(get_db),
+def put_app_script(app_id: int, body: ScriptIn, request: Request, db=Depends(get_db),
                    user: User = Depends(_require_admin)):
-    content = body["content"]
+    # Validate before writing, like every sibling route here: a missing
+    # `content` used to KeyError into a 500, and an unknown app_id used to
+    # 500 on the AppScript FK violation at commit time.
+    if db.get(App, app_id) is None:
+        raise HTTPException(404, "app not found")
+    content = body.content
     latest = (db.query(AppScript).filter_by(app_id=app_id)
              .order_by(AppScript.version.desc()).first())
     next_version = (latest.version + 1) if latest else 1
