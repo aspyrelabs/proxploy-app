@@ -134,7 +134,11 @@ class App(TimestampMixin, Base):
     __tablename__ = "apps"
     id: Mapped[int] = mapped_column(primary_key=True)
     host_id: Mapped[int] = mapped_column(ForeignKey("hosts.id", ondelete="RESTRICT"))
-    ctid: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Physical column is `ct_id`: `ctid` is a PostgreSQL system column present
+    # on every table, so `CREATE TABLE apps (... ctid ...)` is rejected outright
+    # (`column name "ctid" conflicts with a system column name`). The Python
+    # attribute, the API field and the frontend type all stay `ctid`.
+    ctid: Mapped[int] = mapped_column("ct_id", Integer, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     catalog_slug: Mapped[str | None] = mapped_column(Text)
@@ -151,7 +155,8 @@ class App(TimestampMixin, Base):
     uptime_s_cached: Mapped[int | None] = mapped_column(Integer)
     update_available: Mapped[str | None] = mapped_column(Text)
     adopted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    __table_args__ = (UniqueConstraint("host_id", "ctid", name="ux_apps_host_ctid"),)
+    # Table-level constraints name the *physical* column, hence "ct_id".
+    __table_args__ = (UniqueConstraint("host_id", "ct_id", name="ux_apps_host_ctid"),)
 
 
 class AppScript(TimestampMixin, Base):

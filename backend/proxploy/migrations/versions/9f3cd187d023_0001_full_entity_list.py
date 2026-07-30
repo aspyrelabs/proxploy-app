@@ -285,7 +285,7 @@ def upgrade() -> None:
     op.create_table('apps',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('host_id', sa.Integer(), nullable=False),
-    sa.Column('ctid', sa.Integer(), nullable=False),
+    sa.Column('ct_id', sa.Integer(), nullable=False),
     sa.Column('name', sa.Text(), nullable=False),
     sa.Column('slug', sa.Text(), nullable=False),
     sa.Column('catalog_slug', sa.Text(), nullable=True),
@@ -306,7 +306,7 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['host_id'], ['hosts.id'], ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('host_id', 'ctid', name='ux_apps_host_ctid'),
+    sa.UniqueConstraint('host_id', 'ct_id', name='ux_apps_host_ctid'),
     sa.UniqueConstraint('slug')
     )
     op.create_table('backups',

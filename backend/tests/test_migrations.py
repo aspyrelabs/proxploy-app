@@ -42,10 +42,94 @@ def test_sqlite_wal(tmp_path):
         assert c.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
 
 
-@pytest.mark.skipif(not os.environ.get("PROXPLOY_TEST_PG_DSN"), reason="no Postgres DSN")
-def test_migration_0001_postgres():
-    tables = _upgraded_tables(os.environ["PROXPLOY_TEST_PG_DSN"])
+# --- Postgres leg of the dual-DB claim -------------------------------------
+#
+# Docs 02 §3 and 04 promise "Postgres via a single DSN change". That promise
+# went unverified from Phase 1 until now because this leg silently skipped:
+# `apps.ctid` collided with PostgreSQL's `ctid` system column, so migration
+# 0001 had literally never run on Postgres. The skip reason below spells out
+# that a skipped run has NOT verified anything, and the tests themselves now
+# assert the schema objects exist rather than only that `upgrade()` returned.
+
+PG_DSN = os.environ.get("PROXPLOY_TEST_PG_DSN")
+requires_pg = pytest.mark.skipif(
+    not PG_DSN,
+    reason=("PROXPLOY_TEST_PG_DSN is unset — the Postgres half of the dual-DB "
+            "claim (docs 02 §3, 04) is UNVERIFIED in this run, not passing. "
+            "Set it to e.g. postgresql+psycopg://user:pw@host:5432/db."),
+)
+
+
+@pytest.fixture
+def pg_engine():
+    """A blank Postgres database, torn down after the test."""
+    eng = create_engine(PG_DSN)
+    with eng.begin() as c:
+        c.exec_driver_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+    try:
+        yield eng
+    finally:
+        eng.dispose()
+
+
+@requires_pg
+def test_migration_0001_postgres(pg_engine):
+    """0001 creates every table on Postgres, and `apps` uses the physical
+    column `ct_id` — `ctid` is a Postgres system column and would make the
+    CREATE TABLE fail outright."""
+    tables = _upgraded_tables(PG_DSN)
     assert EXPECTED <= tables
+
+    insp = inspect(pg_engine)
+    cols = {c["name"] for c in insp.get_columns("apps")}
+    assert "ct_id" in cols and "ctid" not in cols
+    [ux] = [u for u in insp.get_unique_constraints("apps")
+            if u["name"] == "ux_apps_host_ctid"]
+    assert ux["column_names"] == ["host_id", "ct_id"]
+
+    # The constraint is not just declared, it bites.
+    add_app = text(
+        "INSERT INTO apps (host_id, ct_id, name, slug, web_protocol, web_path, "
+        "adopted, created_at, updated_at) SELECT id, 150, 'Immich', :slug, "
+        "'http', '/', false, now(), now() FROM hosts LIMIT 1")
+    with pg_engine.begin() as c:
+        c.execute(text("INSERT INTO hosts (name, address, verify_tls, status, "
+                       "created_at, updated_at) VALUES ('h', 'https://x', true, "
+                       "'connected', now(), now())"))
+        c.execute(add_app, {"slug": "immich"})
+    with pytest.raises(IntegrityError):
+        with pg_engine.begin() as c:
+            c.execute(add_app, {"slug": "immich-2"})  # same (host_id, ct_id)
+
+
+@requires_pg
+def test_migration_0002_postgres_applies_and_enforces_the_allowlist(pg_engine):
+    """0002 uses `batch_alter_table`, which on Postgres must degrade to a
+    plain ALTER TABLE ADD CONSTRAINT rather than SQLite's table-recreate.
+    Prove it: step 0001 -> 0002 with a row already present, then check
+    `pg_constraint` really carries the allowlist and really rejects."""
+    from alembic import command
+
+    from proxploy.models import ALLOWED_NOTIFICATION_KINDS
+
+    cfg = _alembic_cfg(PG_DSN)
+    command.upgrade(cfg, "9f3cd187d023")  # 0001 only
+    _insert_raw_channel(pg_engine, "telegram")
+    command.upgrade(cfg, "head")  # 0001 -> 0002, in place
+
+    with pg_engine.connect() as c:
+        assert c.execute(text("SELECT name, kind FROM notification_channels")
+                         ).all() == [("leak-test", "telegram")]
+        sqltext = c.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conname = 'ck_notification_channels_kind_allowlist'"
+        )).scalar_one()
+    assert set(re.findall(r"'([^']*)'", sqltext)) == set(ALLOWED_NOTIFICATION_KINDS)
+
+    with pytest.raises(IntegrityError):
+        _insert_raw_channel(pg_engine, "AAH-SUPERSECRETBOTTOKEN")
+    for kind in [*sorted(ALLOWED_NOTIFICATION_KINDS), None]:
+        _insert_raw_channel(pg_engine, kind)
 
 
 # --- 0002: notification_channels.kind CHECK constraint ---------------------
@@ -75,10 +159,12 @@ def _insert_raw_channel(engine, kind):
                 "INSERT INTO notification_channels "
                 "(name, kind, url_enc, key_version, events, enabled, "
                 "created_at, updated_at) VALUES "
-                "(:name, :kind, :blob, 1, '[]', 1, "
+                "(:name, :kind, :blob, 1, '[]', :enabled, "
                 "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             ),
-            {"name": "leak-test", "kind": kind, "blob": b"\x00"},
+            # `enabled` is bound, not a literal 1: Postgres rejects an integer
+            # for a boolean column.
+            {"name": "leak-test", "kind": kind, "blob": b"\x00", "enabled": True},
         )
 
 
