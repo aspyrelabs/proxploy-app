@@ -242,16 +242,16 @@ community-scripts/ProxmoxVE metadata, fetched server-side with ETag refresh (bri
 | id | int PK | |
 | slug | text | upstream script slug, unique index |
 | name | text | |
-| description | text | |
-| category | text | store chip categories |
+| description | text | null in v1 — not derivable from `ct/*.sh` content; see gap note below |
+| category | text | store chip categories; v1 sourced from a hand-maintained slug→category map, not upstream metadata — see gap note below |
 | script_path | text | upstream repo path of the install entrypoint |
-| website / docs_url | text | |
-| default_cpu | int | upstream resource defaults |
+| website / docs_url | text | `website` comes from the `ct/*.sh` header's `# Source:` line; `docs_url` null in v1 |
+| default_cpu | int | upstream resource defaults, parsed from `ct/*.sh`'s `var_cpu`/etc. |
 | default_ram_mb | int | |
 | default_disk_gb | int | |
 | default_os / default_os_version | text | e.g. `debian` / `12` |
-| icon_url | text | |
-| popularity | int | stars/installs figure for sorting (prototype `pop`) |
+| icon_url | text | null in v1 — not derivable from `ct/*.sh` content; see gap note below |
+| popularity | int | null in v1 — no public source found; see gap note below |
 | upstream_sha | text | commit the metadata was read at |
 | raw | json | full upstream JSON record, forward-compat |
 | deprecated | bool | upstream removed/renamed; kept so installed apps still resolve |
@@ -266,6 +266,15 @@ The true count of `installable = true` rows is the number reported in Phase
 the classifier rule above measured ≈88.2% (493/559) against the current
 upstream corpus (`docs/notes/phase-4-spike.md`); ingest will report the
 live figure at Phase 4 completion.
+
+**Tracked v1 gap:** `description`, `icon_url`, and `popularity` are null,
+and `category` comes from a small hand-maintained slug→category map
+(`proxploy/services/catalog_categories.py`, unmapped slugs default to
+"Uncategorized") rather than upstream metadata — there is no public bulk
+read API for the community-scripts catalog to source these from instead
+(doc 01 §3 has the full correction and rationale). Follow-up, not blocking
+Phase 4: find a stable read path into the community-scripts content, or
+keep hand-curating the category map as ongoing maintenance.
 
 ---
 

@@ -68,9 +68,18 @@ Each feature has:
 
 ## 3. App Store
 
-Source: community-scripts/ProxmoxVE metadata, fetched **server-side only**,
-cached in DB with ETag refresh (brief §5). Installs run the script as root on
-the node over the SSH executor — stated plainly in the consent UX (brief §8).
+Source: community-scripts/ProxmoxVE — parsed **server-side only** directly
+from the public `ct/*.sh` + `install/*.sh` script pairs in that GitHub repo,
+cached in DB with ETag-based change detection (brief §5). **Correction to an
+earlier assumption in this doc:** there is no public bulk catalog metadata
+API to fetch instead — the community-scripts website's catalog is
+PocketBase-backed behind its own Next.js frontend with no open read
+endpoint (confirmed while grounding the Phase 4 plan in real code; see
+`docs/superpowers/plans/2026-07-30-phase-4-store.md`'s header note, and
+`docs/notes/phase-4-store.md` once Phase 4 lands). Installs run the script
+as root on the node over the SSH executor — stated plainly in the consent
+UX (brief §8).
+
 Catalog ingest classifies every entry as **installable** (drivable
 non-interactively within the one-CT constraint) or **unsupported**; only
 installable entries are ever offered as install targets, unsupported entries
@@ -85,6 +94,19 @@ reliable unsupported signal (`docs/notes/phase-4-spike.md`). Applied to the
 current upstream corpus this rule seats installable ≈ **493/559 (88.2%)** —
 the number Phase 4's definition of done reports (doc 10), replacing any
 "300+ scripts" framing with the real figure.
+
+**Known v1 gap, tracked rather than silently absorbed:** `ct/*.sh` reliably
+yields `name`, resource defaults (`var_cpu`/`var_ram`/`var_disk`/`var_os`/
+`var_version`), and a `website` link (the script's `# Source:` header
+comment) — but not `category`, `description`, `icon_url`, or `popularity`,
+none of which are derivable from script content alone. Phase 4 ships a
+small hand-maintained slug→category map (`proxploy/services/catalog_categories.py`)
+as a v1 stopgap, defaulting unmapped entries to "Uncategorized";
+`description`/`icon_url`/`popularity` stay null until a real source is
+found. **Follow-up (not blocking Phase 4):** either find/negotiate a stable
+read path into the community-scripts PocketBase content, or accept
+hand-curating the map as ongoing catalog-maintenance cost and grow it
+incrementally as real gaps surface in the store UI.
 
 | Feature | Description | Flag key | Tier (inert) |
 |---|---|---|---|
