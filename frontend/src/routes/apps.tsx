@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { AppRow, DiscoveredRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
+import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
@@ -22,6 +23,7 @@ export function AppsPage() {
   const search = useSearch({ strict: false }) as { host?: number; q?: string }
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(false)
+  const [adopting, setAdopting] = useState(false)
   const { data: hosts } = useQuery({
     queryKey: ['hosts'],
     queryFn: () => api<HostRow[]>('/hosts'),
@@ -82,9 +84,9 @@ export function AppsPage() {
               </div>
             ))}
           </div>
-          <div className="mt-3 text-[12px] text-text-3">
-            Adoption arrives with the App Store phase (Phase 4) — these containers keep running untouched.
-          </div>
+          <button className="mt-2 text-[12px] text-amber hover:underline" onClick={() => setAdopting(true)}>
+            Adopt {discovered.length} container{discovered.length > 1 ? 's' : ''}
+          </button>
         </div>
       )}
 
@@ -125,6 +127,8 @@ export function AppsPage() {
         <EmptyState title="No apps match your filter."
           note="Install from the App Store (Phase 4) or adopt discovered containers." />
       )}
+
+      {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}
     </div>
   )
 }

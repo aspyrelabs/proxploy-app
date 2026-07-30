@@ -44,6 +44,6 @@ describe('AppsPage', () => {
     // legitimately match /plex/ (the CT name and the "matches" badge) —
     // findAllByText avoids the ambiguous-match error findByText would throw.
     expect((await screen.findAllByText(/plex/)).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Adoption arrives with the App Store phase/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Adopt 1 container/i })).toBeInTheDocument()
   })
 })
