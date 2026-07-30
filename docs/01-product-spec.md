@@ -75,8 +75,16 @@ Catalog ingest classifies every entry as **installable** (drivable
 non-interactively within the one-CT constraint) or **unsupported**; only
 installable entries are ever offered as install targets, unsupported entries
 render with an honest note and an upstream link (doc 04 `catalog_entries`,
-doc 11 §8). Phase 4's definition of done reports the true installable count
-(doc 10), replacing any "300+ scripts" framing with the real figure.
+doc 11 §8). The classifier rule is mechanical, not a guess: single
+`build_container` call in the paired `ct/` script, and no unguarded
+interactive prompt (`read`/`whiptail`/`dialog` not preceded by an env-var
+short-circuit) in the paired `install/` script — every community-scripts
+install runs under a `set -e` + ERR-trap wrapper, so an unguarded prompt
+hard-aborts rather than defaulting, making "unguarded prompt present" a
+reliable unsupported signal (`docs/notes/phase-4-spike.md`). Applied to the
+current upstream corpus this rule seats installable ≈ **493/559 (88.2%)** —
+the number Phase 4's definition of done reports (doc 10), replacing any
+"300+ scripts" framing with the real figure.
 
 | Feature | Description | Flag key | Tier (inert) |
 |---|---|---|---|

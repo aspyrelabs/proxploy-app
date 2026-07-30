@@ -35,16 +35,16 @@ third-party repo of root shell scripts). **Impact:** High.
 - We do **not** claim sandboxing, containment, or safety review we don't do.
   Any future hardening (e.g. `ForceCommand` wrappers, restricted key options)
   is additive, never marketed as isolation.
-- **Non-root/API-first spike (Phase 4 entry gate, doc 08 §4, doc 10):**
-  before further committing engineering to raw SSH-root, investigate whether
-  current community-scripts tooling exposes a non-interactive or
-  API-drivable install path (env-var/silent mode, an official headless
-  entrypoint, or create-CT-via-API-then-configure) that would reduce or
-  remove the need for a root shell. Expected outcome: raw SSH-root remains
-  necessary — community-scripts assumes an interactive root shell throughout
-  — but this is investigated and written down before Phase 4's
-  `SSHExecutor` work proceeds, not assumed. A changed finding updates this
-  section and doc 08 §4 before that work starts.
+- **Non-root/API-first spike (Phase 4 entry gate, doc 08 §4, doc 10) — RAN,
+  SETTLED:** confirmed raw SSH-root is structurally necessary, not assumed.
+  Community-scripts creates every LXC via the host-local `pct create` CLI
+  (never the Proxmox API) and enforces `root_check()`; Proxmox's own REST
+  API additionally has no LXC equivalent of the QEMU guest-agent `exec`
+  endpoint, so even a Proxploy-authored container-create-via-API path would
+  still need host-CLI access (`pct exec`/`pct push`) to run the install
+  script afterward. Full findings, methodology, and the install-feasibility
+  classifier rule this unlocked: `docs/notes/phase-4-spike.md`. Phase 4's
+  `SSHExecutor` proceeds as designed below.
 
 **Deferred decision:** whether to add an opt-in "hold installs until diff
 approved by an admin" policy for teams. Resolves with: first multi-user
@@ -229,7 +229,10 @@ cases in the store).
   entries installable as a single CT; the catalog ingest classifies entries
   (`catalog_entries.installable` / `unsupported_reason`, doc 04) and
   anything that can't honor one-CT is excluded from install (visible with an
-  "unsupported pattern" explanation rather than silently missing).
+  "unsupported pattern" explanation rather than silently missing). The
+  Phase 4 entry-gate spike confirms this is the common case, not a hope:
+  568 of 572 upstream `ct/` scripts (99.3%) call `build_container` exactly
+  once (`docs/notes/phase-4-spike.md`).
 - Docker-in-LXC entries (upstream has these) are still one CT — the CT is
   the app boundary; what runs inside is the script's business, shown honestly
   on the app detail page.

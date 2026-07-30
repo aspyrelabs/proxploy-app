@@ -103,12 +103,17 @@ every connection) rather than globally disabling verification.
 
 ## 4. SSH key handling for the executor
 
-Before Phase 4 invests further in this design, a spike (Phase 4 entry gate,
-doc 10/11 §1) checks whether current community-scripts tooling exposes a
-non-interactive or API-drivable install path — env-var/silent mode, an
-official headless entrypoint, or create-CT-via-API-then-configure — that
-would reduce or remove the need for a root shell. The design below is what
-ships if, as expected, raw SSH-root remains necessary.
+**Phase 4 entry-gate spike (doc 10/11 §1) ran and confirmed: raw SSH-root is
+structurally necessary, not merely the expected default.** Findings in full
+at `docs/notes/phase-4-spike.md`: every community-scripts LXC install
+creates its container with the host-local `pct create` CLI, never the
+Proxmox REST API, and `root_check()` hard-exits anything that isn't root;
+independently, Proxmox's REST API has no LXC equivalent of the QEMU
+guest-agent `exec` endpoint at all — `pct exec`/`pct push` are host-CLI-only.
+So there is no non-interactive or API-drivable path that removes the need
+for a root shell, at either the container-creation step or the
+install-script-execution step. The design below ships as originally
+planned.
 
 - One **dedicated ed25519 keypair per Proxploy install** (generated with
   `cryptography`'s Ed25519 primitives or `asyncssh.generate_private_key` —
