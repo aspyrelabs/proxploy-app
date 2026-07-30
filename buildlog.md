@@ -5,7 +5,7 @@ Autonomous build loop: cycles `/superpowers:writing-plans` (Fable 5) then
 `docs/10-build-sequence.md`, fully unattended, no phase-gate pauses.
 Driven by `bin/build-cycle.sh` on the `proxploy-build.timer` systemd user timer.
 
-<!-- STATE: phase=4 step=plan -->
+<!-- STATE: phase=6 step=plan -->
 
 ### 2026-07-29T01:22:23+05:30 — Phase 1 — write-plan FAILED (exit 1)
 
@@ -316,3 +316,55 @@ operator-rejected-on-node-shell test, a cosmetic entitlement-loading tooltip
 flash on the node-shell button, and no visibility-based pause on log
 polling — none block this phase's DoD. The token/termproxy open question
 above is the one item that needs a real PVE host to close out.
+
+### 2026-07-31T00:45:00+05:30 — Phase 5 — final whole-branch review + fix wave
+
+Per-task reviews above cover Tasks 1-12 individually; the final whole-branch
+review (opus) covering the full `433ce46..fb01529` range found 1 Critical +
+11 Important cross-task integration gaps that no single task's reviewer was
+scoped to see — each sat precisely at a seam between two individually-correct
+tasks. Fixed in one consolidated wave (`5c974d9`, `432e22a`):
+
+- **Critical**: the Logs tab (Task 11) polled `GET /apps/{id}/logs`, which
+  never existed — confirmed 404, silently empty terminal. No CT-log-tailing
+  subsystem exists anywhere in the codebase (`ProxmoxClient` has no `pct
+  exec`; the executor only runs host-side install scripts), so the honest
+  fix is a real `501` route plus a frontend `EmptyState` saying so, not a
+  fabricated tail.
+- **Important** (11): PtyBridge discarded the buffered shell prompt after
+  the `"OK"` handshake frame (blank terminal until Enter); the test meant to
+  prove that flush didn't call the production function at all; the plan's
+  own mandated 30s keepalive was never implemented; `Terminal`/`VncConsole`'s
+  reconnect-on-drop had no attempt cap (unbounded loop against a real
+  Proxmox host on exactly the PVE-token-rejection case this plan documents);
+  the actionable `PtyBridgeError` text was sent to the browser but never
+  rendered; the literal `"OK"` sentinel leaked into the terminal; `vm_vnc_ws`
+  had no error handling and a differently-typed error than the PTY path;
+  blocking TLS/socket I/O ran directly on the event loop inside the async
+  connect functions; the bridges' `finally` blocks could skip the
+  upstream-close step if the browser-side close raised first (a leaked PVE
+  session per abandoned console); no frontend UI existed anywhere to toggle
+  `Host.node_shell_enabled` (added to the Settings page); and the resize
+  control frame's `cols`/`rows` were read without validation at a trust
+  boundary.
+- Several Minor items bundled in: hardcoded `:8006` ignoring a host's actual
+  port, a ticket-kind check missing between `_run_pty_ws`'s shared routes,
+  `websockets` bumped `>=13` → `>=14`, a deleted-target race with no `None`
+  guard, a redundant index, and the plan doc itself being untracked in git.
+
+Backend rose to 340 passed / 2 skipped / 3 deselected, frontend to 71 passed
+/ 20 files, clean build. A scoped re-review of the fix wave (opus)
+independently re-ran both suites, confirmed 16 of 18 findings cleanly fixed
+with real regression tests, and found the fix wave itself introduced two
+narrow new issues — both adjudicated (not a second fix wave, per the
+process) as real but deferred, nothing later in this phase depends on
+either: the new keepalive teardown can, on a narrow timing window, skip the
+just-fixed close-ordering cleanup; and the reconnect give-up screen can
+unmount the `Terminal` before the user reads the actionable error it was
+built to show. Both documented with exact fix guidance in
+`docs/notes/phase-5-console.md`'s "Final whole-branch review" section for a
+fast-follow.
+
+**Phase 5 final state**: all 12 planned tasks + 1 consolidated fix wave,
+15 commits total (`433ce46..432e22a`) plus this buildlog/notes bookkeeping,
+all committed directly to `main`. Ready to merge, with two parked findings.
