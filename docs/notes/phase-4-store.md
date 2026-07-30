@@ -362,6 +362,24 @@ No documented DoD clause or non-negotiable acceptance criterion was loosened
 by any of the above — every fix made the real behavior match its own stated
 intent more closely, not less.
 
+**The scoped re-review of that fix wave found one new issue introduced by the
+fix itself**, closed in a second, narrower pass:
+
+| # | Finding | Fix |
+|---|---|---|
+| N1 | `SSHExecutor.run`'s command-composition shell-quotes env *values* (`shlex.quote`) but never validated *keys* — an admin-supplied `overrides` dict key containing shell metacharacters (e.g. `"os; touch /tmp/x; a"`) landed unescaped in the composed command and executed as a second root command. Admin-role + `store.install` entitlement + explicit consent gated (not a privilege escalation — the whole point of this route is running a script as root), but a genuine, freshly-introduced hole with zero validation | `SSHExecutor.run` now rejects any env key not matching `^[A-Za-z_][A-Za-z0-9_]*$` before composing the command (the shared choke point, so no caller can reintroduce this); `InstallIn.overrides` also validates keys at the API layer for a clean 422 instead of a job failing deep in the executor |
+
+**Parked, needs a product decision, not a further code fix:** deriving
+`StoreCard`'s `installed` state from the real `/apps` list (fixing I6) made it
+host-agnostic — once an app is installed on host A, that catalog entry now
+shows disabled "Installed" everywhere in the Store, even though the backend's
+409 check is scoped to `(host_id, ctid)` and installing the same app on host B
+is still fully permitted server-side. The UI just has no way to attempt it
+anymore. Options: show installed-on-N-hosts instead of a flat disabled state,
+or accept it as v1 scope (most users won't install the identical app twice
+across hosts on day one) — an explicit choice for whoever picks this back up,
+not an oversight.
+
 ## Known ceilings
 
 No new `ponytail:`-tagged shortcuts were added this phase. One carried
