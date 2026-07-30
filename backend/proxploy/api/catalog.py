@@ -3,10 +3,11 @@ level; refresh is admin-gated since it fans out into ~24 GitHub fetches."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
-from proxploy.models import CatalogEntry, User
+from proxploy.models import CatalogEntry, HostCredential, User
 from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -65,4 +66,46 @@ def refresh_catalog(request: Request, db=Depends(get_db),
                                          requested_by=user.id)
     write_audit(db, actor_type="user", actor_id=user.id, action="catalog.refresh",
                 job_id=job.id, ip=request.client.host if request.client else None)
+    return {"job": job_out(job)}
+
+
+class InstallIn(BaseModel):
+    host_id: int
+    name: str
+    ctid: int
+    overrides: dict = {}
+    consent: bool = False
+
+
+# This route triggers the single most security-relevant action in the whole
+# phase: SSH as root into a node and run a community-scripts.org script. Two
+# independent gates, either can 400 first (order doesn't matter, both are
+# exercised in tests/test_catalog_install_api.py): explicit `consent: true`
+# (mirrors hosts.py's CONSENT_NOTE shape) and an already-enrolled `ssh_key`
+# HostCredential — no key, no route, regardless of consent.
+@router.post("/{slug}/install", status_code=202,
+             dependencies=[Depends(_require_admin),
+                          Depends(require_entitlement("store.install"))])
+def install_catalog_entry(slug: str, body: InstallIn, request: Request,
+                          db=Depends(get_db), user: User = Depends(_require_admin)):
+    if not body.consent:
+        raise HTTPException(400, "root-consent required: this installs and runs a "
+                                 "community-scripts.org script as root on the node")
+    cred = (db.query(HostCredential)
+            .filter_by(host_id=body.host_id, kind="ssh_key").one_or_none())
+    if cred is None:
+        raise HTTPException(400, "host has no enrolled ssh_key credential")
+    entry = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
+    if entry is None:
+        raise HTTPException(404, "not found")
+    if not entry.installable:
+        raise HTTPException(400, f"not installable: {entry.unsupported_reason}")
+    job = request.app.state.jobs.enqueue(
+        db, kind="app.install", requested_by=user.id,
+        params={"catalog_slug": slug, "host_id": body.host_id, "name": body.name,
+               "ctid": body.ctid, "overrides": body.overrides})
+    write_audit(db, actor_type="user", actor_id=user.id, action="app.install",
+                target_type="host", target_id=body.host_id, job_id=job.id,
+                params={"catalog_slug": slug, "name": body.name, "ctid": body.ctid},
+                ip=request.client.host if request.client else None)
     return {"job": job_out(job)}
