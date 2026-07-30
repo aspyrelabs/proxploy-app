@@ -17,8 +17,6 @@ export const indexRoute = createRoute({
   beforeLoad: () => { throw redirect({ to: '/cluster' as never }) },
 })
 
-export const storeRoute = page('/store', 'App Store', 'Phase 4 (Store)',
-  'The community-scripts catalog is fetched and cached server-side, never from the browser.')
 export const storageRoute = page('/storage', 'Storage', 'Phase 6 (Infra pages)',
   'Datastore cards and the content browser arrive in Phase 6.')
 export const networkRoute = page('/network', 'Network', 'Phase 6 (Infra pages)',
@@ -32,6 +30,7 @@ import { settingsRoute } from './routes/settings'
 import { clusterRoute, nodeDetailRoute } from './routes/cluster'
 import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
 import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute } from './routes/vms'
+import { storeRoute } from './routes/store'
 
 const appDetailTree = appDetailRoute.addChildren([appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute])
 const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute])
