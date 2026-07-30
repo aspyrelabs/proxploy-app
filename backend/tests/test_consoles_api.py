@@ -147,3 +147,46 @@ def test_console_ws_bridges_after_redeeming_ticket(tmp_path, csrf_header, bootst
     finally:
         ptybridge_mod.connect_upstream_pty = orig
         _stop_upstream(fake_ws, upstream_loop, upstream_thread)
+
+
+def test_shell_ticket_requires_node_shell_enabled(tmp_path, csrf_header, bootstrap_admin):
+    fake = FakePVE()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)  # node_shell_enabled defaults False
+            host_id = host.id
+        _seed_credential(app, host)
+
+        r = client.post(f"/api/v1/hosts/{host_id}/shell/tickets", headers=csrf_header(client))
+        assert r.status_code == 409
+        assert "node shell" in r.json()["detail"].lower()
+
+
+def test_shell_ticket_mints_after_toggling_on_and_audits(tmp_path, csrf_header, bootstrap_admin):
+    fake = FakePVE()
+    fake.termproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:abc",
+                                "port": "5900", "upid": "UPID:pve1:...:termproxy::proxploy@pve:"}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            host_id = host.id
+        _seed_credential(app, host)
+
+        r = client.patch(f"/api/v1/hosts/{host_id}", json={"node_shell_enabled": True},
+                         headers=csrf_header(client))
+        assert r.status_code == 200
+
+        r = client.post(f"/api/v1/hosts/{host_id}/shell/tickets", headers=csrf_header(client))
+        assert r.status_code == 200
+        body = r.json()
+        assert "ticket" in body and "expires_at" in body
+        assert fake.last_node_termproxy_call == "pve1"
+
+        with app.state.sessionmaker() as db:
+            from proxploy.models import AuditEvent
+            row = db.query(AuditEvent).filter_by(action="console.open").one()
+            assert row.target_type == "host" and row.target_id == host_id

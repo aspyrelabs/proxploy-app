@@ -49,6 +49,13 @@ class HostIn(ProbeIn):
     ssh_consent: bool = False
 
 
+class HostPatchIn(BaseModel):
+    """The only editable field, deliberately -- this is not a general
+    host-update endpoint (name/address/credentials all go through their own
+    dedicated flows), just the node-shell opt-in toggle (doc 08 §9)."""
+    node_shell_enabled: bool
+
+
 def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
     return ProxmoxClient(body.address, body.token_id, body.token_secret,
                          verify_tls=body.verify_tls,
@@ -141,6 +148,17 @@ def host_detail(host_id: int, db=Depends(get_db),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": c.last_used_at.isoformat()
                              if c.last_used_at else None} for c in creds]}
+
+
+@router.patch("/{host_id}")
+def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
+              user: User = Depends(require_role("admin"))):
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    h.node_shell_enabled = body.node_shell_enabled
+    db.commit()
+    return {"id": h.id, "node_shell_enabled": h.node_shell_enabled}
 
 
 @router.post("/{host_id}/test")

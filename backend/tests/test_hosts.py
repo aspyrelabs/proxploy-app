@@ -151,6 +151,35 @@ def test_creating_a_host_at_a_denied_address_stores_nothing(pve_client, csrf_hea
     assert c.get("/api/v1/hosts").json() == []
 
 
+def test_patch_host_toggles_node_shell_enabled(pve_client, csrf_header):
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": True},
+               headers=csrf_header(c))
+    assert r.status_code == 200
+    assert r.json() == {"id": hid, "node_shell_enabled": True}
+    assert c.get(f"/api/v1/hosts/{hid}").json()["id"] == hid
+
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": False},
+               headers=csrf_header(c))
+    assert r.status_code == 200 and r.json()["node_shell_enabled"] is False
+
+
+def test_patch_host_requires_admin_role(pve_client, csrf_header):
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    c.post("/api/v1/users", json={"email": "viewer2@example.com",
+                                  "password": "correct-horse-battery",
+                                  "display_name": "V2", "role": "viewer"},
+           headers=csrf_header(c))
+    c.post("/api/v1/auth/login", json={"email": "viewer2@example.com",
+                                       "password": "correct-horse-battery"},
+           headers=csrf_header(c))
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": True},
+               headers=csrf_header(c))
+    assert r.status_code == 403
+
+
 def test_an_unparseable_token_id_is_a_422_not_a_502(pve_client, csrf_header):
     """Rejected at the door as bad input, not surfaced as an upstream failure —
     and nothing derived from the raw string is stored on the way."""

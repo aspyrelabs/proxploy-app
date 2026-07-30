@@ -38,6 +38,7 @@ def _proxmox_client_for_host(app_state, db, host: Host) -> ProxmoxClient:
 
 
 _require_operator = require_role("operator")
+_require_admin = require_role("admin")
 
 
 @router.post("/apps/{app_id}/console/tickets",
@@ -118,6 +119,36 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None):
 
 @router.websocket("/apps/{app_id}/console/ws")
 async def app_console_ws(websocket: WebSocket, app_id: int, ticket: str | None = None):
+    await _run_pty_ws(websocket, ticket)
+
+
+@router.post("/hosts/{host_id}/shell/tickets",
+             dependencies=[Depends(_require_admin), Depends(require_entitlement("terminal.node"))])
+def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
+                      user: User = Depends(_require_admin)):
+    host = db.get(Host, host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    if not host.node_shell_enabled:
+        raise HTTPException(409, "node shell is not enabled for this host — "
+                             "opt in via host settings first (doc 08 §9: a "
+                             "second, deliberate gate on top of RBAC)")
+    client = _proxmox_client_for_host(request.app.state, db, host)
+    node = host.node_name or ""
+    upstream = client.node_termproxy(node)
+    raw, expires_at = mint_ticket(
+        db, user_id=user.id, kind="node_shell", target_id=host.id, node=node,
+        guest_kind=None, vmid=None, upstream_user=upstream["user"],
+        upstream_ticket=upstream["ticket"], upstream_port=str(upstream["port"]),
+        ttl_s=request.app.state.settings.console_ticket_ttl_s)
+    write_audit(db, actor_type="user", actor_id=user.id, action="console.open",
+               target_type="host", target_id=host.id,
+               ip=request.client.host if request.client else None)
+    return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
+
+
+@router.websocket("/hosts/{host_id}/shell/ws")
+async def node_shell_ws(websocket: WebSocket, host_id: int, ticket: str | None = None):
     await _run_pty_ws(websocket, ticket)
 
 
