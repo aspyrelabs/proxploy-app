@@ -180,3 +180,63 @@ additional entitlement gates doc 05 left blank; doc 05 §Streaming 4 was
 amended to add `target_type` to the `job` SSE event; job-row writes are
 inline on the event loop by design; `hosts/{id}/tasks` and `hosts/{id}/sync`
 were deliberately not built (no Phase 3 dependency).
+
+### 2026-07-30T16:28:38+05:30 — Phase 4 — execute-plan completed
+
+Plan: `docs/superpowers/plans/2026-07-30-phase-4-store.md`. All 14 feature
+tasks implemented and committed directly to `main`, each individually
+reviewed (fix rounds where the reviewer found real gaps: Task 1's TOFU
+pinning bug, Task 4's missing entitlement/audit wiring, Task 14's theme-token
+color fix), Task 15 closing out with DoD verification, this notes doc, and
+this buildlog entry. Full details, DoD proof, and deviations in
+`docs/notes/phase-4-store.md`.
+
+**What was built:**
+- `proxploy/executor/`: asyncssh runner with closed stdin, host-key TOFU
+  pinning (`hosts.ssh_host_key_fingerprint`), `run_for_host`
+- Install-feasibility classifier (`services/classifier.py`): mechanical
+  detection of unconditional interactive prompts and multi-CT patterns
+- CatalogSource ingest (`services/catalog.py` + `catalog_categories.py`):
+  GitHub-raw fetch of `ct/*.sh`/`install/*.sh` pairs, ETag-cached, classified,
+  upserted into `catalog_entries`; `Settings.catalog_slugs` (24-app v1 seed)
+- Catalog API (`GET /catalog`, `GET /catalog/{slug}`, `POST /catalog/refresh`)
+- Install job handler (`app.install`): pin script into `app_scripts`, SSH
+  install with streamed log, create `App` row
+- `POST /catalog/{slug}/install` with root-consent + enrolled-ssh_key gates
+- `POST /apps/adopt` bulk adoption (single-batch commit + audit)
+- Script view/edit/diff-vs-upstream/version-history routes on `apps.py`
+- Frontend: catalog hooks, `StoreCard`, `/store` route (tile grid, category
+  chips, real installable/unsupported counts), install dialog (root-consent
+  gate, live job log), bulk-adopt dialog wired into `/apps`, app detail
+  Config tab (script view/edit + diff)
+
+**Verification:**
+- Backend: 290 passed, 2 skipped, 2 deselected — `pytest tests/ -q -m "not pve_integration and not e2e"`
+- Backend: executor isolation OK (`scripts/check_executor_isolation.py`)
+- Frontend: 49 passed (16 files) — `npx vitest run`; build clean
+- `docs/notes/phase-4-store.md`'s `dod_verify_phase4.py` run: the "one real
+  app installs as exactly one CT, with live log, archived log, audit row,
+  consent step" DoD clause proved against `tests.support.make_app` + a real
+  `TestClient` + `tests/fakes/ssh.py`'s `FakeSSHConnection` (no live PVE, no
+  real SSH, no browser on this box)
+- Real 24-slug live classifier measurement (this task, real network, real
+  `classify_install_feasibility`, no mocks): **15/24 installable (62.5%)**,
+  9/24 unsupported (all "install script requires interactive input, no
+  non-interactive entrypoint"), 0 fetch failures — the true number for this
+  v1 catalog, not the phase-4 spike's 493/559 full-corpus estimate
+
+**Deviations** (full list + rationale in the notes doc): Task 1's TOFU
+pinning had a real bug only visible against a live asyncssh server
+(`known_hosts=None` silently disabling the pin check) caught in review, not
+by the implementer's own fake-backed tests; Tasks 4/6/7/8 proactively added
+entitlement gating + audit-log writes the plan's sample code omitted; Task
+5 fixed an executor-isolation violation in the plan's own sample code by
+adding `SSHExecutor.run_for_host` (key never leaves `executor/`) and
+corrected `App.slug`'s scheme to include `host_id`; Task 8 fixed a
+structurally-unsatisfiable diff-direction assertion in the plan's own test;
+Task 12 kept the real 4-part install-consent gate rather than weakening it
+to match a contradictory test in the plan, strengthening the test instead.
+Known, undelivered gaps carried into Phase 9: no staleness banner on the
+Store page (cache-survival itself works; the UI indicator does not exist),
+and the `category`/`description`/`icon_url`/`popularity` v1 gap documented
+before implementation began (no public community-scripts bulk metadata API).
