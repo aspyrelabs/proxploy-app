@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
+import { useEffect } from 'react'
+import { useConsoleTicket, consoleWsUrl } from '../api/consoles'
 import { api } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
+import { VncConsole } from '../components/console/VncConsole'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
+import { Button } from '../components/ui/button'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -55,8 +59,12 @@ export function VmsPage() {
                   </td>
                   <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                   <td className="py-2.5"><StatusPill status={v.status} /></td>
-                  <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-2.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} size="sm" />
+                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                      onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })}>
+                      Console
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -186,7 +194,28 @@ export const vmOverviewRoute = createRoute({
   path: '/',
   component: VmOverview,
 })
-export const vmConsoleRoute = phaseTab('console', 'Phase 5 (Console)',
-  'noVNC over the proxied Proxmox vncwebsocket.')
+function VmConsole() {
+  const { vmId } = useParams({ strict: false }) as { vmId: string }
+  const id = Number(vmId)
+  const ticket = useConsoleTicket('vm', id)
+  useEffect(() => { ticket.mutate() }, [id])
+  if (!ticket.data) return <EmptyState title="Opening console…" note="" />
+  // VncConsole has no onDrop today (Task 9 doesn't add one — noVNC's RFB
+  // class exposes its own 'disconnect' event for this instead of a generic
+  // prop); wire the same re-mint-on-drop behavior via that event:
+  return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={() => ticket.mutate()} />
+}
+
+function VncConsoleWithReconnect({ vmId, ticket, onNeedNewTicket }:
+  { vmId: number; ticket: string; onNeedNewTicket: () => void }) {
+  return (
+    <VncConsole key={ticket} wsUrl={consoleWsUrl('vm', vmId, ticket)}
+      onDisconnect={onNeedNewTicket} />
+  )
+}
+
+export const vmConsoleRoute = createRoute({
+  getParentRoute: () => vmDetailRoute, path: 'console', component: VmConsole,
+})
 export const vmSnapshotsRoute = phaseTab('snapshots', 'Phase 6 (Infra pages)',
   'List, create, roll back and delete snapshots.')
