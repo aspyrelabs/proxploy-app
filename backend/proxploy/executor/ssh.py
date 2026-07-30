@@ -11,12 +11,21 @@ instead of parking a JobBackend semaphore slot indefinitely.
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
 from collections.abc import Callable
 
 import asyncssh
 
 CONNECT_TIMEOUT_S = 15.0
+
+# POSIX shell variable name. `env` keys are inlined literally (unquoted) into
+# the command string below, so a key isn't just data like a value is — an
+# unvalidated key IS shell syntax. shlex.quote on the value can't help here;
+# this is the only thing standing between an admin-supplied override key
+# (proxploy/api/catalog.py InstallIn.overrides, untyped keys) and a second
+# root command riding in via e.g. `"os; touch /tmp/pwned; a": "1"`.
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SSHHostKeyMismatch(Exception):
@@ -94,6 +103,9 @@ class SSHExecutor:
         them, with no error anywhere. Inlining into the command is the only
         mechanism that works without editing the node's sshd config.
         """
+        for k in (env or {}):
+            if not _ENV_KEY_RE.match(k):
+                raise ValueError(f"invalid env var name: {k!r}")
         conn = await self._connect_factory(
             host, private_key_pem, pinned_fingerprint=pinned_fingerprint,
             on_new_fingerprint=on_new_fingerprint)

@@ -17,6 +17,33 @@ def test_install_requires_consent(client, csrf_header, bootstrap_admin):
     assert r.status_code == 400
 
 
+def test_install_422s_on_an_override_key_with_a_shell_metacharacter(client, csrf_header,
+                                                                    bootstrap_admin):
+    """Rejected at the door as bad input, not surfaced as a deep JobFailed —
+    overrides keys are inlined into the SSH command as `var_{key}=...` shell
+    syntax (services/appstore.py, executor/ssh.py), so an unvalidated key is
+    an untrusted-JSON -> root-shell trust boundary."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    r = client.post(
+        "/api/v1/catalog/redis/install",
+        json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True,
+             "overrides": {"os=x; touch /tmp/pwned_key; a": "1"}},
+        headers=csrf_header(client))
+    assert r.status_code == 422, r.text
+    assert client.get("/api/v1/jobs").json() == []  # rejected before a job was ever enqueued
+
+
 def test_install_enqueues_an_app_install_job(client, csrf_header, bootstrap_admin):
     bootstrap_admin(client)
     with client.app.state.sessionmaker() as db:

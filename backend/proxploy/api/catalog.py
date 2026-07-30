@@ -2,8 +2,10 @@
 level; refresh is admin-gated since it fans out into ~24 GitHub fetches."""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
@@ -75,6 +77,18 @@ class InstallIn(BaseModel):
     ctid: int
     overrides: dict = {}
     consent: bool = False
+
+    @field_validator("overrides")
+    @classmethod
+    def _keys_are_safe_shell_var_names(cls, v: dict) -> dict:
+        """appstore.py turns each key into an inlined `var_{key}=...` shell
+        prefix (services/appstore.py, executor/ssh.py). Reject a bad key here
+        with a clean 422 instead of letting it travel all the way to a job
+        that fails deep inside SSHExecutor.run's own defense-in-depth check."""
+        for k in v:
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", k):
+                raise ValueError(f"invalid override key: {k!r}")
+        return v
 
 
 # This route triggers the single most security-relevant action in the whole

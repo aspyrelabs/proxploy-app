@@ -50,6 +50,26 @@ def test_run_inlines_env_vars_into_the_command_string():
         "MODE=default var_ctid=150 TITLE='two words' bash /tmp/install.sh")
 
 
+def test_run_rejects_a_shell_metacharacter_in_an_env_key():
+    """Regression test: env values are shlex-quoted but keys never were —
+    an admin-supplied overrides key like `"os; touch /tmp/x"` used to be
+    inlined literally into the command, running as a second root command.
+    Uses a connect_factory that blows up if called at all, to prove
+    validation happens before a connection is even opened, let alone before
+    the command reaches create_process."""
+    async def exploding_factory(*args, **kwargs):
+        raise AssertionError("must not connect when an env key is invalid")
+
+    executor = SSHExecutor(connect_factory=exploding_factory)
+
+    with pytest.raises(ValueError, match="os; touch /tmp/x"):
+        asyncio.run(executor.run(
+            "10.0.0.9", b"fake-key-pem", "bash /tmp/install.sh",
+            pinned_fingerprint=None, on_new_fingerprint=lambda fp: None,
+            env={"os; touch /tmp/x": "1"},
+        ))
+
+
 def test_run_with_no_env_leaves_the_command_untouched():
     fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc123", stdout_lines=[],
                              stderr_lines=[], exit_status=0)
