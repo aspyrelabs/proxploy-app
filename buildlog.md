@@ -240,3 +240,79 @@ Known, undelivered gaps carried into Phase 9: no staleness banner on the
 Store page (cache-survival itself works; the UI indicator does not exist),
 and the `category`/`description`/`icon_url`/`popularity` v1 gap documented
 before implementation began (no public community-scripts bulk metadata API).
+
+### 2026-07-31T00:15:00+05:30 — Phase 5 — execute-plan completed
+
+Plan: `docs/superpowers/plans/2026-07-30-phase-5-console.md`. All 12 tasks
+implemented and committed directly to `main`, each individually reviewed (fix
+rounds where the reviewer found real gaps: Tasks 3/4's shared `asyncio.wait()`
+exception-swallowing bug in the plan's own example code, Task 6's missing
+audit row on the node-shell toggle, Task 9's `@novnc/novnc/core/rfb` import
+path that doesn't actually resolve). Task 12 closed out with DoD
+verification, this notes doc, and this buildlog entry. Full details, DoD
+proof, and deviations in `docs/notes/phase-5-console.md`.
+
+**What was built:**
+- `ProxmoxClient.termproxy`/`.node_termproxy`/`.vncproxy` (backend/proxploy/
+  services/proxmox.py) + matching `FakePVE` support
+- `console_tickets` schema + `mint_ticket`/`redeem_ticket`
+  (backend/proxploy/services/consoletickets.py) — single-use, short-TTL,
+  bound to a specific Proxmox target and its upstream ticket
+- PtyBridge (backend/proxploy/services/ptybridge.py): translates doc 05's
+  simple browser JSON framing to/from Proxmox's own `termproxy`/xtermjs wire
+  protocol, reverse-engineered directly from `pve-xtermjs`'s own client code
+- ConsoleProxy (backend/proxploy/services/consoleproxy.py): dumb byte-for-byte
+  relay for VM noVNC (`vncproxy`/`vncwebsocket`), no translation needed
+- `POST /apps/{id}/console/tickets` + `WS /apps/{id}/console/ws` (CT
+  terminal), `POST /hosts/{id}/shell/tickets` + `WS /hosts/{id}/shell/ws`
+  (node shell, three-way gated: role + entitlement + per-host opt-in),
+  `POST /vms/{id}/console/tickets` + `WS /vms/{id}/vnc/ws` (VM noVNC) — every
+  ticket-mint route audits `console.open`, every WS route is ticket-only
+  (no session cookie)
+- Frontend: `Terminal.tsx` (xterm.js + fit addon), `VncConsole.tsx`
+  (`@novnc/novnc`'s `RFB`), `api/consoles.ts` ticket hooks, Console tab wired
+  into app detail (CT) and VM detail, node-shell section on node detail, and
+  the shared `TerminalPanel` log viewer used by both the live CT log tab and
+  archived job logs
+
+**Verification:**
+- Backend: 333 passed, 2 skipped, 3 deselected — `pytest tests/ -q -m "not
+  pve_integration and not e2e"` (the extra deselected test is this task's new
+  gated live-PVE test, see below)
+- Backend: executor isolation OK (`scripts/check_executor_isolation.py`,
+  unaffected by this phase)
+- Frontend: 65 passed (20 files) — `npx vitest run`; build clean
+- `docs/notes/phase-5-console.md`'s `dod_verify_phase5.py` run: all three
+  doc-10 DoD sub-clauses ("through the Proxploy origin only", "survive
+  reconnect", "write audit rows on open") proved against
+  `tests.support.make_app` + `FakePVE` + `FakeXtermUpstream` (no live PVE, no
+  real websocket to Proxmox, no browser on this box)
+- `backend/tests/test_console_pve_integration.py` added (Task 12): a
+  `pve_integration`-marked, disposable-live-PVE-gated test proving-or-
+  disproving the plan's own "Spike correction" finding — whether this PVE
+  host's `termproxy` accepts API-token auth for the LXC/node-shell path
+  (Proxmox bugzilla #6079, fixed for VMs in `qemu-server` 9.1.7+, unconfirmed
+  for LXC/node-shell). Skips here, same standing no-live-PVE limitation every
+  prior phase has stated — the single biggest open item this phase carries
+  forward
+
+**Deviations** (full list + rationale in the notes doc): Tasks 3 and 4 each
+independently found and fixed the same real bug in the plan's own example
+code — `asyncio.wait()` never propagates a done task's exception to the
+`await` point, so an idle timeout or abnormal close would stop the bridge but
+silently misreport `exit_code=0`; both fixes now walk the `done` set and
+re-raise, both reviewer-verified via live repros. Task 7 deliberately skipped
+the webgl xterm.js addon (marginal render-perf gain, no functional
+difference, called out rather than silent). Task 9 fixed a `@novnc/novnc/
+core/rfb` import path that doesn't resolve against the real package's
+`exports` field, and a `FakeRFB.disconnect` test-infra bug that was silently
+skipping the reconnect test's actual assertion. Task 6 added a missing audit
+row on `PATCH /hosts/{id}`'s node-shell toggle (`host.node_shell_toggle`).
+Known, undelivered/deferred items carried forward: no automated concurrency
+regression test for `redeem_ticket`'s single-use atomicity (proven live by a
+20-thread race in review, not committed to the suite), no dedicated
+mismatched-ticket-kind test on `app_console_ws` specifically, no
+operator-rejected-on-node-shell test, a cosmetic entitlement-loading tooltip
+flash on the node-shell button, and no visibility-based pause on log
+polling — none block this phase's DoD. The token/termproxy open question
+above is the one item that needs a real PVE host to close out.
