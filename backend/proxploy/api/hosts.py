@@ -158,6 +158,9 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
         raise HTTPException(404, "host not found")
     h.node_shell_enabled = body.node_shell_enabled
     db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="host.node_shell_toggle", target_type="host",
+                target_id=h.id, params={"node_shell_enabled": h.node_shell_enabled})
     return {"id": h.id, "node_shell_enabled": h.node_shell_enabled}
 
 

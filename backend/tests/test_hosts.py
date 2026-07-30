@@ -165,6 +165,21 @@ def test_patch_host_toggles_node_shell_enabled(pve_client, csrf_header):
     assert r.status_code == 200 and r.json()["node_shell_enabled"] is False
 
 
+def test_patch_host_writes_an_audit_event(pve_client, csrf_header):
+    from proxploy.models import AuditEvent
+
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": True},
+               headers=csrf_header(c))
+    assert r.status_code == 200
+
+    with c.app.state.sessionmaker() as db:
+        row = db.query(AuditEvent).filter_by(action="host.node_shell_toggle").one()
+        assert row.target_type == "host" and row.target_id == hid
+        assert row.params == {"node_shell_enabled": True}
+
+
 def test_patch_host_requires_admin_role(pve_client, csrf_header):
     c, _ = pve_client
     hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
