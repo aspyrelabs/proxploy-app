@@ -56,19 +56,47 @@ class _GuestStatusNS:
         return _ActionLeaf(self._owner, self._kind, self._vmid, action)
 
 
+class _TermproxyLeaf:
+    def __init__(self, owner, kind, node, vmid):
+        self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        if self._vmid is None:
+            self._owner.last_node_termproxy_call = self._node
+        else:
+            self._owner.last_termproxy_call = (self._kind, self._node, self._vmid)
+        return self._owner.termproxy_response
+
+
+class _VncproxyLeaf:
+    def __init__(self, owner, node, vmid):
+        self._owner, self._node, self._vmid = owner, node, vmid
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.last_vncproxy_call = (self._node, self._vmid)
+        return self._owner.vncproxy_response
+
+
 class _GuestNS:
-    def __init__(self, owner, kind, vmid):
+    def __init__(self, owner, kind, node, vmid):
         self.status = _GuestStatusNS(owner, kind, vmid)
+        self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
+        if kind == "qemu":
+            self.vncproxy = _VncproxyLeaf(owner, node, vmid)
 
 
 class _GuestFactory:
     """nodes(n).lxc / nodes(n).qemu — callable with a vmid."""
 
-    def __init__(self, owner, kind):
-        self._owner, self._kind = owner, kind
+    def __init__(self, owner, kind, node):
+        self._owner, self._kind, self._node = owner, kind, node
 
     def __call__(self, vmid):
-        return _GuestNS(self._owner, self._kind, int(vmid))
+        return _GuestNS(self._owner, self._kind, self._node, int(vmid))
 
 
 class _TaskStatusLeaf:
@@ -112,8 +140,9 @@ class _NodeNS:
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
                                 owner.fail or owner.rrd_fail)
         self.tasks = _TaskFactory(owner)
-        self.lxc = _GuestFactory(owner, "lxc")
-        self.qemu = _GuestFactory(owner, "qemu")
+        self.lxc = _GuestFactory(owner, "lxc", name)
+        self.qemu = _GuestFactory(owner, "qemu", name)
+        self.termproxy = _TermproxyLeaf(owner, None, name, None)
 
 
 class _NodesNS:
@@ -144,6 +173,12 @@ class FakePVE:
         self.task_lines: dict[str, list[str]] = {}
         self._polls: dict[str, int] = {}
         self._upid_n = 0
+        # console calls (Phase 5)
+        self.termproxy_response: dict = {}
+        self.vncproxy_response: dict = {}
+        self.last_termproxy_call = None
+        self.last_node_termproxy_call = None
+        self.last_vncproxy_call = None
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

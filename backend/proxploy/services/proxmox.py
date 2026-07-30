@@ -146,14 +146,19 @@ def resolve_target(host: str, port: int) -> str:
     return chosen
 
 
-def tls_fingerprint_sha256(host: str, port: int = 8006) -> str:
+def open_validated_tcp_socket(host: str, port: int, timeout: float = 10.0) -> socket.socket:
+    """resolve_target + connect to the literal we validated (doc 02 §5's SSRF
+    guard, shared by the TLS-fingerprint check and the new console websocket
+    connections — nothing here reaches Proxmox's own address string again)."""
     ip = resolve_target(host, port)
+    return socket.create_connection((ip, port), timeout=timeout)
+
+
+def tls_fingerprint_sha256(host: str, port: int = 8006) -> str:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE  # we are fetching the cert to pin it, not trusting it
-    # Connect to the literal we validated, not to `host` again: socket.create_connection
-    # would re-resolve and a second answer could differ from the one we checked.
-    with socket.create_connection((ip, port), timeout=10) as sock:
+    with open_validated_tcp_socket(host, port) as sock:
         with ctx.wrap_socket(sock, server_hostname=host) as tls:
             der = tls.getpeercert(binary_form=True)
     digest = hashlib.sha256(der).hexdigest().upper()
@@ -294,3 +299,32 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"task log failed for {upid}", e) from e
+
+    # --- console/terminal calls (Phase 5) -----------------------------------
+
+    def termproxy(self, kind: str, node: str, vmid: int) -> dict:
+        """POST /nodes/{node}/{lxc|qemu}/{vmid}/termproxy -> {user, ticket, port, upid}."""
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).termproxy.post()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"termproxy failed for {kind}/{vmid} on {node}", e) from e
+
+    def node_termproxy(self, node: str) -> dict:
+        """POST /nodes/{node}/termproxy -> {user, ticket, port, upid} (node shell)."""
+        try:
+            return self._connect().nodes(node).termproxy.post()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"node termproxy failed on {node}", e) from e
+
+    def vncproxy(self, node: str, vmid: int) -> dict:
+        """POST /nodes/{node}/qemu/{vmid}/vncproxy (websocket=1) -> {user, ticket, port, cert, upid}."""
+        try:
+            return self._connect().nodes(node).qemu(vmid).vncproxy.post(websocket=1)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"vncproxy failed for qemu/{vmid} on {node}", e) from e
