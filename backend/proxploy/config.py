@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     cookie_secure: bool = False  # installer flips on when TLS terminates at the app
     api_base_url: str = "https://api.proxploy.com"
     ent_extra_keys_file: Path | None = None
+    catalog_slugs: list[str] = [
+        "redis", "postgresql", "mysql", "mariadb", "mongodb",
+        "jellyfin", "plex", "immich", "homeassistant", "homebridge", "zigbee2mqtt",
+        "grafana", "prometheus", "uptimekuma", "gitea", "n8n",
+        "pihole", "adguard", "nginxproxymanager", "wireguard",
+        "docker", "paperless-ngx", "vaultwarden", "proxmox-backup-server",
+    ]
     poll_enabled: bool = True
     poll_interval_s: float = 30.0
     poll_timeout_s: float = 20.0
