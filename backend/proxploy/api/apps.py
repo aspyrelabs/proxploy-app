@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
@@ -13,6 +14,13 @@ from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
 
 router = APIRouter(prefix="/apps", tags=["apps"])
+
+# Reused as BOTH the route-level dependency and the parameter-level one below
+# (same collapse-and-ordering rationale as catalog.py's _require_admin/
+# _require_viewer and this file's own _require_operator further down): auth/
+# role must run before require_entitlement, or an anonymous caller gets a
+# leaky 403 instead of 401 (test_route_auth_invariant.py).
+_require_admin = require_role("admin")
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -67,6 +75,48 @@ def discovered(request: Request, db=Depends(get_db),
         for d in snap.discovered:
             out.append({"host_id": host_id, "host_name": h.name, **d})
     return out
+
+
+class AdoptItem(BaseModel):
+    host_id: int
+    ctid: int
+    name: str
+    catalog_slug: str | None = None
+
+
+class AdoptIn(BaseModel):
+    items: list[AdoptItem]
+
+
+@router.post("/adopt", dependencies=[Depends(_require_admin),
+                                     Depends(require_entitlement("apps.adopt"))])
+def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
+               user: User = Depends(_require_admin)):
+    """Bulk-adopt pre-existing/discovered CTs as tracked apps (doc 05, Phase 4).
+
+    One commit for the whole batch: a mid-batch ux_apps_host_ctid conflict
+    rolls back everything flushed so far in this request (nothing partially
+    lands), and a single audit row covers the whole batch rather than one per
+    item.
+    """
+    adopted = []
+    for item in body.items:
+        slug = f"{item.catalog_slug or 'adopted'}-{item.host_id}-{item.ctid}"
+        row = App(host_id=item.host_id, ctid=item.ctid, name=item.name, slug=slug,
+                  catalog_slug=item.catalog_slug, web_protocol="http", web_path="/",
+                  adopted=True)
+        db.add(row)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, f"CT {item.ctid} on host {item.host_id} is already adopted")
+        adopted.append(row.id)
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="apps.adopt",
+                params={"count": len(adopted), "app_ids": adopted},
+                ip=request.client.host if request.client else None)
+    return {"adopted": adopted}
 
 
 @router.get("/{app_id}")
