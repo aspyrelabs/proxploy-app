@@ -4,7 +4,7 @@ import { api } from '../api/client'
 type ScriptOut = { version: number; content: string; source: string; diff_vs_upstream: string | null }
 
 function DiffLine({ line }: { line: string }) {
-  const cls = line.startsWith('+') ? 'text-green-400' : line.startsWith('-') ? 'text-red-400' : 'text-text-3'
+  const cls = line.startsWith('+') ? 'text-green' : line.startsWith('-') ? 'text-red' : 'text-text-3'
   return <div className={cls}>{line}</div>
 }
 
