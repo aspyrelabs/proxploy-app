@@ -1339,7 +1339,10 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         raise JobFailed(f"install script exited {status}")
     ctx.progress(80)
 
-    slug = f"{catalog_slug}-{ctid}"
+    # host_id is part of the slug, not just catalog_slug+ctid: App.slug is
+    # globally unique, and two different hosts can each run a CTID 150
+    # "redis" install — omitting host_id would collide on the second one.
+    slug = f"{catalog_slug}-{host_id}-{ctid}"
     with app.state.sessionmaker() as db:
         row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
                   catalog_slug=catalog_slug, category=entry.category,
