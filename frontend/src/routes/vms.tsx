@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect } from 'react'
-import { useConsoleTicket, consoleWsUrl } from '../api/consoles'
+import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { api } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
@@ -197,13 +197,19 @@ export const vmOverviewRoute = createRoute({
 function VmConsole() {
   const { vmId } = useParams({ strict: false }) as { vmId: string }
   const id = Number(vmId)
-  const ticket = useConsoleTicket('vm', id)
-  useEffect(() => { ticket.mutate() }, [id])
+  const { ticket, failed, start, reconnect } = useReconnectingTicket('vm', id)
+  useEffect(() => { start() }, [id])
+  if (failed) {
+    return <EmptyState title="Console connection failed"
+      note="Gave up after repeated attempts. Reload the page to try again." />
+  }
   if (!ticket.data) return <EmptyState title="Opening console…" note="" />
   // VncConsole has no onDrop today (Task 9 doesn't add one — noVNC's RFB
   // class exposes its own 'disconnect' event for this instead of a generic
-  // prop); wire the same re-mint-on-drop behavior via that event:
-  return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={() => ticket.mutate()} />
+  // prop); wire the same reconnect-with-cap behavior via that event. VNC has
+  // no JSON control-frame channel (unlike Terminal), so there is no "fatal"
+  // signal to short-circuit on here — every drop just counts against the cap.
+  return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={reconnect} />
 }
 
 function VncConsoleWithReconnect({ vmId, ticket, onNeedNewTicket }:

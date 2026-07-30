@@ -4,7 +4,7 @@ import { createRoute, useParams } from '@tanstack/react-router'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
-import { consoleWsUrl, useConsoleTicket } from '../api/consoles'
+import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
@@ -158,13 +158,17 @@ function useHostDetail(id: number) {
 function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeShellEnabled: boolean }) {
   const ent = useEntitlements()
   const [open, setOpen] = useState(false)
-  const ticket = useConsoleTicket('host', hostId)
+  const { ticket, failed, reconnect, giveUp } = useReconnectingTicket('host', hostId)
   const allowed = ent.has('terminal.node') && nodeShellEnabled
+  if (open && failed) {
+    return <EmptyState title="Console connection failed"
+      note="Gave up after repeated attempts. Reload the page to try again." />
+  }
   if (open && ticket.data) {
     return (
       <Terminal key={ticket.data.ticket}
         wsUrl={consoleWsUrl('host', hostId, ticket.data.ticket)}
-        onDrop={() => ticket.mutate()} />
+        onDrop={({ fatal }) => (fatal ? giveUp() : reconnect())} />
     )
   }
   return (

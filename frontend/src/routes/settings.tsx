@@ -16,7 +16,8 @@ export const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
-type HostRow = { id: number; name: string; address: string; status: string; pve_version: string | null }
+type HostRow = { id: number; name: string; address: string; status: string; pve_version: string | null;
+                node_shell_enabled: boolean }
 
 function Card({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -35,6 +36,17 @@ export function SettingsPage() {
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  // The only editable host field (doc 08 §9's deliberate second, admin-only
+  // opt-in gate on top of RBAC) — NodeDetailPage's node-shell section reads
+  // this same value, so invalidating the 'hosts' query key here (a prefix
+  // match in TanStack Query v5) keeps both in sync without a second fetch.
+  const toggleNodeShell = useMutation({
+    mutationFn: (h: HostRow) => api(`/hosts/${h.id}`, {
+      method: 'PATCH', body: JSON.stringify({ node_shell_enabled: !h.node_shell_enabled }),
+    }),
+    onError: () => toast.error('Could not update node shell setting — try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
+  })
 
   // Wait for the first entitlements fetch before deciding — `has()` defaults
   // to false until then, which would 403 the query and open an "Add channel"
@@ -93,7 +105,7 @@ export function SettingsPage() {
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
         <table className="w-full text-left text-[13px]">
           <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-            <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th></tr></thead>
+            <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th></tr></thead>
           <tbody>
             {(hosts.data ?? []).map(h => (
               <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
@@ -101,9 +113,19 @@ export function SettingsPage() {
                 <td className="font-mono text-text-2">{h.address}</td>
                 <td className="text-text-2">{h.pve_version ?? '—'}</td>
                 <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
+                <td>
+                  <label className="inline-flex items-center gap-1.5">
+                    <input type="checkbox" checked={h.node_shell_enabled}
+                      disabled={toggleNodeShell.isPending}
+                      onChange={() => toggleNodeShell.mutate(h)} />
+                    <span className="text-[11px] text-text-3">
+                      {h.node_shell_enabled ? 'enabled' : 'disabled'}
+                    </span>
+                  </label>
+                </td>
               </tr>
             ))}
-            {!hosts.data?.length && <tr><td colSpan={4} className="py-4 text-text-3">No hosts yet.</td></tr>}
+            {!hosts.data?.length && <tr><td colSpan={5} className="py-4 text-text-3">No hosts yet.</td></tr>}
           </tbody>
         </table>
         {adding && <div className="mt-4 border-t border-line-soft pt-4">

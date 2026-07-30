@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import { useConsoleTicket, consoleWsUrl } from '../api/consoles'
+import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import type { AppRow, DiscoveredRow } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
@@ -268,13 +268,17 @@ export const appOverviewRoute = createRoute({
   component: AppOverview,
 })
 export function AppConsole({ appId }: { appId: number }) {
-  const ticket = useConsoleTicket('app', appId)
-  useEffect(() => { ticket.mutate() }, [appId])
+  const { ticket, failed, start, reconnect, giveUp } = useReconnectingTicket('app', appId)
+  useEffect(() => { start() }, [appId])
+  if (failed) {
+    return <EmptyState title="Console connection failed"
+      note="Gave up after repeated attempts. Reload the page to try again." />
+  }
   if (!ticket.data) return <EmptyState title="Opening console…" note="" />
   return (
     <Terminal key={ticket.data.ticket}
       wsUrl={consoleWsUrl('app', appId, ticket.data.ticket)}
-      onDrop={() => ticket.mutate()} />
+      onDrop={({ fatal }) => (fatal ? giveUp() : reconnect())} />
   )
 }
 
@@ -284,11 +288,19 @@ function AppConsoleTab() {
 }
 
 export function AppLogs({ appId }: { appId: number }) {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['apps', appId, 'logs'],
     queryFn: () => api<{ stream: string; message: string }[]>(`/apps/${appId}/logs`),
-    refetchInterval: 5_000,
+    // Stop polling once the backend has answered with an error (currently
+    // always — see GET /apps/{id}/logs's 501) instead of retrying a dead
+    // endpoint every 5s forever.
+    refetchInterval: (query) => (query.state.error ? false : 5_000),
+    retry: false,
   })
+  if (isError) {
+    return <EmptyState title="Logs not available yet"
+      note="Proxploy has no CT journal/exec channel wired up yet — this is a known gap, not a bug." />
+  }
   return <TerminalPanel lines={data ?? []} />
 }
 

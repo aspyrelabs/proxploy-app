@@ -7,7 +7,10 @@ const THEME = {
   red: '#F26D6D', green: '#3FCF8E', yellow: '#F5B544', blue: '#5B9DF9',
 }
 
-export function Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void }) {
+export type TerminalDropInfo = { fatal: boolean }
+
+export function Terminal({ wsUrl, onDrop }:
+  { wsUrl: string; onDrop?: (info: TerminalDropInfo) => void }) {
   const box = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -20,6 +23,12 @@ export function Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void
 
     if (typeof WebSocket === 'undefined') return  // jsdom without a WS stub
     let unmounting = false
+    // Set when an exit control frame carries an `error` (the actionable
+    // PtyBridge/PVE-rejection message, e.g. the token-vs-termproxy PVE
+    // limitation the plan documents) — that drop is terminal, not transient,
+    // so the caller should stop retrying instead of burning its reconnect
+    // budget on a connection that will fail the same way every time.
+    let fatal = false
     const ws = new WebSocket(wsUrl)
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
@@ -28,7 +37,11 @@ export function Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void
       let data = e.data as string
       try {
         const control = JSON.parse(data)
-        if (control?.type === 'exit') { term.write(`\r\n[session ended: ${control.code}]\r\n`); return }
+        if (control?.type === 'exit') {
+          term.write(`\r\n[session ended: ${control.code}${control.error ? ': ' + control.error : ''}]\r\n`)
+          if (control.error) fatal = true
+          return
+        }
       } catch { /* not a control frame — raw terminal text */ }
       term.write(data)
     }
@@ -38,7 +51,7 @@ export function Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void
     // re-mints a ticket and remounts with a fresh wsUrl; this component only
     // has to tell them a drop happened, and not confuse its own teardown
     // (which also closes the socket) for one.
-    ws.onclose = () => { if (!unmounting) onDrop?.() }
+    ws.onclose = () => { if (!unmounting) onDrop?.({ fatal }) }
     const sub = term.onData((data) => ws.readyState === WebSocket.OPEN && ws.send(data))
     const resizeSub = term.onResize(({ cols, rows }) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }))
