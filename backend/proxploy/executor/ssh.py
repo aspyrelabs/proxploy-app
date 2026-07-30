@@ -25,24 +25,40 @@ class SSHHostKeyMismatch(Exception):
 
 async def default_connect_factory(host: str, private_key_pem: bytes, *,
                                   pinned_fingerprint: str | None,
-                                  on_new_fingerprint: Callable[[str], None]):
+                                  on_new_fingerprint: Callable[[str], None],
+                                  port: int = 22):
+    # port defaults to the real SSH port; it's a keyword-only extra (not
+    # part of SSHExecutor.run's contract) so tests can point this factory at
+    # an in-process asyncssh server on an ephemeral port.
     key = asyncssh.import_private_key(private_key_pem)
     captured: dict[str, str] = {}
 
     class _PinningClient(asyncssh.SSHClient):
-        def validate_host_public_key(self, host_, addr, port, key_) -> bool:
-            fp = key_.get_fingerprint()
-            captured["fingerprint"] = fp
-            if pinned_fingerprint is None:
-                return True
-            return fp == pinned_fingerprint
+        def validate_host_public_key(self, host_, addr, port_, key_) -> bool:
+            # Always accept at the transport layer and only capture the
+            # fingerprint here. Returning False on a mismatch would make
+            # asyncssh itself abort the handshake with its own
+            # HostKeyNotVerifiable *before* the caller gets a chance to see
+            # a proper SSHHostKeyMismatch — the mismatch decision belongs to
+            # the post-connect check below, which can also close the
+            # connection cleanly instead of asyncssh tearing it down mid-kex.
+            captured["fingerprint"] = key_.get_fingerprint()
+            return True
 
     conn, _ = await asyncssh.create_connection(
-        _PinningClient, host, username="root", client_keys=[key],
-        known_hosts=None, connect_timeout=CONNECT_TIMEOUT_S,
+        _PinningClient, host, port, username="root", client_keys=[key],
+        # known_hosts=None disables asyncssh's own trust store AND skips
+        # calling validate_host_public_key entirely (asyncssh sets
+        # _trusted_host_keys=None and never invokes the callback) — that
+        # silently no-ops our TOFU pinning. known_hosts=b'' (an empty inline
+        # trust store, not "no check") keeps _trusted_host_keys as an empty
+        # set, which is what makes asyncssh actually call
+        # validate_host_public_key below.
+        known_hosts=b"", connect_timeout=CONNECT_TIMEOUT_S,
     )
     if pinned_fingerprint is not None and captured.get("fingerprint") != pinned_fingerprint:
         conn.close()
+        await conn.wait_closed()
         raise SSHHostKeyMismatch(
             f"host key changed: pinned {pinned_fingerprint}, saw {captured.get('fingerprint')}")
     if pinned_fingerprint is None and "fingerprint" in captured:

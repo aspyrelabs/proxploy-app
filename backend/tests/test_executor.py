@@ -1,9 +1,12 @@
 import asyncio
 import pytest
 
-from proxploy.executor import SSHExecutor
-from proxploy.executor.ssh import SSHHostKeyMismatch
+import asyncssh
+
+from proxploy.executor import SSHExecutor, get_ssh_private_key
+from proxploy.executor.ssh import SSHHostKeyMismatch, default_connect_factory
 from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+from tests.support import make_db, seed_host_row
 
 
 def test_run_streams_lines_and_returns_exit_status():
@@ -50,3 +53,103 @@ def test_run_times_out_on_a_hanging_command():
             "10.0.0.9", b"fake-key-pem", "sleep 999",
             pinned_fingerprint=None, on_new_fingerprint=lambda fp: None, timeout_s=0.05,
         ))
+
+
+class _AcceptAnyKeyServer(asyncssh.SSHServer):
+    """Throwaway in-process server: accepts the one test client key so we
+    can exercise the REAL default_connect_factory (not tests/fakes/ssh.py's
+    hand-rolled reimplementation of the pin logic) end to end."""
+
+    def __init__(self, client_pub):
+        self._client_pub = client_pub
+
+    def begin_auth(self, username):
+        return True
+
+    def public_key_auth_supported(self):
+        return True
+
+    def validate_public_key(self, username, key):
+        return key == self._client_pub
+
+
+def test_default_connect_factory_pins_then_accepts_then_rejects_changed_key():
+    """Regression test for the bug a reviewer caught: known_hosts=None makes
+    asyncssh skip validate_host_public_key entirely, silently disabling TOFU
+    pinning. Runs against a real local asyncssh server/client pair — the
+    fakes/ssh.py-based tests above never touch this code path."""
+
+    async def scenario():
+        host_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_pub = client_key.convert_to_public()
+        client_pem = client_key.export_private_key()
+
+        server = await asyncssh.create_server(
+            lambda: _AcceptAnyKeyServer(client_pub), "127.0.0.1", 0,
+            server_host_keys=[host_key],
+        )
+        try:
+            port = server.sockets[0].getsockname()[1]
+
+            # First connect: no pin yet -> TOFU captures the fingerprint.
+            seen_fp: list[str] = []
+            conn = await default_connect_factory(
+                "127.0.0.1", client_pem, pinned_fingerprint=None,
+                on_new_fingerprint=seen_fp.append, port=port,
+            )
+            conn.close()
+            await conn.wait_closed()
+            assert len(seen_fp) == 1 and seen_fp[0]
+
+            # Second connect: same key pinned -> must succeed (this is the
+            # case the known_hosts=None bug broke: it raised unconditionally).
+            conn2 = await default_connect_factory(
+                "127.0.0.1", client_pem, pinned_fingerprint=seen_fp[0],
+                on_new_fingerprint=lambda fp: None, port=port,
+            )
+            conn2.close()
+            await conn2.wait_closed()
+
+            # Third connect: a different pinned fingerprint -> must reject.
+            with pytest.raises(SSHHostKeyMismatch):
+                await default_connect_factory(
+                    "127.0.0.1", client_pem, pinned_fingerprint="SHA256:bogus",
+                    on_new_fingerprint=lambda fp: None, port=port,
+                )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
+
+
+def test_get_ssh_private_key_decrypts_the_stored_credential(tmp_path):
+    from proxploy.models import HostCredential
+    from proxploy.secretstore import SecretStore
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    kf = tmp_path / "master.key"
+    SecretStore.ensure_key_file(kf, db_file_exists=False)
+    secretstore = SecretStore(kf)
+    blob, ver = secretstore.encrypt(b"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n")
+    db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                          encrypted_blob=blob, key_version=ver))
+    db.commit()
+
+    assert get_ssh_private_key(db, secretstore, host.id) == \
+        b"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n"
+
+
+def test_get_ssh_private_key_raises_when_no_credential(tmp_path):
+    from proxploy.secretstore import SecretStore
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    kf = tmp_path / "master.key"
+    SecretStore.ensure_key_file(kf, db_file_exists=False)
+    secretstore = SecretStore(kf)
+
+    with pytest.raises(LookupError):
+        get_ssh_private_key(db, secretstore, host.id)
