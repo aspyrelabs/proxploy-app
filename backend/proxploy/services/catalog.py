@@ -15,7 +15,8 @@ from proxploy.models import CatalogEntry
 from proxploy.services.catalog_categories import category_for
 from proxploy.services.classifier import classify_install_feasibility
 
-RAW_BASE = "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main"
+RAW_BASE = "https://raw.githubusercontent.com/community-scripts/ProxmoxVE"
+HEAD_COMMIT_API = "https://api.github.com/repos/community-scripts/ProxmoxVE/commits/main"
 
 APP_RE = re.compile(r'^APP="([^"]+)"', re.MULTILINE)
 SOURCE_RE = re.compile(r"^#\s*Source:\s*(\S+)", re.MULTILINE)
@@ -32,6 +33,29 @@ def _fetch(url: str, **kw) -> httpx.Response:
     return httpx.get(url, timeout=15.0, **kw)
 
 
+def raw_url(sha: str, path: str) -> str:
+    """Raw-content URL pinned to an immutable commit, never to `main`.
+
+    Single definition on purpose: `_ingest_one` classifies/pins the content at
+    this URL and `services/appstore.py::run_install` executes the content at
+    this URL, and "pinned" only means anything if both resolve to the exact
+    same bytes.
+    """
+    return f"{RAW_BASE}/{sha}/{path}"
+
+
+def head_sha() -> str:
+    """The repo's current HEAD commit SHA — one unauthenticated GitHub API
+    call per refresh job (not per slug; the rate limit is 60/hr/IP)."""
+    resp = _fetch(HEAD_COMMIT_API)
+    if resp.status_code != 200:
+        raise JobFailed(f"upstream HEAD commit lookup failed ({resp.status_code})")
+    sha = (resp.json() or {}).get("sha")
+    if not sha:
+        raise JobFailed("upstream HEAD commit lookup returned no sha")
+    return sha
+
+
 def parse_ct_script(content: str) -> dict:
     meta: dict = {}
     if m := APP_RE.search(content):
@@ -44,18 +68,19 @@ def parse_ct_script(content: str) -> dict:
     return meta
 
 
-def _ingest_one(db, slug: str) -> None:
-    ct_resp = _fetch(f"{RAW_BASE}/ct/{slug}.sh")
+def _ingest_one(db, slug: str, sha: str) -> None:
+    row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
+    if row is not None and row.upstream_sha == sha:
+        return  # nothing changed upstream since last sync
+
+    # Fetched by commit SHA, not by `main`: the content classified and pinned
+    # here must be byte-identical to what run_install later executes.
+    ct_resp = _fetch(raw_url(sha, f"ct/{slug}.sh"))
     if ct_resp.status_code != 200:
         raise JobFailed(f"{slug}: ct script fetch failed ({ct_resp.status_code})")
-    install_resp = _fetch(f"{RAW_BASE}/install/{slug}-install.sh")
+    install_resp = _fetch(raw_url(sha, f"install/{slug}-install.sh"))
     if install_resp.status_code != 200:
         raise JobFailed(f"{slug}: install script fetch failed ({install_resp.status_code})")
-
-    etag = (ct_resp.headers.get("ETag") or "").strip('"')
-    row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
-    if row is not None and etag and row.upstream_sha == etag:
-        return  # unchanged since last sync
 
     meta = parse_ct_script(ct_resp.text)
     installable, reason = classify_install_feasibility(ct_resp.text, install_resp.text)
@@ -74,18 +99,27 @@ def _ingest_one(db, slug: str) -> None:
     row.default_os_version = meta.get("default_os_version")
     row.installable = installable
     row.unsupported_reason = reason
-    row.upstream_sha = etag or None
+    row.upstream_sha = sha
     row.raw = {"ct_script": ct_resp.text, "install_script": install_resp.text}
     row.synced_at = datetime.now(timezone.utc)
     db.commit()
 
 
 def run_ingest(db, slugs: list[str]) -> dict:
-    n = 0
+    """One HEAD-commit lookup, then one slug at a time. A single bad slug
+    (404, network hiccup) is recorded and skipped — it must not abort the
+    other 23, which is what an escaping JobFailed used to do."""
+    sha = head_sha()
+    synced, failed = 0, []
     for slug in slugs:
-        _ingest_one(db, slug)
-        n += 1
-    return {"synced": n}
+        try:
+            _ingest_one(db, slug, sha)
+        except Exception as e:  # noqa: BLE001 — one bad slug can't kill the batch
+            db.rollback()
+            failed.append({"slug": slug, "reason": str(e)})
+            continue
+        synced += 1
+    return {"synced": synced, "failed": failed, "upstream_sha": sha}
 
 
 async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
@@ -94,6 +128,12 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"refreshing {len(slugs)} catalog entries")
     with app.state.sessionmaker() as db:
         result = await asyncio.to_thread(run_ingest, db, slugs)
+    ctx.log(f"pinned to upstream commit {result['upstream_sha']}")
+    # ctx.log only runs on the event loop (every other handler does the same),
+    # so per-slug failures are narrated here rather than from inside the thread.
+    for f in result["failed"]:
+        ctx.log(f"{f['slug']}: {f['reason']}", stream="stderr")
+    ctx.log(f"synced {result['synced']}, failed {len(result['failed'])}")
     ctx.progress(100)
     return result
 

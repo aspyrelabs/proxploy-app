@@ -15,6 +15,7 @@ import hashlib
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, AppScript, CatalogEntry, Host
+from proxploy.services.catalog import raw_url
 
 
 def _resolve(app, catalog_slug: str, host_id: int):
@@ -31,6 +32,12 @@ def _resolve(app, catalog_slug: str, host_id: int):
             raise JobFailed(f"catalog entry {catalog_slug} not found")
         if not entry.installable:
             raise JobFailed(f"{catalog_slug} is not installable: {entry.unsupported_reason}")
+        if not entry.upstream_sha:
+            # Without a pinned commit there is nothing to execute that matches
+            # what was classified and diffed — never silently fall back to
+            # `main`, which is the bug this guard exists to prevent.
+            raise JobFailed(f"{catalog_slug} has no pinned upstream commit; "
+                            f"refresh the catalog before installing")
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
@@ -53,6 +60,12 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     env = {"MODE": "default", "PHS_SILENT": "1"}
     for key, val in overrides.items():
         env[f"var_{key}"] = str(val)
+    # Set last so it always wins over an `overrides` entry: the App row below
+    # records this ctid as fact, so the container has to actually land there.
+    # misc/build.func honours it (`local requested_id="${var_ctid:-$NEXTID}"`);
+    # without it the script silently auto-picks the next free ID instead and
+    # the App row points at a CT that doesn't exist.
+    env["var_ctid"] = str(ctid)
 
     executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
 
@@ -65,9 +78,18 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
+    # Pinned to the exact commit that was ingested, classified and diffed —
+    # not to `main`, which would be a fresh, possibly-different fetch at
+    # execution time and would make the app_scripts pin decorative.
+    #
+    # RESIDUAL LIMITATION (deliberately not solved here): the pinned ct/*.sh
+    # itself contains a literal `source <(curl -fsSL .../main/misc/build.func)`
+    # line. That line's text is frozen at this commit, but the framework file
+    # it names is still fetched live from `main` at execution time, one level
+    # down. Full transitive vendoring of the community-scripts framework is a
+    # separate, larger piece of work — see docs/notes/phase-4-store.md.
     command = (
-        f"bash -c \"$(curl -fsSL "
-        f"https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/{entry.script_path})\""
+        f"bash -c \"$(curl -fsSL {raw_url(entry.upstream_sha, entry.script_path)})\""
     )
     try:
         status = await executor.run_for_host(
