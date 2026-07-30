@@ -2,13 +2,16 @@
 state is cache."""
 from __future__ import annotations
 
+import difflib
+import hashlib
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
-from proxploy.models import App, Host, User
+from proxploy.models import App, AppScript, CatalogEntry, Host, User
 from proxploy.services.audit import write_audit
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
@@ -21,6 +24,11 @@ router = APIRouter(prefix="/apps", tags=["apps"])
 # role must run before require_entitlement, or an anonymous caller gets a
 # leaky 403 instead of 401 (test_route_auth_invariant.py).
 _require_admin = require_role("admin")
+
+# Defined here (rather than just above the lifecycle wildcard further down)
+# so the script routes below — registered before that wildcard per the
+# WARNING near it — can also reuse it as a single collapsed dependency.
+_require_operator = require_role("operator")
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -129,6 +137,73 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     return _app_out(a, host, request.app.state.poller.snapshots)
 
 
+def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
+    """Doc 05/10: diff the pinned app_scripts row against the *current*
+    catalog_entries.raw.install_script for this app's catalog_slug — not just
+    against this app's own prior version. A catalog refresh can move upstream
+    forward with the app's pinned content untouched, and that drift has to
+    surface too (see test_upstream_moving_on_after_pin_also_surfaces_a_diff)."""
+    if not app_row.catalog_slug:
+        return None
+    entry = db.query(CatalogEntry).filter_by(slug=app_row.catalog_slug).one_or_none()
+    if entry is None or not entry.raw:
+        return None
+    upstream = entry.raw.get("install_script")
+    if upstream is None or upstream == pinned_content:
+        return None
+    diff = difflib.unified_diff(
+        upstream.splitlines(keepends=True), pinned_content.splitlines(keepends=True),
+        fromfile="upstream", tofile="pinned")
+    return "".join(diff)
+
+
+# Literal two-segment/three-segment paths registered here — BEFORE the
+# lifecycle wildcard further down — per that route's own WARNING: Starlette
+# matches path templates in registration order, and `/{app_id}/{action}`
+# would otherwise swallow these (it's POST-only though, so GET/PUT here don't
+# actually collide on method; kept ahead of it anyway for the same reason
+# doc 05's future /{id}/update and /{id}/migrate must be).
+@router.get("/{app_id}/script", dependencies=[Depends(_require_operator),
+                                              Depends(require_entitlement("apps.script_edit"))])
+def get_app_script(app_id: int, db=Depends(get_db)):
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+             .order_by(AppScript.version.desc()).first())
+    if latest is None:
+        raise HTTPException(404, "no pinned script for this app")
+    app_row = db.get(App, app_id)
+    return {"version": latest.version, "content": latest.content, "source": latest.source,
+           "diff_vs_upstream": _diff_vs_upstream(db, app_row, latest.content)}
+
+
+@router.put("/{app_id}/script", dependencies=[Depends(_require_admin),
+                                              Depends(require_entitlement("apps.script_edit"))])
+def put_app_script(app_id: int, body: dict, request: Request, db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    content = body["content"]
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+             .order_by(AppScript.version.desc()).first())
+    next_version = (latest.version + 1) if latest else 1
+    row = AppScript(app_id=app_id, version=next_version, content=content,
+                    content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                    source="edited", created_by=user.id)
+    db.add(row)
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="apps.script_edit",
+                target_type="app", target_id=app_id, params={"version": row.version},
+                ip=request.client.host if request.client else None)
+    return {"version": row.version, "content": row.content, "source": row.source}
+
+
+@router.get("/{app_id}/script/versions",
+            dependencies=[Depends(_require_operator),
+                         Depends(require_entitlement("apps.script_edit"))])
+def list_app_script_versions(app_id: int, db=Depends(get_db)):
+    rows = (db.query(AppScript).filter_by(app_id=app_id)
+           .order_by(AppScript.version.desc()).all())
+    return [{"version": r.version, "source": r.source, "created_at": r.created_at.isoformat()}
+           for r in rows]
+
+
 class LifecycleIn(BaseModel):
     confirm: str | None = None
 
@@ -162,15 +237,6 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
                 target_id=target.id, params={"action": action},
                 job_id=job.id, ip=ip)
     return job
-
-
-# Reused as BOTH the route-level dependency and the parameter-level one below
-# so FastAPI's dependency cache (keyed on the callable) collapses them into a
-# single call that runs first. A bare `dependencies=[Depends(require_entitlement(...))]`
-# would sit at position 0 of the dependant and run BEFORE this auth/role check,
-# leaking 403 to an anonymous caller who should see 401 (Task 3 hit this in
-# jobs.py; verified experimentally — see task-5-report.md).
-_require_operator = require_role("operator")
 
 
 # WARNING: this wildcard is registered last and Starlette matches routes in
