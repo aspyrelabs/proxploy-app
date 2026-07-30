@@ -12,6 +12,7 @@ import { LifecycleActions } from '../components/LifecycleActions'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { RAM_GRADIENT, UsageBar } from '../components/UsageBar'
+import { ScriptPanel } from '../components/ScriptPanel'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -274,5 +275,14 @@ export const appLogsRoute = phaseTab('logs', 'Phase 5 (Console)',
   'Live CT logs share the log-viewer with job transcripts.')
 export const appConsoleRoute = phaseTab('console', 'Phase 5 (Console)',
   'xterm.js over the proxied Proxmox termproxy websocket.')
-export const appConfigRoute = phaseTab('config', 'Phase 4 (Store)',
-  'The pinned community script becomes viewable and editable here.')
+
+const AppConfigTab = () => {
+  const { appId } = useParams({ strict: false }) as { appId: string }
+  return <ScriptPanel appId={Number(appId)} />
+}
+
+export const appConfigRoute = createRoute({
+  getParentRoute: () => appDetailRoute,
+  path: 'config',
+  component: AppConfigTab,
+})
