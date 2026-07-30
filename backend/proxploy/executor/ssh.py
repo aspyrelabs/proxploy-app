@@ -11,6 +11,7 @@ instead of parking a JobBackend semaphore slot indefinitely.
 from __future__ import annotations
 
 import asyncio
+import shlex
 from collections.abc import Callable
 
 import asyncssh
@@ -80,11 +81,27 @@ class SSHExecutor:
                   env: dict[str, str] | None = None,
                   on_line: Callable[[str, str], None] | None = None,
                   timeout_s: float = 1800.0) -> int:
+        """Run `command` as root on `host`, streaming output line-by-line.
+
+        `env` is inlined as a shell-quoted `KEY=value ...` prefix on the
+        command string, NOT passed through asyncssh's `env=` kwarg. This is
+        not a style choice: asyncssh's `env=` sends each variable as an SSH
+        protocol `env` channel request, and stock OpenSSH `sshd` silently
+        drops every variable not listed in its `AcceptEnv` directive — which
+        defaults to empty (only `LANG`/`LC_*` survive on most builds). On a
+        default-configured Proxmox node that means `MODE`, `PHS_SILENT` and
+        every `var_*` override would vanish before the remote script saw
+        them, with no error anywhere. Inlining into the command is the only
+        mechanism that works without editing the node's sshd config.
+        """
         conn = await self._connect_factory(
             host, private_key_pem, pinned_fingerprint=pinned_fingerprint,
             on_new_fingerprint=on_new_fingerprint)
         async with conn:
-            proc = await conn.create_process(command, env=env or {}, stdin=asyncssh.DEVNULL)
+            env_prefix = " ".join(f"{k}={shlex.quote(str(v))}"
+                                  for k, v in (env or {}).items())
+            full_command = f"{env_prefix} {command}" if env_prefix else command
+            proc = await conn.create_process(full_command, stdin=asyncssh.DEVNULL)
 
             async def _pump(stream, name):
                 async for line in stream:

@@ -40,8 +40,14 @@ class FakeSSHConnection:
         self.exit_status = exit_status
         self.hang = hang
         self.stdin_closed: bool | None = None
+        # The exact command string handed to create_process. Captured because
+        # env vars are inlined into it (SSH env channel requests are dropped
+        # by default sshd AcceptEnv) — asserting on it is the only way to
+        # prove an override actually reaches the remote process.
+        self.last_command: str | None = None
 
     async def create_process(self, command, *, env=None, stdin=None):
+        self.last_command = command
         self.stdin_closed = stdin is not None
         return _FakeProcess(self)
 

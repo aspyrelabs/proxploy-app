@@ -31,6 +31,36 @@ def test_run_streams_lines_and_returns_exit_status():
     assert fake.stdin_closed is True  # spike finding: stdin must be closed, never left open
 
 
+def test_run_inlines_env_vars_into_the_command_string():
+    """Regression test for Critical #1B: `env` used to go out via asyncssh's
+    `env=` kwarg, i.e. SSH `env` channel requests, which stock OpenSSH sshd
+    silently drops unless every name is listed in AcceptEnv (default: none).
+    The only reliable mechanism is a shell-quoted prefix on the command."""
+    fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc123", stdout_lines=[],
+                             stderr_lines=[], exit_status=0)
+    executor = SSHExecutor(connect_factory=make_fake_connect_factory(fake))
+
+    asyncio.run(executor.run(
+        "10.0.0.9", b"fake-key-pem", "bash /tmp/install.sh",
+        pinned_fingerprint=None, on_new_fingerprint=lambda fp: None,
+        env={"MODE": "default", "var_ctid": "150", "TITLE": "two words"},
+    ))
+
+    assert fake.last_command == (
+        "MODE=default var_ctid=150 TITLE='two words' bash /tmp/install.sh")
+
+
+def test_run_with_no_env_leaves_the_command_untouched():
+    fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc123", stdout_lines=[],
+                             stderr_lines=[], exit_status=0)
+    executor = SSHExecutor(connect_factory=make_fake_connect_factory(fake))
+
+    asyncio.run(executor.run("10.0.0.9", b"k", "true", pinned_fingerprint=None,
+                             on_new_fingerprint=lambda fp: None))
+
+    assert fake.last_command == "true"
+
+
 def test_run_rejects_a_changed_host_key():
     fake = FakeSSHConnection(host_key_fingerprint="SHA256:changed", stdout_lines=[],
                              stderr_lines=[], exit_status=0)
