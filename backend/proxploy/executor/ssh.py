@@ -101,3 +101,25 @@ class SSHExecutor:
                 proc.terminate()
                 raise
             return proc.exit_status
+
+    async def run_for_host(self, sessionmaker, secretstore, host_id: int, host: str,
+                           command: str, *, pinned_fingerprint: str | None,
+                           on_new_fingerprint: Callable[[str], None],
+                           env: dict[str, str] | None = None,
+                           on_line: Callable[[str, str], None] | None = None,
+                           timeout_s: float = 1800.0) -> int:
+        """Same contract as `run`, but resolves the private key from
+        SecretStore itself so the raw key bytes never have to leave
+        executor/ (docs 08 §4) — callers outside this package pass a
+        sessionmaker + host_id instead of a key, and
+        scripts/check_executor_isolation.py enforces that only this module
+        ever references `get_ssh_private_key`. Raises LookupError if the
+        host has no ssh_key credential (see executor/keys.py)."""
+        from proxploy.executor.keys import get_ssh_private_key
+
+        with sessionmaker() as db:
+            private_key_pem = get_ssh_private_key(db, secretstore, host_id)
+        return await self.run(host, private_key_pem, command,
+                              pinned_fingerprint=pinned_fingerprint,
+                              on_new_fingerprint=on_new_fingerprint, env=env,
+                              on_line=on_line, timeout_s=timeout_s)

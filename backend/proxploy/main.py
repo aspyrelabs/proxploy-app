@@ -80,6 +80,7 @@ def create_app(
 
         from proxploy.jobs import JobBackend
         from proxploy.pollers import Poller
+        from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install
         from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
         from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
         from proxploy.services.metrics import metrics_loop
