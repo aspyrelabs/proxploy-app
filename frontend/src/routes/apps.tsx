@@ -11,6 +11,7 @@ import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { Terminal } from '../components/terminal/Terminal'
+import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { RAM_GRADIENT, UsageBar } from '../components/UsageBar'
@@ -261,13 +262,6 @@ export const appDetailRoute = createRoute({
   component: AppDetail,
 })
 
-const phaseTab = (path: string, phase: string, note: string) =>
-  createRoute({
-    getParentRoute: () => appDetailRoute,
-    path,
-    component: () => <EmptyState title={`This tab lands in ${phase}`} note={note} />,
-  })
-
 export const appOverviewRoute = createRoute({
   getParentRoute: () => appDetailRoute,
   path: '/',
@@ -289,8 +283,24 @@ function AppConsoleTab() {
   return <AppConsole appId={Number(appId)} />
 }
 
-export const appLogsRoute = phaseTab('logs', 'Phase 5 (Console)',
-  'Live CT logs share the log-viewer with job transcripts.')
+export function AppLogs({ appId }: { appId: number }) {
+  const { data } = useQuery({
+    queryKey: ['apps', appId, 'logs'],
+    queryFn: () => api<{ stream: string; message: string }[]>(`/apps/${appId}/logs`),
+    refetchInterval: 5_000,
+  })
+  return <TerminalPanel lines={data ?? []} />
+}
+
+function AppLogsTab() {
+  const { appId } = useParams({ strict: false }) as { appId: string }
+  return <AppLogs appId={Number(appId)} />
+}
+
+export const appLogsRoute = createRoute({
+  getParentRoute: () => appDetailRoute, path: 'logs', component: AppLogsTab,
+})
+
 export const appConsoleRoute = createRoute({
   getParentRoute: () => appDetailRoute, path: 'console', component: AppConsoleTab,
 })

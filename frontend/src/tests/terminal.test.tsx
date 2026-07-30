@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Terminal } from '../components/terminal/Terminal'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -66,5 +66,16 @@ describe('AppConsole', () => {
     )
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
     expect(FakeWebSocket.instances[0].url).toContain('/apps/42/console/ws?ticket=tix')
+  })
+})
+
+describe('AppLogs', () => {
+  it('renders the logs tail in a static TerminalPanel', async () => {
+    const apiMock = vi.mocked((await import('../api/client')).api)
+    apiMock.mockResolvedValue([{ stream: 'stdout', message: 'app started' }])
+    const { AppLogs } = await import('../routes/apps')
+    const qc = new QueryClient()
+    render(<QueryClientProvider client={qc}><AppLogs appId={42} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByText('app started')).toBeInTheDocument())
   })
 })
