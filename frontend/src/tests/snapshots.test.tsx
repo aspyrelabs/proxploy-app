@@ -106,6 +106,15 @@ describe('SnapshotPanel', () => {
     confirmSpy.mockRestore()
   })
 
+  it('does not delete when window.confirm is dismissed', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    wrap(<SnapshotPanel vmId={9} vmName="win11" />)
+    fireEvent.click(await screen.findByRole('button', { name: /delete/i }))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(calls.length).toBe(0)
+    confirmSpy.mockRestore()
+  })
+
   it('disables every mutating control with a plan tooltip when vms.snapshots is off', async () => {
     features = { 'vms.snapshots': false }
     wrap(<SnapshotPanel vmId={9} vmName="win11" />)
