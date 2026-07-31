@@ -111,6 +111,11 @@ describe('SnapshotPanel', () => {
     wrap(<SnapshotPanel vmId={9} vmName="win11" />)
     fireEvent.click(await screen.findByRole('button', { name: /delete/i }))
     expect(confirmSpy).toHaveBeenCalled()
+    // run.mutate() reaches the mocked api() call on a later microtask, so a
+    // synchronous check here would pass whether or not the guard actually
+    // blocked it. Give the mutation a real chance to fire before asserting
+    // it didn't (same tick-flush idiom as settings.test.tsx).
+    await new Promise((r) => setTimeout(r, 10))
     expect(calls.length).toBe(0)
     confirmSpy.mockRestore()
   })
