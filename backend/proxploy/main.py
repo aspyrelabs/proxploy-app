@@ -1,4 +1,5 @@
 import http.client
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -88,6 +89,12 @@ def create_app(
 
         app.state.jobs = JobBackend(app)
         app.state.jobs.sweep_orphans()  # doc 02 §3: mark orphans, never resume
+        # A spooled upload belongs to a job sweep_orphans just marked
+        # `interrupted` above — this runner never resumes a job across a
+        # restart — so anything left in the upload spool dir at boot is
+        # provably orphaned. Clear it rather than let a crash/OOM/deploy
+        # mid-upload strand a multi-GB temp file on disk forever.
+        shutil.rmtree(settings.data_dir / "uploads", ignore_errors=True)
         app.state.poller = Poller(app)
         poller_task = metrics_task = None
         if settings.poll_enabled:

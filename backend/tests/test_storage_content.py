@@ -179,6 +179,72 @@ def test_delete_volume_route_enqueues_and_audits_the_volid(tmp_path, csrf_header
             assert row.job_id == job["id"]
 
 
+def test_startup_clears_stale_spool_files_left_by_a_crash(tmp_path):
+    """The in-process job runner never resumes a job across a restart —
+    sweep_orphans (proxploy/jobs/backend.py) only ever marks a queued/running
+    job `interrupted`, full stop. So a spool file left in `data_dir/uploads`
+    at boot provably belongs to a job that can never run again; leaving it
+    there strands a multi-GB temp file forever after every crash/OOM/deploy
+    mid-upload. main.py's lifespan clears the whole directory at startup."""
+    from fastapi.testclient import TestClient
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    stale_dir = tmp_path / "uploads"
+    stale_dir.mkdir()
+    stale = stale_dir / "abandoned.upload"
+    stale.write_bytes(b"orphaned bytes from a dead process")
+
+    with TestClient(app):
+        pass  # lifespan startup/shutdown ran
+
+    assert not stale.exists()
+
+
+def test_proxmoxer_streams_large_uploads_via_requests_toolbelt(monkeypatch):
+    """Covers the leg the fakes cannot see: FakePVE.upload replaces
+    `self._connect()` entirely, so the browser->spool leg (chunked, proven
+    above) is real but the spool->PVE leg goes through proxmoxer's actual
+    `requests` backend even in tests — and that backend silently buffers (or
+    outright refuses, `OverflowError`, above ~2 GiB) any upload over 10 MiB
+    unless `requests_toolbelt` is importable. This asserts the dependency is
+    present AND that proxmoxer picks the true streaming branch (a
+    `MultipartEncoder` body, never a bare dict) for a file above that
+    threshold, by intercepting `requests.Session.request` before it would hit
+    the network. What remains unproven without a real PVE: actual bytes
+    reaching the wire and PVE accepting them — that is exercised by the
+    `pve_integration`-marked tests, not this one.
+    """
+    import requests_toolbelt
+
+    assert hasattr(requests_toolbelt, "MultipartEncoder")
+
+    import io
+    from types import SimpleNamespace
+
+    import proxmoxer.backends.https as pveh
+
+    captured = {}
+
+    def fake_request(self, method, url, params=None, data=None, headers=None,
+                     *rest, **kw):
+        captured["data"] = data
+        captured["headers"] = headers
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(pveh.requests.Session, "request", fake_request)
+
+    session = pveh.ProxmoxHttpSession()
+    session.auth = SimpleNamespace(verify_ssl=True, timeout=5, get_cookies=lambda: None)
+    big = io.BytesIO(b"x" * (pveh.STREAMING_SIZE_THRESHOLD + 1))
+    big.name = "big.iso"
+    session.request("POST", "https://pve.example/nodes/pve1/storage/local/upload",
+                    data={"filename": big, "content": "iso"})
+
+    assert isinstance(captured["data"], requests_toolbelt.MultipartEncoder)
+    assert captured["headers"]["Content-Type"].startswith("multipart/form-data")
+
+
 def test_delete_volume_job_calls_delete_and_awaits_the_task(tmp_path):
     from proxploy.jobs import JobBackend
     from proxploy.models import Job
