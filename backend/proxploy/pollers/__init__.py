@@ -183,7 +183,15 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     snap_storage = [
         {"storage": r.get("storage"), "node": r.get("node"),
          "used_bytes": int(r.get("disk") or 0),
-         "total_bytes": int(r.get("maxdisk") or 0)}
+         "total_bytes": int(r.get("maxdisk") or 0),
+         # These four ride on the SAME /cluster/resources row the two above come
+         # from — the poller used to discard them. Reading them here is what
+         # lets GET /storage answer from the snapshot instead of adding a
+         # per-datastore PVE call, which doc 02 §3's O(nodes) budget forbids.
+         "type": r.get("plugintype"),
+         "content": [c for c in str(r.get("content") or "").split(",") if c],
+         "shared": bool(r.get("shared")),
+         "status": r.get("status") or "unknown"}
         for r in storage_rows
     ]
 

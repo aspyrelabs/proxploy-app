@@ -100,3 +100,25 @@ def test_discovered_cts_with_catalog_suggestion(tmp_path):
     disc = res.snapshot.discovered
     assert [d["ctid"] for d in disc] == [200]  # 150 is mapped, not discovered
     assert disc[0]["suggestion"] == "plex" and disc[0]["name"] == "plex"
+
+
+def test_snapshot_storage_carries_type_content_shared_status(tmp_path):
+    """/cluster/resources already returns plugintype/content/shared/status on
+    every storage row; the poller used to drop all four. Keeping them costs
+    zero extra PVE calls, which is the only reason the Storage page can be
+    served from the snapshot at all (doc 02 §3's O(nodes) poll budget)."""
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    snap = _ingest(db, host).snapshot
+
+    by_name = {s["storage"]: s for s in snap.storage}
+    assert by_name["local"] == {
+        "storage": "local", "node": "pve1",
+        "used_bytes": 107374182400, "total_bytes": 471859200000,
+        "type": "dir", "content": ["iso", "vztmpl", "backup"],
+        "shared": False, "status": "available"}
+    assert by_name["pbs-datastore"]["type"] == "pbs"
+    assert by_name["pbs-datastore"]["content"] == ["backup"]
+    assert by_name["pbs-datastore"]["shared"] is True

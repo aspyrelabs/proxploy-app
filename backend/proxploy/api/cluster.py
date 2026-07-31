@@ -31,8 +31,15 @@ def cluster_summary(request: Request, db=Depends(get_db),
             # dedupe by node name: two Host rows on one cluster count each node once
             nodes[n["node"]] = n
         for st in snap.storage:
-            # ponytail: shared storage repeats per node — dedupe by name, keep
-            # first; per-datastore truth arrives with the Phase 6 Storage page
+            # ponytail: name-keyed dedupe, which is exact for a shared datastore
+            # (one datastore reported once per node) and undercounts a LOCAL
+            # storage that happens to share a name across nodes (`local` on pve1
+            # and pve2 is 2x the capacity, counted once). This is the cluster
+            # RING — a single number — and the snapshot dict now carries
+            # `shared`, so the fix is one line (`key = st["storage"] if
+            # st["shared"] else (st["node"], st["storage"])`) if the ring is ever
+            # shown to disagree with the page. Per-datastore truth, which does
+            # key on `shared`, is GET /storage (api/storage.py::list_storage).
             storage.setdefault(st["storage"], st)
         net_in += snap.net["in_bps"]
         net_out += snap.net["out_bps"]
