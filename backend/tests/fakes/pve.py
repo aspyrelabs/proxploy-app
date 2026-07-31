@@ -263,10 +263,24 @@ class _SnapshotNS:
                                name)
 
 
+class _NextidLeaf:
+    """cluster.nextid — increments nextid_calls so a test can prove a
+    caller-supplied vmid never asked PVE for one (Phase 6 Task 11)."""
+
+    def __init__(self, owner):
+        self._owner = owner
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.nextid_calls += 1
+        return str(self._owner.nextid)
+
+
 class _ClusterNS:
     def __init__(self, owner, resources, fail):
         self.resources = _KwLeaf(resources, fail)
-        self.nextid = _AttrLeaf(owner, "nextid", str)  # PVE returns a string
+        self.nextid = _NextidLeaf(owner)  # PVE returns a string
 
 
 class _ActionLeaf:
@@ -314,14 +328,38 @@ class _VncproxyLeaf:
         return self._owner.vncproxy_response
 
 
+class _CloneLeaf:
+    def __init__(self, owner, node, vmid):
+        self._owner, self._node, self._vmid = owner, node, vmid
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        # recorded BEFORE the injected failure so a test can prove exactly one
+        # attempt was made and nothing retried
+        self._owner.clones.append((self._node, self._vmid, kwargs))
+        if self._owner.clone_error:
+            raise RuntimeError(self._owner.clone_error)
+        return self._owner._record_action("qemu", int(kwargs.get("newid", 0)),
+                                          "clone")
+
+
 class _GuestNS:
     def __init__(self, owner, kind, node, vmid):
+        self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
         self.status = _GuestStatusNS(owner, kind, vmid)
         self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
         self.config = _GuestConfigLeaf(owner, kind, vmid)
         self.snapshot = _SnapshotNS(owner, kind, node, vmid)
         if kind == "qemu":
             self.vncproxy = _VncproxyLeaf(owner, node, vmid)
+            self.clone = _CloneLeaf(owner, node, vmid)
+
+    def delete(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.guest_deletes.append((self._kind, self._node, self._vmid))
+        return self._owner._record_action(self._kind, self._vmid, "destroy")
 
 
 class _GuestFactory:
@@ -339,6 +377,8 @@ class _GuestFactory:
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
         self._owner.creates.append((self._kind, self._node, kwargs))
+        if self._owner.create_error:
+            raise RuntimeError(self._owner.create_error)
         return self._owner._record_action(self._kind, int(kwargs.get("vmid", 0)),
                                           "create")
 
@@ -492,6 +532,7 @@ class FakePVE:
         self.config_update_upid: str | None = None
         self.snapshots_by_guest: dict[tuple[str, int], list[dict]] = {}
         self.nextid = "100"
+        self.nextid_calls = 0
         self.last_storage_status_call = None
         self.last_content_call = None
         self.storage = _ClusterStorageFactory(self)
@@ -528,6 +569,12 @@ class FakePVE:
         self.snapshot_creates: list[tuple[str, str, int, dict]] = []
         self.snapshot_rollbacks: list[tuple[str, str, int, str]] = []
         self.snapshot_deletes: list[tuple[str, str, int, str]] = []
+        # guest create/clone/destroy (Phase 6, Task 11) — `creates` and `nextid`
+        # already exist from Tasks 9 and 1
+        self.clones: list[tuple[str, int, dict]] = []
+        self.guest_deletes: list[tuple[str, str, int]] = []
+        self.create_error: str | None = None
+        self.clone_error: str | None = None
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

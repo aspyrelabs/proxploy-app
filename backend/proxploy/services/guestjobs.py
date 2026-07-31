@@ -137,3 +137,134 @@ async def snapshot_delete_job(ctx: JobContext, params: dict) -> dict:
 HANDLERS["vm.snapshot_create"] = snapshot_create_job
 HANDLERS["vm.snapshot_rollback"] = snapshot_rollback_job
 HANDLERS["vm.snapshot_delete"] = snapshot_delete_job
+
+
+def _host_client(app, host_id: int):
+    """Blocking: hosts.id -> (client, node, host name). Create has no guest row
+    to resolve from yet, so it resolves the host directly."""
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        if host is None:
+            raise JobFailed(f"host {host_id} not found")
+        return client_for_host(app, db, host), host.node_name or "", host.name
+
+
+def _create_params(params: dict) -> dict:
+    """The one place Proxploy's create spec becomes PVE's qemu parameters.
+
+    Deliberately opinionated defaults rather than a passthrough of arbitrary
+    PVE keys: virtio-scsi-single + a virtio NIC is what the Proxmox UI's own
+    defaults produce, and a create wizard that lets a caller post raw qemu
+    config would be an unvalidated write to the hypervisor.
+    """
+    iso = params.get("iso")
+
+    def _net0(p: dict) -> str:
+        # PVE spells a VLAN on a guest NIC as `,tag=N` inside the netN string
+        # (same grammar services/netconfig.py round-trips for edits). Absent or
+        # falsy tag means untagged — never emit `tag=` with an empty value.
+        spec = f"virtio,bridge={p.get('bridge') or 'vmbr0'}"
+        tag = p.get("vlan_tag")
+        return f"{spec},tag={int(tag)}" if tag else spec
+
+    call = {
+        "vmid": int(params["vmid"]),
+        "name": params["name"],
+        "cores": int(params["cores"]),
+        "sockets": 1,
+        "memory": int(params["memory_mb"]),
+        "ostype": params.get("ostype") or "l26",
+        "scsihw": "virtio-scsi-single",
+        "scsi0": f"{params['storage']}:{int(params['disk_gb'])}",
+        "net0": _net0(params),
+        "boot": "order=scsi0;ide2" if iso else "order=scsi0",
+    }
+    if iso:
+        call["ide2"] = f"{iso},media=cdrom"
+    if params.get("start"):
+        call["start"] = 1
+    return call
+
+
+async def create_vm(ctx: JobContext, params: dict) -> dict:
+    """`vm.create` — post the spec, poll the task, nudge the UI.
+
+    No `Vm` row is written here. `vms` is the poller's droppable mirror (doc 04:
+    Proxmox is the truth) and writing one from this side would create a row the
+    next poll cycle either confirms or deletes — a second, worse source of
+    truth. The resource publish below is the same nudge run_lifecycle emits, so
+    an open tab refetches instead of waiting out the 30 s interval.
+    """
+    app = ctx.backend.app
+    host_id = int(params["host_id"])
+    client, host_node, host_name = await asyncio.to_thread(_host_client, app,
+                                                           host_id)
+    node = params.get("node") or host_node
+    call = _create_params(params)
+    ctx.log(f"creating VM {call['vmid']} ({call['name']}) on {host_name}/{node}: "
+            f"{call['cores']} cores, {call['memory']} MiB, {call['scsi0']}")
+    # ponytail: no retry on a taken vmid. PVE is the authority on uniqueness and
+    # rejects a duplicate outright; retrying with the next free id would race a
+    # second orchestrator indefinitely and silently create a guest under an id
+    # the caller never asked for. The error is surfaced verbatim instead.
+    upid = await asyncio.to_thread(client.vm_create, node, call)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": None,
+                                       "change": "created"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"),
+            "vmid": call["vmid"], "name": call["name"], "node": node}
+
+
+HANDLERS["vm.create"] = create_vm
+
+
+async def clone_vm(ctx: JobContext, params: dict) -> dict:
+    """`vm.clone` — full or linked, per the caller's `full` flag.
+
+    `full` is passed through untouched. PVE allows `full=0` (a linked clone)
+    only from a template, and Proxploy has no way to know which VMs are
+    templates — the `vms` table has no `template` column and the poller does not
+    read `/cluster/resources`'s `template` field — so PVE's own rejection is the
+    answer the caller gets, verbatim, instead of a guess made here.
+    """
+    app = ctx.backend.app
+    vm_id = int(params["vm_id"])
+    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+        _vm_target, app, vm_id)
+    call: dict = {"newid": int(params["newid"]), "full": 1 if params.get("full") else 0}
+    for key in ("name", "target", "storage"):
+        if params.get(key):
+            call[key] = params[key]
+    ctx.log(f"{'full' if call['full'] else 'linked'} clone of {vm_name} "
+            f"(qemu {vmid}) on {node} -> {call['newid']}")
+    upid = await asyncio.to_thread(client.vm_clone, node, vmid, call)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": None,
+                                       "change": "created"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"),
+            "newid": call["newid"], "source_vmid": vmid, "full": bool(call["full"])}
+
+
+async def delete_vm(ctx: JobContext, params: dict) -> dict:
+    """`vm.delete` — destroy the guest and its disks.
+
+    The route already required owner role, a typed name, a non-running guest and
+    a selfguard pass. As with create, the `vms` row is left to the poller to
+    drop: deleting it here would beat the poller to a state Proxmox has not
+    confirmed yet.
+    """
+    app = ctx.backend.app
+    vm_id = int(params["vm_id"])
+    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+        _vm_target, app, vm_id)
+    ctx.log(f"destroying {vm_name} (qemu {vmid}) on {node}")
+    upid = await asyncio.to_thread(client.guest_delete, "qemu", node, vmid)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": None,
+                                       "change": "deleted"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,
+            "name": vm_name}
+
+
+HANDLERS["vm.clone"] = clone_vm
+HANDLERS["vm.delete"] = delete_vm

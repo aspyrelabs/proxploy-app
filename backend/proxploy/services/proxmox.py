@@ -628,6 +628,49 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster nextid read failed", e) from e
 
+    # --- guest create / clone / destroy (Phase 6) ---------------------------
+
+    def vm_create(self, node: str, params: dict) -> str:
+        """POST /nodes/{node}/qemu -> UPID.
+
+        The same endpoint restore_guest() posts an `archive` to; here it carries
+        a full spec (vmid, name, cores, memory, scsi0, net0, …). Building that
+        spec is the caller's job — this method only posts it, so every PVE
+        parameter name lives in exactly one place (services/guestjobs.py).
+        """
+        try:
+            return self._connect().nodes(node).qemu.post(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+            raise self._wrap(f"vm create failed on {node}", e) from e
+
+    def vm_clone(self, node: str, vmid: int, params: dict) -> str:
+        """POST /nodes/{node}/qemu/{vmid}/clone -> UPID.
+
+        `params` carries newid/name/full/target/storage. `full=0` (a linked
+        clone) is only legal when the source is a template; PVE enforces that
+        and its refusal is what the caller reports.
+        """
+        try:
+            return self._connect().nodes(node).qemu(vmid).clone.post(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"clone of qemu/{vmid} failed on {node}", e) from e
+
+    def guest_delete(self, kind: str, node: str, vmid: int) -> str:
+        """DELETE /nodes/{node}/{lxc|qemu}/{vmid} -> UPID. Destroys the guest
+        and its disks; PVE refuses while it is running."""
+        if kind not in ("lxc", "qemu"):
+            raise ProxmoxError(f"{kind!r} is not a destroyable guest kind")
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"destroying {kind}/{vmid} failed on {node}", e) from e
+
     # --- storage content mutations (Phase 6) --------------------------------
 
     def storage_upload(self, node: str, storage: str, content: str,

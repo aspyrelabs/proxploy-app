@@ -16,6 +16,7 @@ from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import VM_ACTIONS
 from proxploy.services.proxmox import ProxmoxError
+from proxploy.services.selfguard import is_self
 
 router = APIRouter(prefix="/vms", tags=["vms"])
 
@@ -64,6 +65,7 @@ def vm_detail(request: Request, vm_id: int, db=Depends(get_db),
 _require_viewer = require_role("viewer")
 _require_operator = require_role("operator")
 _require_admin = require_role("admin")
+_require_owner = require_role("owner")
 
 
 def _vm_and_host(db, vm_id: int):
@@ -97,6 +99,97 @@ def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
     v, host = _vm_and_host(db, vm_id)
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
                          host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body)
+
+
+# PVE's own name rule for a guest: a DNS-ish label, since it becomes the
+# hostname the guest advertises.
+VM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$")
+
+
+def _pick_node(request: Request, host: Host, node: str | None) -> str:
+    """Resolve and validate the target node for a create.
+
+    The known-node list comes from the poller's snapshot for this host (its
+    `nodes` entries are `{"node": name, …}`), falling back to `Host.node_name`
+    for a host that has not been polled yet. A caller-supplied node is checked
+    against that list; an unknown one is a 422 rather than a job that fails
+    thirty seconds later inside Proxmox.
+    """
+    snap = request.app.state.poller.snapshots.get(host.id)
+    known = [n["node"] for n in (snap.nodes if snap else []) if n.get("node")]
+    if not known and host.node_name:
+        known = [host.node_name]
+    if node:
+        if known and node not in known:
+            raise HTTPException(422, f"node {node!r} is not on host {host.name} "
+                                     f"(known: {', '.join(known)})")
+        return node
+    if not known:
+        raise HTTPException(422, "this host has no known node yet — wait for the "
+                                 "first poll or name a node explicitly")
+    return known[0]
+
+
+class VmCreateIn(BaseModel):
+    host_id: int
+    name: str
+    node: str | None = None
+    vmid: int | None = None
+    cores: int = 2
+    memory_mb: int = 2048
+    disk_gb: int = 32
+    storage: str = "local-lvm"
+    iso: str | None = None
+    bridge: str = "vmbr0"
+    # Task 17's wizard has a VLAN field on its Network step. Pydantic ignores
+    # unknown keys rather than rejecting them, so omitting this here would
+    # silently drop the operator's tag and build an untagged NIC — a wrong
+    # result that looks like a success. Declared, validated, and threaded
+    # through to net0 below.
+    vlan_tag: int | None = None
+    ostype: str = "l26"
+    start: bool = False
+
+
+@router.post("", status_code=202,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("vms.create"))])
+def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
+                    user: User = Depends(_require_admin)):
+    """Validate the spec here, not in the job: a bad spec should be a 422 the
+    operator sees while the form is still open, not a failed job in the history.
+    """
+    host = db.get(Host, body.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    if not VM_NAME_RE.match(body.name or ""):
+        raise HTTPException(422, "name must be a hostname-shaped label: letters, "
+                                 "digits, '.' and '-', starting with a letter or "
+                                 "digit")
+    for field, value in (("cores", body.cores), ("memory_mb", body.memory_mb),
+                         ("disk_gb", body.disk_gb)):
+        if value <= 0:
+            raise HTTPException(422, f"{field} must be greater than zero")
+    node = _pick_node(request, host, body.node)
+    vmid = body.vmid
+    if vmid is None:
+        # Minted here so the 202 can name the id and the audit row records it.
+        # cluster_nextid is advisory, not a reservation: between this call and
+        # the job's POST another orchestrator can take the id, and PVE then
+        # rejects the create. See create_vm()'s ponytail comment — no retry.
+        client = client_for_host(request.app, db, host)
+        try:
+            vmid = int(client.cluster_nextid())
+        except ProxmoxError as e:
+            raise HTTPException(502, str(e)) from e
+    params = {"host_id": host.id, "node": node, "vmid": int(vmid),
+              "name": body.name, "cores": body.cores, "memory_mb": body.memory_mb,
+              "disk_gb": body.disk_gb, "storage": body.storage, "iso": body.iso,
+              "bridge": body.bridge, "vlan_tag": body.vlan_tag,
+              "ostype": body.ostype, "start": body.start}
+    out = enqueue_and_audit(request, db, user, kind="vm.create",
+                            target_type="host", target_id=host.id, params=params)
+    return {**out, "vmid": int(vmid)}
 
 
 # Registered ABOVE the /{vm_id}/{action} wildcard — see the WARNING on that
@@ -220,6 +313,94 @@ def delete_vm_snapshot(request: Request, vm_id: int, name: str, db=Depends(get_d
     return enqueue_and_audit(request, db, user, kind="vm.snapshot_delete",
                              target_type="vm", target_id=v.id,
                              params={"vm_id": v.id, "name": name})
+
+
+class VmCloneIn(BaseModel):
+    name: str | None = None
+    newid: int | None = None
+    full: bool = True
+    target: str | None = None
+    storage: str | None = None
+
+
+@router.post("/{vm_id}/clone", status_code=202,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("vms.clone"))])
+def clone_vm_route(request: Request, vm_id: int,
+                   body: VmCloneIn = Body(default=VmCloneIn()), db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    """`full` is passed through to PVE unvalidated.
+
+    ponytail: PVE permits a linked clone (`full=false`) only from a template,
+    and Proxploy cannot tell templates apart — the `vms` table has no `template`
+    column and this phase adds no migration. Pre-validating would mean guessing.
+    Upgrade path if PVE's rejection proves confusing in practice: have the
+    poller mirror `/cluster/resources`'s `template` flag onto `Vm`, then refuse
+    a linked clone of a non-template here with a message naming the reason.
+    """
+    v, host = _vm_and_host(db, vm_id)
+    if body.name is not None and not VM_NAME_RE.match(body.name):
+        raise HTTPException(422, "name must be a hostname-shaped label")
+    newid = body.newid
+    if newid is None:
+        client = client_for_host(request.app, db, host)
+        try:
+            newid = int(client.cluster_nextid())
+        except ProxmoxError as e:
+            raise HTTPException(502, str(e)) from e
+    out = enqueue_and_audit(request, db, user, kind="vm.clone", target_type="vm",
+                            target_id=v.id,
+                            params={"vm_id": v.id, "newid": int(newid),
+                                    "name": body.name, "full": body.full,
+                                    "target": body.target,
+                                    "storage": body.storage})
+    return {**out, "vmid": int(newid)}
+
+
+class VmDeleteIn(BaseModel):
+    confirm: str | None = None
+
+
+@router.delete("/{vm_id}", status_code=202,
+               dependencies=[Depends(_require_owner),
+                             Depends(require_entitlement("vms.create"))])
+def delete_vm_route(request: Request, vm_id: int,
+                    body: VmDeleteIn = Body(default=VmDeleteIn()),
+                    db=Depends(get_db), user: User = Depends(_require_owner)):
+    """The most destructive route in this phase: the guest and its disks are
+    gone, and nothing here backs them up first. Doc 05 puts it at owner, one
+    rung above every other VM route; on top of that it takes the same
+    typed-confirmation path as a self-targeted stop, and refuses a running
+    guest outright rather than forcing it down first.
+    """
+    v, _host = _vm_and_host(db, vm_id)
+    name = v.name or f"VM {v.vmid}"
+    ip = request.client.host if request.client else None
+
+    def _deny(payload: dict):
+        write_audit(db, actor_type="user", actor_id=user.id, action="vm.delete",
+                    target_type="vm", target_id=v.id, result="denied", ip=ip)
+        raise HTTPException(409, payload)
+
+    # One guard point for "is this Proxploy itself". is_self() answers False for
+    # every VM today (selfguard.py:21 — Proxploy ships as an LXC CT), so this is
+    # currently always a pass. It is called anyway rather than reasoned around:
+    # the day a VM-hosted install exists, the guard is already wired, and the
+    # alternative is a comment asserting an invariant no code enforces.
+    if is_self(db, "vm", v.id):
+        _deny({"error": "self_target", "confirm_phrase": name,
+               "detail": f"{name} is the guest Proxploy itself runs in — "
+                         f"destroying it would destroy this process."})
+    if (v.status or "") == "running":
+        _deny({"error": "guest_running",
+               "detail": f"stop {name} before destroying it"})
+    if (body.confirm or "") != name:
+        _deny({"error": "confirm_required", "confirm_phrase": name,
+               "detail": (f"Destroying {name} deletes the VM and every disk "
+                          f"attached to it. There is no undo and no automatic "
+                          f"backup. Type the VM name to confirm.")})
+    return enqueue_and_audit(request, db, user, kind="vm.delete", target_type="vm",
+                             target_id=v.id, params={"vm_id": v.id, "vmid": v.vmid})
 
 
 @router.post("/{vm_id}/{action}", status_code=202,
