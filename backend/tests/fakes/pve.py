@@ -56,7 +56,23 @@ class _StorageStatusLeaf:
         return self._owner.storage_status_response
 
 
-class _StorageContentLeaf:
+class _VolumeLeaf:
+    """nodes(n).storage(s).content(volid) — .delete() records and mints a UPID."""
+
+    def __init__(self, owner, node, storage, volid):
+        self._owner, self._node = owner, node
+        self._storage, self._volid = storage, volid
+
+    def delete(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.deleted_volumes.append((self._node, self._storage, self._volid))
+        return self._owner._record_action("storage", 0, "delvolume")
+
+
+class _StorageContentNS:
+    """.get() lists volumes; calling it drills into one volid."""
+
     def __init__(self, owner, node, storage):
         self._owner, self._node, self._storage = owner, node, storage
 
@@ -65,18 +81,40 @@ class _StorageContentLeaf:
             raise ConnectionError("fake PVE unreachable")
         self._owner.last_content_call = (self._node, self._storage,
                                          kwargs.get("content"))
-        return self._owner.content_by_storage.get(self._storage, [])
+        rows = self._owner.content_by_storage.get(self._storage, [])
+        want = kwargs.get("content")
+        return [r for r in rows if not want or r.get("content") == want]
+
+    def __call__(self, volid):
+        return _VolumeLeaf(self._owner, self._node, self._storage, volid)
 
 
-class _StorageNS:
+class _UploadLeaf:
+    def __init__(self, owner, node, storage):
+        self._owner, self._node, self._storage = owner, node, storage
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        fh = kwargs.get("filename")
+        self._owner.uploads.append({
+            "node": self._node, "storage": self._storage,
+            "content": kwargs.get("content"),
+            "filename": getattr(fh, "name", ""),
+            "bytes": fh.read() if hasattr(fh, "read") else b""})
+        return self._owner._record_action("storage", 0, "upload")
+
+
+class _NodeStorageNS:
     """nodes(n).storage(name) — the per-datastore subtree."""
 
     def __init__(self, owner, node, storage):
         self.status = _StorageStatusLeaf(owner, node, storage)
-        self.content = _StorageContentLeaf(owner, node, storage)
+        self.content = _StorageContentNS(owner, node, storage)
+        self.upload = _UploadLeaf(owner, node, storage)
 
 
-class _NodeStorageNS:
+class _NodeStorageFactory:
     """nodes(n).storage is BOTH gettable and callable, exactly like proxmoxer:
     `.storage.get()` lists every datastore on the node, `.storage(name)`
     descends into one. ProxmoxClient.storages and .storage_status use one shape
@@ -91,7 +129,7 @@ class _NodeStorageNS:
         return self._owner.storages_by_node.get(self._node, [])
 
     def __call__(self, storage):
-        return _StorageNS(self._owner, self._node, storage)
+        return _NodeStorageNS(self._owner, self._node, storage)
 
 
 class _NetIfaceNS:
@@ -254,7 +292,7 @@ class _NodeNS:
         self.lxc = _GuestFactory(owner, "lxc", name)
         self.qemu = _GuestFactory(owner, "qemu", name)
         self.termproxy = _TermproxyLeaf(owner, None, name, None)
-        self.storage = _NodeStorageNS(owner, name)
+        self.storage = _NodeStorageFactory(owner, name)
         self.network = _NodeNetworkNS(owner, name)
 
 
@@ -305,6 +343,9 @@ class FakePVE:
         self.last_termproxy_call = None
         self.last_node_termproxy_call = None
         self.last_vncproxy_call = None
+        # storage content mutations (Phase 6)
+        self.uploads: list[dict] = []
+        self.deleted_volumes: list[tuple] = []
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

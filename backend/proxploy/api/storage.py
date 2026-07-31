@@ -17,9 +17,15 @@ amendment in the phase notes.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import contextlib
+import os
+import tempfile
+
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
+                     UploadFile)
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, User
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
@@ -32,6 +38,9 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 # lands at position 0 and runs BEFORE auth, answering an anonymous caller with
 # 403 instead of 401 — see tests/test_route_auth_invariant.py.
 _require_viewer = require_role("viewer")
+_require_admin = require_role("admin")
+
+UPLOAD_CHUNK = 1024 * 1024
 
 
 def _pct(used: float, total: float) -> float:
@@ -153,3 +162,68 @@ def storage_content(request: Request, host_id: int, name: str,
              "content": r.get("content"), "notes": r.get("notes"),
              "verification": r.get("verification")}
             for r in rows if not content or r.get("content") == content]
+
+
+@router.post("/{host_id}/{name}/content", status_code=202,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("storage.content"))])
+def upload_content(request: Request, host_id: int, name: str,
+                   file: UploadFile = File(...), content: str = Form("iso"),
+                   node: str | None = Form(None), db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    """Spool the body to disk, then hand the PATH to a job (doc 05 §Storage).
+
+    Never slurp the whole upload in one call: FastAPI's UploadFile already
+    spools to a SpooledTemporaryFile, and reading it all at once would
+    materialise a multi-GB ISO in this process's RAM. The 1 MiB loop below
+    keeps peak memory flat regardless of file size. The cost, stated in
+    services/storagejobs.py's docstring too: the ISO crosses the wire twice
+    (browser -> here -> PVE) and the Proxploy host needs transient free disk
+    equal to the file size.
+    """
+    host = _host_or_404(db, host_id)
+    node = _resolve_node(request, host, name, node)
+    max_bytes = request.app.state.settings.storage_upload_max_bytes
+    updir = request.app.state.settings.data_dir / "uploads"
+    updir.mkdir(parents=True, exist_ok=True)
+    fd, spool = tempfile.mkstemp(dir=updir, suffix=".upload")
+    written = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = file.file.read(UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(413, f"upload exceeds the "
+                                             f"{max_bytes} byte limit")
+                out.write(chunk)
+    except BaseException:
+        # Anything at all — cap exceeded, disconnect, cancellation — must not
+        # leave a partial multi-GB file behind on the Proxploy host.
+        with contextlib.suppress(OSError):
+            os.unlink(spool)
+        raise
+    return enqueue_and_audit(
+        request, db, user, kind="storage.upload", target_type="storage",
+        target_id=host.id,
+        params={"host_id": host.id, "node": node, "storage": name,
+                "content": content, "filename": file.filename or "upload",
+                "path": spool, "size_bytes": written})
+
+
+@router.delete("/{host_id}/{name}/content/{volid:path}", status_code=202,
+               dependencies=[Depends(_require_admin),
+                             Depends(require_entitlement("storage.content"))])
+def delete_content(request: Request, host_id: int, name: str, volid: str,
+                   node: str | None = None, db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    """`:path` because a volid is `local:iso/ubuntu.iso` — it carries a slash,
+    which a plain `{volid}` converter would refuse to match."""
+    host = _host_or_404(db, host_id)
+    node = _resolve_node(request, host, name, node)
+    return enqueue_and_audit(
+        request, db, user, kind="storage.delete_volume", target_type="storage",
+        target_id=host.id,
+        params={"host_id": host.id, "node": node, "storage": name, "volid": volid})

@@ -20,6 +20,7 @@ dependencies = [
   "apprise>=1.9",
   "asyncssh>=2.14",
   "websockets>=14",
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

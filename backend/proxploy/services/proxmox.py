@@ -3,6 +3,7 @@ PVE-8-vs-9 behavioural branch lives here — never in routers, pollers, or jobs.
 (No version branches exist yet; when PVE 9 diverges, branch on self.version()["release"]
 inside this module only.) Scoped API tokens, never root@pam passwords (doc 00 §8)."""
 import hashlib
+import io
 import ipaddress
 import os
 import re
@@ -163,6 +164,24 @@ def tls_fingerprint_sha256(host: str, port: int = 8006) -> str:
             der = tls.getpeercert(binary_form=True)
     digest = hashlib.sha256(der).hexdigest().upper()
     return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
+
+
+class _NamedUpload(io.BufferedReader):
+    """A file object whose `.name` is settable, for `ProxmoxClient.storage_upload`.
+
+    `io.BufferedReader.name` normally proxies the underlying raw stream's name
+    (the spooled temp path) and cannot be reassigned. Overriding the property
+    here is the only way to hand proxmoxer/requests the ISO's real filename
+    without renaming the spool file on disk.
+    """
+
+    def __init__(self, raw, name: str):
+        super().__init__(raw)
+        self._upload_name = name
+
+    @property
+    def name(self):
+        return self._upload_name
 
 
 class ProxmoxClient:
@@ -419,3 +438,45 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster nextid read failed", e) from e
+
+    # --- storage content mutations (Phase 6) --------------------------------
+
+    def storage_upload(self, node: str, storage: str, content: str,
+                       filename: str, path: str) -> str:
+        """POST /nodes/{node}/storage/{storage}/upload -> UPID.
+
+        `path` is a spooled temp file on the Proxploy host, opened here and
+        streamed by proxmoxer as the multipart part — the bytes are never held
+        in memory by us (see api/storage.py's upload route for the other half).
+
+        proxmoxer/requests derive the multipart part's filename from the file
+        object's `.name` (`requests.utils.guess_filename`), but a plain
+        `open()` result exposes `.name` read-only as the spool path's own
+        basename — assigning to it raises `AttributeError`. `_NamedUpload`
+        wraps the raw stream so `.name` reports the ISO's real filename
+        instead, while still passing `isinstance(_, io.IOBase)` so proxmoxer's
+        streaming-multipart path (large-file handling) still kicks in.
+        """
+        try:
+            with open(path, "rb", buffering=0) as raw, _NamedUpload(raw, filename) as fh:
+                return self._connect().nodes(node).storage(storage).upload.post(
+                    content=content, filename=fh)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"upload of {filename!r} to {storage} on {node} failed",
+                             e) from e
+
+    def storage_delete_volume(self, node: str, storage: str, volid: str) -> str | None:
+        """DELETE /nodes/{node}/storage/{storage}/content/{volid}.
+
+        Returns a UPID for the plugins that delete asynchronously (PBS, ZFS) and
+        None for the ones that do it inline (dir) — the caller must handle both.
+        """
+        try:
+            return self._connect().nodes(node).storage(storage).content(volid).delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"deleting {volid!r} from {storage} on {node} failed",
+                             e) from e

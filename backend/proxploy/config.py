@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     poll_timeout_s: float = 20.0
     console_ticket_ttl_s: float = 30.0
     console_idle_timeout_s: float = 1800.0
+    # An ISO is spooled to `data_dir/uploads` on its way to PVE (api/storage.py),
+    # so this caps BOTH the request body and the transient free disk the
+    # Proxploy host must have. 16 GiB covers a Windows Server ISO with room.
+    storage_upload_max_bytes: int = 16 * 1024 ** 3
     # Wall-clock ceiling every Phase 6 job handler passes to
     # services/pvetask.py::await_task. services/lifecycle.py keeps its own
     # module constant instead — a start/stop that needs five minutes is a
