@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # different animal from a restore that needs fifty, and lifecycle's
     # timeout is already exercised by tests that monkeypatch it.
     pve_task_timeout_s: float = 300.0
+    backup_sync_stale_s: float = 900.0
 
 
 @lru_cache
