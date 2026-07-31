@@ -6,9 +6,14 @@ import { Button } from './ui/button'
  * through a stronger typed-confirmation instead of the one-click action, with
  * an explicit warning that stopping it can strand its own recovery path.
  */
-export function ConfirmSelfDialog({ phrase, detail, onConfirm, onCancel }: {
+export function ConfirmSelfDialog({ phrase, detail, title, onConfirm, onCancel }: {
   phrase: string
   detail: string
+  /** Defaults to the self-CT heading. Phase 6's network apply and in-place
+   *  restore reuse the same typed-confirmation control for a different danger,
+   *  and a false heading above the most destructive button in the product is
+   *  worse than a prop. */
+  title?: string
   onConfirm: (typed: string) => void
   onCancel: () => void
 }) {
@@ -18,7 +23,7 @@ export function ConfirmSelfDialog({ phrase, detail, onConfirm, onCancel }: {
          className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
       <div className="w-[420px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
         <h2 className="font-display text-[16px] font-semibold text-amber">
-          This is Proxploy&apos;s own container
+          {title ?? 'This is Proxploy’s own container'}
         </h2>
         <p className="mt-2 text-[13px] text-text-2">{detail}</p>
         <label className="mt-4 block text-[12px] text-text-3" htmlFor="self-confirm">
