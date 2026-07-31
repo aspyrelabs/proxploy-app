@@ -30,6 +30,23 @@ export function applyMetrics(qc: QueryClient, data: { targets: MetricTarget[] })
   qc.invalidateQueries({ queryKey: ['metrics'] })
 }
 
+/**
+ * `d.type` (resource events) and `d.target_type` (job events) → the root of the
+ * query key that owns that resource. One map, both functions, because they
+ * used to disagree: applyResource fell through to 'vms' for anything it did
+ * not recognise and applyJob invalidated nothing at all, so Phase 6's storage /
+ * backup / network events refreshed the VM list while their own pages went
+ * stale. An unlisted type now routes NOWHERE, which is the honest answer —
+ * a guess here is a wrong cache read somewhere else.
+ */
+const RESOURCE_KEY: Record<string, string> = {
+  app: 'apps',
+  vm: 'vms',
+  storage: 'storage',
+  backup: 'backups',
+  network: 'network',
+}
+
 /** SSE `resource` event → patch status, invalidate everything else (doc 06 §d). */
 export function applyResource(qc: QueryClient, d: ResourceEvent) {
   if (d.type === 'host') {
@@ -37,8 +54,12 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
     qc.invalidateQueries({ queryKey: ['hosts'] })
     return
   }
-  const key = d.type === 'app' ? 'apps' : 'vms'
-  if (d.change === 'status' && d.id != null) {
+  const key = RESOURCE_KEY[d.type]
+  if (!key) return
+  // Guests only. A storage/backup/network event's `id` is a HOST id and those
+  // caches hold no `id` column — running the row patch there would edit
+  // whichever unrelated row happened to collide.
+  if (d.change === 'status' && d.id != null && (d.type === 'app' || d.type === 'vm')) {
     qc.setQueriesData({ queryKey: [key] }, (v: unknown) => {
       if (Array.isArray(v)) {
         return v.map((r: any) => (r.id === d.id ? { ...r, status: d.status } : r))
@@ -82,8 +103,10 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   if (wasTerminal) return
   qc.invalidateQueries({ queryKey: ['jobs'] })
   qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
-  if (d.target_type === 'app') qc.invalidateQueries({ queryKey: ['apps'] })
-  if (d.target_type === 'vm') qc.invalidateQueries({ queryKey: ['vms'] })
+  // ['vms'] is a prefix match, so a vm.snapshot_* job invalidates
+  // ['vms', id, 'snapshots'] here for free — Task 16 adds no wiring.
+  const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
+  if (resourceKey) qc.invalidateQueries({ queryKey: [resourceKey] })
   toast?.({
     kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
     text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),
