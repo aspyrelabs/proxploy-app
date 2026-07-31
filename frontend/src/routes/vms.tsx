@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { api } from '../api/client'
 import type { VmRow } from '../api/hooks'
-import { useMetrics } from '../api/hooks'
+import { useEntitlements, useMetrics } from '../api/hooks'
 import { VncConsole } from '../components/console/VncConsole'
+import { CloneDialog } from '../components/CloneDialog'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
@@ -13,25 +14,40 @@ import { SnapshotPanel } from '../components/SnapshotPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { Button } from '../components/ui/button'
+import { VmCreateWizard } from '../components/VmCreateWizard'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 
 export function VmsPage() {
   const navigate = useNavigate()
+  const ent = useEntitlements()
+  const [creating, setCreating] = useState(false)
+  const [cloning, setCloning] = useState<VmRow | null>(null)
   const { data: vms } = useQuery({
     queryKey: ['vms', {}],
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
   })
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
+  // ent.has() is false until /entitlements resolves — gate on ent.data != null
+  // too, or every plan sees a dead "New VM" button for the whole first fetch.
+  const createDenied = ent.data != null && !ent.has('vms.create')
+  const cloneDenied = ent.data != null && !ent.has('vms.clone')
   return (
     <div>
-      <div className="mb-5">
-        <h1 className="font-display text-[22px] font-semibold">Virtual Machines</h1>
-        <div className="text-[12px] text-text-3">
-          {vms ? `${vms.length} VMs · ${running} running` : '…'}
+      <div className="mb-5 flex items-center">
+        <div>
+          <h1 className="font-display text-[22px] font-semibold">Virtual Machines</h1>
+          <div className="text-[12px] text-text-3">
+            {vms ? `${vms.length} VMs · ${running} running` : '…'}
+          </div>
         </div>
+        <Button className="ml-auto" disabled={createDenied}
+          title={createDenied ? 'Not included in your plan' : undefined}
+          onClick={() => setCreating(true)}>
+          New VM
+        </Button>
       </div>
       {vms && vms.length > 0 ? (
         <div className={card}>
@@ -66,6 +82,17 @@ export function VmsPage() {
                       onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })}>
                       Console
                     </Button>
+                    {/* doc 06 §e rule 2: a table-cell button is a "small inline
+                        action", so the Pro treatment here is disabled+tooltip,
+                        not LockVeil — veiling a 60px cell blurs nothing legible,
+                        and a disabled trigger makes a veil inside the dialog
+                        unreachable dead code. */}
+                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                      disabled={cloneDenied}
+                      title={cloneDenied ? 'Cloning is a Pro feature' : undefined}
+                      onClick={() => setCloning(v)}>
+                      Clone
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -76,6 +103,8 @@ export function VmsPage() {
         <EmptyState title="No VMs discovered"
           note="QEMU guests on connected hosts are mirrored here by the poller." />
       )}
+      {creating && <VmCreateWizard onClose={() => setCreating(false)} />}
+      {cloning && <CloneDialog vm={cloning} onClose={() => setCloning(null)} />}
     </div>
   )
 }
