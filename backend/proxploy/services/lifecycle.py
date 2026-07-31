@@ -18,6 +18,7 @@ from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Host, Vm
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
+from proxploy.services.pvetask import TASK_POLL_S, TASK_TIMEOUT_S, await_task
 
 APP_ACTIONS = ("start", "stop", "restart", "shutdown")
 VM_ACTIONS = ("start", "stop", "restart", "shutdown", "pause", "resume")
@@ -30,12 +31,6 @@ PVE_VERB = {
     "pause": "suspend",
     "resume": "resume",
 }
-
-TASK_POLL_S = 1.0
-# ponytail: flat wall-clock ceiling per lifecycle action. A slow shutdown that
-# genuinely needs longer belongs to a per-kind timeout table, which is worth
-# building when a real workload proves one action needs it.
-TASK_TIMEOUT_S = 300.0
 
 
 def job_kind(target_type: str, action: str) -> str:
@@ -84,47 +79,15 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
                 f"the request may have already reached proxmox; no task id was "
                 f"captured to track it", stream="stderr")
         raise
-    ctx.log(f"proxmox task {upid}")
-    ctx.progress(10)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
-    seen = 0
-    deadline = asyncio.get_running_loop().time() + TASK_TIMEOUT_S
-    ctx.progress(50)
-    try:
-        while True:
-            status = await asyncio.to_thread(client.task_status, node, upid)
-            rows = await asyncio.to_thread(client.task_log, node, upid, seen)
-            for r in rows:
-                ctx.log(str(r.get("t", "")))
-                seen = max(seen, int(r.get("n", seen)))
-            if status.get("status") != "running":
-                break
-            if asyncio.get_running_loop().time() > deadline:
-                raise JobFailed(f"proxmox task {upid} still running after "
-                                f"{TASK_TIMEOUT_S:.0f}s — giving up on the log, the "
-                                f"task itself is untouched on the node")
-            await asyncio.sleep(TASK_POLL_S)
-    except asyncio.CancelledError:
-        # The status/action POST already reached proxmox and is unaffected by a
-        # local cancel — telling the user it was "canceled" without this line
-        # would read as "nothing happened", which is false.
-        ctx.log(f"canceled locally; proxmox task {upid} keeps running on {node}",
-               stream="stderr")
-        raise
-
-    exitstatus = status.get("exitstatus")
-    if exitstatus != "OK":
-        # Fail closed: a stopped task with a missing/None exitstatus is an
-        # unknown outcome, not a success, contra proxmox.py's own contract.
-        reason = exitstatus if exitstatus else "no exitstatus reported"
-        raise JobFailed(f"{action} failed: {reason}")
-
-    ctx.progress(100)
     # Nudge every open tab to refetch rather than assert a status we have not
     # polled yet — the poller owns cached state (doc 04: Proxmox is the truth).
     app.state.bus.publish("resource", {"type": target_type, "id": target_id,
                                        "change": "lifecycle"})
-    return {"upid": upid, "exitstatus": exitstatus, "node": node, "vmid": vmid}
+    return {"upid": upid, "exitstatus": status.get("exitstatus"),
+            "node": node, "vmid": vmid}
 
 
 def _register(target_type: str, action: str) -> None:

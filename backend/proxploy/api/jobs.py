@@ -43,6 +43,29 @@ def backlog(db, job_id: int, after: int = 0, limit: int = 5000) -> list[dict]:
              "stream": e.stream, "message": e.message} for e in rows]
 
 
+def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
+                      target_type: str | None, target_id: int | None,
+                      params: dict, action: str | None = None) -> dict:
+    """Enqueue a job, write the audit row that points at it, return the 202 body.
+
+    api/apps.py::enqueue_lifecycle is this same shape plus the self-guard and
+    the fixed `{target_type}.{action}` kind; this is the plain version every
+    Phase 6 mutation route uses. `action` overrides the audit action when the
+    job kind is not the right name for the audit trail (a `backup.run` job
+    fired from the restore route, say) — it defaults to `kind`.
+
+    Both `params` copies are redacted at their own sink: JobBackend.enqueue
+    redacts before writing `jobs.params`, write_audit before `audit_events.params`.
+    """
+    job = request.app.state.jobs.enqueue(
+        db, kind=kind, target_type=target_type, target_id=target_id,
+        params=params, requested_by=user.id)
+    write_audit(db, actor_type="user", actor_id=user.id, action=action or kind,
+                target_type=target_type, target_id=target_id, params=params,
+                job_id=job.id, ip=request.client.host if request.client else None)
+    return {"job": job_out(job)}
+
+
 @router.get("", dependencies=[Depends(require_role("viewer")),
                               Depends(require_entitlement("jobs.history"))])
 def list_jobs(response: Response, status: str | None = None, kind: str | None = None,

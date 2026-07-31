@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     poll_timeout_s: float = 20.0
     console_ticket_ttl_s: float = 30.0
     console_idle_timeout_s: float = 1800.0
+    # Wall-clock ceiling every Phase 6 job handler passes to
+    # services/pvetask.py::await_task. services/lifecycle.py keeps its own
+    # module constant instead — a start/stop that needs five minutes is a
+    # different animal from a restore that needs fifty, and lifecycle's
+    # timeout is already exercised by tests that monkeypatch it.
+    pve_task_timeout_s: float = 300.0
 
 
 @lru_cache
