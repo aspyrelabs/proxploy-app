@@ -103,7 +103,8 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div role="dialog" aria-label={editing ? `Edit ${existing?.storage}` : 'Add storage'}
+         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[520px] rounded-card border border-line bg-panel p-5">
         <h2 className="mb-4 text-[16px] font-semibold text-text">
           {editing ? `Edit ${existing?.storage}` : 'Add storage'}

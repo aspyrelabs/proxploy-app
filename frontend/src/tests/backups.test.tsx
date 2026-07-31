@@ -1,0 +1,224 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+
+const BACKUPS = {
+  backups: [
+    { id: 11, host_id: 1, host_name: 'host-01', storage: 'pbs-ds',
+      volid: 'pbs-ds:backup/ct/150/2026-07-30T02:00:00Z', guest_type: 'ct',
+      guest_vmid: 150, guest_name: 'Immich', taken_at: '2026-07-30T02:00:00Z',
+      size_bytes: 1073741824, verify_state: 'ok', notes: 'nightly' },
+    { id: 12, host_id: 1, host_name: 'host-01', storage: 'pbs-ds',
+      volid: 'pbs-ds:backup/vm/201/2026-07-30T03:00:00Z', guest_type: 'vm',
+      guest_vmid: 201, guest_name: 'win11', taken_at: '2026-07-30T03:00:00Z',
+      size_bytes: 5368709120, verify_state: 'failed', notes: null },
+  ],
+  stats: {
+    total: 2, total_bytes: 6442450944, ok_count: 1, failed_count: 1,
+    success_rate_30d: 50.0,
+    datastores: [{ storage: 'pbs-ds', count: 2, size_bytes: 6442450944 }],
+  },
+  synced_at: '2026-07-31T09:00:00Z',
+  stale: false,
+}
+
+const PRUNE = [
+  { volid: 'pbs-ds:backup/ct/150/2026-07-30T02:00:00Z', type: 'ct', vmid: 150,
+    ctime: 1753840800, mark: 'keep' },
+  { volid: 'pbs-ds:backup/ct/150/2026-06-01T02:00:00Z', type: 'ct', vmid: 150,
+    ctime: 1748743200, mark: 'remove' },
+  { volid: 'pbs-ds:backup/vm/201/2026-05-01T02:00:00Z', type: 'vm', vmid: 201,
+    ctime: 1746064800, mark: 'protected' },
+]
+
+const calls: { path: string; method: string; body: any }[] = []
+let features: Record<string, boolean> = {
+  'backups.pbs': true, 'backups.run': true, 'backups.restore': true,
+  'backups.retention': true,
+}
+/** which 409 the next in-place restore should hit, if any */
+let restoreGuard: 'confirm' | 'self' | null = null
+
+vi.mock('../api/client', () => {
+  class ApiError extends Error {
+    status: number; body: unknown
+    constructor(status: number, body: unknown) {
+      super(`API ${status}`); this.status = status; this.body = body
+    }
+  }
+  return {
+    ApiError,
+    api: vi.fn((path: string, opts?: RequestInit) => {
+      const method = (opts?.method ?? 'GET').toUpperCase()
+      const body = opts?.body ? JSON.parse(String(opts.body)) : {}
+      if (path === '/entitlements') {
+        return Promise.resolve({ tier: 'builtin', features, grace: null })
+      }
+      if (method !== 'GET') calls.push({ path, method, body })
+      if (path === '/backups') return Promise.resolve(BACKUPS)
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      if (path.startsWith('/backups/prune-preview')) return Promise.resolve(PRUNE)
+      if (path === '/backups/run') {
+        return Promise.resolve({ job: { id: 31, kind: 'backup.run', status: 'queued' } })
+      }
+      if (path.endsWith('/restore')) {
+        if (body.mode === 'in_place' && restoreGuard === 'self') {
+          // Unconditional refusal — `confirm` does not bypass it. Flat body,
+          // matching main.py::problem_handler's `body.update(exc.detail)`
+          // (Task 14 confirmed the real backend never nests under `detail`).
+          return Promise.reject(new ApiError(409, {
+            error: 'self_target', confirm_phrase: 'Immich',
+            detail: 'Immich is the container Proxploy itself runs in. An in-place ' +
+                    'restore would overwrite Proxploy mid-restore. Restore as new instead.',
+          }))
+        }
+        if (body.mode === 'in_place' && restoreGuard === 'confirm' && !body.confirm) {
+          return Promise.reject(new ApiError(409, {
+            error: 'confirm_required', confirm_phrase: 'win11',
+            detail: 'An in-place restore overwrites win11 with the contents of this backup.',
+          }))
+        }
+        return Promise.resolve({ job: { id: 32, kind: 'backup.restore', status: 'queued' } })
+      }
+      if (method === 'DELETE') {
+        return Promise.resolve({ job: { id: 33, kind: 'backup.delete', status: 'queued' } })
+      }
+      return Promise.resolve(null)
+    }),
+  }
+})
+
+vi.mock('@tanstack/react-router', async (orig) => ({
+  ...(await orig() as object),
+  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
+  useNavigate: () => () => {},
+  useSearch: () => ({}),
+}))
+
+import { BackupsPage } from '../routes/backups'
+
+const wrap = () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  return render(<QueryClientProvider client={qc}><BackupsPage /></QueryClientProvider>)
+}
+
+describe('BackupsPage', () => {
+  it('renders the datastore header, the three stat cards and the recent-backups table', async () => {
+    calls.length = 0; restoreGuard = null
+    wrap()
+    expect(await screen.findByText(/Proxmox Backup Server · pbs-ds/)).toBeInTheDocument()
+    expect(screen.getByText('Next scheduled')).toBeInTheDocument()
+    expect(screen.getByText('Datastore used')).toBeInTheDocument()
+    expect(screen.getByText('Success rate · 30d')).toBeInTheDocument()
+    expect(screen.getByText('50%')).toBeInTheDocument()
+    expect(screen.getByText('Immich')).toBeInTheDocument()
+    expect(screen.getByText('win11')).toBeInTheDocument()
+    expect(screen.getByText('5.0 GiB')).toBeInTheDocument()
+  })
+
+  it('renders "New job" as a disabled control that says why', async () => {
+    calls.length = 0
+    wrap()
+    const btn = await screen.findByRole('button', { name: 'New job' })
+    expect(btn).toBeDisabled()
+    expect(btn.getAttribute('title')).toMatch(/Phase 7/i)
+  })
+
+  it('runs a backup and swaps the dialog body for the job log', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    // the single registered host is auto-selected once /hosts resolves; the
+    // button is disabled until then, and a click on a disabled button is a no-op
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start backup' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/run')
+    expect(calls[0].body).toEqual({ guests: 'all', host_id: 1 })
+    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('asks for confirmation before deleting an archive, then fires the job', async () => {
+    calls.length = 0
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    wrap()
+    await screen.findByText('Immich')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(calls.length).toBe(0)          // declining deletes nothing
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].method).toBe('DELETE')
+    expect(calls[0].path).toBe('/backups/11')
+    confirmSpy.mockRestore()
+  })
+
+  it('takes a typed confirmation for an in-place restore over another guest', async () => {
+    calls.length = 0; restoreGuard = 'confirm'
+    wrap()
+    await screen.findByText('win11')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Restore' })[1])
+    fireEvent.click(await screen.findByLabelText(/In place/i))
+    fireEvent.click(screen.getByRole('button', { name: 'Start restore' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].body).toEqual({ mode: 'in_place' })
+
+    expect(await screen.findByText(/An in-place restore overwrites win11/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'win11' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm$/ }))
+    await waitFor(() => expect(calls.length).toBe(2))
+    expect(calls[1].body).toEqual({ mode: 'in_place', confirm: 'win11' })
+    restoreGuard = null
+  })
+
+  it('refuses an in-place restore over Proxploy itself instead of offering a confirm box', async () => {
+    calls.length = 0; restoreGuard = 'self'
+    wrap()
+    await screen.findByText('Immich')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Restore' })[0])
+    fireEvent.click(await screen.findByLabelText(/In place/i))
+    fireEvent.click(screen.getByRole('button', { name: 'Start restore' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    // the backend's own sentence, and NO typed-confirmation control: re-POSTing
+    // with the phrase gets the same 409, so offering one would be a lie
+    expect(await screen.findByText(/Restore as new instead/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/type/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Confirm$/ })).toBeNull()
+    expect(calls.length).toBe(1)
+    restoreGuard = null
+  })
+
+  it('veils the retention preview without backups.retention, and marks volumes when entitled', async () => {
+    calls.length = 0
+    features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true }
+    const veiled = wrap()
+    expect(await screen.findByText(/Retention preview is a Pro feature/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Unlock Pro/i })).toBeInTheDocument()
+    veiled.unmount()
+
+    features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true,
+                 'backups.retention': true }
+    wrap()
+    // enabled only once /backups resolves — the datastore and its host come from it
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Preview retention' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Preview retention' }))
+    expect(await screen.findByText('remove')).toBeInTheDocument()
+    expect(screen.getByText('protected')).toBeInTheDocument()
+    expect(screen.getAllByText('keep').length).toBeGreaterThan(0)
+    expect(screen.getByText(/deletes nothing/i)).toBeInTheDocument()
+  })
+
+  it('offers PBS datastore connect, reusing StorageForm pre-set to type pbs', async () => {
+    // doc 10 lists "PBS datastore connect" as a Phase 6 Backups deliverable.
+    // Connecting PBS *is* attaching a storage of type pbs, so this asserts the
+    // affordance exists and opens Task 13's form in the right mode — not that
+    // a second, parallel PBS form was built.
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect PBS' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText(/Type/i)).toHaveValue('pbs')
+  })
+})
