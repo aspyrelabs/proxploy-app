@@ -277,9 +277,14 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
                          db=Depends(get_db),
                          user: User = Depends(_require_admin)):
     """Rollback throws away every write since the snapshot was taken — there is
-    no undo and no second copy. It therefore reuses the exact 409 body
-    `enqueue_lifecycle` uses for a self-targeted stop, so the frontend's
-    existing ConfirmSelfDialog renders it with no new component.
+    no undo and no second copy. It therefore reuses the same three-key 409
+    *shape* (`error`/`confirm_phrase`/`detail`) `enqueue_lifecycle` uses, so
+    the frontend's existing typed-confirmation dialog renders it with no new
+    component — but the `error` value here is `"confirm_required"`, not
+    `enqueue_lifecycle`'s self-targeted-stop `"self_target"`: rollback asks
+    for confirmation from *every* caller, not only when the VM happens to be
+    the one Proxploy itself runs in. The frontend keys on this exact string,
+    so do not conflate the two.
     """
     v, _host = _vm_and_host(db, vm_id)
     _valid_snap_name(name)

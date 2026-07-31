@@ -28,6 +28,13 @@ documented endpoint callable with an API key (`api_keys` table,
   `DELETE`, `migrate`) refuse the action, or require `{"confirm": "<typed
   phrase>"}` in the body, when the target resolves to the CT/host Proxploy is
   itself running on (doc 02 §9, doc 08 §1/§9).
+- **A blank Entitlement cell means "never gated"** — not "forgotten." Phase 6
+  found six read endpoints (`GET /storage`, `/storage/{h}/{n}`,
+  `/storage/{h}/{n}/content`, `/network/bridges`, `/network/throughput`,
+  `/vms/{id}/snapshots`) whose cells were blank by omission rather than by
+  design; they are gated in code (`storage.view`, `storage.content`,
+  `network.view`, `vms.snapshots`) and this doc was wrong. Corrected in
+  Phase 6 — see `docs/notes/phase-6-infra.md`.
 
 ---
 
@@ -132,7 +139,7 @@ documented endpoint callable with an API key (`api_keys` table,
 | POST | `/api/v1/vms` | Create VM from spec → job | admin | `vms.create` |
 | POST | `/api/v1/vms/{id}/clone` | Clone → job | admin | `vms.clone` |
 | DELETE | `/api/v1/vms/{id}` | Destroy VM → job | owner | `vms.create` |
-| GET | `/api/v1/vms/{id}/snapshots` | List snapshots (live from Proxmox) | viewer | |
+| GET | `/api/v1/vms/{id}/snapshots` | List snapshots (live from Proxmox) | viewer | `vms.snapshots` |
 | POST | `/api/v1/vms/{id}/snapshots` | Take snapshot → job | operator | `vms.snapshots` |
 | POST | `/api/v1/vms/{id}/snapshots/{name}/rollback` | Roll back → job | admin | `vms.snapshots` |
 | DELETE | `/api/v1/vms/{id}/snapshots/{name}` | Delete snapshot → job | operator | `vms.snapshots` |
@@ -142,9 +149,9 @@ documented endpoint callable with an API key (`api_keys` table,
 
 | Method | Path | Purpose | Role | Entitlement |
 |---|---|---|---|---|
-| GET | `/api/v1/storage` | Datastores across hosts: type, used/total (live-refreshed cache) | viewer | |
-| GET | `/api/v1/storage/{hostId}/{name}` | Datastore detail + content listing | viewer | |
-| GET | `/api/v1/storage/{hostId}/{name}/content` | Volumes (ISOs, templates, disks) | viewer | |
+| GET | `/api/v1/storage` | Datastores across hosts: type, used/total (live-refreshed cache) | viewer | `storage.view` |
+| GET | `/api/v1/storage/{hostId}/{name}` | Datastore detail + content listing | viewer | `storage.view` |
+| GET | `/api/v1/storage/{hostId}/{name}/content` | Volumes (ISOs, templates, disks) | viewer | `storage.content` |
 | POST | `/api/v1/storage/{hostId}/{name}/content` | Upload ISO/template to a datastore → job | admin | `storage.content` |
 | DELETE | `/api/v1/storage/{hostId}/{name}/content/{volid}` | Delete a volume (ISO, template, disk image) → job | admin | `storage.content` |
 | POST | `/api/v1/storage` | Attach storage (dir, NFS, CIFS, PBS, ZFS-over-API) to a host `{host_id, type, config}` via Proxmox API | admin | `storage.manage` |
@@ -155,18 +162,29 @@ documented endpoint callable with an API key (`api_keys` table,
 
 | Method | Path | Purpose | Role | Entitlement |
 |---|---|---|---|---|
-| GET | `/api/v1/network/bridges` | Bridges/interfaces per node (live passthrough) | viewer | |
-| GET | `/api/v1/network/throughput` | Cluster + per-node in/out rates (from MetricsStore) | viewer | |
+| GET | `/api/v1/network/bridges` | Bridges/interfaces per node (live passthrough), plus the guest NIC attachment map | viewer | `network.view` |
+| GET | `/api/v1/network/throughput` | Cluster + per-node in/out rates (from MetricsStore) | viewer | `network.view` |
+| GET | `/api/v1/apps/{id}/network` | Guest NICs for a CT (live read, no cache) | viewer | `network.guest_config` |
+| PUT | `/api/v1/apps/{id}/network/{iface}` | Read-modify-write one CT `netN` (bridge, tag, firewall, rate, mtu, link_down) | operator | `network.guest_config` |
+| GET | `/api/v1/vms/{id}/network` | Guest NICs for a VM (live read, no cache) | viewer | `network.guest_config` |
+| PUT | `/api/v1/vms/{id}/network/{iface}` | Read-modify-write one VM `netN` | operator | `network.guest_config` |
+| POST | `/api/v1/network/bridges` | Create a host bridge/bond/VLAN — stages into `/etc/network/interfaces.new`, not applied | admin | `network.host_config` |
+| PUT | `/api/v1/network/bridges/{hostId}/{node}/{iface}` | Edit a staged/existing host interface | admin | `network.host_config` |
+| DELETE | `/api/v1/network/bridges/{hostId}/{node}/{iface}` | Remove a host interface (staged) | admin | `network.host_config` |
+| POST | `/api/v1/network/{hostId}/{node}/apply` | Promote staged interface changes (`ifreload`) — typed node-name confirmation required | admin | `network.host_config` |
+| POST | `/api/v1/network/{hostId}/{node}/revert` | Discard staged interface changes, no confirmation needed (cannot disturb the running config) | admin | `network.host_config` |
 
 ## Backups
 
 | Method | Path | Purpose | Role | Entitlement |
 |---|---|---|---|---|
 | GET | `/api/v1/backups` | Cached backup list + summary stats (next run, datastore usage, 30d success rate) | viewer | `backups.pbs` |
-| POST | `/api/v1/backups/run` | Run backup now `{guests: [...] \| all}` → job | operator | `backups.pbs` |
-| POST | `/api/v1/backups/{id}/restore` | Restore a backup → job | admin | `backups.pbs` |
+| POST | `/api/v1/backups/run` | Run backup now `{guests: [...] \| all}` → job | operator | `backups.run` |
+| POST | `/api/v1/backups/{id}/restore` | Restore a backup → job | admin | `backups.restore` |
 | DELETE | `/api/v1/backups/{id}` | Delete backup volume upstream → job | admin | `backups.pbs` |
 | GET | `/api/v1/backups/jobs` | Configured backup schedules (see Schedules) | viewer | `backups.pbs` |
+| GET | `/api/v1/backups/prune-preview` | Dry-run retention preview: which archives would be kept/removed (GET only, deletes nothing) | admin | `backups.retention` |
+| POST | `/api/v1/backups/prune` | Apply retention (`keep-*` rules) → job — ships this phase, not yet wired to any UI control | admin | `backups.retention` |
 
 ## Jobs
 

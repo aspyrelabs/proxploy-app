@@ -368,3 +368,114 @@ fast-follow.
 **Phase 5 final state**: all 12 planned tasks + 1 consolidated fix wave,
 15 commits total (`433ce46..432e22a`) plus this buildlog/notes bookkeeping,
 all committed directly to `main`. Ready to merge, with two parked findings.
+
+### 2026-07-31T22:18:00+05:30 — Phase 6 — execute-plan completed
+
+Plan: `docs/superpowers/plans/2026-07-31-phase-6-infra.md`. All 17 tasks
+implemented and committed directly to `main` (`2182940..5ad5579`), each
+individually reviewed (fix rounds where the reviewer found real gaps: Task
+4's `requests-toolbelt` finding below, Task 8's anti-stampede sync lock and
+per-storage-failure isolation, Task 9's audit-row assertion gap on the
+self-targeted-restore refusal, Task 11's missing audit assertions on all
+three VM-delete refusal branches, Task 14's dead untested branch in
+`errBody()`, Task 16's two-round false-negative test fix). Task 18 closed
+out with DoD verification, this notes doc, and this buildlog entry. Full
+details, DoD proof, and deviations in `docs/notes/phase-6-infra.md`.
+
+**What was built:**
+- **Storage**: `ProxmoxClient` reads/writes (`storages`, `storage_status`,
+  `storage_content`, `cluster_storage`, `storage_create/update/remove`,
+  `storage_upload`, `storage_delete_volume`) + `client_for_host` extraction;
+  `GET/POST/PATCH/DELETE /storage[...]` (`backend/proxploy/api/storage.py`);
+  chunked-spool multipart upload job with crash-safe cleanup on boot;
+  frontend Storage page + upload/attach/edit/detach dialogs
+- **Network**: `netconfig.py` NIC-string round-tripper; bridge/guest-config
+  `ProxmoxClient` methods; `GET /network/bridges|throughput`,
+  `GET/PUT /{apps|vms}/{id}/network[/{iface}]`, host bridge stage/apply/
+  revert (`POST/PUT/DELETE /network/bridges/...`, `POST /network/{h}/{n}/
+  apply|revert` — typed node-name confirmation on apply); frontend Network
+  page + NIC/bridge forms
+- **Backups**: `backupjobs.py` sync (droppable `backups` mirror, anti-
+  stampede lock, auto-sync-on-stale), run/restore/prune `ProxmoxClient`
+  methods + routes (`POST /backups/run`, `POST /backups/{id}/restore`,
+  `GET /backups/prune-preview`, `POST /backups/prune`, `DELETE /backups/
+  {id}`); frontend Backups page (last placeholder page deleted)
+- **VM lifecycle**: snapshot list/create/rollback/delete, create, clone,
+  delete `ProxmoxClient` methods + job handlers + routes (`GET/POST /vms/
+  {id}/snapshots`, rollback with typed confirm, `POST /vms`, `POST /vms/
+  {id}/clone`, `DELETE /vms/{id}` — owner-role 3-gate refusal chain);
+  frontend snapshots tab, VM create wizard, clone dialog
+- **Shared**: `pvetask.py::await_task`, `api/jobs.py::enqueue_and_audit`,
+  both extracted from the existing lifecycle-job pattern and reused by every
+  route above
+
+**Verification:**
+- Backend: 491 passed, 2 skipped, 4 deselected (178.01s) — `pytest tests/ -q
+  -m "not pve_integration and not e2e"` (deselected rose from 3 to 4: this
+  task's new gated live-PVE test)
+- Backend: executor isolation OK, unaffected by this phase
+- Backend license audit: fails locally on `psycopg` (LGPL) — pre-existing,
+  documented since Phase 1/4, `postgres` extras never installed in CI's
+  actual gate; this phase's own two new dependencies are both cleanly
+  allowlisted (see Deviations)
+- Migrations: 7 passed, 2 skipped; `alembic heads` = `2330a95b98d2`,
+  unchanged — zero migrations this phase
+- Frontend: 118 passed (26 files) — `npx vitest run`; build clean; lint
+  exit 0 (pre-existing warning classes only, no errors)
+- `docs/notes/phase-6-infra.md`'s `dod_verify_phase6.py` run: all four
+  doc-10 DoD clauses ("every nav page renders real content", "VM created/
+  snapshotted/rolled back/cloned", "CT backs up to PBS and restores as a new
+  CTID", "ISO uploads through Proxploy") proved against `tests.support.
+  make_app` + `FakePVE` (no live PVE, no browser on this box)
+- `backend/tests/test_infra_pve_integration.py` added (Task 18): a
+  `pve_integration`-marked, disposable-live-PVE-gated test for what only a
+  real host can prove (real multi-hundred-MB upload, a real vzdump-to-PBS
+  and restore, real network apply/revert semantics on PVE 8.x/9.x, and that
+  prunebackups' dry-run really deletes nothing). Skips here, same standing
+  no-live-PVE limitation every phase has stated
+
+**Deviations** (full list + rationale in the notes doc): Phase 6 shipped
+**two** new backend dependencies, not one as both the plan's header and this
+task's own brief claimed — `python-multipart` (Apache-2.0, Task 4, FastAPI
+requires it to define an `UploadFile` route at all) and `requests-toolbelt`
+(Apache Software License, added in Task 4's fix round after discovering
+proxmoxer silently falls back to buffering an entire upload in RAM without
+it, and hard-fails with `OverflowError` above ~2 GiB — the exact failure
+mode `storage_upload_max_bytes: 16 GiB` was supposed to make safe). Zero
+Alembic migrations, as planned — the `backups` table and every column this
+phase populates existed unused since migration 0001. Doc 05 was amended
+(Task 18) for three real omissions this phase surfaced: a missing §Network
+section for guest/host config endpoints, six read endpoints with a blank
+entitlement column that should have read `storage.view`/`storage.content`/
+`network.view`/`vms.snapshots`, and a missing `GET /backups/prune-preview` +
+`POST /backups/prune` pair — plus a fourth, unrequested fix found in the
+same table: `POST /backups/run`/`POST /backups/{id}/restore` were both
+listed under `backups.pbs`, but the code gates them on the distinct
+`backups.run`/`backups.restore` keys doc 01 already defines. A docstring
+defect in `api/vms.py`'s snapshot
+rollback (claiming it reuses `enqueue_lifecycle`'s `self_target` 409 shape,
+when it actually emits `confirm_required` — the frontend keys on the exact
+string) was corrected in the same pass. The staged-network-changes indicator
+was deliberately not built: proxmoxer's `.get()` unwraps only the `data` key
+and drops the sibling `changes` property PVE uses to report pending state,
+so Apply/Revert are always offered rather than guessing at pending state.
+Linked-clone validity is not pre-checked — Proxploy does not track
+template-ness, so PVE's rejection is surfaced verbatim. `POST /backups/
+prune` ships unconsumed by any UI control (retention-by-policy belongs to
+Phase 7's scheduler). `sync_host_backups` reads only `Host.node_name`, so
+node-local archives on a cluster's other nodes are missed until `Host`
+models more than one node. An adjudicated, intentionally asymmetric audit
+decision is recorded in the notes doc: only the `self_target` restore
+refusal writes an audit row (`guest_missing`/`confirm_required`/
+`guest_running` are ordinary retryable rejections, not incidents). Known,
+carried-forward test-hygiene items (deliberately not fixed this task, next
+whole-branch review owns the sweep): `test_concurrent_stale_reads_enqueue_
+only_one_sync` is slow and timing-variable (62s/62s/2s across three runs,
+passing every time); three frontend `window.confirm`-dismissed tests
+(`backups.test.tsx`'s archive-delete, and two in `storage-mutations.
+test.tsx`) are proven false negatives via the same microtask-timing gap
+Task 16 found and fixed on a sibling test.
+
+**Phase 6 final state**: all 17 planned tasks, committed directly to `main`
+(`2182940..5ad5579`) plus this buildlog/notes/doc-05 commit. Ready to
+proceed to whichever phase comes next.
