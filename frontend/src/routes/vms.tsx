@@ -9,6 +9,7 @@ import { VncConsole } from '../components/console/VncConsole'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
+import { SnapshotPanel } from '../components/SnapshotPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
 import { Button } from '../components/ui/button'
@@ -182,13 +183,6 @@ export const vmDetailRoute = createRoute({
   component: VmDetail,
 })
 
-const phaseTab = (path: string, phase: string, note: string) =>
-  createRoute({
-    getParentRoute: () => vmDetailRoute,
-    path,
-    component: () => <EmptyState title={`This tab lands in ${phase}`} note={note} />,
-  })
-
 export const vmOverviewRoute = createRoute({
   getParentRoute: () => vmDetailRoute,
   path: '/',
@@ -223,5 +217,17 @@ function VncConsoleWithReconnect({ vmId, ticket, onNeedNewTicket }:
 export const vmConsoleRoute = createRoute({
   getParentRoute: () => vmDetailRoute, path: 'console', component: VmConsole,
 })
-export const vmSnapshotsRoute = phaseTab('snapshots', 'Phase 6 (Infra pages)',
-  'List, create, roll back and delete snapshots.')
+
+function VmSnapshots() {
+  const { vmId } = useParams({ strict: false }) as { vmId: string }
+  const id = Number(vmId)
+  const { data: vm } = useQuery({ queryKey: ['vms', id], queryFn: () => api<VmRow>(`/vms/${id}`) })
+  // The tab renders inside VmDetail's Outlet, so the ['vms', id] row is already
+  // warm; this read is a cache hit, not a second round trip.
+  if (!vm) return null
+  return <SnapshotPanel vmId={id} vmName={vm.name} />
+}
+
+export const vmSnapshotsRoute = createRoute({
+  getParentRoute: () => vmDetailRoute, path: 'snapshots', component: VmSnapshots,
+})
