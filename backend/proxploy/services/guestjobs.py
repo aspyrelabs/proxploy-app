@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
-from proxploy.models import Host
+from proxploy.models import Host, Vm
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.pvetask import await_task
 
@@ -54,3 +54,86 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
 
 
 HANDLERS["network.apply"] = run_network_apply
+
+
+def _vm_target(app, vm_id: int):
+    """Blocking: vms.id -> (client, node, vmid, name, host_id). Runs in a thread.
+
+    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch —
+    everything in this module is qemu-only (doc 05 puts snapshots, create and
+    clone under /vms).
+    """
+    with app.state.sessionmaker() as db:
+        v = db.get(Vm, vm_id)
+        if v is None:
+            raise JobFailed(f"vm {vm_id} not found")
+        host = db.get(Host, v.host_id)
+        if host is None:
+            raise JobFailed(f"host {v.host_id} not found")
+        return (client_for_host(app, db, host), host.node_name or "",
+                int(v.vmid), v.name or f"VM {v.vmid}", host.id)
+
+
+async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
+    """`vm.snapshot_create` — take a snapshot, optionally with RAM."""
+    app = ctx.backend.app
+    vm_id = int(params["vm_id"])
+    name = params["name"]
+    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+        _vm_target, app, vm_id)
+    vmstate = bool(params.get("vmstate"))
+    ctx.log(f"snapshot {name!r} of {vm_name} (qemu {vmid}) on {node}"
+            f"{' including RAM' if vmstate else ''}")
+    upid = await asyncio.to_thread(client.snapshot_create, "qemu", node, vmid,
+                                   name, params.get("description"), vmstate)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
+                                       "change": "snapshot"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
+            "vmid": vmid, "vmstate": vmstate}
+
+
+async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
+    """`vm.snapshot_rollback` — discard everything since the snapshot.
+
+    The route already took the typed confirmation. PVE refuses a rollback of a
+    running VM unless the snapshot carries vmstate, and that refusal is surfaced
+    verbatim rather than pre-checked here: the guest's cached status can be up
+    to one poll cycle stale, so a local check would produce a second, less
+    accurate answer than the one Proxmox gives.
+    """
+    app = ctx.backend.app
+    vm_id = int(params["vm_id"])
+    name = params["name"]
+    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+        _vm_target, app, vm_id)
+    ctx.log(f"rolling {vm_name} (qemu {vmid}) back to snapshot {name!r} on {node}")
+    upid = await asyncio.to_thread(client.snapshot_rollback, "qemu", node, vmid,
+                                   name)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
+                                       "change": "rollback"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
+            "vmid": vmid}
+
+
+async def snapshot_delete_job(ctx: JobContext, params: dict) -> dict:
+    """`vm.snapshot_delete` — remove one snapshot; the guest is untouched."""
+    app = ctx.backend.app
+    vm_id = int(params["vm_id"])
+    name = params["name"]
+    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+        _vm_target, app, vm_id)
+    ctx.log(f"deleting snapshot {name!r} of {vm_name} (qemu {vmid}) on {node}")
+    upid = await asyncio.to_thread(client.snapshot_delete, "qemu", node, vmid,
+                                   name)
+    status = await await_task(ctx, client, node, upid)
+    app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
+                                       "change": "snapshot"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
+            "vmid": vmid}
+
+
+HANDLERS["vm.snapshot_create"] = snapshot_create_job
+HANDLERS["vm.snapshot_rollback"] = snapshot_rollback_job
+HANDLERS["vm.snapshot_delete"] = snapshot_delete_job

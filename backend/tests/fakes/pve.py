@@ -210,14 +210,57 @@ class _GuestConfigLeaf:
         return self._owner.config_update_upid
 
 
-class _SnapshotLeaf:
-    def __init__(self, owner, kind, vmid):
-        self._owner, self._kind, self._vmid = owner, kind, vmid
+class _RollbackLeaf:
+    def __init__(self, owner, kind, node, vmid, name):
+        self._owner, self._kind = owner, kind
+        self._node, self._vmid, self._name = node, vmid, name
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.snapshot_rollbacks.append(
+            (self._kind, self._node, self._vmid, self._name))
+        return self._owner._record_action(self._kind, self._vmid, "rollback")
+
+
+class _SnapshotItemNS:
+    """nodes(n).<kind>(vmid).snapshot(name) — .rollback.post() and .delete()."""
+
+    def __init__(self, owner, kind, node, vmid, name):
+        self._owner, self._kind = owner, kind
+        self._node, self._vmid, self._name = node, vmid, name
+        self.rollback = _RollbackLeaf(owner, kind, node, vmid, name)
+
+    def delete(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.snapshot_deletes.append(
+            (self._kind, self._node, self._vmid, self._name))
+        return self._owner._record_action(self._kind, self._vmid, "snapdelete")
+
+
+class _SnapshotNS:
+    """nodes(n).<kind>(vmid).snapshot — .get() lists, .post() creates, and the
+    object itself is callable with a snapshot name (proxmoxer's own shape)."""
+
+    def __init__(self, owner, kind, node, vmid):
+        self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
 
     def get(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
         return self._owner.snapshots_by_guest.get((self._kind, self._vmid), [])
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.snapshot_creates.append(
+            (self._kind, self._node, self._vmid, kwargs))
+        return self._owner._record_action(self._kind, self._vmid, "snapshot")
+
+    def __call__(self, name):
+        return _SnapshotItemNS(self._owner, self._kind, self._node, self._vmid,
+                               name)
 
 
 class _ClusterNS:
@@ -276,7 +319,7 @@ class _GuestNS:
         self.status = _GuestStatusNS(owner, kind, vmid)
         self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
         self.config = _GuestConfigLeaf(owner, kind, vmid)
-        self.snapshot = _SnapshotLeaf(owner, kind, vmid)
+        self.snapshot = _SnapshotNS(owner, kind, node, vmid)
         if kind == "qemu":
             self.vncproxy = _VncproxyLeaf(owner, node, vmid)
 
@@ -481,6 +524,10 @@ class FakePVE:
         self.prune_gets: list[tuple[str, str, dict]] = []
         self.prune_deletes: list[tuple[str, str, dict]] = []
         self.prune_preview_rows: list[dict] = []
+        # snapshot recording (Phase 6, Task 10)
+        self.snapshot_creates: list[tuple[str, str, int, dict]] = []
+        self.snapshot_rollbacks: list[tuple[str, str, int, str]] = []
+        self.snapshot_deletes: list[tuple[str, str, int, str]] = []
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

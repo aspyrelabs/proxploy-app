@@ -562,6 +562,62 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"snapshot list failed for {kind}/{vmid} on {node}", e) from e
 
+    # --- snapshots (Phase 6, Task 10) ---------------------------------------
+
+    def snapshot_create(self, kind: str, node: str, vmid: int, name: str,
+                        description: str | None = None,
+                        vmstate: bool = False) -> str:
+        """POST /nodes/{node}/{kind}/{vmid}/snapshot -> UPID.
+
+        `vmstate` is doc 01 §4's "with-RAM option": PVE dumps the guest's memory
+        into the snapshot so a rollback resumes mid-execution. It exists only on
+        the qemu endpoint — PVE's lxc snapshot API has no such parameter — so a
+        container request for it is refused here rather than silently dropped,
+        which would produce a snapshot the caller believes has RAM in it.
+        """
+        if vmstate and kind != "qemu":
+            raise ProxmoxError("vmstate (snapshot with RAM) is a VM-only feature; "
+                               f"{kind} snapshots cannot include memory")
+        call: dict = {"snapname": name}
+        if description:
+            call["description"] = description
+        if vmstate:
+            call["vmstate"] = 1
+        try:
+            guest = getattr(self._connect().nodes(node), kind)(vmid)
+            return guest.snapshot.post(**call)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+            raise self._wrap(f"snapshot {name!r} of {kind}/{vmid} failed on {node}",
+                             e) from e
+
+    def snapshot_rollback(self, kind: str, node: str, vmid: int, name: str) -> str:
+        """POST /nodes/{node}/{kind}/{vmid}/snapshot/{name}/rollback -> UPID.
+
+        Destructive: everything written since the snapshot is discarded. The
+        typed-name confirmation lives in the route (api/vms.py), not here.
+        """
+        try:
+            guest = getattr(self._connect().nodes(node), kind)(vmid)
+            return guest.snapshot(name).rollback.post()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"rollback of {kind}/{vmid} to {name!r} failed on "
+                             f"{node}", e) from e
+
+    def snapshot_delete(self, kind: str, node: str, vmid: int, name: str) -> str:
+        """DELETE /nodes/{node}/{kind}/{vmid}/snapshot/{name} -> UPID."""
+        try:
+            guest = getattr(self._connect().nodes(node), kind)(vmid)
+            return guest.snapshot(name).delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"deleting snapshot {name!r} of {kind}/{vmid} failed "
+                             f"on {node}", e) from e
+
     def cluster_nextid(self) -> int:
         """GET /cluster/nextid — PVE answers with a JSON string; cast once here
         so no caller has to remember to."""

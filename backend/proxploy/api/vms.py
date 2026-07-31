@@ -2,14 +2,20 @@
 snapshot cpu."""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
 from proxploy.api.deps import get_db, require_entitlement, require_role
-from proxploy.api.jobs import job_out
+from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm
+from proxploy.services.audit import write_audit
+from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import VM_ACTIONS
+from proxploy.services.proxmox import ProxmoxError
 
 router = APIRouter(prefix="/vms", tags=["vms"])
 
@@ -91,6 +97,129 @@ def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
     v, host = _vm_and_host(db, vm_id)
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
                          host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body)
+
+
+# Registered ABOVE the /{vm_id}/{action} wildcard — see the WARNING on that
+# route. Out of order, `POST /vms/3/snapshots` lands in vm_lifecycle with
+# action="snapshots" and 422s (test_post_snapshots_is_not_swallowed_by_the_
+# lifecycle_wildcard proves it stays this way).
+
+# PVE's own pve-configid shape, plus its 40-char ceiling. Enforced here because
+# the value is interpolated into a Proxmox path segment, and because "current"
+# is PVE's synthetic pseudo-snapshot name and must never be creatable.
+SNAP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{1,39}$")
+
+
+def _valid_snap_name(name: str) -> str:
+    if not SNAP_NAME_RE.match(name or "") or name == "current":
+        raise HTTPException(422, "snapshot name must start with a letter and use "
+                                 "only letters, digits, '-' and '_' (2-40 chars), "
+                                 "and cannot be 'current'")
+    return name
+
+
+def _snapshot_out(s: dict) -> dict:
+    return {
+        "name": s.get("name"),
+        "description": s.get("description"),
+        "snaptime": s.get("snaptime"),
+        # PVE returns 0/1 (and omits it entirely on containers)
+        "vmstate": bool(int(s.get("vmstate") or 0)),
+        "parent": s.get("parent"),
+    }
+
+
+@router.get("/{vm_id}/snapshots",
+            dependencies=[Depends(_require_viewer),
+                          Depends(require_entitlement("vms.snapshots"))])
+def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
+                      user: User = Depends(_require_viewer)):
+    """Live read on every request (doc 05: "List snapshots (live from
+    Proxmox)") — there is no snapshot table and this phase adds none.
+
+    PVE always includes a synthetic `current` entry describing the running
+    state. It is not a snapshot, has no snaptime, and cannot be rolled back to
+    or deleted, so it is dropped here rather than in the UI — otherwise every
+    consumer of this endpoint has to know the same trivia.
+    """
+    v, host = _vm_and_host(db, vm_id)
+    client = client_for_host(request.app, db, host)
+    try:
+        rows = client.snapshots("qemu", host.node_name or "", v.vmid)
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e)) from e
+    return [_snapshot_out(s) for s in rows if s.get("name") != "current"]
+
+
+class SnapshotIn(BaseModel):
+    name: str
+    description: str | None = None
+    vmstate: bool = False
+
+
+@router.post("/{vm_id}/snapshots", status_code=202,
+             dependencies=[Depends(_require_operator),
+                           Depends(require_entitlement("vms.snapshots"))])
+def create_vm_snapshot(request: Request, vm_id: int, body: SnapshotIn,
+                       db=Depends(get_db),
+                       user: User = Depends(_require_operator)):
+    v, _host = _vm_and_host(db, vm_id)
+    name = _valid_snap_name(body.name)
+    return enqueue_and_audit(request, db, user, kind="vm.snapshot_create",
+                             target_type="vm", target_id=v.id,
+                             params={"vm_id": v.id, "name": name,
+                                     "description": body.description,
+                                     "vmstate": body.vmstate})
+
+
+class RollbackIn(BaseModel):
+    confirm: str | None = None
+
+
+@router.post("/{vm_id}/snapshots/{name}/rollback", status_code=202,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("vms.snapshots"))])
+def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
+                         body: RollbackIn = Body(default=RollbackIn()),
+                         db=Depends(get_db),
+                         user: User = Depends(_require_admin)):
+    """Rollback throws away every write since the snapshot was taken — there is
+    no undo and no second copy. It therefore reuses the exact 409 body
+    `enqueue_lifecycle` uses for a self-targeted stop, so the frontend's
+    existing ConfirmSelfDialog renders it with no new component.
+    """
+    v, _host = _vm_and_host(db, vm_id)
+    _valid_snap_name(name)
+    vm_name = v.name or f"VM {v.vmid}"
+    ip = request.client.host if request.client else None
+    if (body.confirm or "") != vm_name:
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="vm.snapshot_rollback", target_type="vm",
+                    target_id=v.id, params={"name": name}, result="denied", ip=ip)
+        raise HTTPException(409, {
+            "error": "confirm_required", "confirm_phrase": vm_name,
+            "detail": (f"Rolling {vm_name} back to {name!r} discards everything "
+                       f"written since that snapshot was taken. Type the VM name "
+                       f"to confirm."),
+        })
+    return enqueue_and_audit(request, db, user, kind="vm.snapshot_rollback",
+                             target_type="vm", target_id=v.id,
+                             params={"vm_id": v.id, "name": name})
+
+
+@router.delete("/{vm_id}/snapshots/{name}", status_code=202,
+               dependencies=[Depends(_require_operator),
+                             Depends(require_entitlement("vms.snapshots"))])
+def delete_vm_snapshot(request: Request, vm_id: int, name: str, db=Depends(get_db),
+                       user: User = Depends(_require_operator)):
+    """No typed confirmation: deleting a snapshot leaves the guest and its disk
+    exactly as they are. Only the rollback above destroys live state.
+    """
+    v, _host = _vm_and_host(db, vm_id)
+    _valid_snap_name(name)
+    return enqueue_and_audit(request, db, user, kind="vm.snapshot_delete",
+                             target_type="vm", target_id=v.id,
+                             params={"vm_id": v.id, "name": name})
 
 
 @router.post("/{vm_id}/{action}", status_code=202,
