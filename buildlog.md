@@ -468,14 +468,78 @@ models more than one node. An adjudicated, intentionally asymmetric audit
 decision is recorded in the notes doc: only the `self_target` restore
 refusal writes an audit row (`guest_missing`/`confirm_required`/
 `guest_running` are ordinary retryable rejections, not incidents). Known,
-carried-forward test-hygiene items (deliberately not fixed this task, next
-whole-branch review owns the sweep): `test_concurrent_stale_reads_enqueue_
+carried-forward test-hygiene item: `test_concurrent_stale_reads_enqueue_
 only_one_sync` is slow and timing-variable (62s/62s/2s across three runs,
-passing every time); three frontend `window.confirm`-dismissed tests
-(`backups.test.tsx`'s archive-delete, and two in `storage-mutations.
-test.tsx`) are proven false negatives via the same microtask-timing gap
-Task 16 found and fixed on a sibling test.
+passing every time) — deliberately left as-is. Three frontend
+`window.confirm`-dismissed tests (`backups.test.tsx`'s archive-delete, and
+two in `storage-mutations.test.tsx`) were suspected false negatives via the
+same microtask-timing gap Task 16 found and fixed on a sibling test; the
+final whole-branch review below individually neutralised each production
+guard to check. Only `storage-mutations.test.tsx`'s detach test was
+genuinely broken, fixed with the same macrotask-flush idiom. The other two —
+`backups.test.tsx`'s archive-delete and `storage-mutations.test.tsx`'s
+volume-delete — do fail when their guards are removed, via a `waitFor`
+already present, so they were verified load-bearing and correctly left
+untouched.
 
-**Phase 6 final state**: all 17 planned tasks, committed directly to `main`
-(`2182940..5ad5579`) plus this buildlog/notes/doc-05 commit. Ready to
-proceed to whichever phase comes next.
+### 2026-07-31T22:45:00+05:30 — Phase 6 — final whole-branch review + fix wave
+
+Per-task reviews above cover Tasks 1-18 individually; the final whole-branch
+review (opus) covering the full `ce590bd..13a0737` range (25 commits, 68
+files, ~10.8k insertions) returned MERGE AFTER FIXES with 4 blocking
+findings plus same-wave items, fixed in `172167d` and `b36846c`:
+
+- **Two parameter-collision bugs, both proven live against the running
+  app.** `api/network.py::create_bridge` and `api/storage.py::attach_storage`
+  each built their PVE call as `{route_key: value, **caller_config}`, so a
+  caller-supplied `config` key named `iface`/`type` (or `storage`/`type`)
+  silently overrode the route's own. Demonstrated: a request naming `vmbr9`
+  returned 201 saying `vmbr9`, wrote an audit row saying `vmbr9`, and staged
+  a redefinition of **`vmbr0`** — the management bridge — as a VLAN
+  interface, which a subsequent apply would have `ifreload`ed. Fixed by
+  reordering so route-controlled keys win, with regression tests asserting
+  against what the PVE fake actually recorded rather than the response body.
+  Worth stating honestly: a per-task review had checked this pattern and
+  reported it absent — it had checked `vms.py`, not `storage.py`, which is
+  exactly the kind of seam only a whole-branch view catches.
+- **`api/network.py` never caught `ProxmoxError`**, unlike every sibling
+  router, so seven call sites plus `api/backups.py::prune_preview_route`
+  returned bare 500s with no audit row. `client_for_host` raises it for a
+  routine missing-credential (no outage required), and `list_bridges`
+  iterates every host, so one unreachable host 500'd the whole Network page.
+  Fixed to the `storage.py` pattern (scrubbed 502 + `result="error"` audit
+  row), with `list_bridges` degrading per host into an `errors` list.
+- **`settings.pve_task_timeout_s` was dead config.** Both `config.py` and
+  `pvetask.py` documented it as the ceiling every Phase 6 handler passes to
+  `await_task`; none of the 13 call sites passed it, so every job silently
+  used the 300s default. A `vm.clone`, `backup.restore` or vzdump exceeding
+  five minutes would report FAILED while the PVE task continued
+  successfully — inviting a destructive retry on a mid-flight restore. The
+  existing test only asserted the setting *parsed*. Now threaded through all
+  13 sites with the default raised to 3600s (these handlers are
+  disk-copy-bound, unlike lifecycle's start/stop which still uses its own
+  shorter constant), and the new test proves the configured value actually
+  reaches `await_task`.
+- **`DELETE /backups/{id}` was gated on `backups.pbs`** — the same key as
+  the backup list — so view rights implied permanent-delete rights on
+  archives. Moved to `backups.retention`.
+- `ProxmoxError` → `JobFailed` translation added to the seven Phase 6 job
+  resolvers, matching `lifecycle.py`'s long-standing behaviour so a missing
+  credential reports as a failed job rather than a handler bug. Dead code
+  removed (`EDITABLE`, an unused role singleton).
+
+The scoped re-review of that wave then found the wave had introduced two
+regressions of its own, both fixed in `b36846c`: the per-host network
+degrade was invisible in the UI (the frontend type lacked `errors` and
+nothing rendered it, so an unreachable host silently vanished from the page
+— trading a loud failure for a quiet one), and the backup delete button was
+left ungated after the entitlement change, so a `backups.pbs`-only tenant
+saw a button that 403s.
+
+Final suite state: backend 499 passed / 2 skipped / 4 deselected; frontend
+121 passed across 26 files; Alembic head unchanged at `2330a95b98d2` (zero
+migrations, as planned). Phase 6 spans `ce590bd..b36846c`.
+
+**Phase 6 final state**: all 17 planned tasks + 1 consolidated fix wave, 27
+commits total (`2182940..b36846c`) plus this buildlog/notes/doc-05
+bookkeeping, all committed directly to `main`. Ready to merge.
