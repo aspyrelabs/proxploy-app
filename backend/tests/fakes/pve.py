@@ -105,6 +105,26 @@ class _UploadLeaf:
         return self._owner._record_action("storage", 0, "upload")
 
 
+class _PruneLeaf:
+    """nodes(n).storage(s).prunebackups — .get() previews, .delete() deletes.
+    Recorded separately so a test can prove the preview never deletes."""
+
+    def __init__(self, owner, node, storage):
+        self._owner, self._node, self._storage = owner, node, storage
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.prune_gets.append((self._node, self._storage, kwargs))
+        return self._owner.prune_preview_rows
+
+    def delete(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.prune_deletes.append((self._node, self._storage, kwargs))
+        return self._owner._record_action("prune", 0, "prune")
+
+
 class _NodeStorageNS:
     """nodes(n).storage(name) — the per-datastore subtree."""
 
@@ -112,6 +132,7 @@ class _NodeStorageNS:
         self.status = _StorageStatusLeaf(owner, node, storage)
         self.content = _StorageContentNS(owner, node, storage)
         self.upload = _UploadLeaf(owner, node, storage)
+        self.prunebackups = _PruneLeaf(owner, node, storage)
 
 
 class _NodeStorageFactory:
@@ -261,13 +282,22 @@ class _GuestNS:
 
 
 class _GuestFactory:
-    """nodes(n).lxc / nodes(n).qemu — callable with a vmid."""
+    """nodes(n).lxc / nodes(n).qemu — callable with a vmid, and postable for
+    the guest create/restore endpoint (Phase 6 Task 9; Task 11's vm_create
+    reuses this same .post())."""
 
     def __init__(self, owner, kind, node):
         self._owner, self._kind, self._node = owner, kind, node
 
     def __call__(self, vmid):
         return _GuestNS(self._owner, self._kind, self._node, int(vmid))
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.creates.append((self._kind, self._node, kwargs))
+        return self._owner._record_action(self._kind, int(kwargs.get("vmid", 0)),
+                                          "create")
 
 
 class _TaskStatusLeaf:
@@ -349,6 +379,26 @@ class _ClusterStorageFactory:
         return _ClusterStorageLeaf(self._owner, name)
 
 
+class _VzdumpLeaf:
+    def __init__(self, owner, node):
+        self._owner, self._node = owner, node
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.vzdumps.append((self._node, kwargs))
+        # ponytail deviation from the brief's literal snippet: `vmid` here may
+        # be a comma-joined multi-guest string ("150,201") or absent entirely
+        # (the `all=1` selection), and `int()` on either raises — this only
+        # needs a *number* for the synthetic UPID, not the real selection.
+        raw = kwargs.get("vmid", 0) or 0
+        try:
+            vmid = int(raw)
+        except (TypeError, ValueError):
+            vmid = 0
+        return self._owner._record_action("vzdump", vmid, "vzdump")
+
+
 class _NodeNS:
     def __init__(self, owner, name):
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
@@ -359,6 +409,7 @@ class _NodeNS:
         self.termproxy = _TermproxyLeaf(owner, None, name, None)
         self.storage = _NodeStorageFactory(owner, name)
         self.network = _NetworkNS(owner, name)
+        self.vzdump = _VzdumpLeaf(owner, name)
 
 
 class _NodesNS:
@@ -424,6 +475,12 @@ class FakePVE:
         # storage content mutations (Phase 6)
         self.uploads: list[dict] = []
         self.deleted_volumes: list[tuple] = []
+        # backup / restore / prune recording (Phase 6 Task 9)
+        self.vzdumps: list[tuple[str, dict]] = []
+        self.creates: list[tuple[str, str, dict]] = []
+        self.prune_gets: list[tuple[str, str, dict]] = []
+        self.prune_deletes: list[tuple[str, str, dict]] = []
+        self.prune_preview_rows: list[dict] = []
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

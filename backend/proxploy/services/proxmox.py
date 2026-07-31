@@ -394,6 +394,64 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"task log failed for {upid}", e) from e
 
+    # --- backups (Phase 6 Task 9) --------------------------------------------
+
+    def vzdump(self, node: str, params: dict) -> str:
+        """POST /nodes/{node}/vzdump -> UPID. `params` carries `vmid` (a comma
+        string) or `all=1`, plus storage/mode/compress."""
+        try:
+            return self._connect().nodes(node).vzdump.post(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"vzdump failed on {node}", e) from e
+
+    def restore_guest(self, kind: str, node: str, vmid: int, params: dict) -> str:
+        """Restore is a create-with-archive, not its own endpoint.
+
+        A CT restore POSTs /nodes/{node}/lxc with `ostemplate=<volid>` +
+        `restore=1`; a VM restore POSTs /nodes/{node}/qemu with
+        `archive=<volid>`. `vmid` is the TARGET id: the guest's own for an
+        in-place restore (which also needs `force=1` and a stopped guest), a
+        fresh `cluster_nextid()` for a restore-as-new. Building that decision
+        is the caller's; this method only posts it.
+        """
+        if kind not in ("lxc", "qemu"):
+            raise ProxmoxError(f"{kind!r} is not a restorable guest kind")
+        try:
+            return getattr(self._connect().nodes(node), kind).post(vmid=int(vmid),
+                                                                    **params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"restore of {kind}/{vmid} failed on {node}", e) from e
+
+    def prune_preview(self, node: str, storage: str, params: dict) -> list[dict]:
+        """GET /nodes/{node}/storage/{storage}/prunebackups — a DRY RUN.
+
+        Marks each volume keep|remove|protected and deletes nothing. The real
+        deletion is the DELETE verb in prune_backups() below; the two must stay
+        separate methods so no caller can reach the destructive one by accident.
+        `params` is a dict because `prune-backups` is hyphenated and cannot be a
+        Python kwarg.
+        """
+        try:
+            return self._connect().nodes(node).storage(storage).prunebackups.get(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"prune preview failed for {storage} on {node}", e) from e
+
+    def prune_backups(self, node: str, storage: str, params: dict) -> str:
+        """DELETE /nodes/{node}/storage/{storage}/prunebackups -> UPID. This one
+        really deletes; run prune_preview() with the same `params` first."""
+        try:
+            return self._connect().nodes(node).storage(storage).prunebackups.delete(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"prune failed for {storage} on {node}", e) from e
+
     # --- console/terminal calls (Phase 5) -----------------------------------
 
     def termproxy(self, kind: str, node: str, vmid: int) -> dict:

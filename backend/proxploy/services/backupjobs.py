@@ -16,9 +16,10 @@ import asyncio
 import re
 from datetime import datetime, timezone
 
-from proxploy.jobs import HANDLERS, JobContext
+from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, Job, Vm, utcnow
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.pvetask import await_task
 from proxploy.services.settings import set_setting
 
 SYNCED_AT_KEY = "backup.synced_at"
@@ -159,3 +160,155 @@ def sync_in_flight(db) -> bool:
 
 
 HANDLERS["backup.sync"] = sync_backups
+
+
+# --- backup mutations (Phase 6 Task 9) --------------------------------------
+
+def _host_target(app, host_id: int):
+    """Blocking: host id -> (client, node, host name)."""
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        if host is None:
+            raise JobFailed(f"host {host_id} not found")
+        return client_for_host(app, db, host), host.node_name or "", host.name
+
+
+def _backup_target(app, backup_id: int):
+    """Blocking: backup id -> (client, node, plain dict of the row's fields).
+
+    The row itself is not returned: the resync at the end of every mutation may
+    delete it, and a detached ORM object would then be unreadable.
+    """
+    with app.state.sessionmaker() as db:
+        b = db.get(Backup, backup_id)
+        if b is None:
+            raise JobFailed(f"backup {backup_id} not found")
+        host = db.get(Host, b.host_id)
+        if host is None:
+            raise JobFailed(f"host {b.host_id} not found")
+        info = {"host_id": b.host_id, "volid": b.volid, "storage": b.storage,
+                "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
+                "guest_name": b.guest_name}
+        return client_for_host(app, db, host), host.node_name or "", info
+
+
+async def _resync(ctx: JobContext, host_id: int) -> None:
+    """Every backup mutation ends here. Without it the cache still lists a
+    volume that was just deleted, or misses one that was just created.
+
+    A failed resync is logged, not raised: the mutation upstream already
+    succeeded, and failing the job over a stale cache would misreport it.
+    """
+    app = ctx.backend.app
+    try:
+        r = await asyncio.to_thread(sync_host_backups, app, host_id)
+    except Exception as e:  # noqa: BLE001
+        ctx.log(f"backup cache resync failed: {e}", stream="stderr")
+        return
+    ctx.log(f"backup cache resynced: {r['synced']} cached, {r['dropped']} dropped")
+    app.state.bus.publish("resource", {"type": "backup", "change": "list"})
+
+
+async def run_backup(ctx: JobContext, params: dict) -> dict:
+    """`backup.run` — one vzdump task over the selected guests, or all of them."""
+    app = ctx.backend.app
+    host_id = int(params["host_id"])
+    client, node, host_name = await asyncio.to_thread(_host_target, app, host_id)
+    vmids = [int(v) for v in (params.get("vmids") or [])]
+    call = {"mode": params.get("mode") or "snapshot",
+            "compress": params.get("compress") or "zstd"}
+    if params.get("storage"):
+        call["storage"] = params["storage"]
+    if vmids:
+        call["vmid"] = ",".join(str(v) for v in vmids)
+    else:
+        call["all"] = 1  # empty selection means every guest on the node
+    ctx.log(f"vzdump on {host_name}/{node}: "
+            f"{'all guests' if not vmids else ', '.join(str(v) for v in vmids)}")
+    upid = await asyncio.to_thread(client.vzdump, node, call)
+    status = await await_task(ctx, client, node, upid)
+    await _resync(ctx, host_id)
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmids": vmids}
+
+
+HANDLERS["backup.run"] = run_backup
+
+
+async def restore_backup(ctx: JobContext, params: dict) -> dict:
+    """`backup.restore` — in place (same vmid, force=1) or as new (fresh vmid).
+
+    The route already refused an in-place restore over a running guest or over
+    Proxploy itself; this handler assumes that gate was passed.
+    """
+    app = ctx.backend.app
+    in_place = params.get("mode") == "in_place"
+    client, node, info = await asyncio.to_thread(
+        _backup_target, app, int(params["backup_id"]))
+    kind = "lxc" if info["guest_type"] == "ct" else "qemu"
+    if in_place:
+        if not info["guest_vmid"]:
+            raise JobFailed(f"{info['volid']} carries no guest id to restore over")
+        vmid = int(info["guest_vmid"])
+    else:
+        vmid = await asyncio.to_thread(client.cluster_nextid)
+    call = ({"ostemplate": info["volid"], "restore": 1} if kind == "lxc"
+            else {"archive": info["volid"]})
+    if params.get("storage"):
+        call["storage"] = params["storage"]
+    if in_place:
+        call["force"] = 1  # overwrite the existing guest; PVE requires it stopped
+    ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "
+            f"({'in place' if in_place else 'as new'})")
+    upid = await asyncio.to_thread(client.restore_guest, kind, node, vmid, call)
+    status = await await_task(ctx, client, node, upid)
+    await _resync(ctx, info["host_id"])
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,
+            "mode": "in_place" if in_place else "new"}
+
+
+HANDLERS["backup.restore"] = restore_backup
+
+
+async def delete_backup(ctx: JobContext, params: dict) -> dict:
+    """`backup.delete` — remove one archive upstream, then re-mirror."""
+    app = ctx.backend.app
+    client, node, info = await asyncio.to_thread(
+        _backup_target, app, int(params["backup_id"]))
+    ctx.log(f"deleting {info['volid']} from {info['storage']} on {node}")
+    upid = await asyncio.to_thread(client.storage_delete_volume, node,
+                                   info["storage"], info["volid"])
+    if upid:
+        await await_task(ctx, client, node, upid)
+    else:
+        # Some storage plugins delete synchronously and return no task id.
+        ctx.log("storage deleted the volume synchronously (no task id)")
+        ctx.progress(100)
+    await _resync(ctx, info["host_id"])
+    return {"upid": upid, "volid": info["volid"]}
+
+
+async def prune_backups_job(ctx: JobContext, params: dict) -> dict:
+    """`backup.prune` — apply a retention spec for real. `spec` was built and
+    validated by the route; an empty one would mark every archive `remove`."""
+    app = ctx.backend.app
+    host_id = int(params["host_id"])
+    client, node, host_name = await asyncio.to_thread(_host_target, app, host_id)
+    node = params.get("node") or node
+    storage = params["storage"]
+    # `prune-backups` is hyphenated: a dict that gets unpacked at the proxmoxer
+    # call, never a Python kwarg.
+    call = {"prune-backups": params["spec"]}
+    if params.get("guest_type"):
+        call["type"] = params["guest_type"]
+    if params.get("vmid"):
+        call["vmid"] = int(params["vmid"])
+    ctx.log(f"pruning {storage} on {host_name}/{node} with {params['spec']}")
+    upid = await asyncio.to_thread(client.prune_backups, node, storage, call)
+    status = await await_task(ctx, client, node, upid)
+    await _resync(ctx, host_id)
+    return {"upid": upid, "exitstatus": status.get("exitstatus"),
+            "spec": params["spec"], "storage": storage}
+
+
+HANDLERS["backup.delete"] = delete_backup
+HANDLERS["backup.prune"] = prune_backups_job
