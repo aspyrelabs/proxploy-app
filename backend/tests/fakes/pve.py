@@ -158,13 +158,22 @@ class _NodeNetworkNS:
 
 
 class _GuestConfigLeaf:
+    """nodes(n).lxc(vmid).config / .qemu(vmid).config — .get() reads, .put() records."""
+
     def __init__(self, owner, kind, vmid):
         self._owner, self._kind, self._vmid = owner, kind, vmid
 
     def get(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
-        return self._owner.guest_configs.get((self._kind, self._vmid), {})
+        return dict(self._owner.guest_configs.get((self._kind, self._vmid), {}))
+
+    def put(self, **cfg):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.config_updates.append((self._kind, self._vmid, dict(cfg)))
+        self._owner.guest_configs.setdefault((self._kind, self._vmid), {}).update(cfg)
+        return self._owner.config_update_upid
 
 
 class _SnapshotLeaf:
@@ -365,6 +374,9 @@ class FakePVE:
         self.cluster_storage_rows: list[dict] = []
         self.networks_by_node: dict[str, list[dict]] = {}
         self.guest_configs: dict[tuple[str, int], dict] = {}
+        # guest config writes (Phase 6 Task 6)
+        self.config_updates: list[tuple[str, int, dict]] = []
+        self.config_update_upid: str | None = None
         self.snapshots_by_guest: dict[tuple[str, int], list[dict]] = {}
         self.nextid = "100"
         self.last_storage_status_call = None

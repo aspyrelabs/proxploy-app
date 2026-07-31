@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
+from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm
 from proxploy.services.lifecycle import VM_ACTIONS
 
@@ -51,7 +52,45 @@ def vm_detail(request: Request, vm_id: int, db=Depends(get_db),
 # Same ordering fix as apps.py::app_lifecycle — see the comment there. Reusing
 # this one callable as both the route-level dependency and the parameter
 # dependency makes auth/role run first and collapses the two into one call.
+# Hoisted to the top of the routes (Phase 6 Task 6) so later tasks (10, 11)
+# adding more routes above the /{vm_id}/{action} wildcard can reuse these
+# without re-declaring them.
+_require_viewer = require_role("viewer")
 _require_operator = require_role("operator")
+_require_admin = require_role("admin")
+
+
+def _vm_and_host(db, vm_id: int):
+    v = db.get(Vm, vm_id)
+    if v is None:
+        raise HTTPException(404, "vm not found")
+    host = db.get(Host, v.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    return v, host
+
+
+# Registered ABOVE the /{vm_id}/{action} wildcard below — Starlette matches in
+# registration order, and although that wildcard is POST-only today, doc 05's
+# future two-segment siblings are not. Same WARNING as apps.py:266-271.
+# test_network_api.py asserts this ordering by route index.
+@router.get("/{vm_id}/network",
+            dependencies=[Depends(_require_viewer),
+                          Depends(require_entitlement("network.guest_config"))])
+def vm_network(request: Request, vm_id: int, db=Depends(get_db),
+               user: User = Depends(_require_viewer)):
+    v, host = _vm_and_host(db, vm_id)
+    return guest_nics(request, db, host, "qemu", v.vmid)
+
+
+@router.put("/{vm_id}/network/{iface}",
+            dependencies=[Depends(_require_operator),
+                          Depends(require_entitlement("network.guest_config"))])
+def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
+                      db=Depends(get_db), user: User = Depends(_require_operator)):
+    v, host = _vm_and_host(db, vm_id)
+    return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
+                         host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body)
 
 
 @router.post("/{vm_id}/{action}", status_code=202,

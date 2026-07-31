@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
+from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User
 from proxploy.services.audit import write_audit
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
@@ -29,6 +30,10 @@ _require_admin = require_role("admin")
 # so the script routes below — registered before that wildcard per the
 # WARNING near it — can also reuse it as a single collapsed dependency.
 _require_operator = require_role("operator")
+
+# Hoisted alongside the above (Phase 6 Task 6) for the network routes below,
+# which need a viewer-level singleton to collapse with require_entitlement.
+_require_viewer = require_role("viewer")
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -226,6 +231,36 @@ def list_app_script_versions(app_id: int, db=Depends(get_db)):
            .order_by(AppScript.version.desc()).all())
     return [{"version": r.version, "source": r.source, "created_at": r.created_at.isoformat()}
            for r in rows]
+
+
+def _app_and_host(db, app_id: int):
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    host = db.get(Host, a.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    return a, host
+
+
+# Above the lifecycle wildcard, per that route's own WARNING further down.
+@router.get("/{app_id}/network",
+            dependencies=[Depends(_require_viewer),
+                          Depends(require_entitlement("network.guest_config"))])
+def app_network(request: Request, app_id: int, db=Depends(get_db),
+                user: User = Depends(_require_viewer)):
+    a, host = _app_and_host(db, app_id)
+    return guest_nics(request, db, host, "lxc", a.ctid)
+
+
+@router.put("/{app_id}/network/{iface}",
+            dependencies=[Depends(_require_operator),
+                          Depends(require_entitlement("network.guest_config"))])
+def app_network_update(request: Request, app_id: int, iface: str, body: NicIn,
+                       db=Depends(get_db), user: User = Depends(_require_operator)):
+    a, host = _app_and_host(db, app_id)
+    return set_guest_nic(request, db, user, target_type="app", target_id=a.id,
+                         host=host, kind="lxc", vmid=a.ctid, iface=iface, body=body)
 
 
 class LifecycleIn(BaseModel):

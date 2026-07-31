@@ -299,6 +299,24 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001 — one wrap point, like version()
             raise self._wrap(f"{kind}/{vmid} {action} failed on {node}", e) from e
 
+    def guest_config_update(self, kind: str, node: str, vmid: int,
+                            config: dict) -> str | None:
+        """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> UPID or None.
+
+        NOT long-running: PVE writes the config file synchronously. A RUNNING
+        qemu guest is the one case that returns a UPID — the change lands in
+        the guest's pending-config section and PVE spawns a tiny task to record
+        it; the guest itself only picks it up at next boot. A stopped guest or
+        an lxc guest returns None and the write is already effective. Callers
+        surface that difference rather than pretending it is a job.
+        """
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).config.put(**config)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"config update failed for {kind}/{vmid} on {node}", e) from e
+
     def task_status(self, node: str, upid: str) -> dict:
         """GET /nodes/{node}/tasks/{upid}/status — `stopped` + exitstatus == done."""
         try:
