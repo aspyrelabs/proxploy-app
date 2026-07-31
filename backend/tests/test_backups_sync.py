@@ -154,6 +154,63 @@ def test_a_broken_host_does_not_abort_the_batch(tmp_path):
     asyncio.run(run())
 
 
+def test_a_failed_storage_read_does_not_drop_the_hosts_existing_backups(tmp_path):
+    """A transient failure on ONE storage mid-cycle must not delete this
+    host's already-synced rows as "vanished". `sync_host_backups` builds the
+    `rows` list (one PVE call per backup-capable storage) BEFORE it queries
+    `existing` or touches the DB at all, so a raise partway through that loop
+    must propagate out with nothing added, deleted, or committed for this
+    host — the whole host's sync is skipped this cycle, not partially
+    applied. The job handler records it as a per-host failure and moves on
+    (`services/catalog.py::run_ingest`'s rule), exactly like a missing
+    credential, but a missing credential fails before any PVE call and
+    before the `existing` query — it never exercises this delete-scope
+    protection. This test does, by pre-seeding real rows and asserting none
+    of them vanish."""
+    from proxploy.jobs import JobBackend
+    from proxploy.models import utcnow
+    from tests.support import make_job_app
+
+    PBS_VOLID = "pbs-ds:backup/vm/201/2026-07-01T00:00:00Z"
+
+    async def run():
+        fake = _fake_with_backups()
+        # a second backup-capable storage on the same node; its content read
+        # fails this cycle while "local" (processed first) succeeds fine.
+        fake.storages_by_node["pve1"].append(
+            {"storage": "pbs-ds", "type": "pbs", "content": "backup"})
+        fake.content_fail_storages = {"pbs-ds"}
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.backupjobs  # noqa: F401 — registers backup.sync
+
+        hid = _seed_host(app)
+        with app.state.sessionmaker() as db:  # rows a prior, successful sync left behind
+            now = utcnow()
+            db.add(Backup(host_id=hid, storage="local", volid=VOLID_CT, guest_type="ct",
+                          guest_vmid=150, guest_name="Immich", taken_at=now,
+                          size_bytes=1073741824, verify_state="ok", synced_at=now))
+            db.add(Backup(host_id=hid, storage="pbs-ds", volid=PBS_VOLID, guest_type="vm",
+                          guest_vmid=201, guest_name="win11", taken_at=now,
+                          size_bytes=5368709120, verify_state="ok", synced_at=now))
+            db.commit()
+
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            jid = backend.enqueue(db, kind="backup.sync", target_type="system",
+                                  params={}).id
+        await backend.wait(jid, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, jid)
+            assert job.status == "succeeded", job.error  # batch not aborted
+            assert job.result["synced"] == 0  # this host's cycle never committed
+            assert len(job.result["failed"]) == 1
+            assert job.result["failed"][0]["host_id"] == hid  # recorded, not swallowed
+            rows = {b.volid for b in db.query(Backup).filter_by(host_id=hid)}
+            assert rows == {VOLID_CT, PBS_VOLID}  # nothing dropped
+
+    asyncio.run(run())
+
+
 def _seed_two_backups(app):
     from datetime import timedelta
 

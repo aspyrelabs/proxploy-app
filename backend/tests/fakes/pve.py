@@ -77,7 +77,7 @@ class _StorageContentNS:
         self._owner, self._node, self._storage = owner, node, storage
 
     def get(self, **kwargs):
-        if self._owner.fail:
+        if self._owner.fail or self._storage in self._owner.content_fail_storages:
             raise ConnectionError("fake PVE unreachable")
         self._owner.last_content_call = (self._node, self._storage,
                                          kwargs.get("content"))
@@ -384,6 +384,10 @@ class FakePVE:
         self.storages_by_node: dict[str, list[dict]] = {}
         self.storage_status_response: dict = {}
         self.content_by_storage: dict[str, list[dict]] = {}
+        # per-storage failure injection (Phase 6 Task 8 review): a storage
+        # name in here raises on .content.get() while its siblings succeed —
+        # unlike `fail`, which is all-or-nothing across the whole fake.
+        self.content_fail_storages: set[str] = set()
         self.cluster_storage_rows: list[dict] = []
         self.networks_by_node: dict[str, list[dict]] = {}
         # host network staging (Phase 6 Task 7): (op, node, iface|None, config)
