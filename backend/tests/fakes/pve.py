@@ -284,6 +284,49 @@ class _TaskFactory:
         return _TaskNS(self._owner, upid)
 
 
+class _ClusterStorageLeaf:
+    """root .storage(name) — the cluster-level storage definition."""
+
+    def __init__(self, owner, name):
+        self._owner, self._name = owner, name
+
+    def put(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.storage_updates.append((self._name, kwargs))
+        return None
+
+    def delete(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.storage_removes.append(self._name)
+        return None
+
+
+class _ClusterStorageFactory:
+    """root .storage — .get() lists definitions, .post() creates one,
+    calling it drills into a named definition. All three are synchronous in
+    Proxmox and return no UPID, so none of them mints one here either."""
+
+    def __init__(self, owner):
+        self._owner = owner
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        return self._owner.cluster_storage_rows
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.storage_creates.append(kwargs)
+        self._owner.cluster_storage_rows.append(dict(kwargs))
+        return None
+
+    def __call__(self, name):
+        return _ClusterStorageLeaf(self._owner, name)
+
+
 class _NodeNS:
     def __init__(self, owner, name):
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
@@ -326,7 +369,11 @@ class FakePVE:
         self.nextid = "100"
         self.last_storage_status_call = None
         self.last_content_call = None
-        self.storage = _AttrLeaf(self, "cluster_storage_rows")  # root /storage
+        self.storage = _ClusterStorageFactory(self)
+        # storage definition management (Phase 6)
+        self.storage_creates: list[dict] = []
+        self.storage_updates: list[tuple] = []
+        self.storage_removes: list[str] = []
         self.cluster = _ClusterNS(self, resources or [], fail)
         self.nodes = _NodesNS(self)
         self.kwargs = {}

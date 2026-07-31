@@ -480,3 +480,43 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"deleting {volid!r} from {storage} on {node} failed",
                              e) from e
+
+    # --- storage definition management (Phase 6) ----------------------------
+    # These three hit the CLUSTER-level /storage endpoints, not /nodes/{n}/…:
+    # a storage definition lives in /etc/pve/storage.cfg and is cluster-wide.
+    # They are SYNCHRONOUS — Proxmox returns no UPID, so there is nothing to
+    # poll and these are plain route calls rather than jobs.
+    #
+    # `config` may carry a live credential (PBS `password`, CIFS `username`/
+    # `password`). It is forwarded and forgotten: nothing here logs, stores or
+    # returns it, and _wrap below scrubs only OUR token — the caller's secret
+    # never enters an exception message because it is a request body, not a
+    # header, and proxmoxer does not echo request bodies in its errors.
+
+    def storage_create(self, config: dict) -> None:
+        """POST /storage — `config` must include `storage` and `type`."""
+        try:
+            self._connect().storage.post(**config)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"attaching storage {config.get('storage')!r} failed",
+                             e) from e
+
+    def storage_update(self, storage: str, config: dict) -> None:
+        """PUT /storage/{storage} — only the keys given are changed."""
+        try:
+            self._connect().storage(storage).put(**config)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"updating storage {storage!r} failed", e) from e
+
+    def storage_remove(self, storage: str) -> None:
+        """DELETE /storage/{storage} — drops the definition; upstream data stays."""
+        try:
+            self._connect().storage(storage).delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"detaching storage {storage!r} failed", e) from e

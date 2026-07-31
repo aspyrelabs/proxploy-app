@@ -23,10 +23,12 @@ import tempfile
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
+from pydantic import BaseModel
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, User
+from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 
@@ -39,8 +41,26 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 # 403 instead of 401 — see tests/test_route_auth_invariant.py.
 _require_viewer = require_role("viewer")
 _require_admin = require_role("admin")
+_require_owner = require_role("owner")
 
 UPLOAD_CHUNK = 1024 * 1024
+
+
+class StorageAttachIn(BaseModel):
+    """`config` is a free-form passthrough because the key set is per-plugin
+    (dir wants `path`, nfs wants `server`+`export`, pbs wants `server`+
+    `datastore`+`username`+`password`+`fingerprint`) and Proxmox is the
+    authority on what is valid — mirroring it here would be a second schema to
+    keep in sync and a new way to reject a storage type Proxmox supports.
+    It may carry a live credential; see the module note on where it does NOT go."""
+    host_id: int
+    storage: str
+    type: str
+    config: dict = {}
+
+
+class StorageEditIn(BaseModel):
+    config: dict
 
 
 def _pct(used: float, total: float) -> float:
@@ -227,3 +247,88 @@ def delete_content(request: Request, host_id: int, name: str, volid: str,
         request, db, user, kind="storage.delete_volume", target_type="storage",
         target_id=host.id,
         params={"host_id": host.id, "node": node, "storage": name, "volid": volid})
+
+
+@router.post("", status_code=201,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("storage.manage"))])
+def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    """Attach a storage definition (doc 05 §Storage, doc 01 §5 "Add/edit storage").
+
+    Synchronous: Proxmox returns no UPID for /storage, so there is no job and
+    therefore no `jobs.params` row holding `body.config`. The audit row is the
+    only durable trace, and write_audit runs it through redact() — nested
+    `config.password` included.
+
+    The response deliberately echoes NO config: a credential the caller just
+    sent must not come back out of a GET the browser might cache or a screenshot
+    someone pastes into a ticket.
+    """
+    host = _host_or_404(db, body.host_id)
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).storage_create(
+            {"storage": body.storage, "type": body.type, **body.config})
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
+                    target_type="storage", target_id=host.id,
+                    params=body.model_dump(), result="error", ip=ip)
+        raise HTTPException(502, str(e))
+    write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
+                target_type="storage", target_id=host.id,
+                params=body.model_dump(), ip=ip)
+    request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
+                                               "change": "list"})
+    return {"host_id": host.id, "storage": body.storage, "type": body.type}
+
+
+@router.patch("/{host_id}/{name}",
+              dependencies=[Depends(_require_admin),
+                            Depends(require_entitlement("storage.manage"))])
+def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
+                 db=Depends(get_db), user: User = Depends(_require_admin)):
+    """Audits the NAMES of the keys changed, never their values — the same rule
+    settings.py::patch_settings follows, and the reason a rotated PBS password
+    leaves a legible audit trail without leaving the password in it."""
+    host = _host_or_404(db, host_id)
+    keys = sorted(body.config)
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).storage_update(name, body.config)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
+                    target_type="storage", target_id=host.id,
+                    params={"storage": name, "keys": keys}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
+    write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
+                target_type="storage", target_id=host.id,
+                params={"storage": name, "keys": keys}, ip=ip)
+    request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
+                                               "change": "list"})
+    return {"host_id": host.id, "storage": name, "updated": keys}
+
+
+@router.delete("/{host_id}/{name}",
+               dependencies=[Depends(_require_owner),
+                             Depends(require_entitlement("storage.manage"))])
+def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db),
+                   user: User = Depends(_require_owner)):
+    """Owner, not admin (doc 05): detaching drops the definition while guest
+    disks keep pointing at it, which is the one action here that can strand
+    running guests. Upstream data is left in place — this is not a wipe."""
+    host = _host_or_404(db, host_id)
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).storage_remove(name)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
+                    target_type="storage", target_id=host.id,
+                    params={"storage": name}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
+    write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
+                target_type="storage", target_id=host.id,
+                params={"storage": name}, ip=ip)
+    request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
+                                               "change": "list"})
+    return {"host_id": host.id, "storage": name, "detached": True}
