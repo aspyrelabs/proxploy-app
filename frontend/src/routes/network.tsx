@@ -330,6 +330,7 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
 export function NetworkPage() {
   const { data, isError } = useBridges()
   const nodes = data?.nodes ?? []
+  const errors = data?.errors ?? []
   const bridgeCount = nodes.reduce(
     (a, n) => a + n.interfaces.filter((i) => i.type === 'bridge').length, 0)
 
@@ -347,6 +348,21 @@ export function NetworkPage() {
           note="Proxploy reads bridges live from each node — check that the host is connected." />
       ) : (
         <>
+          {errors.length > 0 && (
+            // list_bridges() degrades per host instead of 500ing the whole
+            // page (BLOCKING 3) — everything below is genuinely partial, so
+            // that must be visible, not just a smaller-than-expected count.
+            // Same amber/warning vocabulary as RetentionSection's dry-run
+            // banner, not a new one.
+            <p role="alert"
+               className="mb-4 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
+              <span className="text-amber">
+                {errors.length === 1 ? '1 host' : `${errors.length} hosts`} could not be read.
+              </span>{' '}
+              {errors.map((e) => e.host_name).join(', ')} — the page below is missing whatever
+              those hosts would have shown.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <BridgesCard nodes={nodes} />
             <ThroughputCard />

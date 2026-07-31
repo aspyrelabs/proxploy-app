@@ -218,6 +218,11 @@ export function BackupsPage() {
   const biggest = stores[0]
   const runDenied = ent.data != null && !ent.has('backups.run')
   const restoreDenied = ent.data != null && !ent.has('backups.restore')
+  // DELETE /backups/{id} moved from backups.pbs to backups.retention in the
+  // final Phase 6 review (BLOCKING 3/item 6) — gate the button on the same
+  // key the route now checks, or a tenant with backups.pbs but not
+  // backups.retention sees a Delete button that just 403s.
+  const deleteDenied = ent.data != null && !ent.has('backups.retention')
 
   const drop = (b: BackupRow) => {
     if (!window.confirm(
@@ -332,6 +337,8 @@ export function BackupsPage() {
                       Restore
                     </Button>
                     <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                            disabled={deleteDenied}
+                            title={deleteDenied ? 'Not included in your plan' : undefined}
                             onClick={() => drop(b)}>
                       Delete
                     </Button>

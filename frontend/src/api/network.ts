@@ -35,7 +35,13 @@ export type Attachment = {
   rate: string | null; mtu: string | null; link_down: boolean
 }
 
-export type Bridges = { nodes: NodeIfaces[]; attachments: Attachment[] }
+/** One host list_bridges() could not read (api/network.py: unreachable, or
+ * missing its API token credential — a routine state, not an outage). The
+ * rest of the page still renders; this is what tells the operator a host is
+ * silently missing rather than the fleet just being smaller than they think. */
+export type BridgeError = { host_id: number; host_name: string; error: string }
+
+export type Bridges = { nodes: NodeIfaces[]; attachments: Attachment[]; errors: BridgeError[] }
 
 export type NetSeries = { resolution: string; ts: number[]; value: (number | null)[] }
 export type HostThroughput = {

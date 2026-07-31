@@ -190,6 +190,18 @@ describe('BackupsPage', () => {
     restoreGuard = null
   })
 
+  it('disables Delete without backups.retention — the entitlement DELETE /backups/{id} now checks', async () => {
+    // BLOCKING 3/item 6 moved the route's gate from backups.pbs to
+    // backups.retention; the button must follow, or a tenant with backups.pbs
+    // and without backups.retention gets a Delete button that just 403s.
+    calls.length = 0
+    features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true }
+    wrap()
+    const btn = (await screen.findAllByRole('button', { name: 'Delete' }))[0]
+    expect(btn).toBeDisabled()
+    expect(btn.getAttribute('title')).toMatch(/not included in your plan/i)
+  })
+
   it('veils the retention preview without backups.retention, and marks volumes when entitled', async () => {
     calls.length = 0
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true }

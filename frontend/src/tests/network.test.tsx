@@ -30,6 +30,7 @@ const BRIDGES = {
       model: 'veth', macaddr: 'BC:24:11:00:11:22', bridge: 'vmbr0', tag: null,
       firewall: false, rate: null, mtu: null, link_down: false },
   ],
+  errors: [] as { host_id: number; host_name: string; error: string }[],
 }
 
 const THROUGHPUT = {
@@ -130,6 +131,29 @@ describe('NetworkPage reads', () => {
     // bonds and physical NICs are not bridges — doc 06's table is bridges only.
     // They belong to the host-config section, which asserts them below.
     expect(t.queryByText('enp1s0 enp2s0')).toBeNull()
+  })
+
+  it('does not show the degraded-host banner when errors is empty', async () => {
+    calls.length = 0
+    wrap()
+    await screen.findByRole('table', { name: 'Bridges' })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('shows a banner naming the host when list_bridges degrades one bad host', async () => {
+    calls.length = 0
+    BRIDGES.errors = [{ host_id: 2, host_name: 'host-02',
+                        error: 'host host-02 has no API token credential' }]
+    try {
+      wrap()
+      const banner = await screen.findByRole('alert')
+      expect(banner).toHaveTextContent('1 host could not be read')
+      expect(banner).toHaveTextContent('host-02')
+      // the rest of the page still renders — this is a degrade, not a wipeout
+      expect(await screen.findByRole('table', { name: 'Bridges' })).toBeInTheDocument()
+    } finally {
+      BRIDGES.errors = []
+    }
   })
 
   it('renders the throughput figures in Mbps from the newest sample', async () => {
