@@ -33,6 +33,10 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ ...LOCAL, avail_bytes: 322122547200, nodes: ['pve1'] })
     }
     if (path === '/storage') return Promise.resolve([LOCAL, PBS])
+    if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+    if (path === '/entitlements') {
+      return Promise.resolve({ tier: 'pro', features: { 'storage.manage': true }, grace: null })
+    }
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},
@@ -103,5 +107,18 @@ describe('StoragePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Backups' }))
     expect(await screen.findByText('local:backup/vzdump-qemu-100.vma.zst')).toBeInTheDocument()
     expect(calls).toContain('/storage/1/local/content?content=backup')
+  })
+
+  it('opens the attach form from the header button', async () => {
+    withQuery(<StoragePage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add storage' }))
+    expect(await screen.findByRole('button', { name: 'Attach' })).toBeInTheDocument()
+  })
+
+  it('offers Upload and Manage inside the content browser', async () => {
+    withQuery(<StoragePage />)
+    fireEvent.click(await screen.findByRole('button', { name: /local/ }))
+    expect(await screen.findByRole('button', { name: 'Upload' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument()
   })
 })

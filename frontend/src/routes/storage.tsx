@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { useStorage, useStorageContent, useStorageDetail } from '../api/storage'
+import { useDeleteVolume, useStorage, useStorageContent, useStorageDetail } from '../api/storage'
 import type { StorageRow, VolumeRow } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { StorageCard } from '../components/StorageCard'
+import { StorageForm } from '../components/StorageForm'
+import { UploadDialog } from '../components/UploadDialog'
 import { Button } from '../components/ui/button'
 import { fmtBytes } from '../lib/format'
 // shellRoute comes from ./shell, never ../router — importing router.tsx here
@@ -28,7 +30,9 @@ function fmtCtime(ctime: number | null) {
   return ctime == null ? '—' : new Date(ctime * 1000).toLocaleString()
 }
 
-function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
+function VolumeTable({ volumes, hostId, node, storage }:
+  { volumes: VolumeRow[]; hostId: number; node: string; storage: string }) {
+  const del = useDeleteVolume()
   if (volumes.length === 0) {
     return <EmptyState title="Nothing stored here yet" note="Volumes of this content type appear here." />
   }
@@ -41,6 +45,7 @@ function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
           <th scope="col" className="pb-2 font-medium">Size</th>
           <th scope="col" className="pb-2 font-medium">Guest</th>
           <th scope="col" className="pb-2 font-medium">Created</th>
+          <th scope="col" className="pb-2 font-medium">Delete</th>
         </tr>
       </thead>
       <tbody>
@@ -51,6 +56,20 @@ function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
             <td className="py-2.5 font-mono text-text-2">{fmtBytes(v.size)}</td>
             <td className="py-2.5 font-mono text-text-2">{v.vmid ?? '—'}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtCtime(v.ctime)}</td>
+            <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
+              <Button
+                variant="danger"
+                className="px-2 py-1 text-[11px]"
+                disabled={del.isPending}
+                onClick={() => {
+                  if (window.confirm(`Delete ${v.volid}? This removes the volume from ${storage} and cannot be undone.`)) {
+                    del.mutate({ hostId, storage, node, volid: v.volid })
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -58,8 +77,9 @@ function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
   )
 }
 
-export function ContentBrowser({ row, onClose }:
-  { row: StorageRow; onClose: () => void }) {
+export function ContentBrowser({ row, onClose, onManage }:
+  { row: StorageRow; onClose: () => void; onManage: (row: StorageRow) => void }) {
+  const [uploading, setUploading] = useState(false)
   const tabs = CONTENT_TABS.filter((t) => row.content.includes(t.key))
   const [active, setActive] = useState<string>(tabs[0]?.key ?? 'iso')
   const detail = useStorageDetail(row.host_id, row.storage)
@@ -75,8 +95,19 @@ export function ContentBrowser({ row, onClose }:
             {row.shared ? ' · shared' : ''}
           </div>
         </div>
-        <Button variant="ghost" className="px-2 py-1 text-[11px]" onClick={onClose}>Close</Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+            onClick={() => setUploading(true)}>Upload</Button>
+          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+            onClick={() => onManage(row)}>Manage</Button>
+          <Button variant="ghost" className="px-2 py-1 text-[11px]" onClick={onClose}>Close</Button>
+        </div>
       </div>
+
+      {uploading && (
+        <UploadDialog hostId={row.host_id} storage={row.storage} node={row.node}
+          contentTypes={row.content} onClose={() => setUploading(false)} />
+      )}
 
       <KVGrid items={[
         ['Status', row.status],
@@ -107,7 +138,7 @@ export function ContentBrowser({ row, onClose }:
         <EmptyState title="Content listing unavailable"
           note="Proxploy could not reach this datastore — it may be offline or the node may be down." />
       ) : (
-        <VolumeTable volumes={volumes ?? []} />
+        <VolumeTable volumes={volumes ?? []} hostId={row.host_id} node={row.node} storage={row.storage} />
       )}
     </div>
   )
@@ -116,6 +147,9 @@ export function ContentBrowser({ row, onClose }:
 export function StoragePage() {
   const { data: rows } = useStorage()
   const [open, setOpen] = useState<StorageRow | null>(null)
+  // 'new' = attach, a row = edit + detach. One dialog, two modes — a second
+  // component would be the same form with two fields locked.
+  const [form, setForm] = useState<'new' | StorageRow | null>(null)
 
   return (
     <div>
@@ -126,6 +160,7 @@ export function StoragePage() {
             {rows ? `${rows.length} datastores across the cluster` : '…'}
           </div>
         </div>
+        <Button variant="primary" onClick={() => setForm('new')}>Add storage</Button>
       </div>
 
       {rows && rows.length > 0 ? (
@@ -144,7 +179,12 @@ export function StoragePage() {
         // queries, rather than showing the previous datastore's volumes for a
         // frame while the new ones load.
         <ContentBrowser key={`${open.host_id}:${open.storage}`} row={open}
-          onClose={() => setOpen(null)} />
+          onClose={() => setOpen(null)} onManage={setForm} />
+      )}
+
+      {form && (
+        <StorageForm existing={form === 'new' ? null : form}
+          onClose={() => setForm(null)} />
       )}
     </div>
   )
