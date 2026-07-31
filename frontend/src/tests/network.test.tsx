@@ -68,13 +68,15 @@ vi.mock('../api/client', () => {
       if (path.startsWith('/network/throughput')) return Promise.resolve(THROUGHPUT)
       if (path.endsWith('/apply')) {
         if (!body.confirm) {
-          // FastAPI wraps HTTPException(409, {...}) bodies in `detail` — the
-          // exact envelope api/network.py::apply_network produces.
+          // The real 409 is FLAT: main.py::problem_handler does
+          // body.update(exc.detail), so error/confirm_phrase are top-level
+          // and detail is a plain string — the same convention
+          // lifecycle.test.tsx uses for self_target. Verified against the
+          // live endpoint (task-14 review, finding 1).
           return Promise.reject(new ApiError(409, {
-            detail: {
-              error: 'confirm_required', confirm_phrase: 'pve1',
-              detail: 'Applying the staged network config reloads pve1’s interfaces.',
-            },
+            type: 'about:blank', title: 'Conflict', status: 409,
+            error: 'confirm_required', confirm_phrase: 'pve1',
+            detail: "Applying the staged network config reloads pve1's interfaces.",
           }))
         }
         return Promise.resolve({ job: { id: 7, kind: 'network.apply', status: 'queued' } })

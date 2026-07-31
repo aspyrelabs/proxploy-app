@@ -52,15 +52,9 @@ export type Throughput = { hours: number; resolution: string; hosts: HostThrough
  * `{type, title, status, error, confirm_phrase, detail}` — `detail` is the
  * human-readable string, not a nested object. That is why `LifecycleActions`
  * reads `e.body.error` directly and why it works for Phase 6's routes too.
- * The `detail`-is-an-object branch below is belt-and-braces for a plain
- * string-detail `HTTPException`; it never fires on the routes we ship.
  */
 export function errBody(e: unknown): Record<string, unknown> | null {
-  if (!(e instanceof ApiError)) return null
-  const body = e.body as Record<string, unknown> | null
-  if (!body) return null
-  const inner = body.detail
-  return inner && typeof inner === 'object' ? (inner as Record<string, unknown>) : body
+  return e instanceof ApiError ? (e.body as Record<string, unknown> | null) : null
 }
 
 export function useBridges(hostId?: number) {
