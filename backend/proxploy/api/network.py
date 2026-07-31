@@ -22,9 +22,10 @@ import re
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
@@ -194,3 +195,148 @@ def throughput(request: Request, hours: int = 1, db=Depends(get_db),
             "out": query_series(db, "host", h.id, "net_out_bps", frm_dt, to_dt, res),
         })
     return {"hours": hours, "resolution": res, "hosts": out}
+
+
+_require_admin = require_role("admin")
+
+# PVE option names are lowercase words with dashes/underscores and digits.
+# The config dict is unpacked straight into a proxmoxer kwargs call, so the
+# key space is a trust boundary even though the values are PVE's problem.
+_SAFE_KEY = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+
+
+def _check_config(config: dict) -> dict:
+    bad = [k for k in config if not _SAFE_KEY.match(str(k))]
+    if bad:
+        raise HTTPException(422, f"unsupported network option(s): {', '.join(map(str, bad))}")
+    return config
+
+
+def _host_or_404(db, host_id: int) -> Host:
+    host = db.get(Host, host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    return host
+
+
+class BridgeIn(BaseModel):
+    host_id: int
+    node: str
+    iface: str
+    type: str = "bridge"
+    config: dict = Field(default_factory=dict)
+
+
+class BridgePatchIn(BaseModel):
+    config: dict = Field(default_factory=dict)
+
+
+class ApplyIn(BaseModel):
+    confirm: str | None = None
+
+
+# Every route below stages or promotes /etc/network/interfaces.new.
+#
+# ponytail: Proxploy does not detect whether staged changes exist, so Apply and
+# Revert are always offered rather than enabled-when-dirty. PVE reports pending
+# state as a `changes` property SIBLING to `data` on GET /nodes/{node}/network,
+# and proxmoxer's .get() unwraps `data` and throws the rest away — reading it
+# would mean bypassing the client layer, which proxmox.py's module docstring
+# forbids outright. A no-op apply is handled gracefully by PVE (it reloads the
+# unchanged config), so the cost of not knowing is one wasted ifreload.
+# Upgrade path: a raw-response accessor on ProxmoxClient if the UI ever needs a
+# "you have unsaved changes" badge.
+
+
+@router.post("/bridges", status_code=201,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("network.host_config"))])
+def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
+                  user: User = Depends(_require_admin)):
+    host = _host_or_404(db, body.host_id)
+    cfg = {"iface": body.iface, "type": body.type, **_check_config(body.config)}
+    client_for_host(request.app, db, host).network_create(body.node, cfg)
+    write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                target_type="host", target_id=host.id,
+                params={"op": "create", "node": body.node, "iface": body.iface,
+                        "config": body.config},
+                ip=request.client.host if request.client else None)
+    return {"staged": True, "node": body.node, "iface": body.iface}
+
+
+@router.put("/bridges/{host_id}/{node}/{iface}",
+            dependencies=[Depends(_require_admin),
+                          Depends(require_entitlement("network.host_config"))])
+def update_bridge(request: Request, host_id: int, node: str, iface: str,
+                  body: BridgePatchIn, db=Depends(get_db),
+                  user: User = Depends(_require_admin)):
+    host = _host_or_404(db, host_id)
+    client_for_host(request.app, db, host).network_update(
+        node, iface, _check_config(body.config))
+    write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                target_type="host", target_id=host.id,
+                params={"op": "update", "node": node, "iface": iface,
+                        "config": body.config},
+                ip=request.client.host if request.client else None)
+    return {"staged": True, "node": node, "iface": iface}
+
+
+@router.delete("/bridges/{host_id}/{node}/{iface}",
+               dependencies=[Depends(_require_admin),
+                             Depends(require_entitlement("network.host_config"))])
+def delete_bridge(request: Request, host_id: int, node: str, iface: str,
+                  db=Depends(get_db), user: User = Depends(_require_admin)):
+    host = _host_or_404(db, host_id)
+    client_for_host(request.app, db, host).network_delete(node, iface)
+    write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                target_type="host", target_id=host.id,
+                params={"op": "delete", "node": node, "iface": iface},
+                ip=request.client.host if request.client else None)
+    return {"staged": True, "node": node, "iface": iface}
+
+
+@router.post("/{host_id}/{node}/apply", status_code=202,
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("network.host_config"))])
+def apply_network(request: Request, host_id: int, node: str, body: ApplyIn,
+                  db=Depends(get_db), user: User = Depends(_require_admin)):
+    """Promote the staged config. Typed confirmation required.
+
+    Doc 08 §1's typed-name guardrail, reused verbatim from selfguard's
+    self_target shape so the frontend has one confirm dialog, not two. The
+    phrase is the NODE NAME because the node is what is at risk: `ifreload -a`
+    with a broken bridge takes the node off the network until someone reaches
+    its physical console. Unlike a stopped CT this has no in-band undo.
+    """
+    host = _host_or_404(db, host_id)
+    ip = request.client.host if request.client else None
+    if (body.confirm or "") != node:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.apply",
+                    target_type="host", target_id=host.id,
+                    params={"node": node}, result="denied", ip=ip)
+        raise HTTPException(409, {
+            "error": "confirm_required", "confirm_phrase": node,
+            "detail": (f"Applying the staged network config reloads {node}'s "
+                       f"interfaces. If the staged bridge is wrong, {node} loses "
+                       f"its network and can only be recovered from its physical "
+                       f"console. Type the node name to confirm."),
+        })
+    return enqueue_and_audit(request, db, user, kind="network.apply",
+                             target_type="host", target_id=host.id,
+                             params={"host_id": host.id, "node": node},
+                             action="network.apply")
+
+
+@router.post("/{host_id}/{node}/revert",
+             dependencies=[Depends(_require_admin),
+                           Depends(require_entitlement("network.host_config"))])
+def revert_network(request: Request, host_id: int, node: str, db=Depends(get_db),
+                   user: User = Depends(_require_admin)):
+    """Discard /etc/network/interfaces.new. No confirmation and no job: this
+    deletes a staged file and cannot disturb the running config."""
+    host = _host_or_404(db, host_id)
+    client_for_host(request.app, db, host).network_revert(node)
+    write_audit(db, actor_type="user", actor_id=user.id, action="network.revert",
+                target_type="host", target_id=host.id, params={"node": node},
+                ip=request.client.host if request.client else None)
+    return {"reverted": True, "node": node}

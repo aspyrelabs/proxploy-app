@@ -317,6 +317,63 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"config update failed for {kind}/{vmid} on {node}", e) from e
 
+    # --- host network staging (Phase 6 Task 7) -------------------------------
+    # PVE writes every one of the three staging calls below into
+    # /etc/network/interfaces.new and touches NOTHING live. Only network_apply
+    # promotes that file. network_revert deletes it.
+
+    def network_create(self, node: str, config: dict) -> None:
+        """POST /nodes/{node}/network — stages a new iface. `config` carries
+        `iface` and `type` plus the PVE options (bridge_ports, cidr, ...)."""
+        try:
+            self._connect().nodes(node).network.post(**config)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"staging network interface failed on {node}", e) from e
+
+    def network_update(self, node: str, iface: str, config: dict) -> None:
+        """PUT /nodes/{node}/network/{iface} — stages an edit."""
+        try:
+            self._connect().nodes(node).network(iface).put(**config)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"staging {iface} failed on {node}", e) from e
+
+    def network_delete(self, node: str, iface: str) -> None:
+        """DELETE /nodes/{node}/network/{iface} — stages a removal."""
+        try:
+            self._connect().nodes(node).network(iface).delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"staging removal of {iface} failed on {node}", e) from e
+
+    def network_apply(self, node: str) -> str:
+        """PUT /nodes/{node}/network -> UPID.
+
+        This is the one that can cut a node off the network. `ifreload -a` runs
+        on the node itself; if the new config is wrong the API connection this
+        very call arrived on may be what dies, so the UPID may become
+        unpollable. Callers confirm before reaching here.
+        """
+        try:
+            return self._connect().nodes(node).network.put()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"applying network config failed on {node}", e) from e
+
+    def network_revert(self, node: str) -> None:
+        """DELETE /nodes/{node}/network — discards /etc/network/interfaces.new."""
+        try:
+            self._connect().nodes(node).network.delete()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"reverting staged network config failed on {node}", e) from e
+
     def task_status(self, node: str, upid: str) -> dict:
         """GET /nodes/{node}/tasks/{upid}/status — `stopped` + exitstatus == done."""
         try:

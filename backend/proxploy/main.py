@@ -83,6 +83,7 @@ def create_app(
         from proxploy.pollers import Poller
         from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install
         from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
+        from proxploy.services import guestjobs as _guestjobs  # noqa: F401 — registers network.apply
         from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
         from proxploy.services import storagejobs as _storagejobs  # noqa: F401 — registers storage.upload/delete_volume
         from proxploy.services.metrics import metrics_loop

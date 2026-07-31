@@ -132,29 +132,42 @@ class _NodeStorageFactory:
         return _NodeStorageNS(self._owner, self._node, storage)
 
 
-class _NetIfaceNS:
-    """nodes(n).network(iface) — the staging subtree Task 7 hangs put/delete
-    off. Present now only so `.network` has proxmoxer's full dual shape."""
+class _NetworkNS:
+    """nodes(n).network — .get() lists, .post/.put/.delete stage, .put() with no
+    iface applies (returns a UPID), .delete() with no iface reverts. Callable
+    for nodes(n).network(iface)."""
 
-    def __init__(self, owner, node, iface):
+    def __init__(self, owner, node, iface=None):
         self._owner, self._node, self._iface = owner, node, iface
 
+    def __call__(self, iface):
+        return _NetworkNS(self._owner, self._node, str(iface))
 
-class _NodeNetworkNS:
-    """Same dual shape as _NodeStorageNS: `.get()` lists, `(iface)` descends."""
-
-    def __init__(self, owner, node):
-        self._owner, self._node = owner, node
-
-    def get(self, **kwargs):
+    def _check(self):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
-        rows = self._owner.networks_by_node.get(self._node, [])
-        want = kwargs.get("type")  # read out of kwargs, never a `type=` param
-        return [r for r in rows if r.get("type") == want] if want else rows
 
-    def __call__(self, iface):
-        return _NetIfaceNS(self._owner, self._node, iface)
+    def get(self, **kwargs):
+        self._check()
+        rows = self._owner.networks_by_node.get(self._node, [])
+        want = kwargs.get("type")
+        return [r for r in rows if want is None or r.get("type") == want]
+
+    def post(self, **cfg):
+        self._check()
+        self._owner.network_calls.append(("create", self._node, None, dict(cfg)))
+
+    def put(self, **cfg):
+        self._check()
+        if self._iface is None:
+            self._owner.network_calls.append(("apply", self._node, None, dict(cfg)))
+            return self._owner._record_action("network", 0, "apply")
+        self._owner.network_calls.append(("update", self._node, self._iface, dict(cfg)))
+
+    def delete(self, **kwargs):
+        self._check()
+        op = "revert" if self._iface is None else "delete"
+        self._owner.network_calls.append((op, self._node, self._iface, dict(kwargs)))
 
 
 class _GuestConfigLeaf:
@@ -345,7 +358,7 @@ class _NodeNS:
         self.qemu = _GuestFactory(owner, "qemu", name)
         self.termproxy = _TermproxyLeaf(owner, None, name, None)
         self.storage = _NodeStorageFactory(owner, name)
-        self.network = _NodeNetworkNS(owner, name)
+        self.network = _NetworkNS(owner, name)
 
 
 class _NodesNS:
@@ -373,6 +386,8 @@ class FakePVE:
         self.content_by_storage: dict[str, list[dict]] = {}
         self.cluster_storage_rows: list[dict] = []
         self.networks_by_node: dict[str, list[dict]] = {}
+        # host network staging (Phase 6 Task 7): (op, node, iface|None, config)
+        self.network_calls: list[tuple[str, str, str | None, dict]] = []
         self.guest_configs: dict[tuple[str, int], dict] = {}
         # guest config writes (Phase 6 Task 6)
         self.config_updates: list[tuple[str, int, dict]] = []
