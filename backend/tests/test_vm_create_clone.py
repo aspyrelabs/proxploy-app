@@ -388,6 +388,32 @@ def test_delete_refuses_a_running_vm(tmp_path, csrf_header, bootstrap_admin):
         assert r.json()["error"] == "guest_running"
         with app.state.sessionmaker() as db:
             assert db.query(Job).count() == 0
+            assert db.query(AuditEvent).filter_by(
+                action="vm.delete", result="denied",
+                target_type="vm", target_id=ids["vm_id"]).count() == 1
+
+
+def test_delete_refuses_a_self_targeted_vm(tmp_path, csrf_header, bootstrap_admin,
+                                           monkeypatch):
+    """is_self() answers False for every VM today (selfguard.py checks
+    target_type == "app" first), so this branch is otherwise unreachable
+    through real settings — monkeypatched here so the _deny()/audit wiring on
+    this specific gate is still under test, same as the other two refusals."""
+    import proxploy.api.vms as vms_module
+
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    monkeypatch.setattr(vms_module, "is_self", lambda db, kind, target_id: True)
+    with c:
+        r = c.request("DELETE", f"/api/v1/vms/{ids['vm_id']}",
+                      json={"confirm": "win11"}, headers=csrf_header(c))
+        assert r.status_code == 409
+        assert r.json()["error"] == "self_target"
+        assert r.json()["confirm_phrase"] == "win11"
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).count() == 0
+            assert db.query(AuditEvent).filter_by(
+                action="vm.delete", result="denied",
+                target_type="vm", target_id=ids["vm_id"]).count() == 1
 
 
 def test_delete_requires_owner_role(tmp_path, csrf_header, bootstrap_admin):
