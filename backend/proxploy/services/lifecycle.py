@@ -13,11 +13,11 @@ These are per-guest calls, deliberately outside the poller's O(nodes) budget
 from __future__ import annotations
 
 import asyncio
-import json as jsonlib
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
-from proxploy.models import App, Host, HostCredential, Vm
-from proxploy.services.proxmox import ProxmoxClient
+from proxploy.models import App, Host, Vm
+from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 
 APP_ACTIONS = ("start", "stop", "restart", "shutdown")
 VM_ACTIONS = ("start", "stop", "restart", "shutdown", "pause", "resume")
@@ -52,15 +52,12 @@ def _resolve(app, target_type: str, target_id: int):
         host = db.get(Host, row.host_id)
         if host is None:
             raise JobFailed(f"host for {target_type} {target_id} not found")
-        cred = (db.query(HostCredential)
-                .filter_by(host_id=host.id, kind="api_token").one_or_none())
-        if cred is None:
-            raise JobFailed(f"host {host.name} has no API token credential")
-        tok = jsonlib.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
-        client = ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
-                               verify_tls=host.verify_tls,
-                               tls_fingerprint=host.tls_fingerprint,
-                               factory=app.state.proxmox_factory)
+        try:
+            client = client_for_host(app, db, host)
+        except ProxmoxError as e:
+            # Same sentence as before the extraction — a job reports a missing
+            # credential as a failed job, never as a 502.
+            raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
         vmid = row.ctid if target_type == "app" else row.vmid
         node = host.node_name or ""

@@ -328,3 +328,94 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"vncproxy failed for qemu/{vmid} on {node}", e) from e
+
+    # --- infra reads (Phase 6) ----------------------------------------------
+    # All read-only, all on-demand: nothing here is called from the poll loop,
+    # so doc 02 §3's O(nodes) budget is untouched.
+
+    def storages(self, node: str) -> list[dict]:
+        """GET /nodes/{node}/storage -> [{storage, type, content, active,
+        enabled, shared, used, avail, total}]."""
+        try:
+            return self._connect().nodes(node).storage.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"storage list failed on {node}", e) from e
+
+    def storage_status(self, node: str, storage: str) -> dict:
+        """GET /nodes/{node}/storage/{storage}/status -> per-datastore detail."""
+        try:
+            return self._connect().nodes(node).storage(storage).status.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"storage status failed for {storage!r} on {node}", e) from e
+
+    def storage_content(self, node: str, storage: str,
+                        content: str | None = None) -> list[dict]:
+        """GET /nodes/{node}/storage/{storage}/content -> volume listing.
+
+        `content=` is a FILTER, so it is omitted rather than sent as None —
+        PVE would otherwise filter on the literal string and return nothing.
+        """
+        try:
+            leaf = self._connect().nodes(node).storage(storage).content
+            return leaf.get(content=content) if content else leaf.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"storage content failed for {storage!r} on {node}", e) from e
+
+    def cluster_storage(self) -> list[dict]:
+        """GET /storage — the cluster-level storage.cfg, not a node's view."""
+        try:
+            return self._connect().storage.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("cluster storage config read failed", e) from e
+
+    def node_networks(self, node: str, iface_type: str | None = None) -> list[dict]:
+        """GET /nodes/{node}/network -> [{iface, type, method, cidr, gateway,
+        bridge_ports, active, autostart, ...}]. `iface_type` is PVE's `type`
+        filter (bridge/bond/eth/vlan), omitted when None for the same reason
+        storage_content omits `content`."""
+        try:
+            net = self._connect().nodes(node).network
+            return net.get(type=iface_type) if iface_type else net.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"network list failed on {node}", e) from e
+
+    def guest_config(self, kind: str, node: str, vmid: int) -> dict:
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/config — the full config dict,
+        including every netN= line the network page round-trips."""
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).config.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"config read failed for {kind}/{vmid} on {node}", e) from e
+
+    def snapshots(self, kind: str, node: str, vmid: int) -> list[dict]:
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/snapshot -> [{name, description,
+        snaptime, vmstate, parent}]. Includes PVE's synthetic `current` row —
+        callers decide whether to show it, this layer does not filter."""
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).snapshot.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"snapshot list failed for {kind}/{vmid} on {node}", e) from e
+
+    def cluster_nextid(self) -> int:
+        """GET /cluster/nextid — PVE answers with a JSON string; cast once here
+        so no caller has to remember to."""
+        try:
+            return int(self._connect().cluster.nextid.get())
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("cluster nextid read failed", e) from e

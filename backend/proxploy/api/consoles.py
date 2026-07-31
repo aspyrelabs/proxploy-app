@@ -12,29 +12,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
-from proxploy.models import App, Host, HostCredential, User, Vm
+from proxploy.models import App, Host, User, Vm
 from proxploy.services import ptybridge
 from proxploy.services.audit import write_audit
 from proxploy.services.consoleproxy import ConsoleProxyError, bridge_binary, connect_upstream_vnc
 from proxploy.services.consoletickets import mint_ticket, redeem_ticket
+from proxploy.services.hostclient import client_for_host
 from proxploy.services.ptybridge import PtyBridgeError, bridge_pty
-from proxploy.services.proxmox import ProxmoxClient
+from proxploy.services.proxmox import ProxmoxError
 
 router = APIRouter(tags=["consoles"])
-
-
-def _proxmox_client_for_host(app_state, db, host: Host) -> ProxmoxClient:
-    """Same three-line decrypt-then-construct pattern as services/lifecycle.py's
-    _resolve and api/hosts.py's test_host — kept inline rather than extracted,
-    matching this codebase's existing (already 3x-duplicated) style; a 4th
-    call site is the tip-over point a future pass could extract, not this one."""
-    cred = db.query(HostCredential).filter_by(host_id=host.id, kind="api_token").one_or_none()
-    if cred is None:
-        raise HTTPException(409, f"host {host.name} has no API token credential")
-    tok = jsonlib.loads(app_state.secretstore.decrypt(cred.encrypted_blob))
-    return ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
-                         verify_tls=host.verify_tls, tls_fingerprint=host.tls_fingerprint,
-                         factory=app_state.proxmox_factory)
 
 
 _require_operator = require_role("operator")
@@ -51,7 +38,10 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
     host = db.get(Host, a.host_id)
     if host is None:
         raise HTTPException(404, "host not found")
-    client = _proxmox_client_for_host(request.app.state, db, host)
+    try:
+        client = client_for_host(request.app, db, host)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
     upstream = client.termproxy("lxc", node, a.ctid)
     raw, expires_at = mint_ticket(
@@ -156,7 +146,10 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
         raise HTTPException(409, "node shell is not enabled for this host — "
                              "opt in via host settings first (doc 08 §9: a "
                              "second, deliberate gate on top of RBAC)")
-    client = _proxmox_client_for_host(request.app.state, db, host)
+    try:
+        client = client_for_host(request.app, db, host)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
     upstream = client.node_termproxy(node)
     raw, expires_at = mint_ticket(
@@ -185,7 +178,10 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
     host = db.get(Host, v.host_id)
     if host is None:
         raise HTTPException(404, "host not found")
-    client = _proxmox_client_for_host(request.app.state, db, host)
+    try:
+        client = client_for_host(request.app, db, host)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
     upstream = client.vncproxy(node, v.vmid)
     raw, expires_at = mint_ticket(
