@@ -16,7 +16,7 @@ jobs:
       - run: python -m pytest tests/ -q -m "not pve_integration and not e2e"
       - run: python scripts/check_executor_isolation.py
       - name: license audit (doc 03 protocol — fails on anything outside brief §3)
-        run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;The Unlicense;CMU License (MIT-CMU)"
+        run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"
 
   backend-postgres:
     runs-on: ubuntu-latest
