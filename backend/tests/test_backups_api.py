@@ -278,6 +278,7 @@ def test_in_place_restore_refuses_a_running_guest(tmp_path, csrf_header,
 
 def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
         tmp_path, csrf_header, bootstrap_admin):
+    from proxploy.models import AuditEvent
     from proxploy.services.settings import set_setting
 
     app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
@@ -300,6 +301,14 @@ def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
         assert body["error"] == "self_target" and body["confirm_phrase"] == "Immich"
         with app.state.sessionmaker() as db:
             assert db.query(Job).filter_by(kind="backup.restore").count() == 0
+            # The refused restore's only durable trace: the route calls
+            # write_audit(..., result="denied") before it raises. Assert the
+            # DB row itself, not the HTTP body — a future refactor could drop
+            # the write_audit call, misspell the action, or flip the result
+            # string, and the response-only assertions above would stay green.
+            row = db.query(AuditEvent).filter_by(action="backup.restore",
+                                                 target_type="backup").one()
+            assert row.target_id == ids["ct_backup"] and row.result == "denied"
         # restore-as-new over the same backup is fine — it takes a fresh vmid
         r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
                    json={"mode": "new"}, headers=csrf_header(c))
