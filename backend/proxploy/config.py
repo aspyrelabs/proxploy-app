@@ -37,7 +37,13 @@ class Settings(BaseSettings):
     # module constant instead — a start/stop that needs five minutes is a
     # different animal from a restore that needs fifty, and lifecycle's
     # timeout is already exercised by tests that monkeypatch it.
-    pve_task_timeout_s: float = 300.0
+    # 3600s (1h), not lifecycle's 300s: every Phase 6 handler that reaches
+    # this setting is disk-copy-bound (vm.clone, backup.run/restore/prune,
+    # storage.upload) rather than a status flip, and a multi-hundred-GB clone
+    # or vzdump routinely needs far longer than five minutes. 300s was
+    # inherited from TASK_TIMEOUT_S's start/stop-shaped default and never
+    # revisited for these — see BLOCKING 4 in the Phase 6 final review.
+    pve_task_timeout_s: float = 3600.0
     backup_sync_stale_s: float = 900.0
 
 

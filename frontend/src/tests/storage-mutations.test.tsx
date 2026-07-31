@@ -160,6 +160,11 @@ describe('StorageForm', () => {
     withQuery(<StorageForm existing={LOCAL} onClose={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Detach' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('local'))
+    // mutate() runs its mutationFn in a microtask, so a synchronous check here
+    // passes even with the window.confirm guard removed entirely — flush a
+    // macrotask first (idiom borrowed from settings.test.tsx) so this actually
+    // exercises the guard.
+    await new Promise((r) => setTimeout(r, 10))
     expect(calls.some((c) => c.opts?.method === 'DELETE')).toBe(false)
 
     confirm.mockReturnValue(true)

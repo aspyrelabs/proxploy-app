@@ -17,6 +17,7 @@ import asyncio
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import Host, Vm
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 
 
@@ -26,7 +27,12 @@ def _resolve_host(app, host_id: int):
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
-        return client_for_host(app, db, host), host.name
+        try:
+            return client_for_host(app, db, host), host.name
+        except ProxmoxError as e:
+            # Same sentence as lifecycle.py::_resolve — a job reports a missing
+            # credential as a failed job, never as a 502.
+            raise JobFailed(str(e)) from e
 
 
 async def run_network_apply(ctx: JobContext, params: dict) -> dict:
@@ -46,7 +52,8 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"applying staged network config on node {node} ({host_name})")
     ctx.progress(5)
     upid = await asyncio.to_thread(client.network_apply, node)
-    status = await await_task(ctx, client, node, upid, start_pct=10, end_pct=100)
+    status = await await_task(ctx, client, node, upid, start_pct=10, end_pct=100,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "network", "id": host_id,
                                        "change": "applied"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -70,7 +77,11 @@ def _vm_target(app, vm_id: int):
         host = db.get(Host, v.host_id)
         if host is None:
             raise JobFailed(f"host {v.host_id} not found")
-        return (client_for_host(app, db, host), host.node_name or "",
+        try:
+            client = client_for_host(app, db, host)
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
+        return (client, host.node_name or "",
                 int(v.vmid), v.name or f"VM {v.vmid}", host.id)
 
 
@@ -86,7 +97,8 @@ async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
             f"{' including RAM' if vmstate else ''}")
     upid = await asyncio.to_thread(client.snapshot_create, "qemu", node, vmid,
                                    name, params.get("description"), vmstate)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
                                        "change": "snapshot"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
@@ -110,7 +122,8 @@ async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"rolling {vm_name} (qemu {vmid}) back to snapshot {name!r} on {node}")
     upid = await asyncio.to_thread(client.snapshot_rollback, "qemu", node, vmid,
                                    name)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
                                        "change": "rollback"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
@@ -127,7 +140,8 @@ async def snapshot_delete_job(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"deleting snapshot {name!r} of {vm_name} (qemu {vmid}) on {node}")
     upid = await asyncio.to_thread(client.snapshot_delete, "qemu", node, vmid,
                                    name)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": vm_id,
                                        "change": "snapshot"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "name": name,
@@ -146,7 +160,10 @@ def _host_client(app, host_id: int):
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
-        return client_for_host(app, db, host), host.node_name or "", host.name
+        try:
+            return client_for_host(app, db, host), host.node_name or "", host.name
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
 
 
 def _create_params(params: dict) -> dict:
@@ -208,7 +225,8 @@ async def create_vm(ctx: JobContext, params: dict) -> dict:
     # second orchestrator indefinitely and silently create a guest under an id
     # the caller never asked for. The error is surfaced verbatim instead.
     upid = await asyncio.to_thread(client.vm_create, node, call)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "created"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -238,7 +256,8 @@ async def clone_vm(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"{'full' if call['full'] else 'linked'} clone of {vm_name} "
             f"(qemu {vmid}) on {node} -> {call['newid']}")
     upid = await asyncio.to_thread(client.vm_clone, node, vmid, call)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "created"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -259,7 +278,8 @@ async def delete_vm(ctx: JobContext, params: dict) -> dict:
         _vm_target, app, vm_id)
     ctx.log(f"destroying {vm_name} (qemu {vmid}) on {node}")
     upid = await asyncio.to_thread(client.guest_delete, "qemu", node, vmid)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "deleted"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,

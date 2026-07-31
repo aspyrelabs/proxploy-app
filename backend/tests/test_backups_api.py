@@ -341,6 +341,19 @@ def test_prune_preview_route_reads_and_prune_route_deletes(tmp_path, csrf_header
         assert r.status_code == 202, r.text
 
 
+def test_prune_preview_upstream_failure_is_a_502_not_a_500(tmp_path, csrf_header,
+                                                            bootstrap_admin):
+    """BLOCKING 3: prune_preview_route had no ProxmoxError handling at all —
+    an unreachable host bare-500'd instead of the 502 every other read in
+    this phase returns."""
+    app, c, fake, ids = _authed(tmp_path, bootstrap_admin)
+    fake.fail = True
+    with c:
+        r = c.get(f"/api/v1/backups/prune-preview?host_id={ids['host_id']}"
+                  f"&storage=local&keep_last=3")
+        assert r.status_code == 502
+
+
 def test_prune_without_any_keep_value_is_rejected(tmp_path, csrf_header,
                                                   bootstrap_admin):
     app, c, fake, ids = _authed(tmp_path, bootstrap_admin)

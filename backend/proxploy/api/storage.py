@@ -267,9 +267,14 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     """
     host = _host_or_404(db, body.host_id)
     ip = request.client.host if request.client else None
+    # Route-controlled keys (storage/type) go LAST in the unpack so a
+    # caller-supplied config.storage or config.type overrides nothing this
+    # route says it is attaching — storage.py has no _SAFE_KEY filter at all
+    # (deliberate free-form plugin passthrough), so this collision is even
+    # more open than network.py's.
     try:
         client_for_host(request.app, db, host).storage_create(
-            {"storage": body.storage, "type": body.type, **body.config})
+            {**body.config, "storage": body.storage, "type": body.type})
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
                     target_type="storage", target_id=host.id,

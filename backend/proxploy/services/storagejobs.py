@@ -24,6 +24,7 @@ import os
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import Host
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 
 
@@ -33,7 +34,10 @@ def _resolve(app, host_id: int, node: str | None):
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
-        return client_for_host(app, db, host), (node or host.node_name or "")
+        try:
+            return client_for_host(app, db, host), (node or host.node_name or "")
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
 
 
 async def run_upload(ctx: JobContext, params: dict) -> dict:
@@ -47,7 +51,8 @@ async def run_upload(ctx: JobContext, params: dict) -> dict:
                 f"to {storage} on {node}")
         upid = await asyncio.to_thread(client.storage_upload, node, storage,
                                        content, filename, path)
-        status = await await_task(ctx, client, node, upid)
+        status = await await_task(ctx, client, node, upid,
+                                  timeout_s=app.state.settings.pve_task_timeout_s)
         app.state.bus.publish("resource", {"type": "storage", "id": host_id,
                                            "change": "content"})
         return {"upid": upid, "exitstatus": status.get("exitstatus"), "node": node,
@@ -69,7 +74,9 @@ async def run_delete_volume(ctx: JobContext, params: dict) -> dict:
     upid = await asyncio.to_thread(client.storage_delete_volume, node, storage, volid)
     exitstatus = "OK"
     if upid:
-        exitstatus = (await await_task(ctx, client, node, upid)).get("exitstatus")
+        exitstatus = (await await_task(
+            ctx, client, node, upid,
+            timeout_s=app.state.settings.pve_task_timeout_s)).get("exitstatus")
     else:
         # dir/lvm plugins delete inline and return no UPID — there is no task to
         # poll, and treating a missing UPID as a failure would fail every

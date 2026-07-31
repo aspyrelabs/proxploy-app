@@ -21,6 +21,7 @@ from proxploy.models import App, Backup, Host, User, Vm, utcnow
 from proxploy.services.backupjobs import SYNCED_AT_KEY, sync_in_flight
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import is_self
 from proxploy.services.settings import get_setting
 
@@ -299,9 +300,12 @@ def prune_preview_route(request: Request, host_id: int, storage: str,
     spec = _prune_spec({"keep_last": keep_last, "keep_daily": keep_daily,
                         "keep_weekly": keep_weekly, "keep_monthly": keep_monthly,
                         "keep_yearly": keep_yearly})
-    client = client_for_host(request.app, db, host)
-    rows = client.prune_preview(node or host.node_name or "", storage,
-                                _prune_call(spec, guest_type, vmid))
+    try:
+        client = client_for_host(request.app, db, host)
+        rows = client.prune_preview(node or host.node_name or "", storage,
+                                    _prune_call(spec, guest_type, vmid))
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e))
     return [{"volid": r.get("volid"), "type": r.get("type"), "vmid": r.get("vmid"),
              "ctime": r.get("ctime"), "mark": r.get("mark")} for r in rows]
 
@@ -337,7 +341,7 @@ def prune_route(request: Request, body: PruneIn, db=Depends(get_db),
 
 @router.delete("/{backup_id}", status_code=202,
                dependencies=[Depends(_require_admin),
-                             Depends(require_entitlement("backups.pbs"))])
+                             Depends(require_entitlement("backups.retention"))])
 def delete_backup_route(request: Request, backup_id: int, db=Depends(get_db),
                         user: User = Depends(_require_admin)):
     b = db.get(Backup, backup_id)

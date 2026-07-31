@@ -63,6 +63,56 @@ def test_create_bridge_stages_and_audits_without_a_job(tmp_path, csrf_header,
             assert row.params["iface"] == "vmbr9" and row.params["op"] == "create"
 
 
+def test_config_iface_collision_does_not_override_the_route_iface(tmp_path, csrf_header,
+                                                                   bootstrap_admin):
+    """BLOCKING 1 regression: `_SAFE_KEY` admits `iface`/`type` inside
+    `config`, so a caller-supplied `config.iface` used to silently override
+    the route's own — verified live: `{"iface": "vmbr9", ..., "config":
+    {"iface": "vmbr0", ...}}` staged a redefinition of vmbr0 (the management
+    bridge) while claiming vmbr9 in both the response and the audit row.
+    Asserted against what FakePVE actually recorded, not the response body,
+    since the response body is exactly what lied before this fix."""
+    from tests.support import make_app
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.post("/api/v1/network/bridges", headers=csrf_header(c),
+                   json={"host_id": host_id, "node": "pve1", "iface": "vmbr9",
+                         "type": "bridge",
+                         "config": {"iface": "vmbr0", "type": "vlan"}})
+        assert r.status_code == 201, r.text
+        assert fake.network_calls == [
+            ("create", "pve1", None, {"iface": "vmbr9", "type": "bridge"})]
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="network.host_config").one()
+            assert row.params["iface"] == "vmbr9"  # the route's iface, not config's
+
+
+def test_mutation_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
+                                                            bootstrap_admin):
+    """BLOCKING 3: network.py's synchronous mutations used to have no
+    ProxmoxError handling at all — a failed stage produced a bare 500 and no
+    audit trace, unlike storage.py's identical routes."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.fail = True
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.post("/api/v1/network/bridges", headers=csrf_header(c),
+                   json={"host_id": host_id, "node": "pve1", "iface": "vmbr9",
+                         "type": "bridge", "config": {}})
+        assert r.status_code == 502
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="network.host_config").one()
+            assert row.result == "error"
+
+
 def test_update_and_delete_stage_through_to_the_iface_path(tmp_path, csrf_header,
                                                            bootstrap_admin):
     from tests.support import make_app

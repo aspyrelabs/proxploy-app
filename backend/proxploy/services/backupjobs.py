@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, Job, Vm, utcnow
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 from proxploy.services.settings import set_setting
 
@@ -68,7 +69,10 @@ def sync_host_backups(app, host_id: int) -> dict:
         host = db.get(Host, host_id)
         if host is None:
             raise RuntimeError(f"host {host_id} not found")
-        client = client_for_host(app, db, host)
+        try:
+            client = client_for_host(app, db, host)
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
         node = host.node_name or ""
         # ponytail: one node per Host row. Shared datastores (PBS, NFS, CephFS)
         # report identically from any node, so this is complete for them;
@@ -170,7 +174,10 @@ def _host_target(app, host_id: int):
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
-        return client_for_host(app, db, host), host.node_name or "", host.name
+        try:
+            return client_for_host(app, db, host), host.node_name or "", host.name
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
 
 
 def _backup_target(app, backup_id: int):
@@ -189,7 +196,10 @@ def _backup_target(app, backup_id: int):
         info = {"host_id": b.host_id, "volid": b.volid, "storage": b.storage,
                 "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
                 "guest_name": b.guest_name}
-        return client_for_host(app, db, host), host.node_name or "", info
+        try:
+            return client_for_host(app, db, host), host.node_name or "", info
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
 
 
 async def _resync(ctx: JobContext, host_id: int) -> None:
@@ -226,7 +236,8 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"vzdump on {host_name}/{node}: "
             f"{'all guests' if not vmids else ', '.join(str(v) for v in vmids)}")
     upid = await asyncio.to_thread(client.vzdump, node, call)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, host_id)
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmids": vmids}
 
@@ -260,7 +271,8 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "
             f"({'in place' if in_place else 'as new'})")
     upid = await asyncio.to_thread(client.restore_guest, kind, node, vmid, call)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, info["host_id"])
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,
             "mode": "in_place" if in_place else "new"}
@@ -278,7 +290,8 @@ async def delete_backup(ctx: JobContext, params: dict) -> dict:
     upid = await asyncio.to_thread(client.storage_delete_volume, node,
                                    info["storage"], info["volid"])
     if upid:
-        await await_task(ctx, client, node, upid)
+        await await_task(ctx, client, node, upid,
+                         timeout_s=app.state.settings.pve_task_timeout_s)
     else:
         # Some storage plugins delete synchronously and return no task id.
         ctx.log("storage deleted the volume synchronously (no task id)")
@@ -304,7 +317,8 @@ async def prune_backups_job(ctx: JobContext, params: dict) -> dict:
         call["vmid"] = int(params["vmid"])
     ctx.log(f"pruning {storage} on {host_name}/{node} with {params['spec']}")
     upid = await asyncio.to_thread(client.prune_backups, node, storage, call)
-    status = await await_task(ctx, client, node, upid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, host_id)
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
             "spec": params["spec"], "storage": storage}

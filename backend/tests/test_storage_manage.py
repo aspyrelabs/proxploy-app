@@ -61,6 +61,30 @@ def test_attach_creates_the_storage_upstream_and_audits(tmp_path, csrf_header,
             assert row.params["storage"] == "nfs-media"
 
 
+def test_config_storage_collision_does_not_override_the_route_storage(tmp_path, csrf_header,
+                                                                       bootstrap_admin):
+    """BLOCKING 2 regression: storage.py applies NO key filter at all (a
+    deliberate free-form plugin passthrough), so a caller-supplied
+    `config.storage`/`config.type` used to silently override the route's own —
+    verified live: `{"storage": "newpbs", ..., "config": {"storage": "local",
+    "type": "dir", ...}}` returned 201 saying newpbs while creating local.
+    Asserted against what FakePVE actually recorded, not the response body."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, hid = _api(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/storage",
+                   json={"host_id": hid, "storage": "newpbs", "type": "pbs",
+                         "config": {"storage": "local", "type": "dir",
+                                    "path": "/mnt/x"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        assert fake.storage_creates == [
+            {"path": "/mnt/x", "storage": "newpbs", "type": "pbs"}]
+
+
 def test_pbs_attach_never_persists_or_echoes_the_password(tmp_path, csrf_header,
                                                           bootstrap_admin):
     """The storage-shaped sibling of tests/test_no_secret_echo.py. A PBS attach

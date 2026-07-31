@@ -1,6 +1,7 @@
 """Phase 6 Task 2: the shared UPID poll-and-drain loop, extracted out of
 services/lifecycle.py so twelve new job handlers don't each re-derive it."""
 import asyncio
+import json
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -149,9 +150,58 @@ def test_lifecycle_uses_the_shared_helper_rather_than_its_own_copy():
 def test_pve_task_timeout_is_configurable(tmp_path, monkeypatch):
     from proxploy.config import Settings
 
-    assert Settings(data_dir=tmp_path).pve_task_timeout_s == 300.0
+    assert Settings(data_dir=tmp_path).pve_task_timeout_s == 3600.0
     monkeypatch.setenv("PROXPLOY_PVE_TASK_TIMEOUT_S", "45")
     assert Settings(data_dir=tmp_path).pve_task_timeout_s == 45.0
+
+
+def test_pve_task_timeout_actually_reaches_await_task(tmp_path):
+    """Root-cause proof for BLOCKING 4: the setting parsing is not enough —
+    every Phase 6 job handler must actually pass it to await_task. Configure a
+    timeout far below await_task's own TASK_TIMEOUT_S default (300s) and prove
+    a real handler (network.apply) honors the SHORT configured value rather
+    than the long fallback, by failing fast against a task that never stops."""
+    import asyncio
+
+    from proxploy.jobs import JobBackend
+    from proxploy.models import Host, HostCredential, Job
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(running_ticks=10_000)  # never stops on its own
+        app = make_job_app(tmp_path, fake=fake)
+        app.state.settings.pve_task_timeout_s = 0.05  # far below the 300s fallback
+        import proxploy.services.guestjobs  # noqa: F401 — registers network.apply
+        with app.state.sessionmaker() as db:
+            host = Host(name="host-01", address="https://10.0.0.9:8006",
+                       node_name="pve1", status="connected", pve_version="8.4.1")
+            db.add(host)
+            db.commit()
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!t", "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=host.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            host_id = host.id
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="network.apply", target_type="host",
+                                     target_id=host_id,
+                                     params={"host_id": host_id, "node": "pve1"}).id
+        start = asyncio.get_event_loop().time()
+        await backend.wait(job_id, timeout=15)
+        elapsed = asyncio.get_event_loop().time() - start
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+            assert "still running" in job.error
+        # If the configured 0.05s never reached await_task, this would have
+        # run for (at least) the 300s fallback instead of failing in well
+        # under a second.
+        assert elapsed < 5.0
+
+    asyncio.run(run())
 
 
 def test_enqueue_and_audit_writes_the_job_the_audit_row_and_the_202_body(tmp_path):

@@ -31,20 +31,16 @@ from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.metrics import pick_resolution, query_series
 from proxploy.services.netconfig import build_net, nic_identity, parse_net
+from proxploy.services.proxmox import ProxmoxError
 
 router = APIRouter(prefix="/network", tags=["network"])
 
-# Singletons first in dependencies=[...] and reused as the parameter dep, so
+# Singleton first in dependencies=[...] and reused as the parameter dep, so
 # auth/role runs before the entitlement gate and FastAPI collapses the two
 # (deps.py idiom; test_route_auth_invariant.py enforces it).
 _require_viewer = require_role("viewer")
-_require_operator = require_role("operator")
 
 NET_KEY = re.compile(r"^net\d+$")
-
-# Keys a NIC edit may touch. The head token (model=MAC) and everything else in
-# the string is passed through untouched by netconfig — see that module.
-EDITABLE = ("bridge", "tag", "firewall", "rate", "mtu", "link_down")
 
 
 class NicIn(BaseModel):
@@ -73,7 +69,11 @@ def _nic_out(iface: str, raw: str) -> dict:
 
 def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[dict]:
     """Every netN on one guest, newest PVE config read (no cache)."""
-    cfg = client_for_host(request.app, db, host).guest_config(kind, host.node_name or "", vmid)
+    try:
+        cfg = client_for_host(request.app, db, host).guest_config(
+            kind, host.node_name or "", vmid)
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e))
     return [_nic_out(k, str(cfg[k])) for k in sorted(cfg) if NET_KEY.match(k)]
 
 
@@ -84,8 +84,15 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
     node = host.node_name or ""
-    client = client_for_host(request.app, db, host)
-    cfg = client.guest_config(kind, node, vmid)
+    ip = request.client.host if request.client else None
+    try:
+        client = client_for_host(request.app, db, host)
+        cfg = client.guest_config(kind, node, vmid)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
+                    target_type=target_type, target_id=target_id,
+                    params={"iface": iface}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
     if iface not in cfg:
         raise HTTPException(404, f"{iface} is not configured on this guest")
     parts = parse_net(str(cfg[iface]))
@@ -98,11 +105,16 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         else:
             parts[key] = str(val)
     value = build_net(parts)
-    upid = client.guest_config_update(kind, node, vmid, {iface: value})
+    try:
+        upid = client.guest_config_update(kind, node, vmid, {iface: value})
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
+                    target_type=target_type, target_id=target_id,
+                    params={"iface": iface, **changes}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
                 target_type=target_type, target_id=target_id,
-                params={"iface": iface, **changes},
-                ip=request.client.host if request.client else None)
+                params={"iface": iface, **changes}, ip=ip)
     return {
         "iface": iface, "value": value, "upid": upid,
         "pending_reboot": upid is not None,
@@ -148,28 +160,35 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
     # poller's O(nodes) budget (proxmox.py's "per-guest, user-triggered calls"
     # section). If it ever gets slow, cache netN in the poller's cluster_resources
     # pass; do not add per-guest calls to the poll loop to get it.
+
+    One bad host (unreachable, or missing its API token credential — a
+    routine state, not an outage) must not 500 the whole page: it is degraded
+    out into `errors` and every other host is still served.
     """
     hosts = [h for h in db.query(Host).order_by(Host.name).all()
              if host is None or h.id == host]
-    nodes, attachments = [], []
+    nodes, attachments, errors = [], [], []
     for h in hosts:
-        client = client_for_host(request.app, db, h)
-        for node in _nodes_of(request, h):
-            nodes.append({"host_id": h.id, "host_name": h.name, "node": node,
-                          "interfaces": [_iface_out(r) for r in client.node_networks(node)]})
-        node = h.node_name or ""
-        guests = ([("app", a.id, a.name, "lxc", a.ctid)
-                   for a in db.query(App).filter_by(host_id=h.id).order_by(App.name)]
-                  + [("vm", v.id, v.name, "qemu", v.vmid)
-                     for v in db.query(Vm).filter_by(host_id=h.id).order_by(Vm.name)])
-        for gtype, gid, gname, kind, vmid in guests:
-            cfg = client.guest_config(kind, node, vmid)
-            for key in sorted(k for k in cfg if NET_KEY.match(k)):
-                attachments.append({"host_id": h.id, "node": node,
-                                    "guest_type": gtype, "guest_id": gid,
-                                    "name": gname, "vmid": vmid,
-                                    **_nic_out(key, str(cfg[key]))})
-    return {"nodes": nodes, "attachments": attachments}
+        try:
+            client = client_for_host(request.app, db, h)
+            for node in _nodes_of(request, h):
+                nodes.append({"host_id": h.id, "host_name": h.name, "node": node,
+                              "interfaces": [_iface_out(r) for r in client.node_networks(node)]})
+            node = h.node_name or ""
+            guests = ([("app", a.id, a.name, "lxc", a.ctid)
+                       for a in db.query(App).filter_by(host_id=h.id).order_by(App.name)]
+                      + [("vm", v.id, v.name, "qemu", v.vmid)
+                         for v in db.query(Vm).filter_by(host_id=h.id).order_by(Vm.name)])
+            for gtype, gid, gname, kind, vmid in guests:
+                cfg = client.guest_config(kind, node, vmid)
+                for key in sorted(k for k in cfg if NET_KEY.match(k)):
+                    attachments.append({"host_id": h.id, "node": node,
+                                        "guest_type": gtype, "guest_id": gid,
+                                        "name": gname, "vmid": vmid,
+                                        **_nic_out(key, str(cfg[key]))})
+        except ProxmoxError as e:
+            errors.append({"host_id": h.id, "host_name": h.name, "error": str(e)})
+    return {"nodes": nodes, "attachments": attachments, "errors": errors}
 
 
 @router.get("/throughput", dependencies=[Depends(_require_viewer),
@@ -254,13 +273,23 @@ class ApplyIn(BaseModel):
 def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
                   user: User = Depends(_require_admin)):
     host = _host_or_404(db, body.host_id)
-    cfg = {"iface": body.iface, "type": body.type, **_check_config(body.config)}
-    client_for_host(request.app, db, host).network_create(body.node, cfg)
+    # Route-controlled keys (iface/type) go LAST in the unpack so a
+    # caller-supplied config.iface or config.type — both admitted by
+    # _SAFE_KEY — can never override what this route says it is staging.
+    cfg = {**_check_config(body.config), "iface": body.iface, "type": body.type}
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).network_create(body.node, cfg)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                    target_type="host", target_id=host.id,
+                    params={"op": "create", "node": body.node, "iface": body.iface,
+                            "config": body.config}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
                 target_type="host", target_id=host.id,
                 params={"op": "create", "node": body.node, "iface": body.iface,
-                        "config": body.config},
-                ip=request.client.host if request.client else None)
+                        "config": body.config}, ip=ip)
     return {"staged": True, "node": body.node, "iface": body.iface}
 
 
@@ -271,13 +300,20 @@ def update_bridge(request: Request, host_id: int, node: str, iface: str,
                   body: BridgePatchIn, db=Depends(get_db),
                   user: User = Depends(_require_admin)):
     host = _host_or_404(db, host_id)
-    client_for_host(request.app, db, host).network_update(
-        node, iface, _check_config(body.config))
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).network_update(
+            node, iface, _check_config(body.config))
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                    target_type="host", target_id=host.id,
+                    params={"op": "update", "node": node, "iface": iface,
+                            "config": body.config}, result="error", ip=ip)
+        raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
                 target_type="host", target_id=host.id,
                 params={"op": "update", "node": node, "iface": iface,
-                        "config": body.config},
-                ip=request.client.host if request.client else None)
+                        "config": body.config}, ip=ip)
     return {"staged": True, "node": node, "iface": iface}
 
 
@@ -287,11 +323,18 @@ def update_bridge(request: Request, host_id: int, node: str, iface: str,
 def delete_bridge(request: Request, host_id: int, node: str, iface: str,
                   db=Depends(get_db), user: User = Depends(_require_admin)):
     host = _host_or_404(db, host_id)
-    client_for_host(request.app, db, host).network_delete(node, iface)
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).network_delete(node, iface)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
+                    target_type="host", target_id=host.id,
+                    params={"op": "delete", "node": node, "iface": iface},
+                    result="error", ip=ip)
+        raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
                 target_type="host", target_id=host.id,
-                params={"op": "delete", "node": node, "iface": iface},
-                ip=request.client.host if request.client else None)
+                params={"op": "delete", "node": node, "iface": iface}, ip=ip)
     return {"staged": True, "node": node, "iface": iface}
 
 
@@ -335,8 +378,14 @@ def revert_network(request: Request, host_id: int, node: str, db=Depends(get_db)
     """Discard /etc/network/interfaces.new. No confirmation and no job: this
     deletes a staged file and cannot disturb the running config."""
     host = _host_or_404(db, host_id)
-    client_for_host(request.app, db, host).network_revert(node)
+    ip = request.client.host if request.client else None
+    try:
+        client_for_host(request.app, db, host).network_revert(node)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="network.revert",
+                    target_type="host", target_id=host.id, params={"node": node},
+                    result="error", ip=ip)
+        raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.revert",
-                target_type="host", target_id=host.id, params={"node": node},
-                ip=request.client.host if request.client else None)
+                target_type="host", target_id=host.id, params={"node": node}, ip=ip)
     return {"reverted": True, "node": node}

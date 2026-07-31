@@ -196,7 +196,7 @@ stale-triggered resync never fired since the cache was already fresh.
 | `POST` `/api/v1/backups/{id}/restore` | admin | `backups.restore` | in-place or as-new → job |
 | `GET` `/api/v1/backups/prune-preview` | admin | `backups.retention` | dry run, GET only |
 | `POST` `/api/v1/backups/prune` | admin | `backups.retention` | → job, unconsumed by UI (see Deviations) |
-| `DELETE` `/api/v1/backups/{id}` | admin | `backups.pbs` | → job |
+| `DELETE` `/api/v1/backups/{id}` | admin | `backups.retention` | → job — corrected from `backups.pbs` in the final whole-branch review (2026-07-31): that key also gates the read-only backup list, so anyone who could see backups could permanently delete them |
 | `GET` `/api/v1/vms/{id}/snapshots` | viewer | `vms.snapshots` | live, filters synthetic `current` |
 | `POST` `/api/v1/vms/{id}/snapshots` | operator | `vms.snapshots` | → job |
 | `POST` `/api/v1/vms/{id}/snapshots/{name}/rollback` | admin | `vms.snapshots` | typed VM-name confirm → job |
@@ -327,13 +327,21 @@ stale-triggered resync never fired since the cache was already fresh.
   exercised only a 3 MiB payload — no real multi-GB ISO was ever pushed
   through this code path on this box. The `requests-toolbelt` fix (see
   Deviations) makes the streaming path *possible*; it does not make the
-  large-file path *tested*.
-- **Two endpoints ship unconsumed by the UI**, deliberately, per the plan's
-  cross-task couplings note: `POST /backups/prune` (see Deviations), and the
-  `vmstate` option on non-qemu guests (LXC snapshots have no `vmstate`
-  concept; `ProxmoxClient.snapshot_create` refuses `vmstate=True` for a
-  non-qemu kind server-side, but nothing in the UI exercises the refusal for
-  a human to see).
+  large-file path *tested*. **This caveat is load-bearing, not cosmetic**
+  (final whole-branch review, 2026-07-31, see BLOCKING 4): the PVE-side task
+  for a real multi-GB ISO upload can genuinely exceed `pve_task_timeout_s`,
+  and a 3 MiB payload's task finishes too fast to exercise that ceiling at
+  all — so this DoD proof and the timeout ceiling are two different unverified
+  edges of the same upload path, not one.
+- **Correction (final whole-branch review, 2026-07-31): three endpoints ship
+  unconsumed by the UI, not two.** The original list named `POST
+  /backups/prune` (see Deviations) and the `vmstate` option on non-qemu
+  guests (LXC snapshots have no `vmstate` concept; `ProxmoxClient.
+  snapshot_create` refuses `vmstate=True` for a non-qemu kind server-side,
+  but nothing in the UI exercises the refusal for a human to see), and
+  omitted `DELETE /vms/{id}` — which this same document's endpoint table
+  calls **the most destructive route in the phase** (owner role, 3-gate
+  refusal chain) and which has no frontend consumer at all.
 - **`GET /backups` auto-enqueues a sync when the cache is stale**, so the
   first load of a fresh install returns an empty list and fills in moments
   later — correct behavior, but worth knowing before someone reports it as a
@@ -346,16 +354,19 @@ stale-triggered resync never fired since the cache was already fresh.
   anti-stampede lock under a real 16-thread race — but its wall-clock cost is
   uneven and worth knowing about before someone "fixes" a slow CI run by
   deleting it.
-- **Three frontend `window.confirm`-dismissed tests are proven false
-  negatives, left unfixed in this task on purpose**: `src/tests/
-  backups.test.tsx` ("asks for confirmation before deleting an archive") and
-  two in `src/tests/storage-mutations.test.tsx` (detach, volume delete) each
-  assert `calls.length === 0` synchronously right after `fireEvent.click`,
-  with no flush. Because `mutate()` runs its mutation function on a later
-  microtask, all three pass even with the production `window.confirm` guard
-  removed entirely — Task 16's review demonstrated this exact failure mode
-  live on a sibling test and fixed it there with a one-line macrotask-flush
-  idiom (`await new Promise(r => setTimeout(r, 10))`, borrowed from
-  `settings.test.tsx`). These three were identified, not fixed, per this
-  task's brief: a final whole-branch review follows this task and owns that
-  sweep.
+- **Correction (final whole-branch review, 2026-07-31): only one of the three
+  suspected false-negative tests was actually broken.** The original claim
+  here was that all three `window.confirm`-dismissed tests in `src/tests/
+  backups.test.tsx` and `src/tests/storage-mutations.test.tsx` (detach,
+  volume delete) asserted `calls.length === 0` synchronously right after
+  `fireEvent.click` with no flush, and therefore all three would pass even
+  with the production `window.confirm` guard removed. The final review
+  verified each of the three individually by neutralising its guard and
+  re-running: `storage-mutations.test.tsx`'s **detach** test ("confirms
+  before detaching and does nothing when the operator cancels") genuinely was
+  a false negative and has been fixed with the macrotask-flush idiom (`await
+  new Promise(r => setTimeout(r, 10))`, borrowed from `settings.test.tsx`).
+  `backups.test.tsx`'s delete-archive test and `storage-mutations.test.tsx`'s
+  **volume-delete** test were both proven load-bearing as written — each
+  fails when its guard is neutralised, via a `waitFor` already present
+  further down in the same test — and were deliberately left untouched.

@@ -82,6 +82,35 @@ def test_bridges_is_a_live_passthrough_with_an_attachment_map(tmp_path, csrf_hea
         assert att[("vm", "net1")]["bridge"] == "vmbr1"
 
 
+def test_bridges_degrades_one_bad_host_instead_of_500ing_the_page(tmp_path, csrf_header,
+                                                                   bootstrap_admin):
+    """BLOCKING 3: `client_for_host` raises ProxmoxError for a host with no API
+    token credential — a routine state, not an outage — and network.py never
+    caught it, so one such host 500'd the whole page. Now it is degraded out
+    into `errors` and the reachable host still serves its nodes."""
+    from proxploy.models import Host
+    from tests.support import make_app, seed_snapshot
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id, _, _ = _seed(app)
+        seed_snapshot(app, host_id, nodes=[{"node": "pve1", "status": "online"}])
+        with app.state.sessionmaker() as db:
+            bad = Host(name="host-02", address="https://10.0.0.10:8006",
+                      node_name="pve2", status="connected", pve_version="8.4.1")
+            db.add(bad)
+            db.commit()
+            bad_id = bad.id  # no HostCredential row at all
+        r = c.get("/api/v1/network/bridges")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["nodes"][0]["host_id"] == host_id  # the good host still served
+        assert body["errors"] == [{"host_id": bad_id, "host_name": "host-02",
+                                   "error": "host host-02 has no API token credential"}]
+
+
 def test_bridges_filters_by_host(tmp_path, csrf_header, bootstrap_admin):
     from tests.support import make_app, seed_snapshot
 
@@ -280,6 +309,40 @@ def test_put_network_does_not_enqueue_a_lifecycle_job(tmp_path, csrf_header,
         with app.state.sessionmaker() as db:
             assert db.query(Job).count() == 0
         assert fake.actions == []  # no guest_action ever reached PVE
+
+
+def test_guest_network_read_failure_is_a_502(tmp_path, csrf_header, bootstrap_admin):
+    """BLOCKING 3: guest_nics() never caught ProxmoxError either — a bare 500
+    instead of the 502 every other read in this phase returns."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.fail = True
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, _, vm_id = _seed(app)
+        assert c.get(f"/api/v1/vms/{vm_id}/network").status_code == 502
+
+
+def test_guest_nic_edit_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
+                                                                 bootstrap_admin):
+    """BLOCKING 3: set_guest_nic() is a mutation with no ProxmoxError handling —
+    a failed write must still leave an audit trace, matching storage.py."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.fail = True
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, _, vm_id = _seed(app)
+        r = c.put(f"/api/v1/vms/{vm_id}/network/net0", json={"bridge": "vmbr9"},
+                  headers=csrf_header(c))
+        assert r.status_code == 502
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="network.guest_config").one()
+            assert row.result == "error"
 
 
 def test_missing_session_is_401_not_403(tmp_path, csrf_header):
