@@ -16,6 +16,8 @@ from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, AppScript, CatalogEntry, Host
 from proxploy.services.catalog import raw_url
+from proxploy.services.hostclient import client_for_host
+from proxploy.services.proxmox import ProxmoxError
 
 
 SHORT_SHA = 7
@@ -177,3 +179,188 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
 
 
 HANDLERS["app.install"] = run_install
+
+
+def _resolve_update(app, app_id: int):
+    """Blocking: (app row fields, host row fields, catalog entry fields).
+
+    Plain dicts, not ORM objects: the session closes when this returns and the
+    caller runs for minutes afterwards. Same reason services/backupjobs.py's
+    `_backup_target` returns a dict.
+    """
+    with app.state.sessionmaker() as db:
+        a = db.get(App, app_id)
+        if a is None:
+            raise JobFailed(f"app {app_id} not found")
+        if not a.catalog_slug:
+            raise JobFailed(f"{a.name} was adopted, not installed from the catalog "
+                            f"— there is no upstream script to update it with")
+        entry = db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
+        if entry is None:
+            raise JobFailed(f"catalog entry {a.catalog_slug} not found; "
+                            f"refresh the catalog first")
+        if not entry.upstream_sha:
+            raise JobFailed(f"{a.catalog_slug} has no pinned upstream commit; "
+                            f"refresh the catalog before updating")
+        latest = (db.query(AppScript).filter_by(app_id=app_id)
+                  .order_by(AppScript.version.desc()).first())
+        # api/apps.py::put_app_script writes an "edited" row WITHOUT an
+        # upstream_ref, so from_ref would read None below regardless — but
+        # that's an accident of that route, not something to depend on here.
+        # Checked explicitly: if it's ever backfilled with a ref, silently
+        # trusting upstream_ref==None would stop catching this and overwrite
+        # the operator's edits.
+        if latest is not None and latest.source == "edited":
+            raise JobFailed(
+                f"{a.name}'s script was edited locally (version {latest.version}); "
+                f"updating would discard those edits by re-running the upstream "
+                f"script — revert to the upstream script first if you want the "
+                f"update")
+        from_ref = pinned_ref(db, app_id)
+        if from_ref is None:
+            raise JobFailed(f"{a.name} has no pinned script; there is no commit "
+                            f"to update from")
+        if from_ref == entry.upstream_sha:
+            raise JobFailed(f"{a.name} is already on upstream commit "
+                            f"{from_ref[:SHORT_SHA]}")
+        host = db.get(Host, a.host_id)
+        if host is None:
+            raise JobFailed(f"host {a.host_id} not found")
+        return (
+            {"id": a.id, "name": a.name, "ctid": a.ctid, "host_id": a.host_id},
+            {"id": host.id, "name": host.name, "address": host.address,
+             "fingerprint": host.ssh_host_key_fingerprint},
+            {"slug": entry.slug, "sha": entry.upstream_sha,
+             "script_path": entry.script_path,
+             "install_script": (entry.raw or {}).get("install_script", ""),
+             "from_ref": from_ref},
+        )
+
+
+def _lxc_ids(app, host_id: int) -> set[int]:
+    """Blocking: every LXC id currently on the host, straight from PVE.
+
+    One `/cluster/resources` call — the same read the poller makes. Deliberately
+    NOT the poller's cached snapshot: this is a safety check, and a cache up to
+    30 s stale is exactly what would miss a container created seconds ago.
+    """
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        if host is None:
+            raise JobFailed(f"host {host_id} not found")
+        try:
+            client = client_for_host(app, db, host)
+            rows = client.cluster_resources()
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
+    return {int(r["vmid"]) for r in rows if r.get("type") == "lxc"}
+
+
+async def run_update(ctx: JobContext, params: dict) -> dict:
+    """`app.update` — re-run the app's catalog script, pinned to the CURRENT
+    upstream commit, over the same SSH path install uses (doc 10 Phase 7:
+    "same pin/diff/consent/stream/archive path as install").
+
+    Consent and the upstream diff are the API layer's job (Task 6), exactly as
+    install splits them; this handler assumes both were obtained.
+
+    Two guards bracket the SSH run. A community-scripts `ct/*.sh` decides for
+    itself whether it is installing or updating — `build.func`'s `start` routes
+    to `update_script()` when it finds the container and to `build_container()`
+    when it does not — and Proxploy cannot see inside that decision. The
+    failure mode when it goes the wrong way is a second container built while
+    the `apps` row still points at the first. So the CT must exist BEFORE
+    (otherwise the script would certainly install fresh), and no new CT may
+    exist AFTER (otherwise it installed anyway, and the job must say so rather
+    than report success over a stray container).
+
+    RESIDUAL LIMITATION, stated rather than hidden: whether a given entry's
+    update path is non-interactive is a property of that upstream script.
+    services/classifier.py classifies INSTALL feasibility only. An update path
+    that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
+    the full transcript archived — the honest outcome. Classifying update paths
+    is separate, larger work; see docs/notes/phase-7-operate.md.
+    """
+    app = ctx.backend.app
+    app_id = int(params["app_id"])
+
+    a, host, entry = await asyncio.to_thread(_resolve_update, app, app_id)
+
+    ctx.log(f"updating {a['name']} (CT {a['ctid']}) on {host['name']}: "
+            f"{entry['from_ref'][:SHORT_SHA]} -> {entry['sha'][:SHORT_SHA]}")
+
+    before = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
+    if a["ctid"] not in before:
+        raise JobFailed(
+            f"CT {a['ctid']} is not present on {host['name']} — refusing to run "
+            f"the catalog script, which would install a NEW container rather "
+            f"than update this one")
+    ctx.progress(10)
+
+    executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
+
+    def on_new_fingerprint(fp: str) -> None:
+        with app.state.sessionmaker() as db:
+            h = db.get(Host, a["host_id"])
+            if h is not None:
+                h.ssh_host_key_fingerprint = fp
+                db.commit()
+
+    # Pinned to the exact commit that was ingested and classified, never to
+    # `main` — identical rule and identical raw_url() helper as run_install,
+    # and it carries the same one-level-down residual: the pinned script's own
+    # `source <(curl ... /main/misc/build.func)` line is frozen text but still
+    # fetches live. See docs/notes/phase-4-store.md.
+    command = f"bash -c \"$(curl -fsSL {raw_url(entry['sha'], entry['script_path'])})\""
+    env = {"MODE": "default", "PHS_SILENT": "1"}
+    try:
+        status = await executor.run_for_host(
+            app.state.sessionmaker, app.state.secretstore, a["host_id"],
+            host["address"], command,
+            pinned_fingerprint=host["fingerprint"],
+            on_new_fingerprint=on_new_fingerprint, env=env,
+            on_line=lambda stream, line: ctx.log(line, stream=stream),
+        )
+    except LookupError as e:
+        raise JobFailed(str(e)) from e
+    if status != 0:
+        raise JobFailed(f"update script exited {status}")
+    ctx.progress(80)
+
+    after = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
+    strays = sorted(after - before)
+    if strays:
+        raise JobFailed(
+            f"the catalog script created new container(s) {strays} instead of "
+            f"updating CT {a['ctid']} — {a['name']} was NOT updated, and "
+            f"{'CT ' + str(strays[0]) if len(strays) == 1 else 'those CTs'} "
+            f"should be reviewed and removed by hand")
+    if a["ctid"] not in after:
+        raise JobFailed(f"CT {a['ctid']} disappeared during the update")
+
+    # The pin advances only now, on a run that provably updated this container.
+    def _record() -> int:
+        with app.state.sessionmaker() as db:
+            row = db.get(App, app_id)
+            latest = (db.query(AppScript).filter_by(app_id=app_id)
+                      .order_by(AppScript.version.desc()).first())
+            version = (latest.version + 1) if latest else 1
+            content = entry["install_script"]
+            db.add(AppScript(app_id=app_id, version=version, content=content,
+                             content_sha256=hashlib.sha256(
+                                 content.encode()).hexdigest(),
+                             source="upstream", upstream_ref=entry["sha"]))
+            if row is not None:
+                row.update_available = None
+            db.commit()
+            return version
+
+    version = await asyncio.to_thread(_record)
+    ctx.progress(100)
+    app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                       "change": "updated"})
+    return {"app_id": app_id, "from_ref": entry["from_ref"], "to_ref": entry["sha"],
+            "script_version": version}
+
+
+HANDLERS["app.update"] = run_update

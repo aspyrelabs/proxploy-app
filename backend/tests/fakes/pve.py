@@ -540,7 +540,12 @@ class FakePVE:
         self.storage_creates: list[dict] = []
         self.storage_updates: list[tuple] = []
         self.storage_removes: list[str] = []
-        self.cluster = _ClusterNS(self, resources or [], fail)
+        # Stored as an attribute (not just captured inside _ClusterNS) so
+        # add_ct() below can mutate the same list object a test already has a
+        # handle on via `resources=` — cluster.resources.get() reads this list
+        # by reference, not a copy.
+        self.resources: list[dict] = list(resources) if resources else []
+        self.cluster = _ClusterNS(self, self.resources, fail)
         self.nodes = _NodesNS(self)
         self.kwargs = {}
         # lifecycle recording (Phase 3)
@@ -575,6 +580,16 @@ class FakePVE:
         self.guest_deletes: list[tuple[str, str, int]] = []
         self.create_error: str | None = None
         self.clone_error: str | None = None
+
+    def add_ct(self, vmid: int, *, node: str = "pve1", name: str = "ct",
+              status: str = "running", **extra) -> dict:
+        """Append an LXC row to /cluster/resources (Phase 7 Task 5: the
+        app.update before/after CT-existence guards read this live, never the
+        poller's cached snapshot)."""
+        row = {"type": "lxc", "vmid": vmid, "node": node, "name": name,
+              "status": status, **extra}
+        self.resources.append(row)
+        return row
 
     def _record_action(self, kind: str, vmid: int, action: str) -> str:
         self.actions.append((kind, vmid, action))

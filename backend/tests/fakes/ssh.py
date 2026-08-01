@@ -33,7 +33,8 @@ class _FakeProcess:
 
 class FakeSSHConnection:
     def __init__(self, *, host_key_fingerprint: str, stdout_lines: list[str],
-                stderr_lines: list[str], exit_status: int, hang: bool = False):
+                stderr_lines: list[str], exit_status: int, hang: bool = False,
+                on_create_process=None):
         self.host_key_fingerprint = host_key_fingerprint
         self.stdout_lines = stdout_lines
         self.stderr_lines = stderr_lines
@@ -45,10 +46,18 @@ class FakeSSHConnection:
         # by default sshd AcceptEnv) — asserting on it is the only way to
         # prove an override actually reaches the remote process.
         self.last_command: str | None = None
+        # Fires right after the command is recorded, before the process
+        # object is returned (Phase 7 Task 5): lets a test mutate FakePVE
+        # mid-run, e.g. simulate the catalog script taking build.func's
+        # install branch and creating a stray CT while "over SSH" the update
+        # is still in flight.
+        self._on_create_process = on_create_process
 
     async def create_process(self, command, *, env=None, stdin=None):
         self.last_command = command
         self.stdin_closed = stdin is not None
+        if self._on_create_process is not None:
+            self._on_create_process(command)
         return _FakeProcess(self)
 
     async def __aenter__(self):
