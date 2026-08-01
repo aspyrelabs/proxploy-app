@@ -2,5 +2,7 @@
 from proxploy.jobs.backend import (
     HANDLERS, TERMINAL, JobBackend, JobContext, JobFailed, handler,
 )
+from proxploy.jobs.scheduler import Scheduler
 
-__all__ = ["HANDLERS", "TERMINAL", "JobBackend", "JobContext", "JobFailed", "handler"]
+__all__ = ["HANDLERS", "TERMINAL", "JobBackend", "JobContext", "JobFailed",
+           "handler", "Scheduler"]

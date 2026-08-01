@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # revisited for these — see BLOCKING 4 in the Phase 6 final review.
     pve_task_timeout_s: float = 3600.0
     backup_sync_stale_s: float = 900.0
+    # Scheduler (doc 10 Phase 7). The tick is the resolution floor: a cron
+    # expression cannot be finer than one minute, so 30s is already twice as
+    # often as it needs to be and costs one indexed SELECT.
+    scheduler_enabled: bool = True
+    scheduler_tick_s: float = 30.0
+    # Alert evaluation rides the poll cycle (services/alerts.py); off means the
+    # poller still writes samples, nothing evaluates them.
+    alerts_enabled: bool = True
 
 
 @lru_cache

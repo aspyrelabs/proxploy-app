@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+from proxploy.jobs import HANDLERS
 from proxploy.models import MetricRollup, MetricSample, utcnow
 
 METRICS = ("cpu_pct", "mem_bytes", "disk_bytes", "net_in_bps", "net_out_bps",
@@ -110,23 +111,37 @@ def query_series(db, target_type: str, target_id: int, metric: str,
             "max": [r.max for r in rows]}
 
 
-async def metrics_loop(app) -> None:
-    """5m rollup every 5 min; 1h rollup + prune hourly.
+async def maintain(ctx, params: dict) -> dict:
+    """`metrics.maintain` — hourly rollups + retention prune, as a real job.
 
-    Plain lifespan task for now — Phase 7 moves these onto APScheduler so
-    they appear in the activity feed like any other job (doc 10 Phase 7).
+    Doc 04: "All pruning runs as scheduled system jobs (visible in the activity
+    feed like any other job)". This replaces Phase 2's silent `metrics_loop`
+    lifespan task, which is why the lookbacks are wider than that loop's:
+    running hourly instead of every five minutes, 13 five-minute buckets covers
+    the full hour and then some. Rollups are idempotent (delete+insert over the
+    window), so an overlapping lookback is free and a missed run self-heals on
+    the next one.
+
+    Charts under six hours read RAW samples (`pick_resolution`), so nothing
+    user-visible lags by moving the 5m rollup from a 5-minute to a 60-minute
+    cadence.
     """
-    tick = 0
-    while True:
-        await asyncio.sleep(300)
-        tick += 1
-        try:
-            def work() -> None:
-                with app.state.sessionmaker() as db:
-                    rollup(db, "5m", utcnow())
-                    if tick % 12 == 0:
-                        rollup(db, "1h", utcnow())
-                        prune(db, utcnow())
-            await asyncio.to_thread(work)
-        except Exception:  # noqa: BLE001 — a failed tick never kills the loop
-            continue
+    app = ctx.backend.app
+
+    def work() -> dict:
+        with app.state.sessionmaker() as db:
+            now = utcnow()
+            rollups = {"5m": rollup(db, "5m", now, lookback=13),
+                       "1h": rollup(db, "1h", now, lookback=2)}
+            return {"rollups": rollups, "pruned": prune(db, now)}
+
+    ctx.log("rolling up metric samples and applying retention")
+    out = await asyncio.to_thread(work)
+    ctx.log(f"5m buckets: {out['rollups']['5m']}, 1h buckets: {out['rollups']['1h']}")
+    ctx.log(f"pruned raw={out['pruned']['raw']} 5m={out['pruned']['5m']} "
+            f"1h={out['pruned']['1h']}")
+    ctx.progress(100)
+    return out
+
+
+HANDLERS["metrics.maintain"] = maintain

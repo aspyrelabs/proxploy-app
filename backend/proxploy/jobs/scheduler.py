@@ -22,6 +22,7 @@ to raise out of the tick.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from apscheduler.triggers.cron import CronTrigger
@@ -209,3 +210,69 @@ def tick(app, now: datetime | None = None) -> list[dict]:
             if out is not None:
                 fired.append(out)
     return fired
+
+
+# --- system schedules -------------------------------------------------------
+
+# Rows Proxploy owns. Seeded by name at boot if absent, never re-created or
+# re-enabled once the operator has touched them (see seed_system_schedules).
+# `catalog.refresh` is what keeps `apps.update_available` honest — without it
+# an auto-update window would never see a new upstream commit.
+SYSTEM_SCHEDULES: tuple[dict, ...] = (
+    {"name": "Catalog refresh", "job_kind": "catalog.refresh",
+     "cron": "0 4 * * *", "timezone": "UTC", "params": {}},
+    {"name": "Metrics maintenance", "job_kind": "metrics.maintain",
+     "cron": "7 * * * *", "timezone": "UTC", "params": {}},
+)
+
+
+def seed_system_schedules(db) -> int:
+    """Insert any missing system schedule. Returns how many were created.
+
+    Keyed on `name`, and deliberately one-way: a system row the operator
+    disabled or re-timed stays that way across restarts. Re-enabling here would
+    make "stop refreshing the catalog nightly" impossible to express.
+    """
+    existing = {name for (name,) in db.query(Schedule.name).all()}
+    created = 0
+    for spec in SYSTEM_SCHEDULES:
+        if spec["name"] in existing:
+            continue
+        db.add(Schedule(enabled=True, created_by=None, **spec))
+        created += 1
+    if created:
+        db.commit()
+    return created
+
+
+# --- the loop ---------------------------------------------------------------
+
+class Scheduler:
+    """One tick loop, shaped like pollers.Poller: the supervisor never dies.
+
+    All DB work runs in `asyncio.to_thread` — SQLAlchemy is blocking, and a
+    scheduler that stalls the event loop would stall the SSE fanout, the
+    pollers and every in-flight job with it.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self._stopped = False
+
+    async def run(self) -> None:
+        interval = self.app.state.settings.scheduler_tick_s
+        while not self._stopped:
+            try:
+                for entry in await asyncio.to_thread(tick, self.app):
+                    self.app.state.bus.publish(
+                        "job", {"id": entry["job_id"], "kind": entry["kind"],
+                                "status": "queued",
+                                "schedule_id": entry["schedule_id"]})
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — one bad tick must not end them all
+                pass
+            await asyncio.sleep(interval)
+
+    def stop(self) -> None:
+        self._stopped = True

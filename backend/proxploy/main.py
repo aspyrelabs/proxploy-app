@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from proxploy.config import Settings, get_settings
 from proxploy.db import make_engine, make_sessionmaker, run_migrations
-from proxploy.models import AppSetting
+from proxploy.models import AppSetting, utcnow
 
 
 def create_app(
@@ -79,7 +79,7 @@ def create_app(
         app.state.bus = EventBus()
         app.state.loop = asyncio.get_running_loop()  # test seam for cross-thread publishes
 
-        from proxploy.jobs import JobBackend
+        from proxploy.jobs import JobBackend, Scheduler
         from proxploy.pollers import Poller
         from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install
         from proxploy.services import backupjobs as _backupjobs  # noqa: F401 — registers backup.sync
@@ -87,7 +87,7 @@ def create_app(
         from proxploy.services import guestjobs as _guestjobs  # noqa: F401 — registers network.apply
         from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
         from proxploy.services import storagejobs as _storagejobs  # noqa: F401 — registers storage.upload/delete_volume
-        from proxploy.services.metrics import metrics_loop
+        from proxploy.services import metrics as _metrics  # noqa: F401 — registers metrics.maintain
 
         app.state.jobs = JobBackend(app)
         app.state.jobs.sweep_orphans()  # doc 02 §3: mark orphans, never resume
@@ -98,18 +98,27 @@ def create_app(
         # mid-upload strand a multi-GB temp file on disk forever.
         shutil.rmtree(settings.data_dir / "uploads", ignore_errors=True)
         app.state.poller = Poller(app)
-        poller_task = metrics_task = None
+        app.state.scheduler = Scheduler(app)
+        poller_task = scheduler_task = None
         if settings.poll_enabled:
             poller_task = asyncio.create_task(app.state.poller.run())
-            metrics_task = asyncio.create_task(metrics_loop(app))
+        if settings.scheduler_enabled:
+            # Seeding needs every handler registered, which the imports above
+            # have just done; priming needs the seeded rows.
+            from proxploy.jobs.scheduler import prime, seed_system_schedules
+            with app.state.sessionmaker() as db:
+                seed_system_schedules(db)
+                prime(db, utcnow())
+            scheduler_task = asyncio.create_task(app.state.scheduler.run())
 
         yield
         if refresh_task:
             refresh_task.cancel()
         if poller_task:
             poller_task.cancel()
-        if metrics_task:
-            metrics_task.cancel()
+        if scheduler_task:
+            scheduler_task.cancel()
+        app.state.scheduler.stop()
         app.state.poller.stop()
         app.state.jobs.stop()
         app.state.engine.dispose()
