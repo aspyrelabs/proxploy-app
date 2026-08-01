@@ -211,16 +211,15 @@ def _resolve_update(app, app_id: int):
         # trusting upstream_ref==None would stop catching this and overwrite
         # the operator's edits.
         if latest is not None and latest.source == "edited":
-            # No route writes source="upstream" except run_install and this
-            # handler itself — there is no revert-to-upstream action anywhere
-            # in the product yet (Task 6 scope), so this is not "fix it and
-            # retry", it is a hard stop. Say that plainly rather than point at
-            # a capability that doesn't exist.
+            # api/apps.py::revert_app_script (Task 6) is the way out: it pins
+            # a fresh version sourced "upstream" so this guard clears. Point
+            # at it by name rather than making the operator guess.
             raise JobFailed(
                 f"{a.name}'s script was edited locally (version {latest.version}); "
                 f"updating would replace it with the upstream script and discard "
-                f"those edits. Proxploy currently has no way to revert a script "
-                f"back to upstream, so this update cannot proceed.")
+                f"those edits. POST /api/v1/apps/{app_id}/script/revert will "
+                f"restore the upstream script first if you want to proceed with "
+                f"the update.")
         from_ref = pinned_ref(db, app_id)
         if from_ref is None:
             raise JobFailed(f"{a.name} has no pinned script; there is no commit "

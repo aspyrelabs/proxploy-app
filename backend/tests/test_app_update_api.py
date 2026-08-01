@@ -114,6 +114,58 @@ def test_update_routes_are_not_swallowed_by_the_lifecycle_wildcard(client,
     assert r.status_code == 202
 
 
+def test_get_update_on_an_edited_app_reports_no_update_and_says_so(client, csrf_header,
+                                                                   bootstrap_admin):
+    """Review finding: put_app_script leaves `upstream_ref` NULL on an edited
+    row, which used to make GET's `from_ref != to_ref` diff guard trivially
+    true and advertise a diff/update that POST would then refuse. An edited
+    newest script must report no update at all, plus WHY via script_source."""
+    bootstrap_admin(client)
+    app_id = _seed(client)
+    client.put(f"/api/v1/apps/{app_id}/script", json={"content": "edited by hand\n"},
+              headers=csrf_header(client))
+    body = client.get(f"/api/v1/apps/{app_id}/update").json()
+    assert body["script_source"] == "edited"
+    assert body["update_available"] is None
+    assert body["from_ref"] is None
+    assert body["diff_vs_upstream"] is None
+
+
+def test_post_update_on_an_edited_app_names_revert_not_refresh_the_catalog(client,
+                                                                          csrf_header,
+                                                                          bootstrap_admin):
+    """Distinct 409 from the "nothing pinned" case: refreshing the catalog
+    does nothing for an edited app, so the message must not say that, and must
+    point at the real remedy (POST .../script/revert) built in this task."""
+    bootstrap_admin(client)
+    app_id = _seed(client)
+    h = csrf_header(client)
+    client.put(f"/api/v1/apps/{app_id}/script", json={"content": "edited by hand\n"},
+              headers=h)
+    r = client.post(f"/api/v1/apps/{app_id}/update", json={"consent": True}, headers=h)
+    assert r.status_code == 409
+    text = r.text.lower()
+    assert "script/revert" in text
+    assert "refresh the catalog" not in text
+
+
+def test_revert_clears_a_stale_update_available(client, csrf_header, bootstrap_admin):
+    """Review finding: revert pins to the catalog's CURRENT sha, so by
+    definition nothing is pending afterwards — GET must not go on reporting
+    both "up to date" (from_ref == to_ref) and a stale update_available."""
+    bootstrap_admin(client)
+    app_id = _seed(client)  # pinned="a"*40, upstream="b"*40 -> update pending
+    before = client.get(f"/api/v1/apps/{app_id}/update").json()
+    assert before["update_available"] == "b" * 7
+
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert r.status_code == 200, r.text
+
+    after = client.get(f"/api/v1/apps/{app_id}/update").json()
+    assert after["update_available"] is None
+    assert after["from_ref"] == after["to_ref"] == "b" * 40
+
+
 def test_store_update_entitlement_gates_the_post(tmp_path, csrf_header,
                                                  bootstrap_admin):
     app = make_app(tmp_path)

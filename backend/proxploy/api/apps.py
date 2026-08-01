@@ -276,6 +276,13 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                     source="upstream", upstream_ref=entry.upstream_sha,
                     created_by=user.id)
     db.add(row)
+    # Pins to the catalog's CURRENT sha, so by definition there is nothing
+    # pending afterwards — mirrors run_update's own reset (services/appstore.py)
+    # rather than leaving GET /update reporting an update against a script that
+    # was just reverted TO that exact commit. A single-row assignment, not
+    # mark_updates_available(db): that recomputes the whole table and this
+    # route only just changed the state of one.
+    a.update_available = None
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="apps.script_revert",
                 target_type="app", target_id=app_id, params={"version": row.version},
@@ -287,7 +294,16 @@ class UpdateIn(BaseModel):
     consent: bool = False
 
 
-def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, str | None]:
+def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript | None]:
+    """Returns the app, its catalog entry (if any), and its NEWEST AppScript
+    row — the single query both GET and POST /update need. Returning the row
+    itself, not just `.upstream_ref`, lets both callers see `.source` too:
+    `put_app_script` leaves `upstream_ref` NULL on an edited row, and that
+    NULL alone is not enough to tell "edited" apart from "no script pinned at
+    all" (review finding: a bare `from_ref is None` check conflated the two,
+    so GET showed a stale update + a bogus diff for an edited app, and POST's
+    409 blamed a missing catalog entry that was not the actual cause).
+    """
     a = db.get(App, app_id)
     if a is None:
         raise HTTPException(404, "app not found")
@@ -295,7 +311,7 @@ def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, str | None
              if a.catalog_slug else None)
     latest = (db.query(AppScript).filter_by(app_id=app_id)
               .order_by(AppScript.version.desc()).first())
-    return a, entry, (latest.upstream_ref if latest else None)
+    return a, entry, latest
 
 
 @router.get("/{app_id}/update",
@@ -312,15 +328,23 @@ def get_app_update(app_id: int, db=Depends(get_db)):
     Unlike the Config tab's GET /script (which always shows drift, including
     the rare case where a catalog refresh moves `raw.install_script` without
     the pinned commit changing), this route only surfaces a diff when there is
-    an update TO show: `from_ref != to_ref`. A caller here is asking "what
-    would `POST .../update` do", and the honest answer when the app is already
-    on the catalog's commit is "nothing" — not a diff sourced from unrelated
-    content drift.
+    an update TO show. A caller here is asking "what would `POST .../update`
+    do", and the honest answer when the app is already on the catalog's
+    commit is "nothing" — not a diff sourced from unrelated content drift.
+
+    An edited newest script (`script_source == "edited"`) is reported as no
+    update available at all, never a diff: `upstream_ref` is NULL on that row,
+    so POST will refuse regardless of the catalog state (see update_app), and
+    showing a populated `diff_vs_upstream`/`update_available` here would
+    advertise an action POST is about to reject.
     """
-    a, entry, from_ref = _update_state(db, app_id)
-    latest = (db.query(AppScript).filter_by(app_id=app_id)
-              .order_by(AppScript.version.desc()).first())
+    a, entry, latest = _update_state(db, app_id)
     to_ref = entry.upstream_sha if entry else None
+    script_source = latest.source if latest else None
+    if script_source == "edited":
+        return {"update_available": None, "from_ref": None, "to_ref": to_ref,
+                "diff_vs_upstream": None, "script_source": script_source}
+    from_ref = latest.upstream_ref if latest else None
     diff = (_diff_vs_upstream(db, a, latest.content)
             if latest and to_ref is not None and from_ref != to_ref else None)
     return {
@@ -328,6 +352,7 @@ def get_app_update(app_id: int, db=Depends(get_db)):
         "from_ref": from_ref,
         "to_ref": to_ref,
         "diff_vs_upstream": diff,
+        "script_source": script_source,
     }
 
 
@@ -336,16 +361,26 @@ def get_app_update(app_id: int, db=Depends(get_db)):
                            Depends(require_entitlement("store.update"))])
 def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db),
                user: User = Depends(_require_operator)):
-    """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry).
-
-    This re-runs a community script as root on the node — brief §8 says the
-    honest thing is to make the operator say so out loud, and an update is no
-    less privileged than the install was.
+    """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry):
+    this re-runs a community script as root on the node, and brief §8 says the
+    honest thing is to make the operator say so out loud. Unlike install
+    (admin-only), doc 05 grants this to operator — a lower bar than the
+    catalog table above intentionally accepts, not an oversight to fix here.
     """
     if not body.consent:
         raise HTTPException(400, "root-consent required: this runs a community "
                                  "script as root on the node")
-    a, entry, from_ref = _update_state(db, app_id)
+    a, entry, latest = _update_state(db, app_id)
+    if latest is not None and latest.source == "edited":
+        # Distinct from the "nothing pinned" 409 below: refreshing the catalog
+        # does nothing for an edited app, so don't tell the operator to do it.
+        raise HTTPException(409, f"{a.name}'s saved script was edited locally; "
+                                 f"updating would replace it with the upstream "
+                                 f"script and discard those edits. POST "
+                                 f"/api/v1/apps/{app_id}/script/revert will "
+                                 f"restore the upstream script if you want to "
+                                 f"proceed with the update.")
+    from_ref = latest.upstream_ref if latest else None
     if entry is None or not entry.upstream_sha or from_ref is None:
         raise HTTPException(409, "no upstream script is pinned for this app; "
                                  "refresh the catalog first")

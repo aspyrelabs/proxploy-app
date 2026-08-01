@@ -307,10 +307,10 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
     upstream script over an edited one would silently discard the operator's
     edits — this must fail before anything reaches SSH.
 
-    Review B3: no route anywhere writes source="upstream" except run_install
-    and this handler itself, so there is no revert action to point an operator
-    at — the message must say plainly that Proxploy has no way to revert,
-    not describe a "revert first" workaround that doesn't exist."""
+    Task 6 built api/apps.py::revert_app_script as the way out, so the
+    message now points at it by name (`POST .../script/revert`) instead of
+    the old "Proxploy has no way to revert" wording, which stopped being true
+    the moment that route shipped."""
     async def go():
         fake = FakePVE()
         fake.add_ct(101, node="pve1", name="redis", status="running")
@@ -324,8 +324,8 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
             await HANDLERS["app.update"](ctx, {"app_id": app_id})
         msg = str(e.value).lower()
         assert "edit" in msg
-        assert "no way to revert" in msg
-        assert "revert to the upstream script first" not in msg  # no fake workaround
+        assert "script/revert" in msg
+        assert "no way to revert" not in msg           # the old, now-false claim
         assert cmds == []                             # never reached the SSH executor
 
     asyncio.run(go())
