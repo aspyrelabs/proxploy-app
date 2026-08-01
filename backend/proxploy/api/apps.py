@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
-from proxploy.api.jobs import job_out
+from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User
 from proxploy.services.audit import write_audit
@@ -233,6 +233,129 @@ def list_app_script_versions(app_id: int, db=Depends(get_db)):
            for r in rows]
 
 
+@router.post("/{app_id}/script/revert",
+             dependencies=[Depends(_require_admin),
+                          Depends(require_entitlement("apps.script_edit"))])
+def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
+                      user: User = Depends(_require_admin)):
+    """Task 5 review found a dead end: put_app_script above always writes
+    `source="edited"`, and nothing else ever writes `source="upstream"` except
+    the install/update job handlers — so once an app's script is edited,
+    services/appstore.py::_resolve_update's edited-script guard blocks
+    `app.update` FOREVER, even if the operator pastes the exact upstream text
+    back (there was no way to re-mark a row "upstream"). This route is that
+    way back: pin a NEW version to the catalog's CURRENT install_script,
+    sourced "upstream", so pinned_ref reads the catalog sha again and the
+    guard clears.
+
+    Never mutates or deletes the edited row being reverted from — the version
+    history is the record, same rule put_app_script already follows.
+    """
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    if not a.catalog_slug:
+        raise HTTPException(409, f"{a.name} was adopted, not installed from the "
+                                 f"catalog — there is no upstream script to revert to")
+    entry = db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
+    if entry is None:
+        raise HTTPException(409, f"catalog entry {a.catalog_slug} not found; "
+                                 f"refresh the catalog first")
+    if not entry.upstream_sha:
+        raise HTTPException(409, f"{a.catalog_slug} has no pinned upstream commit; "
+                                 f"refresh the catalog before reverting")
+    content = (entry.raw or {}).get("install_script")
+    if not content:
+        raise HTTPException(409, f"{a.catalog_slug}'s catalog entry has no "
+                                 f"install_script to revert to")
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+             .order_by(AppScript.version.desc()).first())
+    next_version = (latest.version + 1) if latest else 1
+    row = AppScript(app_id=app_id, version=next_version, content=content,
+                    content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                    source="upstream", upstream_ref=entry.upstream_sha,
+                    created_by=user.id)
+    db.add(row)
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="apps.script_revert",
+                target_type="app", target_id=app_id, params={"version": row.version},
+                ip=request.client.host if request.client else None)
+    return {"version": row.version, "content": row.content, "source": row.source}
+
+
+class UpdateIn(BaseModel):
+    consent: bool = False
+
+
+def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, str | None]:
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
+             if a.catalog_slug else None)
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+              .order_by(AppScript.version.desc()).first())
+    return a, entry, (latest.upstream_ref if latest else None)
+
+
+@router.get("/{app_id}/update",
+            dependencies=[Depends(_require_operator),
+                          Depends(require_entitlement("store.updates"))])
+def get_app_update(app_id: int, db=Depends(get_db)):
+    """What an update would do: which commit to which, and the script diff.
+
+    Doc 10 Phase 7 requires the same diff/consent surface install has, so the
+    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders —
+    one implementation, one answer, no chance of the two disagreeing about
+    what is about to run.
+
+    Unlike the Config tab's GET /script (which always shows drift, including
+    the rare case where a catalog refresh moves `raw.install_script` without
+    the pinned commit changing), this route only surfaces a diff when there is
+    an update TO show: `from_ref != to_ref`. A caller here is asking "what
+    would `POST .../update` do", and the honest answer when the app is already
+    on the catalog's commit is "nothing" — not a diff sourced from unrelated
+    content drift.
+    """
+    a, entry, from_ref = _update_state(db, app_id)
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+              .order_by(AppScript.version.desc()).first())
+    to_ref = entry.upstream_sha if entry else None
+    diff = (_diff_vs_upstream(db, a, latest.content)
+            if latest and to_ref is not None and from_ref != to_ref else None)
+    return {
+        "update_available": a.update_available,
+        "from_ref": from_ref,
+        "to_ref": to_ref,
+        "diff_vs_upstream": diff,
+    }
+
+
+@router.post("/{app_id}/update", status_code=202,
+             dependencies=[Depends(_require_operator),
+                           Depends(require_entitlement("store.update"))])
+def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db),
+               user: User = Depends(_require_operator)):
+    """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry).
+
+    This re-runs a community script as root on the node — brief §8 says the
+    honest thing is to make the operator say so out loud, and an update is no
+    less privileged than the install was.
+    """
+    if not body.consent:
+        raise HTTPException(400, "root-consent required: this runs a community "
+                                 "script as root on the node")
+    a, entry, from_ref = _update_state(db, app_id)
+    if entry is None or not entry.upstream_sha or from_ref is None:
+        raise HTTPException(409, "no upstream script is pinned for this app; "
+                                 "refresh the catalog first")
+    if from_ref == entry.upstream_sha:
+        raise HTTPException(409, f"{a.name} is already up to date")
+    return enqueue_and_audit(request, db, user, kind="app.update",
+                             target_type="app", target_id=app_id,
+                             params={"app_id": app_id})
+
+
 def _app_and_host(db, app_id: int):
     a = db.get(App, app_id)
     if a is None:
@@ -300,10 +423,11 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
 
 # WARNING: this wildcard is registered last and Starlette matches routes in
 # registration order, so it will silently swallow any future two-segment
-# sibling under /apps/{id}/... — e.g. doc 05's still-unbuilt /apps/{id}/update
-# (Phase 4) and /apps/{id}/migrate (Phase 8). Register those routes with their
-# literal action segments BEFORE this one, or they'll hit this handler instead
-# and 422 with "action must be one of start, stop, restart, shutdown".
+# sibling under /apps/{id}/... — e.g. /apps/{id}/update above (Phase 7 Task 6)
+# and doc 05's still-unbuilt /apps/{id}/migrate (Phase 8). Register those
+# routes with their literal action segments BEFORE this one, or they'll hit
+# this handler instead and 422 with "action must be one of start, stop,
+# restart, shutdown".
 @router.post("/{app_id}/{action}", status_code=202,
              dependencies=[Depends(_require_operator),
                           Depends(require_entitlement("apps.lifecycle"))])

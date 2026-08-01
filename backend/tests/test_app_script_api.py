@@ -1,5 +1,7 @@
+from fastapi.testclient import TestClient
+
 from proxploy.models import App, AppScript
-from tests.support import seed_host_row
+from tests.support import make_app, seed_host_row
 
 
 def _seed_app_with_script(db, content="msg_ok done\n"):
@@ -131,3 +133,177 @@ def test_put_script_for_an_unknown_app_is_a_404_not_a_500(client, csrf_header, b
     r = client.put("/api/v1/apps/9999/script", json={"content": "x\n"},
                    headers=csrf_header(client))
     assert r.status_code == 404
+
+
+# --- POST /{app_id}/script/revert (Task 6 mandatory addition) --------------
+#
+# Task 5's review found a dead end: put_app_script above always writes
+# source="edited", and nothing else ever writes source="upstream" except the
+# install/update job handlers — so once a script is edited, services/
+# appstore.py::_resolve_update's edited-script guard blocks app.update
+# FOREVER. This route is the way back.
+
+
+def test_revert_pins_a_new_upstream_version_and_keeps_history(client, csrf_header,
+                                                               bootstrap_admin):
+    bootstrap_admin(client)
+    from proxploy.models import CatalogEntry
+    with client.app.state.sessionmaker() as db:
+        app = _seed_app_with_script(db, content="msg_ok done\n")
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha="c" * 40,
+                            raw={"install_script": "msg_ok upstream v2\n"}))
+        db.commit()
+        app_id = app.id
+
+    client.put(f"/api/v1/apps/{app_id}/script", json={"content": "msg_ok edited\n"},
+              headers=csrf_header(client))
+    edited = client.get(f"/api/v1/apps/{app_id}/script").json()
+    assert edited["source"] == "edited" and edited["version"] == 2
+
+    rr = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert rr.status_code == 200, rr.text
+    body = rr.json()
+    assert body["version"] == 3
+    assert body["content"] == "msg_ok upstream v2\n"
+    assert body["source"] == "upstream"
+
+    versions = client.get(f"/api/v1/apps/{app_id}/script/versions").json()
+    assert [v["version"] for v in versions] == [3, 2, 1]
+    assert [v["source"] for v in versions] == ["upstream", "edited", "upstream"]
+
+    from proxploy.services.appstore import pinned_ref
+    with client.app.state.sessionmaker() as db:
+        assert pinned_ref(db, app_id) == "c" * 40
+
+
+def test_revert_clears_the_edited_guard_that_blocks_app_update(client, csrf_header,
+                                                                bootstrap_admin):
+    """`_resolve_update` refuses to update an app whose newest script is
+    source="edited". After a revert, the newest script is source="upstream"
+    again and pinned to the catalog sha, so the guard no longer fires."""
+    bootstrap_admin(client)
+    from proxploy.models import CatalogEntry
+    with client.app.state.sessionmaker() as db:
+        app = _seed_app_with_script(db, content="msg_ok done\n")
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha="c" * 40,
+                            raw={"install_script": "msg_ok upstream v2\n"}))
+        db.commit()
+        app_id = app.id
+
+    client.put(f"/api/v1/apps/{app_id}/script", json={"content": "msg_ok edited\n"},
+              headers=csrf_header(client))
+    client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+
+    # The revert pins the app to the catalog's CURRENT commit exactly, so
+    # _resolve_update now takes the "already up to date" branch rather than
+    # the "was edited locally" one — proof the edited-script guard cleared.
+    from proxploy.jobs import JobFailed
+    from proxploy.services.appstore import _resolve_update
+    try:
+        _resolve_update(client.app, app_id)
+    except JobFailed as e:
+        assert "edited locally" not in str(e)
+        assert "already on upstream commit" in str(e)
+    else:
+        raise AssertionError("expected JobFailed: already on upstream commit")
+
+
+def test_revert_404s_an_unknown_app(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    r = client.post("/api/v1/apps/9999/script/revert", headers=csrf_header(client))
+    assert r.status_code == 404
+
+
+def test_revert_409s_an_adopted_app_with_no_catalog_slug(client, csrf_header,
+                                                         bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        app = App(host_id=host.id, ctid=151, name="Adopted", slug="adopted-1",
+                  catalog_slug=None, web_protocol="http", web_path="/", adopted=True)
+        db.add(app)
+        db.commit()
+        app_id = app.id
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert r.status_code == 409
+    assert "adopted" in r.text.lower()
+
+
+def test_revert_409s_when_the_catalog_entry_is_gone(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db).id  # catalog_slug="redis", no CatalogEntry row
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert r.status_code == 409
+    assert "catalog entry" in r.text.lower()
+
+
+def test_revert_409s_when_the_catalog_entry_has_no_upstream_sha(client, csrf_header,
+                                                                bootstrap_admin):
+    bootstrap_admin(client)
+    from proxploy.models import CatalogEntry
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db).id
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha=None, raw={"install_script": "x\n"}))
+        db.commit()
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert r.status_code == 409
+    assert "upstream commit" in r.text.lower()
+
+
+def test_revert_409s_when_the_catalog_entry_has_no_install_script(client, csrf_header,
+                                                                  bootstrap_admin):
+    bootstrap_admin(client)
+    from proxploy.models import CatalogEntry
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db).id
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha="c" * 40, raw={}))
+        db.commit()
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+    assert r.status_code == 409
+    assert "install_script" in r.text.lower()
+
+
+def test_revert_requires_admin(tmp_path, csrf_header, bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        from proxploy.models import CatalogEntry
+        with c.app.state.sessionmaker() as db:
+            app_row = _seed_app_with_script(db)
+            db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                                upstream_sha="c" * 40,
+                                raw={"install_script": "x\n"}))
+            db.commit()
+            app_id = app_row.id
+        c.post("/api/v1/users", json={"email": "op@example.com",
+                                      "password": "correct-horse-battery",
+                                      "display_name": "Op", "role": "operator"},
+               headers=csrf_header(c))
+        c.post("/api/v1/auth/login", json={"email": "op@example.com",
+                                           "password": "correct-horse-battery"},
+               headers=csrf_header(c))
+        r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
+        assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
+
+
+def test_revert_entitlement_gates_the_route(tmp_path, csrf_header, bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        from proxploy.models import CatalogEntry
+        with c.app.state.sessionmaker() as db:
+            app_row = _seed_app_with_script(db)
+            db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                                upstream_sha="c" * 40,
+                                raw={"install_script": "x\n"}))
+            db.commit()
+            app_id = app_row.id
+        c.app.state.entitlements._features = {"apps.script_edit": False}
+        r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
+        assert r.status_code == 403
+        assert r.json()["feature"] == "apps.script_edit"
