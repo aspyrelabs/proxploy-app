@@ -3,9 +3,10 @@
 The `schedules` table is authoritative (doc 04) and `jobs/scheduler.py` reads
 it every tick, so there is nothing to register or de-register here: a write
 that lands is live within one tick. The only obligation is that a row this
-router accepts must be one the tick can actually fire — hence `validate()` on
-every write, rather than discovering a bad cron when the schedule silently
-disables itself hours later.
+router accepts must be one the tick can actually fire — hence `_validated()`
+(the same checks as Task 1's `validate()`, split out so a 422 can name which
+of cron/timezone/job_kind actually failed) on every write, rather than
+discovering a bad cron when the schedule silently disables itself hours later.
 """
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from pydantic import BaseModel
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
 from proxploy.api.jobs import job_out
-from proxploy.jobs.scheduler import BadSchedule, _target, next_fire, validate
+from proxploy.jobs import HANDLERS
+from proxploy.jobs.scheduler import BadSchedule, _target, next_fire
 from proxploy.models import Job, Schedule, User, utcnow
 from proxploy.services.audit import write_audit
 
@@ -81,19 +83,25 @@ def _check_auto_update(request: Request, job_kind: str) -> None:
 
 
 def _validated(cron: str, tz: str, job_kind: str) -> None:
+    """Same checks as `validate()` (Task 1), but discriminating which of the
+    three axes failed — a flat `str(BadSchedule)` doesn't always name the
+    axis (e.g. a bad cron's message never contains the word "cron"), and a
+    human (or a test) needs to know whether to fix the trigger or the kind."""
+    if job_kind not in HANDLERS:
+        raise HTTPException(422, f"no job handler registered for kind {job_kind!r}")
     try:
-        validate(cron, tz, job_kind)
+        next_fire(cron, tz, utcnow())
     except BadSchedule as e:
-        raise HTTPException(422, f"invalid cron/timezone/job_kind: {e}") from e
+        raise HTTPException(422, f"invalid cron expression or timezone: {e}") from e
 
 
 @router.get("", dependencies=[Depends(_require_viewer)])
 def list_schedules(db=Depends(get_db), user: User = Depends(_require_viewer)):
-    # Newest first, same convention as GET /jobs (api/jobs.py) — otherwise the
-    # two boot-seeded system schedules (ids 1-2, doc 04 SYSTEM_SCHEDULES)
-    # permanently occupy the front of the list ahead of anything an operator
-    # creates.
-    return [_out(s) for s in db.query(Schedule).order_by(Schedule.id.desc()).all()]
+    # Ascending, same convention as notifications.py::list_channels — this is
+    # a small, admin-curated config list (unlike GET /jobs' append-only
+    # execution log, where newest-first is the right read), and stable
+    # ordering matters more here than surfacing new rows first.
+    return [_out(s) for s in db.query(Schedule).order_by(Schedule.id).all()]
 
 
 @router.post("", status_code=201,
@@ -152,8 +160,9 @@ def patch_schedule(request: Request, schedule_id: int, body: SchedulePatch,
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="schedule.update",
                 target_type="schedule", target_id=row.id,
-                params={"name": row.name, "cron": row.cron,
-                        "timezone": row.timezone, "enabled": row.enabled},
+                params={"name": row.name, "job_kind": row.job_kind,
+                        "cron": row.cron, "timezone": row.timezone,
+                        "enabled": row.enabled},
                 ip=_ip(request))
     return _out(row)
 
