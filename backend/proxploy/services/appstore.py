@@ -18,6 +18,55 @@ from proxploy.models import App, AppScript, CatalogEntry, Host
 from proxploy.services.catalog import raw_url
 
 
+SHORT_SHA = 7
+
+
+def pinned_ref(db, app_id: int) -> str | None:
+    """The upstream commit the app's newest saved script came from."""
+    latest = (db.query(AppScript).filter_by(app_id=app_id)
+              .order_by(AppScript.version.desc()).first())
+    return latest.upstream_ref if latest else None
+
+
+def mark_updates_available(db) -> dict:
+    """Recompute `apps.update_available` for every app. Blocking.
+
+    community-scripts publishes no version numbers (doc 01 §3), so the only
+    honest signal is "the commit this app was pinned to is behind the commit
+    the catalog now holds". The column stores the SHORT sha an update would
+    move the app to, which is what doc 06's "Update to vX" renders.
+
+    This is DERIVED state, recomputed wholesale rather than latched: an app
+    that updated, or whose catalog entry was rolled back, must stop advertising
+    an update. `cleared` counts exactly that.
+
+    Skipped, each for a reason rather than as an oversight:
+      - no `catalog_slug` — a hand-rolled CT adopted in Phase 4 has no upstream;
+      - no `app_scripts` row — an adopted app has no "from" commit, so there is
+        no diff to show and nothing to consent to;
+      - catalog entry with no `upstream_sha` — never successfully refreshed.
+    """
+    shas = {c.slug: c.upstream_sha
+            for c in db.query(CatalogEntry.slug, CatalogEntry.upstream_sha).all()}
+    marked = cleared = 0
+    for a in db.query(App).all():
+        want = None
+        upstream = shas.get(a.catalog_slug) if a.catalog_slug else None
+        if upstream:
+            ref = pinned_ref(db, a.id)
+            if ref and ref != upstream:
+                want = upstream[:SHORT_SHA]
+        if want == a.update_available:
+            continue
+        if want:
+            marked += 1
+        else:
+            cleared += 1
+        a.update_available = want
+    db.commit()
+    return {"marked": marked, "cleared": cleared}
+
+
 def _resolve(app, catalog_slug: str, host_id: int):
     """Blocking: (catalog row, host, install script). Runs in a thread.
 
@@ -112,7 +161,8 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     with app.state.sessionmaker() as db:
         row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
                   catalog_slug=catalog_slug, category=entry.category,
-                  web_protocol="http", web_path="/", adopted=True)
+                  web_protocol="http", web_path="/", adopted=True,
+                  update_available=None)
         db.add(row)
         db.flush()
         db.add(AppScript(app_id=row.id, version=1, content=install_script,

@@ -123,6 +123,8 @@ def run_ingest(db, slugs: list[str]) -> dict:
 
 
 async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
+    from proxploy.services.appstore import mark_updates_available
+
     app = ctx.backend.app
     slugs = params.get("slugs") or list(app.state.settings.catalog_slugs)
     ctx.log(f"refreshing {len(slugs)} catalog entries")
@@ -134,6 +136,19 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     for f in result["failed"]:
         ctx.log(f"{f['slug']}: {f['reason']}", stream="stderr")
     ctx.log(f"synced {result['synced']}, failed {len(result['failed'])}")
+
+    # A refresh is the ONLY moment `update_available` can change, so it is the
+    # only place this has to run — no separate sweep, no separate schedule.
+    def _mark():
+        with app.state.sessionmaker() as db:
+            return mark_updates_available(db)
+
+    counts = await asyncio.to_thread(_mark)
+    result["updates_marked"] = counts["marked"]
+    result["updates_cleared"] = counts["cleared"]
+    ctx.log(f"{counts['marked']} app(s) have an update available")
+    if counts["marked"] or counts["cleared"]:
+        app.state.bus.publish("resource", {"type": "app", "change": "list"})
     ctx.progress(100)
     return result
 
