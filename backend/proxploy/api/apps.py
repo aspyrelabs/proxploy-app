@@ -101,6 +101,10 @@ class AdoptIn(BaseModel):
     items: list[AdoptItem]
 
 
+class UpdateIn(BaseModel):
+    consent: bool = False
+
+
 @router.post("/adopt", dependencies=[Depends(_require_admin),
                                      Depends(require_entitlement("apps.adopt"))])
 def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
@@ -130,6 +134,69 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
                 params={"count": len(adopted), "app_ids": adopted},
                 ip=request.client.host if request.client else None)
     return {"adopted": adopted}
+
+
+# Literal segment, registered ahead of `GET /{app_id}` and the lifecycle
+# wildcard: `{app_id}` would otherwise try to parse "update-all" as an int
+# and 422 (see test_update_all_is_not_matched_as_an_app_id).
+@router.post("/update-all", status_code=202,
+             dependencies=[Depends(_require_operator),
+                          Depends(require_entitlement("store.update_all"))])
+def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
+                    user: User = Depends(_require_operator)):
+    """One `app.update` job per stale app (doc 05: "per-app results").
+
+    No new queue machinery: JobBackend.MAX_CONCURRENT already runs four at a
+    time and genuinely queues the rest, and each job carries its own status,
+    transcript and result — which is what "per-app results" means.
+
+    `skipped` is not decoration. A bare "0 jobs started" is indistinguishable
+    from a broken endpoint, so every app that did not get a job says why.
+
+    Reuses `_update_state` and mirrors POST /{app_id}/update's own skip
+    order exactly, so a bulk run and a single-app run never disagree about
+    why a given app didn't get a job:
+
+    1. Edited script first — an edited row's `upstream_ref` is NULL, so
+       checking "no pinned script" before "edited" would misreport an
+       edited app as having no upstream at all. Enqueueing anyway would
+       spray a guaranteed-`JobFailed` job (services/appstore.py::
+       _resolve_update refuses to discard local edits), so this is skipped,
+       not enqueued-to-fail.
+    2. No catalog entry / no upstream_sha / no pinned script at all.
+    3. Already on the catalog's current commit.
+    """
+    if not body.consent:
+        raise HTTPException(400, "root-consent required: this runs community "
+                                 "scripts as root on your nodes")
+    jobs, skipped = [], []
+    for a in db.query(App).order_by(App.id).all():
+        _, entry, latest = _update_state(db, a.id)
+        if latest is not None and latest.source == "edited":
+            skipped.append({
+                "app_id": a.id, "name": a.name,
+                "reason": (f"{a.name}'s saved script was edited locally; "
+                          f"updating would discard those edits. POST "
+                          f"/api/v1/apps/{a.id}/script/revert restores the "
+                          f"upstream script."),
+            })
+            continue
+        from_ref = latest.upstream_ref if latest else None
+        if entry is None or not entry.upstream_sha or from_ref is None:
+            skipped.append({
+                "app_id": a.id, "name": a.name,
+                "reason": "no upstream script is pinned for this app; "
+                         "refresh the catalog first",
+            })
+            continue
+        if from_ref == entry.upstream_sha:
+            skipped.append({"app_id": a.id, "name": a.name,
+                            "reason": f"{a.name} is already up to date"})
+            continue
+        jobs.append(enqueue_and_audit(request, db, user, kind="app.update",
+                                      target_type="app", target_id=a.id,
+                                      params={"app_id": a.id})["job"])
+    return {"jobs": jobs, "skipped": skipped}
 
 
 @router.get("/{app_id}")
@@ -288,10 +355,6 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                 target_type="app", target_id=app_id, params={"version": row.version},
                 ip=request.client.host if request.client else None)
     return {"version": row.version, "content": row.content, "source": row.source}
-
-
-class UpdateIn(BaseModel):
-    consent: bool = False
 
 
 def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript | None]:
