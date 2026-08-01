@@ -8,8 +8,16 @@ from datetime import datetime
 
 import pytest
 
+# Registers HANDLERS entries this file relies on (`catalog.refresh`,
+# `backup.run`, `app.*`/`vm.*` lifecycle kinds) as an import side effect.
+# Without these, this file only passes when some other test module that
+# imports them (e.g. via `create_app`) runs first in the same session —
+# these imports make it pass standalone too.
+import proxploy.services.catalog  # noqa: F401
+import proxploy.services.backupjobs  # noqa: F401
+import proxploy.services.lifecycle  # noqa: F401
 from proxploy.jobs.scheduler import (
-    BadSchedule, due, fire_one, next_fire, prime, tick, validate,
+    BadSchedule, _target, due, fire_one, next_fire, prime, tick, validate,
 )
 from proxploy.models import AuditEvent, Job, Schedule
 from tests.support import make_db, make_job_app
@@ -69,6 +77,24 @@ def test_validate_rejects_an_unregistered_job_kind():
     with pytest.raises(BadSchedule) as e:
         validate("0 3 * * *", "UTC", "app.doesnotexist")
     assert "app.doesnotexist" in str(e.value)
+
+
+# --- _target -----------------------------------------------------------------
+
+@pytest.mark.parametrize("job_kind, params, expected", [
+    # Lifecycle kinds carry a bare `target_id` (api/apps.py enqueues
+    # `{"target_id": ..., "action": ...}`) — the prefix, not the param key,
+    # must decide the type.
+    ("vm.restart", {"target_id": 12}, ("vm", 12)),
+    ("app.start", {"target_id": 3}, ("app", 3)),
+    ("backup.run", {"host_id": 7}, ("host", 7)),
+    ("app.update", {"app_id": 5}, ("app", 5)),
+    ("catalog.refresh", {}, ("system", None)),
+    # A stray id in params for a system-prefixed kind must not leak through.
+    ("metrics.maintain", {"host_id": 1}, ("system", None)),
+])
+def test_target_derives_type_from_the_job_kind_prefix(job_kind, params, expected):
+    assert _target(job_kind, params) == expected
 
 
 # --- prime / due ------------------------------------------------------------
@@ -157,6 +183,67 @@ def test_fire_one_derives_the_job_target_from_params(tmp_path):
             job = db.get(Job, out["job_id"])
             assert (job.target_type, job.target_id) == ("host", 7)
             assert job.params == {"host_id": 7}
+
+    asyncio.run(go())
+
+
+def test_fire_one_derives_a_lifecycle_target_from_the_kind_prefix(tmp_path):
+    """`vm.restart` carries a bare `target_id` (api/apps.py), not `vm_id` — the
+    param-key-sniffing bug this regression-tests for derived ("system", None)
+    here, which would have pointed the SSE `job` delta's cache invalidation
+    (api/live.ts) at nothing."""
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        now = datetime(2026, 8, 1, 12, 0)
+        with app.state.sessionmaker() as db:
+            s = _sched(db, job_kind="vm.restart", params={"target_id": 12},
+                       next_run_at=now)
+            out = fire_one(app, db, s, now)
+            job = db.get(Job, out["job_id"])
+            assert (job.target_type, job.target_id) == ("vm", 12)
+
+    asyncio.run(go())
+
+
+def test_fire_one_still_returns_the_dict_if_the_row_breaks_right_after_firing(
+        tmp_path, monkeypatch):
+    """A job really was enqueued here, so the caller still needs its id even
+    though the schedule's OWN next_fire() call (advancing past `now`) then
+    raises and disables the row. None means "no job was enqueued" — it must
+    not also mean "the row got disabled", or a caller can't tell these apart."""
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        now = datetime(2026, 8, 1, 12, 0)
+        with app.state.sessionmaker() as db:
+            s = _sched(db, next_run_at=now)
+
+            import proxploy.jobs.scheduler as scheduler_mod
+            monkeypatch.setattr(scheduler_mod, "next_fire",
+                                 lambda cron, tz, after: (_ for _ in ()).throw(
+                                     BadSchedule("tz dropped from tzdata")))
+
+            out = fire_one(app, db, s, now)
+            assert out is not None
+            assert out["schedule_id"] == s.id
+
+            job = db.get(Job, out["job_id"])
+            assert job is not None  # the job was really enqueued
+
+            db.refresh(s)
+            assert s.enabled is False
+            assert s.next_run_at is None
+
+            fire_row = (db.query(AuditEvent)
+                        .filter_by(action="schedule.fire", target_id=s.id).one())
+            assert fire_row.job_id == out["job_id"]
+            disable_row = (db.query(AuditEvent)
+                           .filter_by(action="schedule.disable", target_id=s.id)
+                           .one())
+            assert disable_row.result == "error"
 
     asyncio.run(go())
 

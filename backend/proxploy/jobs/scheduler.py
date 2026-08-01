@@ -72,15 +72,34 @@ def validate(cron: str, tz: str, job_kind: str) -> None:
     next_fire(cron, tz, utcnow())
 
 
-def _target(params: dict | None) -> tuple[str, int | None]:
-    """Job target from the schedule's params, so a scheduled run invalidates
-    the same UI caches an ad-hoc one does (doc 05 §Streaming: the `job` delta
-    carries `target_type`, and api/live.ts routes on it)."""
+_PREFIX_TARGET = {
+    "app": "app", "vm": "vm",
+    "backup": "host", "storage": "host", "network": "host", "host": "host",
+}
+
+
+def _target(job_kind: str, params: dict | None) -> tuple[str, int | None]:
+    """Job target from the job kind's dotted prefix, so a scheduled run
+    invalidates the same UI caches an ad-hoc one does (doc 05 §Streaming: the
+    `job` delta carries `target_type`, and api/live.ts routes on it).
+
+    The prefix, not a param key name, is authoritative: `job_kind` is what
+    selects the handler (`HANDLERS[job_kind]`), so it cannot disagree with
+    itself. Param key names vary per handler — lifecycle's `run_lifecycle`
+    reads a bare `target_id` (api/apps.py), `backup.run` reads `host_id` — so
+    sniffing keys instead of the prefix silently mis-derives the type for
+    whichever handler doesn't use the sniffed name (this broke every
+    `app.*`/`vm.*` lifecycle kind before this fix).
+    """
+    prefix = job_kind.split(".", 1)[0]
+    target_type = _PREFIX_TARGET.get(prefix, "system")
+    if target_type == "system":
+        return "system", None
     params = params or {}
-    for key, kind in (("app_id", "app"), ("vm_id", "vm"), ("host_id", "host")):
+    for key in ("target_id", "app_id", "vm_id", "host_id"):
         if params.get(key) is not None:
-            return kind, int(params[key])
-    return "system", None
+            return target_type, int(params[key])
+    return target_type, None
 
 
 def _disable(db, s: Schedule, reason: str) -> None:
@@ -126,7 +145,16 @@ def due(db, now: datetime) -> list[Schedule]:
 
 
 def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
-    """Enqueue one schedule's job and advance the row. None if it was disabled.
+    """Enqueue one schedule's job and advance the row.
+
+    Returns None ONLY when no job was enqueued at all — `s.job_kind` has no
+    registered handler, `app.state.jobs.enqueue` raised, and the row is
+    disabled with an audit trail. It does NOT mean "the row was disabled": if
+    enqueue succeeds but the schedule's own cron/timezone then breaks on the
+    following `next_fire()` call, a job really was created and the caller
+    needs its id, so the dict is returned even though the row is also
+    disabled in that path (both a `schedule.fire` and a `schedule.disable`
+    audit row are written).
 
     `next_run_at` advances from `now`, NOT from the stale `next_run_at`: after
     a week of downtime the schedule owes exactly one catch-up run, not one per
@@ -134,7 +162,7 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
     history, which is the honest record.
     """
     params = dict(s.params or {})
-    target_type, target_id = _target(params)
+    target_type, target_id = _target(s.job_kind, params)
     try:
         job = app.state.jobs.enqueue(
             db, kind=s.job_kind, target_type=target_type, target_id=target_id,
