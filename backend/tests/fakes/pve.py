@@ -540,10 +540,11 @@ class FakePVE:
         self.storage_creates: list[dict] = []
         self.storage_updates: list[tuple] = []
         self.storage_removes: list[str] = []
+        # `list(resources)` copies whatever a test passed via `resources=` —
+        # a test never gets a handle on this list itself, only on the copy.
         # Stored as an attribute (not just captured inside _ClusterNS) so
-        # add_ct() below can mutate the same list object a test already has a
-        # handle on via `resources=` — cluster.resources.get() reads this list
-        # by reference, not a copy.
+        # add_ct() below can append to it after construction and have
+        # cluster.resources.get() see the same list by reference from then on.
         self.resources: list[dict] = list(resources) if resources else []
         self.cluster = _ClusterNS(self, self.resources, fail)
         self.nodes = _NodesNS(self)

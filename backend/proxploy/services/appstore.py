@@ -14,7 +14,7 @@ import hashlib
 
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
-from proxploy.models import App, AppScript, CatalogEntry, Host
+from proxploy.models import App, AppScript, CatalogEntry, Host, Job, utcnow
 from proxploy.services.catalog import raw_url
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
@@ -211,11 +211,16 @@ def _resolve_update(app, app_id: int):
         # trusting upstream_ref==None would stop catching this and overwrite
         # the operator's edits.
         if latest is not None and latest.source == "edited":
+            # No route writes source="upstream" except run_install and this
+            # handler itself — there is no revert-to-upstream action anywhere
+            # in the product yet (Task 6 scope), so this is not "fix it and
+            # retry", it is a hard stop. Say that plainly rather than point at
+            # a capability that doesn't exist.
             raise JobFailed(
                 f"{a.name}'s script was edited locally (version {latest.version}); "
-                f"updating would discard those edits by re-running the upstream "
-                f"script — revert to the upstream script first if you want the "
-                f"update")
+                f"updating would replace it with the upstream script and discard "
+                f"those edits. Proxploy currently has no way to revert a script "
+                f"back to upstream, so this update cannot proceed.")
         from_ref = pinned_ref(db, app_id)
         if from_ref is None:
             raise JobFailed(f"{a.name} has no pinned script; there is no commit "
@@ -256,6 +261,48 @@ def _lxc_ids(app, host_id: int) -> set[int]:
     return {int(r["vmid"]) for r in rows if r.get("type") == "lxc"}
 
 
+# Job kinds that build a new guest (Task 5 review B1). JobBackend runs up to
+# MAX_CONCURRENT jobs at once, so an id appearing in `after` that wasn't in
+# `before` may belong to one of these running concurrently, not to this
+# update's script taking build.func's install branch.
+_GUEST_CREATING_KINDS = ("app.install", "vm.create", "vm.clone")
+
+
+def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
+                            window_start, window_end) -> set[int]:
+    """Blocking: ctids from OTHER guest-creating jobs whose run overlapped
+    this job's SSH window, so the stray-CT check doesn't blame — and point an
+    operator at destroying — a legitimate container an unrelated job built at
+    the same time.
+
+    Only `app.install`'s target id is knowable without guessing: run_install
+    forces `var_ctid` onto the remote script (above), so `params["ctid"]` is
+    the id it actually built regardless of whether that job has finished yet.
+    `vm.create`/`vm.clone` are qemu-only (services/guestjobs.py, doc 05) and
+    can never produce an LXC row in the first place, so nothing is extracted
+    for them — they're queried (per review) alongside app.install for
+    completeness, not because either can contribute an id `_lxc_ids` would
+    ever see.
+    """
+    with app.state.sessionmaker() as db:
+        rows = (db.query(Job)
+                .filter(Job.id != exclude_job_id,
+                        Job.kind.in_(_GUEST_CREATING_KINDS),
+                        Job.started_at.isnot(None),
+                        Job.started_at <= window_end)
+                .all())
+        ids: set[int] = set()
+        for j in rows:
+            if j.finished_at is not None and j.finished_at < window_start:
+                continue  # finished before this job's window even opened
+            if (j.kind == "app.install" and j.params
+                    and j.params.get("host_id") == host_id):
+                ctid = j.params.get("ctid")
+                if ctid is not None:
+                    ids.add(int(ctid))
+        return ids
+
+
 async def run_update(ctx: JobContext, params: dict) -> dict:
     """`app.update` — re-run the app's catalog script, pinned to the CURRENT
     upstream commit, over the same SSH path install uses (doc 10 Phase 7:
@@ -280,6 +327,16 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
     the full transcript archived — the honest outcome. Classifying update paths
     is separate, larger work; see docs/notes/phase-7-operate.md.
+
+    A SECOND, more severe residual limitation (Task 5 review B4): the post-
+    check is an id-SET comparison (before vs. after), and a set diff is blind
+    to a script that destroys CT <ctid> and rebuilds it at the SAME id — no id
+    is added, none is missing, the diff sees nothing wrong, and this handler
+    reports success and advances the pin over what is now a freshly built,
+    EMPTY container. This is undetected. It is the one failure mode here with
+    real data loss, and nothing in `_lxc_ids`'s id-set approach can catch it;
+    detecting it would need something like a creation-time/uptime marker,
+    deliberately not attempted here.
     """
     app = ctx.backend.app
     app_id = int(params["app_id"])
@@ -289,6 +346,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"updating {a['name']} (CT {a['ctid']}) on {host['name']}: "
             f"{entry['from_ref'][:SHORT_SHA]} -> {entry['sha'][:SHORT_SHA]}")
 
+    window_start = utcnow()
     before = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
     if a["ctid"] not in before:
         raise JobFailed(
@@ -328,13 +386,32 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     ctx.progress(80)
 
     after = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
-    strays = sorted(after - before)
+    window_end = utcnow()
+    strays = set(after - before)
     if strays:
+        concurrent = await asyncio.to_thread(
+            _concurrent_guest_ctids, app, ctx.job_id, a["host_id"],
+            window_start, window_end)
+        strays -= concurrent
+    if strays:
+        names = ", ".join(f"CT {s}" for s in sorted(strays))
+        # Never an imperative "remove it" (Task 5 review B1): this is a
+        # whole-cluster snapshot diff and JobBackend runs jobs concurrently,
+        # so a stray id here is not proof this update's script built it — it
+        # could just as well be an unrelated job that landed in the same
+        # window. B2: also tell the truth about retrying — the pin and
+        # update_available are both left untouched below, and a plain retry
+        # hits the same install branch again.
         raise JobFailed(
-            f"the catalog script created new container(s) {strays} instead of "
-            f"updating CT {a['ctid']} — {a['name']} was NOT updated, and "
-            f"{'CT ' + str(strays[0]) if len(strays) == 1 else 'those CTs'} "
-            f"should be reviewed and removed by hand")
+            f"{names} appeared on {host['name']} during this update of "
+            f"{a['name']} (CT {a['ctid']}) that {'was' if len(strays) == 1 else 'were'} "
+            f"not there before. {names} may have been created by this update's "
+            f"script taking the catalog's install branch, or by something else "
+            f"running on this host at the same time — verify which before "
+            f"removing anything. This update was NOT recorded as applied, an "
+            f"update is still shown as available, and simply retrying will "
+            f"likely hit the same install branch again and create yet another "
+            f"container, so resolve {names} first")
     if a["ctid"] not in after:
         raise JobFailed(f"CT {a['ctid']} disappeared during the update")
 

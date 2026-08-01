@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from proxploy.jobs import HANDLERS, JobBackend, JobContext, JobFailed
-from proxploy.models import App, AppScript, CatalogEntry, Host, HostCredential, Job
+from proxploy.models import App, AppScript, CatalogEntry, Host, HostCredential, Job, utcnow
 from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.update
 from tests.fakes.pve import FakePVE
 from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
@@ -119,7 +119,12 @@ def test_update_refuses_when_the_container_is_missing(tmp_path):
 
 def test_update_fails_loudly_if_a_new_container_appeared(tmp_path):
     """The post-check. The script decided to install; say so and name the CTID
-    rather than report success over a stray container."""
+    rather than report success over a stray container.
+
+    Review B1/B2: the message must (a) never issue a bare "remove it"
+    instruction — this is a whole-cluster snapshot diff and JobBackend runs
+    jobs concurrently, so a stray id is not proof of what built it — and (b)
+    warn that a bare retry will likely hit the same install branch again."""
     async def go():
         fake = FakePVE()
         fake.add_ct(101, node="pve1", name="redis", status="running")
@@ -132,6 +137,79 @@ def test_update_fails_loudly_if_a_new_container_appeared(tmp_path):
                            ssh_factory=_ssh(cmds, lines=("done",), on_run=on_run))
         app.state.jobs = JobBackend(app)
         _, app_id = _seed(app)
+
+        ctx = JobContext(app.state.jobs, _job(app, app_id))
+        with pytest.raises(JobFailed) as e:
+            await HANDLERS["app.update"](ctx, {"app_id": app_id})
+        msg = str(e.value)
+        assert "999" in msg
+        assert "removed by hand" not in msg.lower()     # B1: no destroy order
+        assert "may have been created" in msg           # B1: attribution is uncertain
+        assert "verify" in msg.lower()
+        assert "retry" in msg.lower() or "retrying" in msg.lower()  # B2
+        assert "resolve" in msg.lower()
+
+        with app.state.sessionmaker() as db:
+            a = db.get(App, app_id)
+            assert a.update_available == "b" * 7        # B2: still offered, honestly
+
+    asyncio.run(go())
+
+
+def test_update_does_not_blame_a_concurrent_app_install_for_the_stray(tmp_path):
+    """Review B1: JobBackend's MAX_CONCURRENT means an id appearing in `after`
+    may belong to an unrelated app.install that landed in the same window, not
+    to this update's script taking the install branch. A CT this handler can
+    attribute to another job's params["ctid"] must not fail the update."""
+    async def go():
+        fake = FakePVE()
+        fake.add_ct(101, node="pve1", name="redis", status="running")
+        cmds: list[str] = []
+
+        def on_run(_cmd):
+            fake.add_ct(300, node="pve1", name="other-app", status="running")
+
+        app = make_job_app(tmp_path, fake=fake,
+                           ssh_factory=_ssh(cmds, on_run=on_run))
+        app.state.jobs = JobBackend(app)
+        host_id, app_id = _seed(app)
+
+        with app.state.sessionmaker() as db:
+            db.add(Job(kind="app.install", status="running", target_type="app",
+                      params={"ctid": 300, "host_id": host_id,
+                              "catalog_slug": "other", "name": "other-app"},
+                      started_at=utcnow()))
+            db.commit()
+
+        ctx = JobContext(app.state.jobs, _job(app, app_id))
+        out = await HANDLERS["app.update"](ctx, {"app_id": app_id})
+        assert out["to_ref"] == "b" * 40                # succeeded despite CT 300
+
+    asyncio.run(go())
+
+
+def test_update_still_fails_for_a_stray_no_concurrent_job_can_account_for(tmp_path):
+    """The concurrency exclusion must not swallow a real stray: an app.install
+    job for a DIFFERENT ctid running at the same time must not excuse CT 999."""
+    async def go():
+        fake = FakePVE()
+        fake.add_ct(101, node="pve1", name="redis", status="running")
+        cmds: list[str] = []
+
+        def on_run(_cmd):
+            fake.add_ct(999, node="pve1", name="redis", status="running")
+
+        app = make_job_app(tmp_path, fake=fake,
+                           ssh_factory=_ssh(cmds, on_run=on_run))
+        app.state.jobs = JobBackend(app)
+        host_id, app_id = _seed(app)
+
+        with app.state.sessionmaker() as db:
+            db.add(Job(kind="app.install", status="running", target_type="app",
+                      params={"ctid": 300, "host_id": host_id,
+                              "catalog_slug": "other", "name": "other-app"},
+                      started_at=utcnow()))
+            db.commit()
 
         ctx = JobContext(app.state.jobs, _job(app, app_id))
         with pytest.raises(JobFailed) as e:
@@ -227,7 +305,12 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
     """api/apps.py::put_app_script writes source="edited" WITHOUT an
     upstream_ref (verified live, Task 4 review finding). Re-running the
     upstream script over an edited one would silently discard the operator's
-    edits — this must fail before anything reaches SSH."""
+    edits — this must fail before anything reaches SSH.
+
+    Review B3: no route anywhere writes source="upstream" except run_install
+    and this handler itself, so there is no revert action to point an operator
+    at — the message must say plainly that Proxploy has no way to revert,
+    not describe a "revert first" workaround that doesn't exist."""
     async def go():
         fake = FakePVE()
         fake.add_ct(101, node="pve1", name="redis", status="running")
@@ -239,7 +322,10 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
         ctx = JobContext(app.state.jobs, _job(app, app_id))
         with pytest.raises(JobFailed) as e:
             await HANDLERS["app.update"](ctx, {"app_id": app_id})
-        assert "edit" in str(e.value).lower()
+        msg = str(e.value).lower()
+        assert "edit" in msg
+        assert "no way to revert" in msg
+        assert "revert to the upstream script first" not in msg  # no fake workaround
         assert cmds == []                             # never reached the SSH executor
 
     asyncio.run(go())
