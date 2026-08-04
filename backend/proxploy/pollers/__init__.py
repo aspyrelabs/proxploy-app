@@ -267,7 +267,47 @@ class Poller:
                         self.snapshots.pop(hid, None)
             except Exception:  # noqa: BLE001 — supervisor never dies
                 pass
+            # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
+            # loop". Here rather than in _host_loop: this supervisor already
+            # ticks exactly once per interval no matter how many hosts exist,
+            # and every rule's answer is global — evaluating per host would be
+            # N times the queries for the same result. Wrapped separately from
+            # the block above so an alerting failure can never stop the
+            # supervisor from (re)spawning host loops.
+            if self.app.state.settings.alerts_enabled:
+                await self._evaluate_alerts()
             await asyncio.sleep(interval)
+
+    async def _evaluate_alerts(self) -> None:
+        """Evaluate, publish on the loop, notify off it.
+
+        `evaluate` and `notify_transitions` are blocking (SQLAlchemy, then
+        Apprise's ~8 s-per-channel network I/O) so both go to a thread;
+        `bus.publish` runs on the loop, matching _poll_once's contract that a
+        worker thread returns events rather than publishing them itself.
+
+        The SSE publish happens BEFORE notification and in its own try: a dead
+        webhook must not cost the UI its badge update.
+        """
+        from proxploy.services import alerts as alerts_svc
+
+        try:
+            def work():
+                with self.app.state.sessionmaker() as db:
+                    return alerts_svc.evaluate(db, utcnow())
+
+            transitions = await asyncio.to_thread(work)
+        except Exception:  # noqa: BLE001 — one bad pass, not the end of polling
+            return
+        if not transitions:
+            return
+        for t in transitions:
+            self.app.state.bus.publish("alert", alerts_svc.sse_frame(t))
+        try:
+            await asyncio.to_thread(alerts_svc.notify_transitions, self.app,
+                                    transitions)
+        except Exception:  # noqa: BLE001 — a notification is a courtesy
+            pass
 
     def stop(self) -> None:
         for t in self._tasks.values():
