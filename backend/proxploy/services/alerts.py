@@ -249,3 +249,38 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
                 db.commit()
                 transitions.append(_transition(rule, open_alert, label, "resolved"))
     return transitions
+
+
+def sse_frame(t: dict) -> dict:
+    """The `alert` SSE delta, doc 05 §Streaming 4, verbatim:
+    {"id":12,"state":"firing","severity":"warning","message":"host-02 CPU …"}
+    """
+    return {"id": t["alert_id"], "state": t["state"],
+            "severity": t["severity"], "message": t["message"]}
+
+
+def notify_transitions(app, transitions: list[dict]) -> int:
+    """Fan transitions out through the Notifier. Blocking; returns sends made.
+
+    Event names are `alert.fired` / `alert.resolved`, which is what doc 04's
+    `notification_channels.events` example subscribes to. A rule's
+    `channel_ids` overrides that subscription (see notifier.channels_for).
+
+    Notification is a courtesy and must never be able to fail evaluation, so
+    every send is isolated inside notifier.notify already; this only has to not
+    raise on its own account.
+    """
+    from proxploy.services.notifier import notify
+
+    reached = 0
+    for t in transitions:
+        event = f"alert.{'fired' if t['state'] == 'firing' else 'resolved'}"
+        verb = "FIRING" if t["state"] == "firing" else "RESOLVED"
+        title = f"Proxploy alert {verb}: {t['rule_name']}"
+        try:
+            reached += notify(app, event, title, t["message"],
+                              only_ids=t.get("channel_ids") or None)
+        except Exception:  # noqa: BLE001 — a broken channel never breaks alerting
+            logger.debug("alert %s notification failed", t.get("alert_id"),
+                         exc_info=True)
+    return reached

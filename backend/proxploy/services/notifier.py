@@ -70,13 +70,25 @@ def send_one(url: str, title: str, body: str) -> bool:
     return bool(ap.notify(title=title, body=body))
 
 
-def channels_for(db, event: str) -> list[NotificationChannel]:
-    """Doc 04: an empty `events` list means every event."""
-    return [c for c in db.query(NotificationChannel).filter_by(enabled=True).all()
-            if not c.events or event in c.events]
+def channels_for(db, event: str, only_ids: list[int] | None = None
+                 ) -> list[NotificationChannel]:
+    """Doc 04: an empty `events` list means every event.
+
+    `only_ids` is an OVERRIDE, not a filter on top of the subscription: an
+    alert rule that names its channels (doc 04 `alert_rules.channel_ids`)
+    means exactly those, whatever they happen to be subscribed to. A disabled
+    channel is still never used — "off" beats "named".
+    """
+    rows = db.query(NotificationChannel).filter_by(enabled=True)
+    if only_ids is not None:
+        if not only_ids:
+            return []
+        return rows.filter(NotificationChannel.id.in_(only_ids)).all()
+    return [c for c in rows.all() if not c.events or event in c.events]
 
 
-def notify(app, event: str, title: str, body: str) -> int:
+def notify(app, event: str, title: str, body: str,
+           only_ids: list[int] | None = None) -> int:
     """Fan a single event out to every subscribed channel. Returns channels reached.
 
     A channel that is misconfigured, unreachable or slow must never fail the
@@ -88,7 +100,7 @@ def notify(app, event: str, title: str, body: str) -> int:
     """
     with app.state.sessionmaker() as db:
         targets = []
-        for channel in channels_for(db, event):
+        for channel in channels_for(db, event, only_ids):
             try:
                 url = app.state.secretstore.decrypt(channel.url_enc).decode()
             except Exception:  # noqa: BLE001 — never let one channel poison the rest

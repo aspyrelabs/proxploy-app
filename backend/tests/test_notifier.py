@@ -490,3 +490,26 @@ def test_sweep_orphans_fires_one_aggregate_notification_without_blocking_startup
         assert "app.start" in body and "app.stop" in body
 
     asyncio.run(run())
+
+
+def test_channels_for_restricted_to_explicit_ids(tmp_path):
+    """only_ids is an override: named channels are used regardless of their
+    `events` subscription, but never when disabled."""
+    from proxploy.models import NotificationChannel
+    from proxploy.services.notifier import channels_for
+    from tests.support import make_db
+
+    db = make_db(tmp_path)
+    wanted = NotificationChannel(name="a", kind="webhook", url_enc=b"x",
+                                 key_version=1, events=["job.failed"], enabled=True)
+    other = NotificationChannel(name="b", kind="webhook", url_enc=b"x",
+                                key_version=1, events=[], enabled=True)
+    off = NotificationChannel(name="c", kind="webhook", url_enc=b"x",
+                              key_version=1, events=[], enabled=False)
+    db.add_all([wanted, other, off])
+    db.commit()
+
+    got = channels_for(db, "alert.fired", only_ids=[wanted.id, off.id])
+    assert [c.name for c in got] == ["a"]
+    # unchanged without only_ids: subscription rules apply
+    assert {c.name for c in channels_for(db, "alert.fired")} == {"b"}
