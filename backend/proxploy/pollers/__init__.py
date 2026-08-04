@@ -51,6 +51,25 @@ def _mem_pct(used: int, total: int) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
+def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
+    """Aggregate used/total across this host's datastores.
+
+    Deduped correctly, unlike the cluster ring's deliberate shortcut in
+    api/cluster.py::cluster_summary: a SHARED datastore is reported once per
+    node and must count once, a LOCAL datastore with the same name on two
+    nodes is two distinct pools. Doing it wrong here is not a cosmetic ring
+    error — it is an alert that fires at the wrong number.
+    """
+    pools: dict[tuple, dict] = {}
+    for r in storage_rows:
+        key = (r.get("storage"),) if r.get("shared") else (r.get("node"),
+                                                           r.get("storage"))
+        pools[key] = r
+    used = sum(int(r.get("disk") or 0) for r in pools.values())
+    total = sum(int(r.get("maxdisk") or 0) for r in pools.values())
+    return round(used / total * 100, 1) if total else 0.0
+
+
 def ingest_cycle(db, host: Host, resources: list[dict],
                  rrd_by_node: dict[str, list[dict]], now: datetime) -> CycleResult:
     events: list[tuple[str, dict]] = []
@@ -82,6 +101,9 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     if own:
         for metric, value in (("cpu_pct", own["cpu_pct"]),
                               ("mem_bytes", float(own["mem_bytes"])),
+                              ("mem_pct", _mem_pct(own["mem_bytes"],
+                                                   own["mem_total_bytes"])),
+                              ("disk_pct", _disk_pct(host.node_name, storage_rows)),
                               ("net_in_bps", net_in), ("net_out_bps", net_out)):
             samples.append(MetricSample(target_type="host", target_id=host.id,
                                         metric=metric, value=value, ts=now))
@@ -129,6 +151,14 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                     metric="cpu_pct", value=g["cpu_pct"], ts=now))
         samples.append(MetricSample(target_type="app", target_id=a.id,
                                     metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
+        samples.append(MetricSample(target_type="app", target_id=a.id,
+                                    metric="mem_pct",
+                                    value=_mem_pct(g["mem_bytes"],
+                                                   g["mem_total_bytes"]), ts=now))
+        # ponytail: no disk_pct for apps/vms — /cluster/resources' `disk` field
+        # is meaningful for LXC but routinely 0 for QEMU, so a guest disk_pct
+        # would be silently wrong for every VM. Task 12's rule validation
+        # rejects disk_pct on app/vm targets with an explanatory 422 instead.
         targets.append({"t": "app", "id": a.id, "cpu_pct": g["cpu_pct"],
                         "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
 
@@ -166,6 +196,10 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                     metric="cpu_pct", value=g["cpu_pct"], ts=now))
         samples.append(MetricSample(target_type="vm", target_id=v.id,
                                     metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
+        samples.append(MetricSample(target_type="vm", target_id=v.id,
+                                    metric="mem_pct",
+                                    value=_mem_pct(g["mem_bytes"],
+                                                   g["mem_total_bytes"]), ts=now))
         targets.append({"t": "vm", "id": v.id, "cpu_pct": g["cpu_pct"],
                         "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
     if membership_changed:

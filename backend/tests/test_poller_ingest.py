@@ -30,7 +30,8 @@ def test_host_samples_and_snapshot(tmp_path):
     assert host.status == "connected" and host.last_seen_at is not None
     metrics = {s.metric for s in db.query(MetricSample).filter_by(
         target_type="host", target_id=host.id)}
-    assert metrics == {"cpu_pct", "mem_bytes", "net_in_bps", "net_out_bps"}
+    assert metrics == {"cpu_pct", "mem_bytes", "mem_pct", "disk_pct",
+                       "net_in_bps", "net_out_bps"}
 
     snap = res.snapshot
     assert snap.nodes[0]["node"] == "pve1" and snap.nodes[0]["cpu_cores"] == 8
@@ -67,11 +68,11 @@ def test_vms_upserted_and_apps_cached_refreshed(tmp_path):
     # stopped->running transition emitted a resource event
     assert ("resource", {"type": "app", "id": app_row.id,
                          "change": "status", "status": "running"}) in res.events
-    # guest samples reference DB ids, not vmids
+    # guest samples reference DB ids, not vmids (cpu_pct, mem_bytes, mem_pct)
     assert db.query(MetricSample).filter_by(target_type="app",
-                                            target_id=app_row.id).count() == 2
+                                            target_id=app_row.id).count() == 3
     assert db.query(MetricSample).filter_by(target_type="vm",
-                                            target_id=vm.id).count() == 2
+                                            target_id=vm.id).count() == 3
 
 
 def test_vm_removed_upstream_is_deleted(tmp_path):
@@ -122,3 +123,84 @@ def test_snapshot_storage_carries_type_content_shared_status(tmp_path):
     assert by_name["pbs-datastore"]["type"] == "pbs"
     assert by_name["pbs-datastore"]["content"] == ["backup"]
     assert by_name["pbs-datastore"]["shared"] is True
+
+
+def test_ingest_persists_mem_pct_for_host_app_and_vm(tmp_path):
+    """Doc 04's alert_rules.metric enum names mem_pct; without a sample by
+    that name a memory rule is created, enabled, and never fires."""
+    from proxploy.models import App, MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    db.add(App(host_id=host.id, ctid=101, name="redis", slug="redis-1-101",
+               web_protocol="http", web_path="/", adopted=True))
+    db.commit()
+
+    resources = [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.5,
+         "maxcpu": 8, "mem": 4_000_000_000, "maxmem": 8_000_000_000, "uptime": 100},
+        {"type": "lxc", "vmid": 101, "node": "pve1", "name": "redis",
+         "status": "running", "cpu": 0.1, "maxcpu": 1,
+         "mem": 512_000_000, "maxmem": 1_024_000_000, "maxdisk": 0, "uptime": 50},
+        {"type": "qemu", "vmid": 201, "node": "pve1", "name": "win",
+         "status": "running", "cpu": 0.2, "maxcpu": 4,
+         "mem": 2_000_000_000, "maxmem": 8_000_000_000, "maxdisk": 0, "uptime": 50},
+    ]
+    ingest_cycle(db, host, resources, {"pve1": []}, utcnow())
+
+    got = {(s.target_type, s.metric): s.value
+           for s in db.query(MetricSample).filter_by(metric="mem_pct").all()}
+    assert got[("host", "mem_pct")] == 50.0      # 4G of 8G
+    assert got[("app", "mem_pct")] == 50.0       # 512M of 1024M
+    assert got[("vm", "mem_pct")] == 25.0        # 2G of 8G
+
+
+def test_ingest_persists_a_host_disk_pct_from_its_datastores(tmp_path):
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    resources = [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+         "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1},
+        {"type": "storage", "storage": "local", "node": "pve1",
+         "disk": 30, "maxdisk": 100, "shared": 0},
+        {"type": "storage", "storage": "local", "node": "pve2",
+         "disk": 10, "maxdisk": 100, "shared": 0},
+        # shared datastore, reported once per node — must count ONCE
+        {"type": "storage", "storage": "nfs", "node": "pve1",
+         "disk": 60, "maxdisk": 200, "shared": 1},
+        {"type": "storage", "storage": "nfs", "node": "pve2",
+         "disk": 60, "maxdisk": 200, "shared": 1},
+    ]
+    ingest_cycle(db, host, resources, {"pve1": []}, utcnow())
+
+    s = db.query(MetricSample).filter_by(metric="disk_pct").one()
+    assert s.target_type == "host" and s.target_id == host.id
+    # (30 + 10 + 60) / (100 + 100 + 200) = 25%
+    assert s.value == 25.0
+
+
+def test_disk_pct_is_zero_rather_than_a_crash_when_a_host_reports_no_storage(tmp_path):
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    ingest_cycle(db, host, [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+         "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}], {"pve1": []}, utcnow())
+    assert db.query(MetricSample).filter_by(metric="disk_pct").one().value == 0.0
+
+
+def test_mem_pct_and_disk_pct_are_queryable_metrics():
+    """api/metrics.py rejects anything outside METRICS with a 422, so a chart
+    of a metric the alert rules use would 422 without this."""
+    from proxploy.services.metrics import METRICS
+    assert "mem_pct" in METRICS
+    assert "disk_pct" in METRICS

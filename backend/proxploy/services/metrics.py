@@ -13,8 +13,11 @@ from datetime import datetime, timedelta, timezone
 from proxploy.jobs import HANDLERS
 from proxploy.models import MetricRollup, MetricSample, utcnow
 
-METRICS = ("cpu_pct", "mem_bytes", "disk_bytes", "net_in_bps", "net_out_bps",
-           "io_read_bps", "io_write_bps")
+# Phase 7 adds mem_pct and disk_pct: doc 04's alert_rules.metric enum names
+# both, and api/metrics.py 422s any metric not listed here — so a chart of the
+# very metric an alert fired on would have been unqueryable.
+METRICS = ("cpu_pct", "mem_pct", "disk_pct", "mem_bytes", "disk_bytes",
+           "net_in_bps", "net_out_bps", "io_read_bps", "io_write_bps")
 
 # ponytail: retention constants; the settings-table knob (doc 04) ships with
 # Phase 7's scheduler UI, which is where users would actually edit it.
