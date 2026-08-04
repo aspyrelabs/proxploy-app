@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useAlertMetrics } from '../api/alerts'
+import type { AppRow, VmRow } from '../api/hooks'
 import { Button } from './ui/button'
 
 const input = 'w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13px] text-text'
@@ -37,6 +38,16 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   const hosts = useQuery({
     queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts'),
     enabled: targetType === 'host',
+  })
+  // Same query keys cluster.tsx/store.tsx/vms.tsx already fetch under, so this
+  // shares their cache instead of adding a second /apps or /vms request.
+  const apps = useQuery({
+    queryKey: ['apps', {}], queryFn: () => api<AppRow[]>('/apps'),
+    enabled: targetType === 'app',
+  })
+  const vms = useQuery({
+    queryKey: ['vms', {}], queryFn: () => api<VmRow[]>('/vms'),
+    enabled: targetType === 'vm',
   })
 
   const create = useMutation({
@@ -108,6 +119,30 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
             <option value="">Select…</option>
             {(hosts.data ?? []).map((h) =>
               <option key={h.id} value={h.id}>{h.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {targetType === 'app' && (
+        <div>
+          <label className={label} htmlFor="ar-app">App</label>
+          <select id="ar-app" className={input} value={targetId}
+                  onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Select…</option>
+            {(apps.data ?? []).map((a) =>
+              <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {targetType === 'vm' && (
+        <div>
+          <label className={label} htmlFor="ar-vm">VM</label>
+          <select id="ar-vm" className={input} value={targetId}
+                  onChange={(e) => setTargetId(e.target.value)}>
+            <option value="">Select…</option>
+            {(vms.data ?? []).map((v) =>
+              <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
         </div>
       )}

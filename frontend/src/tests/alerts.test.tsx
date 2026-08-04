@@ -26,6 +26,7 @@ vi.mock('../api/client', () => ({
     if (path === '/alert-rules') return Promise.resolve(rules)
     if (path === '/notifications/channels') return Promise.resolve([])
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+    if (path === '/apps') return Promise.resolve([{ id: 5, name: 'jellyfin' }])
     return Promise.resolve([])
   }),
 }))
@@ -111,6 +112,23 @@ describe('AlertsPage', () => {
       name: 'CPU high', metric: 'cpu_pct', threshold: 85, duration_s: 300,
       operator: 'gt', severity: 'warning',
     })
+  })
+
+  it('picks an app target and submits its id', async () => {
+    posted.length = 0; firing = []; rules = []
+    wrap()
+    await waitFor(() => screen.getByRole('button', { name: /new rule/i }))
+    fireEvent.click(screen.getByRole('button', { name: /new rule/i }))
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'App CPU high' } })
+    fireEvent.change(screen.getByLabelText(/^target$/i), { target: { value: 'app' } })
+    // Wait for the app list itself (not just the label) — the picker's
+    // <select> exists before its options do, and setting a value with no
+    // matching <option> is a silent no-op.
+    await waitFor(() => expect(screen.getByRole('option', { name: 'jellyfin' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText(/^app$/i), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /create rule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body).toMatchObject({ target_type: 'app', target_id: 5 })
   })
 
   it('hides threshold and operator for a status metric', async () => {
