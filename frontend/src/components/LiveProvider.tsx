@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
-import { applyJob, applyMetrics, applyResource } from '../api/live'
+import { applyAlert, applyJob, applyMetrics, applyResource } from '../api/live'
 import { useEntitlements } from '../api/hooks'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
@@ -35,6 +35,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
       const show = t.kind === 'ok' ? toast.success : t.kind === 'err' ? toast.error : toast
       show(t.text, { description: `job #${t.jobId}` })
+    }))
+    wire('alert', (d) => applyAlert(qc, d, (t) => {
+      if (!inApp.current) return   // notify.inapp gates the surface, not the data
+      const show = t.kind === 'ok' ? toast.success : toast.error
+      show(t.text, { description: 'alert' })
     }))
     return () => es.close()
   }, [qc])

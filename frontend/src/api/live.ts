@@ -113,3 +113,31 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
     jobId: d.id,
   })
 }
+
+type AlertDelta = {
+  id: number; state: 'firing' | 'resolved'
+  severity: 'info' | 'warning' | 'critical'; message: string
+}
+type AlertToastFn = (t: { kind: 'ok' | 'err'; text: string; alertId: number }) => void
+
+/** SSE `alert` event → invalidate `['alerts','firing']`; toast for `firing` at
+ *  warning+ severity (doc 06 §d, verbatim).
+ *
+ *  Invalidate rather than patch: the delta carries four fields and the table
+ *  renders eleven (rule name, target label, ack state…), so patching would
+ *  write a half-row into the cache. Doc 06's rule is "patch when the delta is
+ *  complete, invalidate when it isn't".
+ *
+ *  A `resolved` transition always toasts, at any severity — an info-level
+ *  alert that quietly went away is still worth one line of good news, and it
+ *  is the only signal that an earlier toast is stale. */
+export function applyAlert(qc: QueryClient, d: AlertDelta, toast?: AlertToastFn) {
+  qc.invalidateQueries({ queryKey: ['alerts', 'firing'] })
+  qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
+  if (d.state === 'resolved') {
+    toast?.({ kind: 'ok', text: d.message, alertId: d.id })
+    return
+  }
+  if (d.severity === 'info') return
+  toast?.({ kind: 'err', text: d.message, alertId: d.id })
+}

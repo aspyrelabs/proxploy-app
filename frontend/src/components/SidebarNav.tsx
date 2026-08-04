@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Brand } from './LoginForm'
+import { HealthFooter } from './HealthFooter'
 
 export const NAV = [
   { label: 'Overview', items: [
@@ -12,6 +13,7 @@ export const NAV = [
     { label: 'Storage', to: '/storage' },
     { label: 'Network', to: '/network' },
     { label: 'Backups', to: '/backups' },
+    { label: 'Alerts', to: '/alerts' },
     { label: 'Settings', to: '/settings' },
   ]},
 ] as const
@@ -36,10 +38,7 @@ export function SidebarNav() {
           </div>
         ))}
       </nav>
-      <div className="border-t border-line-soft px-4 py-3 text-[12px] text-text-2">
-        <span className="mr-2 inline-block h-2 w-2 rounded-full bg-green shadow-[0_0_6px_rgba(63,207,142,.6)]" />
-        All systems healthy
-      </div>
+      <HealthFooter />
     </aside>
   )
 }

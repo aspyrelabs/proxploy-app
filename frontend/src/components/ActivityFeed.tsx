@@ -5,14 +5,18 @@ import { useActivityDrawer } from './ActivityDrawer'
 const TINT: Record<string, string> = {
   succeeded: 'bg-green-dim text-green',
   ok: 'bg-green-dim text-green',
+  resolved: 'bg-green-dim text-green',
   failed: 'bg-red-dim text-red',
   error: 'bg-red-dim text-red',
   denied: 'bg-red-dim text-red',
+  firing: 'bg-red-dim text-red',
   running: 'bg-blue-dim text-blue',
   queued: 'bg-blue-dim text-blue',
   canceled: 'bg-panel-2 text-text-3',
   interrupted: 'bg-amber-dim text-amber',
 }
+
+const BADGE: Record<string, string> = { job: 'JOB', audit: 'AUD', alert: 'ALT' }
 
 function ago(iso: string): string {
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
@@ -32,7 +36,7 @@ function Item({ row, onOpen }: { row: ActivityRow; onOpen: () => void }) {
       className={`flex w-full items-start gap-3 py-2 text-left ${clickable ? 'hover:bg-panel-2' : ''}`}
     >
       <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-tile font-mono text-[10px] uppercase ${tint}`}>
-        {row.kind === 'job' ? 'JOB' : 'AUD'}
+        {BADGE[row.kind] ?? '—'}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block font-mono text-[12.5px] text-text">{row.title}</span>

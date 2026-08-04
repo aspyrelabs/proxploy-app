@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
-import { applyJob, applyMetrics, applyResource } from '../api/live'
+import { applyAlert, applyJob, applyMetrics, applyResource } from '../api/live'
 
 function client() {
   const qc = new QueryClient()
@@ -95,5 +95,40 @@ describe('applyJob — Phase 6 target types', () => {
     const spy = vi.spyOn(qc, 'invalidateQueries')
     applyJob(qc, terminal('vm'))
     expect(spy).toHaveBeenCalledWith({ queryKey: ['vms'] })
+  })
+})
+
+describe('applyAlert', () => {
+  it('invalidates the firing-alerts query and the activity feed', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyAlert(qc, { id: 1, state: 'firing', severity: 'warning', message: 'x' })
+    const keys = spy.mock.calls.map(c => JSON.stringify((c[0] as any).queryKey))
+    expect(keys).toContain(JSON.stringify(['alerts', 'firing']))
+    expect(keys).toContain(JSON.stringify(['cluster', 'activity']))
+  })
+
+  it('toasts a firing alert at warning and above', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    applyAlert(qc, { id: 1, state: 'firing', severity: 'warning', message: 'hot' },
+               (t) => seen.push(t))
+    expect(seen).toEqual([{ kind: 'err', text: 'hot', alertId: 1 }])
+  })
+
+  it('stays quiet for an info-severity alert (doc 06: warning+)', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    applyAlert(qc, { id: 1, state: 'firing', severity: 'info', message: 'meh' },
+               (t) => seen.push(t))
+    expect(seen).toEqual([])
+  })
+
+  it('toasts a resolution as good news, whatever the severity', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    applyAlert(qc, { id: 1, state: 'resolved', severity: 'critical',
+                     message: 'Resolved: host-02 CPU' }, (t) => seen.push(t))
+    expect(seen).toEqual([{ kind: 'ok', text: 'Resolved: host-02 CPU', alertId: 1 }])
   })
 })

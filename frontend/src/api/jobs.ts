@@ -20,9 +20,10 @@ export type JobRow = {
 export type JobEventRow = { seq: number; ts: string; stream: string; message: string }
 
 export type ActivityRow = {
-  kind: 'job' | 'audit'; id: number; at: string; title: string
+  kind: 'job' | 'audit' | 'alert'; id: number; at: string; title: string
   status: string | null; target_type: string | null; target_id: number | null
   actor: string | null; job_id: number | null; progress_pct: number | null
+  severity: string | null; message: string | null
 }
 
 export function jobLabel(j: { kind: string; status: string }): string {
