@@ -15,6 +15,7 @@ vi.mock('../api/client', () => ({
       })
     }
     if (path === '/hosts') return Promise.resolve(hostRows)
+    if (path === '/schedules') return Promise.resolve([])
     if (path.startsWith('/hosts/') && opts?.method === 'PATCH') {
       calls.push({ path, method: opts.method, body: JSON.parse(String(opts.body)) })
       return Promise.resolve({ id: 1, node_shell_enabled: true })

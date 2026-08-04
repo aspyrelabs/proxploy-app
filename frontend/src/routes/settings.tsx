@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { createRoute } from '@tanstack/react-router'
+import { createRoute, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { useSchedules } from '../api/schedules'
+import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
+import { ScheduleForm } from '../components/ScheduleForm'
 import { Button } from '../components/ui/button'
 
 export const settingsRoute = createRoute({
@@ -27,6 +30,95 @@ function Card({ title, children, action }: { title: string; children: React.Reac
       </div>
       {children}
     </section>
+  )
+}
+
+export function SchedulesCard() {
+  const qc = useQueryClient()
+  const schedules = useSchedules()
+  const [adding, setAdding] = useState(false)
+
+  const toggle = useMutation({
+    mutationFn: (s: ScheduleRow) => api(`/schedules/${s.id}`, {
+      method: 'PATCH', body: JSON.stringify({ enabled: !s.enabled }),
+    }),
+    onError: () => toast.error('Could not update that schedule — try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
+  })
+  const runNow = useMutation({
+    mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
+    onSuccess: () => toast.success('Started — follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start that job — try again.'),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/schedules/${id}`, { method: 'DELETE' }),
+    onError: () => toast.error('Could not remove that schedule — try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
+  })
+
+  return (
+    <Card title="Schedules"
+          action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>
+            {adding ? 'Close' : 'New schedule'}
+          </Button>}>
+      <table className="w-full text-left text-[13px]">
+        <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+          <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
+          <th>State</th><th /></tr></thead>
+        <tbody>
+          {(schedules.data ?? []).map(s => (
+            <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
+              <td className="py-2">
+                {s.name}
+                {s.created_by == null && (
+                  <span className="ml-2 rounded-tile bg-panel-2 px-1.5 py-0.5
+                                   font-mono text-[10px] uppercase text-text-3">
+                    system
+                  </span>
+                )}
+              </td>
+              <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
+              <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
+              <td className="font-mono text-[11.5px] text-text-3">
+                {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}
+                <span className="ml-1">{s.timezone}</span>
+              </td>
+              <td className={s.enabled ? 'text-green' : 'text-text-3'}>
+                {s.enabled ? 'enabled' : 'disabled'}
+              </td>
+              <td className="py-2 text-right whitespace-nowrap">
+                <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                        disabled={runNow.isPending}
+                        onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                        disabled={toggle.isPending}
+                        onClick={() => toggle.mutate(s)}>
+                  {s.enabled ? 'Disable' : 'Enable'}
+                </Button>
+                <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                        onClick={() => {
+                          if (window.confirm(`Remove schedule "${s.name}"?`)) {
+                            remove.mutate(s.id)
+                          }
+                        }}>Remove</Button>
+              </td>
+            </tr>
+          ))}
+          {!schedules.data?.length && (
+            <tr><td colSpan={6} className="py-4 text-text-3">
+              No schedules yet. Add one for nightly backups or an auto-update window.
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+      {adding && <div className="mt-4 border-t border-line-soft pt-4">
+        <ScheduleForm onSaved={() => setAdding(false)} />
+      </div>}
+    </Card>
   )
 }
 
@@ -187,10 +279,13 @@ export function SettingsPage() {
         )}
       </Card>
 
+      <SchedulesCard />
+
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
-          Scheduled auto-updates and catalog sync configuration arrive in
-          Phases 4–7; this page grows with them.
+          Auto-update windows, scheduled backups and catalog sync are all
+          schedules — add them above. Alert rules live on the{' '}
+          <Link to={'/alerts' as never} className="text-amber">Alerts</Link> page.
         </p>
       </Card>
     </div>

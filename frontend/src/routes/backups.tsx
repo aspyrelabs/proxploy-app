@@ -7,10 +7,12 @@ import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrunePreview, useRunBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
+import { useSchedules } from '../api/schedules'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { LockVeil } from '../components/LockVeil'
 import { RestoreDialog } from '../components/RestoreDialog'
+import { ScheduleForm } from '../components/ScheduleForm'
 import { StorageForm } from '../components/StorageForm'
 import { UsageBar, STORAGE_GRADIENT } from '../components/UsageBar'
 import { Button } from '../components/ui/button'
@@ -85,6 +87,24 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** "New job" → a backup.run schedule, in the same dialog shell as RunDialog. */
+function ScheduleDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <div role="dialog" aria-label="New scheduled job"
+         className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+      <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
+        <h2 className="font-display text-[16px] font-semibold">New scheduled backup job</h2>
+        <div className="mt-4">
+          <ScheduleForm jobKind="backup.run" onSaved={onClose} />
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const MARK_CLS: Record<string, string> = {
   keep: 'border-green/30 bg-green-dim text-green',
   remove: 'border-red/30 bg-red-dim text-red',
@@ -96,8 +116,9 @@ const MARK_CLS: Record<string, string> = {
  *
  * ponytail: POST /backups/prune is deliberately not wired. A one-shot "prune
  * now" button whose keep-* rules cannot be saved anywhere is the wrong half of
- * retention to ship first; the rules belong to the Phase 7 scheduler, and this
- * view is what proves the spec does what the operator meant before that lands.
+ * retention to ship first; the rules belong to a schedule (Settings →
+ * Schedules, job kind backup.prune), and this view is what proves the spec
+ * does what the operator meant before wiring one up.
  */
 function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
   const ent = useEntitlements()
@@ -211,7 +232,13 @@ export function BackupsPage() {
   const [running, setRunning] = useState(false)
   const [restoring, setRestoring] = useState<BackupRow | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const del = useDeleteBackup()
+
+  const schedules = useSchedules()
+  const nextBackup = (schedules.data ?? [])
+    .filter((s) => s.enabled && s.job_kind === 'backup.run' && s.next_run_at)
+    .sort((a, b) => (a.next_run_at! < b.next_run_at! ? -1 : 1))[0]
 
   const stats = data?.stats
   const stores = stats?.datastores ?? []
@@ -256,8 +283,7 @@ export function BackupsPage() {
           <Button variant="ghost" onClick={() => setConnecting(true)}>
             Connect PBS
           </Button>
-          <Button variant="ghost" disabled
-                  title="Scheduled backup jobs arrive with the Phase 7 scheduler.">
+          <Button variant="ghost" onClick={() => setScheduling(true)}>
             New job
           </Button>
           <Button disabled={runDenied}
@@ -269,8 +295,11 @@ export function BackupsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <StatCard label="Next scheduled" value="—"
-          note="Scheduled backups arrive with the Phase 7 scheduler; every run today is one you started." />
+        <StatCard label="Next scheduled"
+          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : '—'}
+          note={nextBackup
+            ? `${nextBackup.name} · ${nextBackup.cron} ${nextBackup.timezone}`
+            : 'No backup schedule yet — "New job" creates one.'} />
         <StatCard label="Datastore used" value={fmtBytes(stats?.total_bytes)}
           note={
             <>
@@ -357,6 +386,7 @@ export function BackupsPage() {
       {connecting && (
         <StorageForm existing={null} defaultType="pbs" onClose={() => setConnecting(false)} />
       )}
+      {scheduling && <ScheduleDialog onClose={() => setScheduling(false)} />}
     </div>
   )
 }

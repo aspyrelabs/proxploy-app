@@ -1,0 +1,28 @@
+import { useQuery } from '@tanstack/react-query'
+import { api } from './client'
+
+export type ScheduleRow = {
+  id: number; name: string; job_kind: string; cron: string; timezone: string
+  params: Record<string, unknown>; enabled: boolean
+  created_by: number | null           // null = a schedule Proxploy seeded itself
+  last_run_at: string | null; next_run_at: string | null
+}
+
+/** Job kinds worth offering in the UI. Deliberately not every registered
+ *  handler: `vm.delete` on a cron is not a feature, it is a foot-gun. The
+ *  backend accepts any registered kind, so this list is the curated surface,
+ *  not the security boundary. */
+export const SCHEDULABLE: { kind: string; label: string; needs: 'host' | 'app' | null }[] = [
+  { kind: 'backup.run', label: 'Backup guests on a host', needs: 'host' },
+  { kind: 'backup.prune', label: 'Apply backup retention', needs: 'host' },
+  { kind: 'app.update', label: 'Update an app', needs: 'app' },
+  { kind: 'catalog.refresh', label: 'Refresh the app catalog', needs: null },
+  { kind: 'metrics.maintain', label: 'Roll up and prune metrics', needs: null },
+]
+
+export function useSchedules() {
+  return useQuery({
+    queryKey: ['schedules'],
+    queryFn: () => api<ScheduleRow[]>('/schedules'),
+  })
+}

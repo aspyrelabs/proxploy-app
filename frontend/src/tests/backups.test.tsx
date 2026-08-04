@@ -56,6 +56,7 @@ vi.mock('../api/client', () => {
       }
       if (method !== 'GET') calls.push({ path, method, body })
       if (path === '/backups') return Promise.resolve(BACKUPS)
+      if (path === '/schedules') return Promise.resolve([])
       if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
       if (path.startsWith('/backups/prune-preview')) return Promise.resolve(PRUNE)
       if (path === '/backups/run') {
@@ -116,12 +117,15 @@ describe('BackupsPage', () => {
     expect(screen.getByText('5.0 GiB')).toBeInTheDocument()
   })
 
-  it('renders "New job" as a disabled control that says why', async () => {
+  it('opens a schedule dialog from "New job" instead of a disabled button', async () => {
+    // The Phase 6 placeholder rendered a disabled button titled "…arrive with
+    // the Phase 7 scheduler". Phase 7 owes it a working dialog.
     calls.length = 0
     wrap()
-    const btn = await screen.findByRole('button', { name: 'New job' })
-    expect(btn).toBeDisabled()
-    expect(btn.getAttribute('title')).toMatch(/Phase 7/i)
+    const btn = await screen.findByRole('button', { name: /new job/i })
+    expect(btn).not.toBeDisabled()
+    fireEvent.click(btn)
+    await waitFor(() => expect(screen.getByLabelText(/cron/i)).toBeInTheDocument())
   })
 
   it('runs a backup and swaps the dialog body for the job log', async () => {
