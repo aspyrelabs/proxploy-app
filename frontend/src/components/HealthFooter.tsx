@@ -22,6 +22,22 @@ export function HealthFooter() {
   // lie this footer used to tell unconditionally.
   if (alerts.isPending || nodes.isPending) return null
 
+  // isPending goes false on error too (data stays undefined), so a 401/500/
+  // dropped network would otherwise fall through to firing=0, down=0 —
+  // "All systems healthy" while the backend is unreachable. Say so instead.
+  if (alerts.isError || nodes.isError) {
+    return (
+      <Link to={'/alerts' as never}
+            className="block border-t border-line-soft px-4 py-3 text-[12px] text-text-2 hover:bg-panel-2">
+        <span className="mr-2 inline-block h-2 w-2 rounded-full bg-text-3" />
+        Status unknown
+        <span className="mt-0.5 block font-mono text-[11px] text-text-3">
+          couldn't reach the API
+        </span>
+      </Link>
+    )
+  }
+
   const firing = alerts.data?.length ?? 0
   const rows = nodes.data ?? []
   const down = rows.filter((n) => n.status !== 'connected').length
