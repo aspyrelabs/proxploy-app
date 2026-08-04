@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from proxploy.api.deps import get_db, require_entitlement, require_role
-from proxploy.models import App, AuditEvent, Host, Job, User, Vm
+from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
 
@@ -124,17 +124,18 @@ _require_viewer = require_role("viewer")
                           Depends(require_entitlement("cluster.activity_feed"))])
 def activity(limit: int = 20, db=Depends(get_db),
             user: User = Depends(_require_viewer)):
-    """Jobs + audit highlights, merged newest-first (doc 05, doc 06 ActivityFeed).
+    """Jobs + alerts + audit highlights, merged newest-first (doc 05, doc 06
+    ActivityFeed).
 
     An audit row that spawned a job is skipped: the job entry already represents
-    it, and showing both would double every lifecycle action. Alerts join this
-    feed in Phase 7 when the evaluator exists — the `kind` discriminator is here
-    so that is additive.
+    it, and showing both would double every lifecycle action. Alerts are the
+    third source — the `kind` discriminator lets the frontend distinguish all
+    three without extra endpoints.
 
     Paging: each source is independently queried with `LIMIT limit` (not
-    `limit // 2`), so the merged-then-sliced result is always the true
-    top-`limit` rows across both kinds — the top `limit` merged rows can
-    contain at most `limit` rows from either source, and each source already
+    `limit // 3`), so the merged-then-sliced result is always the true
+    top-`limit` rows across all three kinds — the top `limit` merged rows can
+    contain at most `limit` rows from any one source, and each source already
     supplies that many. A source can only return fewer than `limit` rows
     (including zero) than the feed asks for when it genuinely has fewer
     displayable rows, e.g. every audit row in view is a job-spawned dupe that
@@ -155,7 +156,8 @@ def activity(limit: int = 20, db=Depends(get_db),
         "kind": "job", "id": j.id, "at": j.created_at.isoformat() + "Z",
         "title": j.kind, "status": j.status, "target_type": j.target_type,
         "target_id": j.target_id, "actor": emails.get(j.requested_by),
-        "job_id": j.id, "progress_pct": j.progress_pct}) for j in jobs]
+        "job_id": j.id, "progress_pct": j.progress_pct,
+        "severity": None, "message": None}) for j in jobs]
 
     audits = (db.query(AuditEvent).filter(AuditEvent.job_id.is_(None))
               .order_by(AuditEvent.ts.desc(), AuditEvent.id.desc())
@@ -164,7 +166,27 @@ def activity(limit: int = 20, db=Depends(get_db),
         "kind": "audit", "id": a.id, "at": a.ts.isoformat() + "Z",
         "title": a.action, "status": a.result, "target_type": a.target_type,
         "target_id": a.target_id, "actor": emails.get(a.actor_id),
-        "job_id": None, "progress_pct": None}) for a in audits]
+        "job_id": None, "progress_pct": None,
+        "severity": None, "message": None}) for a in audits]
 
-    merged = sorted(job_rows + audit_rows, key=lambda pair: pair[0], reverse=True)
+    # Third source (doc 05: "jobs + alerts + audit highlights, merged"). Like
+    # the two above it is queried with the FULL `limit`, not `limit // 3` —
+    # that is what makes the merged-then-sliced result the true top-`limit`.
+    alerts = (db.query(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
+              .limit(limit).all())
+    rule_names = {r.id: (r.name, r.severity) for r in db.query(AlertRule)
+                  .filter(AlertRule.id.in_({a.rule_id for a in alerts})).all()
+                  } if alerts else {}
+    alert_rows = [(a.created_at, {
+        "kind": "alert", "id": a.id, "at": a.created_at.isoformat() + "Z",
+        "title": rule_names.get(a.rule_id, (a.message, "warning"))[0],
+        "status": a.state,
+        "severity": rule_names.get(a.rule_id, (None, "warning"))[1],
+        "target_type": a.target_type, "target_id": a.target_id,
+        "actor": None,          # nobody triggers an alert; the evaluator does
+        "job_id": None, "progress_pct": None,
+        "message": a.message}) for a in alerts]
+
+    merged = sorted(job_rows + audit_rows + alert_rows,
+                    key=lambda pair: pair[0], reverse=True)
     return [row for _, row in merged[:limit]]
