@@ -11,6 +11,7 @@ export const indexRoute = createRoute({
 
 import { loginRoute } from './routes/login'
 import { onboardingRoute } from './routes/onboarding'
+import { alertsRoute } from './routes/alerts'
 import { settingsRoute } from './routes/settings'
 import { clusterRoute, nodeDetailRoute } from './routes/cluster'
 import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
@@ -26,7 +27,7 @@ const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute,
 export const routeTree = rootRoute.addChildren([
   indexRoute, loginRoute, onboardingRoute,
   shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
-                          storageRoute, networkRoute, backupsRoute, settingsRoute]),
+                          storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute]),
 ])
 export const router = createRouter({ routeTree })
 

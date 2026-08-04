@@ -27,7 +27,7 @@ export function HealthFooter() {
   // "All systems healthy" while the backend is unreachable. Say so instead.
   if (alerts.isError || nodes.isError) {
     return (
-      <Link to={'/alerts' as never}
+      <Link to="/alerts"
             className="block border-t border-line-soft px-4 py-3 text-[12px] text-text-2 hover:bg-panel-2">
         <span className="mr-2 inline-block h-2 w-2 rounded-full bg-text-3" />
         Status unknown
