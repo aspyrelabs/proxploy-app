@@ -11,7 +11,7 @@ import json as jsonlib
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_app, scope_host, scope_vm
 from proxploy.models import App, Host, User, Vm
 from proxploy.services import ptybridge
 from proxploy.services.audit import write_audit
@@ -24,14 +24,15 @@ from proxploy.services.proxmox import ProxmoxError
 router = APIRouter(tags=["consoles"])
 
 
-_require_operator = require_role("operator")
-_require_admin = require_role("admin")
+_app_console = authorize("app", "console", scope_of=scope_app())
+_host_console = authorize("host", "console", scope_of=scope_host())
+_vm_console = authorize("vm", "console", scope_of=scope_vm())
 
 
 @router.post("/apps/{app_id}/console/tickets",
-             dependencies=[Depends(_require_operator), Depends(require_entitlement("apps.console"))])
+             dependencies=[Depends(_app_console), Depends(require_entitlement("apps.console"))])
 def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
-                       user: User = Depends(_require_operator)):
+                       user: User = Depends(_app_console)):
     a = db.get(App, app_id)
     if a is None:
         raise HTTPException(404, "app not found")
@@ -136,9 +137,9 @@ async def app_console_ws(websocket: WebSocket, app_id: int, ticket: str | None =
 
 
 @router.post("/hosts/{host_id}/shell/tickets",
-             dependencies=[Depends(_require_admin), Depends(require_entitlement("terminal.node"))])
+             dependencies=[Depends(_host_console), Depends(require_entitlement("terminal.node"))])
 def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
-                      user: User = Depends(_require_admin)):
+                      user: User = Depends(_host_console)):
     host = db.get(Host, host_id)
     if host is None:
         raise HTTPException(404, "host not found")
@@ -169,9 +170,9 @@ async def node_shell_ws(websocket: WebSocket, host_id: int, ticket: str | None =
 
 
 @router.post("/vms/{vm_id}/console/tickets",
-             dependencies=[Depends(_require_operator), Depends(require_entitlement("vms.console"))])
+             dependencies=[Depends(_vm_console), Depends(require_entitlement("vms.console"))])
 def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
-                      user: User = Depends(_require_operator)):
+                      user: User = Depends(_vm_console)):
     v = db.get(Vm, vm_id)
     if v is None:
         raise HTTPException(404, "vm not found")

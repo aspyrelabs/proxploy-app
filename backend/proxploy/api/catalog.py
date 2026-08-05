@@ -7,7 +7,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.models import App, CatalogEntry, HostCredential, User
 from proxploy.services.audit import write_audit
@@ -16,12 +16,19 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 # Reused as BOTH the route-level dependency and the parameter-level one below
 # so FastAPI's dependency cache (keyed on the callable) collapses them into a
-# single call, and so `require_entitlement` in `dependencies=[...]` runs AFTER
-# auth/role rather than at position 0 — a bare `Depends(require_entitlement(...))`
-# there would leak 403 to an anonymous caller who should see 401 (same fix as
+# single call, and so authorize() in `dependencies=[...]` runs BEFORE
+# require_entitlement — a bare `Depends(require_entitlement(...))` first would
+# leak 403 to an anonymous caller who should see 401 (same fix as
 # jobs.py/apps.py/vms.py/notifications.py; see their comments).
-_require_viewer = require_role("viewer")
-_require_admin = require_role("admin")
+_read = authorize("catalog", "read")
+_refresh = authorize("catalog", "refresh")
+# Install is a store-wide ("app", "install") permission, not scoped by
+# catalog entry — its team lives in the request BODY (host_id), not a path
+# param, so there's no scope_of resolver to hand it (deps.py's scope_*
+# helpers all resolve off request.path_params). ponytail: global-domain
+# install for now; body-derived team scoping is the upgrade path if a
+# non-owner-of-that-host operator installing onto it ever needs blocking.
+_install = authorize("app", "install")
 
 
 def _serialize(r: CatalogEntry) -> dict:
@@ -37,10 +44,10 @@ def _serialize(r: CatalogEntry) -> dict:
     }
 
 
-@router.get("", dependencies=[Depends(_require_viewer),
+@router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("store.catalog"))])
 def list_catalog(category: str | None = None, q: str | None = None,
-                 db=Depends(get_db), user: User = Depends(_require_viewer)):
+                 db=Depends(get_db), user: User = Depends(_read)):
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
@@ -49,10 +56,10 @@ def list_catalog(category: str | None = None, q: str | None = None,
     return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
 
 
-@router.get("/{slug}", dependencies=[Depends(_require_viewer),
+@router.get("/{slug}", dependencies=[Depends(_read),
                                      Depends(require_entitlement("store.catalog"))])
 def get_catalog_entry(slug: str, db=Depends(get_db),
-                      user: User = Depends(_require_viewer)):
+                      user: User = Depends(_read)):
     row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
     if row is None:
         raise HTTPException(404, "not found")
@@ -60,10 +67,10 @@ def get_catalog_entry(slug: str, db=Depends(get_db),
 
 
 @router.post("/refresh", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_refresh),
                           Depends(require_entitlement("store.refresh"))])
 def refresh_catalog(request: Request, db=Depends(get_db),
-                    user: User = Depends(_require_admin)):
+                    user: User = Depends(_refresh)):
     job = request.app.state.jobs.enqueue(db, kind="catalog.refresh",
                                          requested_by=user.id)
     write_audit(db, actor_type="user", actor_id=user.id, action="catalog.refresh",
@@ -98,10 +105,10 @@ class InstallIn(BaseModel):
 # (mirrors hosts.py's CONSENT_NOTE shape) and an already-enrolled `ssh_key`
 # HostCredential — no key, no route, regardless of consent.
 @router.post("/{slug}/install", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_install),
                           Depends(require_entitlement("store.install"))])
 def install_catalog_entry(slug: str, body: InstallIn, request: Request,
-                          db=Depends(get_db), user: User = Depends(_require_admin)):
+                          db=Depends(get_db), user: User = Depends(_install)):
     if not body.consent:
         raise HTTPException(400, "root-consent required: this installs and runs a "
                                  "community-scripts.org script as root on the node")

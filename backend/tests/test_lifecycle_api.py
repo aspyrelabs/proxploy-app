@@ -43,12 +43,15 @@ def test_missing_session_is_401_not_403(tmp_path, csrf_header, bootstrap_admin):
 
 
 def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
-    """require_role("operator") must actually refuse a logged-in user whose
-    role is below operator — a plain signup defaults to "viewer" (UserIn.role)
-    same as a user with no team membership at all defaults to "viewer" via
-    user_role()'s `default=` (deps.py:26-27). Covers both the apps and vms
-    routes: this is the endpoint that stops a customer's container, and
-    "operator required" was previously asserted nowhere in the suite."""
+    """authorize("app"/"vm", "lifecycle") must actually refuse a logged-in
+    user whose role is below operator — a plain signup defaults to "viewer"
+    (UserIn.role) and gets a real viewer membership. (A user with NO team
+    membership is a different case entirely and is denied outright, reads
+    included — Phase 8 amendment A1, pinned by test_authz_bootstrap.py.)
+    Covers both the
+    apps and vms routes: this is the endpoint that stops a customer's
+    container, and "operator required" was previously asserted nowhere in
+    the suite."""
     from tests.fakes.pve import FakePVE
     from tests.support import make_app
 
@@ -65,7 +68,7 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
                headers=csrf_header(c))
         for url in (f"/api/v1/apps/{app_id}/start", f"/api/v1/vms/{vm_id}/start"):
             r = c.post(url, headers=csrf_header(c))
-            assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
+            assert r.status_code == 403 and r.json()["detail"] == "forbidden"
 
 
 def test_app_start_returns_202_with_a_job_and_audits(tmp_path, csrf_header,

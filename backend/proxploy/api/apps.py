@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_app
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User
@@ -20,20 +20,21 @@ from proxploy.services.selfguard import DESTRUCTIVE, is_self
 router = APIRouter(prefix="/apps", tags=["apps"])
 
 # Reused as BOTH the route-level dependency and the parameter-level one below
-# (same collapse-and-ordering rationale as catalog.py's _require_admin/
-# _require_viewer and this file's own _require_operator further down): auth/
-# role must run before require_entitlement, or an anonymous caller gets a
-# leaky 403 instead of 401 (test_route_auth_invariant.py).
-_require_admin = require_role("admin")
-
-# Defined here (rather than just above the lifecycle wildcard further down)
-# so the script routes below — registered before that wildcard per the
-# WARNING near it — can also reuse it as a single collapsed dependency.
-_require_operator = require_role("operator")
-
-# Hoisted alongside the above (Phase 6 Task 6) for the network routes below,
-# which need a viewer-level singleton to collapse with require_entitlement.
-_require_viewer = require_role("viewer")
+# so FastAPI's dependency cache (keyed on the callable) collapses repeated
+# uses into one call per request, and so authorize() runs before
+# require_entitlement — an anonymous caller must get 401, never a leaky 403
+# (test_route_auth_invariant.py). No-id routes (list/discovered/adopt/
+# update-all) use the global (no scope_of) singleton; id-carrying routes use
+# the scope_app()-scoped one.
+_read = authorize("app", "read")
+_read_scoped = authorize("app", "read", scope_of=scope_app())
+_lifecycle = authorize("app", "lifecycle", scope_of=scope_app())
+_configure = authorize("app", "configure", scope_of=scope_app())
+_update = authorize("app", "update")
+_update_scoped = authorize("app", "update", scope_of=scope_app())
+_script_read = authorize("app", "script_read", scope_of=scope_app())
+_script = authorize("app", "script", scope_of=scope_app())
+_adopt = authorize("app", "adopt")
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -57,7 +58,7 @@ def _app_out(a: App, host: Host, snapshots) -> dict:
 @router.get("")
 def list_apps(request: Request, host: int | None = None, q: str | None = None,
               status: str | None = None, db=Depends(get_db),
-              user: User = Depends(require_role("viewer"))):
+              user: User = Depends(_read)):
     hosts = {h.id: h for h in db.query(Host).all()}
     query = db.query(App)
     if host is not None:
@@ -77,7 +78,7 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
 
 @router.get("/discovered")
 def discovered(request: Request, db=Depends(get_db),
-               user: User = Depends(require_role("viewer"))):
+               user: User = Depends(_read)):
     """Pre-existing CTs not yet adopted (doc 05). Read-only until Phase 4."""
     hosts = {h.id: h for h in db.query(Host).all()}
     out = []
@@ -105,10 +106,10 @@ class UpdateIn(BaseModel):
     consent: bool = False
 
 
-@router.post("/adopt", dependencies=[Depends(_require_admin),
+@router.post("/adopt", dependencies=[Depends(_adopt),
                                      Depends(require_entitlement("apps.adopt"))])
 def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
-               user: User = Depends(_require_admin)):
+               user: User = Depends(_adopt)):
     """Bulk-adopt pre-existing/discovered CTs as tracked apps (doc 05, Phase 4).
 
     One commit for the whole batch: a mid-batch ux_apps_host_ctid conflict
@@ -140,10 +141,10 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
 # wildcard: `{app_id}` would otherwise try to parse "update-all" as an int
 # and 422 (see test_update_all_is_not_matched_as_an_app_id).
 @router.post("/update-all", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_update),
                           Depends(require_entitlement("store.update_all"))])
 def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
-                    user: User = Depends(_require_operator)):
+                    user: User = Depends(_update)):
     """One `app.update` job per stale app (doc 05: "per-app results").
 
     No new queue machinery: JobBackend.MAX_CONCURRENT already runs four at a
@@ -201,7 +202,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
 
 @router.get("/{app_id}")
 def app_detail(request: Request, app_id: int, db=Depends(get_db),
-               user: User = Depends(require_role("viewer"))):
+               user: User = Depends(_read_scoped)):
     a = db.get(App, app_id)
     if a is None:
         raise HTTPException(404, "app not found")
@@ -210,7 +211,7 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
 
 
 @router.get("/{app_id}/logs")
-def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(require_role("viewer"))):
+def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)):
     """Doc 05: 'Recent CT log lines (journal tail via pct exec / console
     channel)'. No such exec/journal channel exists anywhere in this codebase
     yet -- services/lifecycle.py and executor/ only ever run install/update
@@ -250,7 +251,7 @@ def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
 # would otherwise swallow these (it's POST-only though, so GET/PUT here don't
 # actually collide on method; kept ahead of it anyway for the same reason
 # doc 05's future /{id}/update and /{id}/migrate must be).
-@router.get("/{app_id}/script", dependencies=[Depends(_require_operator),
+@router.get("/{app_id}/script", dependencies=[Depends(_script_read),
                                               Depends(require_entitlement("apps.script_edit"))])
 def get_app_script(app_id: int, db=Depends(get_db)):
     latest = (db.query(AppScript).filter_by(app_id=app_id)
@@ -266,10 +267,10 @@ class ScriptIn(BaseModel):
     content: str
 
 
-@router.put("/{app_id}/script", dependencies=[Depends(_require_admin),
+@router.put("/{app_id}/script", dependencies=[Depends(_script),
                                               Depends(require_entitlement("apps.script_edit"))])
 def put_app_script(app_id: int, body: ScriptIn, request: Request, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_script)):
     # Validate before writing, like every sibling route here: a missing
     # `content` used to KeyError into a 500, and an unknown app_id used to
     # 500 on the AppScript FK violation at commit time.
@@ -291,7 +292,7 @@ def put_app_script(app_id: int, body: ScriptIn, request: Request, db=Depends(get
 
 
 @router.get("/{app_id}/script/versions",
-            dependencies=[Depends(_require_operator),
+            dependencies=[Depends(_script_read),
                          Depends(require_entitlement("apps.script_edit"))])
 def list_app_script_versions(app_id: int, db=Depends(get_db)):
     rows = (db.query(AppScript).filter_by(app_id=app_id)
@@ -301,10 +302,10 @@ def list_app_script_versions(app_id: int, db=Depends(get_db)):
 
 
 @router.post("/{app_id}/script/revert",
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_script),
                           Depends(require_entitlement("apps.script_edit"))])
 def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
-                      user: User = Depends(_require_admin)):
+                      user: User = Depends(_script)):
     """Task 5 review found a dead end: put_app_script above always writes
     `source="edited"`, and nothing else ever writes `source="upstream"` except
     the install/update job handlers — so once an app's script is edited,
@@ -378,7 +379,7 @@ def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript 
 
 
 @router.get("/{app_id}/update",
-            dependencies=[Depends(_require_operator),
+            dependencies=[Depends(_update_scoped),
                           Depends(require_entitlement("store.updates"))])
 def get_app_update(app_id: int, db=Depends(get_db)):
     """What an update would do: which commit to which, and the script diff.
@@ -420,10 +421,10 @@ def get_app_update(app_id: int, db=Depends(get_db)):
 
 
 @router.post("/{app_id}/update", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_update_scoped),
                            Depends(require_entitlement("store.update"))])
 def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db),
-               user: User = Depends(_require_operator)):
+               user: User = Depends(_update_scoped)):
     """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry):
     this re-runs a community script as root on the node, and brief §8 says the
     honest thing is to make the operator say so out loud. Unlike install
@@ -466,19 +467,19 @@ def _app_and_host(db, app_id: int):
 
 # Above the lifecycle wildcard, per that route's own WARNING further down.
 @router.get("/{app_id}/network",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read_scoped),
                           Depends(require_entitlement("network.guest_config"))])
 def app_network(request: Request, app_id: int, db=Depends(get_db),
-                user: User = Depends(_require_viewer)):
+                user: User = Depends(_read_scoped)):
     a, host = _app_and_host(db, app_id)
     return guest_nics(request, db, host, "lxc", a.ctid)
 
 
 @router.put("/{app_id}/network/{iface}",
-            dependencies=[Depends(_require_operator),
+            dependencies=[Depends(_configure),
                           Depends(require_entitlement("network.guest_config"))])
 def app_network_update(request: Request, app_id: int, iface: str, body: NicIn,
-                       db=Depends(get_db), user: User = Depends(_require_operator)):
+                       db=Depends(get_db), user: User = Depends(_configure)):
     a, host = _app_and_host(db, app_id)
     return set_guest_nic(request, db, user, target_type="app", target_id=a.id,
                          host=host, kind="lxc", vmid=a.ctid, iface=iface, body=body)
@@ -527,12 +528,12 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
 # this handler instead and 422 with "action must be one of start, stop,
 # restart, shutdown".
 @router.post("/{app_id}/{action}", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_lifecycle),
                           Depends(require_entitlement("apps.lifecycle"))])
 def app_lifecycle(request: Request, app_id: int, action: str,
                   body: LifecycleIn = Body(default=LifecycleIn()),
                   db=Depends(get_db),
-                  user: User = Depends(_require_operator)):
+                  user: User = Depends(_lifecycle)):
     if action not in APP_ACTIONS:
         raise HTTPException(422, f"action must be one of {', '.join(APP_ACTIONS)}")
     a = db.get(App, app_id)

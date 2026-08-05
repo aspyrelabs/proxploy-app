@@ -288,7 +288,7 @@ def test_revert_requires_admin(tmp_path, csrf_header, bootstrap_admin):
                                            "password": "correct-horse-battery"},
                headers=csrf_header(c))
         r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
-        assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
+        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
 
 
 def test_revert_entitlement_gates_the_route(tmp_path, csrf_header, bootstrap_admin):
@@ -307,3 +307,34 @@ def test_revert_entitlement_gates_the_route(tmp_path, csrf_header, bootstrap_adm
         r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
         assert r.status_code == 403
         assert r.json()["feature"] == "apps.script_edit"
+
+
+def test_an_operator_may_read_the_script_but_not_write_it(client, csrf_header,
+                                                          bootstrap_admin):
+    """Doc 05 L115/117 put GET /script and GET /script/versions at operator,
+    while PUT and revert are admin. Converting all four onto the single
+    ("app","script")=admin entry would have silently tightened read access —
+    no test covered an operator actor here, so nothing would have caught it.
+    Hence ("app","script_read")="operator" in the matrix, and hence this test.
+    """
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db).id
+
+    client.post("/api/v1/users", json={"email": "op@example.com",
+                                       "password": "correct-horse-battery",
+                                       "display_name": "Op", "role": "operator"},
+                headers=csrf_header(client))
+    client.post("/api/v1/auth/logout", headers=csrf_header(client))
+    client.post("/api/v1/auth/login", json={"email": "op@example.com",
+                                            "password": "correct-horse-battery"},
+                headers=csrf_header(client))
+
+    assert client.get(f"/api/v1/apps/{app_id}/script").status_code == 200
+    assert client.get(f"/api/v1/apps/{app_id}/script/versions").status_code == 200
+    assert client.put(f"/api/v1/apps/{app_id}/script",
+                      json={"content": "msg_ok sneaky\n"},
+                      headers=csrf_header(client)).status_code == 403
+    assert client.post(f"/api/v1/apps/{app_id}/script/revert",
+                       json={"version": 1},
+                       headers=csrf_header(client)).status_code == 403

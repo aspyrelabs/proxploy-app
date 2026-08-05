@@ -53,7 +53,8 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("app", "lifecycle"): "operator",
     ("app", "configure"): "operator",   # PATCH metadata, guest NICs
     ("app", "update"): "operator",
-    ("app", "script"): "admin",         # PUT script (doc 05: admin)
+    ("app", "script_read"): "operator", # GET script + versions (doc 05 L115/117)
+    ("app", "script"): "admin",         # PUT script, revert (doc 05: admin)
     ("app", "console"): "operator",
     ("app", "install"): "admin",        # store install
     ("app", "adopt"): "admin",
