@@ -29,6 +29,12 @@ dependencies = [
   # release exists (alphas only, verified 2026-08-01) and doc 03 marks
   # Scheduling "Provisional (seam: Scheduler)" — see docs/notes/phase-7-operate.md.
   "APScheduler>=3.11,<4",
+  # Phase 8 (Scale). Licenses verified against PyPI 2026-08-05 and run through
+  # the ci.yml allowlist: casbin Apache-2.0 (pulls simpleeval, MIT), Authlib
+  # BSD-3-Clause (pulls joserfc, BSD-3-Clause), pyotp MIT.
+  "casbin>=1.43,<2",
+  "Authlib>=1.7,<2",
+  "pyotp>=2.10,<3",
 ]
 
 [project.optional-dependencies]
