@@ -13,6 +13,8 @@ import { HostForm } from '../components/HostForm'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
+import { TotpCard } from '../components/TotpCard'
+import { SessionsCard } from '../components/SessionsCard'
 import { Button } from '../components/ui/button'
 import { useTeams } from '../api/teams'
 
@@ -326,6 +328,10 @@ export function SettingsPage() {
       <TeamsCard />
 
       <ApiKeysCard />
+
+      <TotpCard />
+
+      <SessionsCard />
 
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
