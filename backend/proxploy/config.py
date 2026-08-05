@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     # Alert evaluation rides the poll cycle (services/alerts.py); off means the
     # poller still writes samples, nothing evaluates them.
     alerts_enabled: bool = True
+    # OIDC JIT provisioning policy (doc 10 Task 10 + gap review). An IdP's user
+    # population is not automatically the application's authorized population
+    # — auto-admitting every directory identity is the accidental-access
+    # failure mode. None (default) means a first-time OIDC sign-in provisions
+    # the user but mints NO team_members row and leaves is_active=False: since
+    # services/authz.py derives every permission from team_members and is
+    # fail-closed, that account can do nothing until an admin activates it and
+    # assigns a role through the existing users/teams API — deny-with-an-
+    # explanation, not a silent lockout. Set this to opt into auto-provisioning
+    # a real role instead; validated against ROLE_ORDER at first use
+    # (services/oidc.py) and raises loudly (never silently falls back) on an
+    # unknown value.
+    oidc_default_role: str | None = None
+    oidc_default_team_slug: str = "default"
 
 
 @lru_cache
