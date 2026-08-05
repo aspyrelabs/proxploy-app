@@ -6,6 +6,8 @@ a reason for the Settings page to fail. Every failure becomes a string the
 operator can act on.
 """
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.request import url2pathname
 
@@ -62,3 +64,19 @@ def check(settings: Settings) -> dict:
     out["channel"] = manifest.get("channel")
     out["update_available"] = is_upgrade(proxploy.__version__, manifest["version"])
     return out
+
+
+def launch(settings: Settings, version: str) -> None:
+    """Hand off to the updater and return immediately.
+
+    systemd-run puts the script in its OWN transient unit, outside this
+    process's cgroup. That is the whole point: the script restarts
+    proxploy.service, and anything living inside that cgroup would be killed
+    mid-update, leaving the symlink swapped and nothing running.
+    """
+    script = str(settings.update_script)
+    systemd_run = shutil.which("systemd-run") or "/usr/bin/systemd-run"
+    subprocess.Popen(
+        [systemd_run, f"--unit=proxploy-update-{version}", "--collect",
+         script, "--to", version, "--channel", settings.release_channel_url],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
