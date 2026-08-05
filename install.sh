@@ -24,6 +24,7 @@ PUBKEY=""
 CTID=""
 STORAGE=""
 BRIDGE=""
+FQDN=""
 PVE_ONLY=0
 DRY_RUN=0
 
@@ -49,6 +50,10 @@ Usage: install.sh --shape systemd|lxc --channel <url> --version <v> --pubkey <pe
   --storage  PVE storage for the CT's rootfs. Default: first storage that
              supports rootdir content.
   --bridge   PVE network bridge for the CT. Default: vmbr0.
+  --hostname Public DNS name Caddy should request a Let's Encrypt cert for.
+             Omit for a LAN install with no public hostname: Caddy still
+             serves TLS, via its own self-signed CA (`tls internal`), on
+             https://<this host's primary IP>/.
   --pve-only Force the PVE-host path (skip auto-detection) and stop after
              creating and staging the CT — never recurse into the
              in-container half.
@@ -66,6 +71,7 @@ while [ $# -gt 0 ]; do
     --ctid) CTID="$2"; shift 2 ;;
     --storage) STORAGE="$2"; shift 2 ;;
     --bridge) BRIDGE="$2"; shift 2 ;;
+    --hostname) FQDN="$2"; shift 2 ;;
     --pve-only) PVE_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -302,16 +308,52 @@ systemctl daemon-reload
 systemctl enable --now proxploy.service
 
 # --- 10. TLS -------------------------------------------------------------------
+# Caddy is arm's-length (doc 00:47): installed from its own official Debian
+# repo and run as its own systemd service. We write config; we never vendor,
+# link, or import its code.
 configure_tls() {
-  # Task 8 implements this for real: install Caddy, render
-  # packaging/caddy/Caddyfile.tmpl to /etc/caddy/Caddyfile, `systemctl
-  # enable --now caddy`. Deliberately a no-op stub here — the unit above
-  # already binds the app to 127.0.0.1 only, so an install that stops before
-  # Task 8 has no public front, not an insecure one.
-  log "TLS is not configured yet (Task 8) — app is reachable on 127.0.0.1:8000 only"
+  if command -v caddy >/dev/null 2>&1; then
+    log "caddy already installed"
+  else
+    log "installing caddy from its official Debian repo"
+    apt-get install -y -qq debian-keyring debian-archive-keyring gnupg apt-transport-https
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+      | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+      > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq
+    apt-get install -y -qq caddy
+  fi
+
+  local site_address tls_directive
+  if [ -n "$FQDN" ]; then
+    # A public hostname: empty tls directive means Caddy manages certs via
+    # ACME (Let's Encrypt) on its own.
+    site_address="$FQDN"
+    tls_directive=""
+  else
+    # No public hostname: still get TLS, just via Caddy's own CA, so a LAN
+    # install is never left serving plaintext. The browser warning is the
+    # honest cost of a self-signed cert, not a reason to skip TLS.
+    local ip
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -n "$ip" ] || die "could not determine this host's primary IP for the self-signed TLS fallback; pass --hostname"
+    site_address="https://$ip"
+    tls_directive="internal"
+  fi
+
+  log "writing /etc/caddy/Caddyfile for $site_address"
+  sed -e "s|{\$PROXPLOY_SITE_ADDRESS}|$site_address|g" \
+      -e "s|{\$PROXPLOY_TLS_DIRECTIVE}|$tls_directive|g" \
+      "$SCRIPT_DIR/packaging/caddy/Caddyfile.tmpl" > /etc/caddy/Caddyfile
+
+  # PROXPLOY_COOKIE_SECURE=true is already in the env block written in step 5
+  # above; verified there rather than written a second time here.
+
+  systemctl enable --now caddy
 }
 configure_tls
 
 # --- 11. done ------------------------------------------------------------------
 log "Proxploy $VERSION installed."
-log "Once Task 8 wires up Caddy, browse to https://<this-host>/ to create the first account."
+log "Browse to https://<this-host>/ to create the first account."
