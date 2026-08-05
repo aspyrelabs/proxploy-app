@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     # unknown value.
     oidc_default_role: str | None = None
     oidc_default_team_slug: str = "default"
+    # Migration preflight (doc 08 §14, doc 11 §2): the only number honesty lets
+    # us assume rather than measure — everything else in the estimate (transfer
+    # size, strategy) comes from a live PVE call. 80 MB/s is a conservative LAN
+    # sustained-transfer figure; the job itself reports MEASURED downtime once
+    # it runs (services/migrate.py's est_note says so explicitly).
+    migrate_assumed_bps: float = 80e6
 
 
 @lru_cache

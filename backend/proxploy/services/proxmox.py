@@ -628,6 +628,40 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster nextid read failed", e) from e
 
+    # --- migration (Phase 8 Task 14/15) --------------------------------------
+
+    def cluster_status(self) -> list[dict]:
+        """GET /cluster/status — cluster membership + node list.
+
+        A standalone node returns rows with no `{"type": "cluster"}` entry.
+        This is the ONLY honest source of cluster membership: `hosts.cluster_name`
+        is never written anywhere else in the codebase (doc 11 §2 / Task 14),
+        so migration preflight calls this live on both hosts rather than
+        trusting that column.
+        """
+        try:
+            return self._connect().cluster.status.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("cluster status read failed", e) from e
+
+    def migrate_guest(self, kind: str, node: str, vmid: int, params: dict) -> str:
+        """POST /nodes/{node}/{lxc|qemu}/{vmid}/migrate -> UPID.
+
+        Only meaningful when source and target share a PVE cluster (the
+        `cluster` strategy in services/migrate.py) — `params` carries `target`
+        (the destination node name) plus optional migrate options.
+        """
+        if kind not in ("lxc", "qemu"):
+            raise ProxmoxError(f"{kind!r} is not a migratable guest kind")
+        try:
+            return getattr(self._connect().nodes(node), kind)(vmid).migrate.post(**params)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"migrate of {kind}/{vmid} failed on {node}", e) from e
+
     # --- guest create / clone / destroy (Phase 6) ---------------------------
 
     def vm_create(self, node: str, params: dict) -> str:

@@ -13,8 +13,10 @@ from proxploy.api.deps import authorize, get_db, require_entitlement, scope_app
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User
+from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
+from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
 
 router = APIRouter(prefix="/apps", tags=["apps"])
@@ -35,6 +37,7 @@ _update_scoped = authorize("app", "update", scope_of=scope_app())
 _script_read = authorize("app", "script_read", scope_of=scope_app())
 _script = authorize("app", "script", scope_of=scope_app())
 _adopt = authorize("app", "adopt")
+_migrate = authorize("app", "migrate", scope_of=scope_app())
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -483,6 +486,39 @@ def app_network_update(request: Request, app_id: int, iface: str, body: NicIn,
     a, host = _app_and_host(db, app_id)
     return set_guest_nic(request, db, user, target_type="app", target_id=a.id,
                          host=host, kind="lxc", vmid=a.ctid, iface=iface, body=body)
+
+
+class MigratePreflightIn(BaseModel):
+    target_host_id: int
+
+
+# Above the lifecycle wildcard (WARNING further down): this is a 3-segment
+# literal path (/{app_id}/migrate/preflight) so it does not actually collide
+# with the 2-segment /{app_id}/{action} template regardless of registration
+# order, but it lives here anyway for the same reason /script and /network
+# do — one place operators look for every non-lifecycle app route, and no
+# surprises if that wildcard's shape ever widens.
+@router.post("/{app_id}/migrate/preflight",
+             dependencies=[Depends(_migrate),
+                          Depends(require_entitlement("migrate.preflight"))])
+def migrate_preflight(request: Request, app_id: int, body: MigratePreflightIn,
+                      db=Depends(get_db), user: User = Depends(_migrate)):
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    target = db.get(Host, body.target_host_id)
+    # A missing target_host_id and an unreachable/disconnected one are the
+    # same caller-facing problem ("this is not a usable migration target"),
+    # so both collapse to one 409 rather than a 404/409 split the frontend
+    # would have to special-case.
+    if (target is None or body.target_host_id == a.host_id
+            or target.status != "connected"):
+        raise HTTPException(409, "target host is unknown, is the app's current "
+                                 "host, or is not connected")
+    try:
+        return migrate_service.preflight(request.app, db, a, body.target_host_id)
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e))
 
 
 class LifecycleIn(BaseModel):

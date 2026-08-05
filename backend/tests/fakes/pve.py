@@ -281,6 +281,9 @@ class _ClusterNS:
     def __init__(self, owner, resources, fail):
         self.resources = _KwLeaf(resources, fail)
         self.nextid = _NextidLeaf(owner)  # PVE returns a string
+        # Phase 8 Task 14: lazy attr leaf (like storages_by_node) so a test can
+        # assign fake.cluster_status_rows after construction.
+        self.status = _AttrLeaf(owner, "cluster_status_rows")
 
 
 class _ActionLeaf:
@@ -344,6 +347,21 @@ class _CloneLeaf:
                                           "clone")
 
 
+class _MigrateLeaf:
+    """nodes(n).<kind>(vmid).migrate — .post() records (kind, node, vmid,
+    params) into fake.migrations and mints a UPID via _record_action
+    (Phase 8 Task 14/15)."""
+
+    def __init__(self, owner, kind, node, vmid):
+        self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
+
+    def post(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.migrations.append((self._kind, self._node, self._vmid, dict(kwargs)))
+        return self._owner._record_action(self._kind, self._vmid, "migrate")
+
+
 class _GuestNS:
     def __init__(self, owner, kind, node, vmid):
         self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
@@ -351,6 +369,7 @@ class _GuestNS:
         self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
         self.config = _GuestConfigLeaf(owner, kind, vmid)
         self.snapshot = _SnapshotNS(owner, kind, node, vmid)
+        self.migrate = _MigrateLeaf(owner, kind, node, vmid)
         if kind == "qemu":
             self.vncproxy = _VncproxyLeaf(owner, node, vmid)
             self.clone = _CloneLeaf(owner, node, vmid)
@@ -523,6 +542,9 @@ class FakePVE:
         # unlike `fail`, which is all-or-nothing across the whole fake.
         self.content_fail_storages: set[str] = set()
         self.cluster_storage_rows: list[dict] = []
+        # cluster membership (Phase 8 Task 14) — [] means "standalone node",
+        # matching real PVE's /cluster/status shape for a non-clustered host.
+        self.cluster_status_rows: list[dict] = []
         self.networks_by_node: dict[str, list[dict]] = {}
         # host network staging (Phase 6 Task 7): (op, node, iface|None, config)
         self.network_calls: list[tuple[str, str, str | None, dict]] = []
@@ -581,6 +603,8 @@ class FakePVE:
         self.guest_deletes: list[tuple[str, str, int]] = []
         self.create_error: str | None = None
         self.clone_error: str | None = None
+        # migration (Phase 8 Task 14/15): (kind, node, vmid, params)
+        self.migrations: list[tuple[str, str, int, dict]] = []
 
     def add_ct(self, vmid: int, *, node: str = "pve1", name: str = "ct",
               status: str = "running", **extra) -> dict:
@@ -609,6 +633,19 @@ class FakePVE:
 
 def make_fake_factory(fake: FakePVE):
     def factory(**kwargs):
+        if fake.fail:
+            raise ConnectionError("fake PVE unreachable")
+        fake.kwargs = kwargs
+        return fake
+    return factory
+
+
+def make_addressed_factory(fakes: dict[str, "FakePVE"]):
+    """Two-host tests (Phase 8 Task 14): one FakePVE per host, keyed by the
+    hostname the client's factory is called with (ProxmoxClient passes
+    host=<hostname parsed from Host.address> — see ProxmoxClient._connect)."""
+    def factory(**kwargs):
+        fake = fakes[kwargs["host"]]
         if fake.fail:
             raise ConnectionError("fake PVE unreachable")
         fake.kwargs = kwargs
