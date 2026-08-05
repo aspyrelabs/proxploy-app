@@ -1,12 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api } from '../api/client'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
-import type { AppRow, DiscoveredRow } from '../api/hooks'
+import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
+import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
@@ -167,7 +169,15 @@ export function AppDetail() {
           {app.icon_initials ?? app.name.slice(0, 2).toUpperCase()}
         </div>
         <div>
-          <h1 className="font-display text-[22px] font-semibold">{app.name}</h1>
+          <h1 className="font-display text-[22px] font-semibold">
+            {app.name}
+            {app.update_available && (
+              <span className="ml-2 rounded-tile bg-amber-dim px-2 py-0.5
+                               font-mono text-[10.5px] uppercase text-amber">
+                update available
+              </span>
+            )}
+          </h1>
           <div className="font-mono text-[12px] text-text-3">
             CT {app.ctid} · {app.host_name}{app.ip ? ` · ${app.ip}${app.web_port ? `:${app.web_port}` : ''}` : ''}
           </div>
@@ -236,6 +246,63 @@ export function AppOverview() {
           ['Update', app.update_available ?? 'Up to date'],
         ]} />
       </div>
+      <div className={`${card} mt-4`}>
+        <h2 className="mb-3 text-[13px] uppercase text-text-3">Update</h2>
+        <UpdatePanel appId={id} app={app} />
+      </div>
+    </div>
+  )
+}
+
+/** Doc 06 App detail Overview: the Details KV grid's "Update" row plus an
+ *  "Update to vX" button. X is a short commit sha, not a version — see
+ *  services/appstore.py::mark_updates_available for why that is the only
+ *  honest thing community-scripts lets us say. */
+export function UpdatePanel({ appId, app }:
+  { appId: number; app: { name: string; update_available: string | null } }) {
+  const qc = useQueryClient()
+  const [consent, setConsent] = useState(false)
+  const info = useQuery({
+    queryKey: ['apps', appId, 'update'],
+    queryFn: () => api<UpdateInfo>(`/apps/${appId}/update`),
+  })
+  const run = useMutation({
+    mutationFn: () => api(`/apps/${appId}/update`, {
+      method: 'POST', body: JSON.stringify({ consent: true }),
+    }),
+    onSuccess: () => toast.success('Update started — follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start the update — try again.'),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['apps'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+
+  const pending = info.data?.update_available ?? app.update_available
+  if (!pending) {
+    return <div className="text-[12.5px] text-text-3">Up to date.</div>
+  }
+  return (
+    <div>
+      <div className="mb-3 font-mono text-[12px] text-text-2">
+        {info.data?.from_ref?.slice(0, 7) ?? '?'} → {info.data?.to_ref?.slice(0, 7) ?? pending}
+      </div>
+      {info.data?.diff_vs_upstream && (
+        <pre className="mb-3 max-h-64 overflow-auto rounded-tile border border-line-soft
+                        bg-panel-2 p-3 font-mono text-[11.5px] text-text-2">
+          {info.data.diff_vs_upstream}
+        </pre>
+      )}
+      <label className="mb-3 flex items-start gap-2 text-[12.5px] text-text-2">
+        <input type="checkbox" checked={consent}
+               onChange={(e) => setConsent(e.target.checked)} />
+        <span>
+          I understand this runs as root on the node hosting {app.name}.
+        </span>
+      </label>
+      <Button disabled={!consent || run.isPending} onClick={() => run.mutate()}>
+        Update to {pending}
+      </Button>
     </div>
   )
 }

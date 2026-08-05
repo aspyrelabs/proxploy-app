@@ -68,6 +68,13 @@ export type VmRow = {
   uptime_s: number | null; synced_at: string | null
 }
 
+export type UpdateInfo = {
+  update_available: string | null
+  from_ref: string | null
+  to_ref: string | null
+  diff_vs_upstream: string | null
+}
+
 export type Series = {
   target: string; metric: string; resolution: string
   ts: number[]; value: number[]; min?: number[]; max?: number[]

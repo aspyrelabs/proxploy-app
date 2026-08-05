@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, useParams } from '@tanstack/react-router'
+import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
@@ -34,6 +35,40 @@ function useNodes() {
     queryFn: () => api<NodeRow[]>('/cluster/nodes'),
     refetchInterval: 30_000,
   })
+}
+
+/** Doc 06 Cluster overview: the Apps section's "Update all" action. One
+ *  confirm covers the whole batch — the backend still requires explicit
+ *  consent, and enqueues one job per stale app so each has its own transcript. */
+export function UpdateAllButton() {
+  const qc = useQueryClient()
+  const run = useMutation({
+    mutationFn: () => api<{ jobs: { id: number }[]; skipped: { reason: string }[] }>(
+      '/apps/update-all', { method: 'POST', body: JSON.stringify({ consent: true }) }),
+    onSuccess: (r) => {
+      if (r.jobs.length === 0) {
+        // Never a bare silence: "nothing happened" and "it is broken" look
+        // identical otherwise.
+        toast('Nothing to update — every app is on its catalog commit.')
+        return
+      }
+      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'} — `
+                    + 'follow them in the activity drawer.')
+    },
+    onError: () => toast.error('Could not start the updates — try again.'),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['apps'] })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+  return (
+    <Button variant="ghost" disabled={run.isPending} onClick={() => {
+      if (window.confirm('Update every app that has a newer catalog commit? '
+                         + 'Each update runs a community script as root on its node.')) {
+        run.mutate()
+      }
+    }}>Update all</Button>
+  )
 }
 
 export function ClusterPage() {
@@ -88,8 +123,11 @@ export function ClusterPage() {
       <div className="mt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-[16px] font-semibold">Apps</h2>
-          {/* as never: route typing workaround, see router.tsx */}
-          <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+          <div className="flex items-center gap-3">
+            <UpdateAllButton />
+            {/* as never: route typing workaround, see router.tsx */}
+            <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+          </div>
         </div>
         {apps && apps.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
