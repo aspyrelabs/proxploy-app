@@ -1,0 +1,8 @@
+services:
+  proxploy:
+    image: ghcr.io/aspyrelabs/proxploy:latest
+    restart: unless-stopped
+    ports: ["8006:8000"]
+    volumes: ["proxploy-data:/var/lib/proxploy"]
+volumes:
+  proxploy-data:
