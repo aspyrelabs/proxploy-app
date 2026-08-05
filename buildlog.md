@@ -543,3 +543,121 @@ migrations, as planned). Phase 6 spans `ce590bd..b36846c`.
 **Phase 6 final state**: all 17 planned tasks + 1 consolidated fix wave, 27
 commits total (`2182940..b36846c`) plus this buildlog/notes/doc-05
 bookkeeping, all committed directly to `main`. Ready to merge.
+
+### 2026-08-05T06:46:38+05:30 — Phase 7 — execute-plan completed
+
+Doc 10 §Phase 7 DoD, verbatim: *"an unattended weekend: scheduled backups and
+an auto-update window run, an induced CPU alert fires and resolves with
+notifications both ways, and Monday's job history tells the whole story."*
+19 tasks, full details in `docs/notes/phase-7-operate.md`.
+
+**What shipped, per subsystem:**
+- **Scheduler**: `jobs/scheduler.py` — `next_fire`/`validate`/`prime`/`due`/
+  `fire_one`/`tick(app, now=None)`, `_target()` deriving a fired job's
+  target from the job kind's dotted prefix rather than sniffing param key
+  names, `SYSTEM_SCHEDULES` seeding "Catalog refresh" (nightly) and "Metrics
+  maintenance" (hourly) at boot, one-way past an operator's own edit. A
+  `Poller`-shaped `Scheduler` supervisor loop ticks every 30s in the
+  lifespan. `api/schedules.py`: `GET`/`POST /schedules`, `PATCH`/
+  `DELETE /schedules/{id}`, `POST /schedules/{id}/run`; frontend Schedules
+  card in Settings + "Next scheduled" on Backups
+- **App updates**: `services/appstore.py` — `pinned_ref`, `mark_updates_
+  available` (derived, recomputed wholesale so a rollback un-advertises an
+  update), the `app.update` job (re-runs the catalog script pinned to the
+  CURRENT upstream commit over the install path, bracketed by CT-must-
+  exist-before and no-new-CT-after guards, with a concurrency exclusion so
+  an unrelated `app.install` running at the same time isn't blamed for a
+  stray). `api/apps.py`: `GET`/`POST /apps/{id}/update` (same pin/diff/
+  consent/stream/archive gate as install), `POST /apps/update-all` (one job
+  per stale app, per-app skip reasons); frontend update-available badge,
+  "Update to `<sha>`" diff+consent dialog, Cluster "Update all"
+- **Alerting**: `services/alerts.py` — `evaluate()` (continuous-breach
+  `duration_s` semantics, at most one open alert per rule×target, automatic
+  recovery, no-samples-is-never-a-breach), `render_message`, `sse_frame`,
+  `notify_transitions`. The poll supervisor now evaluates every cycle,
+  publishes the `alert` SSE frame, THEN notifies — that order means a
+  notifier failure never loses the SSE event. `api/alerts.py`: `GET`/
+  `POST /alert-rules`, `PATCH`/`DELETE /alert-rules/{id}`,
+  `GET /alert-rules/metrics`, `GET /alerts`, `POST /alerts/{id}/ack`.
+  `notifier.py`'s `channels_for`/`notify` widened for a rule's
+  `channel_ids` override. `api/cluster.py`'s `GET /cluster/activity` now
+  merges jobs + alerts + audit highlights, newest-first. Frontend:
+  `/alerts` page (firing list + ack, resolved history, rule CRUD),
+  `HealthFooter` bound to `/alerts?state=firing`, SSE `alert` handling,
+  alert badge + severity in `ActivityFeed`
+- **Metrics maintenance**: `services/metrics.py` gained the
+  `metrics.maintain` job (rollup + retention pruning as a real scheduled,
+  activity-feed-visible job) and now persists `mem_pct` + host `disk_pct`
+  samples the poller had never written before this phase. The old
+  `metrics_loop` asyncio loop is gone, replaced by the hourly system
+  schedule
+
+**Findings that contradicted the docs** (full detail in the notes doc):
+- **APScheduler 4 does not exist.** PyPI's maximum stable is 3.11.3; 4.x is
+  `a1`-`a6` pre-releases only, verified 2026-08-01. Docs 02/03/04/09/10 all
+  named "APScheduler 4". Shipped on the stable 3.11 line; only `CronTrigger`
+  is used, and `jobs/scheduler.py`'s tick loop reads `schedules` directly on
+  every pass rather than running APScheduler's own scheduler/jobstores —
+  doc 04 already makes that table authoritative, and a second in-memory
+  registry synced from it would be two sources of truth to reconcile on
+  every CRUD write. Docs 02, 03 and 04 amended this task (Step 5); doc 09
+  is a known remaining stale reference, out of this task's amendment list.
+- **The poller never wrote `mem_pct` or `disk_pct`.** Doc 04's `alert_
+  rules.metric` enum named both; any memory/disk rule created before this
+  phase would have sat enabled and never fired — silent, not a crash.
+  Fixed in Task 8. `disk_pct` stays host-only: `/cluster/resources`'s
+  guest disk figures are either allocated-not-used or routinely zero for
+  QEMU, so Task 12 rejects a guest `disk_pct` rule at write time rather
+  than accept one that can never honestly fire.
+- **Zero migrations, again.** `schedules`, `alert_rules` and `alerts` have
+  had full column parity since migration 0001; this phase populates tables
+  that were already shaped for it. Alembic head unchanged at
+  `2330a95b98d2`.
+
+**Residual limitations** (both recorded, neither blocking the DoD):
+- **The community-scripts update path.** A `ct/*.sh` decides install-vs-
+  update for itself inside `build.func`; Proxploy cannot see that decision,
+  so `app.update` brackets the SSH run with existence guards instead and
+  fails loudly, naming any stray container, rather than silently trusting
+  the script picked the right branch. `services/classifier.py` classifies
+  install feasibility only — classifying update-path safety is separate,
+  larger work.
+- **No browser on this box.** Every frontend claim rests on Vitest +
+  jsdom. `/alerts`, the health footer, the Schedules card and the update
+  controls have never been rendered in a real browser here — the same gap
+  Phases 5 and 6 recorded.
+- **`backup.prune` scheduling is backend-only.** The `HANDLERS` entry and
+  `POST /schedules` both accept it via the direct API; it was dropped from
+  the frontend's `SCHEDULABLE` list (commit `ae83284`) because the generic
+  `ScheduleForm` has no field that can collect the storage+retention spec
+  the handler actually needs, and shipping a schedule row with empty
+  `params` would fire and no-op forever rather than prune anything. A
+  plan defect caught during Task 17, not an oversight — full detail in the
+  notes doc.
+
+**Verification:**
+- `dod_verify_phase7.py` (task-19 brief, throwaway, not committed): all
+  four doc-10 Phase 7 DoD clauses print OK, exit 0, run twice with
+  identical output — proved through `tests.support.make_app` + `FakePVE` +
+  a fake SSH connect factory driving the real routes, the real
+  `JobBackend`, the real `Scheduler.tick` and the real evaluator (no live
+  PVE, no browser on this box, the same standing limitation every phase
+  has stated)
+- Backend: **661 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+  "not pve_integration and not e2e"` (baseline going into this phase was
+  499 passed, 2 skipped)
+- Frontend: **154 passed across 30 files** (baseline going into this phase
+  was 121 across 26 files); build clean (same pre-existing chunk-size
+  warning, nothing new); lint exit 0 (pre-existing warning classes only,
+  no errors)
+- Migrations: `alembic heads` = `2330a95b98d2`, unchanged — zero
+  migrations this phase, confirmed against the current HEAD
+
+**Phase 7 final state**: `git log --oneline b36846c..HEAD | tail -1`
+returns `def0526` (Phase 6's own closing docs commit, landed one commit
+after the `b36846c` boundary) — the first substantive Phase 7 commit is the
+next one, `ec5ccb9` ("feat(scheduler): cron math, due selection and
+one-pass firing over the schedules table"), running 26 commits through
+`ff73dd4` ("fix(ui): gate Update all on store.update_all entitlement")
+before this task's own documentation commit. All 19 planned tasks
+committed directly to `main`.

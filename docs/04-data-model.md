@@ -316,7 +316,7 @@ Append-only log lines / progress ticks per job — the backing store for the liv
 Indexes: `ux_job_events(job_id, seq)`. No `updated_at` — rows are never mutated.
 
 ### schedules
-APScheduler 4 triggers feeding the JobBackend (brief §5). APScheduler's own state is reconstructed from these rows at boot; this table is authoritative.
+APScheduler 3.11 `CronTrigger` math feeding the JobBackend (brief §5); this table is authoritative. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:** the previous wording — "APScheduler's own state is reconstructed from these rows at boot" — implied a second, APScheduler-owned registry synced from this table. There is no such registry: `jobs/scheduler.py`'s tick loop reads this table directly on every tick (`prime()`/`due()`/`fire_one()`), and APScheduler contributes only `CronTrigger`'s cron-parsing and DST-correct next-fire arithmetic, nothing stateful.
 
 | Column | Type | Notes |
 |---|---|---|

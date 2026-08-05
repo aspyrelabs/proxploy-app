@@ -31,7 +31,7 @@ graph TB
         WS["WebSocket/SSE endpoints<br/>(job logs, console proxy, live invalidation)"]
         ENT["Entitlements client<br/>(OpenFeature-shaped, PyJWT/Ed25519)"]
         JOBS["JobBackend<br/>(in-process asyncio runner)"]
-        SCHED["APScheduler 4<br/>(cron triggers → JobBackend)"]
+        SCHED["APScheduler 3.11<br/>(cron triggers → JobBackend)"]
         POLL["Poller loops<br/>(per-host asyncio tasks, 30s)"]
         CAT["Catalog service<br/>(fetch/cache/refresh, ETag)"]
         EXEC["Executor seam<br/>(SSHExecutor default,<br/>AgentExecutor later)"]
@@ -105,10 +105,15 @@ event loop. Inside it:
   with 20. Any per-guest call (e.g. a live detail fetch triggered by opening
   an app) is user-triggered and outside the poll loop, not part of this
   budget.
-- **APScheduler 4** — cron-like triggers (update windows, scheduled backups,
-  metric rollup/pruning, catalog refresh, entitlement token refresh). Triggers
-  never do work themselves; they enqueue jobs into JobBackend so everything
-  scheduled is also logged, streamable, and cancellable.
+- **APScheduler 3.11** — cron-like triggers (update windows, scheduled
+  backups, metric rollup/pruning, catalog refresh, entitlement token refresh).
+  Triggers never do work themselves; they enqueue jobs into JobBackend so
+  everything scheduled is also logged, streamable, and cancellable.
+  **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:**
+  this said "APScheduler 4"; no 4.x release exists (PyPI's maximum stable is
+  3.11.3, verified 2026-08-01). Only `CronTrigger` is used — the tick loop in
+  `jobs/scheduler.py` reads the `schedules` table directly rather than
+  running APScheduler's own scheduler/jobstore.
 - **Database** — SQLAlchemy 2.x + Alembic. SQLite in WAL mode by default;
   Postgres via a single DSN change. Schema stays in the portable subset of
   both. All Proxmox-derived tables are named and treated as caches; Proxmox
@@ -241,9 +246,13 @@ Brief rule 2: the browser never fetches the catalog; the backend does.
 - **Cache.** Everything lands in `catalog_entries` (metadata, script body,
   upstream ETag/commit ref, fetched_at). The App Store UI reads only from the
   DB — it works offline and is immune to GitHub rate limits and outages.
-- **Refresh.** An APScheduler job re-fetches on an interval using conditional
-  requests (`If-None-Match` with the stored ETag); 304 costs one request and
-  no writes. Manual "refresh now" enqueues the same job.
+- **Refresh.** A scheduled job (`catalog.refresh`, fired by the
+  `jobs/scheduler.py` tick loop against the seeded "Catalog refresh" row) re-
+  fetches on an interval using conditional requests (`If-None-Match` with the
+  stored ETag); 304 costs one request and no writes. Manual "refresh now"
+  enqueues the same job. **Amendment, Phase 7, 2026-08-01:** "An APScheduler
+  job" corrected — see the line-108 amendment above; the mechanism is the
+  same tick loop everywhere in this doc, not APScheduler's own scheduler.
 - **Fallback.** If the optional Aspyre-hosted mirror is configured it is
   tried first as a dumb CDN, but the app **always** falls back to fetching
   upstream directly — the mirror is a bandwidth nicety, never a dependency,
@@ -312,9 +321,12 @@ publishes an invalidation event on the in-process bus → SSE endpoint
 TanStack Query invalidates the matching queries → SPA refetches
 `/api/v1/cluster/summary` and `/api/v1/metrics/query` → uPlot re-renders. If SSE is
 absent (proxy strips it), Query's normal refetch interval keeps the dashboard
-merely 30s-fresh instead of push-fresh. APScheduler jobs roll raw samples into
-5m/1h `metric_rollups` and prune per retention; chart queries pick raw vs
-rollup by requested time range.
+merely 30s-fresh instead of push-fresh. The `metrics.maintain` job — fired
+hourly by the seeded "Metrics maintenance" `schedules` row, via the
+`jobs/scheduler.py` tick loop, not APScheduler's own scheduler (**amendment,
+Phase 7, 2026-08-01**, see the line-108 amendment above) — rolls raw samples
+into 5m/1h `metric_rollups` and prunes per retention; chart queries pick raw
+vs rollup by requested time range.
 
 ### 11.2 An app install
 
