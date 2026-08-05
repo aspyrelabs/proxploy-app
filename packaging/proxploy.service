@@ -1,0 +1,23 @@
+[Unit]
+Description=Proxploy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# current/ is a symlink; the swap in proxploy-update is what makes rollback
+# a pointer move rather than a reinstall.
+WorkingDirectory=/opt/proxploy/current/backend
+EnvironmentFile=/etc/proxploy/proxploy.env
+ExecStart=/opt/proxploy/current/backend/venv/bin/uvicorn --factory proxploy.main:create_app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+User=proxploy
+Group=proxploy
+# Data and secrets live outside the release tree; an update never writes here.
+StateDirectory=proxploy
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
