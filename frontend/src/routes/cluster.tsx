@@ -41,7 +41,9 @@ function useNodes() {
  *  confirm covers the whole batch — the backend still requires explicit
  *  consent, and enqueues one job per stale app so each has its own transcript. */
 export function UpdateAllButton() {
+  const ent = useEntitlements()
   const qc = useQueryClient()
+  const allowed = ent.has('store.update_all')
   const run = useMutation({
     mutationFn: () => api<{ jobs: { id: number }[]; skipped: { reason: string }[] }>(
       '/apps/update-all', { method: 'POST', body: JSON.stringify({ consent: true }) }),
@@ -62,7 +64,9 @@ export function UpdateAllButton() {
     },
   })
   return (
-    <Button variant="ghost" disabled={run.isPending} onClick={() => {
+    <Button variant="ghost" disabled={run.isPending || !allowed}
+      title={!allowed ? 'Pro — Update all' : undefined}
+      onClick={() => {
       if (window.confirm('Update every app that has a newer catalog commit? '
                          + 'Each update runs a community script as root on its node.')) {
         run.mutate()

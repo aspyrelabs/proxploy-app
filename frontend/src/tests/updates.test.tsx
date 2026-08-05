@@ -87,7 +87,9 @@ describe('UpdateAllButton', () => {
     posted.length = 0
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     wrap(<UpdateAllButton />)
-    fireEvent.click(screen.getByRole('button', { name: /update all/i }))
+    const btn = screen.getByRole('button', { name: /update all/i })
+    await waitFor(() => expect(btn).not.toBeDisabled())
+    fireEvent.click(btn)
     await waitFor(() => expect(posted.length).toBe(1))
     expect(posted[0]).toMatchObject({ path: '/apps/update-all', method: 'POST',
                                       body: { consent: true } })
@@ -97,7 +99,9 @@ describe('UpdateAllButton', () => {
     posted.length = 0
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     wrap(<UpdateAllButton />)
-    fireEvent.click(screen.getByRole('button', { name: /update all/i }))
+    const btn = screen.getByRole('button', { name: /update all/i })
+    await waitFor(() => expect(btn).not.toBeDisabled())
+    fireEvent.click(btn)
     await new Promise((r) => setTimeout(r, 0))
     expect(posted.length).toBe(0)
   })
