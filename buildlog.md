@@ -664,3 +664,93 @@ one-pass firing over the schedules table"), running 26 commits through
 `ff73dd4` ("fix(ui): gate Update all on store.update_all entitlement")
 before this task's own documentation commit. All 19 planned tasks
 committed directly to `main`.
+
+### 2026-08-05T18:55:00+05:30 — Phase 8 — execute-plan completed
+
+Doc 10 §Phase 8 DoD, verbatim: *"a second admin logs in through SSO with 2FA,
+a viewer cannot mutate anything, an API token drives the product, and an app
+migrates between two non-clustered hosts with accurate downtime shown."*
+22 tasks, full details in `docs/notes/phase-8-scale.md`.
+
+**What shipped, per subsystem:**
+- **Authorization**: `services/authz.py` — casbin RBAC-with-domains, a static
+  `PERMISSIONS` matrix over (resource, action) → minimum role, and
+  `sync_user` rebuilding a user's `g`-lines from `team_members`.
+  `api/deps.py::authorize(resource, action, scope_of=…)` is now the single
+  authorization path in the product: every router converted, `require_role`
+  deleted. Scope resolvers (`scope_host`/`scope_app`/`scope_vm`/
+  `scope_backup`) evaluate a role inside a team domain rather than globally.
+  The enforcer is built **in memory** from code + `team_members`, not from
+  `casbin_rules` via a sqlalchemy adapter — amendment, doc 03/04 updated
+- **Teams**: `api/teams.py` teams/members CRUD, `GET /users`,
+  `hosts.team_id` assignment; every membership write re-syncs the enforcer so
+  a permission change takes effect in the same request sequence, not at the
+  next restart. Frontend `TeamsCard` + per-host team select
+- **OIDC**: `services/oidc.py` — discovery, S256 PKCE, RS256 ID-token
+  validation via `joserfc` (`authlib.jose` is deprecated in Authlib 1.7.x),
+  and just-in-time provisioning that is deny-by-default: without an
+  explicitly configured role a first-time SSO user is created inactive and
+  told why, and an OIDC identity is never auto-linked to a local account by
+  matching email. Routes in `api/auth.py`, SSO entry on the login page
+- **TOTP + sessions**: enrollment issuing a seed plus ten one-time recovery
+  codes in their own table (`totp_recovery_codes`, migration `6cf6a0722d23`
+  — the plan's zero-migration blob design was rejected mid-implementation as
+  racy on burn); two-step login where the password check alone never sets a
+  cookie, gated by a single-use, TTL-bounded, 5-attempt-capped pending token
+  usable at exactly one route; `GET`/`DELETE /auth/sessions`. Frontend TOTP
+  login step + Security card (secret and `otpauth://` URI as text — no QR
+  dependency added)
+- **API tokens**: `ppk_…` bearer keys, hashed at rest, optionally scoped and
+  optionally expiring; `authorize()` folds a key's scopes in ahead of the
+  role check, so a key can only ever narrow its owner's rights. Frontend
+  `ApiKeysCard` with a show-once secret panel
+- **Cross-host migration**: `services/migrate.py` picks strategy from **live**
+  Proxmox state (`hosts.cluster_name` was never populated before this phase
+  and is written back as a side effect, never trusted as input):
+  cluster-native, shared-storage, or vzdump + SFTP + restore. Preflight
+  returns strategy, transfer size, estimate, blockers, warnings and a
+  verbatim downtime statement; the job records the *measured* `downtime_s`
+  so estimate and outcome sit side by side. The source CT is left stopped
+  and intact, never deleted. Frontend `MigrateDialog`
+- **Invariants**: two suites walk every registered route — one asserting each
+  carries an `authorize()` marker or a reasoned allowlist entry, the other
+  driving a viewer at every mutating route twice, once by cookie and once by
+  bearer token
+
+**Known gaps, stated plainly:**
+- **No real IdP here.** Doc 10 says "round-trips against a real Authelia";
+  there is none on this box. The substitute is a local mock provider with a
+  real discovery document, real S256 PKCE exchange and real RS256 tokens
+  verified against a real JWKS endpoint — protocol-complete, but not a
+  third-party implementation on the wire. The DoD script prints this
+  substitution in its own output rather than hiding it in a notes file
+- **No live Proxmox host.** Migration is proven against two `FakePVE`s plus a
+  fake SFTP layer driving the real preflight, handler and route
+- **Token-authed audit rows still name the user, not the key.** Of 84
+  `write_audit` call sites exactly one writes `actor_type="api_key"` (the
+  scope-denial path); the rest predate API keys. `request.state.api_key` is
+  populated and the upgrade path is an `actor_of(request)` helper threaded
+  through the call sites — mechanical, deliberately not bundled here
+- **The frontend suite is reliable only run sequentially on this box** —
+  unrelated suites flake under vitest's default file parallelism and pass in
+  isolation; `--no-file-parallelism` passes every time
+- **F1 (no route-level `errorComponent`)** remains open — a 5xx during route
+  load white-screens the app. Phase 9 work per doc 10
+
+**Verification:**
+- `dod_verify_phase8.py` (throwaway, not committed): all four doc-10 Phase 8
+  DoD clauses print OK, exit 0, run twice — identical output except the
+  measured `downtime_s` (0.043819 s vs 0.040807 s), left unrounded because it
+  is a real measurement
+- Backend: **784 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+  "not pve_integration and not e2e"`, run twice, identical (baseline entering
+  the phase: 663)
+- Frontend: **199 passed across 36 files** — `npx vitest run
+  --no-file-parallelism` (baseline 154 across 30); build clean; lint exit 0,
+  pre-existing warning classes only
+- Frontend e2e: **1 passed** — real Chromium, login plus every nav page, clean
+  console
+- CI gates: executor isolation OK; backend and frontend license audits clean
+  against the exact CI allow-lists
+- Migrations: `alembic heads` = **`6cf6a0722d23`** — one migration this phase.
+  The plan predicted zero; the recovery-code burn race is why that changed

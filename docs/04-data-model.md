@@ -47,7 +47,7 @@ Local and OIDC-federated accounts. Authorization lives in `casbin_rules`, not he
 | email | text | NOT NULL, unique index |
 | display_name | text | |
 | password_hash | text | argon2id (argon2-cffi); NULL for OIDC-only accounts |
-| totp_secret_enc | blob | Fernet-encrypted TOTP seed; NULL = TOTP not enrolled |
+| totp_secret_enc | blob | Fernet-encrypted TOTP seed, and nothing else; NULL = TOTP not enrolled. One-time recovery codes (doc 08 §5) had no column anywhere in this doc — Phase 8 gave them their own table, `totp_recovery_codes` below, rather than packing them in here |
 | totp_enabled | bool | default false; enforced at login only when true |
 | oidc_issuer | text | NULL for local accounts |
 | oidc_sub | text | unique index with `oidc_issuer` when set |
@@ -56,6 +56,28 @@ Local and OIDC-federated accounts. Authorization lives in `casbin_rules`, not he
 | created_at / updated_at | datetime | |
 
 Indexes: `ux_users_email(email)`, `ux_users_oidc(oidc_issuer, oidc_sub)`.
+
+### totp_recovery_codes
+**Added Phase 8, 2026-08-05** (migration `6cf6a0722d23`, the phase's only
+migration — see `docs/notes/phase-8-scale.md`). Doc 08 §5 requires one-time
+recovery codes "stored argon2-hashed"; no table in this doc held them. The
+Phase 8 plan proposed a zero-migration design packing the hashes as JSON
+inside `users.totp_secret_enc`; that was **rejected during implementation**,
+because burning one code would then mean decrypt-mutate-re-encrypt of a blob
+a concurrent TOTP verify is also reading — racy by construction — and a
+column named for one secret would quietly hold two. One row per code makes
+burning an ordinary atomic `UPDATE … WHERE used_at IS NULL`, the same
+redeem pattern `console_tickets` uses.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | int PK | |
+| user_id | int FK → users | ON DELETE CASCADE |
+| code_hash_enc | blob | argon2 hash of the code (same `PasswordHasher` as passwords), then Fernet-encrypted at rest like `totp_secret_enc` |
+| created_at | datetime | |
+| used_at | datetime | NULL = unused; set once, atomically, when the code is redeemed |
+
+Indexes: `ix_totp_recovery_codes_user_id(user_id)`.
 
 ### sessions
 Server-side DB sessions (brief §5 AuthN — no JWT sessions). Cookie carries an opaque token; only its hash is stored.
@@ -84,7 +106,7 @@ Automation credentials for the public REST API (entitlement `api.tokens`). Shown
 | name | text | user label |
 | prefix | text | first 8 chars, for list display (`ppk_a1b2…`) |
 | key_hash | text | SHA-256, unique index |
-| scopes | json | list of scope strings (`["read","apps:write"]`); empty = full user rights |
+| scopes | json | list of scope strings (`["read","app:write"]`); empty = full user rights. **Amendment, Phase 8:** this example read `"apps:write"` — plural; the grammar is `read` or `<matrix-resource-name>:write`, and the matrix resource name is singular (`app`, `vm`, `backup`). `POST /api-keys` 422s anything not in the matrix, so the plural form was never accepted |
 | expires_at | datetime | NULL = no expiry |
 | last_used_at | datetime | |
 | revoked_at | datetime | NULL = active |
@@ -110,13 +132,26 @@ Casbin domains (brief §5 AuthZ: RBAC with domains = teams). Entitlement `teams.
 | id | int PK | |
 | team_id | int FK → teams | ON DELETE CASCADE |
 | user_id | int FK → users | ON DELETE CASCADE |
-| role | text | `owner` \| `admin` \| `operator` \| `viewer` (mirrored into casbin_rules by the service layer) |
+| role | text | `owner` \| `admin` \| `operator` \| `viewer` — **authoritative**; the enforcer's `g`-lines are derived from this column, not mirrored into `casbin_rules` (amendment, Phase 8 — see the `casbin_rules` section below) |
 | created_at / updated_at | datetime | |
 
 Indexes: `ux_team_members(team_id, user_id)`.
 
 ### casbin_rules
 pycasbin's standard storage table (sqlalchemy-adapter shape). Managed only through the `Authorizer` seam — never written directly.
+
+> **Amendment, Phase 8, 2026-08-05 (see `docs/notes/phase-8-scale.md`).** This
+> table ships and stays **empty**. The enforcer built by
+> `services/authz.py` is in-memory: its `p` policies come from the static
+> `PERMISSIONS` matrix in code, and its `g` grouping lines are derived from
+> `team_members` on boot and re-synced through the `Authorizer` seam on every
+> membership write. There is no `casbin-sqlalchemy-adapter` in the dependency
+> tree, and doc 05 exposes no endpoint that edits policy at runtime, so
+> persisting the rules here would duplicate `team_members` rather than
+> record anything new — the `role` column below says "mirrored into
+> casbin_rules by the service layer", and a mirror is exactly the thing that
+> drifts. `team_members` is the single source of truth. The table is retained
+> for forward compatibility with a future adapter-backed enforcer.
 
 | Column | Type | Notes |
 |---|---|---|

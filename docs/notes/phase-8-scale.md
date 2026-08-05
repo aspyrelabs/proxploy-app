@@ -1,8 +1,62 @@
 # Phase 8 (Scale) — verification notes
 
-> In progress. Amendments are recorded here as they are decided, not at the
-> end of the phase, so a behavior change is documented rather than
-> rediscovered.
+> Amendments were recorded here as they were decided, not at the end of the
+> phase, so a behavior change is documented rather than rediscovered.
+
+## What shipped, per subsystem
+
+**Authorization (Tasks 1–7).** `services/authz.py` holds a casbin
+RBAC-with-domains model, a static `PERMISSIONS` matrix over
+(resource, action) → minimum role, and `sync_user`, which rebuilds a user's
+`g`-lines from `team_members`. `api/deps.py::authorize(resource, action,
+scope_of=…)` is now the **single** authorization path in the product: every
+router was converted to it and `require_role` was deleted (`grep -rn
+require_role backend/proxploy/` returns nothing). Team scoping resolvers
+(`scope_host`, `scope_app`, `scope_vm`, `scope_backup`) turn a path
+parameter into the owning team, so a role is evaluated in a domain rather
+than globally. Two invariant suites walk every registered route: one asserts
+each carries an `authorize()` marker (or sits on a reasoned allowlist), the
+other drives a viewer — once by cookie, once by bearer token — at every
+mutating route and demands 403.
+
+**Teams (Tasks 6, 20).** `api/teams.py` with teams/members CRUD, `GET
+/users` for the member picker, and `hosts.team_id` assignment. Every
+membership write calls `sync_user`, so an enforcement change is immediate
+rather than pending a restart — pinned by a test that flips a viewer to
+admin and PATCHes a host in the same request sequence. Frontend: `TeamsCard`
+plus a per-host team select.
+
+**OIDC (Tasks 10–11, 17).** `services/oidc.py` — discovery, S256 PKCE,
+RS256 ID-token validation against the IdP's live JWKS, and just-in-time
+provisioning under the A2 policy below. Routes in `api/auth.py`; the
+frontend's entry point is a plain `<a href>` to the login route, not a fetch,
+because the flow is a redirect chain. Proven end to end against a local mock
+IdP fixture (`tests/fakes/oidc.py`) that serves a real discovery document
+and real signed tokens.
+
+**TOTP and sessions (Tasks 8–9, 18).** Enrollment issues a seed plus ten
+one-time recovery codes (their own table — see A3). Login became two-step
+for TOTP-enabled users: the password check alone never sets a cookie, it
+returns a pending token that is single-use, TTL-bounded, capped at five
+wrong codes, and usable at exactly one route. `GET/DELETE /auth/sessions`
+give self-service session listing and revocation. Frontend: a TOTP step on
+the login page, and a Security card with enrollment (secret + `otpauth://`
+URI as selectable text, no QR dependency) and session management.
+
+**API tokens (Tasks 12–13, 19).** `ppk_…` bearer keys, hashed at rest,
+optionally scoped (`read`, `<resource>:write`) and optionally expiring;
+`get_current_user` resolves them, and `authorize()` folds a key's scopes in
+*ahead of* the role check, so a key can only ever narrow its owner's rights.
+The whole product was driven once over REST with no cookies to prove the API
+surface is complete.
+
+**Cross-host migration (Tasks 14–16, 21).** `services/migrate.py` picks its
+strategy from **live** Proxmox state: cluster-native when both hosts are in
+one cluster, shared-storage when they share a datastore, otherwise vzdump +
+SFTP transfer + restore. Preflight returns the strategy, transfer size, an
+estimate, blockers, warnings and a verbatim downtime statement; the job
+records the *measured* `downtime_s` so the estimate and the outcome sit side
+by side in the UI.
 
 ## The browser gap is closed
 
@@ -121,3 +175,134 @@ crash-between-the-two case cannot produce a permissionless account. Both
 misconfiguration paths (`oidc_default_role` not in `ROLE_ORDER`,
 `oidc_default_team_slug` naming no existing team) raise before anything is
 written — no fallback, no auto-created team.
+
+### A3 — recovery codes got their own table, and with it the phase's one migration
+
+**What changed.** The plan opened with "zero migrations this phase" and, to
+hold that line, packed the ten one-time recovery codes as JSON inside the
+existing `users.totp_secret_enc` Fernet blob. That was rejected while
+implementing Task 8. Migration `6cf6a0722d23` adds `totp_recovery_codes`
+(one row per code: `code_hash_enc`, `created_at`, `used_at`).
+
+**Why.** Burning a recovery code in the blob design means
+decrypt → mutate → re-encrypt → write, on a column a concurrent TOTP verify
+is reading at the same time. Two logins racing to redeem the same code could
+both read it unused, and the second write would silently clobber the first —
+a one-time code redeemable twice, which is the entire property it exists to
+have. With a row per code, burning is an ordinary
+`UPDATE … WHERE used_at IS NULL`: exactly one statement matches, the database
+arbitrates, and the pattern is already in the codebase
+(`services/consoletickets.py`'s atomic redeem). The secondary reason is
+plainer: a column named `totp_secret_enc` holding two different kinds of
+secret is a name that lies.
+
+**What this cost.** The phase's zero-migration property. Recorded rather
+than defended — a constraint the plan set for itself is not worth a race in
+a credential path, and the honest gate number below is
+`alembic heads` = `6cf6a0722d23`, not the `2330a95b98d2` the plan
+predicted.
+
+## Findings that contradicted the docs
+
+1. **`casbin_rules` + sqlalchemy-adapter (docs 04, 08) → in-memory enforcer.**
+   Doc 04 describes `casbin_rules` as pycasbin's storage table and
+   `team_members.role` as "mirrored into casbin_rules by the service layer" —
+   two sources of truth by design. There is no `casbin-sqlalchemy-adapter` in
+   the dependency tree, the policy matrix never changes at runtime (doc 05
+   exposes no policy-editing endpoint), and the dynamic `g`-lines are a pure
+   function of `team_members`. The enforcer is therefore built in memory from
+   code + `team_members` at boot and re-synced through the `Authorizer` seam
+   on membership writes. `casbin_rules` ships empty and retained. Doc 03's
+   AuthZ row and doc 04's `casbin_rules` section are amended.
+2. **`users.totp_secret_enc` "Fernet-encrypted TOTP seed" (doc 04) had
+   nowhere to put recovery codes,** which doc 08 §5 requires. See A3: new
+   table, doc 04 amended in both places.
+3. **`hosts.cluster_name` was never populated before this phase.** The column
+   existed from migration `0001` and nothing wrote it. Migration strategy
+   selection cannot trust it, so `services/migrate.py` decides from a live
+   `cluster_status()` call on both hosts and writes the observed name back as
+   a side effect. Strategy is derived from what Proxmox says now, never from
+   a cached column — stated in the module docstring so a future reader does
+   not "optimise" the live call away.
+4. **`authlib.jose` is deprecated in Authlib 1.7.x.** ID-token verification
+   uses `joserfc` (Authlib's own dependency and its designated successor)
+   instead. Doc 03 gains `joserfc` as a named transitive row, the way Phase 7
+   added `tzlocal`.
+5. **Doc 04's API-key scope example `"apps:write"` is plural; the grammar is
+   singular.** Scopes are `read` or `<matrix-resource-name>:write`, and the
+   matrix names resources `app`, `vm`, `backup`. `POST /api-keys` 422s
+   anything outside the matrix, so the plural string was never accepted by
+   the code. Doc 04's example is normalised.
+
+## Residual limitations
+
+- **No real IdP on this box.** Doc 10's DoD says OIDC "round-trips against a
+  real Authelia". There is no Authelia and no browser-driven IdP here. The
+  substitute is a local mock provider serving a real discovery document, a
+  real S256 PKCE authorization-code exchange, and real RS256-signed ID tokens
+  verified against a real JWKS endpoint — protocol-complete, but not a
+  third-party implementation on the wire. The DoD script prints this
+  substitution in its own output rather than burying it here.
+- **No live Proxmox host.** Migration is proven against two `FakePVE`
+  instances plus a fake SFTP layer driving the real preflight, real handler
+  and real route. The measured `downtime_s` is a real measurement of fake
+  work.
+- **Token-authed audit rows still name the user, not the key.** 84
+  `write_audit` call sites exist; exactly one
+  (`api/deps.py:158`, the scope-denial path) writes
+  `actor_type="api_key"`. Every other row written during a bearer-token
+  request attributes the acting *user*, because those call sites predate API
+  keys and take the user from the dependency. `request.state.api_key` is
+  populated and available — the upgrade path is an `actor_of(request)` helper
+  threaded through the call sites, which is a mechanical change across 83
+  lines and was not worth bundling into this phase. Per-key forensic evidence
+  today is the scope-denial rows plus `last_used_at`.
+- **OIDC state and the 2FA pending store are in-memory, single-process.** By
+  design — the job backend is in-process too. A restart mid-login costs one
+  re-login. Both carry `ponytail:` comments naming the table-backed upgrade
+  path if multi-worker ever lands.
+- **Migration never deletes the source container.** After a successful
+  vzdump/transfer/restore the source CT is left stopped, for the operator to
+  remove once satisfied. Deliberate: the alternative is destroying the only
+  copy of a workload on the strength of an automated check.
+- **F1 (no route-level `errorComponent`) is still open** — see above; it is
+  Phase 9 work.
+- **The frontend suite is only reliable run sequentially on this box.** Under
+  `npx vitest run`'s default file parallelism, unrelated suites
+  (`settings`, `schedules`, `backups`, `vmcreate`, `storage`) fail
+  intermittently and pass on re-run in isolation — CPU/timer contention in
+  this sandbox, reproduced independently by three different agents on files
+  none of them had touched. `--no-file-parallelism` passes every time. The
+  gate number below is the sequential run; whether the flakiness is
+  environmental or a latent fake-timer dependency in those suites is not
+  settled here, and it is not claimed to be.
+
+## Gate numbers (real, captured this run)
+
+| Gate | Result |
+|---|---|
+| `dod_verify_phase8.py` | 4/4 clauses OK, exit 0, run twice — output identical except the measured `downtime_s` (0.043819 s vs 0.040807 s), which is a real wall-clock measurement and was deliberately not rounded into false identity |
+| Backend | **784 passed, 2 skipped, 4 deselected** — `pytest tests/ -m "not pve_integration and not e2e"`, run twice, identical (baseline entering the phase: 663) |
+| Frontend | **199 passed across 36 files** — `npx vitest run --no-file-parallelism` (Phase 7 closed at 154 across 30; the plan's stated floor was 157) |
+| Frontend build | exit 0, clean — only the pre-existing >500 kB chunk-size advisory |
+| Frontend lint (oxlint) | exit 0 — pre-existing warning classes only, no errors |
+| Frontend e2e | **1 passed** — real Chromium, `login and every nav page renders with a clean console` (3.1 s) |
+| Executor isolation (CI gate) | `executor isolation: OK` |
+| License audit, backend + frontend (CI gates) | clean, exit 0, against the exact CI allow-list |
+| Migrations | `alembic heads` = **`6cf6a0722d23`** — one migration this phase (A3). The plan predicted `2330a95b98d2` unchanged; that prediction did not survive contact with the recovery-code race |
+
+One note on the license audit, because the first run of it was not clean: the
+local `.venv` had `psycopg`/`psycopg-binary` (LGPL-3.0-only) left over from an
+earlier session testing the Postgres CI leg. `pyproject.toml`'s `dev` extra
+does not include them and CI's backend job does not install them, so this was
+an artefact of this machine, not of the dependency tree — confirmed by
+uninstalling, re-running clean, and reinstalling to leave the venv as found.
+
+## Commit range
+
+Phase 8 runs `5c4382a` ("docs(phase-8): implementation plan for Scale") through
+`e76df83` ("feat(ui): security settings — TOTP enrollment with one-time
+recovery codes, session management"), 26 commits, plus this documentation
+commit. The preceding commit, `e8093d1`, is Phase 7's closing chore. All 22
+planned tasks are committed directly to `main`, one commit per task, matching
+the convention every prior phase used.
