@@ -12,6 +12,7 @@ import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
+import { MigrateDialog } from '../components/MigrateDialog'
 import { Terminal } from '../components/terminal/Terminal'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
@@ -148,12 +149,17 @@ const TABS = [
 
 export function AppDetail() {
   const { appId } = useParams({ strict: false }) as { appId: string }
+  const ent = useEntitlements()
+  const [migrating, setMigrating] = useState(false)
   const { data: app } = useQuery({
     queryKey: ['apps', Number(appId)],
     queryFn: () => api<AppRow>(`/apps/${appId}`),
     refetchInterval: 15_000,
   })
   if (!app) return <EmptyState title="Loading…" note="" />
+  // Same wait-for-first-fetch gate as vms.tsx's cloneDenied — otherwise every
+  // plan sees a dead Migrate button for the whole first entitlements fetch.
+  const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
   return (
     <div>
       <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
@@ -184,6 +190,11 @@ export function AppDetail() {
         </div>
         <div className="ml-auto flex items-center gap-3">
           <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} />
+          <Button variant="ghost" disabled={migrateDenied}
+            title={migrateDenied ? 'Not included in your plan' : undefined}
+            onClick={() => setMigrating(true)}>
+            Migrate
+          </Button>
           <StatusPill status={app.status} />
         </div>
       </div>
@@ -201,6 +212,7 @@ export function AppDetail() {
         ))}
       </div>
       <Outlet />
+      {migrating && <MigrateDialog app={app} onClose={() => setMigrating(false)} />}
     </div>
   )
 }
