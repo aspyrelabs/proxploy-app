@@ -34,8 +34,13 @@ way Phase 8 recorded A1–A3.
   `cryptography>=43`, already in `backend/pyproject.toml`. sha256 uses
   `hashlib`. HTTP fetching uses `httpx>=0.27`, already present. If you believe
   a task needs a new dependency, stop and say so rather than adding one.
-- **Every shipped shell script must pass `shellcheck` with no warnings**, and
-  must start `#!/usr/bin/env bash` + `set -euo pipefail`.
+- **Every shipped shell script must pass `shellcheck -x -P SCRIPTDIR` with no
+  warnings**, and must start `#!/usr/bin/env bash` + `set -euo pipefail`.
+  `-x -P SCRIPTDIR` is required, not optional: `install.sh` and
+  `proxploy-update` source `common.sh` through a dynamic
+  `$(dirname "$0")/../lib/common.sh` path that a bare `shellcheck` cannot
+  resolve, and reports SC1091 for. Established while implementing Tasks 7
+  and 9; the CI gate in Task 15 uses the same flags.
 - **The updater never touches `/var/lib/proxploy/`** except to write a backup
   into `pre-update/` and to restore from it during rollback. Data and secrets
   are outside `releases/` by design.
@@ -1920,7 +1925,11 @@ git commit -m "feat(ui): update card — apply, poll, and the honest docker boun
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: shellcheck install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
+      # -x follows sourced files; -P SCRIPTDIR lets it resolve the dynamic
+      # `$(dirname "$0")/../lib/common.sh` sourcing both install.sh and
+      # proxploy-update use. A bare `shellcheck <path>` SC1091s on every one
+      # of them — established while implementing Tasks 7 and 9.
+      - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
 
   install-harness:
     runs-on: ubuntu-latest
