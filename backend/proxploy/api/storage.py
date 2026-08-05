@@ -25,7 +25,7 @@ from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_host
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, User
 from proxploy.services.audit import write_audit
@@ -38,10 +38,15 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 # FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call that runs FIRST. A bare `dependencies=[Depends(require_entitlement(...))]`
 # lands at position 0 and runs BEFORE auth, answering an anonymous caller with
-# 403 instead of 401 — see tests/test_route_auth_invariant.py.
-_require_viewer = require_role("viewer")
-_require_admin = require_role("admin")
-_require_owner = require_role("owner")
+# 403 instead of 401 — see tests/test_route_auth_invariant.py. scope_host()'s
+# default param "host_id" matches every {host_id} path segment in this router;
+# on GET "" (no host id in the path) the resolver returns None and enforce()
+# falls back to "any of the user's teams", same as before this had a scope.
+_read = authorize("storage", "read", scope_of=scope_host())
+_content = authorize("storage", "content", scope_of=scope_host())
+_manage_global = authorize("storage", "manage")          # POST "" (host_id in body)
+_manage = authorize("storage", "manage", scope_of=scope_host())
+_remove = authorize("storage", "remove", scope_of=scope_host())
 
 UPLOAD_CHUNK = 1024 * 1024
 
@@ -116,10 +121,10 @@ def _resolve_node(request: Request, host: Host, name: str, node: str | None) -> 
                              f"{host.name} — pass ?node=")
 
 
-@router.get("", dependencies=[Depends(_require_viewer),
+@router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("storage.view"))])
 def list_storage(request: Request, db=Depends(get_db),
-                 user: User = Depends(_require_viewer)):
+                 user: User = Depends(_read)):
     snaps = request.app.state.poller.snapshots
     hosts = {h.id: h for h in db.query(Host).all()}
     seen: dict[tuple, dict] = {}
@@ -138,11 +143,11 @@ def list_storage(request: Request, db=Depends(get_db),
 
 
 @router.get("/{host_id}/{name}",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("storage.view"))])
 def storage_detail(request: Request, host_id: int, name: str,
                    node: str | None = None, db=Depends(get_db),
-                   user: User = Depends(_require_viewer)):
+                   user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
     try:
@@ -162,11 +167,11 @@ def storage_detail(request: Request, host_id: int, name: str,
 
 
 @router.get("/{host_id}/{name}/content",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("storage.content"))])
 def storage_content(request: Request, host_id: int, name: str,
                     node: str | None = None, content: str | None = None,
-                    db=Depends(get_db), user: User = Depends(_require_viewer)):
+                    db=Depends(get_db), user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
     try:
@@ -185,12 +190,12 @@ def storage_content(request: Request, host_id: int, name: str,
 
 
 @router.post("/{host_id}/{name}/content", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_content),
                            Depends(require_entitlement("storage.content"))])
 def upload_content(request: Request, host_id: int, name: str,
                    file: UploadFile = File(...), content: str = Form("iso"),
                    node: str | None = Form(None), db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_content)):
     """Spool the body to disk, then hand the PATH to a job (doc 05 §Storage).
 
     Never slurp the whole upload in one call: FastAPI's UploadFile already
@@ -234,11 +239,11 @@ def upload_content(request: Request, host_id: int, name: str,
 
 
 @router.delete("/{host_id}/{name}/content/{volid:path}", status_code=202,
-               dependencies=[Depends(_require_admin),
+               dependencies=[Depends(_content),
                              Depends(require_entitlement("storage.content"))])
 def delete_content(request: Request, host_id: int, name: str, volid: str,
                    node: str | None = None, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_content)):
     """`:path` because a volid is `local:iso/ubuntu.iso` — it carries a slash,
     which a plain `{volid}` converter would refuse to match."""
     host = _host_or_404(db, host_id)
@@ -250,10 +255,10 @@ def delete_content(request: Request, host_id: int, name: str, volid: str,
 
 
 @router.post("", status_code=201,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage_global),
                            Depends(require_entitlement("storage.manage"))])
 def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_manage_global)):
     """Attach a storage definition (doc 05 §Storage, doc 01 §5 "Add/edit storage").
 
     Synchronous: Proxmox returns no UPID for /storage, so there is no job and
@@ -289,10 +294,10 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
 
 
 @router.patch("/{host_id}/{name}",
-              dependencies=[Depends(_require_admin),
+              dependencies=[Depends(_manage),
                             Depends(require_entitlement("storage.manage"))])
 def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
-                 db=Depends(get_db), user: User = Depends(_require_admin)):
+                 db=Depends(get_db), user: User = Depends(_manage)):
     """Audits the NAMES of the keys changed, never their values — the same rule
     settings.py::patch_settings follows, and the reason a rotated PBS password
     leaves a legible audit trail without leaving the password in it."""
@@ -315,10 +320,10 @@ def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
 
 
 @router.delete("/{host_id}/{name}",
-               dependencies=[Depends(_require_owner),
+               dependencies=[Depends(_remove),
                              Depends(require_entitlement("storage.manage"))])
 def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db),
-                   user: User = Depends(_require_owner)):
+                   user: User = Depends(_remove)):
     """Owner, not admin (doc 05): detaching drops the definition while guest
     disks keep pointing at it, which is the one action here that can strand
     running guests. Upstream data is left in place — this is not a wipe."""

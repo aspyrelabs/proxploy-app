@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_backup
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Backup, Host, User, Vm, utcnow
 from proxploy.services.backupjobs import SYNCED_AT_KEY, sync_in_flight
@@ -29,10 +29,14 @@ router = APIRouter(prefix="/backups", tags=["backups"])
 
 # Singleton first in dependencies=[...] and reused as the parameter dep so
 # FastAPI collapses them and auth runs before the entitlement check
-# (test_route_auth_invariant.py).
-_require_viewer = require_role("viewer")
-_require_operator = require_role("operator")
-_require_admin = require_role("admin")
+# (test_route_auth_invariant.py). host_id/backup_id arrive as a body field or
+# a query param on every route below except restore/delete, which carry
+# {backup_id} in the path — scope_backup()'s default param matches it.
+_read = authorize("backup", "read")
+_run = authorize("backup", "run")                 # host_id is body-carried
+_restore = authorize("backup", "restore", scope_of=scope_backup())
+_manage = authorize("backup", "manage")            # prune/preview: host_id is body/query
+_manage_scoped = authorize("backup", "manage", scope_of=scope_backup())
 
 # GET /backups is polled every 60s and may be open in several browser tabs at
 # once; each hit lands in a different FastAPI threadpool thread. A bare
@@ -69,10 +73,10 @@ def _last_sync(db) -> datetime | None:
     return None
 
 
-@router.get("", dependencies=[Depends(_require_viewer),
+@router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("backups.pbs"))])
 def list_backups(request: Request, db=Depends(get_db),
-                 user: User = Depends(_require_viewer)):
+                 user: User = Depends(_read)):
     hosts = {h.id: h.name for h in db.query(Host).all()}
     rows = db.query(Backup).order_by(Backup.taken_at.desc()).all()
     synced_at = _last_sync(db) or max((b.synced_at for b in rows if b.synced_at),
@@ -171,10 +175,10 @@ def _resolve_guests(db, body: RunIn) -> tuple[int, list[int]]:
 
 
 @router.post("/run", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_run),
                            Depends(require_entitlement("backups.run"))])
 def run_backup_route(request: Request, body: RunIn = Body(default=RunIn()),
-                     db=Depends(get_db), user: User = Depends(_require_operator)):
+                     db=Depends(get_db), user: User = Depends(_run)):
     host_id, vmids = _resolve_guests(db, body)
     return enqueue_and_audit(request, db, user, kind="backup.run",
                              target_type="host", target_id=host_id,
@@ -201,11 +205,11 @@ def _guest_for(db, b: Backup):
 
 
 @router.post("/{backup_id}/restore", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_restore),
                            Depends(require_entitlement("backups.restore"))])
 def restore_backup_route(request: Request, backup_id: int,
                          body: RestoreIn = Body(default=RestoreIn()),
-                         db=Depends(get_db), user: User = Depends(_require_admin)):
+                         db=Depends(get_db), user: User = Depends(_restore)):
     b = db.get(Backup, backup_id)
     if b is None:
         raise HTTPException(404, "backup not found")
@@ -284,14 +288,14 @@ def _prune_call(spec: str, guest_type: str | None, vmid: int | None) -> dict:
 
 
 @router.get("/prune-preview",
-            dependencies=[Depends(_require_admin),
+            dependencies=[Depends(_manage),
                           Depends(require_entitlement("backups.retention"))])
 def prune_preview_route(request: Request, host_id: int, storage: str,
                         node: str | None = None, keep_last: int | None = None,
                         keep_daily: int | None = None, keep_weekly: int | None = None,
                         keep_monthly: int | None = None, keep_yearly: int | None = None,
                         guest_type: str | None = None, vmid: int | None = None,
-                        db=Depends(get_db), user: User = Depends(_require_admin)):
+                        db=Depends(get_db), user: User = Depends(_manage)):
     """Dry run. Calls the GET verb only — this endpoint cannot delete anything;
     POST /backups/prune is the one that does."""
     host = db.get(Host, host_id)
@@ -324,10 +328,10 @@ class PruneIn(BaseModel):
 
 
 @router.post("/prune", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage),
                            Depends(require_entitlement("backups.retention"))])
 def prune_route(request: Request, body: PruneIn, db=Depends(get_db),
-                user: User = Depends(_require_admin)):
+                user: User = Depends(_manage)):
     if db.get(Host, body.host_id) is None:
         raise HTTPException(404, "host not found")
     spec = _prune_spec(body.model_dump())
@@ -340,10 +344,10 @@ def prune_route(request: Request, body: PruneIn, db=Depends(get_db),
 
 
 @router.delete("/{backup_id}", status_code=202,
-               dependencies=[Depends(_require_admin),
+               dependencies=[Depends(_manage_scoped),
                              Depends(require_entitlement("backups.retention"))])
 def delete_backup_route(request: Request, backup_id: int, db=Depends(get_db),
-                        user: User = Depends(_require_admin)):
+                        user: User = Depends(_manage_scoped)):
     b = db.get(Backup, backup_id)
     if b is None:
         raise HTTPException(404, "backup not found")

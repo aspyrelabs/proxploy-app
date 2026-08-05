@@ -243,7 +243,7 @@ def test_operator_role_is_refused_host_config_is_admin(tmp_path, csrf_header,
                headers=csrf_header(c))
         r = c.post(f"/api/v1/network/{host_id}/pve1/apply", headers=csrf_header(c),
                    json={"confirm": "pve1"})
-        assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
+        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
 
 
 def test_missing_session_is_401_not_403(tmp_path, csrf_header):

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_vm
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm
@@ -19,6 +19,20 @@ from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import is_self
 
 router = APIRouter(prefix="/vms", tags=["vms"])
+
+# Singletons so FastAPI's dependency cache (keyed on the callable) collapses
+# repeated uses into one call per request, and so route-level dependencies=[...]
+# and the parameter-level copy run the same auth check first (doc 10 "auth
+# before entitlement" ordering invariant). scope_vm()'s default param "vm_id"
+# matches every {vm_id} path segment in this router.
+_read = authorize("vm", "read", scope_of=scope_vm())
+_lifecycle = authorize("vm", "lifecycle", scope_of=scope_vm())
+_snapshot = authorize("vm", "snapshot", scope_of=scope_vm())
+_rollback = authorize("vm", "rollback", scope_of=scope_vm())
+_create = authorize("vm", "create")               # host_id is body-carried, no id yet
+_clone = authorize("vm", "clone", scope_of=scope_vm())
+_remove = authorize("vm", "remove", scope_of=scope_vm())
+_configure = authorize("vm", "configure", scope_of=scope_vm())
 
 
 def _vm_out(v: Vm, host: Host, snapshots) -> dict:
@@ -38,7 +52,7 @@ def _vm_out(v: Vm, host: Host, snapshots) -> dict:
 
 @router.get("")
 def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
-             user: User = Depends(require_role("viewer"))):
+             user: User = Depends(_read)):
     hosts = {h.id: h for h in db.query(Host).all()}
     query = db.query(Vm)
     if host is not None:
@@ -49,23 +63,11 @@ def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
 
 @router.get("/{vm_id}")
 def vm_detail(request: Request, vm_id: int, db=Depends(get_db),
-              user: User = Depends(require_role("viewer"))):
+              user: User = Depends(_read)):
     v = db.get(Vm, vm_id)
     if v is None:
         raise HTTPException(404, "vm not found")
     return _vm_out(v, db.get(Host, v.host_id), request.app.state.poller.snapshots)
-
-
-# Same ordering fix as apps.py::app_lifecycle — see the comment there. Reusing
-# this one callable as both the route-level dependency and the parameter
-# dependency makes auth/role run first and collapses the two into one call.
-# Hoisted to the top of the routes (Phase 6 Task 6) so later tasks (10, 11)
-# adding more routes above the /{vm_id}/{action} wildcard can reuse these
-# without re-declaring them.
-_require_viewer = require_role("viewer")
-_require_operator = require_role("operator")
-_require_admin = require_role("admin")
-_require_owner = require_role("owner")
 
 
 def _vm_and_host(db, vm_id: int):
@@ -83,19 +85,19 @@ def _vm_and_host(db, vm_id: int):
 # future two-segment siblings are not. Same WARNING as apps.py:266-271.
 # test_network_api.py asserts this ordering by route index.
 @router.get("/{vm_id}/network",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("network.guest_config"))])
 def vm_network(request: Request, vm_id: int, db=Depends(get_db),
-               user: User = Depends(_require_viewer)):
+               user: User = Depends(_read)):
     v, host = _vm_and_host(db, vm_id)
     return guest_nics(request, db, host, "qemu", v.vmid)
 
 
 @router.put("/{vm_id}/network/{iface}",
-            dependencies=[Depends(_require_operator),
+            dependencies=[Depends(_configure),
                           Depends(require_entitlement("network.guest_config"))])
 def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
-                      db=Depends(get_db), user: User = Depends(_require_operator)):
+                      db=Depends(get_db), user: User = Depends(_configure)):
     v, host = _vm_and_host(db, vm_id)
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
                          host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body)
@@ -152,10 +154,10 @@ class VmCreateIn(BaseModel):
 
 
 @router.post("", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_create),
                            Depends(require_entitlement("vms.create"))])
 def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
-                    user: User = Depends(_require_admin)):
+                    user: User = Depends(_create)):
     """Validate the spec here, not in the job: a bad spec should be a 422 the
     operator sees while the form is still open, not a failed job in the history.
     """
@@ -223,10 +225,10 @@ def _snapshot_out(s: dict) -> dict:
 
 
 @router.get("/{vm_id}/snapshots",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("vms.snapshots"))])
 def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
-                      user: User = Depends(_require_viewer)):
+                      user: User = Depends(_read)):
     """Live read on every request (doc 05: "List snapshots (live from
     Proxmox)") — there is no snapshot table and this phase adds none.
 
@@ -251,11 +253,11 @@ class SnapshotIn(BaseModel):
 
 
 @router.post("/{vm_id}/snapshots", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_snapshot),
                            Depends(require_entitlement("vms.snapshots"))])
 def create_vm_snapshot(request: Request, vm_id: int, body: SnapshotIn,
                        db=Depends(get_db),
-                       user: User = Depends(_require_operator)):
+                       user: User = Depends(_snapshot)):
     v, _host = _vm_and_host(db, vm_id)
     name = _valid_snap_name(body.name)
     return enqueue_and_audit(request, db, user, kind="vm.snapshot_create",
@@ -270,12 +272,12 @@ class RollbackIn(BaseModel):
 
 
 @router.post("/{vm_id}/snapshots/{name}/rollback", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_rollback),
                            Depends(require_entitlement("vms.snapshots"))])
 def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
                          body: RollbackIn = Body(default=RollbackIn()),
                          db=Depends(get_db),
-                         user: User = Depends(_require_admin)):
+                         user: User = Depends(_rollback)):
     """Rollback throws away every write since the snapshot was taken — there is
     no undo and no second copy. It therefore reuses the same three-key 409
     *shape* (`error`/`confirm_phrase`/`detail`) `enqueue_lifecycle` uses, so
@@ -306,10 +308,10 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
 
 
 @router.delete("/{vm_id}/snapshots/{name}", status_code=202,
-               dependencies=[Depends(_require_operator),
+               dependencies=[Depends(_snapshot),
                              Depends(require_entitlement("vms.snapshots"))])
 def delete_vm_snapshot(request: Request, vm_id: int, name: str, db=Depends(get_db),
-                       user: User = Depends(_require_operator)):
+                       user: User = Depends(_snapshot)):
     """No typed confirmation: deleting a snapshot leaves the guest and its disk
     exactly as they are. Only the rollback above destroys live state.
     """
@@ -329,11 +331,11 @@ class VmCloneIn(BaseModel):
 
 
 @router.post("/{vm_id}/clone", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_clone),
                            Depends(require_entitlement("vms.clone"))])
 def clone_vm_route(request: Request, vm_id: int,
                    body: VmCloneIn = Body(default=VmCloneIn()), db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_clone)):
     """`full` is passed through to PVE unvalidated.
 
     ponytail: PVE permits a linked clone (`full=false`) only from a template,
@@ -367,11 +369,11 @@ class VmDeleteIn(BaseModel):
 
 
 @router.delete("/{vm_id}", status_code=202,
-               dependencies=[Depends(_require_owner),
+               dependencies=[Depends(_remove),
                              Depends(require_entitlement("vms.create"))])
 def delete_vm_route(request: Request, vm_id: int,
                     body: VmDeleteIn = Body(default=VmDeleteIn()),
-                    db=Depends(get_db), user: User = Depends(_require_owner)):
+                    db=Depends(get_db), user: User = Depends(_remove)):
     """The most destructive route in this phase: the guest and its disks are
     gone, and nothing here backs them up first. Doc 05 puts it at owner, one
     rung above every other VM route; on top of that it takes the same
@@ -409,12 +411,12 @@ def delete_vm_route(request: Request, vm_id: int,
 
 
 @router.post("/{vm_id}/{action}", status_code=202,
-             dependencies=[Depends(_require_operator),
+             dependencies=[Depends(_lifecycle),
                           Depends(require_entitlement("vms.lifecycle"))])
 def vm_lifecycle(request: Request, vm_id: int, action: str,
                  body: LifecycleIn = Body(default=LifecycleIn()),
                  db=Depends(get_db),
-                 user: User = Depends(_require_operator)):
+                 user: User = Depends(_lifecycle)):
     if action not in VM_ACTIONS:
         raise HTTPException(422, f"action must be one of {', '.join(VM_ACTIONS)}")
     v = db.get(Vm, vm_id)

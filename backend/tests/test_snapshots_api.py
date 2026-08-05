@@ -229,7 +229,7 @@ def test_rollback_requires_admin(tmp_path, csrf_header, bootstrap_admin):
         # … but not roll one back
         r = c.post(f"/api/v1/vms/{vid}/snapshots/base/rollback",
                    json={"confirm": "win11"}, headers=csrf_header(c))
-        assert r.status_code == 403 and r.json()["detail"] == "insufficient role"
+        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
 
 
 def test_delete_snapshot_enqueues_and_audits(tmp_path, csrf_header, bootstrap_admin):

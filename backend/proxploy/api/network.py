@@ -24,7 +24,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement, scope_host
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
@@ -36,9 +36,11 @@ from proxploy.services.proxmox import ProxmoxError
 router = APIRouter(prefix="/network", tags=["network"])
 
 # Singleton first in dependencies=[...] and reused as the parameter dep, so
-# auth/role runs before the entitlement gate and FastAPI collapses the two
-# (deps.py idiom; test_route_auth_invariant.py enforces it).
-_require_viewer = require_role("viewer")
+# auth runs before the entitlement gate and FastAPI collapses the two
+# (deps.py idiom; test_route_auth_invariant.py enforces it). Both reads below
+# take `host` as a query param, not a path param, so there is nothing for
+# scope_host() to resolve — global, same as before this had a scope.
+_read = authorize("network", "read")
 
 NET_KEY = re.compile(r"^net\d+$")
 
@@ -148,10 +150,10 @@ def _iface_out(row: dict) -> dict:
     }
 
 
-@router.get("/bridges", dependencies=[Depends(_require_viewer),
+@router.get("/bridges", dependencies=[Depends(_read),
                                       Depends(require_entitlement("network.view"))])
 def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
-                 user: User = Depends(_require_viewer)):
+                 user: User = Depends(_read)):
     """Bridges/bonds/VLANs/physical NICs per node + the guest attachment map.
 
     # ponytail: the attachment map costs one guest_config read per adopted app
@@ -191,10 +193,10 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
     return {"nodes": nodes, "attachments": attachments, "errors": errors}
 
 
-@router.get("/throughput", dependencies=[Depends(_require_viewer),
+@router.get("/throughput", dependencies=[Depends(_read),
                                          Depends(require_entitlement("network.view"))])
 def throughput(request: Request, hours: int = 1, db=Depends(get_db),
-               user: User = Depends(_require_viewer)):
+               user: User = Depends(_read)):
     """Per-host in/out series from the MetricsStore rows the poller already writes.
 
     Same reader as /metrics/query (services/metrics.py::query_series); this
@@ -216,7 +218,11 @@ def throughput(request: Request, hours: int = 1, db=Depends(get_db),
     return {"hours": hours, "resolution": res, "hosts": out}
 
 
-_require_admin = require_role("admin")
+# create_bridge's host_id is body-carried (no id in the path yet), so it stays
+# global-domain, mirroring apps.py catalog install's ponytail comment. The
+# other three host-config mutations all carry host_id in the path.
+_host_global = authorize("network", "host")
+_host = authorize("network", "host", scope_of=scope_host())
 
 # PVE option names are lowercase words with dashes/underscores and digits.
 # The config dict is unpacked straight into a proxmoxer kwargs call, so the
@@ -268,10 +274,10 @@ class ApplyIn(BaseModel):
 
 
 @router.post("/bridges", status_code=201,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_host_global),
                            Depends(require_entitlement("network.host_config"))])
 def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
-                  user: User = Depends(_require_admin)):
+                  user: User = Depends(_host_global)):
     host = _host_or_404(db, body.host_id)
     # Route-controlled keys (iface/type) go LAST in the unpack so a
     # caller-supplied config.iface or config.type — both admitted by
@@ -294,11 +300,11 @@ def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
 
 
 @router.put("/bridges/{host_id}/{node}/{iface}",
-            dependencies=[Depends(_require_admin),
+            dependencies=[Depends(_host),
                           Depends(require_entitlement("network.host_config"))])
 def update_bridge(request: Request, host_id: int, node: str, iface: str,
                   body: BridgePatchIn, db=Depends(get_db),
-                  user: User = Depends(_require_admin)):
+                  user: User = Depends(_host)):
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
@@ -318,10 +324,10 @@ def update_bridge(request: Request, host_id: int, node: str, iface: str,
 
 
 @router.delete("/bridges/{host_id}/{node}/{iface}",
-               dependencies=[Depends(_require_admin),
+               dependencies=[Depends(_host),
                              Depends(require_entitlement("network.host_config"))])
 def delete_bridge(request: Request, host_id: int, node: str, iface: str,
-                  db=Depends(get_db), user: User = Depends(_require_admin)):
+                  db=Depends(get_db), user: User = Depends(_host)):
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
@@ -339,10 +345,10 @@ def delete_bridge(request: Request, host_id: int, node: str, iface: str,
 
 
 @router.post("/{host_id}/{node}/apply", status_code=202,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_host),
                            Depends(require_entitlement("network.host_config"))])
 def apply_network(request: Request, host_id: int, node: str, body: ApplyIn,
-                  db=Depends(get_db), user: User = Depends(_require_admin)):
+                  db=Depends(get_db), user: User = Depends(_host)):
     """Promote the staged config. Typed confirmation required.
 
     Doc 08 §1's typed-name guardrail, reused verbatim from selfguard's
@@ -371,10 +377,10 @@ def apply_network(request: Request, host_id: int, node: str, body: ApplyIn,
 
 
 @router.post("/{host_id}/{node}/revert",
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_host),
                            Depends(require_entitlement("network.host_config"))])
 def revert_network(request: Request, host_id: int, node: str, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_host)):
     """Discard /etc/network/interfaces.new. No confirmation and no job: this
     deletes a staged file and cannot disturb the running config."""
     host = _host_or_404(db, host_id)
