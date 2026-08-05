@@ -157,7 +157,21 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
 
 
 def sync_in_flight(db) -> bool:
-    """A page that refetches while a sync is queued must not pile up a second."""
+    """A page that refetches while a sync is queued must not pile up a second.
+
+    `db.rollback()` first, and it is load-bearing: the caller has already run
+    queries on this session, which pins a read snapshot (SQLite in WAL gives a
+    transaction a consistent view until it ends). A concurrent request that
+    enqueued and committed its Job row AFTER that snapshot opened is invisible
+    here, so the check returns False and a duplicate job is enqueued — which is
+    exactly the race `api/backups.py::_sync_enqueue_lock` looks like it
+    prevents but cannot: the lock serializes the code, not the visibility of
+    the data. Ending the read transaction starts a fresh snapshot.
+
+    Callers must therefore have no uncommitted writes pending on `db`. Every
+    caller today is a read path.
+    """
+    db.rollback()
     return (db.query(Job)
             .filter(Job.kind == "backup.sync", Job.status.in_(("queued", "running")))
             .first() is not None)
