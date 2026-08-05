@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Proxploy self-update (Phase 9a).
+#
+# Runs OUTSIDE the app's cgroup, launched by systemd-run from
+# services/updater.py::launch. That is deliberate: this script restarts
+# proxploy.service, and anything inside that cgroup would be killed halfway
+# through, leaving the symlink swapped and nothing serving.
+#
+# Order matters and is not negotiable:
+#   backup BEFORE download   (a full disk must not cost you the database)
+#   verify BEFORE unpack     (never write unverified bytes into releases/)
+#   migrate BEFORE switch    (a failed migration leaves the old version running)
+#   health  AFTER  switch    (and any failure from here rolls back)
+set -euo pipefail
+
+# Installed layout is $PP_BIN/proxploy-update sourcing $PP_LIB/common.sh
+# (both under /opt/proxploy — see install.sh step 7), so the relative and
+# fallback paths below resolve to the same file in production. The relative
+# path also lets this script run straight out of a release/build checkout
+# before it has been installed anywhere.
+# shellcheck source=lib/common.sh
+. "$(dirname "$0")/../lib/common.sh" 2>/dev/null || . /opt/proxploy/lib/common.sh
+
+TO=""; CHANNEL=""; FORCE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --to) TO="$2"; shift 2 ;;
+    --channel) CHANNEL="$2"; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+[ -n "$TO" ] || die "--to <version> is required"
+[ -n "$CHANNEL" ] || die "--channel <url> is required"
+need_root
+
+FROM=$(basename "$(readlink -f "$PP_CURRENT")")
+BACKUP="$PP_DATA/pre-update/$FROM"
+
+rollback() {
+  log "rolling back to $FROM"
+  ln -sfn "$PP_RELEASES/$FROM" "$PP_CURRENT.tmp" && mv -T "$PP_CURRENT.tmp" "$PP_CURRENT"
+  if [ -f "$BACKUP/proxploy.db" ]; then
+    cp -a "$BACKUP/proxploy.db" "$PP_DATA/proxploy.db"
+  fi
+  systemctl restart proxploy.service || true
+  die "update to $TO failed; rolled back to $FROM"
+}
+
+# --- preflight -------------------------------------------------------------
+[ "$TO" != "$FROM" ] || die "already running $TO"
+if [ -d "$PP_RELEASES/$TO" ] && [ "$FORCE" -eq 0 ]; then
+  die "$TO is already unpacked; use --force"
+fi
+avail=$(df -Pk "$PP_ROOT" | awk 'NR==2 {print $4}')
+[ "$avail" -gt 2097152 ] || die "less than 2 GiB free on $PP_ROOT — refusing to update"
+
+# --- backup ----------------------------------------------------------------
+log "backing up $FROM"
+mkdir -p "$BACKUP"
+if [ -f "$PP_DATA/proxploy.db" ]; then
+  # sqlite3 .backup is safe against a live writer; cp is not.
+  sqlite3 "$PP_DATA/proxploy.db" ".backup '$BACKUP/proxploy.db'"
+fi
+cp -a "$PP_DATA/master.key" "$BACKUP/master.key" 2>/dev/null || true
+echo "$FROM" > "$BACKUP/version"
+
+# --- download + verify -------------------------------------------------------
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+log "fetching $TO"
+fetch_to "$CHANNEL/manifest.json"     "$work/manifest.json"
+fetch_to "$CHANNEL/manifest.json.sig" "$work/manifest.json.sig"
+tarball=$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$work/manifest.json" | head -1)
+[ -n "$tarball" ] || die "manifest.json has no artifact name"
+fetch_to "$CHANNEL/$tarball" "$work/$tarball"
+verify_release "$work" "$PP_CURRENT/backend/proxploy/release_pubkey.pem"
+
+# --- unpack + migrate --------------------------------------------------------
+log "installing $TO"
+install_release "$work/$tarball" "$TO"
+log "migrating database"
+if ! "$PP_RELEASES/$TO/backend/venv/bin/alembic" \
+    -c "$PP_RELEASES/$TO/backend/alembic.ini" upgrade head; then
+  # Nothing was switched: the old version is still running and its database
+  # was never touched by a migration that failed to apply. Rolling back here
+  # would restore a backup over a database that is already unchanged — that
+  # would be the bug, not the fix.
+  log "migration failed; nothing was switched"
+  exit 1
+fi
+
+# --- switch + health ----------------------------------------------------------
+log "switching to $TO"
+ln -sfn "$PP_RELEASES/$TO" "$PP_CURRENT.tmp" && mv -T "$PP_CURRENT.tmp" "$PP_CURRENT"
+systemctl restart proxploy.service || rollback
+
+deadline=$(($(date +%s) + 120))
+until curl -fsS --max-time 5 http://127.0.0.1:8000/api/v1/meta/health >/dev/null 2>&1; do
+  [ "$(date +%s)" -lt "$deadline" ] || rollback
+  sleep 2
+done
+
+log "update to $TO complete"
