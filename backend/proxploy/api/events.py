@@ -7,11 +7,22 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from proxploy.api.deps import authorize
 from proxploy.services.authn import resolve_session
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 PING_S = 15
+
+# Called directly inside the handler, not via Depends: a StreamingResponse
+# would hold a DI-scoped DB session open for the whole connection. Same
+# pattern api/jobs.py::job_stream uses. Authentication alone is NOT enough
+# here — this bus carries host, app, job and alert deltas for the entire
+# cluster, so a user with no team membership (denied everything else by
+# Phase 8 amendment A1) could otherwise still watch the whole system through
+# it. viewer-level `meta.read` is the "is an authorized user of this install"
+# floor, and it requires a real membership.
+_read = authorize("meta", "read")
 
 
 @router.get("/stream")
@@ -22,7 +33,10 @@ async def events_stream(request: Request):
 
     def check():
         with request.app.state.sessionmaker() as db:
-            return resolve_session(db, raw) if raw else None
+            user = resolve_session(db, raw) if raw else None
+            if user is not None:
+                _read(request, db, user)
+            return user
 
     user = await asyncio.to_thread(check)
     if user is None:
