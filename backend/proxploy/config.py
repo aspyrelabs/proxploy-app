@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     # sustained-transfer figure; the job itself reports MEASURED downtime once
     # it runs (services/migrate.py's est_note says so explicitly).
     migrate_assumed_bps: float = 80e6
+    # Phase 9a. The release channel is a base URL holding manifest.json,
+    # manifest.json.sig and the tarball. https:// in production; the test
+    # harnesses point it at a file:// directory so no test ever needs the
+    # network or a real release.
+    release_channel_url: str = "https://github.com/aspyrelabs/proxploy-app/releases/latest/download"
+    release_pubkey_file: Path | None = None   # None = the key shipped in the package
+    # Set by the installer in /etc/proxploy/proxploy.env. Unset means a dev
+    # checkout: check works, apply refuses, because there is no managed
+    # layout to switch.
+    install_shape: str | None = None
+    update_script: Path = Path("/opt/proxploy/bin/proxploy-update")
+    update_timeout_s: float = 600.0
+    # Written by the installer from inside the CT it creates, so
+    # services/selfguard.py can recognise Proxploy's own container.
+    self_ctid: int | None = None
 
 
 @lru_cache
