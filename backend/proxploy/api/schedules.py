@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.jobs import HANDLERS
 from proxploy.jobs.scheduler import BadSchedule, _target, next_fire
@@ -22,12 +22,12 @@ from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 
-# One singleton per role so FastAPI's dependency cache collapses the
-# route-level and parameter-level uses, and so auth/role always runs before
+# One singleton per permission so FastAPI's dependency cache collapses the
+# route-level and parameter-level uses, and so authorize always runs before
 # require_entitlement (tests/test_route_auth_invariant.py).
-_require_viewer = require_role("viewer")
-_require_operator = require_role("operator")
-_require_admin = require_role("admin")
+_read = authorize("schedule", "read")
+_run = authorize("schedule", "run")
+_manage = authorize("schedule", "manage")
 
 # Doc 05: "`sched.windows`; `store.auto_update` when `job_kind=app.update`".
 # Enforced in the body rather than as a route dependency because it depends on
@@ -95,8 +95,8 @@ def _validated(cron: str, tz: str, job_kind: str) -> None:
         raise HTTPException(422, f"invalid cron expression or timezone: {e}") from e
 
 
-@router.get("", dependencies=[Depends(_require_viewer)])
-def list_schedules(db=Depends(get_db), user: User = Depends(_require_viewer)):
+@router.get("", dependencies=[Depends(_read)])
+def list_schedules(db=Depends(get_db), user: User = Depends(_read)):
     # Ascending, same convention as notifications.py::list_channels — this is
     # a small, admin-curated config list (unlike GET /jobs' append-only
     # execution log, where newest-first is the right read), and stable
@@ -105,10 +105,10 @@ def list_schedules(db=Depends(get_db), user: User = Depends(_require_viewer)):
 
 
 @router.post("", status_code=201,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage),
                            Depends(require_entitlement("sched.windows"))])
 def create_schedule(request: Request, body: ScheduleIn, db=Depends(get_db),
-                    user: User = Depends(_require_admin)):
+                    user: User = Depends(_manage)):
     _check_auto_update(request, body.job_kind)
     _validated(body.cron, body.timezone, body.job_kind)
     row = Schedule(name=body.name, job_kind=body.job_kind, cron=body.cron,
@@ -129,10 +129,10 @@ def create_schedule(request: Request, body: ScheduleIn, db=Depends(get_db),
 
 
 @router.patch("/{schedule_id}",
-              dependencies=[Depends(_require_admin),
+              dependencies=[Depends(_manage),
                             Depends(require_entitlement("sched.windows"))])
 def patch_schedule(request: Request, schedule_id: int, body: SchedulePatch,
-                   db=Depends(get_db), user: User = Depends(_require_admin)):
+                   db=Depends(get_db), user: User = Depends(_manage)):
     row = _get(db, schedule_id)
     cron = body.cron if body.cron is not None else row.cron
     tz = body.timezone if body.timezone is not None else row.timezone
@@ -168,9 +168,9 @@ def patch_schedule(request: Request, schedule_id: int, body: SchedulePatch,
 
 
 @router.delete("/{schedule_id}", status_code=204,
-               dependencies=[Depends(_require_admin)])
+               dependencies=[Depends(_manage)])
 def delete_schedule(request: Request, schedule_id: int, db=Depends(get_db),
-                    user: User = Depends(_require_admin)):
+                    user: User = Depends(_manage)):
     row = _get(db, schedule_id)
     name, kind = row.name, row.job_kind
     # jobs.schedule_id is a plain nullable FK with no ON DELETE — historical
@@ -186,9 +186,9 @@ def delete_schedule(request: Request, schedule_id: int, db=Depends(get_db),
 
 
 @router.post("/{schedule_id}/run", status_code=202,
-             dependencies=[Depends(_require_operator)])
+             dependencies=[Depends(_run)])
 def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
-                     user: User = Depends(_require_operator)):
+                     user: User = Depends(_run)):
     """An extra run, not a reschedule: `next_run_at` deliberately does not move.
 
     Unlike a tick-fired run this one carries `requested_by` — a human asked for

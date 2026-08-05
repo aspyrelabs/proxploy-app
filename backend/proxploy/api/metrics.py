@@ -5,11 +5,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from proxploy.api.deps import get_db, require_role
+from proxploy.api.deps import authorize, get_db
 from proxploy.models import User, utcnow
 from proxploy.services.metrics import METRICS, pick_resolution, query_series
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
+
+_read = authorize("metric", "read")
 
 TARGET_TYPES = ("host", "app", "vm")
 
@@ -29,7 +31,7 @@ def metrics_query(request: Request, target: str, metric: str,
                   frm: str | None = Query(None, alias="from"),
                   to: str | None = None, resolution: str | None = None,
                   db=Depends(get_db),
-                  user: User = Depends(require_role("viewer"))):
+                  user: User = Depends(_read)):
     try:
         ttype, raw_id = target.split(":", 1)
         tid = int(raw_id)

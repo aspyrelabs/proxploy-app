@@ -9,6 +9,7 @@ from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_
 from proxploy.models import TeamMember, User
 from proxploy.services import authn, oidc
 from proxploy.services.audit import write_audit
+from proxploy.services.authz import enforce
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -83,10 +84,9 @@ def create_user(request: Request, body: UserIn, db=Depends(get_db)):
         actor = authn.resolve_session(db, raw) if raw else None
         if not actor:
             raise HTTPException(401, "authentication required")
-        actor_role = user_role(db, actor)
-        if ROLE_ORDER[actor_role] < ROLE_ORDER["admin"]:
-            raise HTTPException(403, "insufficient role")
-        if body.role == "owner" and actor_role != "owner":
+        if not enforce(request.app.state.authz, db, actor, "user", "manage"):
+            raise HTTPException(403, "forbidden")
+        if body.role == "owner" and user_role(db, actor) != "owner":
             raise HTTPException(403, "only an owner may grant owner")
         role = body.role
         actor_id = actor.id

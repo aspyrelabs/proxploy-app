@@ -11,13 +11,16 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.jobs import TERMINAL
 from proxploy.models import Job, JobEvent, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.authn import resolve_session
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+_read = authorize("job", "read")
+_cancel = authorize("job", "cancel")
 
 PING_S = 15
 
@@ -66,7 +69,7 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
     return {"job": job_out(job)}
 
 
-@router.get("", dependencies=[Depends(require_role("viewer")),
+@router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("jobs.history"))])
 def list_jobs(response: Response, status: str | None = None, kind: str | None = None,
               target: str | None = None, page: int = 1, per_page: int = 50,
@@ -88,7 +91,7 @@ def list_jobs(response: Response, status: str | None = None, kind: str | None = 
     return [job_out(j) for j in rows]
 
 
-@router.get("/{job_id}", dependencies=[Depends(require_role("viewer")),
+@router.get("/{job_id}", dependencies=[Depends(_read),
                                        Depends(require_entitlement("jobs.history"))])
 def job_detail(job_id: int, db=Depends(get_db)):
     job = db.get(Job, job_id)
@@ -98,7 +101,7 @@ def job_detail(job_id: int, db=Depends(get_db)):
 
 
 @router.get("/{job_id}/events",
-            dependencies=[Depends(require_role("viewer")),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("jobs.history"))])
 def job_events(job_id: int, after: int = 0, limit: int = 5000, db=Depends(get_db)):
     if db.get(Job, job_id) is None:
@@ -108,7 +111,7 @@ def job_events(job_id: int, after: int = 0, limit: int = 5000, db=Depends(get_db
 
 @router.post("/{job_id}/cancel")
 def cancel_job(request: Request, job_id: int, db=Depends(get_db),
-               user: User = Depends(require_role("operator"))):
+               user: User = Depends(_cancel)):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
@@ -141,10 +144,10 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
 
     Auth is resolved once via a short-lived session in a thread — never a
     `Depends(get_db)` seam, which for a StreamingResponse would stay open for
-    the life of the connection. `require_role`/`require_entitlement` are
+    the life of the connection. `authorize`/`require_entitlement` are
     still the ones enforcing it (called directly, not through FastAPI's DI)
     so this route stays on the same auth -> RBAC -> entitlement seam as its
-    siblings, in that order, and picks up the Phase-8 pycasbin swap for free.
+    siblings, in that order.
     """
     raw = request.cookies.get(request.app.state.settings.session_cookie)
 
@@ -153,7 +156,7 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
             user = resolve_session(db, raw) if raw else None
             if user is None:
                 raise HTTPException(401, "authentication required")
-            require_role("viewer")(request, db, user)
+            _read(request, db, user)
             require_entitlement("jobs.stream")(request)
             if db.get(Job, job_id) is None:
                 raise HTTPException(404, "job not found")

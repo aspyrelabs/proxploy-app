@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, Request
 
 from proxploy import __version__
-from proxploy.api.deps import get_current_user, get_db
+from proxploy.api.deps import authorize, get_db
 from proxploy.models import Host, User
 from proxploy.services import oidc
 from proxploy.services.settings import get_setting
 
 router = APIRouter(prefix="/meta", tags=["meta"])
+
+_read = authorize("meta", "read")
 
 
 @router.get("/health")
@@ -15,7 +17,7 @@ def health():
 
 
 @router.get("/version")
-def version(request: Request, user=Depends(get_current_user)):
+def version(request: Request, user=Depends(_read)):
     return {"version": __version__,
             "db_backend": request.app.state.engine.dialect.name}
 

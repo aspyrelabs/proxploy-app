@@ -27,16 +27,6 @@ def user_role(db, user: User) -> str:
     return max(roles, key=lambda r: ROLE_ORDER.get(r, -1), default="viewer")
 
 
-def require_role(min_role: str):
-    """Phase-1 RBAC stub — the seam pycasbin replaces in Phase 8 (doc 08 §6)."""
-    def dep(request: Request, db=Depends(get_db),
-            user: User = Depends(get_current_user)) -> User:
-        if ROLE_ORDER[user_role(db, user)] < ROLE_ORDER[min_role]:
-            raise HTTPException(403, "insufficient role")
-        return user
-    return dep
-
-
 def default_team(db) -> Team:
     team = db.query(Team).filter_by(slug="default").one_or_none()
     if not team:
@@ -107,10 +97,11 @@ def scope_backup(param: str = "backup_id"):
 
 
 def authorize(resource: str, action: str, *, scope_of=None):
-    """Doc 08 §6 enforcement point. Replaces require_role() route-by-route in
-    Phase 8. Fail-closed twice over: an unregistered (resource, action) pair
-    refuses to even build a dependency (so an ungoverned route cannot be
-    registered), and the enforcer denies anything it does not recognise.
+    """Doc 08 §6 enforcement point — the only authorization path in the
+    product (the Phase-1 require_role RBAC stub is retired). Fail-closed
+    twice over: an unregistered (resource, action) pair refuses to even
+    build a dependency (so an ungoverned route cannot be registered), and
+    the enforcer denies anything it does not recognise.
     Order on routes: dependencies=[Depends(authorize(...)),
     Depends(require_entitlement(...))] — authorize resolves get_current_user
     first, so an anonymous caller still gets 401 before any 403."""

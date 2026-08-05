@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_current_user, get_db, get_entitlements, require_role
+from proxploy.api.deps import authorize, get_db, get_entitlements
 from proxploy.models import AppSetting, EntitlementCache, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.license_client import LicenseApiError
@@ -12,8 +12,11 @@ from proxploy.services.settings import set_setting as _set_setting
 
 router = APIRouter(prefix="/entitlements", tags=["entitlements"])
 
+_read = authorize("entitlement", "read")
+_manage = authorize("entitlement", "manage")
 
-@router.get("", dependencies=[Depends(get_current_user)])
+
+@router.get("", dependencies=[Depends(_read)])
 def entitlements(ent=Depends(get_entitlements)):
     st = ent.status()
     grace = None
@@ -52,7 +55,7 @@ def apply_new_token(request: Request, db, token: str) -> None:
 
 @router.post("/license")
 def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
-                user=Depends(require_role("owner"))):
+                user=Depends(_manage)):
     install_id = _setting(db, "license.install_id")
     if not install_id:
         install_id = str(uuid.uuid4())
@@ -79,7 +82,7 @@ def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
 
 @router.post("/refresh")
 def force_refresh(request: Request, db=Depends(get_db),
-                  user=Depends(require_role("owner"))):
+                  user=Depends(_manage)):
     enc = _setting(db, "license.refresh_credential.enc")
     if not enc:
         raise HTTPException(409, "no license configured")
@@ -95,7 +98,7 @@ def force_refresh(request: Request, db=Depends(get_db),
 
 @router.delete("/license")
 def remove_license(request: Request, db=Depends(get_db),
-                   user=Depends(require_role("owner"))):
+                   user=Depends(_manage)):
     row = db.get(EntitlementCache, 1)
     if row:
         row.token = None

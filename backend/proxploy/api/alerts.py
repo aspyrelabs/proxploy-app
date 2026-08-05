@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import (Alert, AlertRule, App, Host, NotificationChannel,
                              User, Vm, utcnow)
 from proxploy.services.alerts import METRIC_TARGETS, STATUS_METRICS
@@ -23,9 +23,9 @@ from proxploy.services.audit import write_audit
 
 router = APIRouter(tags=["alerts"])
 
-_require_viewer = require_role("viewer")
-_require_operator = require_role("operator")
-_require_admin = require_role("admin")
+_read = authorize("alert", "read")
+_ack = authorize("alert", "ack")
+_manage = authorize("alert", "manage")
 
 OPERATORS = ("gt", "lt")
 SEVERITIES = ("info", "warning", "critical")
@@ -107,9 +107,9 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
 # --- rules ------------------------------------------------------------------
 
 @router.get("/alert-rules/metrics",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("alerts.rules"))])
-def list_metrics(user: User = Depends(_require_viewer)):
+def list_metrics(user: User = Depends(_read)):
     """One source of truth for the metric enum — the rule form renders this."""
     return {"metrics": [
         {"metric": m, "targets": list(targets),
@@ -118,17 +118,17 @@ def list_metrics(user: User = Depends(_require_viewer)):
 
 
 @router.get("/alert-rules",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("alerts.rules"))])
-def list_rules(db=Depends(get_db), user: User = Depends(_require_viewer)):
+def list_rules(db=Depends(get_db), user: User = Depends(_read)):
     return [_rule_out(r) for r in db.query(AlertRule).order_by(AlertRule.id).all()]
 
 
 @router.post("/alert-rules", status_code=201,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage),
                            Depends(require_entitlement("alerts.rules"))])
 def create_rule(request: Request, body: RuleIn, db=Depends(get_db),
-                user: User = Depends(_require_admin)):
+                user: User = Depends(_manage)):
     channel_ids = body.channel_ids or []
     _validate(db, metric=body.metric, target_type=body.target_type,
               target_id=body.target_id, operator=body.operator,
@@ -148,10 +148,10 @@ def create_rule(request: Request, body: RuleIn, db=Depends(get_db),
 
 
 @router.patch("/alert-rules/{rule_id}",
-              dependencies=[Depends(_require_admin),
+              dependencies=[Depends(_manage),
                             Depends(require_entitlement("alerts.rules"))])
 def patch_rule(request: Request, rule_id: int, body: RulePatch,
-               db=Depends(get_db), user: User = Depends(_require_admin)):
+               db=Depends(get_db), user: User = Depends(_manage)):
     row = db.get(AlertRule, rule_id)
     if row is None:
         raise HTTPException(404, "alert rule not found")
@@ -175,10 +175,10 @@ def patch_rule(request: Request, rule_id: int, body: RulePatch,
 
 
 @router.delete("/alert-rules/{rule_id}", status_code=204,
-               dependencies=[Depends(_require_admin),
+               dependencies=[Depends(_manage),
                              Depends(require_entitlement("alerts.rules"))])
 def delete_rule(request: Request, rule_id: int, db=Depends(get_db),
-                user: User = Depends(_require_admin)):
+                user: User = Depends(_manage)):
     row = db.get(AlertRule, rule_id)
     if row is None:
         raise HTTPException(404, "alert rule not found")
@@ -240,9 +240,9 @@ def _lookups(db, rows: list[Alert]) -> tuple[dict, dict, dict]:
     return rules, labels, emails
 
 
-@router.get("/alerts", dependencies=[Depends(_require_viewer)])
+@router.get("/alerts", dependencies=[Depends(_read)])
 def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
-                user: User = Depends(_require_viewer)):
+                user: User = Depends(_read)):
     """Doc 05 leaves the entitlement column blank here on purpose: the sidebar
     health footer ("3 nodes · 0 alerts") reads this on every tier."""
     limit = max(1, min(limit, ALERTS_MAX))
@@ -254,9 +254,9 @@ def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
     return [alert_out(a, rules, labels, emails) for a in rows]
 
 
-@router.post("/alerts/{alert_id}/ack", dependencies=[Depends(_require_operator)])
+@router.post("/alerts/{alert_id}/ack", dependencies=[Depends(_ack)])
 def ack_alert(request: Request, alert_id: int, db=Depends(get_db),
-              user: User = Depends(_require_operator)):
+              user: User = Depends(_ack)):
     """Acknowledging silences; it never resolves. The evaluator still flips an
     acked alert to `resolved` on recovery (services/alerts.py) — an operator
     saying "I know" must not make the system stop tracking whether it is fixed.

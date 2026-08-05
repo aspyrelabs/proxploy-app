@@ -2,13 +2,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Response
 
-from proxploy.api.deps import get_db, require_role
+from proxploy.api.deps import authorize, get_db
 from proxploy.models import AuditEvent
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
+_read = authorize("audit", "read")
 
-@router.get("", dependencies=[Depends(require_role("admin"))])
+
+@router.get("", dependencies=[Depends(_read)])
 def list_audit(response: Response, db=Depends(get_db), action: str | None = None,
                actor: int | None = None, from_: datetime | None = None,
                to: datetime | None = None, page: int = 1, per_page: int = 50):

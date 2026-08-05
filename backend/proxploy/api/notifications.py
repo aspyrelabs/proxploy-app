@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import NotificationChannel, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.notifier import kind_for, send_one
@@ -18,11 +18,13 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 # Reused as BOTH the route-level dependency and the parameter-level one below
 # so FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call. A bare `dependencies=[Depends(require_entitlement(...))]` sits
-# at position 0 of the dependant and would run BEFORE this auth/role check,
+# at position 0 of the dependant and would run BEFORE this auth check,
 # leaking 403 to an anonymous caller who should see 401 (Tasks 3 and 5 hit
-# this — see jobs.py/apps.py). Putting `_require_admin` first in the
-# dependencies list forces auth -> role -> entitlement, in that order.
-_require_admin = require_role("admin")
+# this — see jobs.py/apps.py). Putting `_manage` first in the dependencies
+# list forces auth -> authz -> entitlement, in that order. Doc 05: every
+# notifications route is admin, no viewer read tier — one permission covers
+# the whole router.
+_manage = authorize("channel", "manage")
 
 
 class ChannelIn(BaseModel):
@@ -56,17 +58,17 @@ def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-@router.get("/channels", dependencies=[Depends(_require_admin),
+@router.get("/channels", dependencies=[Depends(_manage),
                                        Depends(require_entitlement("notify.channels"))])
-def list_channels(db=Depends(get_db), user: User = Depends(_require_admin)):
+def list_channels(db=Depends(get_db), user: User = Depends(_manage)):
     return [_out(c) for c in db.query(NotificationChannel).order_by(NotificationChannel.id)]
 
 
 @router.post("/channels", status_code=201,
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage),
                           Depends(require_entitlement("notify.channels"))])
 def create_channel(request: Request, body: ChannelIn, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_manage)):
     _require_url(body.url)
     blob, ver = request.app.state.secretstore.encrypt(body.url.encode())
     row = NotificationChannel(name=body.name, kind=kind_for(body.url),
@@ -83,10 +85,10 @@ def create_channel(request: Request, body: ChannelIn, db=Depends(get_db),
 
 
 @router.patch("/channels/{channel_id}",
-              dependencies=[Depends(_require_admin),
+              dependencies=[Depends(_manage),
                            Depends(require_entitlement("notify.channels"))])
 def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
-                  db=Depends(get_db), user: User = Depends(_require_admin)):
+                  db=Depends(get_db), user: User = Depends(_manage)):
     row = db.get(NotificationChannel, channel_id)
     if row is None:
         raise HTTPException(404, "channel not found")
@@ -113,10 +115,10 @@ def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
 
 
 @router.delete("/channels/{channel_id}", status_code=204,
-               dependencies=[Depends(_require_admin),
+               dependencies=[Depends(_manage),
                             Depends(require_entitlement("notify.channels"))])
 def delete_channel(request: Request, channel_id: int, db=Depends(get_db),
-                   user: User = Depends(_require_admin)):
+                   user: User = Depends(_manage)):
     row = db.get(NotificationChannel, channel_id)
     if row is None:
         raise HTTPException(404, "channel not found")
@@ -131,10 +133,10 @@ def delete_channel(request: Request, channel_id: int, db=Depends(get_db),
 
 
 @router.post("/channels/{channel_id}/test",
-             dependencies=[Depends(_require_admin),
+             dependencies=[Depends(_manage),
                           Depends(require_entitlement("notify.channels"))])
 def test_channel(request: Request, channel_id: int, db=Depends(get_db),
-                 user: User = Depends(_require_admin)):
+                 user: User = Depends(_manage)):
     row = db.get(NotificationChannel, channel_id)
     if row is None:
         raise HTTPException(404, "channel not found")
