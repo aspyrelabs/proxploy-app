@@ -165,6 +165,34 @@ def test_patch_host_toggles_node_shell_enabled(pve_client, csrf_header):
     assert r.status_code == 200 and r.json()["node_shell_enabled"] is False
 
 
+def test_patch_host_assigns_team(pve_client, csrf_header):
+    from proxploy.models import Team
+
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    with c.app.state.sessionmaker() as db:
+        db.add(Team(name="Ops", slug="ops"))
+        db.commit()
+        team_id = db.query(Team).filter_by(slug="ops").one().id
+
+    r = c.patch(f"/api/v1/hosts/{hid}",
+               json={"node_shell_enabled": False, "team_id": team_id},
+               headers=csrf_header(c))
+    assert r.status_code == 200
+    with c.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, hid).team_id == team_id
+
+
+def test_patch_host_rejects_unknown_team(pve_client, csrf_header):
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}",
+               json={"node_shell_enabled": False, "team_id": 999999},
+               headers=csrf_header(c))
+    assert r.status_code == 404
+
+
 def test_patch_host_writes_an_audit_event(pve_client, csrf_header):
     from proxploy.models import AuditEvent
 

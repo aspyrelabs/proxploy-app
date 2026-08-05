@@ -3,10 +3,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from proxploy.api.deps import get_db, require_entitlement, require_role
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
+
+# Cluster reads are host-shaped aggregates, not a distinct "cluster" resource
+# — there is no ("cluster", "read") entry in PERMISSIONS, so this reuses
+# ("host", "read"). Same singleton for the route-level dependencies=[...] copy
+# and the parameter-level copy (see _read's use on /activity below) so
+# FastAPI's dependency cache collapses them into one call that runs first —
+# ordering fix, doc 10 "auth before entitlement" invariant.
+_read = authorize("host", "read")
 
 
 def _iso(dt):
@@ -19,7 +27,7 @@ def _pct(used: float, total: float) -> float:
 
 @router.get("/summary")
 def cluster_summary(request: Request, db=Depends(get_db),
-                    user: User = Depends(require_role("viewer"))):
+                    user: User = Depends(_read)):
     snaps = request.app.state.poller.snapshots
     nodes: dict[str, dict] = {}
     storage: dict[str, dict] = {}
@@ -77,7 +85,7 @@ def cluster_summary(request: Request, db=Depends(get_db),
 
 @router.get("/nodes")
 def cluster_nodes(request: Request, db=Depends(get_db),
-                  user: User = Depends(require_role("viewer"))):
+                  user: User = Depends(_read)):
     snaps = request.app.state.poller.snapshots
     out = []
     for h in db.query(Host).order_by(Host.id).all():
@@ -110,20 +118,11 @@ def cluster_nodes(request: Request, db=Depends(get_db),
 ACTIVITY_MAX = 100
 
 
-# Reused as BOTH the route-level dependency and the parameter-level one so
-# FastAPI's dependency cache (keyed on the callable) collapses them into a
-# single call that runs first. A bare `dependencies=[Depends(require_entitlement(...))]`
-# would sit at position 0 of the dependant and run BEFORE this auth/role check,
-# leaking 403 to an anonymous caller who should see 401 (Tasks 3, 5, 7 hit this
-# in jobs.py/apps.py/notifications.py — see apps.py._require_operator).
-_require_viewer = require_role("viewer")
-
-
 @router.get("/activity",
-            dependencies=[Depends(_require_viewer),
+            dependencies=[Depends(_read),
                           Depends(require_entitlement("cluster.activity_feed"))])
 def activity(limit: int = 20, db=Depends(get_db),
-            user: User = Depends(_require_viewer)):
+            user: User = Depends(_read)):
     """Jobs + alerts + audit highlights, merged newest-first (doc 05, doc 06
     ActivityFeed).
 

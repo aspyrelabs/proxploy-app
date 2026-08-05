@@ -94,6 +94,8 @@ def create_user(request: Request, body: UserIn, db=Depends(get_db)):
     db.commit()
     db.add(TeamMember(team_id=default_team(db).id, user_id=user.id, role=role))
     db.commit()
+    from proxploy.services.authz import sync_user
+    sync_user(request.app.state.authz, db, user.id)
     write_audit(db, actor_type="user", actor_id=actor_id, action="user.create",
                 target_type="user", target_id=user.id, params={"email": body.email,
                 "role": role})

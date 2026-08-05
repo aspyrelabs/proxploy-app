@@ -5,14 +5,23 @@ import json as jsonlib
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from proxploy.api.deps import get_db, require_role
-from proxploy.models import Host, HostCredential, User, utcnow
+from proxploy.api.deps import authorize, get_db, scope_host
+from proxploy.models import Host, HostCredential, Team, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        token_public_meta)
 from proxploy.services.sshkeys import generate_ed25519
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
+
+# Singletons so FastAPI's dependency cache (keyed on the callable) collapses
+# repeated uses into one call per request. Only the actions this router's
+# routes actually gate get a singleton here — host.sync/credentials/remove/
+# console have no route in this file yet (doc 05 lists them; no task in the
+# Phase 8 plan adds them), so no dead singleton for them either.
+_read = authorize("host", "read")
+_manage = authorize("host", "manage", scope_of=scope_host())
+_manage_global = authorize("host", "manage")          # no host id yet (probe, create)
 
 CONSENT_NOTE = ("This key gives Proxploy a root shell on the node, used only for "
                 "App Store install/update/migration scripts — exactly as if you ran "
@@ -50,10 +59,11 @@ class HostIn(ProbeIn):
 
 
 class HostPatchIn(BaseModel):
-    """The only editable field, deliberately -- this is not a general
-    host-update endpoint (name/address/credentials all go through their own
-    dedicated flows), just the node-shell opt-in toggle (doc 08 §9)."""
+    """Not a general host-update endpoint (name/address/credentials all go
+    through their own dedicated flows) -- just the node-shell opt-in toggle
+    (doc 08 §9) plus team assignment (doc 05 "team assignment")."""
     node_shell_enabled: bool
+    team_id: int | None = None
 
 
 def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
@@ -65,7 +75,7 @@ def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
 
 @router.post("/probe")
 def probe(request: Request, body: ProbeIn,
-          user: User = Depends(require_role("admin"))):
+          user: User = Depends(_manage_global)):
     try:
         v = _client(request, body).version()
     except ProxmoxError as e:
@@ -75,7 +85,7 @@ def probe(request: Request, body: ProbeIn,
 
 @router.post("", status_code=201)
 def create_host(request: Request, body: HostIn, db=Depends(get_db),
-                user: User = Depends(require_role("admin"))):
+                user: User = Depends(_manage_global)):
     ent = request.app.state.entitlements
     if db.query(Host).count() >= 1 and not ent.enabled("hosts.multi"):
         raise HTTPException(403, {"error": "entitlement_required",
@@ -127,7 +137,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 
 
 @router.get("")
-def list_hosts(db=Depends(get_db), user: User = Depends(require_role("viewer"))):
+def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
     return [{"id": h.id, "name": h.name, "address": h.address,
              "node_name": h.node_name, "status": h.status,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
@@ -137,7 +147,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(require_role("viewer")))
 
 @router.get("/{host_id}")
 def host_detail(host_id: int, db=Depends(get_db),
-                user: User = Depends(require_role("viewer"))):
+                user: User = Depends(_read)):
     h = db.get(Host, host_id)
     if not h:
         raise HTTPException(404, "no such host")
@@ -153,21 +163,27 @@ def host_detail(host_id: int, db=Depends(get_db),
 
 @router.patch("/{host_id}")
 def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
-              user: User = Depends(require_role("admin"))):
+              user: User = Depends(_manage)):
     h = db.get(Host, host_id)
     if h is None:
         raise HTTPException(404, "host not found")
     h.node_shell_enabled = body.node_shell_enabled
+    audit_params = {"node_shell_enabled": h.node_shell_enabled}
+    if body.team_id is not None:
+        if not db.get(Team, body.team_id):
+            raise HTTPException(404, "team not found")
+        h.team_id = body.team_id
+        audit_params["team_id"] = body.team_id
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="host.node_shell_toggle", target_type="host",
-                target_id=h.id, params={"node_shell_enabled": h.node_shell_enabled})
+                target_id=h.id, params=audit_params)
     return {"id": h.id, "node_shell_enabled": h.node_shell_enabled}
 
 
 @router.post("/{host_id}/test")
 def test_host(request: Request, host_id: int, db=Depends(get_db),
-              user: User = Depends(require_role("admin"))):
+              user: User = Depends(_manage)):
     h = db.get(Host, host_id)
     if not h:
         raise HTTPException(404, "no such host")

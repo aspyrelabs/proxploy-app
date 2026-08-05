@@ -45,6 +45,10 @@ def create_app(
         with app.state.sessionmaker() as db:
             app.state.entitlements.load(db, app.state.secretstore)
 
+        from proxploy.services.authz import build_enforcer
+        with app.state.sessionmaker() as db:
+            app.state.authz = build_enforcer(db)
+
         import asyncio
 
         async def _refresh_loop():
@@ -129,6 +133,11 @@ def create_app(
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
     app.state.license_client = license_client or LicenseClient(settings.api_base_url)
     app.state.proxmox_factory = proxmox_factory
+    # OIDC single-use state store (services/oidc.py) — {state: (verifier, nonce,
+    # expires_at)}, pruned on access. app.state.oidc_transport is deliberately
+    # NOT set here: it defaults (via getattr) to None = real network, and is
+    # the seam tests substitute an ASGITransport into.
+    app.state.oidc_states = {}
 
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import casbin
 
-from proxploy.api.deps import ROLE_ORDER
 from proxploy.models import TeamMember, User
 
 # RBAC with domains (doc 08 §6): sub = user:<id>, dom = team:<id>,
@@ -116,6 +115,17 @@ def _dom(team_id: int) -> str:
 
 
 def build_enforcer(db) -> casbin.Enforcer:
+    # Deliberately local, not a module-level import: authorize() (api/deps.py)
+    # imports THIS module lazily inside route-registration singletons in
+    # hosts.py/cluster.py, which are themselves imported as part of
+    # proxploy.api's package init. A module-level `from proxploy.api.deps
+    # import ROLE_ORDER` here creates a two-way circular import — whichever
+    # side loads first deadlocks on the other's not-yet-defined names (hit
+    # by test_authz_bootstrap.py, which imports this module before anything
+    # has imported proxploy.api). Local import breaks the cycle without
+    # changing what ROLE_ORDER means or where it lives.
+    from proxploy.api.deps import ROLE_ORDER
+
     model = casbin.Model()
     model.load_model_from_text(MODEL_TEXT)
     e = casbin.Enforcer(model)  # no adapter: in-memory, nothing auto-saved
