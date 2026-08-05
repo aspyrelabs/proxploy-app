@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test double for pct. Records every invocation; pretends everything worked.
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_PCT_LOG:?FAKE_PCT_LOG must be set}"
+case "${1:-}" in
+  list)   printf 'VMID       Status     Name\n' ;;
+  create) : ;;
+  start)  : ;;
+  exec)   : ;;
+  push)   : ;;
+  *)      : ;;
+esac
+exit 0
