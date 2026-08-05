@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 const posted: { path: string; method: string; body: any }[] = []
 let schedules: any[] = []
+// Mutable so the "target required" test can put more than one host in play —
+// with exactly one, ScheduleForm auto-selects it and there is nothing to gate.
+let hosts: any[] = [{ id: 1, name: 'host-01' }]
 
 vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
@@ -14,7 +17,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ id: 5, job: { id: 1, kind: 'backup.run' } })
     }
     if (path === '/schedules') return Promise.resolve(schedules)
-    if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+    if (path === '/hosts') return Promise.resolve(hosts)
     if (path === '/entitlements') return Promise.resolve({
       tier: 'builtin', features: { 'sched.windows': true, 'store.auto_update': true },
       grace: null })
@@ -34,9 +37,15 @@ const wrap = (ui: React.ReactNode) => {
 describe('ScheduleForm', () => {
   it('posts name, job kind, cron and timezone', async () => {
     posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
     wrap(<ScheduleForm onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly backup' } })
     fireEvent.change(screen.getByLabelText(/what to run/i), { target: { value: 'backup.run' } })
+    // Wait for the host list itself (not just the label) — the picker's
+    // <select> exists before its options do, and setting a value with no
+    // matching <option> is a silent no-op (mirrors alerts.test.tsx's app pick).
+    await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText(/host/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/cron/i), { target: { value: '0 2 * * *' } })
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
@@ -65,6 +74,19 @@ describe('ScheduleForm', () => {
     posted.length = 0
     wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
     expect(screen.queryByLabelText(/what to run/i)).toBeNull()
+  })
+
+  it('keeps Create schedule disabled until a required target is chosen', async () => {
+    posted.length = 0
+    // More than one host: nothing to auto-select, so "Select…" must gate submit.
+    hosts = [{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    const submit = screen.getByRole('button', { name: /create schedule/i })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'host-02' })).toBeInTheDocument())
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/host/i), { target: { value: '2' } })
+    expect(submit).toBeEnabled()
+    hosts = [{ id: 1, name: 'host-01' }]
   })
 })
 

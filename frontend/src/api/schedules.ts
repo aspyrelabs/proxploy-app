@@ -11,10 +11,15 @@ export type ScheduleRow = {
 /** Job kinds worth offering in the UI. Deliberately not every registered
  *  handler: `vm.delete` on a cron is not a feature, it is a foot-gun. The
  *  backend accepts any registered kind, so this list is the curated surface,
- *  not the security boundary. */
+ *  not the security boundary.
+ *
+ *  ponytail: `backup.prune` is left out on purpose — its handler
+ *  (backupjobs.py) hard-requires `params.storage`/`params.spec`, which this
+ *  form has no fields for, so scheduling it would create cleanly and then
+ *  KeyError at every fire. Add it once the form grows a datastore + keep-rule
+ *  picker (the retention-preview UI on the Backups page is the model). */
 export const SCHEDULABLE: { kind: string; label: string; needs: 'host' | 'app' | null }[] = [
   { kind: 'backup.run', label: 'Backup guests on a host', needs: 'host' },
-  { kind: 'backup.prune', label: 'Apply backup retention', needs: 'host' },
   { kind: 'app.update', label: 'Update an app', needs: 'app' },
   { kind: 'catalog.refresh', label: 'Refresh the app catalog', needs: null },
   { kind: 'metrics.maintain', label: 'Roll up and prune metrics', needs: null },

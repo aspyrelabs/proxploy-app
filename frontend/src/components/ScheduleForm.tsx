@@ -31,12 +31,16 @@ export function ScheduleForm({ jobKind, onSaved }:
     queryFn: () => api<Named[]>(needs === 'app' ? '/apps' : '/hosts'),
     enabled: needs != null,
   })
+  // Mirrors RunDialog's hostId fallback: with exactly one candidate there is
+  // nothing to ask, so don't leave "Select…" chosen and let the job KeyError
+  // on host_id/app_id at fire time.
+  const effectiveTargetId = targetId || (targets.data?.length === 1 ? String(targets.data[0].id) : '')
 
   const create = useMutation({
     mutationFn: () => {
       const params: Record<string, number> = {}
-      if (needs === 'host' && targetId) params.host_id = Number(targetId)
-      if (needs === 'app' && targetId) params.app_id = Number(targetId)
+      if (needs === 'host' && effectiveTargetId) params.host_id = Number(effectiveTargetId)
+      if (needs === 'app' && effectiveTargetId) params.app_id = Number(effectiveTargetId)
       return api('/schedules', {
         method: 'POST',
         body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz,
@@ -80,7 +84,7 @@ export function ScheduleForm({ jobKind, onSaved }:
           <label className={label} htmlFor="sc-target">
             {needs === 'app' ? 'App' : 'Host'}
           </label>
-          <select id="sc-target" className={input} value={targetId}
+          <select id="sc-target" className={input} value={effectiveTargetId}
                   onChange={(e) => setTargetId(e.target.value)}>
             <option value="">Select…</option>
             {(targets.data ?? []).map((t) =>
@@ -105,7 +109,10 @@ export function ScheduleForm({ jobKind, onSaved }:
       </div>
 
       <div className="sm:col-span-2">
-        <Button type="submit" disabled={create.isPending}>Create schedule</Button>
+        <Button type="submit"
+                disabled={create.isPending || (needs != null && !effectiveTargetId)}>
+          Create schedule
+        </Button>
       </div>
     </form>
   )

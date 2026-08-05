@@ -116,9 +116,11 @@ const MARK_CLS: Record<string, string> = {
  *
  * ponytail: POST /backups/prune is deliberately not wired. A one-shot "prune
  * now" button whose keep-* rules cannot be saved anywhere is the wrong half of
- * retention to ship first; the rules belong to a schedule (Settings →
- * Schedules, job kind backup.prune), and this view is what proves the spec
- * does what the operator meant before wiring one up.
+ * retention to ship first; this view is what proves the spec does what the
+ * operator meant before a scheduled `backup.prune` is worth building. That
+ * job kind isn't offered under Settings → Schedules yet — its handler needs
+ * a datastore + keep-rule payload this preview doesn't collect — so there is
+ * nowhere to wire it up to today.
  */
 function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
   const ent = useEntitlements()
