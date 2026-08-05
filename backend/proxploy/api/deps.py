@@ -1,6 +1,8 @@
+import hashlib
+
 from fastapi import Depends, HTTPException, Request
 
-from proxploy.models import Team, TeamMember, User
+from proxploy.models import ApiKey, Team, TeamMember, User, utcnow
 from proxploy.services.authn import resolve_session
 
 ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}
@@ -15,6 +17,35 @@ def get_db(request: Request):
 
 
 def get_current_user(request: Request, db=Depends(get_db)) -> User:
+    """Cookie session by default; `Authorization: Bearer ppk_...` resolves
+    through api_keys instead (Task 12). Bearer is never a second, weaker
+    login path: same fail-closed 401 shape, same is_active gate, and the
+    resolved row is stashed on request.state.api_key so authorize() can
+    narrow the session's own role by the key's scopes below."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        raw = auth[7:]
+        if not raw.startswith("ppk_"):
+            raise HTTPException(401, "authentication required")
+        if not request.app.state.entitlements.enabled("api.tokens"):
+            # feature off = no bearer auth, and a 403 here would leak flag
+            # state to an anonymous caller
+            raise HTTPException(401, "authentication required")
+        row = (db.query(ApiKey)
+               .filter_by(key_hash=hashlib.sha256(raw.encode()).hexdigest())
+               .one_or_none())
+        now = utcnow()
+        if (row is None or row.revoked_at
+                or (row.expires_at and row.expires_at < now)):
+            raise HTTPException(401, "authentication required")
+        user = db.get(User, row.user_id)
+        if not user or not user.is_active:
+            raise HTTPException(401, "authentication required")
+        if row.last_used_at is None or (now - row.last_used_at).total_seconds() > 60:
+            row.last_used_at = now      # rate-limited write, one per key-minute
+            db.commit()
+        request.state.api_key = row
+        return user
     raw = request.cookies.get(request.app.state.settings.session_cookie)
     user = resolve_session(db, raw) if raw else None
     if not user:
@@ -112,11 +143,26 @@ def authorize(resource: str, action: str, *, scope_of=None):
 
     def dep(request: Request, db=Depends(get_db),
             user: User = Depends(get_current_user)) -> User:
+        from proxploy.services.audit import write_audit
+
+        # A key can only narrow its user, never widen — this runs BEFORE the
+        # casbin check so a key's scopes are a ceiling on the session's own
+        # role, never an alternate grant. Empty scopes = full user rights
+        # (doc 04): a key with no scopes list still cannot exceed enforce()
+        # below, which is keyed on the *user*, not the key.
+        key = getattr(request.state, "api_key", None)
+        if key is not None and key.scopes:
+            allowed = ("read" in key.scopes and action == "read") or \
+                      (f"{resource}:write" in key.scopes)
+            if not allowed:
+                write_audit(db, actor_type="api_key", actor_id=key.id,
+                            action=f"{resource}.{action}", result="denied",
+                            ip=request.client.host if request.client else None)
+                raise HTTPException(403, "key scope does not allow this")
+
         team_id = scope_of(db, request.path_params) if scope_of else None
-        # Task 12 folds API-key scope checks in here (require_key_scope).
         if not _enforce(request.app.state.authz, db, user, resource, action,
                         team_id=team_id):
-            from proxploy.services.audit import write_audit
             write_audit(db, actor_type="user", actor_id=user.id,
                         action=f"{resource}.{action}", result="denied",
                         ip=request.client.host if request.client else None)

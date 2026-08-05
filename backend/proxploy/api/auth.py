@@ -20,6 +20,11 @@ users_router = APIRouter(prefix="/users", tags=["users"])
 # OIDC IdP config is an "own flow" settings.py's `.enc`-key refusal points at.
 _oidc_manage = authorize("settings", "manage")
 
+# GET /users (Task 6, doc 05): the member-picker source, ("user", "read")
+# global (any-team admin, no scope_of) — same status as ("user", "manage")
+# in create_user below.
+_users_read = authorize("user", "read")
+
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -106,6 +111,17 @@ def create_user(request: Request, body: UserIn, db=Depends(get_db)):
                 target_type="user", target_id=user.id, params={"email": body.email,
                 "role": role})
     return _user_out(db, user)
+
+
+@users_router.get("")
+def list_users(db=Depends(get_db), user: User = Depends(_users_read)):
+    memberships: dict[int, list[dict]] = {}
+    for m in db.query(TeamMember):
+        memberships.setdefault(m.user_id, []).append(
+            {"team_id": m.team_id, "role": m.role})
+    return [{"id": u.id, "email": u.email, "display_name": u.display_name,
+             "is_active": u.is_active, "teams": memberships.get(u.id, [])}
+            for u in db.query(User).order_by(User.id)]
 
 
 # --- OIDC (Task 11: routes over services/oidc.py's Task-10 begin()/complete()) ---
