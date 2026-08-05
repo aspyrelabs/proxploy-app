@@ -81,5 +81,23 @@ install_release() {  # install_release <tarball> <version>
   tar xzf "$tarball" -C "$dest"
   python3 -m venv "$dest/backend/venv"
   "$dest/backend/venv/bin/pip" install --no-cache-dir --quiet --upgrade pip
-  "$dest/backend/venv/bin/pip" install --no-cache-dir --quiet "$dest/backend"
+  # -e (editable), not a regular install: a plain `pip install backend/` copies
+  # proxploy/ into venv/lib/.../site-packages, so main.py's
+  # `Path(__file__).resolve().parents[2] / "frontend" / "dist"` resolves under
+  # site-packages instead of the release tree — the API still answers, but
+  # `/` 404s because the SPA is never found. The release directory is
+  # immutable and IS the install location, so keeping __file__ pointed at
+  # $dest/backend/proxploy is correct here, not a dev-mode leftover.
+  "$dest/backend/venv/bin/pip" install --no-cache-dir --quiet -e "$dest/backend"
+}
+
+# migrate_release: run a release's own alembic against the live database.
+# alembic.ini's script_location is the relative path "proxploy/migrations",
+# which alembic resolves against the current working directory, not the ini
+# file's location — so this must run from inside backend/, or every caller
+# hits "Path doesn't exist: proxploy/migrations" against its own cwd instead.
+# Shared here so install.sh and proxploy-update can't drift out of sync on
+# this again.
+migrate_release() {  # migrate_release <release-dir, e.g. $PP_RELEASES/$version>
+  ( cd "$1/backend" && ./venv/bin/alembic -c alembic.ini upgrade head )
 }

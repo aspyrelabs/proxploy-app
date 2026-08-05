@@ -80,8 +80,16 @@ verify_release "$work" "$PP_CURRENT/backend/proxploy/release_pubkey.pem"
 log "installing $TO"
 install_release "$work/$tarball" "$TO"
 log "migrating database"
-if ! "$PP_RELEASES/$TO/backend/venv/bin/alembic" \
-    -c "$PP_RELEASES/$TO/backend/alembic.ini" upgrade head; then
+# config.py's Settings has no env_file — it only reads PROXPLOY_* from the
+# process environment, which systemd-run (services/updater.py::launch) does
+# not hand this script. Source the installer's env file by hand, the same
+# way install.sh does, or alembic's env.py falls back to the default
+# relative sqlite path and fails with "unable to open database file".
+set -a
+# shellcheck source=/dev/null
+. "$PP_ENV"
+set +a
+if ! migrate_release "$PP_RELEASES/$TO"; then
   # Nothing was switched: the old version is still running and its database
   # was never touched by a migration that failed to apply. Rolling back here
   # would restore a backup over a database that is already unchanged — that

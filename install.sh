@@ -278,15 +278,33 @@ EOF
 fi
 
 # --- 6. database migration --------------------------------------------------
-# alembic upgrade head is idempotent — a no-op when already at head — so this
-# runs every time, including on a re-run against an already-migrated DB.
-log "running database migrations"
-set -a
-# shellcheck source=/dev/null
-. "$PP_ENV"
-set +a
-"$PP_RELEASES/$VERSION/backend/venv/bin/alembic" \
-  -c "$PP_RELEASES/$VERSION/backend/alembic.ini" upgrade head
+# Only if a database already exists (a re-run, or an already-onboarded box
+# being pointed at a new release). On a genuinely fresh install there is no
+# database yet, and proxploy/main.py's lifespan generates the master key
+# ONLY when no database exists (secretstore/__init__.py's ensure_key_file:
+# db present + key absent is treated as key loss, not first boot, and it
+# refuses to start rather than silently strand every encrypted credential).
+# Migrating here first would create the database before the app ever runs,
+# turning every fresh install into that refusal. So on first install this
+# step is a no-op by design; the app runs its own migration (main.py calls
+# run_migrations() right after generating the key) the first time it boots,
+# started by `systemctl enable --now` a few steps down. alembic upgrade
+# head is idempotent, so re-running it here on an existing DB is safe.
+if [ -f "$PP_DATA/proxploy.db" ]; then
+  log "running database migrations"
+  # config.py's Settings has no env_file — it only reads PROXPLOY_* from the
+  # process environment. The app itself gets those from systemd's
+  # EnvironmentFile=, but this manual invocation needs them sourced by hand,
+  # or alembic's env.py falls back to the default relative sqlite path and
+  # fails with "unable to open database file".
+  set -a
+  # shellcheck source=/dev/null
+  . "$PP_ENV"
+  set +a
+  migrate_release "$PP_RELEASES/$VERSION"
+else
+  log "no existing database — the app will migrate and generate its master key on first boot"
+fi
 
 # --- 7. install the updater and its shared library --------------------------
 log "installing the updater"
@@ -338,7 +356,14 @@ configure_tls() {
     local ip
     ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -n "$ip" ] || die "could not determine this host's primary IP for the self-signed TLS fallback; pass --hostname"
-    site_address="https://$ip"
+    # 127.0.0.1 is listed alongside the primary IP, not instead of it: Caddy
+    # matches a request to a site block by SNI/Host, so a bare IP-only site
+    # address answers that IP but sends a TLS-level "internal error" (no
+    # matching site) to anything that connects via 127.0.0.1 or localhost —
+    # including this box's own health checks and an admin who SSHes in and
+    # browses locally. `tls internal` happily issues one cert covering every
+    # address listed here.
+    site_address="https://$ip, https://127.0.0.1"
     tls_directive="internal"
   fi
 
