@@ -53,10 +53,20 @@ export function ScheduleForm({ jobKind, onSaved }:
     },
     // The backend's 422 carries the actual cron parser error ("Wrong number of
     // fields; got 4, expected 5"), which is far more useful than "invalid".
-    onError: (e) => toast.error(
-      e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-        ? (e.body as any).detail
-        : 'Could not create that schedule — check the fields and try again.'),
+    // The entitlement 403's body has `error`, not `detail` — without this
+    // branch it fell through to the generic "check the fields" message,
+    // which is wrong advice for a plan limit.
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 403
+          && (e.body as any)?.error === 'entitlement_required') {
+        toast.error('Not included in your plan.')
+        return
+      }
+      toast.error(
+        e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
+          ? (e.body as any).detail
+          : 'Could not create that schedule — check the fields and try again.')
+    },
   })
 
   return (

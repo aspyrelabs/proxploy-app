@@ -3,8 +3,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 const posted: { path: string; method: string; body: any }[] = []
+const getPaths: string[] = []
 let app: any = null
 let updateInfo: any = null
+let features: Record<string, boolean> = {
+  'store.updates': true, 'store.update': true, 'store.update_all': true,
+}
 
 vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
@@ -15,11 +19,10 @@ vi.mock('../api/client', () => ({
       if (path === '/apps/update-all') return Promise.resolve({ jobs: [{ id: 1 }], skipped: [] })
       return Promise.resolve({ job: { id: 1, kind: 'app.update' } })
     }
+    getPaths.push(path)
     if (path.endsWith('/update')) return Promise.resolve(updateInfo)
     if (path.startsWith('/apps/')) return Promise.resolve(app)
-    if (path === '/entitlements') return Promise.resolve({
-      tier: 'builtin', features: { 'store.update': true, 'store.update_all': true },
-      grace: null })
+    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
     return Promise.resolve([])
   }),
 }))
@@ -79,6 +82,19 @@ describe('UpdatePanel', () => {
                    diff_vs_upstream: '--- upstream\n+++ pinned\n-old\n+new\n' }
     wrap(<UpdatePanel appId={1} app={app} />)
     await waitFor(() => expect(screen.getByText(/\+new/)).toBeInTheDocument())
+  })
+
+  it('does not fetch update info or offer the button without store.updates', async () => {
+    getPaths.length = 0
+    app = { id: 1, name: 'Redis', update_available: 'b'.repeat(7) }
+    updateInfo = { update_available: 'b'.repeat(7), from_ref: 'a'.repeat(40),
+                   to_ref: 'b'.repeat(40), diff_vs_upstream: null }
+    features = { 'store.updates': false, 'store.update': false, 'store.update_all': false }
+    wrap(<UpdatePanel appId={1} app={app} />)
+    await waitFor(() => expect(screen.getByText(/not included in your plan/i)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /update to/i })).toBeNull()
+    expect(getPaths.some((p) => p.endsWith('/update'))).toBe(false)
+    features = { 'store.updates': true, 'store.update': true, 'store.update_all': true }
   })
 })
 

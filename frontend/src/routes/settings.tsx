@@ -35,8 +35,13 @@ function Card({ title, children, action }: { title: string; children: React.Reac
 
 export function SchedulesCard() {
   const qc = useQueryClient()
+  const ent = useEntitlements()
   const schedules = useSchedules()
   const [adding, setAdding] = useState(false)
+  // Wait for the first entitlements fetch before deciding (alerts.tsx
+  // precedent) — POST/PATCH /schedules require sched.windows, so offering
+  // "New schedule"/"Run now" to everyone flashes controls that always 403.
+  const windowsAllowed = ent.data != null && ent.has('sched.windows')
 
   const toggle = useMutation({
     mutationFn: (s: ScheduleRow) => api(`/schedules/${s.id}`, {
@@ -62,9 +67,11 @@ export function SchedulesCard() {
 
   return (
     <Card title="Schedules"
-          action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>
-            {adding ? 'Close' : 'New schedule'}
-          </Button>}>
+          action={windowsAllowed && (
+            <Button variant="ghost" onClick={() => setAdding(a => !a)}>
+              {adding ? 'Close' : 'New schedule'}
+            </Button>
+          )}>
       <table className="w-full text-left text-[13px]">
         <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
           <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
@@ -91,9 +98,11 @@ export function SchedulesCard() {
                 {s.enabled ? 'enabled' : 'disabled'}
               </td>
               <td className="py-2 text-right whitespace-nowrap">
-                <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                        disabled={runNow.isPending}
-                        onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                {windowsAllowed && (
+                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                          disabled={runNow.isPending}
+                          onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                )}
                 <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
                         disabled={toggle.isPending}
                         onClick={() => toggle.mutate(s)}>

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { api } from '../api/client'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
-import { useMetrics } from '../api/hooks'
+import { useEntitlements, useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
@@ -261,10 +261,16 @@ export function AppOverview() {
 export function UpdatePanel({ appId, app }:
   { appId: number; app: { name: string; update_available: string | null } }) {
   const qc = useQueryClient()
+  const ent = useEntitlements()
   const [consent, setConsent] = useState(false)
+  // Wait for the first entitlements fetch before deciding (settings.tsx
+  // precedent) — otherwise this fires GET /update for every viewer of every
+  // app overview and offers a consent+button whose POST always 403s.
+  const updatesAllowed = ent.data != null && ent.has('store.updates')
   const info = useQuery({
     queryKey: ['apps', appId, 'update'],
     queryFn: () => api<UpdateInfo>(`/apps/${appId}/update`),
+    enabled: updatesAllowed,
   })
   const run = useMutation({
     mutationFn: () => api(`/apps/${appId}/update`, {
@@ -281,6 +287,11 @@ export function UpdatePanel({ appId, app }:
   const pending = info.data?.update_available ?? app.update_available
   if (!pending) {
     return <div className="text-[12.5px] text-text-3">Up to date.</div>
+  }
+  if (!updatesAllowed) {
+    return <div className="text-[12.5px] text-text-3">
+      {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
+    </div>
   }
   return (
     <div>

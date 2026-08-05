@@ -7,23 +7,38 @@ let schedules: any[] = []
 // Mutable so the "target required" test can put more than one host in play —
 // with exactly one, ScheduleForm auto-selects it and there is nothing to gate.
 let hosts: any[] = [{ id: 1, name: 'host-01' }]
+let features: Record<string, boolean> = { 'sched.windows': true, 'store.auto_update': true }
+let postError: { status: number; body: any } | null = null
 
-vi.mock('../api/client', () => ({
-  ApiError: class extends Error {},
-  api: vi.fn((path: string, opts?: RequestInit) => {
-    const method = (opts?.method ?? 'GET').toUpperCase()
-    if (method !== 'GET') {
-      posted.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
-      return Promise.resolve({ id: 5, job: { id: 1, kind: 'backup.run' } })
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+
+vi.mock('../api/client', () => {
+  class ApiError extends Error {
+    status: number
+    body: any
+    constructor(status: number, body: any) {
+      super(`API ${status}`)
+      this.status = status
+      this.body = body
     }
-    if (path === '/schedules') return Promise.resolve(schedules)
-    if (path === '/hosts') return Promise.resolve(hosts)
-    if (path === '/entitlements') return Promise.resolve({
-      tier: 'builtin', features: { 'sched.windows': true, 'store.auto_update': true },
-      grace: null })
-    return Promise.resolve([])
-  }),
-}))
+  }
+  return {
+    ApiError,
+    api: vi.fn((path: string, opts?: RequestInit) => {
+      const method = (opts?.method ?? 'GET').toUpperCase()
+      if (method !== 'GET') {
+        posted.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
+        if (postError) return Promise.reject(new ApiError(postError.status, postError.body))
+        return Promise.resolve({ id: 5, job: { id: 1, kind: 'backup.run' } })
+      }
+      if (path === '/schedules') return Promise.resolve(schedules)
+      if (path === '/hosts') return Promise.resolve(hosts)
+      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+      return Promise.resolve([])
+    }),
+  }
+})
 
 import { ScheduleForm } from '../components/ScheduleForm'
 import { SchedulesCard } from '../routes/settings'
@@ -88,6 +103,19 @@ describe('ScheduleForm', () => {
     expect(submit).toBeEnabled()
     hosts = [{ id: 1, name: 'host-01' }]
   })
+
+  it('shows an entitlement message, not the generic one, on a 403', async () => {
+    posted.length = 0
+    toastError.mockClear()
+    postError = { status: 403, body: { error: 'entitlement_required', feature: 'sched.windows' } }
+    wrap(<ScheduleForm onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'x' } })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Not included in your plan.'))
+    postError = null
+  })
 })
 
 describe('SchedulesCard', () => {
@@ -134,5 +162,18 @@ describe('SchedulesCard', () => {
                    created_by: null, last_run_at: null, next_run_at: null }]
     wrap(<SchedulesCard />)
     await waitFor(() => expect(screen.getByText(/system/i)).toBeInTheDocument())
+  })
+
+  it('hides New schedule and Run now without sched.windows', async () => {
+    posted.length = 0
+    features = { 'sched.windows': false, 'store.auto_update': true }
+    schedules = [{ id: 1, name: 'Nightly backup', job_kind: 'backup.run',
+                   cron: '0 2 * * *', timezone: 'UTC', params: {}, enabled: true,
+                   created_by: 1, last_run_at: null, next_run_at: null }]
+    wrap(<SchedulesCard />)
+    await waitFor(() => expect(screen.getByText('Nightly backup')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /new schedule/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /run now/i })).toBeNull()
+    features = { 'sched.windows': true, 'store.auto_update': true }
   })
 })
