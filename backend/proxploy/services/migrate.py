@@ -24,20 +24,38 @@ job's result is MEASURED wall-clock time from the moment the source guest is
 (or would be) stopped to the moment the target guest is confirmed running —
 that is the number doc 10's "accurate downtime shown" DoD is actually about.
 
+The transfer strategy (Task 16, no shared cluster, no shared backup storage)
+runs a vzdump on the source into its own local dir storage, streams the
+resulting archive to the target's local dir storage over SFTP through
+`executor/transfer.py::sftp_copy_for_hosts` (the only module outside
+executor/ ever allowed to call it — it hands over host ids and a
+sessionmaker/secretstore, never key bytes), then restores from the
+target-local copy exactly like the shared-storage branch restores from a
+shared one. Both scratch archives (source vzdump output, target copy) are
+transfer plumbing, not real backups — `_cleanup_volume` best-effort deletes
+both on every exit path, success or failure, so a migration never leaves
+either host's storage silently filling up with orphaned dump files.
+
 FAKES vs HARDWARE: every PVE call below goes through `services/proxmox.py`'s
 `ProxmoxClient`, which in every test in this repo is backed by
 `tests/fakes/pve.py::FakePVE` — there is no live Proxmox host here and never
-will be. What the tests prove: the handler's call sequence, its honesty
-properties (measured not estimated downtime, source never destroyed, no
-repoint before a health check passes), and its JobFailed/rollback-messaging
-behaviour, all GIVEN the PVE API shapes FakePVE encodes. What they do NOT
-prove: that a real PVE 8.x/9.x vzdump/restore/migrate cycle behaves this way
-end-to-end on real disks over a real network — that needs live hardware.
+will be. The transfer strategy additionally goes through
+`app.state.ssh_connect_factory`, backed in every test by
+`tests/fakes/ssh.py::FakeSSHConnection`/`FakeSFTP` — there is no real SSH
+target here either. What the tests prove: the handler's call sequence, its
+honesty properties (measured not estimated downtime, source never destroyed,
+no repoint before a health check passes, transfer artifacts cleaned up on
+both hosts), and its JobFailed/rollback-messaging behaviour, all GIVEN the
+PVE API shapes FakePVE encodes and the SFTP semantics FakeSFTP encodes. What
+they do NOT prove: that a real PVE 8.x/9.x vzdump/restore cycle or a real
+OpenSSH SFTP transfer behaves this way end-to-end on real disks over a real
+network — that needs live hardware.
 """
 from __future__ import annotations
 
 import asyncio
 
+from proxploy.executor.transfer import sftp_copy_for_hosts
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, utcnow
 from proxploy.services.backupjobs import parse_volid
@@ -85,6 +103,37 @@ def _storage_names(rows: list[dict], *, types: frozenset[str] | None,
         elif types is None or rtype in types:
             out.add(name)
     return out
+
+
+def _dir_storage(rows: list[dict]) -> str | None:
+    """Same pick as preflight's `capacity_storage` for the transfer strategy:
+    the lexicographically-first dir-type backup storage. Recomputed here
+    (rather than threaded through `preflight()`'s return dict) because
+    `preflight()` already discards this name once it has used it for the
+    capacity check, and route callers never need it."""
+    names = _storage_names(rows, types=None, dir_only=True)
+    return next(iter(sorted(names)), None)
+
+
+def _storage_path(rows: list[dict], name: str | None) -> str | None:
+    """The dir storage's filesystem root (`/storage`'s `path` field) — the
+    physical parent of its `dump/` directory. `None` if the storage wasn't
+    found or carries no `path` (a real PVE dir storage always has one; a
+    hand-built fixture that omits it is treated as "can't transfer", not
+    guessed at)."""
+    if name is None:
+        return None
+    for r in rows:
+        if r.get("storage") == name:
+            return r.get("path") or None
+    return None
+
+
+def _dump_filename(volid: str) -> str:
+    """"local:backup/vzdump-lxc-150-....tar.zst" -> the filename tail, i.e.
+    what actually sits under storage `path`'s `dump/` directory."""
+    _, _, tail = volid.partition(":backup/")
+    return tail or volid
 
 
 def _transfer_bytes(db, src_client, source_host_id: int,
@@ -271,8 +320,18 @@ def _load(app, app_id: int, target_host_id: int) -> dict:
             tgt_client = client_for_host(app, db, target_host)
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
+        # Plain strings only, never the ORM rows themselves — used solely by
+        # the transfer strategy's SFTP hop below, which needs the same
+        # host/fingerprint shape appstore.py's SSHExecutor.run_for_host call
+        # already relies on. Cheap to always compute: both rows are already
+        # loaded above for client_for_host, and the other two strategies
+        # simply ignore this key.
+        ssh = {"src_address": source_host.address,
+              "src_fingerprint": source_host.ssh_host_key_fingerprint,
+              "tgt_address": target_host.address,
+              "tgt_fingerprint": target_host.ssh_host_key_fingerprint}
     return {"pf": pf, "app_name": app_name, "src_client": src_client,
-            "tgt_client": tgt_client}
+            "tgt_client": tgt_client, "ssh": ssh}
 
 
 def _is_running(client, ctid: int) -> bool:
@@ -307,16 +366,37 @@ def _repoint(app, app_id: int, target_host_id: int, target_ctid: int) -> None:
         db.commit()
 
 
+async def _cleanup_volume(ctx: JobContext, client, node: str, storage: str | None,
+                          volid: str | None, timeout_s: float) -> None:
+    """Best-effort delete of one vzdump/SFTP transfer scratch archive.
+
+    Never raises: this runs on both the success path (the archive did its
+    job, keeping it around would look like a real backup nobody asked for)
+    and every failure path (the whole point is that a dead-mid-copy transfer
+    doesn't leave orphaned dump files behind) — a cleanup failure must not
+    mask, replace, or block the real outcome of the migration itself, so it
+    is logged and swallowed rather than raised.
+    """
+    if storage is None or volid is None:
+        return
+    try:
+        upid = await asyncio.to_thread(client.storage_delete_volume, node, storage, volid)
+        if upid:
+            await await_task(ctx, client, node, upid, timeout_s=timeout_s)
+        ctx.log(f"cleaned up transfer artifact {volid}")
+    except Exception as e:  # noqa: BLE001 — cleanup is best-effort by design
+        ctx.log(f"could not remove transfer artifact {volid}: {e}", stream="stderr")
+
+
 async def migrate_app(ctx: JobContext, params: dict) -> dict:
-    """`migrate.app` — cluster-native or shared-storage backup/restore.
+    """`migrate.app` — cluster-native migrate, shared-storage backup/restore,
+    or (Task 16) vzdump + SFTP transfer + restore for hosts with neither.
 
     Failure ordering IS the safety property (doc 11 §2): every step before
     the target's health check can raise JobFailed and the source is still
     the only guest anyone has touched — stopped (if it was running) but
     never destroyed, and `apps.host_id`/`apps.ctid` are never written until
-    AFTER that health check passes. The vzdump+SFTP transfer strategy
-    (Task 16) is out of scope here and refused honestly rather than
-    silently mishandled.
+    AFTER that health check passes.
     """
     app = ctx.backend.app
     app_id = int(params["app_id"])
@@ -326,11 +406,6 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     pf = loaded["pf"]
     src_client, tgt_client = loaded["src_client"], loaded["tgt_client"]
     strategy = pf["strategy"]
-    if strategy == STRATEGY_TRANSFER:
-        raise JobFailed(
-            "the vzdump + SFTP transfer path (no shared backup storage, no "
-            "shared PVE cluster) is not implemented yet — this migration was "
-            "not started, the source app is untouched")
 
     source, target = pf["source"], pf["target"]
     source_ctid, source_node, source_host_name = (
@@ -366,7 +441,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         upid = await asyncio.to_thread(src_client.migrate_guest, "lxc", source_node,
                                        source_ctid, {"target": target_node})
         await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
-    else:
+    elif strategy == STRATEGY_SHARED:
         shared = pf["shared_storage"]
         ctx.log(f"vzdump CT {source_ctid} on {source_host_name}/{source_node} "
                 f"-> {shared}")
@@ -392,6 +467,133 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
                                        target_ctid, {"ostemplate": volid, "restore": 1})
         await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s)
+    else:  # STRATEGY_TRANSFER — vzdump locally, SFTP the archive, restore
+        ssh = loaded["ssh"]
+        src_storage_rows = await asyncio.to_thread(src_client.cluster_storage)
+        tgt_storage_rows = await asyncio.to_thread(tgt_client.cluster_storage)
+        src_storage = _dir_storage(src_storage_rows)
+        tgt_storage = _dir_storage(tgt_storage_rows)
+        if src_storage is None or tgt_storage is None:
+            missing = source_host_name if src_storage is None else target_host_name
+            raise JobFailed(
+                f"no dir-type backup storage available on {missing} for the "
+                f"transfer path — source CT {source_ctid} on {source_host_name} "
+                f"is stopped but intact")
+
+        ctx.log(f"vzdump CT {source_ctid} on {source_host_name}/{source_node} "
+                f"-> {src_storage} (local staging for transfer)")
+        upid = await asyncio.to_thread(src_client.vzdump, source_node,
+                                       {"vmid": source_ctid, "storage": src_storage,
+                                        "mode": "stop", "compress": "zstd"})
+        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
+
+        rows = await asyncio.to_thread(src_client.storage_content, source_node,
+                                       src_storage, "backup")
+        candidates = sorted(
+            (r for r in rows if parse_volid(r.get("volid") or "") == ("ct", source_ctid)),
+            key=lambda r: r.get("ctime") or 0)
+        if not candidates:
+            raise JobFailed(
+                f"vzdump succeeded but no backup archive for CT {source_ctid} "
+                f"was found on {src_storage} — source CT {source_ctid} on "
+                f"{source_host_name} is stopped but intact")
+        src_row = candidates[-1]
+        src_volid = src_row["volid"]
+        archive_bytes = src_row.get("size")
+        filename = _dump_filename(src_volid)
+        dst_volid = f"{tgt_storage}:backup/{filename}"
+
+        src_root = _storage_path(src_storage_rows, src_storage)
+        tgt_root = _storage_path(tgt_storage_rows, tgt_storage)
+        if src_root is None or tgt_root is None:
+            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+                                  src_volid, timeout_s)
+            missing_storage = src_storage if src_root is None else tgt_storage
+            missing_host = source_host_name if src_root is None else target_host_name
+            raise JobFailed(
+                f"dir storage {missing_storage} on {missing_host} has no "
+                f"filesystem path configured — transfer cannot proceed; "
+                f"source CT {source_ctid} on {source_host_name} is stopped "
+                f"but intact")
+
+        src_path = f"{src_root.rstrip('/')}/dump/{filename}"
+        dst_path = f"{tgt_root.rstrip('/')}/dump/{filename}"
+
+        def on_progress(done: int) -> None:
+            # 10-80%: vzdump above already reached 10 via await_task's
+            # default start_pct, restore below reaches 100 via its own.
+            if archive_bytes:
+                ctx.progress(min(80, 10 + int(70 * done / archive_bytes)))
+
+        def on_new_src_fp(fp: str) -> None:
+            # Fresh session: the `_load` one that read `ssh` is already closed.
+            with app.state.sessionmaker() as db:
+                h = db.get(Host, source["host_id"])
+                if h is not None:
+                    h.ssh_host_key_fingerprint = fp
+                    db.commit()
+
+        def on_new_tgt_fp(fp: str) -> None:
+            with app.state.sessionmaker() as db:
+                h = db.get(Host, target_host_id)
+                if h is not None:
+                    h.ssh_host_key_fingerprint = fp
+                    db.commit()
+
+        ctx.log(f"streaming {filename} "
+                f"({archive_bytes if archive_bytes else 'size unknown'} bytes) "
+                f"{source_host_name} -> {target_host_name} over SFTP")
+        try:
+            await sftp_copy_for_hosts(
+                app.state.sessionmaker, app.state.secretstore,
+                src_host_id=source["host_id"], src_host=ssh["src_address"],
+                src_pinned_fingerprint=ssh["src_fingerprint"],
+                src_on_new_fingerprint=on_new_src_fp,
+                dst_host_id=target_host_id, dst_host=ssh["tgt_address"],
+                dst_pinned_fingerprint=ssh["tgt_fingerprint"],
+                dst_on_new_fingerprint=on_new_tgt_fp,
+                src_path=src_path, dst_path=dst_path, on_progress=on_progress,
+                connect_factory=app.state.ssh_connect_factory)
+        except Exception as e:
+            # SSHHostKeyMismatch, LookupError (no ssh_key credential), a
+            # dropped connection mid-copy — all land here. The source vzdump
+            # archive exists on disk at this point; clean it up rather than
+            # leave it as an orphan. The destination file may or may not
+            # exist depending on how far the copy got — the delete call is a
+            # harmless no-op on real PVE either way (Path never existed).
+            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+                                  src_volid, timeout_s)
+            await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+                                  dst_volid, timeout_s)
+            raise JobFailed(
+                f"SFTP transfer of {filename} failed: {e} — source CT "
+                f"{source_ctid} on {source_host_name} is stopped but intact"
+            ) from e
+        ctx.progress(80)
+
+        ctx.log(f"restoring {dst_volid} as CT {target_ctid} on "
+                f"{target_host_name}/{target_node}")
+        try:
+            upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
+                                           target_ctid, {"ostemplate": dst_volid,
+                                                         "restore": 1})
+            await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s)
+        except JobFailed:
+            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+                                  src_volid, timeout_s)
+            await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+                                  dst_volid, timeout_s)
+            raise
+
+        # Restore succeeded from the target's own copy of the archive: both
+        # scratch files (source vzdump output, target-side SFTP copy) were
+        # transfer plumbing, not real backups — remove them on both hosts so
+        # a migration never silently fills either one's storage.
+        await _cleanup_volume(ctx, src_client, source_node, src_storage,
+                              src_volid, timeout_s)
+        await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+                              dst_volid, timeout_s)
+        volid = dst_volid
 
     ctx.log(f"starting CT {target_ctid} on {target_host_name}/{target_node}")
     upid = await asyncio.to_thread(tgt_client.guest_action, "lxc", target_node,

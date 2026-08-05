@@ -305,29 +305,7 @@ def test_stopped_source_skips_stop_but_downtime_is_still_measured(tmp_path):
     asyncio.run(go())
 
 
-# --- transfer strategy is out of scope for this task (Task 16) ----------------
-
-def test_transfer_strategy_is_refused_honestly_not_silently_mishandled(tmp_path):
-    async def go():
-        fake_src, fake_tgt = FakePVE(), FakePVE()
-        fake_src.cluster_storage_rows = [{"storage": "local", "type": "dir",
-                                          "content": "backup,iso"}]
-        fake_tgt.cluster_storage_rows = [{"storage": "local", "type": "dir",
-                                          "content": "backup,iso"}]
-        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
-
-        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
-        src_id, tgt_id, app_id = _seed(app)
-        job_id = _job(app, app_id, tgt_id)
-        ctx = JobContext(app.state.jobs, job_id)
-
-        with pytest.raises(JobFailed) as e:
-            await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
-                                                "target_host_id": tgt_id})
-        assert "not implemented" in str(e.value).lower()
-        assert ("lxc", 150, "stop") not in fake_src.actions  # nothing touched
-
-        host_id, ctid = _app_row(app, app_id)
-        assert (host_id, ctid) == (src_id, 150)
-
-    asyncio.run(go())
+# The vzdump+SFTP transfer strategy (Task 16, no shared storage/cluster) is
+# implemented and tested in test_migrate_transfer.py — this file previously
+# asserted the strategy was refused, which stopped being true once Task 16
+# landed.
