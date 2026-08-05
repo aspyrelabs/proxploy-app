@@ -5,9 +5,9 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
-                               get_db, user_role)
+                               get_db, require_entitlement, user_role)
 from proxploy.models import TeamMember, User
-from proxploy.services import authn, oidc
+from proxploy.services import authn, oidc, totp
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import enforce
 
@@ -40,7 +40,7 @@ class UserIn(BaseModel):
 
 def _user_out(db, user: User) -> dict:
     return {"id": user.id, "email": user.email, "display_name": user.display_name,
-            "role": user_role(db, user)}
+            "role": user_role(db, user), "totp_enabled": user.totp_enabled}
 
 
 @router.post("/login")
@@ -76,6 +76,68 @@ def logout(request: Request, response: Response, db=Depends(get_db),
 @router.get("/me")
 def me(db=Depends(get_db), user: User = Depends(get_current_user)):
     return _user_out(db, user)
+
+
+# --- TOTP (Task 8: enrollment; login-step + session mgmt is Task 9) --------
+#
+# Self-service on the caller's own account, same shape as api/apikeys.py:
+# `dependencies=[Depends(get_current_user), Depends(require_entitlement(...))]`
+# in that order (route-ordering invariant: auth before entitlement, so an
+# anonymous caller 401s, never a flag-leaking 403), plus get_current_user
+# again as a function parameter to get the User back (cached per-request,
+# not a second DB hit). No authorize() call: this isn't an RBAC-gated admin
+# action, it's a user managing their own 2FA, so it isn't in
+# services/authz.py's PERMISSIONS matrix either.
+_totp_ent = require_entitlement("auth.totp")
+
+
+class TotpConfirmIn(BaseModel):
+    code: str
+
+
+class TotpDisableIn(BaseModel):
+    password: str  # or, for an OIDC-only account, a current TOTP/recovery code
+
+
+@router.post("/totp/enroll",
+            dependencies=[Depends(get_current_user), Depends(_totp_ent)])
+def totp_enroll(request: Request, db=Depends(get_db),
+                user: User = Depends(get_current_user)):
+    if user.totp_enabled:
+        raise HTTPException(409, "disable first")
+    result = totp.start_enrollment(db, request.app.state.secretstore, user)
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.enroll")
+    return result
+
+
+@router.post("/totp/confirm",
+            dependencies=[Depends(get_current_user), Depends(_totp_ent)])
+def totp_confirm(request: Request, body: TotpConfirmIn, db=Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    if not totp.confirm(db, request.app.state.secretstore, user, body.code):
+        raise HTTPException(400, "invalid code")
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.confirm")
+    return {"ok": True}
+
+
+@router.delete("/totp",
+               dependencies=[Depends(get_current_user), Depends(_totp_ent)])
+def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    # Doc 08 requires re-auth before disabling 2FA. A password is the one
+    # thing an OIDC-only account (password_hash IS NULL) doesn't have, so
+    # that path accepts a current TOTP/recovery code in the same field
+    # instead -- still proof of possession, just of the second factor
+    # rather than the first.
+    if user.password_hash:
+        ok = authn.verify_password(user.password_hash, body.password)
+    else:
+        ok = totp.verify_login(db, request.app.state.secretstore, user, body.password)
+    if not ok:
+        raise HTTPException(403, "re-authentication required")
+    totp.disable(db, user)
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.disable")
+    return {"ok": True}
 
 
 @users_router.post("", status_code=201)

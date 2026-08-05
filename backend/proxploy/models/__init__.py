@@ -44,6 +44,25 @@ class User(TimestampMixin, Base):
     __table_args__ = (Index("ux_users_oidc", "oidc_issuer", "oidc_sub", unique=True),)
 
 
+class TotpRecoveryCode(Base):
+    """One row per recovery code (Phase 8 Task 8 amendment — see
+    docs/notes/phase-8-scale.md: the plan's zero-migration design packed
+    these inside `users.totp_secret_enc`; a real column replaces that so
+    burning a code is an ordinary UPDATE, never a decrypt-mutate-re-encrypt
+    of a blob shared with a concurrent TOTP verify). `code_hash_enc` is the
+    argon2 hash (services/authn.py::hash_password's idiom, never the raw
+    code) Fernet-encrypted at rest via SecretStore, same as
+    `totp_secret_enc`. Burning sets `used_at`; the atomic single-use
+    guarantee is `UPDATE ... WHERE id = ? AND used_at IS NULL`
+    (services/consoletickets.py::redeem_ticket's exact pattern)."""
+    __tablename__ = "totp_recovery_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class SessionRow(TimestampMixin, Base):
     __tablename__ = "sessions"
     id: Mapped[int] = mapped_column(primary_key=True)
