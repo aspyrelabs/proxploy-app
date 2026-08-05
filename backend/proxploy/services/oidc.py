@@ -85,6 +85,14 @@ def clear_config(db) -> None:
     db.commit()
 
 
+def configured(db) -> bool:
+    """Cheap existence check (no decrypt) for routes that only need to know
+    whether OIDC is set up, not the secret itself — Task 11's login gate and
+    /meta/onboarding's `oidc` flag both go through this instead of `config()`."""
+    return bool(get_setting(db, "oidc.issuer") and get_setting(db, "oidc.client_id")
+                and get_setting(db, "oidc.client_secret.enc"))
+
+
 # --- Discovery / JWKS, cached on app.state keyed by issuer ------------------
 
 def _cache(app, attr: str) -> dict:

@@ -1,6 +1,7 @@
 def test_onboarding_state_progression(client, csrf_header, bootstrap_admin):
     r = client.get("/api/v1/meta/onboarding")
-    assert r.json() == {"admin_exists": False, "host_added": False, "complete": False}
+    assert r.json() == {"admin_exists": False, "host_added": False, "complete": False,
+                        "oidc": False}  # Task 11: unconfigured OIDC -> False
 
     bootstrap_admin(client)
     assert client.get("/api/v1/meta/onboarding").json()["admin_exists"] is True

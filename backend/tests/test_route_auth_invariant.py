@@ -31,6 +31,11 @@ PUBLIC = {
                                           # call after the first user exists 401s instead
                                           # (auth.py::create_user checks this itself,
                                           # not via a FastAPI dependency)
+    ("GET", "/api/v1/auth/oidc/login"),    # how an anonymous caller starts SSO in the
+                                            # first place; answers 404 when unconfigured/
+                                            # not entitled, never 403 (doc 10 Task 11)
+    ("GET", "/api/v1/auth/oidc/callback"), # IdP redirects here with no session cookie
+                                            # yet — this route is what mints the session
 }
 
 

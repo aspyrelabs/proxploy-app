@@ -227,3 +227,189 @@ def test_unknown_configured_role_fails_loudly_and_provisions_nothing(tmp_path):
             assert db.query(User).filter_by(oidc_sub="bad-1").count() == 0
 
     asyncio.run(scenario())
+
+
+# --- Route half (Task 11): the same protocol driven through real HTTP, over
+# the app's actual /auth/oidc/* endpoints, against the same mock IdP. ---
+
+import json as jsonlib
+
+from fastapi.testclient import TestClient
+
+
+def _configure_via_api(client, csrf_header, *, default_role=None, **idp_kwargs):
+    """`_configure()`'s HTTP-route equivalent: PUT /auth/oidc/config as the
+    authed owner (rather than calling oidc.set_config() directly), wiring the
+    fake IdP as the transport seam the same way. oidc_default_role stays a
+    Settings/env value (doc 10: no route exposes it), so it is still set
+    directly on app.state.settings."""
+    idp = make_idp(**idp_kwargs)
+    client.app.state.oidc_transport = httpx.ASGITransport(app=idp)
+    r = client.put("/api/v1/auth/oidc/config",
+                   json={"issuer": ISSUER, "client_id": "proxploy", "client_secret": "s3cret"},
+                   headers=csrf_header(client))
+    assert r.status_code == 200, r.text
+    with client.app.state.sessionmaker() as db:
+        default_team(db)
+    if default_role is not None:
+        client.app.state.settings = client.app.state.settings.model_copy(
+            update={"oidc_default_role": default_role})
+    return idp
+
+
+def _authorize_at_fake_idp(idp, q):
+    with TestClient(idp) as idpc:
+        ar = idpc.get("/authorize", params={
+            "state": q["state"][0], "nonce": q["nonce"][0],
+            "code_challenge": q["code_challenge"][0],
+            "code_challenge_method": "S256",
+            "redirect_uri": q["redirect_uri"][0]})
+    assert ar.status_code == 200, ar.text
+    return parse_qs(urlparse(ar.json()["redirect"]).query)
+
+
+def test_oidc_config_get_never_returns_the_secret(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    _configure_via_api(client, csrf_header, default_role="viewer")
+    r = client.get("/api/v1/auth/oidc/config", headers=csrf_header(client))
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"issuer": ISSUER, "client_id": "proxploy", "configured": True}
+    assert "s3cret" not in jsonlib.dumps(body) and "client_secret" not in body
+
+
+def test_oidc_login_is_404_not_403_when_unconfigured(client):
+    r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+    assert r.status_code == 404
+    assert r.json()["error"] == "oidc_not_configured"
+
+
+def test_oidc_login_and_callback_round_trip_creates_a_jit_session(client, csrf_header,
+                                                                   bootstrap_admin):
+    """The Task 11 round-trip, and the closest honest substitute for doc 10's
+    DoD ("OIDC round-trips against a real Authelia") available on this
+    machine: there is no browser and no live IdP here, so tests/fakes/oidc.py
+    stands in for Authelia. What this genuinely proves — a real discovery
+    document is fetched, S256 PKCE is enforced end-to-end (challenge stored
+    at /authorize, verifier checked at /token), and a real RS256 ID token is
+    verified against a real JWKS endpoint — is exactly what the app would do
+    against Authelia; only the third-party implementation is absent.
+
+    PUT config (owner) -> anonymous GET /login (307, real PKCE params in the
+    Location) -> the fake IdP's /authorize (standing in for the browser) ->
+    GET /callback -> session cookie + 307 to "/" -> GET /auth/me resolves the
+    JIT-provisioned viewer."""
+    bootstrap_admin(client)
+    idp = _configure_via_api(client, csrf_header, default_role="viewer",
+                             sub="alice-1", email="alice@example.com", name="Alice")
+    client.cookies.delete("pp_session")  # the owner session must not matter below
+
+    r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+    assert r.status_code == 307
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    assert q["code_challenge_method"] == ["S256"] and q["state"][0] and q["nonce"][0]
+
+    rq = _authorize_at_fake_idp(idp, q)
+
+    r = client.get("/api/v1/auth/oidc/callback",
+                   params={"state": rq["state"][0], "code": rq["code"][0]},
+                   follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/"
+    assert "pp_session" in r.cookies
+
+    me = client.get("/api/v1/auth/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["email"] == "alice@example.com" and body["role"] == "viewer"
+
+    with client.app.state.sessionmaker() as db:
+        rows = db.query(AuditEvent).all()
+        assert rows  # the walk below would be vacuously true over an empty table
+        for row in rows:
+            assert "s3cret" not in jsonlib.dumps(row.params or {})
+        oidc_logins = [e for e in rows if e.action == "auth.login" and e.result == "ok"
+                       and e.params and e.params.get("via") == "oidc"]
+        assert len(oidc_logins) == 1
+
+
+def test_oidc_bad_state_redirects_to_login_with_a_generic_error_and_no_session(
+        client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    _configure_via_api(client, csrf_header, default_role="viewer")
+    client.cookies.delete("pp_session")
+
+    r = client.get("/api/v1/auth/oidc/callback",
+                   params={"state": "not-a-real-state", "code": "x"},
+                   follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/login?error=oidc"
+    assert "pp_session" not in r.cookies
+
+    with client.app.state.sessionmaker() as db:
+        errs = (db.query(AuditEvent)
+                .filter_by(action="auth.login", result="error").all())
+        assert any(e.params and e.params.get("via") == "oidc" for e in errs)
+
+
+def test_oidc_pending_approval_gets_its_own_redirect_and_grants_no_session(
+        client, csrf_header, bootstrap_admin):
+    """Global Constraint 1 of the Task 11 brief: an unconfigured
+    oidc_default_role provisions a real, inactive, teamless user row (proven
+    directly below) and services/oidc.py raises OIDCError(PENDING_APPROVAL_
+    MESSAGE). The callback must not turn that into a session, a 500, or the
+    same undifferentiated "?error=oidc" every other failure gets — it is not
+    a login failure, it is a successful sign-up awaiting an administrator."""
+    bootstrap_admin(client)
+    idp = _configure_via_api(client, csrf_header, sub="pending-1",
+                             email="pending@example.com")  # no default_role
+    client.cookies.delete("pp_session")
+
+    r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    rq = _authorize_at_fake_idp(idp, q)
+
+    r = client.get("/api/v1/auth/oidc/callback",
+                   params={"state": rq["state"][0], "code": rq["code"][0]},
+                   follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/login?error=oidc_pending"
+    assert "pp_session" not in r.cookies
+
+    with client.app.state.sessionmaker() as db:
+        user = db.query(User).filter_by(email="pending@example.com").one()
+        assert user.is_active is False
+        assert db.query(TeamMember).filter_by(user_id=user.id).count() == 0
+
+
+def test_oidc_config_delete_clears_it_back_to_unconfigured(client, csrf_header,
+                                                            bootstrap_admin):
+    bootstrap_admin(client)
+    _configure_via_api(client, csrf_header, default_role="viewer")
+    r = client.delete("/api/v1/auth/oidc/config", headers=csrf_header(client))
+    assert r.status_code == 200
+    r = client.get("/api/v1/auth/oidc/config", headers=csrf_header(client))
+    assert r.json() == {"issuer": None, "client_id": None, "configured": False}
+    r = client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_oidc_config_routes_require_admin(client, csrf_header):
+    """No session at all -> 401 (covered by test_route_auth_invariant.py);
+    this checks the role floor specifically: a plain viewer must not manage
+    OIDC config (doc 10 Task 11: authorize("settings", "manage"))."""
+    client.post("/api/v1/users", json={"email": "owner@example.com",
+                                       "password": "correct-horse-battery"},
+               headers=csrf_header(client))
+    client.post("/api/v1/auth/login",
+               json={"email": "owner@example.com", "password": "correct-horse-battery"},
+               headers=csrf_header(client))
+    r = client.post("/api/v1/users", json={"email": "viewer@example.com",
+                                           "password": "correct-horse-battery",
+                                           "role": "viewer"},
+                    headers=csrf_header(client))
+    assert r.status_code == 201
+    client.post("/api/v1/auth/login",
+               json={"email": "viewer@example.com", "password": "correct-horse-battery"},
+               headers=csrf_header(client))
+    r = client.get("/api/v1/auth/oidc/config", headers=csrf_header(client))
+    assert r.status_code == 403
