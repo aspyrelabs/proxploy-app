@@ -12,6 +12,7 @@ import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
+import { ApiKeysCard } from '../components/ApiKeysCard'
 import { Button } from '../components/ui/button'
 import { useTeams } from '../api/teams'
 
@@ -323,6 +324,8 @@ export function SettingsPage() {
       <SchedulesCard />
 
       <TeamsCard />
+
+      <ApiKeysCard />
 
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
