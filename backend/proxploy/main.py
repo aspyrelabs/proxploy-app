@@ -116,6 +116,17 @@ def create_app(
                 prime(db, utcnow())
             scheduler_task = asyncio.create_task(app.state.scheduler.run())
 
+        # Phase 9a: the installer knows which CT it built Proxploy into and
+        # puts it in the env file; persist it once so services/selfguard.py
+        # can recognise our own container. Write-once: a later operator
+        # correction (Proxploy moved) must survive restarts, so an existing
+        # value wins.
+        if settings.self_ctid is not None:
+            from proxploy.services.settings import get_setting, set_setting
+            with app.state.sessionmaker() as db:
+                if get_setting(db, "self.ctid") is None:
+                    set_setting(db, "self.ctid", settings.self_ctid)
+
         yield
         if refresh_task:
             refresh_task.cancel()
