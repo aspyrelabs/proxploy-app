@@ -521,6 +521,61 @@ def migrate_preflight(request: Request, app_id: int, body: MigratePreflightIn,
         raise HTTPException(502, str(e))
 
 
+class MigrateIn(BaseModel):
+    target_host_id: int
+    confirm: str | None = None
+
+
+# Above the lifecycle wildcard, same reasoning as /migrate/preflight above —
+# three literal segments so it cannot structurally collide with
+# /{app_id}/{action}, but registered here for the same "one place operators
+# look" reason.
+@router.post("/{app_id}/migrate", status_code=202,
+             dependencies=[Depends(_migrate),
+                          Depends(require_entitlement("migrate.cross_host"))])
+def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
+                      db=Depends(get_db), user: User = Depends(_migrate)):
+    """Params handed to the job are ONLY app_id/target_host_id: strategy,
+    target ctid and shared storage all come from a FRESH preflight the
+    handler itself runs, never from this route's own preflight call below —
+    state (host connectivity, storage, capacity) can change in the gap
+    between this request and the job actually running (Task 15 interfaces
+    note)."""
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    target = db.get(Host, body.target_host_id)
+    if (target is None or body.target_host_id == a.host_id
+            or target.status != "connected"):
+        raise HTTPException(409, "target host is unknown, is the app's current "
+                                 "host, or is not connected")
+    try:
+        pf = migrate_service.preflight(request.app, db, a, body.target_host_id)
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e))
+    if pf["blockers"]:
+        raise HTTPException(409, {"error": "migration_blocked",
+                                  "blockers": pf["blockers"]})
+    ip = request.client.host if request.client else None
+    if is_self(db, "app", a.id):
+        if (body.confirm or "") != a.name:
+            write_audit(db, actor_type="user", actor_id=user.id,
+                        action="app.migrate", target_type="app", target_id=a.id,
+                        result="denied", ip=ip)
+            raise HTTPException(409, {
+                "error": "self_target", "confirm_phrase": a.name,
+                "detail": (f"{a.name} is the container Proxploy itself runs in. "
+                           f"Migrating it can strand its own recovery path. "
+                           f"Type the name to confirm."),
+            })
+    result = enqueue_and_audit(request, db, user, kind="migrate.app",
+                               target_type="app", target_id=app_id,
+                               params={"app_id": app_id,
+                                       "target_host_id": body.target_host_id},
+                               action="app.migrate")
+    return {**result, "preflight": pf}
+
+
 class LifecycleIn(BaseModel):
     confirm: str | None = None
 
@@ -558,11 +613,12 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
 
 # WARNING: this wildcard is registered last and Starlette matches routes in
 # registration order, so it will silently swallow any future two-segment
-# sibling under /apps/{id}/... — e.g. /apps/{id}/update above (Phase 7 Task 6)
-# and doc 05's still-unbuilt /apps/{id}/migrate (Phase 8). Register those
-# routes with their literal action segments BEFORE this one, or they'll hit
-# this handler instead and 422 with "action must be one of start, stop,
-# restart, shutdown".
+# sibling under /apps/{id}/... — e.g. /apps/{id}/update (Phase 7 Task 6) and
+# /apps/{id}/migrate (Phase 8 Task 15) above. Register those routes with
+# their literal action segments BEFORE this one, or they'll hit this handler
+# instead and 422 with "action must be one of start, stop, restart, shutdown"
+# (test_migrate_api.py::test_route_does_not_get_shadowed_by_the_lifecycle_wildcard
+# is the regression check).
 @router.post("/{app_id}/{action}", status_code=202,
              dependencies=[Depends(_lifecycle),
                           Depends(require_entitlement("apps.lifecycle"))])

@@ -90,6 +90,7 @@ def create_app(
         from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
         from proxploy.services import guestjobs as _guestjobs  # noqa: F401 — registers network.apply
         from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
+        from proxploy.services import migrate as _migrate  # noqa: F401 — registers migrate.app
         from proxploy.services import storagejobs as _storagejobs  # noqa: F401 — registers storage.upload/delete_volume
         from proxploy.services import metrics as _metrics  # noqa: F401 — registers metrics.maintain
 
