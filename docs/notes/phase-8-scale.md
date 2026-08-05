@@ -4,6 +4,34 @@
 > end of the phase, so a behavior change is documented rather than
 > rediscovered.
 
+## The browser gap is closed
+
+Phases 5, 6 and 7 each recorded the same limitation: no browser on this box,
+so every frontend claim rested on Vitest + jsdom. That is no longer true —
+`frontend/e2e/smoke.spec.ts` drives real Chromium against the real backend
+(throwaway SQLite DB, pollers off) and asserts all nine nav pages render with
+a clean console. `npm run e2e`.
+
+What is still true, and always will be: there is **no live Proxmox host
+here**. The harness seeds its admin through the app's own REST endpoints and
+skips the onboarding wizard's host step, because `POST /hosts` probes a real
+PVE API.
+
+### F1 — no route-level `errorComponent` anywhere in the frontend (deferred)
+
+Found by the harness on its first real run, while a backend fault was making
+`/auth/me` return 500: TanStack Router logged *"The following error wasn't
+caught by any route! At the very least, consider setting an 'errorComponent'
+in your RootRoute!"* and the page rendered nothing. `grep -rn errorComponent
+frontend/src` returns no hits, and `routes/shell.tsx`'s `beforeLoad` calls the
+API — so any 5xx or unreachable backend during route load white-screens the
+app instead of showing an error state.
+
+jsdom could never have surfaced this; it does not run the router's real error
+path. Deferred rather than fixed here: doc 10 puts "empty states, error
+states" in Phase 9, and this is that work, not Phase 8's. Recorded so it is
+scheduled rather than rediscovered.
+
 ## Amendments
 
 ### A1 — Authorization is fail-closed; a membership-less user is denied everything
@@ -80,3 +108,16 @@ state machine to keep consistent with the first.
 **What was explicitly rejected.** Provisioning OIDC users as admins (grants
 the IdP the ability to mint privilege in Proxploy); and widening the viewer
 default to cover them (re-opens A1 for every user, to paper over one path).
+
+**Also settled while implementing this** — an OIDC identity is never linked to
+an existing local account by matching email. If the email claim collides with
+a password account, provisioning refuses. Silent linking would let anyone who
+can get that email claim out of the IdP take over the local account it names.
+Deliberate linking is an admin action, not a side effect of a first login.
+
+**As built** — `services/oidc.py::_create_user`. The user row and its
+`TeamMember` are written with one `flush()` and a single `commit()`, so the
+crash-between-the-two case cannot produce a permissionless account. Both
+misconfiguration paths (`oidc_default_role` not in `ROLE_ORDER`,
+`oidc_default_team_slug` naming no existing team) raise before anything is
+written — no fallback, no auto-created team.
