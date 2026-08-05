@@ -594,14 +594,17 @@ notifications both ways, and Monday's job history tells the whole story."*
 
 **Findings that contradicted the docs** (full detail in the notes doc):
 - **APScheduler 4 does not exist.** PyPI's maximum stable is 3.11.3; 4.x is
-  `a1`-`a6` pre-releases only, verified 2026-08-01. Docs 02/03/04/09/10 all
-  named "APScheduler 4". Shipped on the stable 3.11 line; only `CronTrigger`
-  is used, and `jobs/scheduler.py`'s tick loop reads `schedules` directly on
-  every pass rather than running APScheduler's own scheduler/jobstores —
-  doc 04 already makes that table authoritative, and a second in-memory
-  registry synced from it would be two sources of truth to reconcile on
-  every CRUD write. Docs 02, 03 and 04 amended this task (Step 5); doc 09
-  is a known remaining stale reference, out of this task's amendment list.
+  `a1`-`a6` pre-releases only, verified 2026-08-01. Docs 00/01/02/03/04/09/10
+  all named "APScheduler 4". Shipped on the stable 3.11 line; only
+  `CronTrigger` is used, and `jobs/scheduler.py`'s tick loop reads
+  `schedules` directly on every pass rather than running APScheduler's own
+  scheduler/jobstores — doc 04 already makes that table authoritative, and a
+  second in-memory registry synced from it would be two sources of truth to
+  reconcile on every CRUD write. Docs 02, 03 and 04 amended this task
+  (Step 5); four docs still say "APScheduler 4" and were out of this task's
+  amendment scope — `docs/00-decision-brief.md:79`, `docs/01-product-spec.
+  md:193`, `docs/09-repository-structure.md:69`,
+  `docs/10-build-sequence.md:226`.
 - **The poller never wrote `mem_pct` or `disk_pct`.** Doc 04's `alert_
   rules.metric` enum named both; any memory/disk rule created before this
   phase would have sat enabled and never fired — silent, not a crash.

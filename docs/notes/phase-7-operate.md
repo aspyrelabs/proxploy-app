@@ -82,8 +82,12 @@ via the tick loop.
 **APScheduler 4 does not exist.** PyPI's maximum stable release is 3.11.3;
 4.x exists only as `4.0.0a1`–`a6` pre-releases — verified 2026-08-01 (`pip
 index versions APScheduler` and the PyPI project page both confirm no stable
-4.x has ever shipped). Docs 02, 03, 04, 09 and 10 all named "APScheduler 4".
-Doc 03 already marked Scheduling "Provisional (seam: `Scheduler`)", so this
+4.x has ever shipped). Docs 00, 01, 02, 03, 04, 09 and 10 all named "APScheduler
+4" — a wider list than this task's amendment scope: `docs/00-decision-brief.
+md:79`, `docs/01-product-spec.md:193`, `docs/09-repository-structure.
+md:69` and `docs/10-build-sequence.md:226` still say "APScheduler 4" after
+this task and were deliberately left unamended (out of scope — the brief's
+Step 5 named only docs 02/03/04). Doc 03 already marked Scheduling "Provisional (seam: `Scheduler`)", so this
 shipped on the stable 3.11.3 line, and only `CronTrigger` is used — cron
 parsing and DST-correct next-fire arithmetic, the one part of scheduling that
 must never be hand-rolled. `jobs/scheduler.py`'s tick loop replaces
@@ -91,8 +95,11 @@ must never be hand-rolled. `jobs/scheduler.py`'s tick loop replaces
 `schedules` table authoritative, and a second in-memory registry synced from
 it would be two sources of truth to reconcile on every CRUD write. Docs 02
 (lines 34, 108, 244, 315), 03 (Scheduling row) and 04 (`schedules` section)
-are amended by this task (Step 5, below); doc 09 was not in this task's
-amendment list and is a known remaining stale reference.
+are amended by this task (Step 5, below). Four docs still say "APScheduler 4"
+and were **not** in this task's amendment scope — known remaining stale
+references, not fixed here: `docs/00-decision-brief.md:79`, `docs/
+01-product-spec.md:193`, `docs/09-repository-structure.md:69`, `docs/
+10-build-sequence.md:226`.
 
 **Zero migrations, again.** `schedules`, `alert_rules` and `alerts` have
 existed with full column parity since migration 0001 — this phase populates
