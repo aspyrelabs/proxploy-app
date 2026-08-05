@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 
 export type Onboarding = {
@@ -47,4 +47,34 @@ export function useTotpStatus(enabled: boolean) {
 
 export function useSessions() {
   return useQuery({ queryKey: ['auth', 'sessions'], queryFn: () => api<SessionRow[]>('/auth/sessions') })
+}
+
+// --- Task 14: Settings update card -------------------------------------------
+//
+// Mirrors backend/proxploy/api/meta.py's GET/POST /meta/update exactly (see
+// backend/tests/test_update_api.py).
+
+export type UpdateStatus = {
+  current: string
+  latest: string | null
+  update_available: boolean
+  notes_url: string | null
+  channel: string | null
+  error: string | null
+  install_shape: string
+  can_self_apply: boolean
+  compose_hint: string | null
+}
+
+export function useUpdateStatus() {
+  return useQuery({ queryKey: ['meta', 'update'], queryFn: () => api<UpdateStatus>('/meta/update') })
+}
+
+export function useApplyUpdate() {
+  return useMutation({
+    mutationFn: (version: string) =>
+      api<{ ok: boolean; version: string }>('/meta/update', {
+        method: 'POST', body: JSON.stringify({ version }),
+      }),
+  })
 }

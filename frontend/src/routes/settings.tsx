@@ -15,6 +15,7 @@ import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
 import { TotpCard } from '../components/TotpCard'
 import { SessionsCard } from '../components/SessionsCard'
+import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { useTeams } from '../api/teams'
 
@@ -332,6 +333,8 @@ export function SettingsPage() {
       <TotpCard />
 
       <SessionsCard />
+
+      <UpdateCard />
 
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
