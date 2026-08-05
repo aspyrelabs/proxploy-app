@@ -1941,6 +1941,21 @@ git commit -m "feat(ui): update card — apply, poll, and the honest docker boun
       - run: bash packaging/tests/test_install.sh
       - run: bash packaging/tests/test_upgrade_rollback.sh
       - run: bash packaging/tests/test_pve_half.sh
+
+  # Task 12 lowered requires-python to >=3.11, because Debian 12 — which is
+  # what a Proxmox VE 8 CT template is, and therefore the actual LXC install
+  # target — ships 3.11 and pip refused to install at all. A supported-version
+  # claim nothing tests is not a claim; the `backend` job above runs 3.12, so
+  # this leg holds the floor honest.
+  backend-py311:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: backend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest tests/ -q -m "not pve_integration and not e2e"
 ```
 
 - [ ] **Step 2: Write `docs/runbooks/publishing-a-release.md`**
