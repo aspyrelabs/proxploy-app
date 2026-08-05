@@ -221,6 +221,41 @@ def test_a_rule_pointing_at_a_deleted_target_is_skipped_not_crashed(tmp_path):
     assert evaluate(db, utcnow()) == []
 
 
+def test_a_firing_alert_whose_target_was_deleted_resolves_on_the_next_pass(tmp_path):
+    """Otherwise the health footer says "1 alert firing" forever."""
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    _rule(db, target_id=host.id)
+    now = utcnow()
+    _samples(db, "host", host.id, "cpu_pct", [92.0], now)
+    evaluate(db, now)
+    assert db.query(Alert).filter_by(state="firing").count() == 1
+
+    db.delete(host)
+    db.commit()
+
+    out = evaluate(db, now + timedelta(seconds=30))
+    assert len(out) == 1 and out[0]["state"] == "resolved"
+    assert db.query(Alert).filter_by(state="firing").count() == 0
+
+
+def test_a_firing_alert_whose_rule_was_disabled_resolves_on_the_next_pass(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    rule = _rule(db, target_id=host.id)
+    now = utcnow()
+    _samples(db, "host", host.id, "cpu_pct", [92.0], now)
+    evaluate(db, now)
+    assert db.query(Alert).filter_by(state="firing").count() == 1
+
+    rule.enabled = False
+    db.commit()
+
+    out = evaluate(db, now + timedelta(seconds=30))
+    assert len(out) == 1 and out[0]["state"] == "resolved"
+    assert db.query(Alert).filter_by(state="firing").count() == 0
+
+
 # --- status-backed metrics --------------------------------------------------
 
 def test_host_offline_fires_on_an_unreachable_host(tmp_path):

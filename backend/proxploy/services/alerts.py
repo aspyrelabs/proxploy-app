@@ -207,9 +207,17 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
     counts a self-hoster has this is a handful of queries every 30 s. If a
     fleet ever makes it hurt, the fix is one grouped query per (metric,
     duration) bucket rather than per target — not a different design.
+
+    A firing Alert whose (rule, target) this pass never visits — its rule got
+    disabled, or its target row got deleted — would otherwise stay `firing`
+    forever (deleting the RULE cascades its alerts away, so a missing rule row
+    can't happen here; only a missing target or a disabled rule can). The
+    orphan sweep at the bottom closes those the same way a normal recovery
+    does, through the same transitions list, so it gets the same SSE/notify.
     """
     now = now or utcnow()
     transitions: list[dict] = []
+    visited: set[tuple[int, str, int]] = set()
     for rule in db.query(AlertRule).filter(AlertRule.enabled.is_(True)).all():
         if rule.metric not in METRIC_TARGETS:
             # A metric this build does not know — a downgrade, or a row edited
@@ -217,6 +225,7 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
             logger.debug("alert rule %s: unknown metric %r", rule.id, rule.metric)
             continue
         for target_type, target_id, label in targets_for(db, rule):
+            visited.add((rule.id, target_type, target_id))
             try:
                 if rule.metric in STATUS_METRICS:
                     breaching, value = _status_state(db, rule, target_id, now)
@@ -248,6 +257,20 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
                     rule.duration_s, value, "resolved")
                 db.commit()
                 transitions.append(_transition(rule, open_alert, label, "resolved"))
+
+    for alert in db.query(Alert).filter(Alert.state == "firing").all():
+        if (alert.rule_id, alert.target_type, alert.target_id) in visited:
+            continue
+        rule = db.get(AlertRule, alert.rule_id)
+        if rule is None:  # cascade should have removed it too; be defensive
+            continue
+        label = _label(db, alert.target_type, alert.target_id) or (
+            f"{alert.target_type} #{alert.target_id}")
+        alert.state = "resolved"
+        alert.resolved_at = now
+        alert.message = f"Resolved: {rule.name} — target removed or rule disabled"
+        db.commit()
+        transitions.append(_transition(rule, alert, label, "resolved"))
     return transitions
 
 
