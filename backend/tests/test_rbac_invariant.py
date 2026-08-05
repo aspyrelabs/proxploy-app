@@ -27,6 +27,19 @@ UNGOVERNED = {
     ("POST", "/api/v1/auth/totp/enroll"),
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
+    # Second factor of login (Task 9): pre-session by construction — there is
+    # no user yet for authorize() to check a role against, that's the whole
+    # point of the route. Ownership/single-use/attempt-cap is enforced by the
+    # pending-2FA store itself (api/auth.py), not by casbin.
+    ("POST", "/api/v1/auth/totp"),
+    # Self-service session list/revoke (Task 9): "my own sessions" has no
+    # (resource, action) pair in services/authz.py's PERMISSIONS matrix and
+    # doesn't need one — every role may always manage its own login state.
+    # Ownership is enforced by filtering the query on user_id=user.id
+    # (list_sessions) / .filter_by(id=sid, user_id=user.id) (revoke), the
+    # same idiom api/apikeys.py uses for "my own API keys" below.
+    ("GET", "/api/v1/auth/sessions"),
+    ("DELETE", "/api/v1/auth/sessions/{sid}"),
     ("GET", "/api/v1/auth/oidc/login"),      # public, pre-session (Task 11)
     ("GET", "/api/v1/auth/oidc/callback"),
     ("POST", "/api/v1/users"),               # first-run bootstrap; enforcer-checked inline
@@ -56,6 +69,11 @@ VIEWER_SELF = {
     ("POST", "/api/v1/auth/totp/enroll"),    # own account
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
+    ("POST", "/api/v1/auth/totp"),           # UNGOVERNED (pre-session second factor) —
+                                             # like /auth/login above, json={} 422s on the
+                                             # missing body before anything role-shaped
+                                             # runs; there is no authorize() here to deny
+    ("DELETE", "/api/v1/auth/sessions/{sid}"),  # own sessions; another user's id 404s
     ("POST", "/api/v1/api-keys"),            # key is capped by the viewer's own role
     ("DELETE", "/api/v1/api-keys/{key_id}"),
     ("POST", "/api/v1/users"),               # 403s inline anyway post-bootstrap; listed

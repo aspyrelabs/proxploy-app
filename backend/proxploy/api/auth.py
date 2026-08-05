@@ -1,3 +1,6 @@
+import secrets
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -6,7 +9,7 @@ from slowapi.util import get_remote_address
 
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
                                get_db, require_entitlement, user_role)
-from proxploy.models import TeamMember, User
+from proxploy.models import SessionRow, TeamMember, User, utcnow
 from proxploy.services import authn, oidc, totp
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import enforce
@@ -26,11 +29,6 @@ _oidc_manage = authorize("settings", "manage")
 _users_read = authorize("user", "read")
 
 
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class UserIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12)
@@ -43,10 +41,58 @@ def _user_out(db, user: User) -> dict:
             "role": user_role(db, user), "totp_enabled": user.totp_enabled}
 
 
+def _issue_session(request: Request, response: Response, db, user: User) -> dict:
+    """The exact create_session + set_cookie + audit block both login paths
+    (password-only, and the TOTP second factor below) need — extracted so
+    the two cannot drift apart."""
+    settings = request.app.state.settings
+    ip = request.client.host if request.client else None
+    raw = authn.create_session(db, user, ip, request.headers.get("user-agent"),
+                               settings.session_ttl_hours)
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.login", ip=ip)
+    response.set_cookie(settings.session_cookie, raw, httponly=True, samesite="lax",
+                        secure=settings.cookie_secure)
+    return {"ok": True, "user": _user_out(db, user)}
+
+
+# --- Pending-2FA store (Task 9) ---------------------------------------------
+#
+# NOT a session and cannot be turned into one by any request other than
+# POST /auth/totp: resolve_session()/get_current_user never look at
+# app.state.pending_totp, so holding a pending token grants access to
+# exactly one route, and that route only completes or burns it. Single-use
+# (popped on success), TTL-bounded (pruned on every access), and capped at
+# PENDING_MAX_ATTEMPTS wrong codes before the entry is discarded outright.
+PENDING_MAX_ATTEMPTS = 5
+
+
+def _create_pending(request: Request, user: User) -> str:
+    raw = secrets.token_urlsafe(32)
+    ttl = request.app.state.settings.totp_pending_ttl_s
+    request.app.state.pending_totp[authn._th(raw)] = (user.id, utcnow() + timedelta(seconds=ttl), 0)
+    return raw
+
+
+def _prune_pending(request: Request) -> None:
+    store = request.app.state.pending_totp
+    now = utcnow()
+    for key in [k for k, (_, expires_at, _) in store.items() if expires_at < now]:
+        del store[key]
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TotpLoginIn(BaseModel):
+    pending: str
+    code: str
+
+
 @router.post("/login")
 @limiter.limit("10/minute")
 def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db)):
-    settings = request.app.state.settings
     user = db.query(User).filter_by(email=body.email).one_or_none()
     ip = request.client.host if request.client else None
     if not user or not user.password_hash or not authn.verify_password(
@@ -54,12 +100,49 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
         write_audit(db, actor_type="user", actor_id=user.id if user else None,
                     action="auth.login", result="error", ip=ip)
         raise HTTPException(401, "invalid credentials")
-    raw = authn.create_session(db, user, ip, request.headers.get("user-agent"),
-                               settings.session_ttl_hours)
-    write_audit(db, actor_type="user", actor_id=user.id, action="auth.login", ip=ip)
-    response.set_cookie(settings.session_cookie, raw, httponly=True, samesite="lax",
-                        secure=settings.cookie_secure)
-    return {"ok": True, "user": _user_out(db, user)}
+    if user.totp_enabled:
+        # No cookie: the password check alone never grants a session. The
+        # pending token below is the only thing this response hands back,
+        # and it is not usable for anything except POST /auth/totp.
+        pending = _create_pending(request, user)
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="auth.login.totp_pending", ip=ip)
+        return {"totp_required": True, "pending": pending}
+    return _issue_session(request, response, db, user)
+
+
+@router.post("/totp")
+@limiter.limit("10/minute")
+def totp_login(request: Request, body: TotpLoginIn, response: Response, db=Depends(get_db)):
+    # PUBLIC (test_route_auth_invariant.py) and UNGOVERNED (test_rbac_invariant.py):
+    # this route IS the second half of acquiring a session, so it can carry
+    # neither get_current_user nor authorize() — see both files' allowlist
+    # comments for this path.
+    ip = request.client.host if request.client else None
+    _prune_pending(request)
+    store = request.app.state.pending_totp
+    key = authn._th(body.pending)
+    entry = store.get(key)
+    ok = False
+    user = None
+    if entry is not None:
+        user_id, expires_at, attempts = entry
+        user = db.get(User, user_id)
+        ok = bool(user and user.is_active and user.totp_enabled and totp.verify_login(
+            db, request.app.state.secretstore, user, body.code))
+        if ok:
+            del store[key]  # single-use: a second call with the same pending 401s
+        else:
+            attempts += 1
+            if attempts >= PENDING_MAX_ATTEMPTS:
+                del store[key]  # attempts exhausted: re-login required, no more guesses
+            else:
+                store[key] = (user_id, expires_at, attempts)
+    if not ok:
+        write_audit(db, actor_type="user", actor_id=user.id if user else None,
+                    action="auth.login", result="error", ip=ip)
+        raise HTTPException(401, "invalid or expired code")
+    return _issue_session(request, response, db, user)
 
 
 @router.post("/logout")
@@ -137,6 +220,56 @@ def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
         raise HTTPException(403, "re-authentication required")
     totp.disable(db, user)
     write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.disable")
+    return {"ok": True}
+
+
+# --- Session management (Task 9) --------------------------------------------
+#
+# Self-service on the caller's own sessions, same idiom as api/apikeys.py:
+# gated on get_current_user alone (no authorize() — "list/revoke my own
+# sessions" has no (resource, action) pair in services/authz.py's PERMISSIONS
+# matrix, and doesn't need one: this is not a role question, viewer and
+# owner alike may always manage their own login state). Ownership is
+# enforced by filtering the query on user_id=user.id, so a caller can never
+# even discover another user's session id, let alone revoke it.
+
+def _iso(dt) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+@router.get("/sessions")
+def list_sessions(request: Request, db=Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    settings = request.app.state.settings
+    raw = request.cookies.get(settings.session_cookie)
+    current_hash = authn._th(raw) if raw else None
+    now = utcnow()
+    rows = (db.query(SessionRow)
+            .filter(SessionRow.user_id == user.id, SessionRow.revoked_at.is_(None),
+                   SessionRow.expires_at > now)
+            .order_by(SessionRow.id))
+    return [{"id": r.id, "ip": r.ip, "user_agent": r.user_agent,
+             "created_at": _iso(r.created_at), "last_seen_at": _iso(r.last_seen_at),
+             "current": r.token_hash == current_hash} for r in rows]
+
+
+@router.delete("/sessions/{sid}")
+def revoke_session_route(request: Request, sid: int, db=Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    row = db.query(SessionRow).filter_by(id=sid, user_id=user.id).one_or_none()
+    if row is None:
+        # Also true of another user's session — 404, not 403: this isn't a
+        # role/permission question (api-keys' revoke_api_key precedent), and
+        # an unauthenticated-role probe learning "403 = exists, 404 =
+        # doesn't" would still be an existence oracle either way.
+        raise HTTPException(404, "session not found")
+    if not row.revoked_at:
+        row.revoked_at = utcnow()  # revocation takes effect immediately:
+        db.commit()                # resolve_session() checks revoked_at on
+                                    # every subsequent request for this token.
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.session.revoke",
+                target_type="session", target_id=sid,
+                ip=request.client.host if request.client else None)
     return {"ok": True}
 
 

@@ -36,6 +36,11 @@ PUBLIC = {
                                             # not entitled, never 403 (doc 10 Task 11)
     ("GET", "/api/v1/auth/oidc/callback"), # IdP redirects here with no session cookie
                                             # yet — this route is what mints the session
+    ("POST", "/api/v1/auth/totp"),         # second factor of login — pre-session by
+                                            # definition (Task 9). No get_current_user
+                                            # dependency exists to 401 an anonymous caller;
+                                            # a bad/missing pending+code pair 422s or 401s
+                                            # from inside the handler, never leaks a 403.
 }
 
 

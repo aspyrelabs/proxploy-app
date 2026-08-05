@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # unknown value.
     oidc_default_role: str | None = None
     oidc_default_team_slug: str = "default"
+    # Task 9: how long a pending-2FA token (issued by password-correct login
+    # for a totp_enabled user) stays redeemable at POST /auth/totp before it
+    # must be discarded and the user re-logs in with their password. Kept
+    # short — this is a live login in progress, not a remember-me window.
+    totp_pending_ttl_s: float = 300.0
     # Migration preflight (doc 08 §14, doc 11 §2): the only number honesty lets
     # us assume rather than measure — everything else in the estimate (transfer
     # size, strategy) comes from a live PVE call. 80 MB/s is a conservative LAN

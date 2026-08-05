@@ -139,6 +139,14 @@ def create_app(
     # NOT set here: it defaults (via getattr) to None = real network, and is
     # the seam tests substitute an ASGITransport into.
     app.state.oidc_states = {}
+    # Pending-2FA store (Task 9, api/auth.py) — {sha256(raw): (user_id,
+    # expires_at, attempts)}, pruned on access. Deliberately NOT a session:
+    # holding this token lets a caller do exactly one thing (finish or
+    # exhaust the second factor), never resolve_session()/get_current_user.
+    # ponytail: in-memory pending-2FA store — single-process app by design
+    # (in-process JobBackend); a restart mid-2FA costs one re-login. Move to
+    # a table if multi-worker ever lands.
+    app.state.pending_totp = {}
 
     from proxploy.api.auth import limiter
     from proxploy.middleware import CSRFMiddleware
