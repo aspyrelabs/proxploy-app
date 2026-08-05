@@ -141,6 +141,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
     return [{"id": h.id, "name": h.name, "address": h.address,
              "node_name": h.node_name, "status": h.status,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
+             "team_id": h.team_id,
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]
 
@@ -155,7 +156,7 @@ def host_detail(host_id: int, db=Depends(get_db),
     return {"id": h.id, "name": h.name, "address": h.address,
             "node_name": h.node_name, "status": h.status,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
-            "node_shell_enabled": h.node_shell_enabled,
+            "node_shell_enabled": h.node_shell_enabled, "team_id": h.team_id,
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": c.last_used_at.isoformat()
                              if c.last_used_at else None} for c in creds]}

@@ -232,3 +232,31 @@ def test_an_unparseable_token_id_is_a_422_not_a_502(pve_client, csrf_header):
     assert r.status_code == 422, r.text
     assert "deadbeef" not in r.text
     assert c.get("/api/v1/hosts").json() == []
+
+
+def test_host_reads_expose_team_id_so_the_ui_can_show_current_assignment(
+        client, csrf_header, bootstrap_admin):
+    """PATCH /hosts/{id} accepted team_id from the start but neither GET
+    returned it, so the Settings team picker could only ever be a write-only
+    control — it could reassign a host but never show what it was already
+    assigned to. Found while wiring the Teams admin UI (Task 20)."""
+    bootstrap_admin(client)
+    from proxploy.models import Host, Team
+
+    with client.app.state.sessionmaker() as db:
+        team = Team(name="Ops", slug="ops")
+        db.add(team)
+        db.add(Host(name="h1", address="https://pve:8006", status="connected"))
+        db.commit()
+        team_id, host_id = team.id, db.query(Host).one().id
+
+    assert client.get("/api/v1/hosts").json()[0]["team_id"] is None
+    assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] is None
+
+    r = client.patch(f"/api/v1/hosts/{host_id}",
+                     json={"node_shell_enabled": False, "team_id": team_id},
+                     headers=csrf_header(client))
+    assert r.status_code == 200, r.text
+
+    assert client.get("/api/v1/hosts").json()[0]["team_id"] == team_id
+    assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id

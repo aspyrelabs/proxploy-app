@@ -11,7 +11,9 @@ import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
 import { ScheduleForm } from '../components/ScheduleForm'
+import { TeamsCard } from '../components/TeamsCard'
 import { Button } from '../components/ui/button'
+import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
@@ -20,7 +22,7 @@ export const settingsRoute = createRoute({
 })
 
 type HostRow = { id: number; name: string; address: string; status: string; pve_version: string | null;
-                node_shell_enabled: boolean }
+                node_shell_enabled: boolean; team_id: number | null }
 
 function Card({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -149,6 +151,22 @@ export function SettingsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
+  // Both host reads return team_id, so this select shows the host's CURRENT
+  // team rather than being a write-only reassignment control. Same teams.rbac gate as
+  // TeamsCard: every /teams route requires it, so fetching before the first
+  // entitlements resolve would 403 for every plan, and TanStack Query
+  // dedupes this against TeamsCard's identical ['teams'] query.
+  const teamsAllowed = ent.data != null && ent.has('teams.rbac')
+  const teams = useTeams(teamsAllowed)
+  const assignTeam = useMutation({
+    mutationFn: ({ host, teamId }: { host: HostRow; teamId: number }) => api(`/hosts/${host.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled, team_id: teamId }),
+    }),
+    onError: () => toast.error('Could not assign that host to a team — try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
+  })
+
   // Wait for the first entitlements fetch before deciding — `has()` defaults
   // to false until then, which would 403 the query and open an "Add channel"
   // form that always errors for the sliver of a second before the flag
@@ -206,7 +224,7 @@ export function SettingsPage() {
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
         <table className="w-full text-left text-[13px]">
           <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-            <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th></tr></thead>
+            <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th><th>Team</th></tr></thead>
           <tbody>
             {(hosts.data ?? []).map(h => (
               <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
@@ -224,9 +242,23 @@ export function SettingsPage() {
                     </span>
                   </label>
                 </td>
+                <td>
+                  {teamsAllowed ? (
+                    <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
+                      disabled={assignTeam.isPending}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
+                      }}
+                      className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
+                      <option value="">Unassigned</option>
+                      {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  ) : <span className="text-text-3">—</span>}
+                </td>
               </tr>
             ))}
-            {!hosts.data?.length && <tr><td colSpan={5} className="py-4 text-text-3">No hosts yet.</td></tr>}
+            {!hosts.data?.length && <tr><td colSpan={6} className="py-4 text-text-3">No hosts yet.</td></tr>}
           </tbody>
         </table>
         {adding && <div className="mt-4 border-t border-line-soft pt-4">
@@ -289,6 +321,8 @@ export function SettingsPage() {
       </Card>
 
       <SchedulesCard />
+
+      <TeamsCard />
 
       <Card title="General">
         <p className="text-[12.5px] text-text-3">

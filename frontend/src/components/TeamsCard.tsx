@@ -1,0 +1,221 @@
+import { Fragment, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { api, ApiError } from '../api/client'
+import { useEntitlements } from '../api/hooks'
+import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
+import type { MemberRow, TeamRow, UserRow } from '../api/teams'
+import { Button } from './ui/button'
+
+const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
+
+// teams.py's HTTPException details are plain strings ("cannot remove the
+// last owner", "team name already exists") -- main.py::problem_handler puts
+// those straight in body.detail. Surface them verbatim rather than a canned
+// message: they're the whole point of the two backend behaviors this card
+// has to be honest about.
+const detailOf = (e: unknown) =>
+  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
+    ? (e.body as any).detail : 'Request failed — try again.'
+
+function TeamMembers({ team, users, onRemove }: {
+  team: TeamRow; users: UserRow[]; onRemove: (team: TeamRow, m: MemberRow) => void
+}) {
+  const qc = useQueryClient()
+  const members = useTeamMembers(team.id)
+  const [pickUserId, setPickUserId] = useState('')
+  const [pickRole, setPickRole] = useState<string>('viewer')
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['teams'] })
+    qc.invalidateQueries({ queryKey: ['teams', team.id, 'members'] })
+    qc.invalidateQueries({ queryKey: ['users'] })
+  }
+  const setRole = useMutation({
+    mutationFn: ({ userId, role }: { userId: number; role: string }) =>
+      api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+    onError: (e) => toast.error(detailOf(e)),
+    onSettled: invalidate,
+  })
+  const addMember = useMutation({
+    mutationFn: ({ userId, role }: { userId: number; role: string }) =>
+      api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+    onSuccess: () => setPickUserId(''),
+    onError: (e) => toast.error(detailOf(e)),
+    onSettled: invalidate,
+  })
+
+  const memberIds = new Set((members.data ?? []).map((m) => m.user_id))
+  const candidates = users.filter((u) => !memberIds.has(u.id))
+
+  return (
+    <div className="py-3">
+      <table className="w-full text-left text-[12.5px]">
+        <thead><tr className="text-[10px] uppercase tracking-wide text-text-3">
+          <th className="pb-1">Email</th><th>Role</th><th /></tr></thead>
+        <tbody>
+          {(members.data ?? []).map((m) => (
+            <tr key={m.user_id} className="border-t border-line-soft">
+              <td className="py-1">{m.email}</td>
+              <td>
+                <select aria-label={`role for ${m.email}`} value={m.role}
+                  disabled={setRole.isPending}
+                  onChange={(e) => setRole.mutate({ userId: m.user_id, role: e.target.value })}
+                  className={selectCls}>
+                  {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </td>
+              <td className="text-right">
+                <Button variant="danger" className="px-2 py-0.5 text-[11px]"
+                  onClick={() => onRemove(team, m)}>Remove</Button>
+              </td>
+            </tr>
+          ))}
+          {!members.data?.length && (
+            <tr><td colSpan={3} className="py-2 text-text-3">No members yet.</td></tr>
+          )}
+        </tbody>
+      </table>
+      <div className="mt-3 flex items-end gap-2">
+        <div>
+          <label htmlFor={`add-user-${team.id}`}
+            className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
+            Add member
+          </label>
+          <select id={`add-user-${team.id}`} value={pickUserId}
+            onChange={(e) => setPickUserId(e.target.value)} className={selectCls}>
+            <option value="">Select user…</option>
+            {candidates.map((u) => <option key={u.id} value={u.id}>{u.email}</option>)}
+          </select>
+        </div>
+        <select aria-label="new member role" value={pickRole}
+          onChange={(e) => setPickRole(e.target.value)} className={selectCls}>
+          {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <Button variant="ghost" className="px-2 py-1 text-[11px]"
+          disabled={!pickUserId || addMember.isPending}
+          onClick={() => addMember.mutate({ userId: Number(pickUserId), role: pickRole })}>
+          Add
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function TeamsCard() {
+  const ent = useEntitlements()
+  // Same wait-for-first-fetch pattern as settings.tsx's channelsAllowed:
+  // every route on this router requires teams.rbac (teams.py::_ENT), so
+  // fetching before the flag resolves true would 403 on every plan during
+  // the initial load, not just plans that lack it.
+  const teamsAllowed = ent.data != null && ent.has('teams.rbac')
+  const qc = useQueryClient()
+  const teams = useTeams(teamsAllowed)
+  const users = useUsers(teamsAllowed)
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  const createTeam = useMutation({
+    mutationFn: () => api<TeamRow>('/teams', { method: 'POST', body: JSON.stringify({ name }) }),
+    onSuccess: () => { setName(''); setAdding(false); qc.invalidateQueries({ queryKey: ['teams'] }) },
+    // Deliberate per Task 20: the "New team" affordance renders for every
+    // role (owner-only enforcement is the backend's job, not UI cosmetics)
+    // -- an operator/admin gets teams.py's 403 back here, verbatim.
+    onError: (e) => toast.error(detailOf(e)),
+  })
+
+  const removeMember = useMutation({
+    mutationFn: ({ teamId, userId }: { teamId: number; userId: number }) =>
+      api(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
+    // Surfaces both backend behaviors honestly: teams.py returns 409 "cannot
+    // remove the last owner" for the default team's last owner (shown here,
+    // not swallowed); a non-default team's last membership for a user is
+    // allowed and returns 200 -- that case is warned about *before* the
+    // click, in confirmRemove below, per amendment A1.
+    onError: (e) => toast.error(detailOf(e)),
+    onSettled: (_d, _e, v) => {
+      qc.invalidateQueries({ queryKey: ['teams'] })
+      qc.invalidateQueries({ queryKey: ['teams', v.teamId, 'members'] })
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
+  })
+
+  const confirmRemove = (team: TeamRow, m: MemberRow) => {
+    const totalTeams = users.data?.find((u) => u.id === m.user_id)?.teams.length ?? 0
+    const isLastMembership = totalTeams <= 1
+    const msg = isLastMembership
+      ? `Remove ${m.email} from ${team.name}? This is their only team -- they will be ` +
+        'denied all access everywhere until added to a team again.'
+      : `Remove ${m.email} from ${team.name}?`
+    if (window.confirm(msg)) removeMember.mutate({ teamId: team.id, userId: m.user_id })
+  }
+
+  return (
+    <section className="rounded-card border border-line-soft bg-panel p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-display text-[15px] font-semibold">Teams</h2>
+        {teamsAllowed && (
+          <Button variant="ghost" onClick={() => setAdding((a) => !a)}>
+            {adding ? 'Close' : 'New team'}
+          </Button>
+        )}
+      </div>
+      {!teamsAllowed ? (
+        <p className="text-[12.5px] text-text-3">
+          {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
+        </p>
+      ) : (
+        <>
+          <table className="w-full text-left text-[13px]">
+            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+              <th className="pb-2">Team</th><th>Members</th><th>Hosts</th><th /></tr></thead>
+            <tbody>
+              {(teams.data ?? []).map((t) => (
+                <Fragment key={t.id}>
+                  <tr className="border-t border-line-soft hover:bg-panel-2">
+                    <td className="py-2 font-mono">
+                      <button type="button" className="cursor-pointer text-left"
+                        onClick={() => setExpanded((x) => (x === t.id ? null : t.id))}>
+                        {expanded === t.id ? '▾' : '▸'} {t.name}
+                      </button>
+                    </td>
+                    <td>{t.member_count}</td>
+                    <td>{t.host_count}</td>
+                    <td />
+                  </tr>
+                  {expanded === t.id && (
+                    <tr className="border-t border-line-soft bg-panel-2/40">
+                      <td colSpan={4}>
+                        <TeamMembers team={t} users={users.data ?? []} onRemove={confirmRemove} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+              {!teams.data?.length && (
+                <tr><td colSpan={4} className="py-4 text-text-3">No teams yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+          {adding && (
+            <div className="mt-4 flex items-end gap-2 border-t border-line-soft pt-4">
+              <div className="flex-1">
+                <label htmlFor="team-name"
+                  className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                  Name
+                </label>
+                <input id="team-name"
+                  className="w-full rounded-ctl border border-line bg-panel-2 px-3 py-1.5 text-[13px] text-text"
+                  value={name} onChange={(e) => setName(e.target.value)} placeholder="Ops" />
+              </div>
+              <Button disabled={!name || createTeam.isPending} onClick={() => createTeam.mutate()}>
+                Create team
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
