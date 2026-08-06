@@ -41,14 +41,6 @@ export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
   })
 }
 
-export function useJob(id: number | null) {
-  return useQuery({
-    queryKey: ['jobs', id],
-    enabled: id != null,
-    queryFn: () => api<JobRow>(`/jobs/${id}`),
-  })
-}
-
 /** Archived transcript. The live tail is the SSE stream in JobLog. */
 export function useJobEvents(id: number | null) {
   return useQuery({
