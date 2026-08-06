@@ -15,7 +15,14 @@ from proxploy.models import utcnow  # noqa: F401  (used by later phases' sync pa
 
 
 class ProxmoxError(RuntimeError):
-    pass
+    """A Proxmox interaction that failed, classified so a caller can tell a
+    stranger what to actually do about it. `kind` is a stable machine string;
+    the message stays human and is always secret-scrubbed by _wrap.
+    """
+
+    def __init__(self, message: str, kind: str = "unknown"):
+        super().__init__(message)
+        self.kind = kind
 
 
 # Proxmox's own status verbs. Proxploy's user-facing vocabulary maps onto these
@@ -132,7 +139,7 @@ def resolve_target(host: str, port: int) -> str:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as e:
-        raise ProxmoxError(f"cannot resolve {host!r}") from e
+        raise ProxmoxError(f"cannot resolve {host!r}", kind="unreachable") from e
     chosen = None
     for info in infos:
         literal = info[4][0].partition("%")[0]  # drop any IPv6 zone id
@@ -142,7 +149,7 @@ def resolve_target(host: str, port: int) -> str:
             if getattr(ip, attr) and not (attr == "is_loopback" and ALLOW_LOOPBACK_TARGET):
                 raise ProxmoxError(
                     f"refusing to connect to {host!r}: it resolves to {ip}, "
-                    f"which is {label}")
+                    f"which is {label}", kind="refused")
         chosen = chosen or literal
     return chosen
 
@@ -184,6 +191,31 @@ class _NamedUpload(io.BufferedReader):
         return self._upload_name
 
 
+def _classify(exc: BaseException) -> str:
+    """Map an underlying transport/auth failure onto a kind the UI can act on.
+    Substring matching is deliberate and lives HERE rather than in the
+    frontend: proxmoxer and requests do not expose typed failures for these,
+    and one fuzzy match in one place beats the same match spread across
+    call sites in another language.
+
+    Only reached from `_wrap`, i.e. for exceptions proxmoxer/requests raised
+    that we did not construct ourselves. `resolve_target`'s SSRF refusals and
+    `_connect`'s TLS-fingerprint mismatch are already `ProxmoxError`s raised
+    with an explicit `kind` at the point they are known — self-classifying,
+    so they never reach here and this function does not need to recognize
+    them.
+    """
+    text = str(exc).lower()
+    if "fingerprint" in text:
+        return "tls_fingerprint"
+    if isinstance(exc, PermissionError) or "401" in text or "authentication" in text:
+        return "auth"
+    if isinstance(exc, (ConnectionError, TimeoutError)) or "refused" in text \
+            or "timed out" in text or "unreachable" in text or "resolve" in text:
+        return "unreachable"
+    return "unknown"
+
+
 class ProxmoxClient:
     def __init__(self, address: str, token_id: str, token_secret: str,
                  verify_tls: bool = True, tls_fingerprint: str | None = None,
@@ -214,7 +246,7 @@ class ProxmoxClient:
             # since urllib3 reports the header as `b'...'`.
             for form in (needle, repr(needle)[1:-1]):
                 text = text.replace(form, "***")
-        return ProxmoxError(text)
+        return ProxmoxError(text, kind=_classify(e))
 
     def _connect(self):
         if self._api is not None:
@@ -233,7 +265,8 @@ class ProxmoxClient:
             seen = tls_fingerprint_sha256(host, port)
             if seen != self.tls_fingerprint.upper():
                 raise ProxmoxError(
-                    f"TLS fingerprint mismatch: pinned {self.tls_fingerprint}, got {seen}")
+                    f"TLS fingerprint mismatch: pinned {self.tls_fingerprint}, got {seen}",
+                    kind="tls_fingerprint")
         user, token_name = parse_token_id(self.token_id)
         try:
             self._api = self._factory(host=host, port=port, user=user,

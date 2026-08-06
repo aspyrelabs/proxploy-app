@@ -139,7 +139,9 @@ def test_probe_refuses_the_cloud_metadata_address(pve_client, csrf_header):
                json=HOST | {"name": None, "address": "https://169.254.169.254:8006"},
                headers=csrf_header(c))
     assert r.status_code == 502
-    assert "refusing to connect" in r.json()["detail"]
+    body = r.json()
+    assert body["error"] == "refused"
+    assert "refusing to connect" in body["detail"]
     assert not fake.kwargs, "the client was constructed despite the refusal"
 
 
@@ -147,7 +149,9 @@ def test_creating_a_host_at_a_denied_address_stores_nothing(pve_client, csrf_hea
     c, _ = pve_client
     r = c.post("/api/v1/hosts", json=HOST | {"address": "https://127.0.0.1:8006"},
                headers=csrf_header(c))
-    assert r.status_code == 502 and "loopback" in r.json()["detail"]
+    assert r.status_code == 502
+    body = r.json()
+    assert body["error"] == "refused" and "loopback" in body["detail"]
     assert c.get("/api/v1/hosts").json() == []
 
 
@@ -260,3 +264,61 @@ def test_host_reads_expose_team_id_so_the_ui_can_show_current_assignment(
 
     assert client.get("/api/v1/hosts").json()[0]["team_id"] == team_id
     assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id
+
+
+def test_probe_reports_unreachable_as_a_kind(tmp_path, csrf_header, bootstrap_admin):
+    """A closed port and a bad token must not read identically to the wizard."""
+    from fastapi.testclient import TestClient
+    from proxploy.config import Settings
+    from proxploy.main import create_app
+
+    def unreachable(**kwargs):
+        raise ConnectionError("connection refused")
+
+    s = Settings(db_url=f"sqlite:///{tmp_path}/p.db", data_dir=tmp_path,
+                 master_key_file=tmp_path / "master.key")
+    with TestClient(create_app(s, proxmox_factory=unreachable)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", headers=csrf_header(c), json={
+            "address": "https://10.0.0.5:8006", "token_id": "u@pve!t",
+            "token_secret": "s", "verify_tls": True})
+    assert r.status_code == 502
+    assert r.json()["error"] == "unreachable"
+
+
+def test_probe_reports_auth_failure_as_its_own_kind(tmp_path, csrf_header, bootstrap_admin):
+    from fastapi.testclient import TestClient
+    from proxploy.config import Settings
+    from proxploy.main import create_app
+
+    def denied(**kwargs):
+        raise PermissionError("401 authentication failure")
+
+    s = Settings(db_url=f"sqlite:///{tmp_path}/a.db", data_dir=tmp_path,
+                 master_key_file=tmp_path / "master.key")
+    with TestClient(create_app(s, proxmox_factory=denied)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", headers=csrf_header(c), json={
+            "address": "https://10.0.0.5:8006", "token_id": "u@pve!t",
+            "token_secret": "s", "verify_tls": True})
+    assert r.status_code == 502
+    assert r.json()["error"] == "auth"
+
+
+def test_error_kind_never_leaks_the_token_secret(tmp_path, csrf_header, bootstrap_admin):
+    """The scrubbing _wrap already does must survive the new structure."""
+    from fastapi.testclient import TestClient
+    from proxploy.config import Settings
+    from proxploy.main import create_app
+
+    def leaky(**kwargs):
+        raise RuntimeError("failed using secret super-secret-value")
+
+    s = Settings(db_url=f"sqlite:///{tmp_path}/l.db", data_dir=tmp_path,
+                 master_key_file=tmp_path / "master.key")
+    with TestClient(create_app(s, proxmox_factory=leaky)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", headers=csrf_header(c), json={
+            "address": "https://10.0.0.5:8006", "token_id": "u@pve!t",
+            "token_secret": "super-secret-value", "verify_tls": True})
+    assert "super-secret-value" not in r.text

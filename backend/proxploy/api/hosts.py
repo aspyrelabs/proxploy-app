@@ -79,7 +79,7 @@ def probe(request: Request, body: ProbeIn,
     try:
         v = _client(request, body).version()
     except ProxmoxError as e:
-        raise HTTPException(502, str(e))
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)})
     return {"ok": True, "version": v.get("version"), "release": v.get("release")}
 
 
@@ -103,7 +103,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
         write_audit(db, actor_type="user", actor_id=user.id, action="host.create",
                     params=audit_params, result="error",
                     ip=request.client.host if request.client else None)
-        raise HTTPException(502, str(e))
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)})
 
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
