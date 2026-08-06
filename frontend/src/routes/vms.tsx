@@ -122,42 +122,47 @@ const TABS = [
 
 export function VmDetail() {
   const { vmId } = useParams({ strict: false }) as { vmId: string }
-  const { data: vm } = useQuery({
+  const vmQuery = useQuery({
     queryKey: ['vms', Number(vmId)],
     queryFn: () => api<VmRow>(`/vms/${vmId}`),
     refetchInterval: 15_000,
   })
-  if (!vm) return <EmptyState title="Loading…" note="" />
   return (
-    <div>
-      <Link to={'/vms' as never} className="text-[12px] text-text-3 hover:text-text">← Virtual Machines</Link>
-      <div className="mt-2 mb-4 flex items-center gap-4">
+    <QueryState query={vmQuery} emptyTitle="" emptyNote="" empty={() => false}
+                errorTitle="This VM could not be loaded"
+                errorNote="Proxploy could not reach the backend, or the VM no longer exists.">
+      {(vm) => (
         <div>
-          <h1 className="font-display text-[22px] font-semibold">{vm.name}</h1>
-          <div className="font-mono text-[12px] text-text-3">
-            VMID {vm.vmid} · {vm.host_name} · {vm.cpu_cores ?? '?'} vCPU / {fmtBytes(vm.mem_bytes)}
+          <Link to={'/vms' as never} className="text-[12px] text-text-3 hover:text-text">← Virtual Machines</Link>
+          <div className="mt-2 mb-4 flex items-center gap-4">
+            <div>
+              <h1 className="font-display text-[22px] font-semibold">{vm.name}</h1>
+              <div className="font-mono text-[12px] text-text-3">
+                VMID {vm.vmid} · {vm.host_name} · {vm.cpu_cores ?? '?'} vCPU / {fmtBytes(vm.mem_bytes)}
+              </div>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} />
+              <StatusPill status={vm.status} />
+            </div>
           </div>
+          <div className="mb-5 flex gap-1 border-b border-line-soft">
+            {TABS.map((t) => (
+              <Link
+                key={t.path}
+                to={t.path as never}
+                from={'/vms/$vmId' as never}
+                activeOptions={{ exact: t.path === '.' }}
+                className="px-3 py-2 text-[13px] text-text-2 hover:text-text [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text"
+              >
+                {t.label}
+              </Link>
+            ))}
+          </div>
+          <Outlet />
         </div>
-        <div className="ml-auto flex items-center gap-3">
-          <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} />
-          <StatusPill status={vm.status} />
-        </div>
-      </div>
-      <div className="mb-5 flex gap-1 border-b border-line-soft">
-        {TABS.map((t) => (
-          <Link
-            key={t.path}
-            to={t.path as never}
-            from={'/vms/$vmId' as never}
-            activeOptions={{ exact: t.path === '.' }}
-            className="px-3 py-2 text-[13px] text-text-2 hover:text-text [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text"
-          >
-            {t.label}
-          </Link>
-        ))}
-      </div>
-      <Outlet />
-    </div>
+      )}
+    </QueryState>
   )
 }
 

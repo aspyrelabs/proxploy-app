@@ -169,69 +169,76 @@ export function AppDetail() {
   const { appId } = useParams({ strict: false }) as { appId: string }
   const ent = useEntitlements()
   const [migrating, setMigrating] = useState(false)
-  const { data: app } = useQuery({
+  const appQuery = useQuery({
     queryKey: ['apps', Number(appId)],
     queryFn: () => api<AppRow>(`/apps/${appId}`),
     refetchInterval: 15_000,
   })
-  if (!app) return <EmptyState title="Loading…" note="" />
-  // Same wait-for-first-fetch gate as vms.tsx's cloneDenied — otherwise every
-  // plan sees a dead Migrate button for the whole first entitlements fetch.
-  const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
   return (
-    <div>
-      <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
-      <div className="mt-2 mb-4 flex items-center gap-4">
-        <div
-          className="flex h-14 w-14 items-center justify-center rounded-card font-display text-[18px] font-semibold text-white"
-          style={{
-            background: app.icon_colors
-              ? `linear-gradient(135deg, ${app.icon_colors.c1}, ${app.icon_colors.c2})`
-              : 'linear-gradient(135deg,#F5B544,#E0862B)',
-          }}
-        >
-          {app.icon_initials ?? app.name.slice(0, 2).toUpperCase()}
-        </div>
-        <div>
-          <h1 className="font-display text-[22px] font-semibold">
-            {app.name}
-            {app.update_available && (
-              <span className="ml-2 rounded-tile bg-amber-dim px-2 py-0.5
-                               font-mono text-[10.5px] uppercase text-amber">
-                update available
-              </span>
-            )}
-          </h1>
-          <div className="font-mono text-[12px] text-text-3">
-            CT {app.ctid} · {app.host_name}{app.ip ? ` · ${app.ip}${app.web_port ? `:${app.web_port}` : ''}` : ''}
+    <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
+                errorTitle="This app could not be loaded"
+                errorNote="Proxploy could not reach the backend, or the app no longer exists.">
+      {(app) => {
+        // Same wait-for-first-fetch gate as vms.tsx's cloneDenied — otherwise every
+        // plan sees a dead Migrate button for the whole first entitlements fetch.
+        const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
+        return (
+          <div>
+            <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
+            <div className="mt-2 mb-4 flex items-center gap-4">
+              <div
+                className="flex h-14 w-14 items-center justify-center rounded-card font-display text-[18px] font-semibold text-white"
+                style={{
+                  background: app.icon_colors
+                    ? `linear-gradient(135deg, ${app.icon_colors.c1}, ${app.icon_colors.c2})`
+                    : 'linear-gradient(135deg,#F5B544,#E0862B)',
+                }}
+              >
+                {app.icon_initials ?? app.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <h1 className="font-display text-[22px] font-semibold">
+                  {app.name}
+                  {app.update_available && (
+                    <span className="ml-2 rounded-tile bg-amber-dim px-2 py-0.5
+                                     font-mono text-[10.5px] uppercase text-amber">
+                      update available
+                    </span>
+                  )}
+                </h1>
+                <div className="font-mono text-[12px] text-text-3">
+                  CT {app.ctid} · {app.host_name}{app.ip ? ` · ${app.ip}${app.web_port ? `:${app.web_port}` : ''}` : ''}
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-3">
+                <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} />
+                <Button variant="ghost" disabled={migrateDenied}
+                  title={migrateDenied ? 'Not included in your plan' : undefined}
+                  onClick={() => setMigrating(true)}>
+                  Migrate
+                </Button>
+                <StatusPill status={app.status} />
+              </div>
+            </div>
+            <div className="mb-5 flex gap-1 border-b border-line-soft">
+              {TABS.map((t) => (
+                <Link
+                  key={t.path}
+                  to={t.path as never}
+                  from={'/apps/$appId' as never}
+                  activeOptions={{ exact: t.path === '.' }}
+                  className="px-3 py-2 text-[13px] text-text-2 hover:text-text [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text"
+                >
+                  {t.label}
+                </Link>
+              ))}
+            </div>
+            <Outlet />
+            {migrating && <MigrateDialog app={app} onClose={() => setMigrating(false)} />}
           </div>
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} />
-          <Button variant="ghost" disabled={migrateDenied}
-            title={migrateDenied ? 'Not included in your plan' : undefined}
-            onClick={() => setMigrating(true)}>
-            Migrate
-          </Button>
-          <StatusPill status={app.status} />
-        </div>
-      </div>
-      <div className="mb-5 flex gap-1 border-b border-line-soft">
-        {TABS.map((t) => (
-          <Link
-            key={t.path}
-            to={t.path as never}
-            from={'/apps/$appId' as never}
-            activeOptions={{ exact: t.path === '.' }}
-            className="px-3 py-2 text-[13px] text-text-2 hover:text-text [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text"
-          >
-            {t.label}
-          </Link>
-        ))}
-      </div>
-      <Outlet />
-      {migrating && <MigrateDialog app={app} onClose={() => setMigrating(false)} />}
-    </div>
+        )
+      }}
+    </QueryState>
   )
 }
 
