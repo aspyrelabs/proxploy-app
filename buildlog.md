@@ -857,3 +857,109 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
   target, and a supported-version claim nothing tests is not a claim
 - Migrations: `alembic heads` = **`6cf6a0722d23`**, unchanged — **zero
   migrations this phase**, as planned
+
+### 2026-08-06T18:06:20+05:30 — Phase 9b — execute-plan completed
+
+Doc 10's Phase 9 DoD: a stranger *"completes onboarding, installs an app,
+creates a VM, schedules a backup"* — four clauses no test had ever executed
+through the UI. 9a shipped how the product gets onto a box; 9b is what a
+stranger sees once it's there. 19 tasks, full details in
+`docs/notes/phase-9b-onboarding-polish.md`.
+
+**What shipped, per subsystem:**
+- **Backend**: `ProxmoxError.kind` (`unreachable`/`auth`/`tls_fingerprint`/
+  `refused`/`unknown`) classified once in `_wrap`, returned by `POST
+  /hosts/probe` and `POST /hosts`; `POST /hosts/{id}/ssh/verify` proves an
+  enrolled key actually opens a root shell instead of trusting a click, and
+  sets `HostCredential.ssh_verified_at`; `GET /meta/onboarding` gained
+  `ssh_pending` so the wizard can derive its own step from server state
+- **Frontend primitives**: `QueryState` renders loading/error/empty/data as
+  four different things (`EmptyState` gained an `action` slot to support
+  it); 40 `?? []` call sites across 25 page lists, 15 selects and 3
+  false-negative single-value queries converted; a themed `RouteError`
+  closes Finding F1 (a 5xx used to white-screen the app outside the theme
+  entirely); two hardcoded `#1d2733` literals replaced with `bg-elev` /
+  `var(--elev)` behind a new static guard
+- **Wizard**: `stepFrom(onboarding)` replaces `useState(0)`, so a reload
+  resumes where you were instead of restarting and reporting "bad password"
+  for an admin account that already exists; host step is skippable with
+  errors that name a specific fix; authorize step verifies for real
+- **Proof**: `tests/e2e_server.py` serves the real app with `FakePVE` +
+  `FakeSSHConnection` (no env-var backdoor); `journey.spec.ts` drives a
+  stranger through all four DoD clauses in a real browser for the first
+  time ever; `light-theme.spec.ts` asserts nine pages carry no dark-only
+  bypass literal; both gated in CI's new `e2e` job so they can't rot after
+  passing once
+
+**Two production bugs found by executing things, both hidden by test
+fixtures supplying what the product itself never wrote:**
+- **SSH passed a URL where asyncssh needs a hostname** (`fa5cce5`).
+  `Host.address` (`https://10.0.0.5:8006`) went straight to asyncssh as the
+  `host` argument. App install, app update, SSH verify, and both legs of
+  cross-host migration **could never have worked against a real Proxmox
+  node** — shipped across Phases 4, 7, 8 with passing DoDs every time.
+  Invisible because every SSH test's fake ignores or dict-keys on whatever
+  `host` string it's given; two `test_migrate_transfer.py` cases even keyed
+  by the full URL and passed for the wrong reason. Fixed once at the two
+  chokepoints every caller funnels through — `SSHExecutor.run()`,
+  `sftp_copy()` — with a new `normalize_ssh_host()` helper
+- **`Host.node_name` was write-never** (`fa4c795`). `POST /hosts` cannot
+  learn it (PVE's `/version` carries none) and `ingest_cycle()` never
+  persisted it either — only `tests/support.py`'s `seed_host_row` test
+  helper ever set it. `GET /cluster/nodes` and the VM-create node picker
+  both read that column directly, so a host created through the real
+  onboarding flow offered no node — **a real user could not create a VM.**
+  Found by the journey harness's first real run. Fixed in
+  `pollers/__init__.py`: the first poll cycle that sees a node writes it
+  once, mirroring `main.py`'s own self-`ctid` write-once pattern
+
+**Smaller findings, each fixed:** `TotpCard`'s plan gate stuck on
+"Loading…" forever on an entitlements error (`isPending` goes `false` on
+error too); `SessionsCard`'s `Array.isArray` guard existed only to paper
+over an incomplete test mock; the hardcoded-colour guard's first run found
+a third offender (`StoreCard.tsx`) the manual survey missed; Task 17 found
+two real e2e races — `beforeAll` runs per *worker* not per *file*
+(fullyParallel let concurrent `seedAdmin()` calls double-post), and
+`POST /login` is rate-limited 10/min per source IP (nine independent UI
+sign-ins blew through it; fixed by signing in once and sharing the session
+cookie).
+
+**Known gaps, stated plainly:**
+- **No real Proxmox node.** The journey runs against `FakePVE` +
+  `FakeSSHConnection`, proving the product's own logic and UI, not hardware
+  behaviour — and this phase is itself the evidence for why that gap
+  matters: the journey's first real run found both production bugs above,
+  each of which three prior phases' fake-backed DoDs had passed straight
+  through
+- **Computed-style assertions are not visual review.** "Ugly but correct"
+  passes `light-theme.spec.ts` without complaint. **The light theme has not
+  been seen by a human on this branch**
+- **Environment quirks worked around, not fixed upstream**: this box's
+  Chromium reports the deprecated tz alias `Asia/Calcutta`, which its
+  minimal tzdata can't resolve (the journey overwrites it with `UTC`); React
+  Query's global 15s `staleTime` can serve a stale cache against fresh
+  backend state (the journey forces a reload rather than trusting it)
+- **22 other `except ProxmoxError` sites** across `api/{consoles,backups,
+  network,storage,vms,apps}.py` still format `str(e)` into an opaque
+  502/409, now inconsistent with the `kind` taxonomy Task 1 gave
+  `hosts.py`. Out of this phase's scope; counted directly (the plan's own
+  survey estimated 24)
+- **F1 was the last item Phase 8 recorded as open** — now closed by Task 9
+
+**Verification:**
+- `dod_verify_phase9b.py` (throwaway, not committed — `backend/.gitignore`
+  carries `dod_verify_phase*.py`; the repo-root `.gitignore` does not, the
+  pattern is backend-local): all four checks OK, exit 0, run twice,
+  byte-identical both times
+- Backend: **827 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+  "not pve_integration and not e2e"` (baseline entering the phase: 810)
+- Frontend: **268 passed across 43 files** — `npx vitest run
+  --no-file-parallelism` (baseline 205 across 37); build clean; lint exit 0,
+  30 warnings, 0 errors, pre-existing warning classes only
+- Frontend e2e: **11 passed** (baseline 1) — `npx playwright test`: smoke +
+  the stranger journey + 9 light-theme pages, all real Chromium
+- Migrations: `alembic heads` = **`01f962e7a491`** — **one migration this
+  phase** (`ssh_verified_at` on `host_credentials`, Task 2), unlike 9a which
+  shipped zero
+- Commit range: `a7bbf3d..fa4c795` (design spec through the last
+  implementation commit)
