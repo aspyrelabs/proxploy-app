@@ -27,11 +27,29 @@ BRIDGE=""
 FQDN=""
 PVE_ONLY=0
 DRY_RUN=0
+DRY_PARSE=0
+
+# Default channel for the bare one-liner (`curl -fsSL https://proxploy.com/
+# install.sh | bash`, no flags). --channel overrides this for a private
+# channel, a staging build, or the test harnesses' file:// fixtures.
+DEFAULT_CHANNEL="https://proxploy.com/releases/latest"
+
+# The release public key, compiled in rather than fetched. This is what
+# makes the no-argument one-liner possible: there is nothing unpacked yet
+# for this script to read a key out of, so the key has to arrive WITH the
+# script. That is sound because the script itself arrives over TLS from a
+# host the user already chose to trust — the same trust the curl already
+# places. Replacing this block is step 1 of
+# docs/runbooks/publishing-a-release.md.
+RELEASE_PUBKEY_PEM='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAGZ/rStVno38RgOMWbVnHIRHHSk0WGVwhb4hMJnUkj/k=
+-----END PUBLIC KEY-----'
 
 usage() {
   cat >&2 <<'EOF'
-Usage: install.sh --shape systemd|lxc --channel <url> --version <v> --pubkey <pem>
-       install.sh [--pve-only] [--dry-run] --channel <url> --version <v>
+Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
+                   [--pubkey <pem>] [--dry-parse]
+       install.sh [--pve-only] [--dry-run] [--channel <url>] [--version <v>]
                    [--ctid <n>] [--storage <name>] [--bridge <name>]
 
   --shape    Install shape: systemd (plain host/VM) or lxc (Proxmox CT).
@@ -39,13 +57,16 @@ Usage: install.sh --shape systemd|lxc --channel <url> --version <v> --pubkey <pe
              create a CT and run the installer inside it.
   --channel  Base URL of a release channel holding manifest.json,
              manifest.json.sig and the tarball (file:// or https://).
+             Default: https://proxploy.com/releases/latest
   --version  The version to install; must match the channel's manifest.
+             Default: whatever version the fetched manifest.json reports.
   --pubkey   Path to the release public key (PEM) to verify the manifest
-             signature against. There is no bundled default: nothing is
-             unpacked yet for this script to read a key out of. Required
-             for --shape installs; not needed on the PVE-host path itself
-             (the CT it creates is handed one when it re-invokes this
-             script).
+             signature against. Default: the release key compiled into
+             this script. Pass this to verify against a different key.
+  --dry-parse Exit 0 immediately after argument validation and defaulting
+             — prints the resolved shape/channel/version/pubkey and never
+             fetches, installs, or requires root. For testing the argument
+             handling itself.
   --ctid     CT id to create. Default: first free id >= 150.
   --storage  PVE storage for the CT's rootfs. Default: first storage that
              supports rootdir content.
@@ -74,6 +95,7 @@ while [ $# -gt 0 ]; do
     --hostname) FQDN="$2"; shift 2 ;;
     --pve-only) PVE_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --dry-parse) DRY_PARSE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -110,6 +132,31 @@ resolve_storage() {
 }
 
 resolve_bridge() { [ -n "$BRIDGE" ] || BRIDGE="vmbr0"; }
+
+# resolve_version: no-op when --version was already given (every existing
+# harness passes it explicitly and never reaches the fetch_to call below).
+# Otherwise fetch the channel's manifest.json and read its version out —
+# the same manifest_field extraction proxploy-update and verify_release()
+# use, so there is exactly one manifest field parser in this codebase.
+# --dry-parse never touches the network: this is called before root, curl
+# availability, or a real channel can be assumed, so it substitutes a
+# placeholder instead of fetching.
+# ponytail: an installer with no --version fetches manifest.json twice
+# (once here, once in step 4 below) — a second small GET, not worth
+# threading a shared work dir through both call sites for.
+resolve_version() {
+  [ -n "$VERSION" ] && return 0
+  if [ "$DRY_PARSE" -eq 1 ]; then
+    VERSION="(resolved from $CHANNEL/manifest.json at install time)"
+    return 0
+  fi
+  local tmp
+  tmp=$(mktemp -d)
+  fetch_to "$CHANNEL/manifest.json" "$tmp/manifest.json"
+  VERSION=$(manifest_field version "$tmp/manifest.json")
+  rm -rf "$tmp"
+  [ -n "$VERSION" ] || die "could not determine --version from $CHANNEL/manifest.json"
+}
 
 resolve_template() {  # resolve_template <storage> -> sets TEMPLATE
   local storage="$1"
@@ -194,9 +241,17 @@ pve_install() {
   [ -z "$ip" ] || log "Browse to https://$ip/ to create the first account."
 }
 
+# --- argument defaults (Task 3, phase 9c) -----------------------------------
+# The advertised one-liner takes no flags at all, so channel/version/pubkey
+# all need usable defaults instead of the hard requirement this used to be.
+[ -n "$CHANNEL" ] || CHANNEL="$DEFAULT_CHANNEL"
+
 if [ "$PVE_ONLY" -eq 1 ] || { [ -z "$SHAPE" ] && is_pve_host; }; then
-  [ -n "$CHANNEL" ] || { usage; die "--channel is required"; }
-  [ -n "$VERSION" ] || { usage; die "--version is required"; }
+  resolve_version
+  if [ "$DRY_PARSE" -eq 1 ]; then
+    log "dry parse ok: shape=pve-host channel=$CHANNEL version=$VERSION"
+    exit 0
+  fi
   pve_install
   exit 0
 fi
@@ -209,9 +264,18 @@ case "$SHAPE" in
   systemd|lxc) ;;
   *) die "--shape must be systemd or lxc, got: $SHAPE" ;;
 esac
-[ -n "$CHANNEL" ] || { usage; die "--channel is required"; }
-[ -n "$VERSION" ] || { usage; die "--version is required"; }
-[ -n "$PUBKEY" ]  || { usage; die "--pubkey is required"; }
+resolve_version
+if [ -z "$PUBKEY" ]; then
+  # No bundled default existed before this: RELEASE_PUBKEY_PEM (near the
+  # top of this file) is what makes the no-argument one-liner possible.
+  PUBKEY=$(mktemp)
+  printf '%s\n' "$RELEASE_PUBKEY_PEM" > "$PUBKEY"
+fi
+
+if [ "$DRY_PARSE" -eq 1 ]; then
+  log "dry parse ok: shape=$SHAPE channel=$CHANNEL version=$VERSION pubkey=$PUBKEY"
+  exit 0
+fi
 
 need_root
 
@@ -249,7 +313,7 @@ else
   log "fetching $VERSION from $CHANNEL"
   fetch_to "$CHANNEL/manifest.json"     "$work/manifest.json"
   fetch_to "$CHANNEL/manifest.json.sig" "$work/manifest.json.sig"
-  tarball=$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$work/manifest.json" | head -1)
+  tarball=$(manifest_field name "$work/manifest.json")
   [ -n "$tarball" ] || die "manifest.json has no artifact name"
   fetch_to "$CHANNEL/$tarball" "$work/$tarball"
   verify_release "$work" "$PUBKEY"

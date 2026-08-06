@@ -33,6 +33,15 @@ log()  { printf '  %s\n' "$*" >&2; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 need_root() { [ "$(id -u)" -eq 0 ] || die "run as root"; }
 
+# manifest_field <key> <file>: pull a top-level string field out of
+# manifest.json without a JSON parser — build_release.sh always writes one
+# `"key": "value",` per line, so this sed is sufficient. install.sh,
+# proxploy-update and verify_release() below all extracted fields this way
+# independently before this was factored out; one copy so they can't drift.
+manifest_field() {  # manifest_field <key> <file>
+  sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" "$2" | head -1
+}
+
 fetch_to() {  # fetch_to <url> <dest>
   local url="$1" dest="$2"
   case "$url" in
@@ -58,8 +67,8 @@ verify_release() {  # verify_release <workdir> <pubkey-pem>
       -in "$dir/manifest.json" -sigfile "$dir/manifest.json.sig" >/dev/null \
     || die "manifest signature is not valid — refusing to install"
   local want name
-  name=$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$dir/manifest.json" | head -1)
-  want=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$dir/manifest.json" | head -1)
+  name=$(manifest_field name "$dir/manifest.json")
+  want=$(manifest_field sha256 "$dir/manifest.json")
   echo "$want  $dir/$name" | sha256sum -c - >/dev/null \
     || die "$name: sha256 mismatch — refusing to install"
 }

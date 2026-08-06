@@ -98,7 +98,7 @@ trap 'rm -rf "$work"' EXIT
 log "fetching $TO"
 fetch_to "$CHANNEL/manifest.json"     "$work/manifest.json"
 fetch_to "$CHANNEL/manifest.json.sig" "$work/manifest.json.sig"
-tarball=$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$work/manifest.json" | head -1)
+tarball=$(manifest_field name "$work/manifest.json")
 [ -n "$tarball" ] || die "manifest.json has no artifact name"
 fetch_to "$CHANNEL/$tarball" "$work/$tarball"
 verify_release "$work" "$PP_CURRENT/backend/proxploy/release_pubkey.pem"
