@@ -754,3 +754,106 @@ migrates between two non-clustered hosts with accurate downtime shown."*
   against the exact CI allow-lists
 - Migrations: `alembic heads` = **`6cf6a0722d23`** — one migration this phase.
   The plan predicted zero; the recovery-code burn race is why that changed
+
+### 2026-08-06T12:55:00+05:30 — Phase 9a — execute-plan completed
+
+Doc 10 §Phase 9's slice carried by 9a, verbatim: *"a stranger installs via the
+one-liner on a clean PVE box … and self-updates to the next tagged release —
+without reading source code."* Doc 10's Phase 9 was one undifferentiated
+"Deliver" block; the design spec split it into 9a–9d and this is the first.
+16 tasks, full details in `docs/notes/phase-9a-install-update.md`.
+
+**What shipped, per subsystem:**
+- **Version**: `proxploy.__version__` is the single source of truth at
+  `1.0.0`; `build_release.sh` overwrites the staged copy from `--version` so
+  artifact, manifest and tag cannot disagree
+- **Release format**: `services/release.py` — Ed25519 `verify_manifest` over
+  the **raw manifest bytes before any parsing**, `verify_artifact` on sha256
+  and size, `is_upgrade` refusing downgrades. Signature → checksum → unpack,
+  and the shell side uses the same order deliberately: a format with two
+  implementations is where a format drifts
+- **Channel client**: `services/updater.py::check` plus `detect_shape()` →
+  `systemd` | `docker` | `dev` and a `CAN_SELF_APPLY` table
+- **Self-identity**: the lifespan persists `self.ctid`, closing a
+  `selfguard.py` hook that had been inert since Phase 4 — the app could not
+  previously recognise its own container, so "don't destroy the CT you are
+  talking to" was a rule with no subject
+- **Update API**: `GET /meta/update` reports current/available/can-self-apply;
+  `POST /meta/update` launches the updater via `systemd-run` **outside** the
+  app's cgroup, because the script restarts `proxploy.service` and anything
+  inside that cgroup is killed halfway through, leaving the symlink swapped
+  and nothing serving
+- **Layout + installer**: immutable `/opt/proxploy/releases/<version>/` each
+  with its own venv, `current` as the symlink a switch or rollback moves, data
+  and secrets outside the release tree. `install.sh` is both halves of the
+  one-liner — CT create and self-push on the PVE host, then packages, service
+  user, verified unpack, unit, and Caddy in front with `tls internal` fallback
+- **Updater**: `packaging/proxploy-update` — backup *before* download, verify
+  *before* unpack, migrate *before* switch, health *after* switch, roll back
+  on any failure from the switch onward. The ordering is the design
+- **Docker shape**: image + compose file that detect they are a container and
+  instruct rather than self-apply
+- **Frontend**: Settings update card — check, apply, poll, and a docker branch
+  that states the boundary instead of hiding the button
+
+**Known gaps, stated plainly:**
+- **No real Proxmox node here.** The PVE half is proven against a fake `pct`
+  that asserts the expected create call; `pct create` on real hardware is
+  unproven. Same gap every phase since 4 has recorded
+- **No real release channel.** Everything ran against a local `file://`
+  channel signed with a throwaway key — spec D4 keeps publication out of
+  implementation on purpose
+- **The release private key does not exist yet** and
+  `backend/proxploy/release_pubkey.pem` ships a **placeholder**. Replacing it
+  is Step 1 of `docs/runbooks/publishing-a-release.md`. The public key ships
+  *inside* the artifact, so rotating it requires publishing a release — the
+  same bootstrap property doc 09 records for the entitlement key
+- **Docker installs cannot self-apply, by design, not by omission** — 409 with
+  the `docker compose pull` instruction
+- **Task 8 (Caddy TLS) has no unit test**, by intent; the container harness
+  serving real HTTPS is the only assertion that means anything about a TLS front
+- **F1 (no route-level `errorComponent`)** carried forward from Phase 8 — 9b
+
+**The two bugs worth recording:**
+- The installer had **never executed** before its harness; the first real run
+  found seven bugs, each fixed at the shared root rather than in the caller
+  that surfaced it. The sharpest: `pip install` without `-e` moved `proxploy/`
+  into site-packages, so `main.py`'s `parents[2]/frontend/dist` resolved
+  *inside the venv* and `/` served nothing while `/meta/health` answered fine.
+  The API being up is not the same claim as the app being usable, and only one
+  of those was being tested
+- **Rollback restored the database as `root:root`.** `cp -a` from a backup
+  written by `sqlite3 .backup` running as root, against a unit running as
+  `User=proxploy` → crash-loop on `attempt to write a readonly database`. Data
+  restored perfectly, box still down — the exact outcome the rollback path
+  exists to prevent, reached by way of a rollback that "worked". Now: stop the
+  unit before restoring (the poisoned version crash-loops on `RestartSec=3`
+  and races it), `reset-failed` to clear systemd's start-limit, plain `cp` +
+  explicit `chown`, and drop the stale `-wal`/`-shm` belonging to the database
+  being replaced rather than let sqlite replay them over a different file
+
+**Verification:**
+- `dod_verify_phase9a.py` (throwaway, not committed — `backend/.gitignore`
+  carries `dod_verify_phase*.py`): all four checks OK, exit 0, run **three
+  times** (twice by the implementer, once independently), byte-identical every
+  time. It surfaces only the harnesses' `OK:` lines, so the runs are identical
+  outright rather than "modulo timings"
+- Backend: **810 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m "not
+  pve_integration and not e2e"` (baseline entering the phase: 784)
+- Frontend: **205 passed across 37 files** — `npx vitest run
+  --no-file-parallelism` (baseline 199 across 36); build clean; lint exit 0,
+  30 warnings, 0 errors, pre-existing warning classes only
+- Shell harnesses, all PASS: `test_install.sh` (unit active, app answers, TLS
+  serves, SPA serves, re-run idempotent), `test_upgrade_rollback.sh` (1.0.0 →
+  1.0.1 with data intact and a backup taken; poisoned 1.0.2 refused and rolled
+  back to 1.0.1, healthy), `test_pve_half.sh` (expected `pct create`). Three
+  harnesses, not the four the plan counted — `channel_fixture.sh` is a fixture
+  builder they all consume, not a harness
+- `shellcheck -x -P SCRIPTDIR` clean, exit 0, over `install.sh`,
+  `proxploy-update`, `packaging/lib/*.sh`, `packaging/tests/*.sh`,
+  `build_release.sh`
+- CI grew three jobs: `scripts`, `install-harness`, `backend-py311` — the last
+  because Task 12 lowered `requires-python` to 3.11 for the real Debian 12 LXC
+  target, and a supported-version claim nothing tests is not a claim
+- Migrations: `alembic heads` = **`6cf6a0722d23`**, unchanged — **zero
+  migrations this phase**, as planned
