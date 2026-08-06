@@ -8,6 +8,7 @@ from pydantic import BaseModel, field_validator
 from proxploy.api.deps import authorize, get_db, scope_host
 from proxploy.models import Host, HostCredential, Team, User, utcnow
 from proxploy.services.audit import write_audit
+from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        token_public_meta)
 from proxploy.services.sshkeys import generate_ed25519
@@ -203,3 +204,52 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="host.test",
                 target_type="host", target_id=h.id, result=result)
     return {"id": h.id, "status": h.status, "pve_version": h.pve_version}
+
+
+@router.post("/{host_id}/ssh/verify")
+async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
+                     user: User = Depends(_manage)):
+    """Prove the enrolled key actually opens a root shell on the node.
+
+    The wizard used to take the operator's word for it, so a mis-pasted
+    authorized_keys line surfaced at the first app install instead of here,
+    far from its cause. `true` is the whole command: this asks one question
+    — does the key authenticate and can we run anything — and nothing else.
+    """
+    host = db.query(Host).filter_by(id=host_id).one_or_none()
+    if host is None:
+        raise HTTPException(404, "host not found")
+    cred = db.query(HostCredential).filter_by(host_id=host_id,
+                                              kind="ssh_key").one_or_none()
+    if cred is None:
+        raise HTTPException(502, {"error": "no_key",
+                                  "detail": "this host has no enrolled SSH key"})
+
+    def on_new_fingerprint(fp: str) -> None:
+        host.ssh_host_key_fingerprint = fp
+
+    executor = SSHExecutor(connect_factory=request.app.state.ssh_connect_factory)
+    try:
+        code = await executor.run_for_host(
+            request.app.state.sessionmaker, request.app.state.secretstore,
+            host_id, host.address, "true",
+            pinned_fingerprint=host.ssh_host_key_fingerprint,
+            on_new_fingerprint=on_new_fingerprint, timeout_s=20.0)
+    except SSHHostKeyMismatch as e:
+        raise HTTPException(502, {"error": "host_key_mismatch", "detail": str(e)})
+    except LookupError as e:
+        raise HTTPException(502, {"error": "no_key", "detail": str(e)})
+    except TimeoutError as e:
+        raise HTTPException(502, {"error": "timeout", "detail": str(e)})
+    except OSError as e:
+        raise HTTPException(502, {"error": "unreachable", "detail": str(e)})
+
+    if code != 0:
+        raise HTTPException(502, {"error": "command_failed",
+                                  "detail": f"the key authenticated but `true` exited {code}"})
+    cred.ssh_verified_at = utcnow()
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="host.ssh_verify",
+                target_type="host", target_id=host_id,
+                ip=request.client.host if request.client else None)
+    return {"verified": True, "verified_at": cred.ssh_verified_at.isoformat()}

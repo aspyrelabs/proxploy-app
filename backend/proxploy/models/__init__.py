@@ -146,6 +146,10 @@ class HostCredential(TimestampMixin, Base):
     key_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     public_meta: Mapped[str | None] = mapped_column(Text)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Set by POST /hosts/{id}/ssh/verify. NULL means "never confirmed working"
+    # — which is exactly what the onboarding wizard's authorize step reads to
+    # know whether it still has something to ask the operator for.
+    ssh_verified_at: Mapped[datetime | None] = mapped_column(DateTime)
     __table_args__ = (UniqueConstraint("host_id", "kind", name="ux_host_creds"),)
 
 
