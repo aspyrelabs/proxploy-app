@@ -236,6 +236,32 @@ purpose: §6 above is left as originally written (per this file's own rule
 against silently rewriting history), and this amendment is the record that
 its premise no longer matches the product.
 
+### 2026-08-06 resolution: path 2 — source-available stands, private is temporary
+
+Aspyre Labs chose **option 2 above**, same day: Proxploy **is**
+source-available as §6 describes, and the repository will be made public.
+Private is a **staging state, not a posture** — it holds until the owner
+judges the project ready to launch, and is not a decision to close the
+source.
+
+Consequences, so later work does not re-litigate this:
+
+- **§6 above stands as originally written.** Its premise is deferred, not
+  falsified. Do not rewrite it.
+- **Entitlement enforcement is bounded by §6's own concession.** Anyone can
+  patch `Entitlements.enabled()` once the source is public, and this
+  document accepts that. Enforcement work should be proportionate to that
+  reality — enough to make the honest path obvious, not an arms race §6
+  already declined to enter.
+- **Distribution stays as Phase 9a designed it**: a public repo plus GitHub
+  Releases. No alternative artifact host is needed, and the install URLs the
+  9c docs print are the ones that will work.
+- **Trust and marketing copy must not claim source-available until it is
+  true.** `proxploy-docs`' trust page currently states "not source-available
+  today", which is accurate now and **must be updated as part of going
+  public** — not before. Publishing the claim ahead of the repo would make
+  it false in the window between.
+
 ## 7. Proxmox API version drift (PVE 8 / PVE 9)
 
 **Risk.** We manage hosts across PVE major versions with differing API
