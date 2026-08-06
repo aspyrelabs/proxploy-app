@@ -37,10 +37,17 @@ design, start at `docs/00-decision-brief.md` and read `docs/01` through
 
 ## Install / deploy
 
+> **Not installable today.** No release has been published (see "Status"
+> above). The commands below are what the finished installer accepts and
+> what Phase 9a proved end-to-end against local fixtures — they are not yet
+> usable against the real `proxploy.com` channel, because there is nothing
+> published there to fetch. `docs/runbooks/publishing-a-release.md` is what
+> makes them real.
+
 Proxploy has three install shapes, all built in Phase 9a
 (`docs/notes/phase-9a-install-update.md`, `install.sh --help`). None of them
 apply to *this* repo as a hosted deployment — they're how the product lands
-on a customer's own hardware.
+on a customer's own hardware, once a release exists.
 
 ### 1. LXC on a Proxmox node (the one-liner)
 
@@ -53,8 +60,7 @@ CT and installs Proxploy inside it — OS packages, a dedicated system user, a
 versioned release layout under `/opt/proxploy/releases/<version>/`, the
 `proxploy.service` systemd unit, and Caddy in front with a real Let's
 Encrypt certificate (`--hostname`) or a self-signed `tls internal` cert
-otherwise. See "Status" above: this doesn't work until a release is
-published.
+otherwise.
 
 ### 2. systemd on a plain Debian box
 
@@ -75,9 +81,11 @@ docker compose up -d
 `packaging/docker/Dockerfile` builds the frontend, then an editable install
 of the backend into a slim Python image; `packaging/docker/compose.yml`
 maps port 8006 on the host to 8000 in the container and persists
-`/var/lib/proxploy` in a named volume. **This shape deliberately cannot
-self-update** — a container replacing its own image from inside is how you
-lose the container. `POST /meta/update` returns `409` with the fix:
+`/var/lib/proxploy` in a named volume. This pulls `ghcr.io/aspyrelabs/
+proxploy:latest`, which — same caveat as above — has never been published.
+**This shape also deliberately cannot self-update** once it exists — a
+container replacing its own image from inside is how you lose the
+container. `POST /meta/update` returns `409` with the fix:
 
 ```bash
 docker compose pull && docker compose up -d
@@ -170,10 +178,13 @@ cd backend
 .venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"
 ```
 
-`pve_integration` needs a disposable live Proxmox host
-(`PROXPLOY_TEST_PVE_*`) that doesn't exist in this environment; pytest's
-`e2e` marker is a cross-repo roundtrip against a local `proxploy-api`, not
-the Playwright suite below — don't confuse the two.
+831 passed, 2 skipped, 4 deselected. `pve_integration` needs a disposable
+live Proxmox host (`PROXPLOY_TEST_PVE_*`) that doesn't exist in this
+environment; pytest's `e2e` marker is a cross-repo roundtrip against a local
+`proxploy-api`, not the Playwright suite below — don't confuse the two.
+`test_backups_sync.py::test_concurrent_stale_reads_enqueue_only_one_sync` is
+a known flake (a real concurrency test, timing-sensitive on a loaded box) —
+if it's the only failure, rerun before assuming something broke.
 
 Frontend unit tests — **the `--no-file-parallelism` flag is required**;
 suites flake under vitest's default parallelism on this box:
