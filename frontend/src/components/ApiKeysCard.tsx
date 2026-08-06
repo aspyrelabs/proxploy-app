@@ -5,6 +5,7 @@ import { api, ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useApiKeys } from '../api/apikeys'
 import type { ApiKeyCreated, ApiKeyRow } from '../api/apikeys'
+import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 
 // Mirrors backend/proxploy/services/authz.py::PERMISSIONS' resource column.
@@ -119,39 +120,44 @@ export function ApiKeysCard() {
             </div>
           )}
 
-          <table className="w-full text-left text-[13px]">
-            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-              <th className="pb-2">Name</th><th>Key</th><th>Scopes</th>
-              <th>Last used</th><th>State</th><th /></tr></thead>
-            <tbody>
-              {(keys.data ?? []).map((k) => (
-                <tr key={k.id} className="border-t border-line-soft hover:bg-panel-2">
-                  <td className="py-2">{k.name}</td>
-                  <td className="font-mono text-text-2">{k.prefix}…</td>
-                  <td className="font-mono text-[11.5px] text-text-3">
-                    {k.scopes.length ? k.scopes.join(', ') : 'full rights of your role'}
-                  </td>
-                  <td className="text-text-3">
-                    {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'never'}
-                  </td>
-                  <td className={k.revoked_at ? 'text-text-3' : 'text-green'}>
-                    {k.revoked_at ? 'revoked' : 'active'}
-                  </td>
-                  <td className="py-2 text-right">
-                    {!k.revoked_at && (
-                      <Button variant="danger" className="px-2 py-1 text-[11px]"
-                        disabled={revokeKey.isPending} onClick={() => revoke(k)}>
-                        Revoke
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!keys.data?.length && (
-                <tr><td colSpan={6} className="py-4 text-text-3">No API keys yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+          <QueryState query={keys}
+                      emptyTitle="No API keys yet."
+                      emptyNote=""
+                      errorTitle="API keys not readable"
+                      errorNote="Proxploy could not reach the backend to list your API keys.">
+            {(rows) => (
+              <table className="w-full text-left text-[13px]">
+                <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+                  <th className="pb-2">Name</th><th>Key</th><th>Scopes</th>
+                  <th>Last used</th><th>State</th><th /></tr></thead>
+                <tbody>
+                  {rows.map((k) => (
+                    <tr key={k.id} className="border-t border-line-soft hover:bg-panel-2">
+                      <td className="py-2">{k.name}</td>
+                      <td className="font-mono text-text-2">{k.prefix}…</td>
+                      <td className="font-mono text-[11.5px] text-text-3">
+                        {k.scopes.length ? k.scopes.join(', ') : 'full rights of your role'}
+                      </td>
+                      <td className="text-text-3">
+                        {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'never'}
+                      </td>
+                      <td className={k.revoked_at ? 'text-text-3' : 'text-green'}>
+                        {k.revoked_at ? 'revoked' : 'active'}
+                      </td>
+                      <td className="py-2 text-right">
+                        {!k.revoked_at && (
+                          <Button variant="danger" className="px-2 py-1 text-[11px]"
+                            disabled={revokeKey.isPending} onClick={() => revoke(k)}>
+                            Revoke
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </QueryState>
 
           {adding && (
             <div className="mt-4 border-t border-line-soft pt-4">

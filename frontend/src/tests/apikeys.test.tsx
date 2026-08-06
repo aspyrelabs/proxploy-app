@@ -10,6 +10,7 @@ const calls: Call[] = []
 let tokensAllowed = true
 let listRows: any[] = []
 let createStatus: 201 | 422 = 201
+let listError = false
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -25,7 +26,10 @@ vi.mock('../api/client', () => ({
     if (path === '/entitlements') {
       return Promise.resolve({ tier: 'builtin', features: { 'api.tokens': tokensAllowed }, grace: null })
     }
-    if (path === '/api-keys' && !method) return Promise.resolve(listRows)
+    if (path === '/api-keys' && !method) {
+      if (listError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
+      return Promise.resolve(listRows)
+    }
     if (path === '/api-keys' && method === 'POST') {
       const body = opts?.body ? JSON.parse(String(opts.body)) : null
       calls.push({ path, method, body })
@@ -59,6 +63,7 @@ describe('ApiKeysCard', () => {
     toastError.mockClear()
     tokensAllowed = true
     createStatus = 201
+    listError = false
     listRows = [
       { id: 1, name: 'CI runner', prefix: 'ppk_zzzz', scopes: ['read'],
         expires_at: null, last_used_at: '2026-08-01T12:00:00', revoked_at: null,
@@ -73,6 +78,19 @@ describe('ApiKeysCard', () => {
     expect(await screen.findByText('Not included in your plan.')).toBeInTheDocument()
     expect(calls.some((c) => c.path === '/api-keys')).toBe(false)
     expect(screen.queryByRole('button', { name: 'New key' })).toBeNull()
+  })
+
+  it('says the keys could not be read rather than showing "no API keys yet"', async () => {
+    listError = true
+    wrap()
+    expect(await screen.findByText(/API keys not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No API keys yet.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-keys copy when there genuinely are none', async () => {
+    listRows = []
+    wrap()
+    expect(await screen.findByText('No API keys yet.')).toBeInTheDocument()
   })
 
   it('lists existing keys showing prefix + ellipsis, scopes, and last-used', async () => {

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useSessions } from '../api/account'
 import type { SessionRow } from '../api/account'
+import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 
 const detailOf = (e: unknown) =>
@@ -39,35 +40,40 @@ export function SessionsCard() {
           </Button>
         )}
       </div>
-      <table className="w-full text-left text-[13px]">
-        <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-          <th className="pb-2">IP</th><th>Device</th><th>Started</th><th>Last seen</th><th /></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
-              <td className="py-2 font-mono">{r.ip ?? '—'}</td>
-              <td className="text-text-2">{r.user_agent ?? '—'}</td>
-              <td className="text-text-3">{new Date(r.created_at).toLocaleString()}</td>
-              <td className="text-text-3">
-                {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '—'}
-              </td>
-              <td className="py-2 text-right">
-                {r.current ? (
-                  <span className="text-[11px] text-green">current</span>
-                ) : (
-                  <Button variant="danger" className="px-2 py-1 text-[11px]"
-                    disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>
-                    Sign out
-                  </Button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {!rows.length && (
-            <tr><td colSpan={5} className="py-4 text-text-3">No sessions.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <QueryState query={sessions}
+                  emptyTitle="No sessions."
+                  emptyNote=""
+                  errorTitle="Sessions not readable"
+                  errorNote="Proxploy could not reach the backend to list your sessions.">
+        {(list) => (
+          <table className="w-full text-left text-[13px]">
+            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+              <th className="pb-2">IP</th><th>Device</th><th>Started</th><th>Last seen</th><th /></tr></thead>
+            <tbody>
+              {list.map((r) => (
+                <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
+                  <td className="py-2 font-mono">{r.ip ?? '—'}</td>
+                  <td className="text-text-2">{r.user_agent ?? '—'}</td>
+                  <td className="text-text-3">{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="text-text-3">
+                    {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '—'}
+                  </td>
+                  <td className="py-2 text-right">
+                    {r.current ? (
+                      <span className="text-[11px] text-green">current</span>
+                    ) : (
+                      <Button variant="danger" className="px-2 py-1 text-[11px]"
+                        disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>
+                        Sign out
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </QueryState>
     </section>
   )
 }

@@ -9,6 +9,7 @@ type Call = { path: string; method?: string }
 const calls: Call[] = []
 let sessionRows: Array<{ id: number; ip: string | null; user_agent: string | null
   created_at: string; last_seen_at: string | null; current: boolean }> = []
+let sessionsError = false
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -21,7 +22,10 @@ vi.mock('../api/client', () => ({
   ApiError,
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
-    if (path === '/auth/sessions' && !method) return Promise.resolve(sessionRows)
+    if (path === '/auth/sessions' && !method) {
+      if (sessionsError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
+      return Promise.resolve(sessionRows)
+    }
     const del = path.match(/^\/auth\/sessions\/(\d+)$/)
     if (del && method === 'DELETE') {
       calls.push({ path, method })
@@ -44,6 +48,7 @@ describe('SessionsCard', () => {
   beforeEach(() => {
     calls.length = 0
     toastError.mockClear()
+    sessionsError = false
     sessionRows = [
       { id: 1, ip: '10.0.0.1', user_agent: 'Chrome', created_at: '2026-08-01T00:00:00',
         last_seen_at: '2026-08-04T00:00:00', current: true },
@@ -54,6 +59,19 @@ describe('SessionsCard', () => {
     ]
   })
   afterEach(() => vi.restoreAllMocks())
+
+  it('says the sessions could not be read rather than showing "no sessions"', async () => {
+    sessionsError = true
+    wrap()
+    expect(await screen.findByText(/sessions not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No sessions.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-sessions copy when there genuinely are none', async () => {
+    sessionRows = []
+    wrap()
+    expect(await screen.findByText('No sessions.')).toBeInTheDocument()
+  })
 
   it('lists sessions from GET /auth/sessions and marks the current one', async () => {
     wrap()
