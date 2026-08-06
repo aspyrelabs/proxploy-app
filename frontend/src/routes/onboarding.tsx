@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router'
-import { rootRoute } from '../router'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+// shellRoute's sibling routes import rootRoute from ./shell, never ../router
+// — importing router.tsx here would force its eager createRouter() to run
+// mid-cycle (cluster.tsx and storage.tsx carry the same note).
+import { rootRoute } from './shell'
 import { api } from '../api/client'
 import { Brand, inputCls } from '../components/LoginForm'
 import { HostForm, type HostCreated } from '../components/HostForm'
@@ -19,12 +23,36 @@ export const onboardingRoute = createRoute({
 
 const STEPS = ['Admin account', 'First host', 'Authorize installs', 'Done'] as const
 
-function Wizard() {
+type Onboarding = { admin_exists: boolean; host_added: boolean
+                    ssh_pending: boolean; complete: boolean }
+
+/** Server state decides where you are; the local override only ever moves
+ *  you forward within one session, so a reload re-derives instead of
+ *  restarting. This is the fix for "you already created the admin" being
+ *  reported as "your password is bad". */
+function stepFrom(ob: Onboarding): number {
+  if (!ob.admin_exists) return 0
+  if (!ob.host_added) return 1
+  if (ob.ssh_pending) return 2
+  return 3
+}
+
+export function Wizard() {
   const navigate = useNavigate()
-  const [step, setStep] = useState(0)
+  const qc = useQueryClient()
+  const ob = useQuery({ queryKey: ['onboarding'], queryFn: () => api<Onboarding>('/meta/onboarding') })
+  const [advanced, setAdvanced] = useState<number | null>(null)
+  const step = advanced ?? (ob.data ? stepFrom(ob.data) : 0)
   const [host, setHost] = useState<HostCreated | null>(null)
   const [admin, setAdmin] = useState({ email: '', password: '', display_name: '' })
   const [error, setError] = useState('')
+
+  // Reload re-derives from the server instead of restarting, so a local
+  // "advance" is always paired with invalidating the query it overrides.
+  function advance(n: number) {
+    setAdvanced(n)
+    qc.invalidateQueries({ queryKey: ['onboarding'] })
+  }
 
   async function createAdmin(e: React.FormEvent) {
     e.preventDefault(); setError('')
@@ -32,7 +60,7 @@ function Wizard() {
       await api('/users', { method: 'POST', body: JSON.stringify(admin) })
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: admin.email, password: admin.password }) })
-      setStep(1)
+      advance(1)
     } catch { setError('Could not create the admin account (password: 12+ characters).') }
   }
 
@@ -69,15 +97,26 @@ function Wizard() {
           </form>
         )}
 
-        {step === 1 && <HostForm onCreated={h => { setHost(h); setStep(h.ssh_public_key ? 2 : 3) }} />}
+        {step === 1 && <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? 2 : 3) }} />}
 
-        {step === 2 && host?.authorized_keys_line && (
+        {step === 2 && (
           <div className="space-y-3">
-            <p className="text-[13px] text-text-2">{host.consent_note}</p>
-            <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{`echo '${host.authorized_keys_line}' >> /root/.ssh/authorized_keys`}</pre>
+            {/* On a fresh reload mid-wizard, host is only known server-side
+                (via ssh_pending) — the key line itself was shown once, at
+                creation, and isn't refetched here. Still show the step
+                rather than nothing. */}
+            <p className="text-[13px] text-text-2">
+              {host?.consent_note ?? 'A key was enrolled for this host. Add it to '
+                + '/root/.ssh/authorized_keys on the node, then confirm below.'}
+            </p>
+            {host?.authorized_keys_line && (
+              <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{`echo '${host.authorized_keys_line}' >> /root/.ssh/authorized_keys`}</pre>
+            )}
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => navigator.clipboard.writeText(host.authorized_keys_line!)}>Copy key line</Button>
-              <Button onClick={() => setStep(3)}>I have authorized it</Button>
+              {host?.authorized_keys_line && (
+                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(host.authorized_keys_line!)}>Copy key line</Button>
+              )}
+              <Button onClick={() => advance(3)}>I have authorized it</Button>
             </div>
           </div>
         )}
