@@ -296,7 +296,7 @@ def test_verify_reports_a_nonzero_exit_as_command_failed(tmp_path, csrf_header, 
         hid = _host_with_ssh(c, csrf_header)
         r = c.post(f"/api/v1/hosts/{hid}/ssh/verify", headers=csrf_header(c))
     assert r.status_code == 502
-    assert r.json()["detail"]["error"] == "command_failed"
+    assert r.json()["error"] == "command_failed"
 
 
 def test_verify_on_a_host_without_ssh_enrolment_is_no_key(tmp_path, csrf_header, bootstrap_admin):
@@ -317,7 +317,7 @@ def test_verify_on_a_host_without_ssh_enrolment_is_no_key(tmp_path, csrf_header,
         hid = r.json()["id"]
         r = c.post(f"/api/v1/hosts/{hid}/ssh/verify", headers=csrf_header(c))
     assert r.status_code == 502
-    assert r.json()["detail"]["error"] == "no_key"
+    assert r.json()["error"] == "no_key"
 ```
 
 **Read `backend/tests/fakes/ssh.py` first** and match `FakeSSHConnection`'s real constructor signature — the arguments above come from `tests/test_app_update_job.py:52-66` but confirm them rather than trusting this plan.
@@ -1304,7 +1304,7 @@ const KIND_COPY: Record<string, string> = {
 const errText = (e: unknown) => {
   if (!(e instanceof ApiError)) return 'Request failed.'
   const body = e.body as { error?: string; detail?: string | { error?: string } } | null
-  const kind = typeof body?.detail === 'object' ? body.detail?.error : body?.error
+  const kind = body?.error
   if (kind && KIND_COPY[kind]) return KIND_COPY[kind]
   if (e.status === 409) return 'A host with that name already exists.'
   if (e.status === 403) return 'Managing more than one host needs a paid tier.'
@@ -1312,7 +1312,11 @@ const errText = (e: unknown) => {
 }
 ```
 
-FastAPI nests a dict `detail` one level deep (`{"detail": {"error": …}}`), which is why the reader above checks both shapes. **Verify the actual JSON body against a real response** from Task 1 before trusting either branch.
+**The body is flat, not nested.** Plain FastAPI would nest a dict `detail` one
+level deep, but `main.py::problem_handler` flattens it into the top-level
+RFC7807 body — so a kind arrives as `body.error`, and `body.detail` is the
+human string. Established by Task 1 against a real response (commit `3763b7a`),
+not assumed.
 
 - [ ] **Step 4: Add the skip**
 
@@ -1374,7 +1378,7 @@ Replace the `I have authorized it` button:
   } catch (e) {
     // A mis-pasted key used to surface at the first app install instead of
     // here, far from its cause.
-    setVerifyError(e instanceof ApiError && (e.body as any)?.detail?.error === 'host_key_mismatch'
+    setVerifyError(e instanceof ApiError && (e.body as any)?.error === 'host_key_mismatch'
       ? "The node's SSH host key changed since Proxploy first saw it. Stop and investigate."
       : 'Not authorized yet — Proxploy still cannot open a root shell on the node. '
         + 'Check the line was added to /root/.ssh/authorized_keys and saved.')
