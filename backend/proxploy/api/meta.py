@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from proxploy import __version__
 from proxploy.api.deps import authorize, get_db
-from proxploy.models import Host, User
+from proxploy.models import Host, HostCredential, User
 from proxploy.services import oidc, updater
 from proxploy.services.audit import write_audit
 from proxploy.services.settings import get_setting
@@ -37,6 +37,12 @@ def version(request: Request, user=Depends(_read)):
 def onboarding(request: Request, db=Depends(get_db)):
     return {"admin_exists": db.query(User).count() > 0,
             "host_added": db.query(Host).count() > 0,
+            # An enrolled-but-unverified key is the wizard's authorize step
+            # still being owed an answer (Task 2). Verified or absent, there
+            # is nothing left to ask.
+            "ssh_pending": db.query(HostCredential).filter_by(kind="ssh_key")
+                             .filter(HostCredential.ssh_verified_at.is_(None))
+                             .count() > 0,
             "complete": bool(get_setting(db, "onboarding.complete", False)),
             # Task 11: login page's pre-session SSO-button gate.
             "oidc": oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")}

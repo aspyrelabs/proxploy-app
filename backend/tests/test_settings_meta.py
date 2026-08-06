@@ -1,6 +1,7 @@
 def test_onboarding_state_progression(client, csrf_header, bootstrap_admin):
     r = client.get("/api/v1/meta/onboarding")
-    assert r.json() == {"admin_exists": False, "host_added": False, "complete": False,
+    assert r.json() == {"admin_exists": False, "host_added": False, "ssh_pending": False,
+                        "complete": False,
                         "oidc": False}  # Task 11: unconfigured OIDC -> False
 
     bootstrap_admin(client)
@@ -10,6 +11,39 @@ def test_onboarding_state_progression(client, csrf_header, bootstrap_admin):
                      headers=csrf_header(client))
     assert r.status_code == 200
     assert client.get("/api/v1/meta/onboarding").json()["complete"] is True
+
+
+def test_onboarding_reports_ssh_pending_until_verified(tmp_path, csrf_header, bootstrap_admin):
+    """The wizard derives its step from this; an unverified key means the
+    authorize step still has something to ask for."""
+    from fastapi.testclient import TestClient
+
+    from proxploy.config import Settings
+    from proxploy.main import create_app
+    from tests.fakes.pve import FakePVE, make_fake_factory
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+
+    fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc",
+                             stdout_lines=["ok"], stderr_lines=[], exit_status=0)
+    s = Settings(db_url=f"sqlite:///{tmp_path}/sp.db", data_dir=tmp_path,
+                 master_key_file=tmp_path / "master.key")
+    app = create_app(s, proxmox_factory=make_fake_factory(FakePVE()),
+                     ssh_factory=make_fake_connect_factory(fake))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts", headers=csrf_header(c), json={
+            "name": "pve-01", "address": "https://10.0.0.5:8006",
+            "token_id": "proxploy@pve!t", "token_secret": "s",
+            "verify_tls": False, "ssh_enroll": True, "ssh_consent": True})
+        assert r.status_code == 201, r.text
+        hid = r.json()["id"]
+
+        assert c.get("/api/v1/meta/onboarding").json()["ssh_pending"] is True
+
+        r = c.post(f"/api/v1/hosts/{hid}/ssh/verify", headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+
+        assert c.get("/api/v1/meta/onboarding").json()["ssh_pending"] is False
 
 
 def test_settings_crud_hides_enc_and_audits(client, csrf_header, bootstrap_admin):
