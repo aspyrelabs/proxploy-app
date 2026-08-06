@@ -1,9 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+let nodesResult: 'ok' | 'empty' | 'error' = 'ok'
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
+    if (path === '/cluster/nodes' && nodesResult !== 'ok') {
+      if (nodesResult === 'error') return Promise.reject(new Error('boom'))
+      return Promise.resolve([])
+    }
     if (path === '/cluster/summary') {
       return Promise.resolve({
         updated_at: '2026-07-29T00:00:00Z',
@@ -44,12 +50,35 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 
 import { ClusterPage } from '../routes/cluster'
 
+const withQuery = (ui: React.ReactNode) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
+
 describe('ClusterPage', () => {
+  beforeEach(() => { nodesResult = 'ok' })
+
   it('renders rings, counts and node cards from the API', async () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(<QueryClientProvider client={qc}><ClusterPage /></QueryClientProvider>)
+    withQuery(<ClusterPage />)
     expect(await screen.findByText('host-01')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
     expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
+  })
+
+  it('says the nodes could not be read rather than showing "no nodes yet"', async () => {
+    // The bug this task exists to fix: a failed fetch used to render as a
+    // bare, message-less <div> — indistinguishable from a fresh install
+    // with zero hosts.
+    nodesResult = 'error'
+    withQuery(<ClusterPage />)
+    expect(await screen.findByText(/nodes not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument()
+  })
+
+  it('tells a fresh install there are no nodes yet, not nothing at all', async () => {
+    nodesResult = 'empty'
+    withQuery(<ClusterPage />)
+    expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
+    expect(screen.queryByText(/nodes not readable/i)).not.toBeInTheDocument()
   })
 })

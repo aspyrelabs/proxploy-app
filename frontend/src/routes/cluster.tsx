@@ -13,6 +13,7 @@ import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LivePulse } from '../components/LiveProvider'
 import { NodeCard } from '../components/NodeCard'
+import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
@@ -77,13 +78,14 @@ export function UpdateAllButton() {
 
 export function ClusterPage() {
   const { data: summary } = useSummary()
-  const { data: nodes } = useNodes()
-  const { data: apps } = useQuery({
+  const nodesQuery = useNodes()
+  const nodes = nodesQuery.data
+  const appsQuery = useQuery({
     queryKey: ['apps', {}],
     queryFn: () => api<AppRow[]>('/apps'),
     refetchInterval: 30_000,
   })
-  const { data: vms } = useQuery({
+  const vmsQuery = useQuery({
     queryKey: ['vms', {}],
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
@@ -120,8 +122,18 @@ export function ClusterPage() {
           stops={['#A78BFA', '#6D5AE6']} />
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-        {(nodes ?? []).map((n) => <NodeCard key={n.host_id} node={n} />)}
+      <div className="mt-5">
+        <QueryState query={nodesQuery}
+                    emptyTitle="No nodes yet"
+                    emptyNote="Proxmox nodes appear here once a host is added."
+                    errorTitle="Nodes not readable"
+                    errorNote="Proxploy could not reach the backend to list your nodes.">
+          {(rows) => (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {rows.map((n) => <NodeCard key={n.host_id} node={n} />)}
+            </div>
+          )}
+        </QueryState>
       </div>
 
       <div className="mt-6">
@@ -133,41 +145,48 @@ export function ClusterPage() {
             <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
           </div>
         </div>
-        {apps && apps.length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {apps.slice(0, 8).map((a) => <AppCard key={a.id} app={a} />)}
-          </div>
-        ) : (
-          <EmptyState title="No apps yet"
-            note="Installed or adopted apps appear here. The App Store lands in Phase 4." />
-        )}
+        <QueryState query={appsQuery}
+                    emptyTitle="No apps yet"
+                    emptyNote="Installed or adopted apps appear here. The App Store lands in Phase 4."
+                    errorTitle="Apps not readable"
+                    errorNote="Proxploy could not reach the backend to list your apps.">
+          {(rows) => (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {rows.slice(0, 8).map((a) => <AppCard key={a.id} app={a} />)}
+            </div>
+          )}
+        </QueryState>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className={card}>
           <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
-          {vms && vms.length > 0 ? (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="text-[11px] uppercase text-text-3">
-                  <th className="pb-2 font-medium">Name</th>
-                  <th className="pb-2 font-medium">Node</th>
-                  <th className="pb-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vms.slice(0, 4).map((v) => (
-                  <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2 font-mono">{v.name}</td>
-                    <td className="py-2 text-text-2">{v.host_name}</td>
-                    <td className="py-2"><StatusPill status={v.status} /></td>
+          <QueryState query={vmsQuery}
+                      emptyTitle="No VMs discovered"
+                      emptyNote="QEMU guests on connected hosts appear here."
+                      errorTitle="VMs not readable"
+                      errorNote="Proxploy could not reach the backend to list your VMs.">
+            {(rows) => (
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="text-[11px] uppercase text-text-3">
+                    <th className="pb-2 font-medium">Name</th>
+                    <th className="pb-2 font-medium">Node</th>
+                    <th className="pb-2 font-medium">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <EmptyState title="No VMs discovered" note="QEMU guests on connected hosts appear here." />
-          )}
+                </thead>
+                <tbody>
+                  {rows.slice(0, 4).map((v) => (
+                    <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
+                      <td className="py-2 font-mono">{v.name}</td>
+                      <td className="py-2 text-text-2">{v.host_name}</td>
+                      <td className="py-2"><StatusPill status={v.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </QueryState>
         </div>
         <div className={card}>
           <h2 className="mb-1 font-display text-[16px] font-semibold">Network</h2>
@@ -234,16 +253,18 @@ export function NodeDetailPage() {
   const { data: host } = useHostDetail(id)
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   const mem = useMetrics(`host:${id}`, 'mem_bytes', 24)
-  const { data: apps } = useQuery({
+  const nodeAppsQuery = useQuery({
     queryKey: ['apps', { host: id }],
     queryFn: () => api<AppRow[]>(`/apps?host=${id}`),
     refetchInterval: 30_000,
   })
-  const { data: vms } = useQuery({
+  const nodeVmsQuery = useQuery({
     queryKey: ['vms', { host: id }],
     queryFn: () => api<VmRow[]>(`/vms?host=${id}`),
     refetchInterval: 30_000,
   })
+  const apps = nodeAppsQuery.data
+  const vms = nodeVmsQuery.data
   if (!node && !host) return <EmptyState title="Node not found" note="It may have been removed." />
   return (
     <div>
@@ -289,24 +310,38 @@ export function NodeDetailPage() {
         <h2 className="mb-3 font-display text-[16px] font-semibold">
           Guests on this node ({(apps?.length ?? 0) + (vms?.length ?? 0)})
         </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {(apps ?? []).map((a) => <AppCard key={a.id} app={a} />)}
-        </div>
-        {vms && vms.length > 0 && (
-          <div className={`${card} mt-4`}>
-            <table className="w-full text-left text-[13px]">
-              <tbody>
-                {vms.map((v) => (
-                  <tr key={v.id} className="border-t border-line-soft first:border-t-0">
-                    <td className="py-2 font-mono">{v.name}</td>
-                    <td className="py-2 text-text-2">VMID {v.vmid}</td>
-                    <td className="py-2"><StatusPill status={v.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <QueryState query={nodeAppsQuery}
+                    emptyTitle="No apps on this node"
+                    emptyNote="Installed or adopted apps on this node appear here."
+                    errorTitle="Apps not readable"
+                    errorNote="Proxploy could not reach the backend to list apps on this node.">
+          {(rows) => (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {rows.map((a) => <AppCard key={a.id} app={a} />)}
+            </div>
+          )}
+        </QueryState>
+        <QueryState query={nodeVmsQuery}
+                    emptyTitle="No VMs on this node"
+                    emptyNote="QEMU guests on this node appear here."
+                    errorTitle="VMs not readable"
+                    errorNote="Proxploy could not reach the backend to list VMs on this node.">
+          {(rows) => (
+            <div className={`${card} mt-4`}>
+              <table className="w-full text-left text-[13px]">
+                <tbody>
+                  {rows.map((v) => (
+                    <tr key={v.id} className="border-t border-line-soft first:border-t-0">
+                      <td className="py-2 font-mono">{v.name}</td>
+                      <td className="py-2 text-text-2">VMID {v.vmid}</td>
+                      <td className="py-2"><StatusPill status={v.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </QueryState>
       </div>
     </div>
   )
