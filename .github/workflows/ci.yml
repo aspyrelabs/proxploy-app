@@ -74,6 +74,26 @@ jobs:
       - name: run against disposable PVE (skips cleanly when secrets are absent)
         run: python -m pytest tests/ -q -m pve_integration
 
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      # The harness launches the backend itself (frontend/playwright.config.ts
+      # webServer), so it needs a real venv at backend/.venv — the path that
+      # config hardcodes — not just a pip install on the runner python.
+      - run: python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npx playwright test
+        working-directory: frontend
+
   scripts:
     runs-on: ubuntu-latest
     steps:
