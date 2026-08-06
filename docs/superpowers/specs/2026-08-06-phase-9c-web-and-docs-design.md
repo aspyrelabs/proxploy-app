@@ -230,7 +230,44 @@ Either way generation is repeatable and checked in CI, so the reference cannot
 silently drift from the API — the same failure mode §1's link tests guard
 against.
 
-### §5 — Deployment configs, deployed nowhere
+### §5 — The one-liner has to work before it can be documented
+
+Found while planning, and it changes 9c's scope: **the advertised one-liner
+does not work.** `install.sh:21-23` initialises `CHANNEL=""`, `VERSION=""`,
+`PUBKEY=""` with no defaults, and lines 198-199 and 212-214 hard-require all
+three on both the PVE-host and in-container paths. So
+
+```
+curl -fsSL https://proxploy.com/install.sh | bash
+```
+
+— the command in `install.sh`'s own header comment, and the one doc 10's
+Phase 9 DoD is phrased around (*"a stranger installs via the one-liner"*) —
+dies immediately with `--channel is required`.
+
+Nothing caught this because every 9a harness invoked the script with explicit
+flags (`--channel file:///channel/1.0.0 --version 1.0.0 --pubkey
+/channel/release.pem`). The bare piped form was never executed. It is the same
+failure mode 9b hit twice: the tested path and the advertised path were
+different paths.
+
+It cannot be fixed with defaults alone. `--pubkey` has no sane default *by
+design* — 9a's own usage text says *"There is no bundled default: nothing is
+unpacked yet for this script to read a key out of."* The fix is to **embed the
+release public key in `install.sh`**, which is sound precisely because the
+script arrives over TLS from a domain the user already chose to trust, and to
+default `--channel` to the official release URL and `--version` to the
+channel's current release.
+
+The install page's whole job is printing that command, so 9c fixes it rather
+than documenting around it. Documenting a command that fails would be worse
+than documenting nothing.
+
+**This does not publish anything** — it makes the script correct for the day a
+channel exists, and the fix is verifiable now against the local channel fixture
+`packaging/tests/channel_fixture.sh` builds.
+
+### §6 — Deployment configs, deployed nowhere
 
 Both sites get their Dockerfiles and build setup so each is one command from
 live: `proxploy-docs` follows `layerr-docs`'s pinned-node-build →
