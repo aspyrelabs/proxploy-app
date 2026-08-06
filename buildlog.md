@@ -1066,3 +1066,121 @@ tasks across three repos, full details in
   `f8679f2`, `92d86db`, `064a5b2`, `94a4326`; this task's own doc/buildlog
   commit follows); `proxploy-docs` `a2af925..987a6c7` (full history, 10
   commits); `proxploy-web` `6b3608c..3b987cd` (full history, 5 commits)
+
+### 2026-08-06T23:47:23+05:30 — Phase 9d — execute-plan completed
+
+Goal, verbatim from the plan: *"Make the licensing service ready to deploy
+— Postgres, rate limits, a real license-key format, install binding that
+survives a reinstall, a health check that checks something, structured
+logs, and a rotation runbook — without deploying it."* 9 tasks, 8 in
+`proxploy-api`, 1 (Task 8) in `proxploy-app`, full details in
+`docs/notes/phase-9d-api-hardening.md`.
+
+**This closes Phase 9 in full** — 9a (install/update), 9b (onboarding
+polish), 9c (docs + marketing sites), 9d (this). All four sub-phases are
+now shipped and committed to `main` in their respective repos.
+
+**What shipped, per subsystem (all in `proxploy-api` unless noted):**
+- **Postgres replaces SQLite.** `db_url`/`make_engine` point at Postgres
+  unconditionally; `tests/conftest.py` starts a throwaway `postgres:16`
+  container per session (or reuses `PROXPLOY_API_TEST_DSN` in CI) — this
+  box has no Postgres binaries at all, so skip-when-absent would have
+  proven nothing
+- **A real license-key format.** `PPL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`,
+  Crockford Base32, 120-bit payload plus a mod-37 check symbol, validated
+  in `canonical()` before any database lookup; no dual-accept path for the
+  old 64-bit format
+- **`install_id` binding on `refresh`/`revoke`**, and a rebind path on
+  `activate`: a mismatched install gets 403 without any mutation; a
+  reactivation from a *new* `install_id` now rebinds cleanly (200, fresh
+  credential) instead of the old 409
+- **Rate limiting** — `proxploy-app`'s `slowapi` idiom, `activate` at
+  10/minute (the only guessable surface), `refresh`/`revoke` at 20/minute,
+  `/v1/health` unlimited
+- **Structured JSON logging**, from a zero-logging baseline — secrets never
+  appear, a SHA-256 prefix (`handle()`) is used where correlation is
+  genuinely needed
+- **A health check that checks something** — `/v1/health` now runs
+  `SELECT 1` and checks the signing key independently, 503s on either
+  failure; the startup path that used to crash on a missing signing key
+  now catches it and reports through health instead
+- **Key rotation code + runbook** — `gen_signing_key.py` refuses to clobber
+  an existing key without `--force`; `docs/runbooks/
+  rotating-the-signing-key.md` documents the two-step sequence the
+  bundled-trust-set design requires, plus the inverted emergency case
+- **Two `proxploy-app` gaps (Task 8)** — `LicenseClient.revoke()` added,
+  `refresh()` now sends `install_id` (using an install identity
+  `proxploy-app` already had — `entitlements.py::set_license`'s persisted
+  `AppSetting("license.install_id")`); the never-imported
+  `signing.py::load_private_pem` helper deleted
+
+**Findings that mattered:**
+- **All four endpoints had zero authentication when this phase started,
+  and still do — by design.** A shared secret would have to live in
+  `proxploy-app`, the repo that goes public, so it would be extractable
+  with one `grep`; rate limits, key entropy and install binding are the
+  actual defence
+- **License keys were ~64 bits with unlimited guesses**, no rate limiting
+  anywhere — now 120 bits, checked before any lookup touches the database
+- **`refresh`/`revoke` had no install binding at all** — possession of a
+  credential was the whole check
+- **`revoke` had no status filter**, so a revoked licence could be revoked
+  again — inconsistent with `refresh`, now fixed to match
+- **There was no logging whatsoever** — zero hits for `logging` in the
+  package before this phase
+- **`/v1/health` could only ever detect a dead process**, and **a missing
+  signing key crashed startup** with an uncaught `FileNotFoundError` —
+  both fixed together, since the health check is what makes the crash fix
+  debuggable rather than just quieter
+- **Re-activating from a new `install_id` returned 409** — every reinstall,
+  CT rebuild or restore was a support ticket
+- **`test_unknown_license_404` was testing a malformed key**, not an
+  unknown one — the 404 path was never actually exercised until this phase
+  split the test in two
+- **Found during execution:** `slowapi`'s `Limiter` is a module-level
+  singleton, so its counters leaked across tests until `limiter.reset()`
+  was added to the `client` fixture (same fix `proxploy-app` already
+  needed); `RateLimitExceeded` subclasses `HTTPException`, so no custom
+  429 handler was needed here, for a simpler reason than the identical
+  pattern needed one to be checked in `proxploy-app`; two bugs in the
+  plan's own draft tests were caught and fixed by implementers (a
+  `str.replace` that stripped the prefix's dash, and a confusables test
+  that could silently `pytest.skip()` instead of running)
+
+**Known gaps, stated plainly:**
+- **The service has still never run outside tests.** No Dockerfile, no
+  host, no deployment — rate limits, health checks and logs are verified
+  by tests and this phase's DoD script, not by a deployed instance under
+  real traffic
+- **Rotation is proven mechanically, never operationally** — the runbook's
+  two-step sequence has never been executed against a real install,
+  because there are no real installs yet
+- **Everything here protects a system whose protections are currently
+  moot** — `tiers.yaml` keeps `all_entitled: true`, so a stolen token
+  grants exactly what `DEFAULT_FEATURES` already grants unconditionally.
+  It all becomes live the day tiers arm
+- **No deployment, Dockerfile, monitoring backend, or error reporting** —
+  deliberately out of scope, same as every phase before it
+
+**Verification:**
+- `proxploy-api`: **35 passed, 0 skipped** — `.venv/bin/python -m pytest
+  tests/ -q` (baseline entering the phase: 4)
+- `proxploy-app` backend: **831 passed, 2 skipped, 4 deselected** —
+  `.venv/bin/python -m pytest tests/ -q -m "not pve_integration and not
+  e2e"`
+- `dod_verify_phase9d.py` (throwaway, not committed — `proxploy-api/
+  .gitignore` gained a `dod_verify_*` line this phase, it had none before):
+  all four checks OK (key format, install binding, rate limiting,
+  Postgres-not-SQLite), exit 0, run twice, identical output both times
+- Commit ranges: `proxploy-api` `5b933d9..b2253e1` (8 commits; this task's
+  own `.gitignore` commit follows); `proxploy-app` `e574b88..4374251`
+  (4 commits; this task's own notes/buildlog commit follows)
+
+**Phase 9, closed.** 9a made install/update work end to end; 9b polished
+onboarding and proved the stranger journey through a real browser; 9c
+built the docs and marketing sites without deploying them; 9d hardened the
+licensing API for a deployment that, per every phase's own residual-gaps
+section, still hasn't happened. What Phase 9 has not done, cumulatively:
+run anything outside a test process, seen any page with a human eye, or
+exercised any of this against real Proxmox hardware. Those are the honest
+boundaries of what "9-phase SDD build, done" means here.
