@@ -1,7 +1,8 @@
 import { Outlet, createRootRoute, createRoute, redirect } from '@tanstack/react-router'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { LiveProvider } from '../components/LiveProvider'
+import { RouteError } from '../components/RouteError'
 
 export const rootRoute = createRootRoute({ component: () => <Outlet /> })
 
@@ -35,9 +36,24 @@ export const shellRoute = createRoute({
       <AppShell />
     </LiveProvider>
   ),
+  errorComponent: RouteError,
   beforeLoad: async () => {
+    // Left uncaught on purpose: errorComponent above is what renders this
+    // failure now (finding F1). A 500 or an unreachable backend here must not
+    // read as "you have not onboarded" — that would bounce a fully set-up
+    // user back into the wizard.
     const ob = await api<Onboarding>('/meta/onboarding')
     if (!ob.complete) throw redirect({ to: '/onboarding' })
-    try { await api('/auth/me') } catch { throw redirect({ to: '/login' }) }
+    try {
+      await api('/auth/me')
+    } catch (e) {
+      // redirect() throws a Response, not an ApiError, so this check never
+      // catches a redirect thrown above — only a real /auth/me failure lands
+      // here. Only a 401 means "please sign in"; any other failure (a 500,
+      // a network error) is not that, and must reach errorComponent instead
+      // of silently masquerading as a logged-out user.
+      if (e instanceof ApiError && e.status === 401) throw redirect({ to: '/login' })
+      throw e
+    }
   },
 })

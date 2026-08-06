@@ -1,4 +1,5 @@
 import { createRoute, createRouter, redirect } from '@tanstack/react-router'
+import { RouteError } from './components/RouteError'
 import { rootRoute, shellRoute } from './routes/shell'
 
 export { rootRoute, shellRoute }
@@ -29,7 +30,7 @@ export const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
                           storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute]),
 ])
-export const router = createRouter({ routeTree })
+export const router = createRouter({ routeTree, defaultErrorComponent: RouteError })
 
 declare module '@tanstack/react-router' {
   interface Register { router: typeof router }
