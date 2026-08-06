@@ -112,13 +112,119 @@ thing that watches the service.
 
 ### §3 — Credential hardening
 
-- **License-key entropy rises well above the current ~64 bits.** The generator
-  in `scripts/create_license.py` and any format validation change together.
-  Existing keys must keep working — this is a widening, not a migration.
-- **`refresh` and `revoke` bind to `install_id`.** A credential leaked from one
-  machine stops being replayable from another. `activate` already records
-  `install_id`; these two simply start checking it.
-- **No shared API secret**, for the reason in "What this phase is" above.
+**No shared API secret**, for the reason in "What this phase is" above.
+
+#### §3.1 — The license-key format, specified
+
+**Format:** `PPL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` — the literal prefix `PPL-`
+followed by **five groups of five characters**, 25 characters total.
+
+**Alphabet:** Crockford Base32 — `0123456789ABCDEFGHJKMNPQRSTVWXYZ`. It
+excludes `I`, `L`, `O` and `U`, and decoding normalises `I`/`l` → `1` and
+`O`/`o` → `0` and is case-insensitive. That is the property that makes a key
+survive being read aloud, written down, or retyped from a support ticket.
+
+**Entropy: 120 bits.** The first 24 characters are the random payload
+(24 × 5 = 120 bits). Compare the current `PPL-XXXX-XXXX-XXXX-XXXX`: 16 hex
+characters, **64 bits**.
+
+**The 25th character is a Crockford check symbol** (the mod-37 convention,
+using the extended `*~$=U` symbols). It detects every single-character error
+and every adjacent transposition — the two ways humans actually mistype a key.
+It is a typo detector, **not** a security control, and the spec should not be
+read as claiming otherwise: an attacker generates valid checksums trivially.
+Its job is to make a mistyped key fail *locally*.
+
+**Validation order is part of the design, not an implementation detail:**
+
+1. Prefix and length check
+2. Charset check (Crockford, after normalisation)
+3. Check-symbol verification
+4. **Only then** a database lookup
+
+A typo therefore never reaches the database, which is what keeps §2's rate
+limit meaningful — the limiter budget is spent on real guesses, not on
+fat-fingered support cases. The four steps also give four distinct failure
+reasons for logging, all of which are safe to log (a malformed key is not a
+credential).
+
+**Storage stays unsalted SHA-256.** `_h()`'s current approach is correct for a
+120-bit random secret and must not be "upgraded" to bcrypt/argon2 — those exist
+to slow brute force against *low*-entropy human-chosen passwords. Against 120
+bits of randomness there is nothing to slow down, and a KDF would only add
+latency to every activation. State this in the code so a future reviewer does
+not helpfully break it.
+
+**The `PPL-` prefix is deliberate and should stay**: a fixed, greppable prefix
+is what lets secret scanners (GitHub's included) recognise a leaked key.
+
+#### §3.2 — Compatibility: no dual-accept
+
+**The new format is the only format the code accepts.** No dual-accept branch,
+no legacy path, no migration.
+
+The only keys that exist anywhere are in local dev databases and test fixtures.
+Regenerate them against the new format and delete the old generator. Carrying a
+64-bit format forever — and carrying the branch that decides which format a key
+is, which is itself a place bugs live — to preserve throwaway fixtures is the
+wrong trade.
+
+`scripts/create_license.py` emits only the new format. Any fixture or test that
+hardcodes a `PPL-XXXX-XXXX-XXXX-XXXX` string is rewritten.
+
+#### §3.3 — `install_id` binding, both directions
+
+`refresh` and `revoke` currently accept a `refresh_credential` and check
+nothing else. They gain an `install_id` that must match the license's current
+binding.
+
+**Mismatch — rejection, and what it must not do.**
+
+A mismatch returns **the same response as a revoked credential** (`403`, the
+existing shape). This is deliberate: `proxploy-app` already handles that
+response correctly and has since Phase 1. Per doc 07 §8, on a failed refresh
+the app keeps honouring its cached token until `exp`, continues honouring it
+through `grace_until` (~30 days) with a non-blocking banner, and only then
+falls back to `reset_builtin()` — the built-in all-on default map. So a
+mismatch **ages the install down through grace to the floor** rather than
+cutting it off. Nothing crashes, nothing bricks, and no new client-side
+handling is needed because the path already exists.
+
+**A mismatch must never mutate the binding.** Rejecting is the entire action.
+If a mismatch revoked or rebound the license, anyone holding a stolen
+credential could lock the legitimate owner out by deliberately triggering one —
+turning an anti-replay measure into a denial-of-service against the customer.
+
+**Legitimate rebind — the reinstall path.**
+
+This is the case that becomes a support queue if it is not designed, and today
+it is actively broken: **re-activating with a different `install_id` currently
+returns `409`.** A customer who reinstalls on new hardware, rebuilds their CT,
+or restores from backup gets a new `install_id` and is refused.
+
+New behaviour: **`activate` with a known license key and a new `install_id`
+rebinds the license and returns `200`** with a freshly minted
+`refresh_credential`. The prior credential is invalidated at that moment.
+
+This is safe because the license key *is* the owner's credential — anyone
+holding it already owns the license, and there is nothing a rebind grants them
+that activation did not. The `409` was protecting nothing and costing a support
+ticket per reinstall.
+
+Two properties that follow, and both are wanted:
+
+- **The old install degrades, it does not die.** After a rebind its credential
+  is invalid, so its next refresh gets the same `403`, and it ages through
+  grace to the floor exactly as above. Somebody who moves machines does not
+  discover their old box hard-failed.
+- **Rebinds are recorded.** Each one is logged and leaves a trail in
+  `issued_tokens`. A license bouncing between installs is not blocked — while
+  `all_entitled` there is nothing to abuse — but it is visible, which is what
+  makes it actionable later if tiers arm.
+
+Re-activating from the *same* `install_id` keeps its current behaviour: `200`
+with `refresh_credential: null`, idempotent, per the contract note already in
+`api/licenses.py`.
 
 ### §4 — A health check that checks something
 
@@ -185,10 +291,14 @@ consistently.
   stays true. The hardening protects a system whose protections are currently
   moot by design.
 
-## Open item for the plan, not for implementation
+## Decisions closed before planning
 
-§3's license-key widening has to preserve existing keys. There are no
-production keys today — the only ones exist in local dev databases and test
-fixtures — but the plan must state the compatibility approach explicitly rather
-than leaving an implementer to decide whether to migrate, dual-accept, or
-regenerate.
+§3 originally left two things as directions rather than specifications, and
+both are now settled in §3.1–§3.3: the license-key format is stated exactly
+(Crockford Base32, 120-bit payload, mod-37 check symbol, `PPL-` prefix,
+validate-before-DB-lookup), compatibility is resolved as regenerate-only with
+no dual-accept path, and `install_id` binding is specified in both directions —
+mismatch rejects without mutating state and ages the install through grace, and
+a reinstall rebinds cleanly via `activate` instead of hitting today's `409`.
+
+Nothing in this spec is left for an implementer to decide.
