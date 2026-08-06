@@ -56,6 +56,12 @@ def test_create_host_with_ssh_enrolment(pve_client, csrf_header):
     assert all("encrypted_blob" not in cred for cred in detail["credentials"])
     assert any(cred["public_meta"] == "proxploy@pve!mon"
                for cred in detail["credentials"])
+    # The reload case (onboarding wizard step 3): authorized_keys_line is
+    # only ever returned once, from POST /hosts. host_detail must still
+    # surface the same public key line via the ssh_key credential's
+    # public_meta, or a user who reloads mid-authorize can never finish.
+    assert any(cred["kind"] == "ssh_key" and cred["public_meta"] == body["authorized_keys_line"]
+               for cred in detail["credentials"])
 
     # audit rows exist (route-template proof)
     audit = c.get("/api/v1/audit", params={"action": "host.create"}).json()

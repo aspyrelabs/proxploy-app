@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 // — importing router.tsx here would force its eager createRouter() to run
 // mid-cycle (cluster.tsx and storage.tsx carry the same note).
 import { rootRoute } from './shell'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { Brand, inputCls } from '../components/LoginForm'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { Button } from '../components/ui/button'
@@ -25,6 +25,8 @@ const STEPS = ['Admin account', 'First host', 'Authorize installs', 'Done'] as c
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
                     ssh_pending: boolean; complete: boolean }
+type HostDetail = { id: number
+                    credentials: { kind: string; public_meta: string | null }[] }
 
 /** Server state decides where you are; the local override only ever moves
  *  you forward within one session, so a reload re-derives instead of
@@ -46,12 +48,51 @@ export function Wizard() {
   const [host, setHost] = useState<HostCreated | null>(null)
   const [admin, setAdmin] = useState({ email: '', password: '', display_name: '' })
   const [error, setError] = useState('')
+  const [verifyError, setVerifyError] = useState('')
 
   // Reload re-derives from the server instead of restarting, so a local
   // "advance" is always paired with invalidating the query it overrides.
   function advance(n: number) {
     setAdvanced(n)
     qc.invalidateQueries({ queryKey: ['onboarding'] })
+  }
+
+  // authorized_keys_line is only ever returned once, from POST /hosts. A
+  // reload lands here with `host` null — the only way back to that line is
+  // the ssh_key credential's public_meta, which is the same string.
+  const needStoredHost = step === 2 && !host
+  const storedHost = useQuery({
+    queryKey: ['onboarding-host'],
+    queryFn: async () => {
+      const hosts = await api<{ id: number }[]>('/hosts')
+      return hosts[0] ? api<HostDetail>(`/hosts/${hosts[0].id}`) : null
+    },
+    enabled: needStoredHost,
+  })
+  const hostId = host?.id ?? storedHost.data?.id
+  const sshKeyLine = host?.authorized_keys_line
+    ?? storedHost.data?.credentials.find(c => c.kind === 'ssh_key')?.public_meta
+    ?? null
+
+  async function verifySsh() {
+    setVerifyError('')
+    try {
+      // Don't wait on the storedHost query's own timing — the id it would
+      // supply is one more fetch away either way, and this can't run before
+      // ssh_pending said a host exists.
+      const id = hostId ?? (await api<{ id: number }[]>('/hosts'))[0]?.id
+      if (id == null) throw new Error('no host to verify')
+      await api(`/hosts/${id}/ssh/verify`, { method: 'POST' })
+      advance(3)
+    } catch (e) {
+      // A mis-pasted key used to surface at the first app install instead of
+      // here, far from its cause. host_key_mismatch is a security event —
+      // everything else just means "not authorized yet".
+      setVerifyError(e instanceof ApiError && (e.body as any)?.error === 'host_key_mismatch'
+        ? "The node's SSH host key changed since Proxploy first saw it. Stop and investigate."
+        : 'Not authorized yet — Proxploy still cannot open a root shell on the node. '
+          + 'Check the line was added to /root/.ssh/authorized_keys and saved.')
+    }
   }
 
   async function createAdmin(e: React.FormEvent) {
@@ -109,22 +150,19 @@ export function Wizard() {
 
         {step === 2 && (
           <div className="space-y-3">
-            {/* On a fresh reload mid-wizard, host is only known server-side
-                (via ssh_pending) — the key line itself was shown once, at
-                creation, and isn't refetched here. Still show the step
-                rather than nothing. */}
             <p className="text-[13px] text-text-2">
               {host?.consent_note ?? 'A key was enrolled for this host. Add it to '
-                + '/root/.ssh/authorized_keys on the node, then confirm below.'}
+                + '/root/.ssh/authorized_keys on the node, then verify below.'}
             </p>
-            {host?.authorized_keys_line && (
-              <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{`echo '${host.authorized_keys_line}' >> /root/.ssh/authorized_keys`}</pre>
+            {sshKeyLine && (
+              <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{`echo '${sshKeyLine}' >> /root/.ssh/authorized_keys`}</pre>
             )}
+            {verifyError && <p className="text-[12.5px] text-red">{verifyError}</p>}
             <div className="flex gap-2">
-              {host?.authorized_keys_line && (
-                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(host.authorized_keys_line!)}>Copy key line</Button>
+              {sshKeyLine && (
+                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(sshKeyLine)}>Copy key line</Button>
               )}
-              <Button onClick={() => advance(3)}>I have authorized it</Button>
+              <Button onClick={verifySsh}>Verify access</Button>
             </div>
           </div>
         )}

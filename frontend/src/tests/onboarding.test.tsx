@@ -1,21 +1,52 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
                     ssh_pending: boolean; complete: boolean }
+type HostDetail = { id: number
+                    credentials: { kind: string; public_meta: string | null }[] }
 
 let onboarding: Onboarding = { admin_exists: false, host_added: false,
   ssh_pending: false, complete: false }
-function mockOnboarding(ob: Onboarding) { onboarding = ob }
+let hostList: { id: number }[] = []
+let hostDetail: Record<number, HostDetail> = {}
+let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 
-vi.mock('../api/client', () => ({
-  api: vi.fn((path: string) => {
-    if (path === '/meta/onboarding') return Promise.resolve(onboarding)
-    return Promise.resolve(null)
-  }),
-  ApiError: class extends Error {},
-}))
+function mockOnboarding(ob: Onboarding) { onboarding = ob }
+// Simulates the reload case: no in-session host object, only what the
+// server still knows — GET /hosts then GET /hosts/{id}.
+function mockStoredHost(h: HostDetail) { hostList = [{ id: h.id }]; hostDetail[h.id] = h }
+function mockVerifyFailure(body: unknown) { verifyOutcome = { ok: false, body } }
+
+beforeEach(() => {
+  onboarding = { admin_exists: false, host_added: false, ssh_pending: false, complete: false }
+  hostList = []
+  hostDetail = {}
+  verifyOutcome = { ok: true }
+})
+
+vi.mock('../api/client', () => {
+  class ApiErrorImpl extends Error {
+    status: number; body: unknown
+    constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
+  }
+  return {
+    api: vi.fn((path: string) => {
+      if (path === '/meta/onboarding') return Promise.resolve(onboarding)
+      if (path === '/hosts') return Promise.resolve(hostList)
+      if (path.endsWith('/ssh/verify')) {
+        return verifyOutcome.ok
+          ? Promise.resolve({ verified: true, verified_at: 'now' })
+          : Promise.reject(new ApiErrorImpl(502, verifyOutcome.body))
+      }
+      const m = /^\/hosts\/(\d+)$/.exec(path)
+      if (m) return Promise.resolve(hostDetail[Number(m[1])] ?? null)
+      return Promise.resolve(null)
+    }),
+    ApiError: ApiErrorImpl,
+  }
+})
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
@@ -55,7 +86,46 @@ describe('onboarding wizard', () => {
   it('resumes at the authorize step when a key is enrolled but unverified', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
     renderWizard()
-    expect(await screen.findByRole('button', { name: 'I have authorized it' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Verify access' })).toBeInTheDocument()
+  })
+
+  it('will not advance until the key actually works', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, credentials: [] })
+    mockVerifyFailure({ error: 'command_failed', detail: 'the key authenticated but `true` exited 1' })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
+    expect(await screen.findByText(/not authorized yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+  })
+
+  it('calls out a host key mismatch as a security event, distinct from "not yet"', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, credentials: [] })
+    mockVerifyFailure({ error: 'host_key_mismatch', detail: 'fingerprint changed' })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
+    expect(await screen.findByText(/stop and investigate/i)).toBeInTheDocument()
+    expect(screen.queryByText(/not authorized yet/i)).not.toBeInTheDocument()
+  })
+
+  it('advances once the server actually verifies the key', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, credentials: [{ kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAA reload' }] })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
+    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+  })
+
+  it('recovers the authorized_keys line after a reload with no host in session', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, credentials: [
+      { kind: 'api_token', public_meta: 'tok' },
+      { kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAAreload proxploy@pve-01' },
+    ] })
+    renderWizard()
+    expect(await screen.findByText(/ssh-ed25519 AAAAreload/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /copy key line/i })).toBeInTheDocument()
   })
 
   it('starts at the admin step on a truly fresh install', async () => {
