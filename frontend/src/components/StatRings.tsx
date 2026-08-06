@@ -16,7 +16,7 @@ export function Ring({ label, pct, sub, stops }: {
             <stop offset="100%" stopColor={stops[1]} />
           </linearGradient>
         </defs>
-        <circle cx="60" cy="60" r="52" fill="none" stroke="#1d2733" strokeWidth="10" />
+        <circle cx="60" cy="60" r="52" fill="none" stroke="var(--elev)" strokeWidth="10" />
         <circle
           cx="60" cy="60" r="52" fill="none" stroke={`url(#${id})`} strokeWidth="10"
           strokeLinecap="round" strokeDasharray={CIRC}

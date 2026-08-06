@@ -9,7 +9,7 @@ export function UsageBar({ pct, gradient = CPU_GRADIENT }: {
 }) {
   const w = Math.min(100, Math.max(0, pct ?? 0))
   return (
-    <div className="h-1.5 overflow-hidden rounded-full" style={{ background: '#1d2733' }}>
+    <div className="h-1.5 overflow-hidden rounded-full bg-elev">
       <div
         className="h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none"
         style={{ width: `${w}%`, background: gradient }}
