@@ -13,6 +13,7 @@ import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
+import { QueryState } from '../components/QueryState'
 import { Terminal } from '../components/terminal/Terminal'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
@@ -31,11 +32,12 @@ export function AppsPage() {
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(false)
   const [adopting, setAdopting] = useState(false)
-  const { data: hosts } = useQuery({
+  const hostsQuery = useQuery({
     queryKey: ['hosts'],
     queryFn: () => api<HostRow[]>('/hosts'),
   })
-  const { data: apps } = useQuery({
+  const hosts = hostsQuery.data
+  const appsQuery = useQuery({
     queryKey: ['apps', { host: search.host, q: search.q }],
     queryFn: () => {
       const p = new URLSearchParams()
@@ -46,11 +48,13 @@ export function AppsPage() {
     },
     refetchInterval: 30_000,
   })
-  const { data: discovered } = useQuery({
+  const apps = appsQuery.data
+  const discoveredQuery = useQuery({
     queryKey: ['apps', 'discovered'],
     queryFn: () => api<DiscoveredRow[]>('/apps/discovered'),
     refetchInterval: 30_000,
   })
+  const discovered = discoveredQuery.data
 
   const setSearch = (patch: Partial<{ host?: number; q?: string }>) =>
     navigate({ to: '/apps' as never, search: { ...search, ...patch } as never, replace: true })
@@ -65,6 +69,12 @@ export function AppsPage() {
           </div>
         </div>
       </div>
+
+      {discoveredQuery.isError && !dismissed && (
+        <div className={`${card} mb-5`}>
+          <p className="text-[12.5px] text-text-3">Could not check for existing containers to adopt.</p>
+        </div>
+      )}
 
       {discovered && discovered.length > 0 && !dismissed && (
         <div className={`${card} mb-5 border-amber-dim`}>
@@ -114,6 +124,11 @@ export function AppsPage() {
               {h.name}
             </button>
           ))}
+          {hostsQuery.isError && (
+            <span className="border-l border-line px-3 py-1.5 text-[12px] text-red">
+              Could not load hosts
+            </span>
+          )}
         </div>
         <input
           className={inputCls}
@@ -126,14 +141,17 @@ export function AppsPage() {
         </span>
       </div>
 
-      {apps && apps.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {apps.map((a) => <AppCard key={a.id} app={a} />)}
-        </div>
-      ) : (
-        <EmptyState title="No apps match your filter."
-          note="Install from the App Store (Phase 4) or adopt discovered containers." />
-      )}
+      <QueryState query={appsQuery}
+                  emptyTitle="No apps match your filter."
+                  emptyNote="Install from the App Store (Phase 4) or adopt discovered containers."
+                  errorTitle="Apps not readable"
+                  errorNote="Proxploy could not reach the backend to list your apps.">
+        {(rows) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {rows.map((a) => <AppCard key={a.id} app={a} />)}
+          </div>
+        )}
+      </QueryState>
 
       {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}
     </div>
