@@ -1,54 +1,15 @@
-import { expect, request, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
-// Matches playwright.config.ts's `use.baseURL` — kept as a plain constant
-// (not a shared module) since this is a one-file smoke harness.
-const BASE_URL = 'http://127.0.0.1:5173'
-const ADMIN_EMAIL = 'e2e-admin@example.com'
-const ADMIN_PASSWORD = 'e2e-smoke-passphrase-1'
+import { goToNavPage, NAV_PAGES, seedAdmin, signIn } from './helpers'
 
-// SidebarNav's accessible link names, in page order (frontend/src/components/
-// SidebarNav.tsx) — every one of them renders an `<h1>` with the identical
-// text (verified against each route file), so the same list drives both the
-// click and the heading assertion.
-const NAV_PAGES = [
-  'Cluster', 'Apps', 'App Store', 'Virtual Machines',
-  'Storage', 'Network', 'Backups', 'Alerts', 'Settings',
-] as const
-
+// It deliberately skips the wizard's "First host" step: creating a host
+// makes the backend probe a real Proxmox API (backend/proxploy/api/hosts.py
+// `_client(...).version()`) and there is no live Proxmox host here, and
+// there never will be. The shell route's guard (frontend/src/routes/
+// shell.tsx) only checks onboarding.complete, not host_added, so seedAdmin()
+// alone is enough to reach the nav.
 test.beforeAll(async () => {
-  // Seed through the app's own real endpoints — no direct DB/ORM writes.
-  // This mirrors the onboarding wizard's "Admin account" + "Done" steps
-  // (frontend/src/routes/onboarding.tsx: POST /users, POST /auth/login,
-  // PATCH /settings 'onboarding.complete'). It deliberately skips the
-  // wizard's "First host" step: creating a host makes the backend probe a
-  // real Proxmox API (backend/proxploy/api/hosts.py `_client(...).version()`)
-  // and there is no live Proxmox host here, and there never will be. The
-  // shell route's guard (frontend/src/routes/shell.tsx) only checks
-  // onboarding.complete, not host_added, so this is enough to reach the nav.
-  const api = await request.newContext({ baseURL: BASE_URL })
-
-  const primed = await api.get('/api/v1/meta/health')
-  expect(primed.ok(), 'priming GET for the pp_csrf cookie failed').toBeTruthy()
-  const csrf = (await api.storageState()).cookies.find(c => c.name === 'pp_csrf')?.value
-  if (!csrf) throw new Error('seed: pp_csrf cookie missing after the priming request')
-  const headers = { 'X-CSRF-Token': csrf }
-
-  const created = await api.post('/api/v1/users', {
-    headers, data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, display_name: 'E2E Admin' },
-  })
-  expect(created.ok(), await created.text()).toBeTruthy()
-
-  const loggedIn = await api.post('/api/v1/auth/login', {
-    headers, data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-  })
-  expect(loggedIn.ok(), await loggedIn.text()).toBeTruthy()
-
-  const completed = await api.patch('/api/v1/settings', {
-    headers, data: { 'onboarding.complete': true },
-  })
-  expect(completed.ok(), await completed.text()).toBeTruthy()
-
-  await api.dispose()
+  await seedAdmin()
 })
 
 test('login and every nav page renders with a clean console', async ({ page }) => {
@@ -86,11 +47,7 @@ test('login and every nav page renders with a clean console', async ({ page }) =
   })
 
   await test.step('login', async () => {
-    await page.goto('/')
-    await expect(page).toHaveURL(/\/login$/)
-    await page.getByLabel('Email').fill(ADMIN_EMAIL)
-    await page.getByLabel('Password').fill(ADMIN_PASSWORD)
-    await page.getByRole('button', { name: 'Sign in' }).click()
+    await signIn(page)
     currentPage = 'Cluster'
     await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
     expect(consoleErrors, consoleErrors.join('\n')).toEqual([])
@@ -101,8 +58,7 @@ test('login and every nav page renders with a clean console', async ({ page }) =
     // eslint-disable-next-line no-loop-func
     await test.step(label, async () => {
       currentPage = label
-      await page.getByRole('navigation').getByRole('link', { name: label, exact: true }).click()
-      await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible()
+      await goToNavPage(page, label)
       expect(consoleErrors, consoleErrors.join('\n')).toEqual([])
     })
   }
