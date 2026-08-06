@@ -8,6 +8,7 @@ import { useAckAlert, useAlertHistory, useAlertMetrics, useAlertRules, useFiring
 import type { AlertRow, AlertRuleRow } from '../api/alerts'
 import { useEntitlements } from '../api/hooks'
 import { AlertRuleForm } from '../components/AlertRuleForm'
+import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -82,8 +83,6 @@ export function AlertsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
 
-  const resolved = (history.data ?? []).filter((a) => a.state === 'resolved')
-
   return (
     <div className="max-w-4xl space-y-5">
       <h1 className="font-display text-[22px] font-semibold">Alerts</h1>
@@ -95,45 +94,52 @@ export function AlertsPage() {
             {showResolved ? 'Hide resolved' : 'Show resolved'}
           </Button>
         </div>
-        {(firing.data ?? []).length === 0 ? (
-          <p className="text-[12.5px] text-text-3">
-            Nothing is firing. Rules are checked every poll cycle.
-          </p>
-        ) : (
-          <table className="w-full text-left">
-            <thead><tr className={th}>
-              <th className="pb-2">Severity</th><th>Alert</th><th>Target</th>
-              <th>Since</th><th /></tr></thead>
-            <tbody>
-              {(firing.data ?? []).map((a) => (
-                <AlertRowView key={a.id} a={a} acking={ack.isPending}
-                              onAck={(id) => ack.mutate(id)} />
-              ))}
-            </tbody>
-          </table>
-        )}
+        <QueryState query={firing}
+                    emptyTitle="Nothing is firing"
+                    emptyNote="Rules are checked every poll cycle."
+                    errorTitle="Alerts not readable"
+                    errorNote="Proxploy could not reach the backend to check what is firing.">
+          {(rows) => (
+            <table className="w-full text-left">
+              <thead><tr className={th}>
+                <th className="pb-2">Severity</th><th>Alert</th><th>Target</th>
+                <th>Since</th><th /></tr></thead>
+              <tbody>
+                {rows.map((a) => (
+                  <AlertRowView key={a.id} a={a} acking={ack.isPending}
+                                onAck={(id) => ack.mutate(id)} />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </QueryState>
 
         {showResolved && (
           <div className="mt-5 border-t border-line-soft pt-4">
             <h3 className="mb-2 text-[12px] uppercase tracking-wide text-text-3">
               Recently resolved
             </h3>
-            {resolved.length === 0 ? (
-              <p className="text-[12.5px] text-text-3">No resolved alerts yet.</p>
-            ) : (
-              <table className="w-full text-left">
-                <tbody>
-                  {resolved.map((a) => (
-                    <tr key={a.id} className="border-t border-line-soft">
-                      <td className="py-2 text-[13px] text-text-2">{a.message}</td>
-                      <td className="font-mono text-[12px] text-text-3">
-                        {ago(a.resolved_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <QueryState query={history}
+                        empty={(rows) => rows.filter((a) => a.state === 'resolved').length === 0}
+                        emptyTitle="No resolved alerts yet."
+                        emptyNote=""
+                        errorTitle="Alert history not readable"
+                        errorNote="Proxploy could not reach the backend to check resolved alerts.">
+              {(rows) => (
+                <table className="w-full text-left">
+                  <tbody>
+                    {rows.filter((a) => a.state === 'resolved').map((a) => (
+                      <tr key={a.id} className="border-t border-line-soft">
+                        <td className="py-2 text-[13px] text-text-2">{a.message}</td>
+                        <td className="font-mono text-[12px] text-text-3">
+                          {ago(a.resolved_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </QueryState>
           </div>
         )}
       </section>
@@ -153,54 +159,57 @@ export function AlertsPage() {
           </p>
         ) : (
           <>
-            <table className="w-full text-left text-[13px]">
-              <thead><tr className={th}>
-                <th className="pb-2">Name</th><th>Condition</th><th>Target</th>
-                <th>Severity</th><th>State</th><th /></tr></thead>
-              <tbody>
-                {(rules.data ?? []).map((r) => (
-                  <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2">{r.name}</td>
-                    <td className="font-mono text-[12px] text-text-2">
-                      {r.metric}
-                      {r.metric.endsWith('_pct')
-                        ? ` ${r.operator === 'gt' ? '>' : '<'} ${r.threshold}%`
-                        : ''}
-                      {r.duration_s ? ` for ${Math.round(r.duration_s / 60)}m` : ''}
-                    </td>
-                    <td className="font-mono text-[12px] text-text-3">
-                      {r.target_type}{r.target_id != null ? ` ${r.target_id}` : ''}
-                    </td>
-                    <td>
-                      <span className={`rounded-tile px-2 py-0.5 font-mono text-[10.5px] ${SEV[r.severity] ?? SEV.warning}`}>
-                        {r.severity}
-                      </span>
-                    </td>
-                    <td className={r.enabled ? 'text-green' : 'text-text-3'}>
-                      {r.enabled ? 'enabled' : 'disabled'}
-                    </td>
-                    <td className="py-2 text-right">
-                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                              disabled={toggleRule.isPending}
-                              onClick={() => toggleRule.mutate(r)}>
-                        {r.enabled ? 'Disable' : 'Enable'}
-                      </Button>
-                      <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
-                              onClick={() => {
-                                if (window.confirm(`Remove alert rule "${r.name}"? Its fired alerts go with it.`)) {
-                                  removeRule.mutate(r.id)
-                                }
-                              }}>Remove</Button>
-                    </td>
-                  </tr>
-                ))}
-                {!rules.data?.length && (
-                  <tr><td colSpan={6} className="py-4 text-text-3">
-                    No rules yet. Add one to be told when a host runs hot.
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
+            <QueryState query={rules}
+                        emptyTitle="No rules yet"
+                        emptyNote="Add one to be told when a host runs hot."
+                        errorTitle="Alert rules not readable"
+                        errorNote="Proxploy could not reach the backend to list your rules.">
+              {(rows) => (
+                <table className="w-full text-left text-[13px]">
+                  <thead><tr className={th}>
+                    <th className="pb-2">Name</th><th>Condition</th><th>Target</th>
+                    <th>Severity</th><th>State</th><th /></tr></thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
+                        <td className="py-2">{r.name}</td>
+                        <td className="font-mono text-[12px] text-text-2">
+                          {r.metric}
+                          {r.metric.endsWith('_pct')
+                            ? ` ${r.operator === 'gt' ? '>' : '<'} ${r.threshold}%`
+                            : ''}
+                          {r.duration_s ? ` for ${Math.round(r.duration_s / 60)}m` : ''}
+                        </td>
+                        <td className="font-mono text-[12px] text-text-3">
+                          {r.target_type}{r.target_id != null ? ` ${r.target_id}` : ''}
+                        </td>
+                        <td>
+                          <span className={`rounded-tile px-2 py-0.5 font-mono text-[10.5px] ${SEV[r.severity] ?? SEV.warning}`}>
+                            {r.severity}
+                          </span>
+                        </td>
+                        <td className={r.enabled ? 'text-green' : 'text-text-3'}>
+                          {r.enabled ? 'enabled' : 'disabled'}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                                  disabled={toggleRule.isPending}
+                                  onClick={() => toggleRule.mutate(r)}>
+                            {r.enabled ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                                  onClick={() => {
+                                    if (window.confirm(`Remove alert rule "${r.name}"? Its fired alerts go with it.`)) {
+                                      removeRule.mutate(r.id)
+                                    }
+                                  }}>Remove</Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </QueryState>
             {adding && (
               <div className="mt-4 border-t border-line-soft pt-4">
                 <AlertRuleForm onSaved={() => setAdding(false)} />

@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const posted: { path: string; method: string; body: any }[] = []
 let features: Record<string, boolean> = { 'alerts.rules': true }
 let firing: any[] = []
 let rules: any[] = []
+let firingErrors = false
+let historyErrors = false
+let rulesErrors = false
 
 vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
@@ -16,14 +19,24 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ id: 99 })
     }
     if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
-    if (path === '/alerts?state=firing') return Promise.resolve(firing)
+    if (path === '/alerts?state=firing') {
+      if (firingErrors) return Promise.reject(new Error('boom'))
+      return Promise.resolve(firing)
+    }
+    if (path.startsWith('/alerts?limit=')) {
+      if (historyErrors) return Promise.reject(new Error('boom'))
+      return Promise.resolve(firing)
+    }
     if (path.startsWith('/alerts')) return Promise.resolve(firing)
     if (path === '/alert-rules/metrics') return Promise.resolve({ metrics: [
       { metric: 'cpu_pct', targets: ['host', 'app', 'vm'], needs_threshold: true },
       { metric: 'disk_pct', targets: ['host'], needs_threshold: true },
       { metric: 'host_offline', targets: ['host'], needs_threshold: false },
     ]})
-    if (path === '/alert-rules') return Promise.resolve(rules)
+    if (path === '/alert-rules') {
+      if (rulesErrors) return Promise.reject(new Error('boom'))
+      return Promise.resolve(rules)
+    }
     if (path === '/notifications/channels') return Promise.resolve([])
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
     if (path === '/apps') return Promise.resolve([{ id: 5, name: 'jellyfin' }])
@@ -40,10 +53,38 @@ const wrap = () => {
 }
 
 describe('AlertsPage', () => {
+  beforeEach(() => { firingErrors = false; historyErrors = false; rulesErrors = false })
+
   it('says nothing is firing when nothing is', async () => {
     posted.length = 0; firing = []; rules = []
     wrap()
     await waitFor(() => expect(screen.getByText(/nothing is firing/i)).toBeInTheDocument())
+  })
+
+  it('says the firing alerts could not be read rather than showing "nothing is firing"', async () => {
+    // The bug: a failed fetch renders identically to a healthy, quiet cluster.
+    posted.length = 0; firing = []; rules = []
+    firingErrors = true
+    wrap()
+    await waitFor(() => expect(screen.getByText(/alerts not readable/i)).toBeInTheDocument())
+    expect(screen.queryByText(/nothing is firing/i)).not.toBeInTheDocument()
+  })
+
+  it('says the alert history could not be read rather than showing "no resolved alerts"', async () => {
+    posted.length = 0; firing = []; rules = []
+    historyErrors = true
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: /show resolved/i }))
+    expect(await screen.findByText(/alert history not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No resolved alerts yet.')).not.toBeInTheDocument()
+  })
+
+  it('says the rules could not be read rather than showing "no rules yet"', async () => {
+    posted.length = 0; firing = []; rules = []
+    rulesErrors = true
+    wrap()
+    expect(await screen.findByText(/alert rules not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No rules yet')).not.toBeInTheDocument()
   })
 
   it('lists a firing alert with its target and severity', async () => {
