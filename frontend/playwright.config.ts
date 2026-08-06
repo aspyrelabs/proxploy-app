@@ -30,7 +30,23 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // journey.spec.ts is the ONLY spec that drives a truly fresh install —
+    // every other spec's seedAdmin() (helpers.ts) is idempotent and happy to
+    // find an admin already there. All specs share one backend process/DB
+    // for the whole run (webServer above), and fullyParallel schedules every
+    // file's tests across workers with no ordering guarantee between files —
+    // so without this, smoke/light-theme's seedAdmin() can win the race and
+    // create their admin first, leaving journey.spec.ts's own "create the
+    // admin through the wizard" step nothing to do. A project `dependencies`
+    // edge is Playwright's documented way to force one project's tests to
+    // finish before another's start; it is not overkill for a one-test file.
+    { name: 'journey', testMatch: 'journey.spec.ts', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      testIgnore: 'journey.spec.ts',
+      dependencies: ['journey'],
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
   webServer: [
     {

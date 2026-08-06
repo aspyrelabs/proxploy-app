@@ -46,6 +46,37 @@ def test_host_samples_and_snapshot(tmp_path):
     assert {t["t"] for t in res.events[0][1]["targets"]} >= {"host"}
 
 
+def test_first_poll_learns_the_hosts_node_name(tmp_path):
+    """A host created through POST /hosts has no way to learn its node name at
+    create time (PVE's /version carries none) — node_name sat at NULL forever
+    until a poll ran, which /cluster/nodes and the VM-create wizard's node
+    picker both read directly. Only tests/support.py's seed_host_row ever set
+    it by hand; this is the real path."""
+    from proxploy.models import Host
+    from tests.support import make_db
+
+    db = make_db(tmp_path)
+    host = Host(name="host-01", address="https://10.0.0.9:8006", status="connected")
+    db.add(host)
+    db.commit()
+    assert host.node_name is None
+
+    _ingest(db, host)
+    assert host.node_name == "pve1"
+
+
+def test_first_poll_never_overwrites_an_already_known_node_name(tmp_path):
+    """A real multi-node cluster's Host row names the node it was actually
+    added on; a later poll cycle must not second-guess that against whichever
+    node happens first in /cluster/resources."""
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve2")
+    _ingest(db, host)
+    assert host.node_name == "pve2"
+
+
 def test_vms_upserted_and_apps_cached_refreshed(tmp_path):
     from proxploy.models import App, MetricSample, Vm
     from tests.support import make_db, seed_host_row

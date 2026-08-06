@@ -96,6 +96,19 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         net_in += float(last.get("netin") or 0.0)
         net_out += float(last.get("netout") or 0.0)
 
+    # host.node_name is otherwise write-never: POST /hosts has no way to learn
+    # it (PVE's /version carries no node name), so a host added through the
+    # real wizard sat at NULL forever — /cluster/nodes and the VM-create
+    # wizard's node picker both read this column directly, not the snapshot,
+    # so they silently had nothing to offer. Only tests/support.py's
+    # seed_host_row ever set it, which is why this never showed up until the
+    # onboarding journey actually drove host creation through the UI (Task 16).
+    # Written once, like main.py's self.ctid: a later operator correction must
+    # survive restarts, and a real multi-node cluster's actual "home" node for
+    # this Host row is not something a later poll should second-guess.
+    if not host.node_name and snap_nodes:
+        host.node_name = snap_nodes[0]["node"]
+
     own = next((n for n in snap_nodes if n["node"] == host.node_name),
                snap_nodes[0] if snap_nodes else None)
     if own:
