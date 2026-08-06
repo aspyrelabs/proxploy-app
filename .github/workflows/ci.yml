@@ -73,3 +73,40 @@ jobs:
       - run: pip install -e '.[dev]'
       - name: run against disposable PVE (skips cleanly when secrets are absent)
         run: python -m pytest tests/ -q -m pve_integration
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # -x follows sourced files; -P SCRIPTDIR lets it resolve the dynamic
+      # `$(dirname "$0")/../lib/common.sh` sourcing both install.sh and
+      # proxploy-update use. A bare `shellcheck <path>` SC1091s on every one
+      # of them — established while implementing Tasks 7 and 9.
+      - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
+
+  install-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: bash packaging/tests/channel_fixture.sh /tmp/pp-channel
+      - run: bash packaging/tests/test_install.sh
+      - run: bash packaging/tests/test_upgrade_rollback.sh
+      - run: bash packaging/tests/test_pve_half.sh
+
+  # Task 12 lowered requires-python to >=3.11, because Debian 12 — which is
+  # what a Proxmox VE 8 CT template is, and therefore the actual LXC install
+  # target — ships 3.11 and pip refused to install at all. A supported-version
+  # claim nothing tests is not a claim; the `backend` job above runs 3.12, so
+  # this leg holds the floor honest.
+  backend-py311:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: backend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest tests/ -q -m "not pve_integration and not e2e"
