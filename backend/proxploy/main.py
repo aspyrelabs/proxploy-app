@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from proxploy import __version__
 from proxploy.config import Settings, get_settings
 from proxploy.db import make_engine, make_sessionmaker, run_migrations
 from proxploy.models import AppSetting, utcnow
@@ -139,7 +140,7 @@ def create_app(
         app.state.jobs.stop()
         app.state.engine.dispose()
 
-    app = FastAPI(title="Proxploy", docs_url="/api/docs",
+    app = FastAPI(title="Proxploy", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))

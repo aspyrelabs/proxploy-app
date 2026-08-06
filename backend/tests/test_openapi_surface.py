@@ -74,3 +74,11 @@ def test_docs_and_openapi_json_serve_200(tmp_path):
     with TestClient(app) as c:
         assert c.get("/api/docs").status_code == 200
         assert c.get("/api/openapi.json").status_code == 200
+
+
+def test_openapi_version_is_the_product_version(tmp_path):
+    """9a Task 1 made __version__ the single source of truth. An OpenAPI
+    schema that reports something else republishes the drift it removed."""
+    import proxploy
+
+    assert make_app(tmp_path).openapi()["info"]["version"] == proxploy.__version__
