@@ -963,3 +963,106 @@ cookie).
   shipped zero
 - Commit range: `a7bbf3d..fa4c795` (design spec through the last
   implementation commit)
+
+### 2026-08-06T20:20:00+05:30 — Phase 9c — execute-plan completed
+
+Goal, verbatim from the plan: *"Build a documentation site and a marketing
+site for Proxploy from the material the project already has, fix the three
+defects that would make them publish falsehoods, and deploy neither."* 17
+tasks across three repos, full details in
+`docs/notes/phase-9c-web-and-docs.md`.
+
+**What shipped, per subsystem:**
+- **`proxploy-app` fixes (Tasks 1-3), landed before any docs content:**
+  `FastAPI(version=__version__)` so the OpenAPI schema reports `1.0.0`
+  instead of FastAPI's `0.1.0` default; `backend/scripts/
+  export_openapi.py` writes the schema to a file as a pure function of the
+  app (inlines `make_app`'s body rather than importing `tests.support`,
+  because `packaging/build_release.sh` excludes `tests/` from the release
+  tarball but not `scripts/`); `install.sh` fixed so the bare `curl -fsSL
+  https://proxploy.com/install.sh | bash` actually works — release public
+  key compiled in, `--channel`/`--version` defaulted (the latter read off
+  the fetched `manifest.json`), `--dry-parse` added so the defaulting is
+  testable without root or network
+- **`proxploy-docs`** (new repo, no remote): Astro 6 + Starlight, `layerr-
+  docs`' content test suite (frontmatter/links/build, plus a rewritten
+  content-consistency check), install/getting-started/trust/15 feature
+  guides, and an OpenAPI-generated API reference — 49 pages, 199 tests
+- **`proxploy-web`** (new repo, no remote): single-package Vite + React +
+  Tailwind, Proxploy's own tokens, no Replit scaffolding, real paths only
+  (no hash anchors), prerendered to 6 static routes, folderr-web-style
+  nginx image
+
+**Findings that mattered:**
+- **The advertised one-liner did not work.** `install.sh` hard-required
+  `--channel`/`--version`/`--pubkey` with no defaults, so the exact command
+  in its own header — and the one doc 10's DoD is phrased around — died on
+  `--channel is required`. Every 9a harness passed explicit flags, so the
+  form every real user would run was the one form never executed. **Third
+  instance this phase-group of tested path ≠ advertised path** — the other
+  two, both from 9b, were SSH handed a URL where asyncssh needs a hostname,
+  and `Host.node_name` never being written by the real onboarding path.
+- **The OpenAPI schema reported `0.1.0`** while `__version__` was `1.0.0` —
+  would have contradicted the product on the reference's first page. Now
+  confirmed `1.0.0` end to end.
+- **`starlight-openapi` was evaluated and rejected on evidence.** The
+  current release doesn't support this repo's pinned Starlight/Astro; an
+  older release does, but generates ~130 virtual routes that break the
+  page-count invariant and bypass the content test suite for the whole
+  reference section, plus pulls a high-severity dependency chain. Fell back
+  to a real-`.md`-file generator instead, covered by the same tests as
+  every other page. `layerr-docs`, the template for the whole site, has no
+  OpenAPI plugin at all — new ground, not a copied pattern.
+- **A `# ponytail:` code comment leaks into the public API docs** via a
+  route docstring (`backend/proxploy/api/network.py:159`,
+  `GET /network/bridges`) — visible today at `/api/docs`. The reference
+  generator now escapes it so it doesn't render as a markdown heading, but
+  the comment itself is still in the docstring — recorded as an open
+  follow-up, not fixed here.
+- **99 unique paths, not 127 routes** — `openapi()["paths"]` is keyed by
+  path, so multiple methods on one path collapse to one key. The real
+  count: 99 paths, 129 operations, measured directly.
+- Two judgement calls, both stated in their commits: **`/screenshots`
+  omitted entirely** (no browser here, a placeholder is worse than no
+  route) and **the refund policy omitted** (no purchase path exists
+  anywhere in the product, so there's nothing for a policy to describe).
+
+**Known gaps, stated plainly:**
+- **Nothing is deployed and no page has been seen by a human.** No browser
+  in this environment; passing builds and link tests are not visual review.
+- **The documented install path is unreachable end to end** — the release
+  channel is unpublished and the repo is private, so nothing exists at the
+  advertised URL yet.
+- **The feature guides are assembled from phase notes, not from using the
+  product against real hardware** — and 9b is direct evidence that gap
+  hides real defects (its journey harness's first real run found two
+  production bugs three prior phases' fake-backed DoDs had missed).
+- **`proxploy-web` and `proxploy-docs` have no git remote** — both exist
+  only on this machine.
+- **Doc 11's §6 amendment records a contradiction, not a resolution.** The
+  repository went private 2026-08-06, an owner decision outside this
+  phase's scope; §6's source-available framing was left as originally
+  written (per the doc's own rule against silently rewriting history), and
+  the amendment records that its premise no longer matches the product.
+  Which side resolves it — amend §6, or make the repo public — is owned by
+  Aspyre Labs.
+
+**Verification:**
+- Backend: **829 passed, 1 failed, 2 skipped, 4 deselected** —
+  `pytest tests/ -q -m "not pve_integration and not e2e"` (baseline
+  entering the phase: 827); the one failure,
+  `test_backups_sync.py::test_concurrent_stale_reads_enqueue_only_one_sync`,
+  is a known timing/thread-race flake under concurrent full-suite load
+  (also seen in Phase 6/9b) — passed 3/3 in isolation, re-run directly in
+  this session
+- `proxploy-docs`: **199 passed** (4 test files) — `npm test`; **49 pages**
+  built, Pagefind index built — `npm run build`
+- `proxploy-web`: **6 routes prerendered** (`/`, `/features`, `/install`,
+  `/about`, `/privacy-policy`, `/terms-of-service`) — `npm run build`;
+  typecheck clean — `npm run typecheck`
+- Migrations: `alembic heads` = **`01f962e7a491`**, unchanged — zero
+  migrations this phase
+- Commit ranges: `proxploy-app` `8e67985..94a4326` (5 commits: `7ddde31`,
+  `f8679f2`, `92d86db`, `064a5b2`, `94a4326`; this task's own doc/buildlog
+  commit follows); `proxploy-docs` `a2af925..987a6c7` (full history, 10
+  commits); `proxploy-web` `6b3608c..3b987cd` (full history, 5 commits)

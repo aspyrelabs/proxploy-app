@@ -184,6 +184,58 @@ honesty, not un-patchable bits).
 **Deferred decision:** none. This is decided; recorded here so it isn't
 relitigated every quarter.
 
+### 2026-08-06 amendment: the repository went private, and this section's premise did not get updated
+
+**What this section says.** The risk above is framed entirely on Proxploy
+being **source-available**: "anyone can patch `Entitlements.enabled()`" is
+only a live risk if anyone can read the source to find `Entitlements.
+enabled()` in the first place, and the "Deferred decision: none" line closes
+the book on it as *accepted* rather than mitigated, reasoning that customers
+buy "support, updates, and honesty, not un-patchable bits" — a sentence that
+only makes sense addressed to people who can see the bits.
+
+**What actually changed.** `proxploy-app` is **private**, and staying
+private is Aspyre Labs' own decision, made 2026-08-06. This was not decided
+by anything in Phase 9c's plan or spec — it is an owner decision the docs
+are catching up to, not a mitigation this phase engineered.
+
+**Why that makes the section's premise stale, not wrong.** The reasoning
+above still holds *if the repo is public*. It doesn't hold today:
+
+- The patching risk this section accepts is now closer to moot than
+  mitigated — nobody can patch a copy of `Entitlements.enabled()` they were
+  never given. That is a stronger position than the "accepted, not
+  mitigated away" framing describes, and it happened by policy change, not
+  by anything in the entitlement design itself.
+- The source-available claim this section's opening sentence rests on is no
+  longer true of the product, and "source-available" is a specific,
+  checkable claim — repeating it in marketing or trust copy while the repo
+  is private would be a false statement about the product, not a stale
+  risk note. `proxploy-docs`' trust page (`src/content/docs/trust/index.md`,
+  written in this same phase) already states the current, accurate
+  position — **"Proxploy is not source-available today"** — precisely
+  because it was written after the repo went private and this doc was not.
+
+**This is recorded as an open decision, not resolved here.** Per this
+document's own convention (§6 was itself marked "none" to close the book on
+a question — this note reopens exactly that framing, deliberately, rather
+than silently rewriting the text above it), two paths exist and neither is
+taken by this note:
+
+1. **Amend §6 above** to drop the source-available framing and restate the
+   free-rider risk in terms that hold for a private repo (the risk shrinks,
+   it does not vanish — an employee leak, a compromised build host, or a
+   future decision to open the repo all reintroduce it).
+2. **Make the repository public**, restoring §6's original premise and
+   argument as written.
+
+Which of these happens, and when, is **owned by Aspyre Labs** — a business
+and trust-posture decision this build phase has no standing to make on its
+own. Until one is chosen, this document carries a contradiction on
+purpose: §6 above is left as originally written (per this file's own rule
+against silently rewriting history), and this amendment is the record that
+its premise no longer matches the product.
+
 ## 7. Proxmox API version drift (PVE 8 / PVE 9)
 
 **Risk.** We manage hosts across PVE major versions with differing API
