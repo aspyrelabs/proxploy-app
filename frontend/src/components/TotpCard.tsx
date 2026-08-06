@@ -70,7 +70,16 @@ export function TotpCard() {
       </div>
       {!totpAllowed ? (
         <p className="text-[12.5px] text-text-3">
-          {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
+          {ent.unknown ? 'Could not check your plan — try reloading.'
+            : ent.data == null ? 'Loading…' : 'Not included in your plan.'}
+        </p>
+      ) : me.isError ? (
+        // Security-relevant: me.data is undefined on error same as on a
+        // genuine "not enrolled" response, so without this branch a failed
+        // /auth/me read would fall straight to "Enable two-factor" — offering
+        // to enroll a user who may already have TOTP on.
+        <p className="text-[12.5px] text-text-3">
+          Could not check two-factor status — try reloading.
         </p>
       ) : me.data?.totp_enabled ? (
         <div>

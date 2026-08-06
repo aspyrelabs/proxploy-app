@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let nodesResult: 'ok' | 'empty' | 'error' = 'ok'
+let summaryResult: 'ok' | 'error' = 'ok'
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
@@ -11,6 +12,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve([])
     }
     if (path === '/cluster/summary') {
+      if (summaryResult === 'error') return Promise.reject(new Error('boom'))
       return Promise.resolve({
         updated_at: '2026-07-29T00:00:00Z',
         cpu: { pct: 42, used_cores: 3.4, total_cores: 8 },
@@ -56,7 +58,7 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 describe('ClusterPage', () => {
-  beforeEach(() => { nodesResult = 'ok' })
+  beforeEach(() => { nodesResult = 'ok'; summaryResult = 'ok' })
 
   it('renders rings, counts and node cards from the API', async () => {
     withQuery(<ClusterPage />)
@@ -80,5 +82,16 @@ describe('ClusterPage', () => {
     withQuery(<ClusterPage />)
     expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
     expect(screen.queryByText(/nodes not readable/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the rings as unknown rather than a calm 0% when the summary fetch fails', async () => {
+    // The bug: pct ?? 0 used to draw a real-looking 0%-used gauge on a
+    // failed fetch, indistinguishable from an actually idle cluster.
+    summaryResult = 'error'
+    withQuery(<ClusterPage />)
+    expect(await screen.findByRole('img', { name: /CPU unknown/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /Memory unknown/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /Storage unknown/i })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /CPU 0%/i })).not.toBeInTheDocument()
   })
 })

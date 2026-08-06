@@ -10,6 +10,8 @@ const calls: Call[] = []
 let totpAllowed = true
 let totpEnabled = false
 let disableStatus: 200 | 403 = 200
+let entitlementsFail = false
+let meFail = false
 
 const RECOVERY_CODES = Array.from({ length: 10 }, (_, i) => `recovery-code-${i}`)
 
@@ -25,9 +27,11 @@ vi.mock('../api/client', () => ({
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
     if (path === '/entitlements') {
+      if (entitlementsFail) return Promise.reject(new Error('boom'))
       return Promise.resolve({ tier: 'builtin', features: { 'auth.totp': totpAllowed }, grace: null })
     }
     if (path === '/auth/me' && !method) {
+      if (meFail) return Promise.reject(new Error('boom'))
       return Promise.resolve({ id: 1, email: 'admin@example.com', display_name: null,
         role: 'owner', totp_enabled: totpEnabled })
     }
@@ -71,6 +75,8 @@ describe('TotpCard', () => {
     totpAllowed = true
     totpEnabled = false
     disableStatus = 200
+    entitlementsFail = false
+    meFail = false
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -116,6 +122,24 @@ describe('TotpCard', () => {
     await waitFor(() => expect(calls.some((c) =>
       c.path === '/auth/totp' && c.method === 'DELETE'
       && JSON.stringify(c.body) === JSON.stringify({ password: 'hunter2' }))).toBe(true))
+  })
+
+  it('says it could not check the plan rather than getting stuck on "Loading…" when entitlements fail', async () => {
+    entitlementsFail = true
+    wrap()
+    expect(await screen.findByText(/could not check your plan/i)).toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    expect(screen.queryByText('Not included in your plan.')).not.toBeInTheDocument()
+  })
+
+  it('does not offer "Enable two-factor" when the status check itself failed', async () => {
+    // Security-relevant regression: /auth/me erroring must not fall through
+    // to the enroll button, which would invite re-enrolling a user who may
+    // already have TOTP on.
+    meFail = true
+    wrap()
+    expect(await screen.findByText(/could not check two-factor status/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Enable two-factor' })).not.toBeInTheDocument()
   })
 
   it('surfaces a 403 re-auth error from disable as a toast', async () => {

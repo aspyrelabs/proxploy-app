@@ -22,7 +22,13 @@ export function useEntitlements() {
     ...q,
     tier: q.data?.tier ?? 'builtin',
     grace: q.data?.grace ?? null,
+    // `has` stays fail-closed: a feature must never unlock because a fetch
+    // failed, that would be a security bug. `unknown` is what lets a
+    // consumer tell "not entitled" apart from "could not check" and render
+    // "could not check" instead of the UI of a tenant who simply lacks the
+    // feature — see components/HealthFooter.tsx for the same distinction.
     has: (key: string) => q.data?.features[key] ?? false,
+    unknown: q.isError,
   }
 }
 
