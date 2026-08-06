@@ -6,6 +6,7 @@ class StubLicenseClient:
         fx = json.loads(fixture_path.read_text())
         self._fx = fx
         self.activations = []
+        self.refreshes = []
 
     def _mint(self):
         import jwt
@@ -21,8 +22,9 @@ class StubLicenseClient:
         self.activations.append((license_key, install_id))
         return {"token": self._mint(), "refresh_credential": "cred-123"}
 
-    def refresh(self, refresh_credential):
+    def refresh(self, refresh_credential, install_id):
         assert refresh_credential == "cred-123"
+        self.refreshes.append(install_id)
         return {"token": self._mint()}
 
 
@@ -57,8 +59,34 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
 
         assert client.post("/api/v1/entitlements/refresh",
                            headers=csrf_header(client)).status_code == 200
+        # refresh must send the same install_id activate used — Task 3 made
+        # it required on the API side.
+        assert stub.refreshes == [stub.activations[0][1]]
 
         assert client.delete("/api/v1/entitlements/license",
                              headers=csrf_header(client)).status_code == 200
         ent = client.get("/api/v1/entitlements").json()
         assert ent["tier"] == "builtin" and len(ent["features"]) == 81
+
+
+def test_client_revoke_sends_credential_and_install_id(monkeypatch):
+    """LicenseClient.revoke() is new (Task 8) — pin its request shape against
+    POST /v1/licenses/revoke, which Task 3 made require both fields."""
+    import httpx
+
+    from proxploy.services.license_client import LicenseClient
+
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"revoked": True},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    out = LicenseClient("http://licensing.example").revoke("cred-abc", "install-xyz")
+
+    assert out == {"revoked": True}
+    assert captured["url"] == "http://licensing.example/v1/licenses/revoke"
+    assert captured["json"] == {"refresh_credential": "cred-abc", "install_id": "install-xyz"}

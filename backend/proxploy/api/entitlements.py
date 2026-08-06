@@ -86,9 +86,10 @@ def force_refresh(request: Request, db=Depends(get_db),
     enc = _setting(db, "license.refresh_credential.enc")
     if not enc:
         raise HTTPException(409, "no license configured")
+    install_id = _setting(db, "license.install_id")
     cred = request.app.state.secretstore.decrypt(enc.encode()).decode()
     try:
-        out = request.app.state.license_client.refresh(cred)
+        out = request.app.state.license_client.refresh(cred, install_id)
     except LicenseApiError as e:
         raise HTTPException(502, f"licensing service: {e}")
     apply_new_token(request, db, out["token"])

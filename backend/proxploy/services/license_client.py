@@ -1,4 +1,4 @@
-"""The ONLY app→Aspyre call path (doc 02 §8): activate / refresh / (revoke later).
+"""The ONLY app→Aspyre call path (doc 02 §8): activate / refresh / revoke.
 Never called unless a license is configured."""
 import logging
 
@@ -40,6 +40,10 @@ class LicenseClient:
         return self._post("/v1/licenses/activate",
                           {"license_key": license_key, "install_id": install_id})
 
-    def refresh(self, refresh_credential: str) -> dict:
+    def refresh(self, refresh_credential: str, install_id: str) -> dict:
         return self._post("/v1/entitlements/refresh",
-                          {"refresh_credential": refresh_credential})
+                          {"refresh_credential": refresh_credential, "install_id": install_id})
+
+    def revoke(self, refresh_credential: str, install_id: str) -> dict:
+        return self._post("/v1/licenses/revoke",
+                          {"refresh_credential": refresh_credential, "install_id": install_id})

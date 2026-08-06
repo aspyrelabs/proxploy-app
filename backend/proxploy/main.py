@@ -64,8 +64,11 @@ def create_app(
                                .filter_by(key="license.refresh_credential.enc").one_or_none())
                         if not row:
                             return
+                        install_row = (db.query(AppSetting)
+                                       .filter_by(key="license.install_id").one_or_none())
                         cred = app.state.secretstore.decrypt(row.value.encode()).decode()
-                        out = app.state.license_client.refresh(cred)
+                        out = app.state.license_client.refresh(
+                            cred, install_row.value if install_row else None)
                         # apply via a fake-request shim: the helper only needs .app
                         class _Req:  # noqa: N801 — minimal shim
                             pass
