@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const calls: { path: string; method: string; body: any }[] = []
 let features: Record<string, boolean> = { 'vms.create': true, 'vms.clone': true }
 let cloneRejects = false
+let vmsListResult: 'ok' | 'empty' | 'error' = 'ok'
 
 const VM = {
   id: 9, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11',
@@ -25,7 +26,10 @@ vi.mock('../api/client', () => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method === 'GET') {
         if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
-        if (path === '/vms') return Promise.resolve([VM])
+        if (path === '/vms') {
+          if (vmsListResult === 'error') return Promise.reject(new ApiError(502, { detail: 'boom' }))
+          return Promise.resolve(vmsListResult === 'empty' ? [] : [VM])
+        }
         if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
         if (path === '/cluster/nodes') return Promise.resolve([{ host_id: 1, node: 'pve1' }])
         if (path === '/storage') return Promise.resolve([
@@ -151,6 +155,22 @@ describe('VmsPage create/clone affordances', () => {
     calls.length = 0
     cloneRejects = false
     features = { 'vms.create': true, 'vms.clone': true }
+    vmsListResult = 'ok'
+  })
+
+  it('says the VMs could not be read rather than showing "no VMs discovered"', async () => {
+    // The bug: a failed fetch renders identically to a genuinely empty fleet.
+    vmsListResult = 'error'
+    wrap(<VmsPage />)
+    expect(await screen.findByText(/VMs not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No VMs discovered')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-state copy when there genuinely are no VMs', async () => {
+    vmsListResult = 'empty'
+    wrap(<VmsPage />)
+    expect(await screen.findByText('No VMs discovered')).toBeInTheDocument()
+    expect(screen.queryByText(/VMs not readable/i)).not.toBeInTheDocument()
   })
 
   it('renders the New VM button and disables it with a tooltip when vms.create is off', async () => {

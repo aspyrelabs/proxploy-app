@@ -14,7 +14,7 @@ import { EmptyState } from './EmptyState'
  */
 export function QueryState<T>({
   query, children, emptyTitle, emptyNote, emptyAction, empty,
-  errorTitle = 'Something went wrong',
+  errorTitle = 'Unavailable right now',
   errorNote = 'Proxploy could not reach the backend. It may be restarting.',
   loading,
 }: {

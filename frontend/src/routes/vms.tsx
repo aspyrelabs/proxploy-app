@@ -10,6 +10,7 @@ import { CloneDialog } from '../components/CloneDialog'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
+import { QueryState } from '../components/QueryState'
 import { SnapshotPanel } from '../components/SnapshotPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
@@ -24,11 +25,12 @@ export function VmsPage() {
   const ent = useEntitlements()
   const [creating, setCreating] = useState(false)
   const [cloning, setCloning] = useState<VmRow | null>(null)
-  const { data: vms } = useQuery({
+  const vmsQuery = useQuery({
     queryKey: ['vms', {}],
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
   })
+  const vms = vmsQuery.data
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
   // ent.has() is false until /entitlements resolves — gate on ent.data != null
   // too, or every plan sees a dead "New VM" button for the whole first fetch.
@@ -49,60 +51,63 @@ export function VmsPage() {
           New VM
         </Button>
       </div>
-      {vms && vms.length > 0 ? (
-        <div className={card}>
-          <table className="w-full text-left text-[13px]">
-            <thead>
-              <tr className="text-[11px] uppercase text-text-3">
-                <th scope="col" className="pb-2 font-medium">Name</th>
-                <th scope="col" className="pb-2 font-medium">Node</th>
-                <th scope="col" className="pb-2 font-medium">vCPU / RAM</th>
-                <th scope="col" className="pb-2 font-medium">CPU</th>
-                <th scope="col" className="pb-2 font-medium">Status</th>
-                <th scope="col" className="pb-2 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {vms.map((v) => (
-                <tr
-                  key={v.id}
-                  className="cursor-pointer border-t border-line-soft hover:bg-panel-2"
-                  onClick={() => navigate({ to: '/vms/$vmId' as never, params: { vmId: String(v.id) } as never })}
-                >
-                  <td className="py-2.5 font-mono">{v.name}</td>
-                  <td className="py-2.5 text-text-2">{v.host_name}</td>
-                  <td className="py-2.5 font-mono text-text-2">
-                    {v.cpu_cores ?? '—'} / {fmtBytes(v.mem_bytes)}
-                  </td>
-                  <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
-                  <td className="py-2.5"><StatusPill status={v.status} /></td>
-                  <td className="py-2.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} size="sm" />
-                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                      onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })}>
-                      Console
-                    </Button>
-                    {/* doc 06 §e rule 2: a table-cell button is a "small inline
-                        action", so the Pro treatment here is disabled+tooltip,
-                        not LockVeil — veiling a 60px cell blurs nothing legible,
-                        and a disabled trigger makes a veil inside the dialog
-                        unreachable dead code. */}
-                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                      disabled={cloneDenied}
-                      title={cloneDenied ? 'Cloning is a Pro feature' : undefined}
-                      onClick={() => setCloning(v)}>
-                      Clone
-                    </Button>
-                  </td>
+      <QueryState query={vmsQuery}
+                  emptyTitle="No VMs discovered"
+                  emptyNote="QEMU guests on connected hosts are mirrored here by the poller."
+                  errorTitle="VMs not readable"
+                  errorNote="Proxploy could not reach the backend to list your VMs.">
+        {(rows) => (
+          <div className={card}>
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="text-[11px] uppercase text-text-3">
+                  <th scope="col" className="pb-2 font-medium">Name</th>
+                  <th scope="col" className="pb-2 font-medium">Node</th>
+                  <th scope="col" className="pb-2 font-medium">vCPU / RAM</th>
+                  <th scope="col" className="pb-2 font-medium">CPU</th>
+                  <th scope="col" className="pb-2 font-medium">Status</th>
+                  <th scope="col" className="pb-2 font-medium"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <EmptyState title="No VMs discovered"
-          note="QEMU guests on connected hosts are mirrored here by the poller." />
-      )}
+              </thead>
+              <tbody>
+                {rows.map((v) => (
+                  <tr
+                    key={v.id}
+                    className="cursor-pointer border-t border-line-soft hover:bg-panel-2"
+                    onClick={() => navigate({ to: '/vms/$vmId' as never, params: { vmId: String(v.id) } as never })}
+                  >
+                    <td className="py-2.5 font-mono">{v.name}</td>
+                    <td className="py-2.5 text-text-2">{v.host_name}</td>
+                    <td className="py-2.5 font-mono text-text-2">
+                      {v.cpu_cores ?? '—'} / {fmtBytes(v.mem_bytes)}
+                    </td>
+                    <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
+                    <td className="py-2.5"><StatusPill status={v.status} /></td>
+                    <td className="py-2.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} size="sm" />
+                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                        onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })}>
+                        Console
+                      </Button>
+                      {/* doc 06 §e rule 2: a table-cell button is a "small inline
+                          action", so the Pro treatment here is disabled+tooltip,
+                          not LockVeil — veiling a 60px cell blurs nothing legible,
+                          and a disabled trigger makes a veil inside the dialog
+                          unreachable dead code. */}
+                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                        disabled={cloneDenied}
+                        title={cloneDenied ? 'Cloning is a Pro feature' : undefined}
+                        onClick={() => setCloning(v)}>
+                        Clone
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </QueryState>
       {creating && <VmCreateWizard onClose={() => setCreating(false)} />}
       {cloning && <CloneDialog vm={cloning} onClose={() => setCloning(null)} />}
     </div>
