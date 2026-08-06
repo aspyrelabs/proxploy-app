@@ -39,11 +39,38 @@ BACKUP="$PP_DATA/pre-update/$FROM"
 
 rollback() {
   log "rolling back to $FROM"
+  # Stop first, and restore into a stopped service. $TO has been crash-looping
+  # on RestartSec=3 for up to the 120s deadline below, so restoring under a
+  # live unit races a process that is starting up on the same database. That
+  # loop also trips systemd's default start-limit (5 starts / 10s), which
+  # leaves the unit in a failed state a bare `start` will not clear —
+  # reset-failed is a no-op otherwise, so it is safe unconditionally.
+  systemctl stop proxploy.service 2>/dev/null || true
+  systemctl reset-failed proxploy.service 2>/dev/null || true
   ln -sfn "$PP_RELEASES/$FROM" "$PP_CURRENT.tmp" && mv -T "$PP_CURRENT.tmp" "$PP_CURRENT"
   if [ -f "$BACKUP/proxploy.db" ]; then
-    cp -a "$BACKUP/proxploy.db" "$PP_DATA/proxploy.db"
+    # -wal/-shm belong to the database being replaced, not to the backup;
+    # leaving them for sqlite to replay over a different file is corruption.
+    rm -f "$PP_DATA/proxploy.db-wal" "$PP_DATA/proxploy.db-shm"
+    # Plain cp then chown, NOT `cp -a`: the backup was written by `sqlite3
+    # .backup` running as root, so preserving its ownership hands the live
+    # database back as root:root while the unit runs as User=proxploy. The
+    # app then crash-loops on "attempt to write a readonly database" — a
+    # rollback that restores the data perfectly and still leaves the box down.
+    cp "$BACKUP/proxploy.db" "$PP_DATA/proxploy.db"
+    chown "$PP_USER:$PP_USER" "$PP_DATA/proxploy.db"
   fi
-  systemctl restart proxploy.service || true
+  systemctl start proxploy.service || true
+  # Type=exec reports "active" the moment the process execs, not once uvicorn
+  # has opened the port. Wait for the same health signal the forward path
+  # waits for, on a shorter deadline since $FROM was healthy moments ago —
+  # otherwise a caller checking health right after we exit sees a false "down".
+  local rb_deadline
+  rb_deadline=$(($(date +%s) + 60))
+  until curl -fsS --max-time 5 http://127.0.0.1:8000/api/v1/meta/health >/dev/null 2>&1; do
+    [ "$(date +%s)" -lt "$rb_deadline" ] || break
+    sleep 2
+  done
   die "update to $TO failed; rolled back to $FROM"
 }
 
