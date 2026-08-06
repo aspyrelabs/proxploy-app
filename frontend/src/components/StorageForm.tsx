@@ -41,7 +41,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   // settings.tsx carry the same guard).
   const locked = ent.data != null && !ent.has('storage.manage')
 
-  const { data: hosts } = useQuery({
+  const hosts = useQuery({
     queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts'), enabled: !editing,
   })
   const attach = useAttachStorage()
@@ -123,9 +123,12 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
                 <label htmlFor="sf-host"
                   className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Host</label>
                 <select id="sf-host" className={inputCls} value={hostId ?? ''}
+                  disabled={hosts.isError}
                   onChange={(e) => setHostId(Number(e.target.value) || null)}>
-                  <option value="">Select a host…</option>
-                  {(hosts ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  {hosts.isError
+                    ? <option value="">Could not load hosts</option>
+                    : <option value="">Select a host…</option>}
+                  {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
                 </select>
               </div>
             )}

@@ -38,7 +38,7 @@ function StatCard({ label, value, note }: { label: string; value: string; note: 
 
 /** Run now → one vzdump job over every guest on the chosen host, then the log. */
 function RunDialog({ onClose }: { onClose: () => void }) {
-  const { data: hosts } = useQuery({
+  const hosts = useQuery({
     queryKey: ['hosts'], queryFn: () => api<{ id: number; name: string }[]>('/hosts'),
   })
   const run = useRunBackup()
@@ -46,7 +46,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   const [jobId, setJobId] = useState<number | null>(null)
   // One vzdump task runs on one node, so the backend requires host_id whenever
   // more than one host is registered; with exactly one there is nothing to ask.
-  const hostId = picked ?? (hosts?.length === 1 ? hosts[0].id : null)
+  const hostId = picked ?? (hosts.data?.length === 1 ? hosts.data[0].id : null)
 
   return (
     <div role="dialog" aria-label="Run backup"
@@ -65,10 +65,12 @@ function RunDialog({ onClose }: { onClose: () => void }) {
               default backup datastore.
             </p>
             <select className={`${inputCls} mt-4`} value={hostId ?? ''}
-                    aria-label="Host"
+                    aria-label="Host" disabled={hosts.isError}
                     onChange={(e) => setPicked(Number(e.target.value) || null)}>
-              <option value="">Select a host…</option>
-              {(hosts ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+              {hosts.isError
+                ? <option value="">Could not load hosts</option>
+                : <option value="">Select a host…</option>}
+              {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
             </select>
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose}>Cancel</Button>

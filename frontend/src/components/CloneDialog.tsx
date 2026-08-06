@@ -90,8 +90,11 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
                   Target storage
                 </label>
                 <select id="clone-storage" className={inputCls} value={storage}
+                  disabled={storages.isError}
                   onChange={(e) => setStorage(e.target.value)}>
-                  <option value="">Same as source</option>
+                  {storages.isError
+                    ? <option value="">Could not load datastores</option>
+                    : <option value="">Same as source</option>}
                   {storeOpts.map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
                 </select>
               </div>

@@ -98,7 +98,9 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
       <div>
         <label className={label} htmlFor="ar-metric">Metric</label>
         <select id="ar-metric" className={input} value={metric}
+                disabled={metrics.isError}
                 onChange={(e) => pickMetric(e.target.value)}>
+          {metrics.isError && <option value="">Could not load metrics</option>}
           {specs.map((s) => <option key={s.metric} value={s.metric}>{s.metric}</option>)}
         </select>
       </div>
@@ -115,8 +117,11 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         <div>
           <label className={label} htmlFor="ar-host">Host</label>
           <select id="ar-host" className={input} value={targetId}
+                  disabled={hosts.isError}
                   onChange={(e) => setTargetId(e.target.value)}>
-            <option value="">Select…</option>
+            {hosts.isError
+              ? <option value="">Could not load hosts</option>
+              : <option value="">Select…</option>}
             {(hosts.data ?? []).map((h) =>
               <option key={h.id} value={h.id}>{h.name}</option>)}
           </select>
@@ -127,8 +132,11 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         <div>
           <label className={label} htmlFor="ar-app">App</label>
           <select id="ar-app" className={input} value={targetId}
+                  disabled={apps.isError}
                   onChange={(e) => setTargetId(e.target.value)}>
-            <option value="">Select…</option>
+            {apps.isError
+              ? <option value="">Could not load apps</option>
+              : <option value="">Select…</option>}
             {(apps.data ?? []).map((a) =>
               <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
@@ -139,8 +147,11 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         <div>
           <label className={label} htmlFor="ar-vm">VM</label>
           <select id="ar-vm" className={input} value={targetId}
+                  disabled={vms.isError}
                   onChange={(e) => setTargetId(e.target.value)}>
-            <option value="">Select…</option>
+            {vms.isError
+              ? <option value="">Could not load VMs</option>
+              : <option value="">Select…</option>}
             {(vms.data ?? []).map((v) =>
               <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>

@@ -9,7 +9,7 @@ type HostRow = { id: number; name: string }
 
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: entry } = useCatalogEntry(slug)
-  const { data: hosts } = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
   const install = useInstall()
   const [hostId, setHostId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -43,9 +43,12 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
           <>
             <div className="mt-4 space-y-3">
               <select className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
-                value={hostId ?? ''} onChange={(e) => setHostId(Number(e.target.value) || null)}>
-                <option value="">Select a host…</option>
-                {(hosts ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+                value={hostId ?? ''} disabled={hosts.isError}
+                onChange={(e) => setHostId(Number(e.target.value) || null)}>
+                {hosts.isError
+                  ? <option value="">Could not load hosts</option>
+                  : <option value="">Select a host…</option>}
+                {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
               <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
                 placeholder="App name" value={name} onChange={(e) => setName(e.target.value)} />

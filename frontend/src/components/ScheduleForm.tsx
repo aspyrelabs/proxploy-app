@@ -95,8 +95,11 @@ export function ScheduleForm({ jobKind, onSaved }:
             {needs === 'app' ? 'App' : 'Host'}
           </label>
           <select id="sc-target" className={input} value={effectiveTargetId}
+                  disabled={targets.isError}
                   onChange={(e) => setTargetId(e.target.value)}>
-            <option value="">Select…</option>
+            {targets.isError
+              ? <option value="">Could not load {needs === 'app' ? 'apps' : 'hosts'}</option>
+              : <option value="">Select…</option>}
             {(targets.data ?? []).map((t) =>
               <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>

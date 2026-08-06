@@ -129,8 +129,11 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                     Target host
                   </label>
                   <select id="migrate-target" className={inputCls} value={targetHostId ?? ''}
+                          disabled={hosts.isError}
                           onChange={(e) => { const v = e.target.value; if (v) runPreflight(Number(v)) }}>
-                    <option value="">Select a host…</option>
+                    {hosts.isError
+                      ? <option value="">Could not load hosts</option>
+                      : <option value="">Select a host…</option>}
                     {targets.map((h) => (
                       <option key={h.id} value={h.id} disabled={h.status !== 'connected'}>
                         {h.name}{h.status !== 'connected' ? ` (${h.status})` : ''}
