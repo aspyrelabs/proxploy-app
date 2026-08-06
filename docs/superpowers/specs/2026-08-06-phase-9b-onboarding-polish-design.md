@@ -118,12 +118,31 @@ is structural: it makes "error displayed as empty" impossible to express,
 rather than a rule contributors must remember at ~40 call sites. It also
 retires `EmptyState`-as-loading-placeholder.
 
-**Which queries:** every query whose result renders a list or collection —
-not all ~40 `useQuery` sites. Single-value queries (a count, a status badge)
-are out of scope unless they can render a false "nothing here". The plan must
-enumerate the exact call sites rather than leave "list-rendering" to
-interpretation; the survey's figure of ~27 sites lacking `isError` is the
-upper bound, not the target.
+**Which queries.** A full inventory taken 2026-08-06 counts **69 `useQuery`
+sites** (one, `api/jobs.ts:45`, is dead code and gets deleted rather than
+converted). **46 render a collection; 6 of those already branch on `isError`;
+40 do not.** The 40 split into 25 page-level content lists and 15 form/dialog
+select-option lists. Page lists come first — an error there reads as "there is
+nothing here"; a select degrades to an empty dropdown, which is milder but
+still wrong.
+
+Single-value queries are out of scope **except** where failure renders a
+reassuring falsehood rather than a blank. Three qualify and are in scope:
+
+- **`api/hooks.ts:16` `useEntitlements`** — `has(key)` returns `false` on
+  error, so a failed entitlements fetch silently hides every gated feature in
+  the product as though the tenant were not entitled. It gates dozens of
+  buttons and panels, which makes this the highest-impact false negative in
+  the app.
+- **`api/account.ts:41` `useTotpStatus`** — on error the card falls to its
+  "not enrolled" branch and offers to enable two-factor when it may already be
+  on. Security-relevant.
+- **`routes/cluster.tsx:25` `useSummary`** — CPU/memory/storage rings fall back
+  to `?? 0` and draw a calm 0% gauge when the truth is "unknown".
+
+`components/HealthFooter.tsx:15` already does this correctly — it checks
+`isError` before ever computing "All systems healthy" — and is the reference
+pattern for the three above.
 
 Each conversion is mechanical; the risk is tedium, not difficulty.
 
@@ -171,6 +190,15 @@ Computed-style assertions are chosen over screenshot review because they catch
 the actual bug class (token bypass) mechanically. They do not prove the light
 theme looks *good*; nothing available here does, and §"What this does not
 prove" says so rather than implying otherwise.
+
+**The e2e suite is not in CI today.** `.github/workflows/ci.yml` has seven jobs
+and none runs Playwright; there is no `playwright install` step anywhere. Phase
+8 closed the browser gap by writing the harness, but nothing runs it except by
+hand. Building the DoD journey on an ungated harness would mean these clauses
+pass once and then rot, so **adding an e2e CI job is part of this phase**, not
+a follow-up. Chromium is present locally (`~/.cache/ms-playwright`); CI needs
+`playwright install --with-deps chromium` plus the backend venv the harness
+launches.
 
 ## What this phase does not prove
 
