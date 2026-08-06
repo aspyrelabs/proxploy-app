@@ -1,4 +1,5 @@
 export const CPU_GRADIENT = 'linear-gradient(90deg,#F5B544,#E0862B)'
+export const STORE_GRADIENT = 'linear-gradient(135deg,#F5B544,#E0862B)'
 export const RAM_GRADIENT = 'linear-gradient(90deg,#34D3C6,#5B9DF9)'
 export const STORAGE_GRADIENT = 'linear-gradient(90deg,#A78BFA,#6D5AE6)'
 export const DANGER_GRADIENT = 'linear-gradient(90deg,#F26D6D,#c93b3b)'

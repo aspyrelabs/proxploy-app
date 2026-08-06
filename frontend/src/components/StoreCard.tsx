@@ -1,5 +1,6 @@
 import type { CatalogRow } from '../api/catalog'
 import { Button } from './ui/button'
+import { STORE_GRADIENT } from './UsageBar'
 
 export function StoreCard({ entry, onInstall, installed }: {
   entry: CatalogRow; onInstall: (slug: string) => void; installed: boolean
@@ -9,7 +10,7 @@ export function StoreCard({ entry, onInstall, installed }: {
       <div className="flex items-start justify-between">
         <div
           className="flex h-10 w-10 items-center justify-center rounded-tile font-display text-[14px] font-semibold text-white"
-          style={{ background: 'linear-gradient(135deg,#F5B544,#E0862B)' }}
+          style={{ background: STORE_GRADIENT }}
         >
           {(entry.name ?? entry.slug).slice(0, 2).toUpperCase()}
         </div>
