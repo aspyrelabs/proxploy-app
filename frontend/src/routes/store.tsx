@@ -6,7 +6,7 @@ import { api } from '../api/client'
 import type { AppRow } from '../api/hooks'
 import { InstallDialog } from '../components/InstallDialog'
 import { StoreCard } from '../components/StoreCard'
-import { EmptyState } from '../components/EmptyState'
+import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
 import { shellRoute } from './shell'
 
@@ -18,7 +18,8 @@ export function StorePage() {
   const navigate = useNavigate()
   const [installing, setInstalling] = useState<string | null>(null)
   const category = search.category && search.category !== 'All' ? search.category : undefined
-  const { data: entries } = useCatalog(category, search.q)
+  const catalogQuery = useCatalog(category, search.q)
+  const entries = catalogQuery.data
   const refresh = useRefreshCatalog()
   // Same query key as cluster.tsx's unfiltered /apps fetch, so this shares one
   // cache entry rather than adding a second request. Drives the real
@@ -64,16 +65,20 @@ export function StorePage() {
         ))}
       </div>
 
-      {entries && entries.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {entries.map((e) => (
-            <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
-              onInstall={(slug) => setInstalling(slug)} />
-          ))}
-        </div>
-      ) : (
-        <EmptyState title="No store entries match your filter." note="" />
-      )}
+      <QueryState query={catalogQuery}
+                  emptyTitle="No store entries match your filter."
+                  emptyNote=""
+                  errorTitle="Store catalog not readable"
+                  errorNote="Proxploy could not reach the backend to list the app catalog.">
+        {(rows) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {rows.map((e) => (
+              <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
+                onInstall={(slug) => setInstalling(slug)} />
+            ))}
+          </div>
+        )}
+      </QueryState>
 
       {installing && (
         <InstallDialog slug={installing} onClose={() => setInstalling(null)} />

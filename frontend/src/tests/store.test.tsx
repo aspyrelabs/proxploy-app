@@ -151,6 +151,25 @@ describe('StorePage', () => {
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
 
+  it('says the catalog could not be read rather than showing "no store entries"', async () => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({
+      isError: true, isPending: false, data: undefined,
+    } as any)
+    withQuery(<StorePage />)
+    expect(await screen.findByText(/store catalog not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No store entries match your filter.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-filter copy when there genuinely are no matches', async () => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({
+      isError: false, isPending: false, data: [],
+    } as any)
+    withQuery(<StorePage />)
+    expect(await screen.findByText('No store entries match your filter.')).toBeInTheDocument()
+  })
+
   it('filters by category chip', async () => {
     const { useCatalog } = await import('../api/catalog')
     const mocked = vi.mocked(useCatalog)
