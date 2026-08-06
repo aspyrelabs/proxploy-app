@@ -28,6 +28,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve(hostRows)
     }
     if (path === '/schedules') return Promise.resolve([])
+    if (path === '/auth/sessions') return Promise.resolve([])
     if (path === '/teams' && !opts?.method) return Promise.resolve(teamRows)
     if (path === '/users' && !opts?.method) return Promise.resolve([])
     if (path.startsWith('/hosts/') && opts?.method === 'PATCH') {
