@@ -6,6 +6,8 @@ const calls: { path: string; method?: string; body: unknown }[] = []
 let notifyChannels = true
 let teamsRbac = false
 let hostRows: unknown[] = []
+let hostsError = false
+let channelsError = false
 const teamRows = [{ id: 1, name: 'Default', slug: 'default', description: null,
                     member_count: 1, host_count: 1 },
                    { id: 2, name: 'Ops', slug: 'ops', description: null,
@@ -21,7 +23,10 @@ vi.mock('../api/client', () => ({
         grace: null,
       })
     }
-    if (path === '/hosts') return Promise.resolve(hostRows)
+    if (path === '/hosts') {
+      if (hostsError) return Promise.reject(new Error('boom'))
+      return Promise.resolve(hostRows)
+    }
     if (path === '/schedules') return Promise.resolve([])
     if (path === '/teams' && !opts?.method) return Promise.resolve(teamRows)
     if (path === '/users' && !opts?.method) return Promise.resolve([])
@@ -30,6 +35,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ id: 1, node_shell_enabled: true })
     }
     if (path === '/notifications/channels' && !opts?.method) {
+      if (channelsError) return Promise.reject(new Error('boom'))
       return Promise.resolve([
         { id: 1, name: 'Home ntfy', kind: 'ntfy', events: ['job.failed'],
           enabled: true, last_notified_at: null },
@@ -148,6 +154,37 @@ describe('SettingsPage — host team assignment', () => {
       c.method === 'PATCH' && c.path === '/hosts/5'
       && JSON.stringify(c.body) === JSON.stringify({ node_shell_enabled: false, team_id: 2 })))
       .toBe(true))
+  })
+})
+
+describe('SettingsPage — hosts and channels error vs empty', () => {
+  beforeEach(() => {
+    calls.length = 0
+    notifyChannels = true
+    teamsRbac = false
+    hostsError = false
+    channelsError = false
+    hostRows = []
+  })
+
+  it('says the hosts could not be read rather than showing "no hosts yet"', async () => {
+    hostsError = true
+    wrap()
+    expect(await screen.findByText(/hosts not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No hosts yet.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-hosts copy when there genuinely are none', async () => {
+    wrap()
+    expect(await screen.findByText('No hosts yet.')).toBeInTheDocument()
+    expect(screen.queryByText(/hosts not readable/i)).not.toBeInTheDocument()
+  })
+
+  it('says the channels could not be read rather than showing "no channels yet"', async () => {
+    channelsError = true
+    wrap()
+    expect(await screen.findByText(/channels not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No channels yet')).not.toBeInTheDocument()
   })
 })
 

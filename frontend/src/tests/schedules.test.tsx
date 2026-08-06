@@ -9,6 +9,7 @@ let schedules: any[] = []
 let hosts: any[] = [{ id: 1, name: 'host-01' }]
 let features: Record<string, boolean> = { 'sched.windows': true, 'store.auto_update': true }
 let postError: { status: number; body: any } | null = null
+let schedulesError = false
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
@@ -32,7 +33,10 @@ vi.mock('../api/client', () => {
         if (postError) return Promise.reject(new ApiError(postError.status, postError.body))
         return Promise.resolve({ id: 5, job: { id: 1, kind: 'backup.run' } })
       }
-      if (path === '/schedules') return Promise.resolve(schedules)
+      if (path === '/schedules') {
+        if (schedulesError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
+        return Promise.resolve(schedules)
+      }
       if (path === '/hosts') return Promise.resolve(hosts)
       if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
       return Promise.resolve([])
@@ -162,6 +166,22 @@ describe('SchedulesCard', () => {
                    created_by: null, last_run_at: null, next_run_at: null }]
     wrap(<SchedulesCard />)
     await waitFor(() => expect(screen.getByText(/system/i)).toBeInTheDocument())
+  })
+
+  it('says the schedules could not be read rather than showing "no schedules yet"', async () => {
+    posted.length = 0
+    schedulesError = true
+    wrap(<SchedulesCard />)
+    expect(await screen.findByText(/schedules not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No schedules yet')).not.toBeInTheDocument()
+    schedulesError = false
+  })
+
+  it('shows the real empty-schedules copy when there genuinely are none', async () => {
+    posted.length = 0
+    schedules = []
+    wrap(<SchedulesCard />)
+    expect(await screen.findByText('No schedules yet')).toBeInTheDocument()
   })
 
   it('hides New schedule and Run now without sched.windows', async () => {

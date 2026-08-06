@@ -10,6 +10,7 @@ import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
+import { QueryState } from '../components/QueryState'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
@@ -78,58 +79,61 @@ export function SchedulesCard() {
               {adding ? 'Close' : 'New schedule'}
             </Button>
           )}>
-      <table className="w-full text-left text-[13px]">
-        <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-          <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
-          <th>State</th><th /></tr></thead>
-        <tbody>
-          {(schedules.data ?? []).map(s => (
-            <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
-              <td className="py-2">
-                {s.name}
-                {s.created_by == null && (
-                  <span className="ml-2 rounded-tile bg-panel-2 px-1.5 py-0.5
-                                   font-mono text-[10px] uppercase text-text-3">
-                    system
-                  </span>
-                )}
-              </td>
-              <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
-              <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
-              <td className="font-mono text-[11.5px] text-text-3">
-                {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}
-                <span className="ml-1">{s.timezone}</span>
-              </td>
-              <td className={s.enabled ? 'text-green' : 'text-text-3'}>
-                {s.enabled ? 'enabled' : 'disabled'}
-              </td>
-              <td className="py-2 text-right whitespace-nowrap">
-                {windowsAllowed && (
-                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                          disabled={runNow.isPending}
-                          onClick={() => runNow.mutate(s.id)}>Run now</Button>
-                )}
-                <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
-                        disabled={toggle.isPending}
-                        onClick={() => toggle.mutate(s)}>
-                  {s.enabled ? 'Disable' : 'Enable'}
-                </Button>
-                <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
-                        onClick={() => {
-                          if (window.confirm(`Remove schedule "${s.name}"?`)) {
-                            remove.mutate(s.id)
-                          }
-                        }}>Remove</Button>
-              </td>
-            </tr>
-          ))}
-          {!schedules.data?.length && (
-            <tr><td colSpan={6} className="py-4 text-text-3">
-              No schedules yet. Add one for nightly backups or an auto-update window.
-            </td></tr>
-          )}
-        </tbody>
-      </table>
+      <QueryState query={schedules}
+                  emptyTitle="No schedules yet"
+                  emptyNote="Add one for nightly backups or an auto-update window."
+                  errorTitle="Schedules not readable"
+                  errorNote="Proxploy could not reach the backend to list your schedules.">
+        {(rows) => (
+          <table className="w-full text-left text-[13px]">
+            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+              <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
+              <th>State</th><th /></tr></thead>
+            <tbody>
+              {rows.map(s => (
+                <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
+                  <td className="py-2">
+                    {s.name}
+                    {s.created_by == null && (
+                      <span className="ml-2 rounded-tile bg-panel-2 px-1.5 py-0.5
+                                       font-mono text-[10px] uppercase text-text-3">
+                        system
+                      </span>
+                    )}
+                  </td>
+                  <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
+                  <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
+                  <td className="font-mono text-[11.5px] text-text-3">
+                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}
+                    <span className="ml-1">{s.timezone}</span>
+                  </td>
+                  <td className={s.enabled ? 'text-green' : 'text-text-3'}>
+                    {s.enabled ? 'enabled' : 'disabled'}
+                  </td>
+                  <td className="py-2 text-right whitespace-nowrap">
+                    {windowsAllowed && (
+                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                              disabled={runNow.isPending}
+                              onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                    )}
+                    <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                            disabled={toggle.isPending}
+                            onClick={() => toggle.mutate(s)}>
+                      {s.enabled ? 'Disable' : 'Enable'}
+                    </Button>
+                    <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                            onClick={() => {
+                              if (window.confirm(`Remove schedule "${s.name}"?`)) {
+                                remove.mutate(s.id)
+                              }
+                            }}>Remove</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </QueryState>
       {adding && <div className="mt-4 border-t border-line-soft pt-4">
         <ScheduleForm onSaved={() => setAdding(false)} />
       </div>}
@@ -226,45 +230,52 @@ export function SettingsPage() {
       </Card>
 
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
-        <table className="w-full text-left text-[13px]">
-          <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-            <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th><th>Team</th></tr></thead>
-          <tbody>
-            {(hosts.data ?? []).map(h => (
-              <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
-                <td className="py-2 font-mono">{h.name}</td>
-                <td className="font-mono text-text-2">{h.address}</td>
-                <td className="text-text-2">{h.pve_version ?? '—'}</td>
-                <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
-                <td>
-                  <label className="inline-flex items-center gap-1.5">
-                    <input type="checkbox" checked={h.node_shell_enabled}
-                      disabled={toggleNodeShell.isPending}
-                      onChange={() => toggleNodeShell.mutate(h)} />
-                    <span className="text-[11px] text-text-3">
-                      {h.node_shell_enabled ? 'enabled' : 'disabled'}
-                    </span>
-                  </label>
-                </td>
-                <td>
-                  {teamsAllowed ? (
-                    <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
-                      disabled={assignTeam.isPending}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
-                      }}
-                      className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
-                      <option value="">Unassigned</option>
-                      {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  ) : <span className="text-text-3">—</span>}
-                </td>
-              </tr>
-            ))}
-            {!hosts.data?.length && <tr><td colSpan={6} className="py-4 text-text-3">No hosts yet.</td></tr>}
-          </tbody>
-        </table>
+        <QueryState query={hosts}
+                    emptyTitle="No hosts yet."
+                    emptyNote=""
+                    errorTitle="Hosts not readable"
+                    errorNote="Proxploy could not reach the backend to list your hosts.">
+          {(rows) => (
+            <table className="w-full text-left text-[13px]">
+              <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+                <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th><th>Team</th></tr></thead>
+              <tbody>
+                {rows.map(h => (
+                  <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
+                    <td className="py-2 font-mono">{h.name}</td>
+                    <td className="font-mono text-text-2">{h.address}</td>
+                    <td className="text-text-2">{h.pve_version ?? '—'}</td>
+                    <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
+                    <td>
+                      <label className="inline-flex items-center gap-1.5">
+                        <input type="checkbox" checked={h.node_shell_enabled}
+                          disabled={toggleNodeShell.isPending}
+                          onChange={() => toggleNodeShell.mutate(h)} />
+                        <span className="text-[11px] text-text-3">
+                          {h.node_shell_enabled ? 'enabled' : 'disabled'}
+                        </span>
+                      </label>
+                    </td>
+                    <td>
+                      {teamsAllowed ? (
+                        <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
+                          disabled={assignTeam.isPending}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
+                          }}
+                          className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
+                          <option value="">Unassigned</option>
+                          {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      ) : <span className="text-text-3">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </QueryState>
         {adding && <div className="mt-4 border-t border-line-soft pt-4">
           <HostForm onCreated={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['hosts'] }) }} />
         </div>}
@@ -280,40 +291,43 @@ export function SettingsPage() {
           </p>
         ) : (
           <>
-            <table className="w-full text-left text-[13px]">
-              <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-                <th className="pb-2">Name</th><th>Kind</th><th>Events</th><th>State</th><th /></tr></thead>
-              <tbody>
-                {(channels.data ?? []).map(ch => (
-                  <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2">{ch.name}</td>
-                    <td className="font-mono text-text-2">{ch.kind}</td>
-                    <td className="font-mono text-[11.5px] text-text-3">
-                      {ch.events.length ? ch.events.join(', ') : 'all events'}
-                    </td>
-                    <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
-                      {ch.enabled ? 'enabled' : 'disabled'}
-                    </td>
-                    <td className="py-2 text-right">
-                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                              disabled={toggleChannel.isPending}
-                              onClick={() => toggleChannel.mutate(ch)}>
-                        {ch.enabled ? 'Disable' : 'Enable'}
-                      </Button>
-                      <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
-                              onClick={() => testChannel.mutate(ch.id)}>Test</Button>
-                      <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
-                              onClick={() => removeChannel(ch)}>Remove</Button>
-                    </td>
-                  </tr>
-                ))}
-                {!channels.data?.length && (
-                  <tr><td colSpan={5} className="py-4 text-text-3">
-                    No channels yet. Add one to get told when a job fails.
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
+            <QueryState query={channels}
+                        emptyTitle="No channels yet"
+                        emptyNote="Add one to get told when a job fails."
+                        errorTitle="Channels not readable"
+                        errorNote="Proxploy could not reach the backend to list your notification channels.">
+              {(rows) => (
+                <table className="w-full text-left text-[13px]">
+                  <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+                    <th className="pb-2">Name</th><th>Kind</th><th>Events</th><th>State</th><th /></tr></thead>
+                  <tbody>
+                    {rows.map(ch => (
+                      <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
+                        <td className="py-2">{ch.name}</td>
+                        <td className="font-mono text-text-2">{ch.kind}</td>
+                        <td className="font-mono text-[11.5px] text-text-3">
+                          {ch.events.length ? ch.events.join(', ') : 'all events'}
+                        </td>
+                        <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
+                          {ch.enabled ? 'enabled' : 'disabled'}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                                  disabled={toggleChannel.isPending}
+                                  onClick={() => toggleChannel.mutate(ch)}>
+                            {ch.enabled ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                                  onClick={() => testChannel.mutate(ch.id)}>Test</Button>
+                          <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                                  onClick={() => removeChannel(ch)}>Remove</Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </QueryState>
             {addingChannel && <div className="mt-4 border-t border-line-soft pt-4">
               <ChannelForm onSaved={() => {
                 setAddingChannel(false)
