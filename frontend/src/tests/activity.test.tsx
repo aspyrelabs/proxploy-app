@@ -1,16 +1,23 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+let jobsResult: 'ok' | 'empty' | 'error' = 'ok'
+let activityResult: 'ok' | 'empty' | 'error' = 'ok'
+let jobEventsError = false
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
     if (path.startsWith('/jobs/12/events')) {
+      if (jobEventsError) return Promise.reject(new Error('boom'))
       return Promise.resolve([
         { seq: 1, ts: '2026-07-29T09:00:00Z', stream: 'stdout', message: 'starting CT 150' },
         { seq: 2, ts: '2026-07-29T09:00:04Z', stream: 'status', message: 'succeeded: ok' },
       ])
     }
     if (path.startsWith('/jobs')) {
+      if (jobsResult === 'error') return Promise.reject(new Error('boom'))
+      if (jobsResult === 'empty') return Promise.resolve([])
       // Realistic GET /jobs order: newest-first, exactly as the server
       // returns it — the drawer must not need to re-sort this itself.
       return Promise.resolve([
@@ -21,6 +28,8 @@ vi.mock('../api/client', () => ({
       ])
     }
     if (path.startsWith('/cluster/activity')) {
+      if (activityResult === 'error') return Promise.reject(new Error('boom'))
+      if (activityResult === 'empty') return Promise.resolve([])
       return Promise.resolve([
         { kind: 'job', id: 12, at: '2026-07-29T09:00:00Z', title: 'app.start',
           status: 'succeeded', target_type: 'app', target_id: 1,
@@ -48,6 +57,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 
 import { ActivityDrawer } from '../components/ActivityDrawer'
 import { ActivityFeed } from '../components/ActivityFeed'
+import { JobLog } from '../components/JobLog'
 import { TerminalPanel } from '../components/TerminalPanel'
 
 const wrap = (ui: React.ReactNode) => {
@@ -72,6 +82,8 @@ describe('TerminalPanel', () => {
 })
 
 describe('ActivityDrawer', () => {
+  beforeEach(() => { jobsResult = 'ok' })
+
   it('lists jobs newest-first with their status', async () => {
     wrap(<ActivityDrawer />)
     expect(await screen.findByText('vm.stop')).toBeInTheDocument()
@@ -79,13 +91,61 @@ describe('ActivityDrawer', () => {
     const rows = screen.getAllByTestId('drawer-job')
     expect(rows[0]).toHaveTextContent('vm.stop')
   })
+
+  it('says activity could not be read rather than showing "no jobs yet"', async () => {
+    jobsResult = 'error'
+    wrap(<ActivityDrawer />)
+    expect(await screen.findByText(/activity not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No jobs yet.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-jobs copy when there genuinely are none', async () => {
+    jobsResult = 'empty'
+    wrap(<ActivityDrawer />)
+    expect(await screen.findByText('No jobs yet.')).toBeInTheDocument()
+  })
 })
 
 describe('ActivityFeed', () => {
+  beforeEach(() => { activityResult = 'ok' })
+
   it('renders merged job and audit rows with their actor', async () => {
     wrap(<ActivityFeed />)
     expect(await screen.findByText('app.start')).toBeInTheDocument()
     expect(screen.getByText('host.create')).toBeInTheDocument()
     expect(screen.getAllByText(/admin@example.com/).length).toBe(2)
+  })
+
+  it('says activity could not be read rather than showing "nothing has happened yet"', async () => {
+    activityResult = 'error'
+    wrap(<ActivityFeed />)
+    expect(await screen.findByText(/activity not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('Nothing has happened yet.')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-activity copy when there genuinely is none', async () => {
+    activityResult = 'empty'
+    wrap(<ActivityFeed />)
+    expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument()
+  })
+})
+
+describe('JobLog', () => {
+  beforeEach(() => { jobEventsError = false })
+
+  it('renders the archived transcript', async () => {
+    wrap(<JobLog jobId={12} />)
+    expect(await screen.findByText('starting CT 150')).toBeInTheDocument()
+  })
+
+  it('says the transcript could not be loaded rather than showing "no output yet"', async () => {
+    // TerminalPanel stays dark by design (doc 06 §c) so this isn't a
+    // QueryState card — it's a distinct line inside the same terminal box,
+    // but it still must not look like a job that legitimately produced
+    // nothing.
+    jobEventsError = true
+    wrap(<JobLog jobId={12} />)
+    expect(await screen.findByText(/could not load this job.s transcript/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no output yet/i)).not.toBeInTheDocument()
   })
 })

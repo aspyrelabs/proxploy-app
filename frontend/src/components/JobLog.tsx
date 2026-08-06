@@ -32,8 +32,16 @@ export function JobLog({ jobId }: { jobId: number }) {
 
   // The stream replays the backlog on connect, so `live` supersedes the query
   // once it has anything; before that the archived rows are what we have.
+  //
+  // TerminalPanel stays dark in both themes by design (doc 06 §c) and is not
+  // a QueryState consumer for that reason — a failed archived-transcript
+  // fetch gets its own line instead of the shared EmptyState card, so it
+  // reads distinctly from "No output yet." (a job that legitimately has no
+  // output) rather than looking identical to it.
   const lines: TermLine[] = live.length
     ? live
-    : (archived.data ?? []).map((e) => ({ stream: e.stream, message: e.message }))
+    : archived.isError
+      ? [{ stream: 'status', message: "Could not load this job's transcript." }]
+      : (archived.data ?? []).map((e) => ({ stream: e.stream, message: e.message }))
   return <TerminalPanel lines={lines} />
 }

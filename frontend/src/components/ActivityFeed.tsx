@@ -1,6 +1,7 @@
 import { useActivity } from '../api/jobs'
 import type { ActivityRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
+import { QueryState } from './QueryState'
 
 const TINT: Record<string, string> = {
   succeeded: 'bg-green-dim text-green',
@@ -52,21 +53,22 @@ function Item({ row, onOpen }: { row: ActivityRow; onOpen: () => void }) {
 
 /** Doc 06 `ActivityFeed`: dashboard + activity drawer share this row pattern. */
 export function ActivityFeed({ limit = 8 }: { limit?: number }) {
-  const { data } = useActivity(limit)
+  const activity = useActivity(limit)
   const drawer = useActivityDrawer()
-  if (!data || data.length === 0) {
-    return (
-      <div className="py-4 text-[12.5px] text-text-3">
-        Nothing has happened yet. Lifecycle actions, installs and backups land here.
-      </div>
-    )
-  }
   return (
-    <div className="divide-y divide-line-soft">
-      {data.slice(0, limit).map((row) => (
-        <Item key={`${row.kind}:${row.id}`} row={row}
-              onOpen={() => row.job_id != null && drawer.openJob(row.job_id)} />
-      ))}
-    </div>
+    <QueryState query={activity}
+                emptyTitle="Nothing has happened yet."
+                emptyNote="Lifecycle actions, installs and backups land here."
+                errorTitle="Activity not readable"
+                errorNote="Proxploy could not reach the backend to list recent activity.">
+      {(data) => (
+        <div className="divide-y divide-line-soft">
+          {data.slice(0, limit).map((row) => (
+            <Item key={`${row.kind}:${row.id}`} row={row}
+                  onOpen={() => row.job_id != null && drawer.openJob(row.job_id)} />
+          ))}
+        </div>
+      )}
+    </QueryState>
   )
 }

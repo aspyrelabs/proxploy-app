@@ -2,6 +2,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useJobs, useCancelJob } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
+import { QueryState } from './QueryState'
 import { UsageBar } from './UsageBar'
 import { Button } from './ui/button'
 
@@ -69,8 +70,7 @@ export function ActivityDrawer() {
   // a bare 'Z' sorts after a fractional-second suffix like '.123456Z', so a
   // zero-microsecond row would sort as newer than a genuinely later
   // same-second row.
-  const { data: jobs } = useJobs({ enabled: open })
-  const sorted = jobs ?? []
+  const jobsQuery = useJobs({ enabled: open })
   if (!open) return null
   return (
     <aside
@@ -85,16 +85,20 @@ export function ActivityDrawer() {
         </Button>
       </div>
       <div className="flex-1 overflow-auto">
-        {sorted.length === 0 ? (
-          <div className="px-4 py-6 text-[12.5px] text-text-3">
-            No jobs yet. Lifecycle actions, installs and backups show up here.
-          </div>
-        ) : (
-          sorted.map((j) => (
-            <JobItem key={j.id} job={j} expanded={jobId === j.id}
-              onExpand={() => openJob(j.id)} />
-          ))
-        )}
+        <QueryState query={jobsQuery}
+                    emptyTitle="No jobs yet."
+                    emptyNote="Lifecycle actions, installs and backups show up here."
+                    errorTitle="Activity not readable"
+                    errorNote="Proxploy could not reach the backend to list recent jobs.">
+          {(sorted) => (
+            <>
+              {sorted.map((j) => (
+                <JobItem key={j.id} job={j} expanded={jobId === j.id}
+                  onExpand={() => openJob(j.id)} />
+              ))}
+            </>
+          )}
+        </QueryState>
       </div>
     </aside>
   )
