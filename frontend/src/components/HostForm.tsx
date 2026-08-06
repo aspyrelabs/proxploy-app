@@ -12,6 +12,26 @@ const CONSENT_COPY = 'App Store installs run community scripts through a dedicat
   'SSH key — a root shell on the node, exactly as if you ran them yourself. ' +
   'Optional: skip it and everything except installs/updates/migration still works.'
 
+// Each kind names a different fix. "Request failed" named none of them.
+const KIND_COPY: Record<string, string> = {
+  auth: 'Proxmox rejected the API token. Check the token id and secret, and that the token has not expired.',
+  unreachable: 'Could not reach that address. Check the host is up and that :8006 is reachable from Proxploy.',
+  tls_fingerprint: "The node's TLS certificate does not match the fingerprint you pinned. "
+    + 'If you did not just replace the certificate, stop and investigate before continuing.',
+  refused: 'Proxploy refused to connect to that address because it resolves somewhere unsafe '
+    + '(loopback, link-local, or metadata). Use the node\'s real address.',
+}
+
+const errText = (e: unknown) => {
+  if (!(e instanceof ApiError)) return 'Request failed.'
+  const body = e.body as { error?: string; detail?: string | { error?: string } } | null
+  const kind = body?.error
+  if (kind && KIND_COPY[kind]) return KIND_COPY[kind]
+  if (e.status === 409) return 'A host with that name already exists.'
+  if (e.status === 403) return 'Managing more than one host needs a paid tier.'
+  return typeof body?.detail === 'string' ? body.detail : 'Request failed.'
+}
+
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const [f, setF] = useState({ name: '', address: 'https://', token_id: '',
     token_secret: '', verify_tls: true, ssh_enroll: false })
@@ -19,8 +39,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k: string, v: unknown) => setF(s => ({ ...s, [k]: v }))
-  const errText = (e: unknown) =>
-    e instanceof ApiError ? String((e.body as any)?.detail ?? (e.body as any)?.title ?? e.message) : 'Request failed'
 
   async function testConnection() {
     setProbe(''); setError('')

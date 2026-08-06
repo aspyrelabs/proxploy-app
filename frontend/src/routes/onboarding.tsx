@@ -97,7 +97,15 @@ export function Wizard() {
           </form>
         )}
 
-        {step === 1 && <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? 2 : 3) }} />}
+        {step === 1 && (
+          <div className="space-y-3">
+            <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? 2 : 3) }} />
+            <Button variant="ghost" onClick={() => advance(3)}>Skip for now</Button>
+            <p className="text-[12px] text-text-3">
+              You can add a host later from Settings. Everything except managing nodes works without one.
+            </p>
+          </div>
+        )}
 
         {step === 2 && (
           <div className="space-y-3">

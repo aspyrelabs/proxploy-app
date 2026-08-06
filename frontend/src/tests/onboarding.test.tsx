@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
@@ -67,6 +67,13 @@ describe('onboarding wizard', () => {
   it('lands on the done step once everything is settled', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
     renderWizard()
+    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+  })
+
+  it('lets a stranger skip the host step entirely', async () => {
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /skip for now/i }))
     expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 })
