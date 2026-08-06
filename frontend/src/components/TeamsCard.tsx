@@ -5,6 +5,7 @@ import { api, ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
 import type { MemberRow, TeamRow, UserRow } from '../api/teams'
+import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 
 const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
@@ -18,8 +19,9 @@ const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
     ? (e.body as any).detail : 'Request failed — try again.'
 
-function TeamMembers({ team, users, onRemove }: {
-  team: TeamRow; users: UserRow[]; onRemove: (team: TeamRow, m: MemberRow) => void
+function TeamMembers({ team, users, usersError, onRemove }: {
+  team: TeamRow; users: UserRow[]; usersError: boolean
+  onRemove: (team: TeamRow, m: MemberRow) => void
 }) {
   const qc = useQueryClient()
   const members = useTeamMembers(team.id)
@@ -50,41 +52,48 @@ function TeamMembers({ team, users, onRemove }: {
 
   return (
     <div className="py-3">
-      <table className="w-full text-left text-[12.5px]">
-        <thead><tr className="text-[10px] uppercase tracking-wide text-text-3">
-          <th className="pb-1">Email</th><th>Role</th><th /></tr></thead>
-        <tbody>
-          {(members.data ?? []).map((m) => (
-            <tr key={m.user_id} className="border-t border-line-soft">
-              <td className="py-1">{m.email}</td>
-              <td>
-                <select aria-label={`role for ${m.email}`} value={m.role}
-                  disabled={setRole.isPending}
-                  onChange={(e) => setRole.mutate({ userId: m.user_id, role: e.target.value })}
-                  className={selectCls}>
-                  {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </td>
-              <td className="text-right">
-                <Button variant="danger" className="px-2 py-0.5 text-[11px]"
-                  onClick={() => onRemove(team, m)}>Remove</Button>
-              </td>
-            </tr>
-          ))}
-          {!members.data?.length && (
-            <tr><td colSpan={3} className="py-2 text-text-3">No members yet.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <QueryState query={members}
+                  emptyTitle="No members yet."
+                  emptyNote=""
+                  errorTitle="Members not readable"
+                  errorNote="Proxploy could not reach the backend to list this team's members.">
+        {(rows) => (
+          <table className="w-full text-left text-[12.5px]">
+            <thead><tr className="text-[10px] uppercase tracking-wide text-text-3">
+              <th className="pb-1">Email</th><th>Role</th><th /></tr></thead>
+            <tbody>
+              {rows.map((m) => (
+                <tr key={m.user_id} className="border-t border-line-soft">
+                  <td className="py-1">{m.email}</td>
+                  <td>
+                    <select aria-label={`role for ${m.email}`} value={m.role}
+                      disabled={setRole.isPending}
+                      onChange={(e) => setRole.mutate({ userId: m.user_id, role: e.target.value })}
+                      className={selectCls}>
+                      {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </td>
+                  <td className="text-right">
+                    <Button variant="danger" className="px-2 py-0.5 text-[11px]"
+                      onClick={() => onRemove(team, m)}>Remove</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </QueryState>
       <div className="mt-3 flex items-end gap-2">
         <div>
           <label htmlFor={`add-user-${team.id}`}
             className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
             Add member
           </label>
-          <select id={`add-user-${team.id}`} value={pickUserId}
+          <select id={`add-user-${team.id}`} value={pickUserId} disabled={usersError}
             onChange={(e) => setPickUserId(e.target.value)} className={selectCls}>
-            <option value="">Select user…</option>
+            {usersError
+              ? <option value="">Could not load users</option>
+              : <option value="">Select user…</option>}
             {candidates.map((u) => <option key={u.id} value={u.id}>{u.email}</option>)}
           </select>
         </div>
@@ -167,37 +176,43 @@ export function TeamsCard() {
         </p>
       ) : (
         <>
-          <table className="w-full text-left text-[13px]">
-            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-              <th className="pb-2">Team</th><th>Members</th><th>Hosts</th><th /></tr></thead>
-            <tbody>
-              {(teams.data ?? []).map((t) => (
-                <Fragment key={t.id}>
-                  <tr className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2 font-mono">
-                      <button type="button" className="cursor-pointer text-left"
-                        onClick={() => setExpanded((x) => (x === t.id ? null : t.id))}>
-                        {expanded === t.id ? '▾' : '▸'} {t.name}
-                      </button>
-                    </td>
-                    <td>{t.member_count}</td>
-                    <td>{t.host_count}</td>
-                    <td />
-                  </tr>
-                  {expanded === t.id && (
-                    <tr className="border-t border-line-soft bg-panel-2/40">
-                      <td colSpan={4}>
-                        <TeamMembers team={t} users={users.data ?? []} onRemove={confirmRemove} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-              {!teams.data?.length && (
-                <tr><td colSpan={4} className="py-4 text-text-3">No teams yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+          <QueryState query={teams}
+                      emptyTitle="No teams yet."
+                      emptyNote=""
+                      errorTitle="Teams not readable"
+                      errorNote="Proxploy could not reach the backend to list your teams.">
+            {(rows) => (
+              <table className="w-full text-left text-[13px]">
+                <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+                  <th className="pb-2">Team</th><th>Members</th><th>Hosts</th><th /></tr></thead>
+                <tbody>
+                  {rows.map((t) => (
+                    <Fragment key={t.id}>
+                      <tr className="border-t border-line-soft hover:bg-panel-2">
+                        <td className="py-2 font-mono">
+                          <button type="button" className="cursor-pointer text-left"
+                            onClick={() => setExpanded((x) => (x === t.id ? null : t.id))}>
+                            {expanded === t.id ? '▾' : '▸'} {t.name}
+                          </button>
+                        </td>
+                        <td>{t.member_count}</td>
+                        <td>{t.host_count}</td>
+                        <td />
+                      </tr>
+                      {expanded === t.id && (
+                        <tr className="border-t border-line-soft bg-panel-2/40">
+                          <td colSpan={4}>
+                            <TeamMembers team={t} users={users.data ?? []}
+                              usersError={users.isError} onRemove={confirmRemove} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </QueryState>
           {adding && (
             <div className="mt-4 flex items-end gap-2 border-t border-line-soft pt-4">
               <div className="flex-1">

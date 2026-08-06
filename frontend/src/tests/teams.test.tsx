@@ -9,6 +9,8 @@ type Call = { path: string; method?: string; body: unknown }
 const calls: Call[] = []
 let teamsRbac = true
 let createStatus: 201 | 403 = 201
+let teamsError = false
+let membersError = false
 
 const TEAMS = [
   { id: 1, name: 'Default', slug: 'default', description: null, member_count: 1, host_count: 2 },
@@ -47,10 +49,16 @@ vi.mock('../api/client', () => ({
     if (path === '/entitlements') {
       return Promise.resolve({ tier: 'builtin', features: { 'teams.rbac': teamsRbac }, grace: null })
     }
-    if (path === '/teams' && !method) return Promise.resolve(TEAMS)
+    if (path === '/teams' && !method) {
+      if (teamsError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
+      return Promise.resolve(TEAMS)
+    }
     if (path === '/users' && !method) return Promise.resolve(USERS)
     const membersMatch = path.match(/^\/teams\/(\d+)\/members$/)
-    if (membersMatch && !method) return Promise.resolve(MEMBERS[Number(membersMatch[1])] ?? [])
+    if (membersMatch && !method) {
+      if (membersError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
+      return Promise.resolve(MEMBERS[Number(membersMatch[1])] ?? [])
+    }
     if (path === '/teams' && method === 'POST') {
       calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
       if (createStatus === 403) return Promise.reject(new ApiError(403, { detail: 'forbidden' }))
@@ -78,8 +86,26 @@ const wrap = () => {
 }
 
 describe('TeamsCard', () => {
-  beforeEach(() => { calls.length = 0; toastError.mockClear(); teamsRbac = true; createStatus = 201 })
+  beforeEach(() => {
+    calls.length = 0; toastError.mockClear(); teamsRbac = true; createStatus = 201
+    teamsError = false; membersError = false
+  })
   afterEach(() => vi.restoreAllMocks())
+
+  it('says the teams could not be read rather than showing "no teams yet"', async () => {
+    teamsError = true
+    wrap()
+    expect(await screen.findByText(/teams not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No teams yet.')).not.toBeInTheDocument()
+  })
+
+  it('says the members could not be read rather than showing "no members yet"', async () => {
+    membersError = true
+    wrap()
+    fireEvent.click(await screen.findByText('Ops', { exact: false }))
+    expect(await screen.findByText(/members not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No members yet.')).not.toBeInTheDocument()
+  })
 
   it('gates the whole card behind teams.rbac: no fetch, plan message shown', async () => {
     teamsRbac = false
