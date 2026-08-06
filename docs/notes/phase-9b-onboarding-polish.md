@@ -215,6 +215,15 @@ number, not the projection.)
   but correct" — bad contrast, misaligned spacing, an awkward but
   token-correct colour — passes it without complaint. **The light theme has
   not been seen by a human on this branch.**
+- **The DoD script's onboarding check tests the contract, not the code.**
+  `dod_verify_phase9b.py`'s check 4 reimplements `stepFrom` in Python and
+  drives it through the four `GET /meta/onboarding` states. That proves the
+  API returns the four booleans the wizard needs and that the intended
+  mapping is coherent — it does **not** execute the real TypeScript
+  `stepFrom` in `routes/onboarding.tsx`, so the two could drift apart and
+  this check would still pass. The real function is covered by
+  `src/tests/onboarding.test.tsx` and end-to-end by `journey.spec.ts`; the
+  DoD check is a third, weaker angle and should not be read as more.
 - **Environment quirks the journey hit, both worked around rather than
   fixed upstream:** this box's Chromium reports the deprecated timezone
   alias `Asia/Calcutta`, which its minimal tzdata has no backward-compat
