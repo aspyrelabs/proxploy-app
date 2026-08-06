@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from proxploy.executor.ssh import default_connect_factory
+from proxploy.executor.ssh import default_connect_factory, normalize_ssh_host
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
 
@@ -30,12 +30,12 @@ async def sftp_copy(connect_factory, *, src: dict, dst: dict,
     every chunk written. Returns the total number of bytes copied.
     """
     async with await connect_factory(
-        src["host"], src["private_key_pem"],
+        normalize_ssh_host(src["host"]), src["private_key_pem"],
         pinned_fingerprint=src["pinned_fingerprint"],
         on_new_fingerprint=src["on_new_fingerprint"],
     ) as src_conn:
         async with await connect_factory(
-            dst["host"], dst["private_key_pem"],
+            normalize_ssh_host(dst["host"]), dst["private_key_pem"],
             pinned_fingerprint=dst["pinned_fingerprint"],
             on_new_fingerprint=dst["on_new_fingerprint"],
         ) as dst_conn:

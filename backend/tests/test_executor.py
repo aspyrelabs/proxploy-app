@@ -4,8 +4,9 @@ import pytest
 import asyncssh
 
 from proxploy.executor import SSHExecutor, get_ssh_private_key
-from proxploy.executor.ssh import SSHHostKeyMismatch, default_connect_factory
-from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+from proxploy.executor.ssh import SSHHostKeyMismatch, default_connect_factory, normalize_ssh_host
+from tests.fakes.ssh import (FakeSSHConnection, make_addressed_connect_factory,
+                             make_fake_connect_factory)
 from tests.support import make_db, seed_host_row
 
 
@@ -203,3 +204,62 @@ def test_get_ssh_private_key_raises_when_no_credential(tmp_path):
 
     with pytest.raises(LookupError):
         get_ssh_private_key(db, secretstore, host.id)
+
+
+# --- normalize_ssh_host --------------------------------------------------
+
+@pytest.mark.parametrize("address, expected", [
+    ("https://10.0.0.5:8006", "10.0.0.5"),           # full URL with port
+    ("https://10.0.0.5", "10.0.0.5"),                # full URL without port
+    ("pve1.example.com", "pve1.example.com"),        # bare hostname
+    ("10.0.0.5", "10.0.0.5"),                        # bare IP
+    ("::1", "::1"),                                  # bare IPv6 literal, unbracketed
+    ("https://[::1]:8006", "::1"),                   # full URL, bracketed IPv6
+    ("[::1]", "::1"),                                # bare IPv6 literal, bracketed
+])
+def test_normalize_ssh_host(address, expected):
+    assert normalize_ssh_host(address) == expected
+
+
+# --- Host.address (a full URL) reaching SSH as a bare hostname -----------
+
+def test_run_for_host_strips_scheme_and_port_from_the_stored_address(tmp_path):
+    """Regression test: `Host.address` is stored as a full `https://host:port`
+    URL (api/hosts.py), but every SSH call site used to hand that straight to
+    asyncssh, which wants a bare hostname — `://` and the embedded port are
+    not valid hostname characters, so this failed name resolution against any
+    real node. `seed_host_row`'s default address is `https://10.0.0.9:8006`;
+    the fake connect factory below is keyed by the bare hostname `10.0.0.9`
+    only, so this raises KeyError before the fix (the full URL is looked up)
+    and resolves after it (SSHExecutor.run normalizes before calling the
+    connect factory)."""
+    from proxploy.db import make_engine, make_sessionmaker, run_migrations
+    from proxploy.config import Settings
+    from proxploy.secretstore import SecretStore
+    from proxploy.models import HostCredential
+
+    s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
+                master_key_file=tmp_path / "master.key")
+    run_migrations(s)
+    sessionmaker = make_sessionmaker(make_engine(s))
+    SecretStore.ensure_key_file(s.master_key_file, db_file_exists=False)
+    secretstore = SecretStore(s.master_key_file)
+
+    with sessionmaker() as db:
+        host = seed_host_row(db)  # address == "https://10.0.0.9:8006"
+        blob, ver = secretstore.encrypt(b"fake-key-pem")
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=blob, key_version=ver))
+        db.commit()
+        host_id, host_address = host.id, host.address
+
+    fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc123", stdout_lines=[],
+                             stderr_lines=[], exit_status=0)
+    factory = make_addressed_connect_factory({"10.0.0.9": fake})
+    executor = SSHExecutor(connect_factory=factory)
+
+    status = asyncio.run(executor.run_for_host(
+        sessionmaker, secretstore, host_id, host_address, "true",
+        pinned_fingerprint=None, on_new_fingerprint=lambda fp: None))
+
+    assert status == 0

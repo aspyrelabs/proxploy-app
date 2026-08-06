@@ -188,7 +188,7 @@ def test_transfer_strategy_copies_archive_restores_on_target_and_cleans_up(tmp_p
                                     stderr_lines=[], exit_status=0, sftp_store=store)
 
         app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
-                            {SRC_ADDR: ssh_src, TGT_ADDR: ssh_tgt})
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
         src_id, tgt_id, app_id = _seed(app)
         job_id = _job(app, app_id, tgt_id)
         ctx = JobContext(app.state.jobs, job_id)
@@ -284,7 +284,7 @@ def test_transfer_strategy_ssh_host_key_mismatch_fails_and_cleans_up_source_arch
                                     sftp_store=store)
 
         app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
-                            {SRC_ADDR: ssh_src, TGT_ADDR: ssh_tgt})
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
         src_id, tgt_id, app_id = _seed(app)
         with app.state.sessionmaker() as db:
             db.get(Host, tgt_id).ssh_host_key_fingerprint = "SHA256:tgt-original"

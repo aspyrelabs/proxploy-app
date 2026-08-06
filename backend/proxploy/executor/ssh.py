@@ -14,10 +14,29 @@ import asyncio
 import re
 import shlex
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 import asyncssh
 
 CONNECT_TIMEOUT_S = 15.0
+
+
+def normalize_ssh_host(address: str) -> str:
+    """`Host.address` (api/hosts.py) is stored as a full `scheme://host:port`
+    URL — the same shape services/proxmox.py::ProxmoxClient._connect parses
+    for HTTPS — but asyncssh's `host` argument wants a bare hostname/IP.
+    Strips scheme and port; falls back to the raw string when there is no
+    scheme (`urlparse(...).hostname` is None for a bare host/IP), which also
+    covers a bare unbracketed IPv6 literal. A bare bracketed IPv6 literal
+    (`"[::1]"`, no scheme) is the one shape urlparse can't help with either
+    way, so that's unwrapped by hand.
+    """
+    hostname = urlparse(address).hostname
+    if hostname:
+        return hostname
+    if address.startswith("[") and address.endswith("]"):
+        return address[1:-1]
+    return address
 
 # POSIX shell variable name. `env` keys are inlined literally (unquoted) into
 # the command string below, so a key isn't just data like a value is — an
@@ -107,7 +126,7 @@ class SSHExecutor:
             if not _ENV_KEY_RE.match(k):
                 raise ValueError(f"invalid env var name: {k!r}")
         conn = await self._connect_factory(
-            host, private_key_pem, pinned_fingerprint=pinned_fingerprint,
+            normalize_ssh_host(host), private_key_pem, pinned_fingerprint=pinned_fingerprint,
             on_new_fingerprint=on_new_fingerprint)
         async with conn:
             env_prefix = " ".join(f"{k}={shlex.quote(str(v))}"
