@@ -4,6 +4,7 @@ import { useDeleteVolume, useStorage, useStorageContent, useStorageDetail } from
 import type { StorageRow, VolumeRow } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
+import { QueryState } from '../components/QueryState'
 import { StorageCard } from '../components/StorageCard'
 import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
@@ -145,7 +146,8 @@ export function ContentBrowser({ row, onClose, onManage }:
 }
 
 export function StoragePage() {
-  const { data: rows } = useStorage()
+  const storageQuery = useStorage()
+  const rows = storageQuery.data
   const [open, setOpen] = useState<StorageRow | null>(null)
   // 'new' = attach, a row = edit + detach. One dialog, two modes — a second
   // component would be the same form with two fields locked.
@@ -163,16 +165,19 @@ export function StoragePage() {
         <Button variant="primary" onClick={() => setForm('new')}>Add storage</Button>
       </div>
 
-      {rows && rows.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((r) => (
-            <StorageCard key={`${r.host_id}:${r.node}:${r.storage}`} row={r} onOpen={setOpen} />
-          ))}
-        </div>
-      ) : (
-        <EmptyState title="No datastores yet"
-          note="Datastores on connected Proxmox hosts appear here after the first poll." />
-      )}
+      <QueryState query={storageQuery}
+                  emptyTitle="No datastores yet"
+                  emptyNote="Datastores on connected Proxmox hosts appear here after the first poll."
+                  errorTitle="Datastores not readable"
+                  errorNote="Proxploy could not reach the backend to list your datastores.">
+        {(list) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {list.map((r) => (
+              <StorageCard key={`${r.host_id}:${r.node}:${r.storage}`} row={r} onOpen={setOpen} />
+            ))}
+          </div>
+        )}
+      </QueryState>
 
       {open && (
         // Keyed so switching datastores resets the content tab and the two

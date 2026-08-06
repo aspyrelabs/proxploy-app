@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const LOCAL = {
   host_id: 1, host_name: 'host-01', node: 'pve1', storage: 'local', type: 'dir',
@@ -23,6 +23,7 @@ const DUMP = {
 }
 
 const calls: string[] = []
+let storageResult: 'ok' | 'empty' | 'error' = 'ok'
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
     calls.push(path)
@@ -32,7 +33,10 @@ vi.mock('../api/client', () => ({
     if (path === '/storage/1/local') {
       return Promise.resolve({ ...LOCAL, avail_bytes: 322122547200, nodes: ['pve1'] })
     }
-    if (path === '/storage') return Promise.resolve([LOCAL, PBS])
+    if (path === '/storage') {
+      if (storageResult === 'error') return Promise.reject(new Error('boom'))
+      return Promise.resolve(storageResult === 'empty' ? [] : [LOCAL, PBS])
+    }
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
     if (path === '/entitlements') {
       return Promise.resolve({ tier: 'pro', features: { 'storage.manage': true }, grace: null })
@@ -57,6 +61,22 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 describe('StoragePage', () => {
+  beforeEach(() => { storageResult = 'ok' })
+
+  it('says the datastores could not be read rather than showing "no datastores yet"', async () => {
+    storageResult = 'error'
+    withQuery(<StoragePage />)
+    expect(await screen.findByText(/datastores not readable/i)).toBeInTheDocument()
+    expect(screen.queryByText('No datastores yet')).not.toBeInTheDocument()
+  })
+
+  it('shows the real empty-datastores copy when there genuinely are none', async () => {
+    storageResult = 'empty'
+    withQuery(<StoragePage />)
+    expect(await screen.findByText('No datastores yet')).toBeInTheDocument()
+    expect(screen.queryByText(/datastores not readable/i)).not.toBeInTheDocument()
+  })
+
   it('counts the datastores in the header (doc 06 §a row 43)', async () => {
     withQuery(<StoragePage />)
     expect(await screen.findByText('2 datastores across the cluster')).toBeInTheDocument()
