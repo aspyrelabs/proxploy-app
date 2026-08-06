@@ -38,7 +38,7 @@ export default defineConfig({
       // create_app() (see main.py) — uvicorn calls it for us with no args,
       // so it picks up Settings() from the PROXPLOY_* env below.
       command: `rm -rf '${dataDir}' && mkdir -p '${dataDir}' && `
-        + `${path.join(backendDir, '.venv/bin/uvicorn')} proxploy.main:create_app `
+        + `${path.join(backendDir, '.venv/bin/uvicorn')} tests.e2e_server:create_e2e_app `
         + `--factory --host 127.0.0.1 --port ${BACKEND_PORT}`,
       cwd: backendDir,
       url: `http://127.0.0.1:${BACKEND_PORT}/api/v1/meta/health`,
