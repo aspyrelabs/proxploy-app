@@ -2,17 +2,16 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { fetchOnboarding } from '../api/account'
 import { Button } from './ui/button'
+import Logo from './Logo'
 
 export const inputCls =
   'w-full rounded-ctl border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-text-3 focus:border-amber focus:outline-none'
 
+// The real brand mark, replacing the gradient "P" tile and the Prox/ploy
+// split that stood in for it. currentColor carries the amber, so this is the
+// same artwork proxploy-web ships with no second copy of the colours.
 export function Brand() {
-  return (
-    <div className="flex items-center gap-2 font-display text-[17px] font-semibold">
-      <span className="grid h-7 w-7 place-items-center rounded-tile bg-[linear-gradient(150deg,#F5B544,#E0862B)] text-[13px] font-bold text-[#20160a]">P</span>
-      <span>Prox<b className="text-amber">ploy</b></span>
-    </div>
-  )
+  return <Logo className="h-[30px] w-auto text-amber" />
 }
 
 type LoginResult = { ok?: true; user?: unknown; totp_required?: true; pending?: string }
