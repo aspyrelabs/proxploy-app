@@ -55,7 +55,7 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
     the fixed `{target_type}.{action}` kind; this is the plain version every
     Phase 6 mutation route uses. `action` overrides the audit action when the
     job kind is not the right name for the audit trail (a `backup.run` job
-    fired from the restore route, say) — it defaults to `kind`.
+    fired from the restore route, say); it defaults to `kind`.
 
     Both `params` copies are redacted at their own sink: JobBackend.enqueue
     redacts before writing `jobs.params`, write_audit before `audit_events.params`.
@@ -142,7 +142,7 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
     """Doc 05 §Streaming 1. `line` frames carry `id:` (the resume cursor);
     `progress` and `status` do not. A terminal `status` closes the stream.
 
-    Auth is resolved once via a short-lived session in a thread — never a
+    Auth is resolved once via a short-lived session in a thread, never a
     `Depends(get_db)` seam, which for a StreamingResponse would stay open for
     the life of the connection. `authorize`/`require_entitlement` are
     still the ones enforcing it (called directly, not through FastAPI's DI)
@@ -190,7 +190,7 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
             # High-water mark over the replay window, not the fixed resume
             # cursor: a line written between subscribe() (above) and this
             # read has seq > `after` and would otherwise be replayed here AND
-            # re-delivered live — the frontend log client appends by frame,
+            # re-delivered live: the frontend log client appends by frame,
             # it does not dedup by seq, so that duplicate is user-visible.
             last = after
             for r in rows:

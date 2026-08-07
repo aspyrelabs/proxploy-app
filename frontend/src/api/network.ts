@@ -1,4 +1,4 @@
-// api/network.ts — Network page server state (doc 05 §Network, doc 06 §a row 44).
+// api/network.ts, Network page server state (doc 05 §Network, doc 06 §a row 44).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -36,7 +36,7 @@ export type Attachment = {
 }
 
 /** One host list_bridges() could not read (api/network.py: unreachable, or
- * missing its API token credential — a routine state, not an outage). The
+ * missing its API token credential, a routine state, not an outage). The
  * rest of the page still renders; this is what tells the operator a host is
  * silently missing rather than the fleet just being smaller than they think. */
 export type BridgeError = { host_id: number; host_name: string; error: string }
@@ -55,7 +55,7 @@ export type Throughput = { hours: number; resolution: string; hosts: HostThrough
  * Every dict-bodied `HTTPException` in this app arrives FLAT: `main.py`'s
  * `problem_handler` does `body.update(exc.detail)`, so `HTTPException(409,
  * {"error": "confirm_required", ...})` serialises as
- * `{type, title, status, error, confirm_phrase, detail}` — `detail` is the
+ * `{type, title, status, error, confirm_phrase, detail}`: `detail` is the
  * human-readable string, not a nested object. That is why `LifecycleActions`
  * reads `e.body.error` directly and why it works for Phase 6's routes too.
  */
@@ -105,7 +105,7 @@ export function useSetNic() {
         { method: 'PUT', body: JSON.stringify(v.patch) }),
     // A config PUT is not a job (api/network.py::set_guest_nic writes the file
     // synchronously), so useLifecycle's "never invalidate the resource key"
-    // rule does not apply — there is no optimistic patch to stomp and the
+    // rule does not apply; there is no optimistic patch to stomp and the
     // attachment map is exactly what changed.
     onSettled: () => { qc.invalidateQueries({ queryKey: ['network'] }) },
   })

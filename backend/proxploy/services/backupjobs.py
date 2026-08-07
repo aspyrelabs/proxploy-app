@@ -5,7 +5,7 @@
 sync writes what Proxmox currently reports and deletes rows whose volid vanished
 upstream. Proxmox is the source of truth; this table only feeds the Backups page.
 
-Unlike `vms`, this is NOT on the 30 s poll cycle — listing storage content is a
+Unlike `vms`, this is NOT on the 30 s poll cycle; listing storage content is a
 per-storage call, not part of the `/cluster/resources` bulk read the doc-02 §3
 budget allows. It runs as a job: on demand from the page (when the cache is
 stale) and after every backup mutation.
@@ -56,7 +56,7 @@ def _has_backup_content(entry: dict) -> bool:
 def _taken_at(ctime) -> datetime | None:
     if ctime in (None, ""):
         return None
-    # naive UTC, matching models.utcnow() — every other datetime column is naive
+    # naive UTC, matching models.utcnow(): every other datetime column is naive
     return datetime.fromtimestamp(int(ctime), timezone.utc).replace(tzinfo=None)
 
 
@@ -120,7 +120,7 @@ def sync_host_backups(app, host_id: int) -> dict:
 
 
 async def sync_backups(ctx: JobContext, params: dict) -> dict:
-    """`backup.sync` — every connected host, or one when `host_id` is given.
+    """`backup.sync`, every connected host, or one when `host_id` is given.
 
     One bad host is recorded and skipped: a host missing its API token must not
     stop the other three from syncing (services/catalog.py::run_ingest's rule).
@@ -137,7 +137,7 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
     for i, hid in enumerate(host_ids):
         try:
             r = await asyncio.to_thread(sync_host_backups, app, hid)
-        except Exception as e:  # noqa: BLE001 — one bad host can't kill the batch
+        except Exception as e:  # noqa: BLE001  (one bad host can't kill the batch)
             failed.append({"host_id": hid, "reason": str(e)})
             ctx.log(f"host {hid}: {e}", stream="stderr")
             continue
@@ -147,7 +147,7 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
     with app.state.sessionmaker() as db:
         # Recorded even when zero backups were found: "the cache is empty" and
         # "the cache was never filled" are different, and only this key can tell
-        # the GET route apart — otherwise a cluster with no backups re-enqueues
+        # the GET route apart: otherwise a cluster with no backups re-enqueues
         # a sync on every page load.
         set_setting(db, SYNCED_AT_KEY, utcnow().isoformat())
     ctx.log(f"{synced} backups cached, {dropped} dropped, {len(failed)} host(s) failed")
@@ -163,7 +163,7 @@ def sync_in_flight(db) -> bool:
     queries on this session, which pins a read snapshot (SQLite in WAL gives a
     transaction a consistent view until it ends). A concurrent request that
     enqueued and committed its Job row AFTER that snapshot opened is invisible
-    here, so the check returns False and a duplicate job is enqueued — which is
+    here, so the check returns False and a duplicate job is enqueued; which is
     exactly the race `api/backups.py::_sync_enqueue_lock` looks like it
     prevents but cannot: the lock serializes the code, not the visibility of
     the data. Ending the read transaction starts a fresh snapshot.
@@ -234,7 +234,7 @@ async def _resync(ctx: JobContext, host_id: int) -> None:
 
 
 async def run_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.run` — one vzdump task over the selected guests, or all of them."""
+    """`backup.run`, one vzdump task over the selected guests, or all of them."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
     client, node, host_name = await asyncio.to_thread(_host_target, app, host_id)
@@ -260,7 +260,7 @@ HANDLERS["backup.run"] = run_backup
 
 
 async def restore_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.restore` — in place (same vmid, force=1) or as new (fresh vmid).
+    """`backup.restore`, in place (same vmid, force=1) or as new (fresh vmid).
 
     The route already refused an in-place restore over a running guest or over
     Proxploy itself; this handler assumes that gate was passed.
@@ -296,7 +296,7 @@ HANDLERS["backup.restore"] = restore_backup
 
 
 async def delete_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.delete` — remove one archive upstream, then re-mirror."""
+    """`backup.delete`, remove one archive upstream, then re-mirror."""
     app = ctx.backend.app
     client, node, info = await asyncio.to_thread(
         _backup_target, app, int(params["backup_id"]))
@@ -315,7 +315,7 @@ async def delete_backup(ctx: JobContext, params: dict) -> dict:
 
 
 async def prune_backups_job(ctx: JobContext, params: dict) -> dict:
-    """`backup.prune` — apply a retention spec for real. `spec` was built and
+    """`backup.prune`, apply a retention spec for real. `spec` was built and
     validated by the route; an empty one would mark every archive `remove`."""
     app = ctx.backend.app
     host_id = int(params["host_id"])

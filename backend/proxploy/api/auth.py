@@ -19,12 +19,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 users_router = APIRouter(prefix="/users", tags=["users"])
 
 # Module-level singleton (hosts.py idiom, api/deps.py::authorize docstring):
-# GET/PUT/DELETE all gate on the same ("settings", "manage") permission — the
+# GET/PUT/DELETE all gate on the same ("settings", "manage") permission: the
 # OIDC IdP config is an "own flow" settings.py's `.enc`-key refusal points at.
 _oidc_manage = authorize("settings", "manage")
 
 # GET /users (Task 6, doc 05): the member-picker source, ("user", "read")
-# global (any-team admin, no scope_of) — same status as ("user", "manage")
+# global (any-team admin, no scope_of): same status as ("user", "manage")
 # in create_user below.
 _users_read = authorize("user", "read")
 
@@ -43,7 +43,7 @@ def _user_out(db, user: User) -> dict:
 
 def _issue_session(request: Request, response: Response, db, user: User) -> dict:
     """The exact create_session + set_cookie + audit block both login paths
-    (password-only, and the TOTP second factor below) need — extracted so
+    (password-only, and the TOTP second factor below) need; extracted so
     the two cannot drift apart."""
     settings = request.app.state.settings
     ip = request.client.host if request.client else None
@@ -116,7 +116,7 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
 def totp_login(request: Request, body: TotpLoginIn, response: Response, db=Depends(get_db)):
     # PUBLIC (test_route_auth_invariant.py) and UNGOVERNED (test_rbac_invariant.py):
     # this route IS the second half of acquiring a session, so it can carry
-    # neither get_current_user nor authorize() — see both files' allowlist
+    # neither get_current_user nor authorize(): see both files' allowlist
     # comments for this path.
     ip = request.client.host if request.client else None
     _prune_pending(request)
@@ -226,7 +226,7 @@ def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
 # --- Session management (Task 9) --------------------------------------------
 #
 # Self-service on the caller's own sessions, same idiom as api/apikeys.py:
-# gated on get_current_user alone (no authorize() — "list/revoke my own
+# gated on get_current_user alone (no authorize(): "list/revoke my own
 # sessions" has no (resource, action) pair in services/authz.py's PERMISSIONS
 # matrix, and doesn't need one: this is not a role question, viewer and
 # owner alike may always manage their own login state). Ownership is
@@ -258,7 +258,7 @@ def revoke_session_route(request: Request, sid: int, db=Depends(get_db),
                          user: User = Depends(get_current_user)):
     row = db.query(SessionRow).filter_by(id=sid, user_id=user.id).one_or_none()
     if row is None:
-        # Also true of another user's session — 404, not 403: this isn't a
+        # Also true of another user's session: 404, not 403: this isn't a
         # role/permission question (api-keys' revoke_api_key precedent), and
         # an unauthenticated-role probe learning "403 = exists, 404 =
         # doesn't" would still be an existence oracle either way.
@@ -336,7 +336,7 @@ def _oidc_config_out(db) -> dict:
 
 
 def _oidc_redirect_uri(request: Request) -> str:
-    # Deterministic function of (route name, request base URL) — begin() and
+    # Deterministic function of (route name, request base URL): begin() and
     # callback() both call this and must agree, since the IdP echoes back
     # whatever redirect_uri begin() sent it.
     return str(request.url_for("oidc_callback"))
@@ -344,7 +344,7 @@ def _oidc_redirect_uri(request: Request) -> str:
 
 @router.get("/oidc/login", name="oidc_login")
 async def oidc_login(request: Request, db=Depends(get_db)):
-    # PUBLIC (test_route_auth_invariant.py): 404, never 403 — an anonymous
+    # PUBLIC (test_route_auth_invariant.py): 404, never 403: an anonymous
     # caller has no session to leak role/entitlement state through, and this
     # route is how a session gets created in the first place.
     if not (oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")):
@@ -366,7 +366,7 @@ async def oidc_callback(request: Request, state: str, code: str, db=Depends(get_
         # failure at all: an account that JIT-provisioned successfully but
         # has no role yet. That gets its own error code so the login page
         # can say "ask an administrator to approve your account" instead of
-        # a bare "sign-in failed" — still no stack trace, still no session.
+        # a bare "sign-in failed": still no stack trace, still no session.
         error = "oidc_pending" if str(e) == oidc.PENDING_APPROVAL_MESSAGE else "oidc"
         write_audit(db, actor_type="user", actor_id=None, action="auth.login",
                     result="error", params={"via": "oidc"}, ip=ip)
@@ -376,7 +376,7 @@ async def oidc_callback(request: Request, state: str, code: str, db=Depends(get_
     # an operator misconfiguration, not something the signing-in user caused
     # or a message safe to hand them, and swallowing it would silently strand
     # every OIDC sign-in with no record of why. It propagates to FastAPI's
-    # default handler as a 500 — logged, not silent, not a fake success.
+    # default handler as a 500: logged, not silent, not a fake success.
     raw = authn.create_session(db, user, ip, request.headers.get("user-agent"),
                                settings.session_ttl_hours)
     write_audit(db, actor_type="user", actor_id=user.id, action="auth.login",

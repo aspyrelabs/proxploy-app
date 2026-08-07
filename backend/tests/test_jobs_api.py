@@ -89,7 +89,7 @@ def test_cancel_stops_a_live_task_through_the_route(
         tmp_path, csrf_header, bootstrap_admin, monkeypatch):
     """test_cancel_marks_a_running_job_and_audits seeds a bare `running` row
     with no JobBackend task behind it, so `backend.cancel()` always returns
-    False there and only the orphan-row fallback ever runs — the exact branch
+    False there and only the orphan-row fallback ever runs, the exact branch
     the TOCTOU bug lived in. This one enqueues a real handler so the request
     hits `backend.cancel() -> True` and the job settles via `_finish`, not
     the route's fallback UPDATE."""
@@ -138,8 +138,8 @@ def test_cancel_stops_a_live_task_through_the_route(
 def test_cancel_refuses_a_job_that_finished_in_the_toctou_window(
         tmp_path, csrf_header, bootstrap_admin, monkeypatch):
     """Important 1: the route reads job.status once (still `running`), then
-    calls `backend.cancel()`. If the runner's `_finish` lands in that gap —
-    `_tasks` already popped, so `cancel()` returns False — the old code blindly
+    calls `backend.cancel()`. If the runner's `_finish` lands in that gap, 
+    `_tasks` already popped, so `cancel()` returns False; the old code blindly
     overwrote the now-`succeeded` row with `canceled`. Simulate the race by
     making the monkeypatched `cancel()` itself finish the job (mirroring what
     `_finish` really does) and return False, then assert the fallback refuses
@@ -217,7 +217,7 @@ def test_sse_dedups_a_line_written_in_the_subscribe_to_backlog_race_window(
         tmp_path, monkeypatch):
     """Important 3: a line committed between subscribe() and the backlog
     SELECT is legitimately in that SELECT's results (the row already exists)
-    but was ALSO already fanned out live (subscribe() ran first) — without a
+    but was ALSO already fanned out live (subscribe() ran first), without a
     high-water mark tracked across the replay, it is emitted twice: once from
     backlog, once from the live queue. Reproduce the race deterministically:
     the patched backlog() call pushes that same row onto the subscriber
@@ -301,7 +301,7 @@ def test_sse_dedups_a_line_written_in_the_subscribe_to_backlog_race_window(
 
 
 def test_sse_resumes_from_last_event_id(tmp_path):
-    """Backlog selection is pure — assert it without a socket."""
+    """Backlog selection is pure, assert it without a socket."""
     from proxploy.api.jobs import backlog
 
     from tests.support import make_app

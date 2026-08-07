@@ -15,7 +15,7 @@ export function useLive() {
 export function LiveProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient()
   const [lastEventAt, setLastEventAt] = useState<number | null>(null)
-  // notify.inapp gates the toast surface, not the data — a ref keeps the
+  // notify.inapp gates the toast surface, not the data; a ref keeps the
   // effect below from re-subscribing (and dropping the EventSource) every
   // time the entitlements query refetches.
   const { has } = useEntitlements()

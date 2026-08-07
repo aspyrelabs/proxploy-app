@@ -22,7 +22,7 @@ test('login and every nav page renders with a clean console', async ({ page }) =
   // Chromium logs EVERY non-2xx fetch as a console error, so the raw console
   // stream can't tell a broken page from a request that is 401 by design.
   // `useMe()` (src/api/hooks.ts) fires GET /auth/me on mount, and on the login
-  // page that 401 is the correct answer — the app is asking "am I signed in?"
+  // page that 401 is the correct answer, the app is asking "am I signed in?"
   // and being told no. That one case is expected; every other failed request
   // is not, and is reported with its status and URL so it can be diagnosed.
   const expected = (status: number, url: string) =>
@@ -36,8 +36,8 @@ test('login and every nav page renders with a clean console', async ({ page }) =
   })
   page.on('console', msg => {
     // The generic resource-load line carries no URL; the response listener
-    // above already covers it with one. Everything else — a React render
-    // warning escalated to error, a thrown effect — is kept.
+    // above already covers it with one. Everything else, a React render
+    // warning escalated to error, a thrown effect; is kept.
     if (msg.type() === 'error' && !msg.text().startsWith('Failed to load resource')) {
       consoleErrors.push(`[${currentPage}] console.error: ${msg.text()}`)
     }

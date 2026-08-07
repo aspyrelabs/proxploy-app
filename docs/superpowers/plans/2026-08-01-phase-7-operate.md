@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Proxploy run itself unattended — apps update on a schedule, backups run on a schedule, and threshold alerts fire and resolve with notifications — so that Monday morning's job history tells the whole weekend's story.
+**Goal:** Make Proxploy run itself unattended, apps update on a schedule, backups run on a schedule, and threshold alerts fire and resolve with notifications; so that Monday morning's job history tells the whole weekend's story.
 
 **Architecture:** Three subsystems land on top of Phase 1–6 infrastructure with **zero new tables and zero Alembic migrations** (`schedules`, `alert_rules`, `alerts` and `notification_channels` have existed unused since migration 0001). (1) The **update pipeline** reuses `services/appstore.py`'s pinned-SSH-execute-stream-archive path, adding an `app.update` handler plus per-app and update-all routes. (2) The **scheduler** is a `schedules`-table-driven tick loop in `proxploy/jobs/scheduler.py` that enqueues into the existing `JobBackend`; APScheduler contributes only its `CronTrigger` cron math. (3) The **alert evaluator** rides the existing poll loop, reading the `metric_samples` rows the poller already writes and fanning firing/resolved transitions out through the existing `Notifier` and `EventBus`.
 
-**Tech Stack:** Python 3.12+ / FastAPI / SQLAlchemy 2.x / Alembic / SQLite (WAL) / APScheduler **3.11.3** (cron math only) / Apprise / pytest — React 19 / Vite / TanStack Router + Query / Tailwind v4 / Vitest.
+**Tech Stack:** Python 3.12+ / FastAPI / SQLAlchemy 2.x / Alembic / SQLite (WAL) / APScheduler **3.11.3** (cron math only) / Apprise / pytest, React 19 / Vite / TanStack Router + Query / Tailwind v4 / Vitest.
 
 ---
 
@@ -24,14 +24,14 @@ Every task's requirements implicitly include this section. Values are copied ver
 
 **Schema**
 
-- **Zero Alembic migrations this phase.** Alembic head stays at `2330a95b98d2`. Verified: migration `9f3cd187d023_0001_full_entity_list.py` already creates `schedules` (line 241), `alert_rules` (line 24), `alerts` (line 187) and index `ix_alerts_state`, with column-for-column parity against `proxploy/models/__init__.py`. If any task appears to need a migration, stop and re-read the model — it does not.
+- **Zero Alembic migrations this phase.** Alembic head stays at `2330a95b98d2`. Verified: migration `9f3cd187d023_0001_full_entity_list.py` already creates `schedules` (line 241), `alert_rules` (line 24), `alerts` (line 187) and index `ix_alerts_state`, with column-for-column parity against `proxploy/models/__init__.py`. If any task appears to need a migration, stop and re-read the model; it does not.
 - `utcnow()` returns a **naive** UTC datetime (`datetime.now(timezone.utc).replace(tzinfo=None)`). Every `DateTime` column in this codebase is naive UTC. Anything that touches an aware datetime (APScheduler's `CronTrigger`) must convert on both edges.
 
 **Dependencies**
 
 - **APScheduler 3.11.3, not 4.** Verified against PyPI on 2026-08-01: `pip index versions APScheduler` returns a maximum stable of **3.11.3**; the only 4.x artifacts published are `4.0.0a1`–`4.0.0a6`, all alphas. Docs 02/03/04/09/10 all say "APScheduler 4"; that version does not exist as a release and an alpha scheduler must not ship in a self-hosted product. Doc 03 marks Scheduling **"Provisional (seam: `Scheduler`)"**, which is exactly the licence to make this call. Task 19 records the amendment in doc 03.
 - New runtime dependencies this phase: `APScheduler>=3.11,<4` (MIT) which pulls `tzlocal` (MIT). Both clear the CI allowlist in `.github/workflows/ci.yml:19` (`"MIT;MIT License;…"`). No other new dependency, backend or frontend.
-- APScheduler is used for **`CronTrigger` only** — cron parsing and DST-correct next-fire arithmetic, the one part of scheduling that must never be hand-rolled. Its `BaseScheduler`/`AsyncIOScheduler`/jobstores are deliberately unused: doc 04 says the `schedules` table "is authoritative" and APScheduler state "is reconstructed from these rows at boot", so running a second in-memory job registry alongside it would be two sources of truth to reconcile on every CRUD write. The tick loop in Task 1 replaces all of that with one query.
+- APScheduler is used for **`CronTrigger` only**, cron parsing and DST-correct next-fire arithmetic, the one part of scheduling that must never be hand-rolled. Its `BaseScheduler`/`AsyncIOScheduler`/jobstores are deliberately unused: doc 04 says the `schedules` table "is authoritative" and APScheduler state "is reconstructed from these rows at boot", so running a second in-memory job registry alongside it would be two sources of truth to reconcile on every CRUD write. The tick loop in Task 1 replaces all of that with one query.
 
 **Verified `CronTrigger` behaviour** (all confirmed by running it, not assumed):
 
@@ -41,7 +41,7 @@ CronTrigger.from_crontab('0 3 * * *', timezone='America/New_York')  # 5 fields, 
 bad cron ('bogus', '0 3 * * * *', '99 3 * * *', '')  -> ValueError
 bad tz   ('Not/AZone')                               -> zoneinfo.ZoneInfoNotFoundError (subclasses KeyError)
 ```
-So `except (ValueError, KeyError)` catches every malformed-input case. Passing `after == the fire time itself` advances to the *next* occurrence rather than returning the same instant — which is what stops a schedule from re-firing inside one tick.
+So `except (ValueError, KeyError)` catches every malformed-input case. Passing `after == the fire time itself` advances to the *next* occurrence rather than returning the same instant, which is what stops a schedule from re-firing inside one tick.
 
 **Error shape**
 
@@ -65,14 +65,14 @@ So `except (ValueError, KeyError)` catches every malformed-input case. Passing `
 - Expected failures raise `JobFailed`; a `ProxmoxError` escaping a handler must be translated to `JobFailed` (the pattern every Phase 6 handler follows).
 - Long PVE tasks pass `timeout_s=app.state.settings.pve_task_timeout_s` to `await_task`.
 
-**Entitlement keys** — all already in `proxploy/entitlements/registry.py`; no key is added this phase:
+**Entitlement keys**: all already in `proxploy/entitlements/registry.py`; no key is added this phase:
 `store.update`, `store.update_all`, `store.auto_update`, `sched.windows`, `alerts.rules`, `alerts.manage`, `notify.channels`, `notify.routing`, `notify.inapp`, `metrics.collect`, `backups.schedule`, `backups.notify`.
 
 **Frontend**
 
 - `api<T>(path, opts)` from `src/api/client.ts` prefixes `/api/v1`, sets `X-CSRF-Token` on mutating verbs, and throws `ApiError { status, body }`.
 - Query keys follow doc 06 §(d): `['alerts','firing']` (60 s refetch), `['schedules']`, `['jobs', …]`. SSE handlers live in `src/api/live.ts` and are wired in `components/LiveProvider.tsx`.
-- Tests mock `../api/client` with `vi.mock` and render inside a `QueryClientProvider` — copy the shape from `src/tests/channels.test.tsx`.
+- Tests mock `../api/client` with `vi.mock` and render inside a `QueryClientProvider`, copy the shape from `src/tests/channels.test.tsx`.
 - Entitlement-gated UI waits for the first entitlements fetch (`ent.data != null && ent.has(key)`) before deciding, or it flashes a form that always 403s.
 
 **Honesty rules (brief §8, and this codebase's established practice)**
@@ -84,7 +84,7 @@ So `except (ValueError, KeyError)` catches every malformed-input case. Passing `
 
 ## File Structure
 
-**Backend — new files**
+**Backend, new files**
 
 | File | Responsibility |
 |---|---|
@@ -93,7 +93,7 @@ So `except (ValueError, KeyError)` catches every malformed-input case. Passing `
 | `backend/proxploy/services/alerts.py` | Rule evaluation, firing/resolved transitions, notification fan-out. No HTTP, no APScheduler. |
 | `backend/proxploy/api/alerts.py` | `/alert-rules` CRUD + `/alerts` list/ack. |
 
-**Backend — modified files**
+**Backend, modified files**
 
 | File | Change |
 |---|---|
@@ -108,7 +108,7 @@ So `except (ValueError, KeyError)` catches every malformed-input case. Passing `
 | `backend/proxploy/api/cluster.py` | Merge alerts into `/cluster/activity`. |
 | `backend/proxploy/api/__init__.py` | Register the two new routers. |
 
-**Frontend — new files**
+**Frontend, new files**
 
 | File | Responsibility |
 |---|---|
@@ -117,10 +117,10 @@ So `except (ValueError, KeyError)` catches every malformed-input case. Passing `
 | `frontend/src/components/ScheduleForm.tsx` | Create/edit a schedule (name, kind, cron, timezone, params). |
 | `frontend/src/components/AlertRuleForm.tsx` | Create/edit an alert rule. |
 | `frontend/src/components/HealthFooter.tsx` | The sidebar health footer, bound to real data. |
-| `frontend/src/routes/alerts.tsx` | `/alerts` — firing + history + rules. |
+| `frontend/src/routes/alerts.tsx` | `/alerts`, firing + history + rules. |
 | `frontend/src/tests/schedules.test.tsx`, `alerts.test.tsx`, `updates.test.tsx`, `healthfooter.test.tsx` | Coverage for the above. |
 
-**Frontend — modified files**
+**Frontend, modified files**
 
 `src/api/live.ts` (alert event), `src/components/LiveProvider.tsx` (wire it), `src/components/SidebarNav.tsx` (nav entry + real footer), `src/router.tsx` (route), `src/routes/settings.tsx` (Schedules card, General card), `src/routes/backups.tsx` ("New job"), `src/routes/apps.tsx` (update button/badge), `src/routes/cluster.tsx` ("Update all").
 
@@ -154,7 +154,7 @@ Tasks 1–3, 4–7 and 8–13 are three independent chains; they can be worked i
 
 ---
 
-## Task 1: Scheduler core — cron math, due selection, firing
+## Task 1: Scheduler core: cron math, due selection, firing
 
 **Files:**
 - Modify: `backend/pyproject.toml` (dependency list, after `"requests-toolbelt>=1.0",`)
@@ -164,25 +164,25 @@ Tasks 1–3, 4–7 and 8–13 are three independent chains; they can be worked i
 **Interfaces:**
 - Consumes: `proxploy.models.Schedule`, `proxploy.models.utcnow`, `proxploy.jobs.HANDLERS`, `proxploy.services.audit.write_audit`, `tests.support.make_job_app`.
 - Produces, for Tasks 2 and 3:
-  - `BadSchedule(ValueError)` — malformed cron, unknown timezone, or unregistered job kind.
-  - `next_fire(cron: str, tz: str, after: datetime) -> datetime` — naive-UTC in, naive-UTC out; strictly after `after`.
-  - `validate(cron: str, tz: str, job_kind: str) -> None` — raises `BadSchedule`.
-  - `prime(db, now: datetime) -> int` — fills `next_run_at` on enabled rows that have none; returns how many.
-  - `due(db, now: datetime) -> list[Schedule]` — enabled rows whose `next_run_at <= now`, oldest first.
-  - `fire_one(app, db, s: Schedule, now: datetime) -> dict | None` — enqueues one job, advances the row; `{"schedule_id", "job_id", "kind"}` or `None` if the row was disabled as broken.
-  - `tick(app, now: datetime | None = None) -> list[dict]` — blocking; one full pass. This is what Task 2's loop calls.
+  - `BadSchedule(ValueError)`: malformed cron, unknown timezone, or unregistered job kind.
+  - `next_fire(cron: str, tz: str, after: datetime) -> datetime`: naive-UTC in, naive-UTC out; strictly after `after`.
+  - `validate(cron: str, tz: str, job_kind: str) -> None`: raises `BadSchedule`.
+  - `prime(db, now: datetime) -> int`: fills `next_run_at` on enabled rows that have none; returns how many.
+  - `due(db, now: datetime) -> list[Schedule]`: enabled rows whose `next_run_at <= now`, oldest first.
+  - `fire_one(app, db, s: Schedule, now: datetime) -> dict | None`: enqueues one job, advances the row; `{"schedule_id", "job_id", "kind"}` or `None` if the row was disabled as broken.
+  - `tick(app, now: datetime | None = None) -> list[dict]`: blocking; one full pass. This is what Task 2's loop calls.
 
 - [ ] **Step 1: Add the dependency**
 
 In `backend/pyproject.toml`, inside `[project] dependencies`, after the `"requests-toolbelt>=1.0",` line, add:
 
 ```toml
-  # Cron math ONLY (proxploy/jobs/scheduler.py) — CronTrigger's parsing and
+  # Cron math ONLY (proxploy/jobs/scheduler.py): CronTrigger's parsing and
   # DST-correct next-fire arithmetic. Its BaseScheduler/jobstores are unused:
   # doc 04 makes the `schedules` table authoritative, so a second in-memory
   # registry would be two sources of truth. Docs say "APScheduler 4"; no 4.x
   # release exists (alphas only, verified 2026-08-01) and doc 03 marks
-  # Scheduling "Provisional (seam: Scheduler)" — see docs/notes/phase-7-operate.md.
+  # Scheduling "Provisional (seam: Scheduler)": see docs/notes/phase-7-operate.md.
   "APScheduler>=3.11,<4",
 ```
 
@@ -200,7 +200,7 @@ Run:
 ./.venv/bin/pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"
 ```
 
-Expected: exit 0, no output naming `APScheduler` or `tzlocal`. Both are MIT. If this fails, stop — a dependency outside brief §3 does not ship.
+Expected: exit 0, no output naming `APScheduler` or `tzlocal`. Both are MIT. If this fails, stop; a dependency outside brief §3 does not ship.
 
 - [ ] **Step 3: Write the failing test**
 
@@ -209,7 +209,7 @@ Create `backend/tests/test_scheduler_core.py`:
 ```python
 """Scheduler core (doc 10 Phase 7, doc 04 `schedules`).
 
-These are the pure pieces — cron math, due selection, one firing pass. The
+These are the pure pieces, cron math, due selection, one firing pass. The
 loop that calls `tick` lives in Task 2 and is tested separately.
 """
 import asyncio
@@ -268,7 +268,7 @@ def test_next_fire_rejects_malformed_cron(cron):
 
 def test_next_fire_rejects_an_unknown_timezone():
     # zoneinfo raises ZoneInfoNotFoundError, which subclasses KeyError, not
-    # ValueError — both have to be caught or this escapes as a 500.
+    # ValueError: both have to be caught or this escapes as a 500.
     with pytest.raises(BadSchedule):
         next_fire("0 3 * * *", "Not/AZone", datetime(2026, 8, 1, 12, 0))
 
@@ -340,7 +340,7 @@ def test_fire_one_enqueues_stamps_and_advances(tmp_path):
 
             db.refresh(s)
             assert s.last_run_at == now
-            # advanced from `now`, NOT from the stale next_run_at — a week of
+            # advanced from `now`, NOT from the stale next_run_at: a week of
             # downtime must produce one catch-up run, not one per missed day.
             assert s.next_run_at == datetime(2026, 8, 2, 3, 0)
 
@@ -401,12 +401,12 @@ def test_tick_primes_then_fires_and_is_idempotent_within_the_minute(tmp_path):
         with app.state.sessionmaker() as db:
             _sched(db, name="hourly", cron="0 * * * *")
 
-        # 11:59 — primed to 12:00, nothing due yet.
+        # 11:59: primed to 12:00, nothing due yet.
         assert tick(app, datetime(2026, 8, 1, 11, 59)) == []
-        # 12:00 — fires once.
+        # 12:00: fires once.
         first = tick(app, datetime(2026, 8, 1, 12, 0))
         assert len(first) == 1
-        # 12:00:30 — the row now points at 13:00, so the same tick does not
+        # 12:00:30: the row now points at 13:00, so the same tick does not
         # re-fire it. This is the regression the boundary rule above prevents.
         assert tick(app, datetime(2026, 8, 1, 12, 0, 30)) == []
 
@@ -419,27 +419,27 @@ def test_tick_primes_then_fires_and_is_idempotent_within_the_minute(tmp_path):
 - [ ] **Step 4: Run it to make sure it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_scheduler_core.py -q`
-Expected: collection error — `ModuleNotFoundError: No module named 'proxploy.jobs.scheduler'`.
+Expected: collection error, `ModuleNotFoundError: No module named 'proxploy.jobs.scheduler'`.
 
 - [ ] **Step 5: Write the implementation**
 
 Create `backend/proxploy/jobs/scheduler.py`:
 
 ```python
-"""Scheduler seam (brief §5, doc 02 §3, doc 04 `schedules`) — cron triggers
+"""Scheduler seam (brief §5, doc 02 §3, doc 04 `schedules`); cron triggers
 feeding the JobBackend.
 
 Doc 04, verbatim: "APScheduler's own state is reconstructed from these rows at
 boot; this table is authoritative." Taken literally there is no second registry
-to reconstruct — this module reads `schedules` on every tick and enqueues what
+to reconstruct, this module reads `schedules` on every tick and enqueues what
 is ripe. APScheduler contributes `CronTrigger` and nothing else: cron parsing
 and DST-correct next-fire arithmetic, the one part of scheduling that must
 never be hand-rolled. Its BaseScheduler/AsyncIOScheduler/jobstores would be a
 second source of truth to reconcile on every CRUD write, which is exactly what
 doc 04's sentence rules out.
 
-Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists — only
-4.0.0a1..a6 (verified against PyPI 2026-08-01) — and doc 03 marks Scheduling
+Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists, only
+4.0.0a1..a6 (verified against PyPI 2026-08-01), and doc 03 marks Scheduling
 "Provisional (seam: `Scheduler`)", so this ships on the stable 3.11 line. See
 docs/notes/phase-7-operate.md.
 
@@ -471,7 +471,7 @@ def next_fire(cron: str, tz: str, after: datetime) -> datetime:
     Both conversions happen here so no caller ever holds an aware datetime.
 
     Passing a firing instant as `after` yields the NEXT occurrence, not the
-    same one — that property is what stops a tick from re-firing the schedule
+    same one, that property is what stops a tick from re-firing the schedule
     it just fired.
     """
     try:
@@ -519,7 +519,7 @@ def prime(db, now: datetime) -> int:
 
     Called at boot and at the top of every tick, so a row created directly in
     the DB (or one whose next_run_at was cleared) starts firing without a
-    restart. Rows that already have a next_run_at are never recomputed here —
+    restart. Rows that already have a next_run_at are never recomputed here, 
     that would move a schedule's firing time on every tick.
     """
     primed = 0
@@ -538,7 +538,7 @@ def prime(db, now: datetime) -> int:
 
 
 def due(db, now: datetime) -> list[Schedule]:
-    """Enabled, primed, and ripe — oldest first so a backlog fires in order."""
+    """Enabled, primed, and ripe; oldest first so a backlog fires in order."""
     return (db.query(Schedule)
             .filter(Schedule.enabled.is_(True),
                     Schedule.next_run_at.is_not(None),
@@ -562,7 +562,7 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
             db, kind=s.job_kind, target_type=target_type, target_id=target_id,
             params=params, requested_by=None, schedule_id=s.id)
     except KeyError as e:
-        # JobBackend.enqueue raises this for an unregistered kind — a job kind
+        # JobBackend.enqueue raises this for an unregistered kind: a job kind
         # can genuinely disappear across an upgrade, and retrying it every tick
         # forever would be the wrong answer.
         _disable(db, s, f"no handler for job kind {s.job_kind!r}: {e}")
@@ -588,7 +588,7 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
 
 
 def tick(app, now: datetime | None = None) -> list[dict]:
-    """One full pass: prime, select, fire. Blocking — runs in a worker thread.
+    """One full pass: prime, select, fire. Blocking, runs in a worker thread.
 
     `JobBackend.enqueue` is explicitly safe from FastAPI's threadpool (it hops
     to the loop via `call_soon_threadsafe`), which is the same contract this
@@ -621,7 +621,7 @@ Expected: 512 passed / 2 skipped (499 + 13), no failures.
 git add backend/pyproject.toml backend/proxploy/jobs/scheduler.py backend/tests/test_scheduler_core.py
 git commit -m "feat(scheduler): cron math, due selection and one-pass firing over the schedules table
 
-APScheduler 3.11.3 for CronTrigger only — no 4.x release exists (alphas
+APScheduler 3.11.3 for CronTrigger only, no 4.x release exists (alphas
 only) and doc 04 makes the schedules table authoritative, so a second
 in-memory registry would be two sources of truth."
 ```
@@ -644,8 +644,8 @@ in-memory registry would be two sources of truth."
 - Consumes: Task 1's `tick`, `prime`, `validate`; `proxploy.services.metrics.rollup`, `prune`.
 - Produces, for Tasks 3 and 19:
   - `Scheduler(app)` with `async def run(self)` and `def stop(self)`.
-  - `SYSTEM_SCHEDULES: tuple[dict, ...]` — seeded rows, keyed by `name`.
-  - `seed_system_schedules(db) -> int` — inserts any missing system row; returns how many.
+  - `SYSTEM_SCHEDULES: tuple[dict, ...]`: seeded rows, keyed by `name`.
+  - `seed_system_schedules(db) -> int`: inserts any missing system row; returns how many.
   - Job kind `metrics.maintain` registered in `HANDLERS`.
   - Settings `scheduler_enabled: bool = True`, `scheduler_tick_s: float = 30.0`, `alerts_enabled: bool = True`.
 
@@ -693,8 +693,8 @@ def test_seeding_does_not_resurrect_a_system_schedule_the_operator_disabled(tmp_
 def test_every_system_schedule_names_a_registered_handler():
     """Seeding a kind with no handler would disable itself on first tick."""
     from proxploy.jobs import HANDLERS
-    import proxploy.services.metrics          # noqa: F401 — registers metrics.maintain
-    import proxploy.services.catalog          # noqa: F401 — registers catalog.refresh
+    import proxploy.services.metrics          # noqa: F401, registers metrics.maintain
+    import proxploy.services.catalog          # noqa: F401, registers catalog.refresh
     for s in SYSTEM_SCHEDULES:
         assert s["job_kind"] in HANDLERS, s["name"]
 
@@ -839,7 +839,7 @@ In `backend/proxploy/services/metrics.py`, delete the entire `async def metrics_
 
 ```python
 async def maintain(ctx, params: dict) -> dict:
-    """`metrics.maintain` — hourly rollups + retention prune, as a real job.
+    """`metrics.maintain`, hourly rollups + retention prune, as a real job.
 
     Doc 04: "All pruning runs as scheduled system jobs (visible in the activity
     feed like any other job)". This replaces Phase 2's silent `metrics_loop`
@@ -880,7 +880,7 @@ Keep `import asyncio` after all (`maintain` uses `asyncio.to_thread`) and add to
 from proxploy.jobs import HANDLERS
 ```
 
-> Import-cycle note: `proxploy.jobs` imports only from `proxploy.jobs.backend`, which imports `proxploy.models` and `proxploy.services.audit` — never `proxploy.services.metrics`. `services/catalog.py`, `services/lifecycle.py` and every Phase 6 job module already import `HANDLERS` this way.
+> Import-cycle note: `proxploy.jobs` imports only from `proxploy.jobs.backend`, which imports `proxploy.models` and `proxploy.services.audit`; never `proxploy.services.metrics`. `services/catalog.py`, `services/lifecycle.py` and every Phase 6 job module already import `HANDLERS` this way.
 
 - [ ] **Step 5: Append the loop and seeding to `scheduler.py`**
 
@@ -891,7 +891,7 @@ At the bottom of `backend/proxploy/jobs/scheduler.py`:
 
 # Rows Proxploy owns. Seeded by name at boot if absent, never re-created or
 # re-enabled once the operator has touched them (see seed_system_schedules).
-# `catalog.refresh` is what keeps `apps.update_available` honest — without it
+# `catalog.refresh` is what keeps `apps.update_available` honest: without it
 # an auto-update window would never see a new upstream commit.
 SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Catalog refresh", "job_kind": "catalog.refresh",
@@ -925,7 +925,7 @@ def seed_system_schedules(db) -> int:
 class Scheduler:
     """One tick loop, shaped like pollers.Poller: the supervisor never dies.
 
-    All DB work runs in `asyncio.to_thread` — SQLAlchemy is blocking, and a
+    All DB work runs in `asyncio.to_thread`, SQLAlchemy is blocking, and a
     scheduler that stalls the event loop would stall the SSE fanout, the
     pollers and every in-flight job with it.
     """
@@ -947,7 +947,7 @@ class Scheduler:
                                 "schedule_id": entry["schedule_id"]})
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 — one bad tick must not end them all
+            except Exception:  # noqa: BLE001, one bad tick must not end them all
                 pass
             await asyncio.sleep(interval)
 
@@ -955,7 +955,7 @@ class Scheduler:
         self._stopped = True
 ```
 
-Move `import asyncio` to the module's top-level imports rather than inside `run` — it is written inline above only to keep the diff readable; put it with `from datetime import ...` at the top of the file and delete the local import.
+Move `import asyncio` to the module's top-level imports rather than inside `run`; it is written inline above only to keep the diff readable; put it with `from datetime import ...` at the top of the file and delete the local import.
 
 - [ ] **Step 6: Export it**
 
@@ -975,7 +975,7 @@ __all__ = ["HANDLERS", "TERMINAL", "JobBackend", "JobContext", "JobFailed",
 
 In `backend/proxploy/main.py`:
 
-1. In the import block around line 82–90, replace `from proxploy.services.metrics import metrics_loop` with `from proxploy.services import metrics as _metrics  # noqa: F401 — registers metrics.maintain`.
+1. In the import block around line 82–90, replace `from proxploy.services.metrics import metrics_loop` with `from proxploy.services import metrics as _metrics  # noqa: F401, registers metrics.maintain`.
 2. Replace the poller/metrics startup block (currently lines 100–104) with:
 
 ```python
@@ -1011,7 +1011,7 @@ In `backend/proxploy/main.py`:
 
 - [ ] **Step 8: Fix the one existing reference**
 
-Run `grep -rn "metrics_loop" backend/` — the only hits should be `tests/test_metrics_store.py` (if any) and the docstring in `services/metrics.py` you already removed. Delete or rewrite any test that imports `metrics_loop`; `test_metrics_loop_is_gone` in Step 1 replaces its coverage, and `test_metrics_maintain_rolls_up_and_prunes` covers the behaviour.
+Run `grep -rn "metrics_loop" backend/`, the only hits should be `tests/test_metrics_store.py` (if any) and the docstring in `services/metrics.py` you already removed. Delete or rewrite any test that imports `metrics_loop`; `test_metrics_loop_is_gone` in Step 1 replaces its coverage, and `test_metrics_maintain_rolls_up_and_prunes` covers the behaviour.
 
 - [ ] **Step 9: Run the tests**
 
@@ -1021,7 +1021,7 @@ Expected: PASS.
 - [ ] **Step 10: Run the full suite**
 
 Run: `./.venv/bin/python -m pytest tests/ -m "not pve_integration and not e2e" -q`
-Expected: no failures. Watch specifically for `test_route_auth_invariant.py` and `test_health.py` — both boot the real app through the real lifespan, so a broken scheduler startup shows up there first.
+Expected: no failures. Watch specifically for `test_route_auth_invariant.py` and `test_health.py`, both boot the real app through the real lifespan, so a broken scheduler startup shows up there first.
 
 - [ ] **Step 11: Commit**
 
@@ -1029,7 +1029,7 @@ Expected: no failures. Watch specifically for `test_route_auth_invariant.py` and
 git add backend/proxploy/jobs/ backend/proxploy/config.py backend/proxploy/main.py backend/proxploy/services/metrics.py backend/tests/
 git commit -m "feat(scheduler): tick loop in the lifespan, seeded system schedules, metrics maintenance as a job
 
-Retires the silent metrics_loop lifespan task — doc 04 requires pruning to
+Retires the silent metrics_loop lifespan task, doc 04 requires pruning to
 run as a scheduled system job visible in the activity feed."
 ```
 
@@ -1179,7 +1179,7 @@ def test_run_now_enqueues_the_schedules_job_and_stamps_last_run(
 
 
 def test_run_now_does_not_move_next_run_at(client, csrf_header, bootstrap_admin):
-    """"Run now" is an extra run, not a reschedule — the window still opens
+    """"Run now" is an extra run, not a reschedule; the window still opens
     when the operator said it would."""
     h = _admin(client, csrf_header, bootstrap_admin)
     sid = _create(client, h, job_kind="catalog.refresh", params={}).json()["id"]
@@ -1255,7 +1255,7 @@ def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_schedules_api.py -q`
-Expected: every test 404s — the router does not exist.
+Expected: every test 404s, the router does not exist.
 
 - [ ] **Step 3: Write the router**
 
@@ -1267,7 +1267,7 @@ Create `backend/proxploy/api/schedules.py`:
 The `schedules` table is authoritative (doc 04) and `jobs/scheduler.py` reads
 it every tick, so there is nothing to register or de-register here: a write
 that lands is live within one tick. The only obligation is that a row this
-router accepts must be one the tick can actually fire — hence `validate()` on
+router accepts must be one the tick can actually fire, hence `validate()` on
 every write, rather than discovering a bad cron when the schedule silently
 disables itself hours later.
 """
@@ -1293,7 +1293,7 @@ _require_admin = require_role("admin")
 
 # Doc 05: "`sched.windows`; `store.auto_update` when `job_kind=app.update`".
 # Enforced in the body rather than as a route dependency because it depends on
-# the payload — a dependency cannot see `job_kind`.
+# the payload: a dependency cannot see `job_kind`.
 AUTO_UPDATE_KIND = "app.update"
 
 
@@ -1424,7 +1424,7 @@ def delete_schedule(request: Request, schedule_id: int, db=Depends(get_db),
                     user: User = Depends(_require_admin)):
     row = _get(db, schedule_id)
     name, kind = row.name, row.job_kind
-    # jobs.schedule_id is a plain nullable FK with no ON DELETE — historical
+    # jobs.schedule_id is a plain nullable FK with no ON DELETE: historical
     # job rows must survive their schedule, so unlink rather than cascade.
     from proxploy.models import Job
     (db.query(Job).filter(Job.schedule_id == schedule_id)
@@ -1443,7 +1443,7 @@ def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
                      user: User = Depends(_require_operator)):
     """An extra run, not a reschedule: `next_run_at` deliberately does not move.
 
-    Unlike a tick-fired run this one carries `requested_by` — a human asked for
+    Unlike a tick-fired run this one carries `requested_by`, a human asked for
     it, and the audit trail should say so.
     """
     row = _get(db, schedule_id)
@@ -1496,7 +1496,7 @@ Expected: no failures.
 git add backend/proxploy/api/schedules.py backend/proxploy/api/__init__.py backend/tests/test_schedules_api.py
 git commit -m "feat(schedules): CRUD + run-now, validated against the tick's own cron parser
 
-A row this router accepts is one the scheduler can actually fire — bad cron,
+A row this router accepts is one the scheduler can actually fire, bad cron,
 unknown tz and unregistered job kinds are 422s at write time rather than a
 schedule that silently disables itself hours later."
 ```
@@ -1514,9 +1514,9 @@ schedule that silently disables itself hours later."
 - Consumes: `proxploy.models.App`, `AppScript`, `CatalogEntry`.
 - Produces, for Tasks 5, 6, 7 and 18:
   - `mark_updates_available(db) -> dict` → `{"marked": int, "cleared": int}`. Sets `App.update_available` to the **short (7-char) upstream commit SHA** an update would move the app to, or `None` when it is current.
-  - `pinned_ref(db, app_id) -> str | None` — the `upstream_ref` of the app's newest `app_scripts` row.
+  - `pinned_ref(db, app_id) -> str | None`: the `upstream_ref` of the app's newest `app_scripts` row.
 
-**Design note — what "update available" can honestly mean here.** community-scripts entries carry no version number; `catalog_entries` pins an immutable commit (`upstream_sha`) and `app_scripts` records the commit each app was installed from (`upstream_ref`). The only truthful signal available is *upstream has moved since this app was pinned*. So `update_available` holds the short SHA the app would move to, and doc 06's "Update to vX" renders as "Update to a1b2c3d". Anything version-shaped would be invented.
+**Design note, what "update available" can honestly mean here.** community-scripts entries carry no version number; `catalog_entries` pins an immutable commit (`upstream_sha`) and `app_scripts` records the commit each app was installed from (`upstream_ref`). The only truthful signal available is *upstream has moved since this app was pinned*. So `update_available` holds the short SHA the app would move to, and doc 06's "Update to vX" renders as "Update to a1b2c3d". Anything version-shaped would be invented.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1587,7 +1587,7 @@ def test_leaves_a_current_app_alone(tmp_path):
 
 
 def test_clears_the_flag_once_the_app_catches_up(tmp_path):
-    """The flag is derived state, not a latch — an app that updated (or whose
+    """The flag is derived state, not a latch; an app that updated (or whose
     catalog entry rolled back) must stop advertising an update."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -1616,7 +1616,7 @@ def test_ignores_an_adopted_app_with_no_catalog_slug(tmp_path):
 
 
 def test_ignores_an_app_with_no_pinned_script(tmp_path):
-    """Adopted apps have no app_scripts row — there is no "from" commit, so
+    """Adopted apps have no app_scripts row; there is no "from" commit, so
     there is no honest diff to offer."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -1714,10 +1714,10 @@ def mark_updates_available(db) -> dict:
     an update. `cleared` counts exactly that.
 
     Skipped, each for a reason rather than as an oversight:
-      - no `catalog_slug` — a hand-rolled CT adopted in Phase 4 has no upstream;
-      - no `app_scripts` row — an adopted app has no "from" commit, so there is
+      - no `catalog_slug`, a hand-rolled CT adopted in Phase 4 has no upstream;
+      - no `app_scripts` row, an adopted app has no "from" commit, so there is
         no diff to show and nothing to consent to;
-      - catalog entry with no `upstream_sha` — never successfully refreshed.
+      - catalog entry with no `upstream_sha`, never successfully refreshed.
     """
     shas = {c.slug: c.upstream_sha
             for c in db.query(CatalogEntry.slug, CatalogEntry.upstream_sha).all()}
@@ -1744,7 +1744,7 @@ def mark_updates_available(db) -> dict:
 
 - [ ] **Step 4: Clear the flag on a fresh install**
 
-In `run_install`, in the `with app.state.sessionmaker() as db:` block that creates the `App` row, add `update_available=None` to the `App(...)` constructor call — a just-installed app is by definition current with the commit it was installed from:
+In `run_install`, in the `with app.state.sessionmaker() as db:` block that creates the `App` row, add `update_available=None` to the `App(...)` constructor call; a just-installed app is by definition current with the commit it was installed from:
 
 ```python
         row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
@@ -1768,7 +1768,7 @@ In `backend/proxploy/services/catalog.py`, inside `refresh_catalog`, replace the
     ctx.log(f"synced {result['synced']}, failed {len(result['failed'])}")
 
     # A refresh is the ONLY moment `update_available` can change, so it is the
-    # only place this has to run — no separate sweep, no separate schedule.
+    # only place this has to run: no separate sweep, no separate schedule.
     def _mark():
         with app.state.sessionmaker() as db:
             return mark_updates_available(db)
@@ -1823,19 +1823,19 @@ wholesale on every catalog refresh so it clears as well as sets."
   - Job kind `app.update`, params `{"app_id": int}`.
   - Result `{"app_id": int, "from_ref": str, "to_ref": str, "script_version": int}`.
 
-**The two guards, and why they exist.** A community-scripts `ct/<slug>.sh` decides for itself whether it is installing or updating — `build.func`'s `start` routes to the script's `update_script()` when it finds the container, and to `build_container` when it does not. Proxploy cannot see inside that decision, and the failure mode when it goes the wrong way is a **second container silently created** and an `apps` row now pointing at the wrong CT. So:
+**The two guards, and why they exist.** A community-scripts `ct/<slug>.sh` decides for itself whether it is installing or updating; `build.func`'s `start` routes to the script's `update_script()` when it finds the container, and to `build_container` when it does not. Proxploy cannot see inside that decision, and the failure mode when it goes the wrong way is a **second container silently created** and an `apps` row now pointing at the wrong CT. So:
 
-1. **Preflight** — the app's CTID must be present on the host before the script runs. If it is not, the script would install fresh, and the job fails instead with a message that says exactly that.
-2. **Post-check** — the set of LXC ids on the host is captured before and after. A new id appearing means the script took the install branch anyway; the job fails loudly and names the stray CTID so an operator can clean it up. It is a detector, not a preventer — see the residual limitation below, which Task 19 records in `docs/notes/phase-7-operate.md`.
+1. **Preflight**: the app's CTID must be present on the host before the script runs. If it is not, the script would install fresh, and the job fails instead with a message that says exactly that.
+2. **Post-check**: the set of LXC ids on the host is captured before and after. A new id appearing means the script took the install branch anyway; the job fails loudly and names the stray CTID so an operator can clean it up. It is a detector, not a preventer; see the residual limitation below, which Task 19 records in `docs/notes/phase-7-operate.md`.
 
-**Residual limitation (deliberately not solved here, stated rather than hidden).** Whether a given entry's update path runs non-interactively is a property of that upstream script, not of Proxploy. `services/classifier.py` classifies *install* feasibility only. An update path that prompts will abort under `catch_errors`' `set -Ee`, and the job fails with the full transcript archived — the honest outcome, and the same one the classifier's install-side guarantee produces. Classifying update paths separately is real work for a later phase, not a line of code to sneak in here.
+**Residual limitation (deliberately not solved here, stated rather than hidden).** Whether a given entry's update path runs non-interactively is a property of that upstream script, not of Proxploy. `services/classifier.py` classifies *install* feasibility only. An update path that prompts will abort under `catch_errors`' `set -Ee`, and the job fails with the full transcript archived; the honest outcome, and the same one the classifier's install-side guarantee produces. Classifying update paths separately is real work for a later phase, not a line of code to sneak in here.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `backend/tests/test_app_update_job.py`:
 
 ```python
-"""`app.update` — same pin/stream/archive path as install (doc 10 Phase 7)."""
+"""`app.update`, same pin/stream/archive path as install (doc 10 Phase 7)."""
 import asyncio
 
 import pytest
@@ -1897,7 +1897,7 @@ def test_update_runs_the_new_pinned_commit_and_advances_the_script_pin(tmp_path)
 
         assert out["from_ref"] == "a" * 40
         assert out["to_ref"] == "b" * 40
-        # Pinned to the NEW commit, never to `main` — same rule as install.
+        # Pinned to the NEW commit, never to `main`: same rule as install.
         assert "b" * 40 in cmds[0]
         assert "/main/" not in cmds[0].split("build.func")[0]
 
@@ -2041,7 +2041,7 @@ def test_a_missing_credential_reports_as_a_failed_job_not_a_handler_bug(tmp_path
     asyncio.run(go())
 ```
 
-> **Before writing the implementation**, open `backend/tests/fakes/ssh.py` and `backend/tests/fakes/pve.py` and check the real helper names — `make_ssh_factory`, `FakePVE.add_ct` and the `ssh_after_run` hook above are the *shapes* these tests need, not necessarily the names that exist. `tests/test_appstore_install.py` already drives `run_install` through both fakes; copy its exact idiom and adjust the `_ssh` / `_seed` helpers above to match. If `FakePVE` has no `add_ct`, add one (a fake gaining a method is fine; a test contorting around a missing one is not). If there is no post-run hook, add the smallest one that lets a test mutate the fake between the SSH call and the post-check.
+> **Before writing the implementation**, open `backend/tests/fakes/ssh.py` and `backend/tests/fakes/pve.py` and check the real helper names; `make_ssh_factory`, `FakePVE.add_ct` and the `ssh_after_run` hook above are the *shapes* these tests need, not necessarily the names that exist. `tests/test_appstore_install.py` already drives `run_install` through both fakes; copy its exact idiom and adjust the `_ssh` / `_seed` helpers above to match. If `FakePVE` has no `add_ct`, add one (a fake gaining a method is fine; a test contorting around a missing one is not). If there is no post-run hook, add the smallest one that lets a test mutate the fake between the SSH call and the post-check.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -2066,7 +2066,7 @@ def _resolve_update(app, app_id: int):
             raise JobFailed(f"app {app_id} not found")
         if not a.catalog_slug:
             raise JobFailed(f"{a.name} was adopted, not installed from the catalog "
-                            f"— there is no upstream script to update it with")
+                            f"; there is no upstream script to update it with")
         entry = db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
         if entry is None:
             raise JobFailed(f"catalog entry {a.catalog_slug} not found; "
@@ -2098,7 +2098,7 @@ def _resolve_update(app, app_id: int):
 def _lxc_ids(app, host_id: int) -> set[int]:
     """Blocking: every LXC id currently on the host, straight from PVE.
 
-    One `/cluster/resources` call — the same read the poller makes. Deliberately
+    One `/cluster/resources` call, the same read the poller makes. Deliberately
     NOT the poller's cached snapshot: this is a safety check, and a cache up to
     30 s stale is exactly what would miss a container created seconds ago.
     """
@@ -2115,7 +2115,7 @@ def _lxc_ids(app, host_id: int) -> set[int]:
 
 
 async def run_update(ctx: JobContext, params: dict) -> dict:
-    """`app.update` — re-run the app's catalog script, pinned to the CURRENT
+    """`app.update`, re-run the app's catalog script, pinned to the CURRENT
     upstream commit, over the same SSH path install uses (doc 10 Phase 7:
     "same pin/diff/consent/stream/archive path as install").
 
@@ -2123,9 +2123,9 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     install splits them; this handler assumes both were obtained.
 
     Two guards bracket the SSH run. A community-scripts `ct/*.sh` decides for
-    itself whether it is installing or updating — `build.func`'s `start` routes
+    itself whether it is installing or updating, `build.func`'s `start` routes
     to `update_script()` when it finds the container and to `build_container()`
-    when it does not — and Proxploy cannot see inside that decision. The
+    when it does not, and Proxploy cannot see inside that decision. The
     failure mode when it goes the wrong way is a second container built while
     the `apps` row still points at the first. So the CT must exist BEFORE
     (otherwise the script would certainly install fresh), and no new CT may
@@ -2136,7 +2136,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     update path is non-interactive is a property of that upstream script.
     services/classifier.py classifies INSTALL feasibility only. An update path
     that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
-    the full transcript archived — the honest outcome. Classifying update paths
+    the full transcript archived, the honest outcome. Classifying update paths
     is separate, larger work; see docs/notes/phase-7-operate.md.
     """
     app = ctx.backend.app
@@ -2150,7 +2150,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     before = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
     if a["ctid"] not in before:
         raise JobFailed(
-            f"CT {a['ctid']} is not present on {host['name']} — refusing to run "
+            f"CT {a['ctid']} is not present on {host['name']}, refusing to run "
             f"the catalog script, which would install a NEW container rather "
             f"than update this one")
     ctx.progress(10)
@@ -2165,7 +2165,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
                 db.commit()
 
     # Pinned to the exact commit that was ingested and classified, never to
-    # `main` — identical rule and identical raw_url() helper as run_install,
+    # `main`: identical rule and identical raw_url() helper as run_install,
     # and it carries the same one-level-down residual: the pinned script's own
     # `source <(curl ... /main/misc/build.func)` line is frozen text but still
     # fetches live. See docs/notes/phase-4-store.md.
@@ -2190,7 +2190,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     if strays:
         raise JobFailed(
             f"the catalog script created new container(s) {strays} instead of "
-            f"updating CT {a['ctid']} — {a['name']} was NOT updated, and "
+            f"updating CT {a['ctid']}, {a['name']} was NOT updated, and "
             f"{'CT ' + str(strays[0]) if len(strays) == 1 else 'those CTs'} "
             f"should be reviewed and removed by hand")
     if a["ctid"] not in after:
@@ -2233,7 +2233,7 @@ from proxploy.services.proxmox import ProxmoxError
 
 - [ ] **Step 4: Register the handler at boot**
 
-In `backend/proxploy/main.py`, the existing `from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install` line now registers both; update the comment to `# noqa: F401 — registers app.install / app.update`.
+In `backend/proxploy/main.py`, the existing `from proxploy.services import appstore as _appstore  # noqa: F401, registers app.install` line now registers both; update the comment to `# noqa: F401, registers app.install / app.update`.
 
 - [ ] **Step 5: Run the tests**
 
@@ -2246,7 +2246,7 @@ Run: `./.venv/bin/python -m pytest tests/ -m "not pve_integration and not e2e" -
 
 ```bash
 git add backend/proxploy/services/appstore.py backend/proxploy/main.py backend/tests/
-git commit -m "feat(store): app.update job — pinned re-run with before/after CT guards
+git commit -m "feat(store): app.update job, pinned re-run with before/after CT guards
 
 A community-scripts ct/*.sh chooses install-vs-update itself; the CT must
 exist first and no new CT may appear after, or the job fails and names the
@@ -2267,7 +2267,7 @@ stray container rather than reporting success over it."
   - `GET /api/v1/apps/{id}/update` → `{"update_available": str|None, "from_ref": str|None, "to_ref": str|None, "diff_vs_upstream": str|None}` (operator, `store.updates`)
   - `POST /api/v1/apps/{id}/update` body `{"consent": bool}` → `{"job": {...}}`, 202 (operator, `store.update`)
 
-**Placement.** Both go **above** the `POST /{app_id}/{action}` lifecycle wildcard, next to the existing `/{app_id}/script` routes and under the same WARNING comment — Starlette matches in registration order and `/{app_id}/{action}` would otherwise swallow `POST /{app_id}/update`.
+**Placement.** Both go **above** the `POST /{app_id}/{action}` lifecycle wildcard, next to the existing `/{app_id}/script` routes and under the same WARNING comment; Starlette matches in registration order and `/{app_id}/{action}` would otherwise swallow `POST /{app_id}/update`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2329,7 +2329,7 @@ def test_get_update_404s_an_unknown_app(client, csrf_header, bootstrap_admin):
 
 
 def test_post_update_requires_explicit_consent(client, csrf_header, bootstrap_admin):
-    """Same root-consent gate as install (api/catalog.py) — this runs a
+    """Same root-consent gate as install (api/catalog.py), this runs a
     community script as root on the node."""
     bootstrap_admin(client)
     app_id = _seed(client)
@@ -2408,7 +2408,7 @@ def test_store_update_entitlement_gates_the_post(tmp_path, csrf_header,
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_app_update_api.py -q`
-Expected: 404s / 405s — the routes do not exist.
+Expected: 404s / 405s, the routes do not exist.
 
 - [ ] **Step 3: Write the routes**
 
@@ -2437,7 +2437,7 @@ def get_app_update(app_id: int, db=Depends(get_db)):
     """What an update would do: which commit to which, and the script diff.
 
     Doc 10 Phase 7 requires the same diff/consent surface install has, so the
-    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders —
+    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders, 
     one implementation, one answer, no chance of the two disagreeing about
     what is about to run.
     """
@@ -2460,7 +2460,7 @@ def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db)
                user: User = Depends(_require_operator)):
     """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry).
 
-    This re-runs a community script as root on the node — brief §8 says the
+    This re-runs a community script as root on the node, brief §8 says the
     honest thing is to make the operator say so out loud, and an update is no
     less privileged than the install was.
     """
@@ -2478,7 +2478,7 @@ def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db)
                              params={"app_id": app_id})
 ```
 
-`enqueue_and_audit` is already imported in `apps.py` via `from proxploy.api.jobs import job_out` — change that line to `from proxploy.api.jobs import enqueue_and_audit, job_out`.
+`enqueue_and_audit` is already imported in `apps.py` via `from proxploy.api.jobs import job_out`, change that line to `from proxploy.api.jobs import enqueue_and_audit, job_out`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -2507,7 +2507,7 @@ git commit -m "feat(apps): GET/POST /apps/{id}/update with the install path's co
 
 **Placement.** Literal `/update-all` must be registered **before** `GET /{app_id}` and before the lifecycle wildcard, or `{app_id}` swallows it. Put it directly beneath the existing `POST /adopt` route, which sits there for exactly the same reason.
 
-**Concurrency.** No new queue: `JobBackend.MAX_CONCURRENT` is 4, so N enqueued `app.update` jobs already run four at a time with the rest genuinely `queued`. Doc 05's "per-app results" is the job list — each job carries its own status, transcript and result.
+**Concurrency.** No new queue: `JobBackend.MAX_CONCURRENT` is 4, so N enqueued `app.update` jobs already run four at a time with the rest genuinely `queued`. Doc 05's "per-app results" is the job list, each job carries its own status, transcript and result.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2614,7 +2614,7 @@ def test_update_all_with_nothing_stale_is_an_empty_202_not_an_error(
 def test_update_all_is_not_matched_as_an_app_id(client, csrf_header,
                                                 bootstrap_admin):
     """`/apps/{app_id}` would parse "update-all" as an id if ordering
-    regressed — FastAPI would 422 on the int coercion."""
+    regressed, FastAPI would 422 on the int coercion."""
     bootstrap_admin(client)
     h = csrf_header(client)
     assert client.post("/api/v1/apps/update-all", json={"consent": True},
@@ -2638,7 +2638,7 @@ def test_store_update_all_entitlement_gates_it(tmp_path, csrf_header,
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_app_update_all.py -q`
-Expected: 422 — `update-all` is being parsed as `{app_id}`.
+Expected: 422, `update-all` is being parsed as `{app_id}`.
 
 - [ ] **Step 3: Write the route**
 
@@ -2656,7 +2656,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
 
     No new queue machinery: JobBackend.MAX_CONCURRENT already runs four at a
     time and genuinely queues the rest, and each job carries its own status,
-    transcript and result — which is what "per-app results" means.
+    transcript and result, which is what "per-app results" means.
 
     `skipped` is not decoration. A bare "0 jobs started" is indistinguishable
     from a broken endpoint, so every app that did not get a job says why.
@@ -2686,7 +2686,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
     return {"jobs": jobs, "skipped": skipped}
 ```
 
-`UpdateIn` is defined in Task 6 further down the file. Move its `class UpdateIn(BaseModel)` definition up so it sits **above** `update_all_apps` — put it next to the existing `class AdoptIn` / `class ScriptIn` model definitions near the top of the module.
+`UpdateIn` is defined in Task 6 further down the file. Move its `class UpdateIn(BaseModel)` definition up so it sits **above** `update_all_apps`, put it next to the existing `class AdoptIn` / `class ScriptIn` model definitions near the top of the module.
 
 - [ ] **Step 4: Run the tests**
 
@@ -2697,7 +2697,7 @@ Expected: PASS, 7 new tests, nothing existing broken.
 
 ```bash
 git add backend/proxploy/api/apps.py backend/tests/test_app_update_all.py
-git commit -m "feat(apps): POST /apps/update-all — one job per stale app, with per-app skip reasons"
+git commit -m "feat(apps): POST /apps/update-all, one job per stale app, with per-app skip reasons"
 ```
 
 ---
@@ -2712,7 +2712,7 @@ git commit -m "feat(apps): POST /apps/update-all — one job per stale app, with
 **Interfaces:**
 - Produces, for Task 9: `metric_samples` rows with `metric` in `{"mem_pct", "disk_pct"}`, alongside the existing `cpu_pct`, `mem_bytes`, `net_in_bps`, `net_out_bps`.
 
-**Why this task exists.** Doc 04 names the `alert_rules.metric` enum as `cpu_pct | mem_pct | disk_pct | host_offline | backup_failed`. Verified against the poller: `ingest_cycle` writes **only** `cpu_pct` and `mem_bytes` per target (plus `net_in_bps`/`net_out_bps` for hosts) — there is no `mem_pct` and no `disk_pct` sample anywhere in the database. A memory or disk rule built on top of today's poller would be created successfully, sit `enabled`, and never fire. `mem_pct` is already *computed* every cycle by `_mem_pct()` for the SSE `targets` payload; it is simply thrown away instead of persisted. This task persists it and adds the host disk aggregate. It is a prerequisite for Task 9, not a nice-to-have.
+**Why this task exists.** Doc 04 names the `alert_rules.metric` enum as `cpu_pct | mem_pct | disk_pct | host_offline | backup_failed`. Verified against the poller: `ingest_cycle` writes **only** `cpu_pct` and `mem_bytes` per target (plus `net_in_bps`/`net_out_bps` for hosts); there is no `mem_pct` and no `disk_pct` sample anywhere in the database. A memory or disk rule built on top of today's poller would be created successfully, sit `enabled`, and never fire. `mem_pct` is already *computed* every cycle by `_mem_pct()` for the SSE `targets` payload; it is simply thrown away instead of persisted. This task persists it and adds the host disk aggregate. It is a prerequisite for Task 9, not a nice-to-have.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2765,7 +2765,7 @@ def test_ingest_persists_a_host_disk_pct_from_its_datastores(tmp_path):
          "disk": 30, "maxdisk": 100, "shared": 0},
         {"type": "storage", "storage": "local", "node": "pve2",
          "disk": 10, "maxdisk": 100, "shared": 0},
-        # shared datastore, reported once per node — must count ONCE
+        # shared datastore, reported once per node: must count ONCE
         {"type": "storage", "storage": "nfs", "node": "pve1",
          "disk": 60, "maxdisk": 200, "shared": 1},
         {"type": "storage", "storage": "nfs", "node": "pve2",
@@ -2811,7 +2811,7 @@ In `backend/proxploy/services/metrics.py`:
 
 ```python
 # Phase 7 adds mem_pct and disk_pct: doc 04's alert_rules.metric enum names
-# both, and api/metrics.py 422s any metric not listed here — so a chart of the
+# both, and api/metrics.py 422s any metric not listed here: so a chart of the
 # very metric an alert fired on would have been unqueryable.
 METRICS = ("cpu_pct", "mem_pct", "disk_pct", "mem_bytes", "disk_bytes",
            "net_in_bps", "net_out_bps", "io_read_bps", "io_write_bps")
@@ -2831,7 +2831,7 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
     api/cluster.py::cluster_summary: a SHARED datastore is reported once per
     node and must count once, a LOCAL datastore with the same name on two
     nodes is two distinct pools. Doing it wrong here is not a cosmetic ring
-    error — it is an alert that fires at the wrong number.
+    error; it is an alert that fires at the wrong number.
     """
     pools: dict[tuple, dict] = {}
     for r in storage_rows:
@@ -2875,7 +2875,7 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
                                                    g["mem_total_bytes"]), ts=now))
 ```
 
-> No `disk_pct` for apps or VMs, deliberately. `/cluster/resources` reports `maxdisk` (allocated) for guests and a `disk` figure that is meaningful for LXC but routinely 0 for QEMU — a guest disk_pct would be silently wrong for every VM. Task 12's rule validation rejects `disk_pct` on `app`/`vm` targets with an explanatory 422 rather than accepting a rule that can never fire. `ponytail:` comment this in the code.
+> No `disk_pct` for apps or VMs, deliberately. `/cluster/resources` reports `maxdisk` (allocated) for guests and a `disk` figure that is meaningful for LXC but routinely 0 for QEMU, a guest disk_pct would be silently wrong for every VM. Task 12's rule validation rejects `disk_pct` on `app`/`vm` targets with an explanatory 422 rather than accepting a rule that can never fire. `ponytail:` comment this in the code.
 
 - [ ] **Step 5: Run the tests**
 
@@ -2904,18 +2904,18 @@ never fired."
 **Interfaces:**
 - Consumes: `proxploy.models.{Alert, AlertRule, App, Backup, Host, Job, MetricSample, Vm, utcnow}`.
 - Produces, for Tasks 10, 11, 12 and 13:
-  - `METRIC_TARGETS: dict[str, tuple[str, ...]]` — which `target_type`s each metric supports.
+  - `METRIC_TARGETS: dict[str, tuple[str, ...]]`: which `target_type`s each metric supports.
   - `SUPPORTED_METRICS: tuple[str, ...]`
-  - `Transition` — a plain dict `{"alert_id", "rule_id", "rule_name", "state", "severity", "target_type", "target_id", "target_label", "value", "message", "channel_ids"}`.
-  - `evaluate(db, now) -> list[dict]` — blocking; opens/closes alerts and returns only the **transitions**, never the steady state.
+  - `Transition`: a plain dict `{"alert_id", "rule_id", "rule_name", "state", "severity", "target_type", "target_id", "target_label", "value", "message", "channel_ids"}`.
+  - `evaluate(db, now) -> list[dict]`: blocking; opens/closes alerts and returns only the **transitions**, never the steady state.
   - `render_message(rule_name, label, metric, operator, threshold, duration_s, value, state) -> str`
-  - `targets_for(db, rule) -> list[tuple[str, int, str]]` — `(target_type, target_id, label)`.
+  - `targets_for(db, rule) -> list[tuple[str, int, str]]`: `(target_type, target_id, label)`.
 
 **Semantics, decided here so no task re-litigates them:**
 
-- **`duration_s` means "has continuously breached for at least this long"**, not "the average over the window breached". Implementation walks samples newest-first, takes the breaching prefix, and fires when `now - oldest_of_prefix >= duration_s`. `duration_s=0` fires on the newest sample alone. A target with no samples never fires — absence of data is not a breach.
+- **`duration_s` means "has continuously breached for at least this long"**, not "the average over the window breached". Implementation walks samples newest-first, takes the breaching prefix, and fires when `now - oldest_of_prefix >= duration_s`. `duration_s=0` fires on the newest sample alone. A target with no samples never fires, absence of data is not a breach.
 - **A rule fires at most one open alert per concrete target.** A second evaluation while it is still breaching produces no transition and no second notification.
-- **Resolution is automatic**: the open alert flips to `resolved` the first cycle the condition stops holding. An acknowledged alert still resolves — ack silences, it does not pin.
+- **Resolution is automatic**: the open alert flips to `resolved` the first cycle the condition stops holding. An acknowledged alert still resolves, ack silences, it does not pin.
 - **`host_offline` and `backup_failed` ignore `operator` and `threshold`** (there is nothing to compare); `duration_s` still applies to `host_offline` via `hosts.last_seen_at`. Task 12 hides those inputs in the UI and does not validate them.
 
 - [ ] **Step 1: Write the failing test**
@@ -3002,7 +3002,7 @@ def test_a_breach_held_for_the_full_duration_fires(tmp_path):
 
 
 def test_a_dip_inside_the_window_resets_the_clock(tmp_path):
-    """"85% for 5 minutes" means continuously — one healthy sample two minutes
+    """"85% for 5 minutes" means continuously, one healthy sample two minutes
     ago means it has only been breaching for two minutes."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -3062,7 +3062,7 @@ def test_recovery_resolves_the_open_alert(tmp_path):
 
     a = db.query(Alert).one()
     assert a.state == "resolved" and a.resolved_at is not None
-    # and it stays resolved — no re-resolve transition on the next cycle
+    # and it stays resolved: no re-resolve transition on the next cycle
     assert evaluate(db, later + timedelta(seconds=30)) == []
 
 
@@ -3196,7 +3196,7 @@ def test_backup_failed_fires_on_the_hosts_latest_failed_backup_job(tmp_path):
 
 
 def test_backup_failed_does_not_fire_when_the_latest_run_succeeded(tmp_path):
-    """Only the LATEST run matters — an old failure already fixed is not a
+    """Only the LATEST run matters, an old failure already fixed is not a
     live alert."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -3251,14 +3251,14 @@ Create `backend/proxploy/services/alerts.py`:
 ```python
 """Alert evaluation (doc 04 `alert_rules` / `alerts`, doc 10 Phase 7).
 
-Reads only the DB. No HTTP, no Apprise, no event bus — it opens and closes
+Reads only the DB. No HTTP, no Apprise, no event bus; it opens and closes
 `alerts` rows and returns the TRANSITIONS. Task 10's notifier and Task 11's
 poll-loop hook do everything outward-facing, so a change to how alerts are
 delivered never touches how they are decided.
 
 Semantics, once, so nothing has to guess:
 
-  * `duration_s` means CONTINUOUSLY breaching for at least that long — the
+  * `duration_s` means CONTINUOUSLY breaching for at least that long, the
     doc 04 prototype phrase is "85% CPU for 5 minutes", and a five-minute
     average that dipped to 10% in the middle is not that. Implemented by
     walking samples newest-first and taking the breaching prefix.
@@ -3266,7 +3266,7 @@ Semantics, once, so nothing has to guess:
     rule yields no transition, which is what stops a 30 s poll cadence from
     re-notifying twice a minute.
   * Recovery resolves automatically on the first non-breaching cycle. An
-    acknowledged alert still resolves — ack silences, it does not pin.
+    acknowledged alert still resolves, ack silences, it does not pin.
   * No samples is not a breach. Absence of data is not evidence of a problem,
     and a freshly-added host must not alarm on its first cycle.
   * `host_offline` and `backup_failed` have nothing to compare, so they ignore
@@ -3351,7 +3351,7 @@ def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
         if rule.target_type not in kinds:
             return []
         label = _label(db, rule.target_type, rule.target_id)
-        # A rule pointing at a deleted host/app/vm is skipped, not crashed —
+        # A rule pointing at a deleted host/app/vm is skipped, not crashed; 
         # nothing cascades alert_rules on target deletion.
         return [] if label is None else [(rule.target_type, rule.target_id, label)]
 
@@ -3421,7 +3421,7 @@ def _status_state(db, rule: AlertRule, target_id: int,
                 return False, 1.0
         return True, 1.0
 
-    # backup_failed — only the LATEST finished backup.run for this host counts.
+    # backup_failed: only the LATEST finished backup.run for this host counts.
     # An old failure that has since been fixed is not a live alert.
     latest = (db.query(Job)
               .filter(Job.kind == "backup.run", Job.target_type == "host",
@@ -3457,13 +3457,13 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
     `ix_samples(target_type, target_id, metric, ts)`. At the single-digit rule
     counts a self-hoster has this is a handful of queries every 30 s. If a
     fleet ever makes it hurt, the fix is one grouped query per (metric,
-    duration) bucket rather than per target — not a different design.
+    duration) bucket rather than per target, not a different design.
     """
     now = now or utcnow()
     transitions: list[dict] = []
     for rule in db.query(AlertRule).filter(AlertRule.enabled.is_(True)).all():
         if rule.metric not in METRIC_TARGETS:
-            # A metric this build does not know — a downgrade, or a row edited
+            # A metric this build does not know: a downgrade, or a row edited
             # by hand. Skip it; one unusable rule must not stop the others.
             logger.debug("alert rule %s: unknown metric %r", rule.id, rule.metric)
             continue
@@ -3474,7 +3474,7 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
                 else:
                     breaching, value = _metric_state(db, rule, target_type,
                                                      target_id, now)
-            except Exception:  # noqa: BLE001 — one bad target never stops the pass
+            except Exception:  # noqa: BLE001, one bad target never stops the pass
                 logger.debug("alert rule %s target %s:%s raised", rule.id,
                              target_type, target_id, exc_info=True)
                 continue
@@ -3534,7 +3534,7 @@ cannot re-notify twice a minute."
   - `notifier.channels_for(db, event, only_ids: list[int] | None = None)`
   - `notifier.notify(app, event, title, body, only_ids: list[int] | None = None) -> int`
   - `alerts.sse_frame(t: dict) -> dict` → `{"id", "state", "severity", "message"}` (doc 05's `alert` event shape, verbatim)
-  - `alerts.notify_transitions(app, transitions: list[dict]) -> int` — blocking; returns channels reached.
+  - `alerts.notify_transitions(app, transitions: list[dict]) -> int`: blocking; returns channels reached.
 
 **Routing rule, decided once:** a rule's `channel_ids` is an **override**, not an addition. Non-empty → only those channels, and each still has to be `enabled`. Empty → the normal `notification_channels.events` subscription applies (doc 04: an empty `events` list means every event). Event names are `alert.fired` and `alert.resolved`, matching `notification_channels.events`' documented example `["job.failed","alert.fired","app.updated"]`.
 
@@ -3711,7 +3711,7 @@ def channels_for(db, event: str, only_ids: list[int] | None = None
     `only_ids` is an OVERRIDE, not a filter on top of the subscription: an
     alert rule that names its channels (doc 04 `alert_rules.channel_ids`)
     means exactly those, whatever they happen to be subscribed to. A disabled
-    channel is still never used — "off" beats "named".
+    channel is still never used, "off" beats "named".
     """
     rows = db.query(NotificationChannel).filter_by(enabled=True)
     if only_ids is not None:
@@ -3731,7 +3731,7 @@ and inside `notify`, change the one call site:
         for channel in channels_for(db, event, only_ids):
 ```
 
-Everything else in `notify` — the decrypt-inside-the-session, blocking-sends-outside, per-channel isolation and redacted logging — is unchanged.
+Everything else in `notify`, the decrypt-inside-the-session, blocking-sends-outside, per-channel isolation and redacted logging; is unchanged.
 
 - [ ] **Step 4: Add the alert fan-out**
 
@@ -3767,7 +3767,7 @@ def notify_transitions(app, transitions: list[dict]) -> int:
         try:
             reached += notify(app, event, title, t["message"],
                               only_ids=t.get("channel_ids") or None)
-        except Exception:  # noqa: BLE001 — a broken channel never breaks alerting
+        except Exception:  # noqa: BLE001, a broken channel never breaks alerting
             logger.debug("alert %s notification failed", t.get("alert_id"),
                          exc_info=True)
     return reached
@@ -3800,7 +3800,7 @@ adding to it; a disabled channel still never fires."
 - Consumes: Task 9's `evaluate`, Task 10's `notify_transitions` + `sse_frame`; `settings.alerts_enabled`.
 - Produces, for Tasks 15 and 19: an `alert` SSE event on every transition, and a Notifier send per transition.
 
-**Where the hook goes, and why.** Doc 10 says "evaluator riding the poll loop". `Poller.run()` is the supervisor: it already ticks exactly once per `poll_interval_s` regardless of how many hosts exist, which is precisely the cadence alerting wants. Hooking the per-host `_host_loop` instead would re-evaluate every rule once per host per interval — N times the work for the same answer.
+**Where the hook goes, and why.** Doc 10 says "evaluator riding the poll loop". `Poller.run()` is the supervisor: it already ticks exactly once per `poll_interval_s` regardless of how many hosts exist, which is precisely the cadence alerting wants. Hooking the per-host `_host_loop` instead would re-evaluate every rule once per host per interval, N times the work for the same answer.
 
 **Thread discipline.** `evaluate` and `notify_transitions` are blocking and go in `asyncio.to_thread`. `bus.publish` is called **on the loop** between them, matching the convention `Poller._poll_once` already follows (it returns events for `_host_loop` to publish rather than publishing from the worker thread).
 
@@ -3883,7 +3883,7 @@ def test_alerts_disabled_evaluates_nothing(tmp_path):
 
 
 def test_an_evaluator_failure_never_kills_the_supervisor(tmp_path, monkeypatch):
-    """The supervisor also (re)spawns host loops — if alerting can kill it,
+    """The supervisor also (re)spawns host loops, if alerting can kill it,
     one bad rule stops all polling."""
     async def go():
         app = make_job_app(tmp_path)
@@ -3962,12 +3962,12 @@ In `backend/proxploy/pollers/__init__.py`, replace `Poller.run` with:
                     if hid not in ids:
                         self._tasks.pop(hid).cancel()
                         self.snapshots.pop(hid, None)
-            except Exception:  # noqa: BLE001 — supervisor never dies
+            except Exception:  # noqa: BLE001, supervisor never dies
                 pass
             # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
             # loop". Here rather than in _host_loop: this supervisor already
             # ticks exactly once per interval no matter how many hosts exist,
-            # and every rule's answer is global — evaluating per host would be
+            # and every rule's answer is global: evaluating per host would be
             # N times the queries for the same result. Wrapped separately from
             # the block above so an alerting failure can never stop the
             # supervisor from (re)spawning host loops.
@@ -3994,7 +3994,7 @@ In `backend/proxploy/pollers/__init__.py`, replace `Poller.run` with:
                     return alerts_svc.evaluate(db, utcnow())
 
             transitions = await asyncio.to_thread(work)
-        except Exception:  # noqa: BLE001 — one bad pass, not the end of polling
+        except Exception:  # noqa: BLE001, one bad pass, not the end of polling
             return
         if not transitions:
             return
@@ -4003,7 +4003,7 @@ In `backend/proxploy/pollers/__init__.py`, replace `Poller.run` with:
         try:
             await asyncio.to_thread(alerts_svc.notify_transitions, self.app,
                                     transitions)
-        except Exception:  # noqa: BLE001 — a notification is a courtesy
+        except Exception:  # noqa: BLE001, a notification is a courtesy
             pass
 ```
 
@@ -4040,7 +4040,7 @@ cannot cost the UI its alert event, and neither can stop host polling."
   - `POST /api/v1/alert-rules` → 201, same shape (admin, `alerts.rules`)
   - `PATCH /api/v1/alert-rules/{id}` → 200 (admin, `alerts.rules`)
   - `DELETE /api/v1/alert-rules/{id}` → 204 (admin, `alerts.rules`)
-  - `GET /api/v1/alert-rules/metrics` → `{"metrics": [{"metric", "targets", "needs_threshold"}]}` — what the form in Task 16 renders from, so the UI never has to hard-code the enum.
+  - `GET /api/v1/alert-rules/metrics` → `{"metrics": [{"metric", "targets", "needs_threshold"}]}`; what the form in Task 16 renders from, so the UI never has to hard-code the enum.
 
 **Validation, which is the point of this task.** The worst alerting bug is a rule that looks configured and can never fire. Every one of these is a 422 at write time: an unknown metric; a `(metric, target_type)` pair outside `METRIC_TARGETS` (notably `disk_pct` on an app or VM); an operator other than `gt`/`lt`; a negative `duration_s`; a severity outside `info|warning|critical`; a `target_id` that does not exist; `target_id` present with `target_type="any"` or absent without it; a `channel_ids` entry naming no channel.
 
@@ -4107,7 +4107,7 @@ def test_rejects_an_unknown_metric(client, csrf_header, bootstrap_admin):
 
 
 def test_rejects_disk_pct_on_a_guest_target(client, csrf_header, bootstrap_admin):
-    """The poller writes disk_pct for hosts only — a guest disk rule would sit
+    """The poller writes disk_pct for hosts only, a guest disk rule would sit
     enabled forever and never fire. Say so instead of accepting it."""
     bootstrap_admin(client)
     h = csrf_header(client)
@@ -4181,7 +4181,7 @@ def test_accepts_a_channel_id_that_exists(client, csrf_header, bootstrap_admin):
 
 def test_status_metrics_do_not_require_a_threshold(client, csrf_header,
                                                    bootstrap_admin):
-    """host_offline has nothing to compare — demanding a threshold would be
+    """host_offline has nothing to compare, demanding a threshold would be
     theatre."""
     bootstrap_admin(client)
     hid = _host(client)
@@ -4217,7 +4217,7 @@ def test_patch_can_disable_a_rule(client, csrf_header, bootstrap_admin):
 
 
 def test_delete_cascades_its_fired_alerts(client, csrf_header, bootstrap_admin):
-    """alerts.rule_id is ON DELETE CASCADE (migration 0001) — assert the
+    """alerts.rule_id is ON DELETE CASCADE (migration 0001), assert the
     behaviour rather than trusting the DDL from memory."""
     bootstrap_admin(client)
     h = csrf_header(client)
@@ -4280,7 +4280,7 @@ def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_alert_rules_api.py -q`
-Expected: 404s — the router does not exist.
+Expected: 404s, the router does not exist.
 
 - [ ] **Step 3: Write the router**
 
@@ -4290,7 +4290,7 @@ Create `backend/proxploy/api/alerts.py`:
 """Alert rules and fired alerts (doc 05 §Alerts).
 
 The substance here is validation. The worst failure mode in alerting is a rule
-that looks configured, sits `enabled`, and can never fire — nobody discovers it
+that looks configured, sits `enabled`, and can never fire; nobody discovers it
 until the outage it was meant to catch. So every combination the evaluator
 cannot answer is a 422 at write time: unknown metric, a (metric, target_type)
 pair outside services/alerts.py::METRIC_TARGETS, a target id that names
@@ -4368,7 +4368,7 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
     allowed = METRIC_TARGETS[metric]
     if target_type != "any" and target_type not in allowed:
         raise HTTPException(422, f"{metric!r} can only target "
-                                 f"{', '.join(allowed)} — not {target_type!r}")
+                                 f"{', '.join(allowed)}; not {target_type!r}")
     if target_type == "any" and target_id is not None:
         raise HTTPException(422, "target_id must be null when target_type is 'any'")
     if target_type != "any":
@@ -4399,7 +4399,7 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
             dependencies=[Depends(_require_viewer),
                           Depends(require_entitlement("alerts.rules"))])
 def list_metrics(user: User = Depends(_require_viewer)):
-    """One source of truth for the metric enum — the rule form renders this."""
+    """One source of truth for the metric enum, the rule form renders this."""
     return {"metrics": [
         {"metric": m, "targets": list(targets),
          "needs_threshold": m not in STATUS_METRICS}
@@ -4473,7 +4473,7 @@ def delete_rule(request: Request, rule_id: int, db=Depends(get_db),
         raise HTTPException(404, "alert rule not found")
     name = row.name
     # alerts.rule_id is ON DELETE CASCADE (migration 0001), but SQLite only
-    # honours that with PRAGMA foreign_keys ON — delete the children explicitly
+    # honours that with PRAGMA foreign_keys ON: delete the children explicitly
     # so the behaviour is identical on both target databases.
     db.query(Alert).filter(Alert.rule_id == rule_id).delete(
         synchronize_session=False)
@@ -4489,7 +4489,7 @@ def delete_rule(request: Request, rule_id: int, db=Depends(get_db),
 
 In `backend/proxploy/api/__init__.py`, add `alerts` to the import tuple and `api_router.include_router(alerts.router)` after `notifications.router`.
 
-> The router has **no prefix** — doc 05 puts rules at `/alert-rules` and alerts at `/alerts`, which are two top-level paths in one domain. Both live in this module.
+> The router has **no prefix**, doc 05 puts rules at `/alert-rules` and alerts at `/alerts`, which are two top-level paths in one domain. Both live in this module.
 
 - [ ] **Step 5: Run the tests**
 
@@ -4503,7 +4503,7 @@ git add backend/proxploy/api/alerts.py backend/proxploy/api/__init__.py backend/
 git commit -m "feat(alerts): rule CRUD that refuses rules which could never fire
 
 disk_pct on a guest, a target id naming nothing, a channel id naming nothing
-— all 422 at write time rather than sitting enabled and silent."
+all 422 at write time rather than sitting enabled and silent."
 ```
 
 ---
@@ -4516,9 +4516,9 @@ disk_pct on a guest, a target id naming nothing, a channel id naming nothing
 
 **Interfaces:**
 - Produces, for Tasks 14, 15 and 16:
-  - `GET /api/v1/alerts?state=firing&limit=50` → `[{id, rule_id, rule_name, severity, target_type, target_id, target_label, state, value, message, fired_at, resolved_at, acked_by, acked_by_email, acked_at}]` (viewer, no entitlement — doc 05 leaves the column blank; the health footer needs it on every tier)
+  - `GET /api/v1/alerts?state=firing&limit=50` → `[{id, rule_id, rule_name, severity, target_type, target_id, target_label, state, value, message, fired_at, resolved_at, acked_by, acked_by_email, acked_at}]` (viewer, no entitlement; doc 05 leaves the column blank; the health footer needs it on every tier)
   - `POST /api/v1/alerts/{id}/ack` → the same object (operator)
-  - `alert_out(db, a: Alert, rules: dict, emails: dict) -> dict` — reused by Task 14's activity feed.
+  - `alert_out(db, a: Alert, rules: dict, emails: dict) -> dict`: reused by Task 14's activity feed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4636,7 +4636,7 @@ def test_ack_404s_an_unknown_alert(client, csrf_header, bootstrap_admin):
 
 def test_alerts_are_readable_without_any_entitlement(tmp_path, csrf_header,
                                                      bootstrap_admin):
-    """Doc 05 leaves the entitlement column blank for GET /alerts — the sidebar
+    """Doc 05 leaves the entitlement column blank for GET /alerts, the sidebar
     health footer must work on every tier, including the free one."""
     from fastapi.testclient import TestClient
     from tests.support import make_app
@@ -4664,7 +4664,7 @@ ALERTS_MAX = 200
 
 
 def alert_out(a: Alert, rules: dict, labels: dict, emails: dict) -> dict:
-    """One row, fully renderable — rule name, severity and target label are
+    """One row, fully renderable; rule name, severity and target label are
     joined here so the table and the health footer need exactly one fetch.
 
     `rules`/`labels`/`emails` are caller-built lookup dicts, so listing N
@@ -4720,7 +4720,7 @@ def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
 def ack_alert(request: Request, alert_id: int, db=Depends(get_db),
               user: User = Depends(_require_operator)):
     """Acknowledging silences; it never resolves. The evaluator still flips an
-    acked alert to `resolved` on recovery (services/alerts.py) — an operator
+    acked alert to `resolved` on recovery (services/alerts.py), an operator
     saying "I know" must not make the system stop tracking whether it is fixed.
     """
     row = db.get(Alert, alert_id)
@@ -4760,7 +4760,7 @@ git commit -m "feat(alerts): GET /alerts + ack, with rule name and target label 
 - Consumes: Task 13's `alert_out`.
 - Produces: `GET /cluster/activity` rows now include `{"kind": "alert", …}` entries alongside `job` and `audit`.
 
-**Why this is a task and not a line.** `api/cluster.py::activity` carries a written promise: *"Alerts join this feed in Phase 7 when the evaluator exists — the `kind` discriminator is here so that is additive."* Doc 05 describes the endpoint as "jobs + alerts + audit highlights, merged". The existing paging note also matters: each source is queried with `LIMIT limit` (not `limit // 3`) so the merged-then-sliced result is the true top-`limit`. Adding a third source keeps that property only if it too gets the full `limit`.
+**Why this is a task and not a line.** `api/cluster.py::activity` carries a written promise: *"Alerts join this feed in Phase 7 when the evaluator exists, the `kind` discriminator is here so that is additive."* Doc 05 describes the endpoint as "jobs + alerts + audit highlights, merged". The existing paging note also matters: each source is queried with `LIMIT limit` (not `limit // 3`) so the merged-then-sliced result is the true top-`limit`. Adding a third source keeps that property only if it too gets the full `limit`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4801,7 +4801,7 @@ def test_activity_merges_alerts_with_jobs_and_audits(client, csrf_header,
     assert alert_row["severity"] == "critical"
     assert alert_row["target_type"] == "host"
     assert alert_row["job_id"] is None
-    # newest first — the alert fired after the job was created
+    # newest first: the alert fired after the job was created
     assert kinds.index("alert") < kinds.index("job")
 
 
@@ -4832,7 +4832,7 @@ def test_a_resolved_alert_shows_as_resolved_in_the_feed(client, csrf_header,
 def test_alerts_do_not_starve_the_other_sources_of_the_feed(client, csrf_header,
                                                             bootstrap_admin):
     """Each source is queried with the full `limit` so the merged top-N is the
-    true top-N — adding a third source must not change that."""
+    true top-N, adding a third source must not change that."""
     from proxploy.models import Alert, AlertRule, Job, utcnow
     from tests.support import seed_host_row
 
@@ -4860,7 +4860,7 @@ def test_alerts_do_not_starve_the_other_sources_of_the_feed(client, csrf_header,
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `./.venv/bin/python -m pytest tests/test_activity_api.py -q`
-Expected: `StopIteration` — no row has `kind == "alert"`.
+Expected: `StopIteration`, no row has `kind == "alert"`.
 
 - [ ] **Step 3: Add the third source**
 
@@ -4872,7 +4872,7 @@ In `backend/proxploy/api/cluster.py`:
 
 ```python
     # Third source (doc 05: "jobs + alerts + audit highlights, merged"). Like
-    # the two above it is queried with the FULL `limit`, not `limit // 3` —
+    # the two above it is queried with the FULL `limit`, not `limit // 3`; 
     # that is what makes the merged-then-sliced result the true top-`limit`.
     alerts = (db.query(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
               .limit(limit).all())
@@ -4897,7 +4897,7 @@ In `backend/proxploy/api/cluster.py`:
                     key=lambda pair: pair[0], reverse=True)
 ```
 
-5. Add `"severity": None` and `"message": None` to the `job` and `audit` row dicts so every feed row has the same keys — the frontend `ActivityFeed` maps over one shape.
+5. Add `"severity": None` and `"message": None` to the `job` and `audit` row dicts so every feed row has the same keys, the frontend `ActivityFeed` maps over one shape.
 
 > `Alert.created_at` is used for ordering rather than `fired_at`: `created_at` is `NOT NULL` on every row (TimestampMixin) while `fired_at` is nullable, and sorting a `None` against a `datetime` raises. They are set to the same instant by the evaluator anyway.
 
@@ -4915,7 +4915,7 @@ git commit -m "feat(cluster): merge alerts into the activity feed, honouring the
 
 ---
 
-## Task 15: Frontend — `alert` SSE event and the real health footer
+## Task 15: Frontend: `alert` SSE event and the real health footer
 
 **Files:**
 - Create: `frontend/src/api/alerts.ts`
@@ -4927,7 +4927,7 @@ git commit -m "feat(cluster): merge alerts into the activity feed, honouring the
 - Consumes: Task 13's `GET /alerts?state=firing`, Task 11's `alert` SSE event, Task 14's activity rows.
 - Produces, for Task 16:
   - `AlertRow`, `AlertRuleRow`, `MetricSpec` types in `src/api/alerts.ts`
-  - `useFiringAlerts()` — `['alerts','firing']`, 60 s refetch (doc 06 §d)
+  - `useFiringAlerts()`: `['alerts','firing']`, 60 s refetch (doc 06 §d)
   - `useAlertRules()`, `useAlertMetrics()`, `useAckAlert()`
   - `applyAlert(qc, d, toast?)` in `src/api/live.ts`
   - `<HealthFooter />`
@@ -5062,7 +5062,7 @@ export type AlertRuleRow = {
   channel_ids: number[]; enabled: boolean
 }
 
-/** GET /alert-rules/metrics — the enum lives on the backend, never twice. */
+/** GET /alert-rules/metrics, the enum lives on the backend, never twice. */
 export type MetricSpec = { metric: string; targets: string[]; needs_threshold: boolean }
 
 /** Doc 06 §d: `['alerts','firing']`, 60 s, health-footer source. */
@@ -5126,7 +5126,7 @@ type AlertToastFn = (t: { kind: 'ok' | 'err'; text: string; alertId: number }) =
  *  write a half-row into the cache. Doc 06's rule is "patch when the delta is
  *  complete, invalidate when it isn't".
  *
- *  A `resolved` transition always toasts, at any severity — an info-level
+ *  A `resolved` transition always toasts, at any severity; an info-level
  *  alert that quietly went away is still worth one line of good news, and it
  *  is the only signal that an earlier toast is stale. */
 export function applyAlert(qc: QueryClient, d: AlertDelta, toast?: AlertToastFn) {
@@ -5162,12 +5162,12 @@ import { api } from '../api/client'
 import { useFiringAlerts } from '../api/alerts'
 import type { NodeRow } from '../api/hooks'
 
-/** Doc 06 §(b) `HealthFooter`: `.side-foot` — "All systems healthy", green dot,
+/** Doc 06 §(b) `HealthFooter`: `.side-foot`, "All systems healthy", green dot,
  *  "3 nodes · 0 alerts". Bound to `/alerts?state=firing` + host status; the dot
  *  turns `--red` when anything is firing.
  *
  *  Until Phase 7 this was three hard-coded lines in SidebarNav that always said
- *  "All systems healthy" — the one piece of UI that must never lie. */
+ *  "All systems healthy", the one piece of UI that must never lie. */
 export function HealthFooter() {
   const alerts = useFiringAlerts()
   const nodes = useQuery({
@@ -5250,12 +5250,12 @@ const TINT: Record<string, string> = {
 const BADGE: Record<string, string> = { job: 'JOB', audit: 'AUD', alert: 'ALT' }
 ```
 
-and in `Item`, replace the badge expression with `{BADGE[row.kind] ?? '—'}`.
+and in `Item`, replace the badge expression with `{BADGE[row.kind] ?? ', '}`.
 
 - [ ] **Step 7: Run the tests**
 
 Run: `npm test`
-Expected: PASS — 121 existing + 7 new.
+Expected: PASS, 121 existing + 7 new.
 
 - [ ] **Step 8: Type-check and lint**
 
@@ -5268,13 +5268,13 @@ Expected: clean.
 git add frontend/src/api/alerts.ts frontend/src/api/live.ts frontend/src/api/jobs.ts frontend/src/components/ frontend/src/tests/
 git commit -m "feat(ui): alert SSE handling and a health footer that can say something is wrong
 
-The footer said 'All systems healthy' unconditionally since Phase 1 — the
+The footer said 'All systems healthy' unconditionally since Phase 1, the
 one piece of UI that must never lie."
 ```
 
 ---
 
-## Task 16: Frontend — the `/alerts` page
+## Task 16: Frontend: the `/alerts` page
 
 **Files:**
 - Create: `frontend/src/routes/alerts.tsx`, `frontend/src/components/AlertRuleForm.tsx`
@@ -5285,7 +5285,7 @@ one piece of UI that must never lie."
 - Consumes: Task 15's `src/api/alerts.ts` hooks, Task 12's `/alert-rules` + `/alert-rules/metrics`, Task 13's `/alerts` + ack.
 - Produces: `alertsRoute` for `router.tsx`.
 
-**Design.** Doc 06 has no `/alerts` route in the prototype, so it is built from the same vocabulary as `/settings` (its `Card` shell and table styling) — no new visual language. Two cards: **Firing** (message, target, severity pill, fired-ago, Ack button; the empty state is the good news) and **Rules** (table + inline `AlertRuleForm`, lock-veiled when `alerts.rules` is unentitled, matching how `settings.tsx` treats `notify.channels`). Alert history sits under Firing behind a "Show resolved" toggle so the page opens on what is wrong now.
+**Design.** Doc 06 has no `/alerts` route in the prototype, so it is built from the same vocabulary as `/settings` (its `Card` shell and table styling); no new visual language. Two cards: **Firing** (message, target, severity pill, fired-ago, Ack button; the empty state is the good news) and **Rules** (table + inline `AlertRuleForm`, lock-veiled when `alerts.rules` is unentitled, matching how `settings.tsx` treats `notify.channels`). Alert history sits under Firing behind a "Show resolved" toggle so the page opens on what is wrong now.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5466,7 +5466,7 @@ const label = 'mb-1 block text-[11.5px] uppercase tracking-wide text-text-3'
 type HostRow = { id: number; name: string }
 
 /** Create one alert rule. The metric enum, and which target kinds each metric
- *  supports, come from GET /alert-rules/metrics — never a second hard-coded
+ *  supports, come from GET /alert-rules/metrics; never a second hard-coded
  *  copy that can drift from services/alerts.py::METRIC_TARGETS. */
 export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   const qc = useQueryClient()
@@ -5515,7 +5515,7 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
     onError: (e) => toast.error(
       e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
         ? (e.body as any).detail
-        : 'Could not create that rule — check the fields and try again.'),
+        : 'Could not create that rule, check the fields and try again.'),
   })
 
   function pickMetric(next: string) {
@@ -5639,7 +5639,7 @@ const SEV: Record<string, string> = {
 }
 
 function ago(iso: string | null): string {
-  if (!iso) return '—'
+  if (!iso) return ', '
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (s < 60) return `${s}s ago`
   if (s < 3600) return `${Math.round(s / 60)}m ago`
@@ -5657,7 +5657,7 @@ function AlertRowView({ a, onAck, acking }:
         </span>
       </td>
       <td className="py-2 text-[13px] text-text">{a.message}</td>
-      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? '—'}</td>
+      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? ', '}</td>
       <td className="font-mono text-[12px] text-text-3">{ago(a.fired_at)}</td>
       <td className="py-2 text-right">
         {a.acked_at
@@ -5687,12 +5687,12 @@ export function AlertsPage() {
     mutationFn: (r: AlertRuleRow) => api(`/alert-rules/${r.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }),
     }),
-    onError: () => toast.error('Could not update that rule — try again.'),
+    onError: () => toast.error('Could not update that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
   const removeRule = useMutation({
     mutationFn: (id: number) => api(`/alert-rules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that rule — try again.'),
+    onError: () => toast.error('Could not remove that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
 
@@ -5841,13 +5841,13 @@ In `frontend/src/router.tsx`, add `import { alertsRoute } from './routes/alerts'
 - [ ] **Step 6: Run the tests, build and lint**
 
 Run: `npm test && npm run build && npm run lint`
-Expected: PASS, 9 new tests, clean build. `src/tests/nav.test.tsx` may assert the nav item list — update it for the new Alerts entry if it does.
+Expected: PASS, 9 new tests, clean build. `src/tests/nav.test.tsx` may assert the nav item list, update it for the new Alerts entry if it does.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add frontend/src/routes/alerts.tsx frontend/src/components/AlertRuleForm.tsx frontend/src/router.tsx frontend/src/tests/
-git commit -m "feat(ui): /alerts page — firing list with ack, resolved history, rule CRUD
+git commit -m "feat(ui): /alerts page, firing list with ack, resolved history, rule CRUD
 
 The rule form renders its metric enum and per-metric target kinds from
 GET /alert-rules/metrics rather than keeping a second copy that can drift."
@@ -5855,7 +5855,7 @@ GET /alert-rules/metrics rather than keeping a second copy that can drift."
 
 ---
 
-## Task 17: Frontend — schedules in Settings and on Backups
+## Task 17: Frontend: schedules in Settings and on Backups
 
 **Files:**
 - Create: `frontend/src/api/schedules.ts`, `frontend/src/components/ScheduleForm.tsx`
@@ -5866,7 +5866,7 @@ GET /alert-rules/metrics rather than keeping a second copy that can drift."
 - Consumes: Task 3's `/schedules` routes.
 - Produces: `ScheduleRow`, `useSchedules()`, `<ScheduleForm jobKind? params? onSaved />`.
 
-**Two placeholders this task is required to remove.** `frontend/src/routes/backups.tsx` currently ships a **disabled** "New job" button titled *"Scheduled backup jobs arrive with the Phase 7 scheduler."* and a "Next scheduled" stat card reading `—` with the note *"Scheduled backups arrive with the Phase 7 scheduler; every run today is one you started."* `frontend/src/routes/settings.tsx` ships a General card reading *"Scheduled auto-updates and catalog sync configuration arrive in Phases 4–7; this page grows with them."* All three are Phase 7's bill. Leaving any of them is leaving the task unfinished.
+**Two placeholders this task is required to remove.** `frontend/src/routes/backups.tsx` currently ships a **disabled** "New job" button titled *"Scheduled backup jobs arrive with the Phase 7 scheduler."* and a "Next scheduled" stat card reading `, ` with the note *"Scheduled backups arrive with the Phase 7 scheduler; every run today is one you started."* `frontend/src/routes/settings.tsx` ships a General card reading *"Scheduled auto-updates and catalog sync configuration arrive in Phases 4–7; this page grows with them."* All three are Phase 7's bill. Leaving any of them is leaving the task unfinished.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6007,7 +6007,7 @@ it('opens a schedule dialog from "New job" instead of a disabled button', async 
 })
 ```
 
-> Match this test's mock/setup to whatever `backups.test.tsx` already establishes at the top of that file — reuse its `vi.mock('../api/client')` rather than adding a second one, and extend that mock to answer `/schedules` with `[]`.
+> Match this test's mock/setup to whatever `backups.test.tsx` already establishes at the top of that file, reuse its `vi.mock('../api/client')` rather than adding a second one, and extend that mock to answer `/schedules` with `[]`.
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -6108,7 +6108,7 @@ export function ScheduleForm({ jobKind, onSaved }:
     onError: (e) => toast.error(
       e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
         ? (e.body as any).detail
-        : 'Could not create that schedule — check the fields and try again.'),
+        : 'Could not create that schedule, check the fields and try again.'),
   })
 
   return (
@@ -6150,7 +6150,7 @@ export function ScheduleForm({ jobKind, onSaved }:
         <input id="sc-cron" className={`${input} font-mono`} value={cron} required
                onChange={(e) => setCron(e.target.value)} />
         <span className="mt-1 block text-[11px] text-text-3">
-          min hour day-of-month month day-of-week — e.g. <code>0 2 * * *</code> is 02:00 daily
+          min hour day-of-month month day-of-week, e.g. <code>0 2 * * *</code> is 02:00 daily
         </span>
       </div>
 
@@ -6182,13 +6182,13 @@ export function SchedulesCard() {
     mutationFn: (s: ScheduleRow) => api(`/schedules/${s.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !s.enabled }),
     }),
-    onError: () => toast.error('Could not update that schedule — try again.'),
+    onError: () => toast.error('Could not update that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
-    onSuccess: () => toast.success('Started — follow it in the activity drawer.'),
-    onError: () => toast.error('Could not start that job — try again.'),
+    onSuccess: () => toast.success('Started, follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start that job, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -6196,7 +6196,7 @@ export function SchedulesCard() {
   })
   const remove = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that schedule — try again.'),
+    onError: () => toast.error('Could not remove that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
 
@@ -6224,7 +6224,7 @@ export function SchedulesCard() {
               <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
               <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
               <td className="font-mono text-[11.5px] text-text-3">
-                {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}
+                {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ', '}
                 <span className="ml-1">{s.timezone}</span>
               </td>
               <td className={s.enabled ? 'text-green' : 'text-text-3'}>
@@ -6269,7 +6269,7 @@ Replace the General card body's placeholder sentence with something true now tha
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
           Auto-update windows, scheduled backups and catalog sync are all
-          schedules — add them above. Alert rules live on the{' '}
+          schedules, add them above. Alert rules live on the{' '}
           <Link to={'/alerts' as never} className="text-amber">Alerts</Link> page.
         </p>
       </Card>
@@ -6281,7 +6281,7 @@ Add the needed imports to `settings.tsx`: `Link` from `@tanstack/react-router`, 
 
 In `frontend/src/routes/backups.tsx`:
 
-1. Replace the disabled "New job" button with a live one that opens a dialog rendering `<ScheduleForm jobKind="backup.run" … />` in the same dialog shell `RunDialog` uses. Delete the `title="Scheduled backup jobs arrive with the Phase 7 scheduler."` attribute — the placeholder is paid.
+1. Replace the disabled "New job" button with a live one that opens a dialog rendering `<ScheduleForm jobKind="backup.run" … />` in the same dialog shell `RunDialog` uses. Delete the `title="Scheduled backup jobs arrive with the Phase 7 scheduler."` attribute, the placeholder is paid.
 2. Fill the "Next scheduled" stat card from `useSchedules()`:
 
 ```tsx
@@ -6293,16 +6293,16 @@ In `frontend/src/routes/backups.tsx`:
 
 ```tsx
         <StatCard label="Next scheduled"
-          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : '—'}
+          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : ', '}
           note={nextBackup
             ? `${nextBackup.name} · ${nextBackup.cron} ${nextBackup.timezone}`
-            : 'No backup schedule yet — "New job" creates one.'} />
+            : 'No backup schedule yet, "New job" creates one.'} />
 ```
 
 - [ ] **Step 7: Run the tests, build and lint**
 
 Run: `npm test && npm run build && npm run lint`
-Expected: PASS, 9 new tests. `src/tests/settings.test.tsx` asserts the old General-card copy — update it.
+Expected: PASS, 9 new tests. `src/tests/settings.test.tsx` asserts the old General-card copy, update it.
 
 - [ ] **Step 8: Confirm no Phase 7 placeholder survives**
 
@@ -6325,7 +6325,7 @@ Pays off the three Phase 7 placeholders the earlier phases left behind."
 
 ---
 
-## Task 18: Frontend — update badge, "Update to X", and "Update all"
+## Task 18: Frontend: update badge, "Update to X", and "Update all"
 
 **Files:**
 - Modify: `frontend/src/routes/apps.tsx`, `frontend/src/routes/cluster.tsx`, `frontend/src/api/hooks.ts`
@@ -6335,7 +6335,7 @@ Pays off the three Phase 7 placeholders the earlier phases left behind."
 - Consumes: Task 6's `GET/POST /apps/{id}/update`, Task 7's `POST /apps/update-all`.
 - Produces: nothing downstream.
 
-**Doc 06 asks for exactly three things**, all quoted from its route table: the app-detail head shows a *"update available" badge*; the Overview KV grid ends with an *"Update to vX" button*; the Cluster page's Apps section has an *"Update all"* action. `AppCard` already renders its `UPDATE` corner tag from `app.update_available` — Task 4 is what finally makes that field non-null, so the card needs no change.
+**Doc 06 asks for exactly three things**, all quoted from its route table: the app-detail head shows a *"update available" badge*; the Overview KV grid ends with an *"Update to vX" button*; the Cluster page's Apps section has an *"Update all"* action. `AppCard` already renders its `UPDATE` corner tag from `app.update_available`, Task 4 is what finally makes that field non-null, so the card needs no change.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6472,7 +6472,7 @@ In `frontend/src/routes/apps.tsx`, add (exported, so the test can mount it direc
 
 ```tsx
 /** Doc 06 App detail Overview: the Details KV grid's "Update" row plus an
- *  "Update to vX" button. X is a short commit sha, not a version — see
+ *  "Update to vX" button. X is a short commit sha, not a version; see
  *  services/appstore.py::mark_updates_available for why that is the only
  *  honest thing community-scripts lets us say. */
 export function UpdatePanel({ appId, app }:
@@ -6487,8 +6487,8 @@ export function UpdatePanel({ appId, app }:
     mutationFn: () => api(`/apps/${appId}/update`, {
       method: 'POST', body: JSON.stringify({ consent: true }),
     }),
-    onSuccess: () => toast.success('Update started — follow it in the activity drawer.'),
-    onError: () => toast.error('Could not start the update — try again.'),
+    onSuccess: () => toast.success('Update started, follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start the update, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -6525,7 +6525,7 @@ export function UpdatePanel({ appId, app }:
 }
 ```
 
-Mount it in the app-detail Overview, in a card beneath the KV grid, and change the KV grid's `Update` row so it reads the same field it already does (`app.update_available ?? 'Up to date'` — unchanged). Add the "update available" badge to the detail head next to the name:
+Mount it in the app-detail Overview, in a card beneath the KV grid, and change the KV grid's `Update` row so it reads the same field it already does (`app.update_available ?? 'Up to date'`, unchanged). Add the "update available" badge to the detail head next to the name:
 
 ```tsx
         {app.update_available && (
@@ -6544,7 +6544,7 @@ In `frontend/src/routes/cluster.tsx`, add (exported):
 
 ```tsx
 /** Doc 06 Cluster overview: the Apps section's "Update all" action. One
- *  confirm covers the whole batch — the backend still requires explicit
+ *  confirm covers the whole batch, the backend still requires explicit
  *  consent, and enqueues one job per stale app so each has its own transcript. */
 export function UpdateAllButton() {
   const qc = useQueryClient()
@@ -6555,13 +6555,13 @@ export function UpdateAllButton() {
       if (r.jobs.length === 0) {
         // Never a bare silence: "nothing happened" and "it is broken" look
         // identical otherwise.
-        toast('Nothing to update — every app is on its catalog commit.')
+        toast('Nothing to update, every app is on its catalog commit.')
         return
       }
-      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'} — `
+      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
                     + 'follow them in the activity drawer.')
     },
-    onError: () => toast.error('Could not start the updates — try again.'),
+    onError: () => toast.error('Could not start the updates, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -6597,7 +6597,7 @@ git commit -m "feat(ui): update-available badge, 'Update to <sha>' with diff + c
 ## Task 19: Definition of Done, notes, doc amendments, buildlog
 
 **Files:**
-- Create: `backend/dod_verify_phase7.py` (throwaway, **not committed** — same as `dod_verify_phase5.py` / `dod_verify_phase6.py`)
+- Create: `backend/dod_verify_phase7.py` (throwaway, **not committed**; same as `dod_verify_phase5.py` / `dod_verify_phase6.py`)
 - Create: `docs/notes/phase-7-operate.md`
 - Modify: `docs/03-technology-dependency-map.md`, `docs/02-system-architecture.md`, `docs/04-data-model.md`, `buildlog.md`
 
@@ -6620,7 +6620,7 @@ Run it:
 ./.venv/bin/python dod_verify_phase7.py
 ```
 
-Expected: every clause prints `OK` and the script exits 0. If a clause cannot be proven without live hardware, print it as an explicit `SKIPPED (needs live PVE)` line rather than silently passing — and record the skip in the notes file below.
+Expected: every clause prints `OK` and the script exits 0. If a clause cannot be proven without live hardware, print it as an explicit `SKIPPED (needs live PVE)` line rather than silently passing; and record the skip in the notes file below.
 
 - [ ] **Step 2: Run both suites one final time**
 
@@ -6629,7 +6629,7 @@ cd backend && ./.venv/bin/python -m pytest tests/ -m "not pve_integration and no
 cd ../frontend && npm test && npm run build && npm run lint
 ```
 
-Expected: backend well above its 499-passed baseline, frontend well above 121. Record the exact numbers — they go in the buildlog.
+Expected: backend well above its 499-passed baseline, frontend well above 121. Record the exact numbers, they go in the buildlog.
 
 - [ ] **Step 3: Confirm the schema really did not move**
 
@@ -6637,27 +6637,27 @@ Expected: backend well above its 499-passed baseline, frontend well above 121. R
 cd backend && ./.venv/bin/python -m alembic -c alembic.ini heads
 ```
 
-Expected: `2330a95b98d2 (head)`, unchanged from Phase 6. A new revision here means someone added a migration this phase did not need — go back and find out why.
+Expected: `2330a95b98d2 (head)`, unchanged from Phase 6. A new revision here means someone added a migration this phase did not need, go back and find out why.
 
 - [ ] **Step 4: Write the phase notes**
 
 Create `docs/notes/phase-7-operate.md` following `docs/notes/phase-6-infra.md`'s shape (`## What shipped, per subsystem`, then a section per finding). It must contain, at minimum:
 
-- **APScheduler 4 does not exist.** PyPI's maximum stable is 3.11.3; 4.x is `a1`–`a6` only, verified 2026-08-01. Docs 02/03/04/09/10 all named "APScheduler 4". Doc 03 marks Scheduling "Provisional (seam: `Scheduler`)", so this shipped on 3.11.3, and only `CronTrigger` is used — the tick loop in `jobs/scheduler.py` replaces `BaseScheduler` entirely, because doc 04 makes the `schedules` table authoritative and a second in-memory registry would be two sources of truth to reconcile on every CRUD write.
+- **APScheduler 4 does not exist.** PyPI's maximum stable is 3.11.3; 4.x is `a1`–`a6` only, verified 2026-08-01. Docs 02/03/04/09/10 all named "APScheduler 4". Doc 03 marks Scheduling "Provisional (seam: `Scheduler`)", so this shipped on 3.11.3, and only `CronTrigger` is used; the tick loop in `jobs/scheduler.py` replaces `BaseScheduler` entirely, because doc 04 makes the `schedules` table authoritative and a second in-memory registry would be two sources of truth to reconcile on every CRUD write.
 - **Zero migrations, again.** `schedules`, `alert_rules` and `alerts` have existed with full column parity since migration 0001. Alembic head unchanged at `2330a95b98d2`.
 - **The poller never wrote `mem_pct` or `disk_pct`.** Doc 04's `alert_rules.metric` enum named both. Any memory or disk rule would have sat `enabled` and never fired. Fixed in Task 8; `disk_pct` is host-only and Task 12 rejects guest disk rules at write time rather than accepting one that cannot fire.
-- **`metrics_loop` is gone.** Doc 04 requires pruning to run "as scheduled system jobs (visible in the activity feed like any other job)"; it now does, hourly, via the seeded `Metrics maintenance` schedule. Rollup cadence moved from 5 min to hourly with a wider idempotent lookback — charts under six hours read raw samples, so nothing user-visible lags.
-- **RESIDUAL LIMITATION — the community-scripts update path.** A `ct/<slug>.sh` decides install-vs-update itself inside `build.func`'s `start`. Proxploy cannot see that decision, so `app.update` brackets the SSH run with a CT-must-exist preflight and a no-new-CT post-check, and fails loudly naming any stray container. Whether a given entry's update path is non-interactive is a property of that upstream script; `services/classifier.py` classifies **install** feasibility only. An update path that prompts aborts under `catch_errors` and the job fails with the transcript archived. Classifying update paths is separate, later work.
-- **RESIDUAL LIMITATION — no browser on this box.** Every frontend claim rests on Vitest + jsdom. `/alerts`, the health footer, the Schedules card and the update controls have never been rendered in a real browser. Same gap Phases 5 and 6 recorded.
+- **`metrics_loop` is gone.** Doc 04 requires pruning to run "as scheduled system jobs (visible in the activity feed like any other job)"; it now does, hourly, via the seeded `Metrics maintenance` schedule. Rollup cadence moved from 5 min to hourly with a wider idempotent lookback, charts under six hours read raw samples, so nothing user-visible lags.
+- **RESIDUAL LIMITATION, the community-scripts update path.** A `ct/<slug>.sh` decides install-vs-update itself inside `build.func`'s `start`. Proxploy cannot see that decision, so `app.update` brackets the SSH run with a CT-must-exist preflight and a no-new-CT post-check, and fails loudly naming any stray container. Whether a given entry's update path is non-interactive is a property of that upstream script; `services/classifier.py` classifies **install** feasibility only. An update path that prompts aborts under `catch_errors` and the job fails with the transcript archived. Classifying update paths is separate, later work.
+- **RESIDUAL LIMITATION, no browser on this box.** Every frontend claim rests on Vitest + jsdom. `/alerts`, the health footer, the Schedules card and the update controls have never been rendered in a real browser. Same gap Phases 5 and 6 recorded.
 - **`update_available` is a commit sha, not a version.** community-scripts publishes no version numbers; the honest signal is "pinned commit is behind the catalog commit", and doc 06's "Update to vX" renders the short sha.
 
 - [ ] **Step 5: Amend the design docs**
 
 Three amendments, each marked as an amendment with its date and reason (Phase 6's doc-05 amendment is the precedent for the format):
 
-1. `docs/03-technology-dependency-map.md` — the Scheduling row: version `APScheduler 3.11` (not 4), MIT **verified** (not †), and a note that only `CronTrigger` is used, the `Scheduler` seam being satisfied by `jobs/scheduler.py`. Add `tzlocal` (MIT, transitive).
-2. `docs/02-system-architecture.md` — lines 34, 108, 244 and 315 say "APScheduler 4". Correct the version and, at line 315, the claim that "APScheduler jobs roll raw samples into rollups": that is now the `metrics.maintain` job fired by the `schedules` tick.
-3. `docs/04-data-model.md` §`schedules` — the sentence "APScheduler's own state is reconstructed from these rows at boot" is now literally true in a stronger sense than written: there is no APScheduler state at all. Reword to say the tick loop reads this table directly.
+1. `docs/03-technology-dependency-map.md`: the Scheduling row: version `APScheduler 3.11` (not 4), MIT **verified** (not †), and a note that only `CronTrigger` is used, the `Scheduler` seam being satisfied by `jobs/scheduler.py`. Add `tzlocal` (MIT, transitive).
+2. `docs/02-system-architecture.md`: lines 34, 108, 244 and 315 say "APScheduler 4". Correct the version and, at line 315, the claim that "APScheduler jobs roll raw samples into rollups": that is now the `metrics.maintain` job fired by the `schedules` tick.
+3. `docs/04-data-model.md` §`schedules`, the sentence "APScheduler's own state is reconstructed from these rows at boot" is now literally true in a stronger sense than written: there is no APScheduler state at all. Reword to say the tick loop reads this table directly.
 
 - [ ] **Step 6: Write the buildlog entry**
 
@@ -6669,7 +6669,7 @@ Append a Phase 7 section to `buildlog.md` in the established narrative voice, co
 git add docs/ buildlog.md
 git commit -m "docs(phase-7): verification notes, doc 02/03/04 amendments, buildlog entry
 
-APScheduler 4 does not exist as a release — amends the four docs that named
+APScheduler 4 does not exist as a release, amends the four docs that named
 it. Records the poller's missing mem_pct/disk_pct samples and the two
 residual limitations (community-scripts update path, no browser here)."
 ```
@@ -6680,13 +6680,13 @@ residual limitations (community-scripts update path, no browser here)."
 git status --short
 ```
 
-Expected: empty, and `backend/dod_verify_phase7.py` untracked or deleted — matching how `dod_verify_phase5.py` and `dod_verify_phase6.py` were handled.
+Expected: empty, and `backend/dod_verify_phase7.py` untracked or deleted; matching how `dod_verify_phase5.py` and `dod_verify_phase6.py` were handled.
 
 ---
 
 ## Self-Review
 
-Run against doc 10 §"Phase 7 — Operate" and docs 04/05/06.
+Run against doc 10 §"Phase 7, Operate" and docs 04/05/06.
 
 **1. Spec coverage**
 
@@ -6716,29 +6716,29 @@ Run against doc 10 §"Phase 7 — Operate" and docs 04/05/06.
 
 **Gaps accepted, and why, rather than left silent:**
 
-- **`audit_events` pruning is not scheduled.** Doc 04 §retention is explicit that audit rows have *"no automatic pruning by default"* and that the opt-in `audit.retention` policy is an export-then-prune flow gated on rows landing in a completed archive — with `proxploy audit export` as the CLI entry point. No CLI exists yet (that is Phase 9 "Deliver"), and scheduling a delete without the export half would be exactly the data loss doc 04 forbids. `metrics.maintain` covers metric pruning, which is what doc 10 Phase 7 actually names. Recorded in the Task 19 notes.
-- **Per-rule channel selection has no UI control.** The backend honours `alert_rules.channel_ids` fully (Tasks 10, 12) and the rule form posts `[]`, meaning "use the normal event subscription" — which is the sane default and the one doc 04 describes. A channel multi-select is a small additive change to `AlertRuleForm`; it is not required by any doc 06 line and is not worth a task of its own.
+- **`audit_events` pruning is not scheduled.** Doc 04 §retention is explicit that audit rows have *"no automatic pruning by default"* and that the opt-in `audit.retention` policy is an export-then-prune flow gated on rows landing in a completed archive, with `proxploy audit export` as the CLI entry point. No CLI exists yet (that is Phase 9 "Deliver"), and scheduling a delete without the export half would be exactly the data loss doc 04 forbids. `metrics.maintain` covers metric pruning, which is what doc 10 Phase 7 actually names. Recorded in the Task 19 notes.
+- **Per-rule channel selection has no UI control.** The backend honours `alert_rules.channel_ids` fully (Tasks 10, 12) and the rule form posts `[]`, meaning "use the normal event subscription"; which is the sane default and the one doc 04 describes. A channel multi-select is a small additive change to `AlertRuleForm`; it is not required by any doc 06 line and is not worth a task of its own.
 - **`backup_failed` alerts read `jobs`, not `backups`.** Doc 04 lists the metric without defining its source. The `backup.run` job's terminal status is the fact Proxploy actually owns; PBS verify state lives in `backups.verify_state` and is a different question (did the archive verify) from this one (did the run fail). Noted in `services/alerts.py`.
 
-**2. Placeholder scan** — every step carries the literal code or the literal command. Three steps deliberately hand judgement to the implementer rather than guessing, and each says so explicitly and says what to check: Task 5 Step 1 (the `tests/fakes/ssh.py` and `FakePVE` helper names — verify against `test_appstore_install.py` before writing), Task 17 Step 1 (reuse `backups.test.tsx`'s existing mock), Task 19 Step 1 (the DoD script's clause-by-clause shape). No "TBD", no "add error handling", no "similar to Task N".
+**2. Placeholder scan**: every step carries the literal code or the literal command. Three steps deliberately hand judgement to the implementer rather than guessing, and each says so explicitly and says what to check: Task 5 Step 1 (the `tests/fakes/ssh.py` and `FakePVE` helper names, verify against `test_appstore_install.py` before writing), Task 17 Step 1 (reuse `backups.test.tsx`'s existing mock), Task 19 Step 1 (the DoD script's clause-by-clause shape). No "TBD", no "add error handling", no "similar to Task N".
 
 **3. Type consistency**
 
-- `next_fire(cron, tz, after)` — same signature in Tasks 1, 2, 3.
-- `tick(app, now=None)` — Task 1 defines it, Task 2's `Scheduler.run` calls it, Task 19's DoD script calls it directly.
-- `_target(params)` — Task 1 defines it; Task 3's `run_schedule_now` imports it by that exact name.
-- `pinned_ref(db, app_id)` / `mark_updates_available(db)` / `SHORT_SHA` — Task 4 defines, Tasks 5 and 6 consume.
-- `_update_state(db, app_id)` — Task 6 defines, Task 7 reads the same three fields (`entry.upstream_sha`, `latest.upstream_ref`) inline rather than importing it, so no ordering dependency inside the module.
-- `UpdateIn` — defined in Task 6 but **used** in Task 7's earlier-registered route; Task 7 Step 3 explicitly says to hoist the model definition above `update_all_apps`.
-- `METRIC_TARGETS` / `STATUS_METRICS` — Task 9 defines, Task 12 imports both by name.
-- `alert_out(a, rules, labels, emails)` — Task 13 defines with four args; Task 14 does not call it (it builds its own feed-shaped row), so no arity mismatch.
-- `channels_for(db, event, only_ids=None)` / `notify(app, event, title, body, only_ids=None)` — Task 10 widens both; `JobBackend._notify_async` calls `notify` with four positional args and is unaffected by a trailing keyword-defaulted parameter.
+- `next_fire(cron, tz, after)`: same signature in Tasks 1, 2, 3.
+- `tick(app, now=None)`: Task 1 defines it, Task 2's `Scheduler.run` calls it, Task 19's DoD script calls it directly.
+- `_target(params)`: Task 1 defines it; Task 3's `run_schedule_now` imports it by that exact name.
+- `pinned_ref(db, app_id)` / `mark_updates_available(db)` / `SHORT_SHA`; Task 4 defines, Tasks 5 and 6 consume.
+- `_update_state(db, app_id)`: Task 6 defines, Task 7 reads the same three fields (`entry.upstream_sha`, `latest.upstream_ref`) inline rather than importing it, so no ordering dependency inside the module.
+- `UpdateIn`: defined in Task 6 but **used** in Task 7's earlier-registered route; Task 7 Step 3 explicitly says to hoist the model definition above `update_all_apps`.
+- `METRIC_TARGETS` / `STATUS_METRICS`, Task 9 defines, Task 12 imports both by name.
+- `alert_out(a, rules, labels, emails)`: Task 13 defines with four args; Task 14 does not call it (it builds its own feed-shaped row), so no arity mismatch.
+- `channels_for(db, event, only_ids=None)` / `notify(app, event, title, body, only_ids=None)`; Task 10 widens both; `JobBackend._notify_async` calls `notify` with four positional args and is unaffected by a trailing keyword-defaulted parameter.
 - Frontend: `AlertRow`, `AlertRuleRow`, `MetricSpec`, `ScheduleRow`, `UpdateInfo` each declared once; `applyAlert(qc, d, toast?)` matches `LiveProvider`'s call; `useFiringAlerts` used by both `HealthFooter` and `AlertsPage`.
 - `ActivityRow` gains `severity` and `message` in Task 15; Task 14 adds those keys to **all three** row kinds on the backend so the type is honest for every row.
 
 **4. Cross-task ordering risks, called out where they bite**
 
-- Task 2 must land before Task 3: `create_schedule` calls `validate()`, which checks `HANDLERS` — and `metrics.maintain` only exists after Task 2.
+- Task 2 must land before Task 3: `create_schedule` calls `validate()`, which checks `HANDLERS`; and `metrics.maintain` only exists after Task 2.
 - Task 8 must land before Task 9's `mem_pct`/`disk_pct` tests mean anything.
 - Task 12 must land before Task 16 (the rule form fetches `/alert-rules/metrics`).
-- Task 14 changes the shape of every activity row; Task 15 updates the frontend type. If they are worked out of order the frontend compiles either way (the new keys are optional at runtime) but `ActivityFeed`'s alert badge renders as `—` until both land.
+- Task 14 changes the shape of every activity row; Task 15 updates the frontend type. If they are worked out of order the frontend compiles either way (the new keys are optional at runtime) but `ActivityFeed`'s alert badge renders as `, ` until both land.

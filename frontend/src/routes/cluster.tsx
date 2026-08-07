@@ -39,7 +39,7 @@ function useNodes() {
 }
 
 /** Doc 06 Cluster overview: the Apps section's "Update all" action. One
- *  confirm covers the whole batch — the backend still requires explicit
+ *  confirm covers the whole batch, the backend still requires explicit
  *  consent, and enqueues one job per stale app so each has its own transcript. */
 export function UpdateAllButton() {
   const ent = useEntitlements()
@@ -52,13 +52,13 @@ export function UpdateAllButton() {
       if (r.jobs.length === 0) {
         // Never a bare silence: "nothing happened" and "it is broken" look
         // identical otherwise.
-        toast('Nothing to update — every app is on its catalog commit.')
+        toast('Nothing to update, every app is on its catalog commit.')
         return
       }
-      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'} — `
+      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
                     + 'follow them in the activity drawer.')
     },
-    onError: () => toast.error('Could not start the updates — try again.'),
+    onError: () => toast.error('Could not start the updates, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -66,7 +66,7 @@ export function UpdateAllButton() {
   })
   return (
     <Button variant="ghost" disabled={run.isPending || !allowed}
-      title={!allowed ? 'Pro — Update all' : undefined}
+      title={!allowed ? 'Pro: Update all' : undefined}
       onClick={() => {
       if (window.confirm('Update every app that has a newer catalog commit? '
                          + 'Each update runs a community script as root on its node.')) {
@@ -117,15 +117,15 @@ export function ClusterPage() {
             rather than "we could not check". */}
         <Ring label="CPU" pct={summary?.cpu.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : '—'}
+            : summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : ', '}
           stops={['#F5B544', '#E0862B']} />
         <Ring label="Memory" pct={summary?.mem.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : '—'}
+            : summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : ', '}
           stops={['#34D3C6', '#5B9DF9']} />
         <Ring label="Storage" pct={summary?.storage.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : '—'}
+            : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : ', '}
           stops={['#A78BFA', '#6D5AE6']} />
       </div>
 
@@ -211,7 +211,7 @@ export function ClusterPage() {
   )
 }
 
-// Minimal slice of GET /hosts/{id} — this page only needs the opt-in flag;
+// Minimal slice of GET /hosts/{id}, this page only needs the opt-in flag;
 // the fleet-overview fields (status, uptime, etc.) already come from `node`.
 type HostDetail = { id: number; name: string; node_shell_enabled: boolean }
 
@@ -243,7 +243,7 @@ function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeSh
     <div className={card}>
       <h2 className="mb-2 text-[13px] uppercase text-text-3">Node shell</h2>
       <Button variant="ghost" disabled={!allowed}
-        title={!ent.has('terminal.node') ? 'Pro — Node shells'
+        title={!ent.has('terminal.node') ? 'Pro: Node shells'
              : !nodeShellEnabled ? 'Enable node shell in host settings first' : undefined}
         onClick={() => { setOpen(true); ticket.mutate() }}>
         Open node shell
@@ -291,7 +291,7 @@ export function NodeDetailPage() {
           <div className={card}>
             <KVGrid items={[
               ['Node', node.node],
-              ['PVE version', node.pve_version ?? '—'],
+              ['PVE version', node.pve_version ?? ', '],
               ['Uptime', fmtUptime(node.uptime_s)],
               ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
               ['Apps', `${node.apps_running}/${node.apps} running`],
@@ -354,7 +354,7 @@ export function NodeDetailPage() {
   )
 }
 
-// Route objects — imported by router.tsx (settings.tsx precedent). shellRoute
+// Route objects, imported by router.tsx (settings.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
 // entry point (e.g. in tests), before clusterRoute/nodeDetailRoute exist.

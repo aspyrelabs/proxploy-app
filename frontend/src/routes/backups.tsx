@@ -23,7 +23,7 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
 
 function fmtWhen(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
+  return iso ? new Date(iso).toLocaleString() : ', '
 }
 
 function StatCard({ label, value, note }: { label: string; value: string; note: React.ReactNode }) {
@@ -77,7 +77,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
               <Button disabled={hostId == null || run.isPending}
                       onClick={() => run.mutate({ hostId }, {
                         onSuccess: (r) => setJobId(r.job.id),
-                        onError: () => toast.error('Could not start the backup — try again.'),
+                        onError: () => toast.error('Could not start the backup, try again.'),
                       })}>
                 {run.isPending ? 'Starting…' : 'Start backup'}
               </Button>
@@ -120,8 +120,8 @@ const MARK_CLS: Record<string, string> = {
  * now" button whose keep-* rules cannot be saved anywhere is the wrong half of
  * retention to ship first; this view is what proves the spec does what the
  * operator meant before a scheduled `backup.prune` is worth building. That
- * job kind isn't offered under Settings → Schedules yet — its handler needs
- * a datastore + keep-rule payload this preview doesn't collect — so there is
+ * job kind isn't offered under Settings → Schedules yet, its handler needs
+ * a datastore + keep-rule payload this preview doesn't collect, so there is
  * nowhere to wire it up to today.
  */
 function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
@@ -148,7 +148,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
           <h2 className="font-display text-[16px] font-semibold">Retention preview</h2>
           <p className="mt-1 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
             <span className="text-amber">Dry run.</span> This preview only asks Proxmox what a
-            retention rule <em>would</em> do — it deletes nothing, and there is no button here
+            retention rule <em>would</em> do, it deletes nothing, and there is no button here
             that does.
           </p>
 
@@ -185,7 +185,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
 
           {preview.isError && (
             <p className="mt-3 text-[12.5px] text-red">
-              Proxmox refused that rule — at least one keep value must be above zero.
+              Proxmox refused that rule, at least one keep value must be above zero.
             </p>
           )}
 
@@ -208,10 +208,10 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
                     <tr key={r.volid} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono text-[11.5px] text-text-2 break-all">{r.volid}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {r.type ?? '—'} {r.vmid ?? ''}
+                        {r.type ?? ', '} {r.vmid ?? ''}
                       </td>
                       <td className="py-2.5 text-text-2">
-                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : '—'}
+                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : ', '}
                       </td>
                       <td className="py-2.5">
                         <span className={`rounded-full border px-2 py-0.5 text-[11px] ${MARK_CLS[r.mark] ?? ''}`}>
@@ -250,7 +250,7 @@ export function BackupsPage() {
   const runDenied = ent.data != null && !ent.has('backups.run')
   const restoreDenied = ent.data != null && !ent.has('backups.restore')
   // DELETE /backups/{id} moved from backups.pbs to backups.retention in the
-  // final Phase 6 review (BLOCKING 3/item 6) — gate the button on the same
+  // final Phase 6 review (BLOCKING 3/item 6), gate the button on the same
   // key the route now checks, or a tenant with backups.pbs but not
   // backups.retention sees a Delete button that just 403s.
   const deleteDenied = ent.data != null && !ent.has('backups.retention')
@@ -259,7 +259,7 @@ export function BackupsPage() {
     if (!window.confirm(
       `Delete ${b.volid}? The archive is removed from ${b.storage} and cannot be recovered.`)) return
     del.mutate(b.id, {
-      onError: () => toast.error('Could not delete that archive — try again.'),
+      onError: () => toast.error('Could not delete that archive, try again.'),
     })
   }
 
@@ -281,7 +281,7 @@ export function BackupsPage() {
           {/* doc 10's "PBS datastore connect". Connecting PBS is exactly
               attaching a storage of type `pbs`, so this opens Task 13's
               StorageForm pre-set rather than duplicating it. Shown always,
-              not only when empty — a second datastore is a normal thing to
+              not only when empty, a second datastore is a normal thing to
               add. Server enforces `storage.manage`; the form carries its own
               LockVeil, so no gate is needed on the trigger. */}
           <Button variant="ghost" onClick={() => setConnecting(true)}>
@@ -300,10 +300,10 @@ export function BackupsPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Next scheduled"
-          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : '—'}
+          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : ', '}
           note={nextBackup
             ? `${nextBackup.name} · ${nextBackup.cron} ${nextBackup.timezone}`
-            : 'No backup schedule yet — "New job" creates one.'} />
+            : 'No backup schedule yet, "New job" creates one.'} />
         <StatCard label="Datastore used" value={fmtBytes(stats?.total_bytes)}
           note={
             <>
@@ -316,9 +316,9 @@ export function BackupsPage() {
             </>
           } />
         <StatCard label="Success rate · 30d"
-          value={stats?.success_rate_30d == null ? '—' : fmtPct(stats.success_rate_30d)}
+          value={stats?.success_rate_30d == null ? ', ' : fmtPct(stats.success_rate_30d)}
           note={stats?.success_rate_30d == null
-            ? 'Nothing verified in the last 30 days — unverified archives are left out rather than counted as passes.'
+            ? 'Nothing verified in the last 30 days, unverified archives are left out rather than counted as passes.'
             : `${stats.ok_count} verified · ${stats.failed_count} failed`} />
       </div>
 
@@ -326,7 +326,7 @@ export function BackupsPage() {
         <h2 className="mb-3 font-display text-[16px] font-semibold">Recent backups</h2>
         {isError ? (
           <EmptyState title="Backups not readable"
-            note="Proxploy mirrors archives from each host's backup datastores — check that the host is connected." />
+            note="Proxploy mirrors archives from each host's backup datastores, check that the host is connected." />
         ) : (data?.backups.length ?? 0) === 0 ? (
           <EmptyState title="No backups yet"
             note="Archives Proxmox already holds appear here after the first sync." />
@@ -348,12 +348,12 @@ export function BackupsPage() {
               {(data?.backups ?? []).map((b) => (
                 <tr key={b.id} className="border-t border-line-soft hover:bg-panel-2">
                   <td className="py-2.5 font-mono">
-                    {b.guest_name ?? '—'}
+                    {b.guest_name ?? ', '}
                     <span className="ml-2 text-[11px] text-text-3">
                       {b.guest_type?.toUpperCase()} {b.guest_vmid}
                     </span>
                   </td>
-                  <td className="py-2.5 text-text-2">{b.host_name ?? '—'}</td>
+                  <td className="py-2.5 text-text-2">{b.host_name ?? ', '}</td>
                   <td className="py-2.5 text-text-2">{fmtWhen(b.taken_at)}</td>
                   <td className="py-2.5 font-mono text-text-2">{fmtBytes(b.size_bytes)}</td>
                   <td className={`py-2.5 text-[12px] ${

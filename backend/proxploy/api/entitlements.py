@@ -69,7 +69,7 @@ def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
         raise HTTPException(502, f"licensing service: {e}")
     apply_new_token(request, db, out["token"])
     # doc note (Task 8 review): refresh_credential is null on an idempotent
-    # same-install reactivation — only non-null on first-ever activation for
+    # same-install reactivation: only non-null on first-ever activation for
     # this license. Keep whatever we already have on file in that case.
     cred = out.get("refresh_credential")
     if cred:

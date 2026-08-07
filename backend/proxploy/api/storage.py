@@ -2,7 +2,7 @@
 """Storage routes (doc 05 §Storage, doc 01 §5).
 
 Reads only, in this task. The LIST is served from the poller's in-memory
-`HostSnapshot.storage` — doc 05 calls it a "live-refreshed cache", and since the
+`HostSnapshot.storage`: doc 05 calls it a "live-refreshed cache", and since the
 poll loop's single `cluster_resources()` already carries every field the page
 needs, listing costs zero PVE calls. Detail and content are on-demand
 passthroughs, one PVE call each, triggered by a human opening a datastore.
@@ -11,7 +11,7 @@ There is no storage table and none is added: doc 04 defines no storage entity.
 Entitlements: doc 05 leaves the column blank on all three reads. Doc 01 §5
 names `storage.view` (datastore overview) and `storage.content` (content
 browser) as real features, and doc 07 §3 says a feature without a key does not
-merge — so the reads are gated with their doc-01 keys rather than left ungated.
+merge, so the reads are gated with their doc-01 keys rather than left ungated.
 Functionally identical today (every flag defaults ON); recorded as a doc-05
 amendment in the phase notes.
 """
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 # FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call that runs FIRST. A bare `dependencies=[Depends(require_entitlement(...))]`
 # lands at position 0 and runs BEFORE auth, answering an anonymous caller with
-# 403 instead of 401 — see tests/test_route_auth_invariant.py. scope_host()'s
+# 403 instead of 401: see tests/test_route_auth_invariant.py. scope_host()'s
 # default param "host_id" matches every {host_id} path segment in this router;
 # on GET "" (no host id in the path) the resolver returns None and enforce()
 # falls back to "any of the user's teams", same as before this had a scope.
@@ -55,7 +55,7 @@ class StorageAttachIn(BaseModel):
     """`config` is a free-form passthrough because the key set is per-plugin
     (dir wants `path`, nfs wants `server`+`export`, pbs wants `server`+
     `datastore`+`username`+`password`+`fingerprint`) and Proxmox is the
-    authority on what is valid — mirroring it here would be a second schema to
+    authority on what is valid, mirroring it here would be a second schema to
     keep in sync and a new way to reject a storage type Proxmox supports.
     It may carry a live credential; see the module note on where it does NOT go."""
     host_id: int
@@ -118,7 +118,7 @@ def _resolve_node(request: Request, host: Host, name: str, node: str | None) -> 
     if host.node_name:
         return host.node_name
     raise HTTPException(409, f"cannot tell which node serves {name!r} on "
-                             f"{host.name} — pass ?node=")
+                             f"{host.name}, pass ?node=")
 
 
 @router.get("", dependencies=[Depends(_read),
@@ -225,7 +225,7 @@ def upload_content(request: Request, host_id: int, name: str,
                                              f"{max_bytes} byte limit")
                 out.write(chunk)
     except BaseException:
-        # Anything at all — cap exceeded, disconnect, cancellation — must not
+        # Anything at all: cap exceeded, disconnect, cancellation; must not
         # leave a partial multi-GB file behind on the Proxploy host.
         with contextlib.suppress(OSError):
             os.unlink(spool)
@@ -244,7 +244,7 @@ def upload_content(request: Request, host_id: int, name: str,
 def delete_content(request: Request, host_id: int, name: str, volid: str,
                    node: str | None = None, db=Depends(get_db),
                    user: User = Depends(_content)):
-    """`:path` because a volid is `local:iso/ubuntu.iso` — it carries a slash,
+    """`:path` because a volid is `local:iso/ubuntu.iso`, it carries a slash,
     which a plain `{volid}` converter would refuse to match."""
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
@@ -263,7 +263,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
 
     Synchronous: Proxmox returns no UPID for /storage, so there is no job and
     therefore no `jobs.params` row holding `body.config`. The audit row is the
-    only durable trace, and write_audit runs it through redact() — nested
+    only durable trace, and write_audit runs it through redact(); nested
     `config.password` included.
 
     The response deliberately echoes NO config: a credential the caller just
@@ -274,7 +274,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     ip = request.client.host if request.client else None
     # Route-controlled keys (storage/type) go LAST in the unpack so a
     # caller-supplied config.storage or config.type overrides nothing this
-    # route says it is attaching — storage.py has no _SAFE_KEY filter at all
+    # route says it is attaching: storage.py has no _SAFE_KEY filter at all
     # (deliberate free-form plugin passthrough), so this collision is even
     # more open than network.py's.
     try:
@@ -298,7 +298,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
                             Depends(require_entitlement("storage.manage"))])
 def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
                  db=Depends(get_db), user: User = Depends(_manage)):
-    """Audits the NAMES of the keys changed, never their values — the same rule
+    """Audits the NAMES of the keys changed, never their values; the same rule
     settings.py::patch_settings follows, and the reason a rotated PBS password
     leaves a legible audit trail without leaving the password in it."""
     host = _host_or_404(db, host_id)
@@ -326,7 +326,7 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
                    user: User = Depends(_remove)):
     """Owner, not admin (doc 05): detaching drops the definition while guest
     disks keep pointing at it, which is the one action here that can strand
-    running guests. Upstream data is left in place — this is not a wipe."""
+    running guests. Upstream data is left in place; this is not a wipe."""
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Shared real-Debian-container recipe for the install/upgrade harnesses
 # (Tasks 12, 13). A Proxmox LXC is a Debian userspace with systemd; this
-# gives the in-container half of the installer exactly that, for real —
+# gives the in-container half of the installer exactly that, for real; 
 # same script, same systemd, same Caddy, same TLS. Sourced, never executed.
 set -euo pipefail
 
 PP_TEST_IMAGE=proxploy-test-systemd-debian12
 
-# ensure_systemd_image: the stock `debian:12` image has no /sbin/init — it
+# ensure_systemd_image: the stock `debian:12` image has no /sbin/init: it
 # is a minimal userland, not a bootable systemd system. Build a thin local
 # image (packaging/tests/Dockerfile.systemd-debian12) that adds just
 # systemd, once, and reuse it on every harness run.
@@ -21,7 +21,7 @@ ensure_systemd_image() {
 # with systemd as PID 1 under $name, waits for it to reach a usable state,
 # and installs the curl/ca-certificates the installer itself needs to fetch
 # a release. Expects $CH (the channel directory built by
-# channel_fixture.sh) to already be set — it is bind-mounted read-only at
+# channel_fixture.sh) to already be set: it is bind-mounted read-only at
 # /channel.
 container_start() {
   local cname="$1"
@@ -50,7 +50,7 @@ install_in_container() {
   local version="$1"
   # shellcheck disable=SC2154 # $name is the container name, set by the
   # sourcing harness (test_install.sh / test_upgrade_rollback.sh) before
-  # calling this — a deliberate shared-global convention, not an unbound var.
+  # calling this: a deliberate shared-global convention, not an unbound var.
   docker exec "$name" bash -c \
     "cp -r /src/install.sh /src/packaging /tmp/ && cd /tmp && \
      ./install.sh --shape systemd --channel file:///channel/$version --version $version \

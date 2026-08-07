@@ -2,7 +2,7 @@
 
 Self-service: a user manages only their own keys, no team scoping needed, so
 routes gate on `get_current_user` + `require_entitlement("api.tokens")`
-rather than `authorize()` — there is no (resource, action) pair for "manage
+rather than `authorize()`; there is no (resource, action) pair for "manage
 my own keys". The scope *check* itself lives in `api/deps.py::authorize`,
 folded in right before the casbin decision on every OTHER route.
 
@@ -27,7 +27,7 @@ from proxploy.services.authz import PERMISSIONS
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
-# "read" or "<matrix-resource-name>:write" — e.g. "app:write", "vm:write".
+# "read" or "<matrix-resource-name>:write": e.g. "app:write", "vm:write".
 # Doc 04's example ("apps:write") is plural; the matrix's resource name is
 # singular ("app"), so that string is normalised here, not copied verbatim.
 _SCOPE_RE = re.compile(r"^(read|[a-z]+:write)$")
@@ -67,7 +67,7 @@ def create_api_key(body: ApiKeyIn, db=Depends(get_db),
     raw = "ppk_" + secrets.token_urlsafe(32)
     prefix = raw[:8]
     # SHA-256, not a slow hash: a 256-bit random token has no dictionary to
-    # attack, unlike a password — argon2 here would just cost 100ms/request
+    # attack, unlike a password: argon2 here would just cost 100ms/request
     # for nothing (same pattern as services/authn.py::_th for session tokens).
     key_hash = hashlib.sha256(raw.encode()).hexdigest()
     row = ApiKey(user_id=user.id, name=body.name, prefix=prefix,
@@ -95,7 +95,7 @@ def revoke_api_key(request: Request, key_id: int, db=Depends(get_db),
                    user: User = Depends(get_current_user)):
     row = db.query(ApiKey).filter_by(id=key_id, user_id=user.id).one_or_none()
     if row is None:
-        # Also true of another user's key — 404, not 403: existence of
+        # Also true of another user's key: 404, not 403: existence of
         # someone else's key id is not this caller's information either way,
         # and an admin revokes access by deactivating the user, not by
         # reaching into another user's keys (doc 04, kept simple).

@@ -1,11 +1,11 @@
 """vzdump-archive transfer between two hosts that share neither a PVE
 cluster nor a backup storage (doc 08 §4, Phase 8 Task 16). The two nodes
-have no credentials for each other by design — that is the whole point of
-this product — so the archive is streamed host -> Proxploy -> host, one SFTP
+have no credentials for each other by design; that is the whole point of
+this product, so the archive is streamed host -> Proxploy -> host, one SFTP
 connection to each side, entirely inside this process.
 
 This is the only module (besides executor/ssh.py, executor/keys.py) allowed
-to import asyncssh — scripts/check_executor_isolation.py enforces the
+to import asyncssh, scripts/check_executor_isolation.py enforces the
 boundary. services/migrate.py, which drives this from outside executor/,
 must never see a private key: it calls `sftp_copy_for_hosts` with host ids
 and a sessionmaker/secretstore instead.
@@ -25,7 +25,7 @@ async def sftp_copy(connect_factory, *, src: dict, dst: dict,
     """Stream one file host -> host through this process, 4 MiB at a time.
 
     `src`/`dst` carry {"host", "private_key_pem", "pinned_fingerprint",
-    "on_new_fingerprint"} — the same arguments executor/ssh.py's
+    "on_new_fingerprint"}, the same arguments executor/ssh.py's
     `default_connect_factory` takes. `on_progress(bytes_done)` fires after
     every chunk written. Returns the total number of bytes copied.
     """
@@ -66,7 +66,7 @@ async def sftp_copy_for_hosts(sessionmaker, secretstore, *,
                               connect_factory=default_connect_factory) -> int:
     """Same contract as `sftp_copy`, but resolves both private keys from
     SecretStore itself, mirroring `executor/ssh.py::SSHExecutor.run_for_host`
-    — so raw key bytes never have to leave this module. Callers outside
+    so raw key bytes never have to leave this module. Callers outside
     executor/ pass a sessionmaker + host ids instead of key material.
     Raises LookupError if either host has no ssh_key credential.
     """

@@ -85,7 +85,7 @@ def test_bridges_is_a_live_passthrough_with_an_attachment_map(tmp_path, csrf_hea
 def test_bridges_degrades_one_bad_host_instead_of_500ing_the_page(tmp_path, csrf_header,
                                                                    bootstrap_admin):
     """BLOCKING 3: `client_for_host` raises ProxmoxError for a host with no API
-    token credential — a routine state, not an outage — and network.py never
+    token credential, a routine state, not an outage; and network.py never
     caught it, so one such host 500'd the whole page. Now it is degraded out
     into `errors` and the reachable host still serves its nodes."""
     from proxploy.models import Host
@@ -125,7 +125,7 @@ def test_bridges_filters_by_host(tmp_path, csrf_header, bootstrap_admin):
 
 def test_throughput_reads_the_existing_host_metric_series(tmp_path, csrf_header,
                                                           bootstrap_admin):
-    """Same MetricsStore rows /metrics/query serves — no second reader."""
+    """Same MetricsStore rows /metrics/query serves, no second reader."""
     from proxploy.models import utcnow
     from tests.support import make_app
 
@@ -312,7 +312,7 @@ def test_put_network_does_not_enqueue_a_lifecycle_job(tmp_path, csrf_header,
 
 
 def test_guest_network_read_failure_is_a_502(tmp_path, csrf_header, bootstrap_admin):
-    """BLOCKING 3: guest_nics() never caught ProxmoxError either — a bare 500
+    """BLOCKING 3: guest_nics() never caught ProxmoxError either, a bare 500
     instead of the 502 every other read in this phase returns."""
     from tests.support import make_app
 
@@ -327,7 +327,7 @@ def test_guest_network_read_failure_is_a_502(tmp_path, csrf_header, bootstrap_ad
 
 def test_guest_nic_edit_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
                                                                  bootstrap_admin):
-    """BLOCKING 3: set_guest_nic() is a mutation with no ProxmoxError handling —
+    """BLOCKING 3: set_guest_nic() is a mutation with no ProxmoxError handling, 
     a failed write must still leave an audit trace, matching storage.py."""
     from tests.support import make_app
 

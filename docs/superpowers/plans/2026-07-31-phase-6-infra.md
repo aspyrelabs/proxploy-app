@@ -2,30 +2,30 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fill in the last three placeholder nav pages — Storage, Network, Backups — with real content, and complete the VM surface with snapshots, a create wizard and clone, so every page in doc 01 §0's fixed nav renders live infrastructure and every guest-shaped operation (create, snapshot, roll back, clone, back up, restore) runs as a tracked, audited job.
+**Goal:** Fill in the last three placeholder nav pages, Storage, Network, Backups; with real content, and complete the VM surface with snapshots, a create wizard and clone, so every page in doc 01 §0's fixed nav renders live infrastructure and every guest-shaped operation (create, snapshot, roll back, clone, back up, restore) runs as a tracked, audited job.
 
-**Architecture:** No new persistence. Storage and network are **live reads** — storage list is served from the poller's existing in-memory `HostSnapshot.storage` (enriched this phase with the `plugintype`/`content`/`shared`/`status` fields `/cluster/resources` already returns and the poller currently discards), per-datastore detail and content listings are on-demand passthroughs, and network interfaces are a pure passthrough to `/nodes/{node}/network` (doc 04 defines no storage or network table; doc 05 calls them "live-refreshed cache" and "live passthrough" respectively). Backups reuse the `backups` **cache** table that migration 0001 already created and nothing has ever written (doc 04 §Backups). VM snapshots are read live from Proxmox on every request (doc 05: "List snapshots (live from Proxmox)"). **Phase 6 therefore ships zero Alembic migrations** — a deliberate, verified finding, not an oversight: every column this phase needs already exists. Every mutation (upload, delete volume, backup, restore, prune, snapshot create/rollback/delete, VM create/clone/delete, host-network apply) is a JobBackend job that posts to Proxmox, gets a UPID back, and polls that UPID to completion — the exact shape `services/lifecycle.py::run_lifecycle` already proves, extracted this phase into one shared `await_task` helper so twelve new handlers do not copy-paste it twelve times.
+**Architecture:** No new persistence. Storage and network are **live reads**, storage list is served from the poller's existing in-memory `HostSnapshot.storage` (enriched this phase with the `plugintype`/`content`/`shared`/`status` fields `/cluster/resources` already returns and the poller currently discards), per-datastore detail and content listings are on-demand passthroughs, and network interfaces are a pure passthrough to `/nodes/{node}/network` (doc 04 defines no storage or network table; doc 05 calls them "live-refreshed cache" and "live passthrough" respectively). Backups reuse the `backups` **cache** table that migration 0001 already created and nothing has ever written (doc 04 §Backups). VM snapshots are read live from Proxmox on every request (doc 05: "List snapshots (live from Proxmox)"). **Phase 6 therefore ships zero Alembic migrations**: a deliberate, verified finding, not an oversight: every column this phase needs already exists. Every mutation (upload, delete volume, backup, restore, prune, snapshot create/rollback/delete, VM create/clone/delete, host-network apply) is a JobBackend job that posts to Proxmox, gets a UPID back, and polls that UPID to completion; the exact shape `services/lifecycle.py::run_lifecycle` already proves, extracted this phase into one shared `await_task` helper so twelve new handlers do not copy-paste it twelve times.
 
-**Tech Stack:** FastAPI + SQLAlchemy 2 + proxmoxer (existing) plus exactly **one new backend dependency**, `python-multipart` (Apache-2.0), which FastAPI hard-requires before it will even define an `UploadFile` route — verified absent from this venv, not assumed present (Task 4 Step 0); React 19 + TanStack Query/Router + uPlot + Tailwind v4 (existing, **zero new frontend dependencies**).
+**Tech Stack:** FastAPI + SQLAlchemy 2 + proxmoxer (existing) plus exactly **one new backend dependency**, `python-multipart` (Apache-2.0), which FastAPI hard-requires before it will even define an `UploadFile` route; verified absent from this venv, not assumed present (Task 4 Step 0); React 19 + TanStack Query/Router + uPlot + Tailwind v4 (existing, **zero new frontend dependencies**).
 
 ## Global Constraints
 
-- **Zero new Alembic migrations.** Head stays `2330a95b98d2` (0004). The `backups` table and every column this phase writes already exist from migration 0001. If a task believes it needs a new column, stop and re-read `backend/proxploy/models/__init__.py` — it is almost certainly already there. (Adding `metric_samples` targets or `settings` rows needs no migration either.)
-- **Exactly one new runtime dependency**, added in Task 4 Step 0 with the doc-03 license-verification protocol run at the moment it is added: `python-multipart>=0.0.9` (Apache-2.0, already inside the CI audit's allowlist). `package.json` is **not** edited by this phase — zero new frontend dependencies.
-- **The error envelope is FLAT, and every task depends on this.** `main.py::problem_handler` does `body.update(exc.detail)` when `exc.detail` is a dict, so `raise HTTPException(409, {"error": "confirm_required", "confirm_phrase": name, "detail": "…"})` reaches the browser as `{"type","title","status","error","confirm_phrase","detail"}` — `detail` is the human-readable string, never a nested object. Backend tests assert `r.json()["error"]`; frontend reads `e.body.error`, exactly as `LifecycleActions` already does. Do not write `r.json()["detail"]["error"]`; it raises `TypeError: string indices must be integers`.
+- **Zero new Alembic migrations.** Head stays `2330a95b98d2` (0004). The `backups` table and every column this phase writes already exist from migration 0001. If a task believes it needs a new column, stop and re-read `backend/proxploy/models/__init__.py`; it is almost certainly already there. (Adding `metric_samples` targets or `settings` rows needs no migration either.)
+- **Exactly one new runtime dependency**, added in Task 4 Step 0 with the doc-03 license-verification protocol run at the moment it is added: `python-multipart>=0.0.9` (Apache-2.0, already inside the CI audit's allowlist). `package.json` is **not** edited by this phase, zero new frontend dependencies.
+- **The error envelope is FLAT, and every task depends on this.** `main.py::problem_handler` does `body.update(exc.detail)` when `exc.detail` is a dict, so `raise HTTPException(409, {"error": "confirm_required", "confirm_phrase": name, "detail": "…"})` reaches the browser as `{"type","title","status","error","confirm_phrase","detail"}`, `detail` is the human-readable string, never a nested object. Backend tests assert `r.json()["error"]`; frontend reads `e.body.error`, exactly as `LifecycleActions` already does. Do not write `r.json()["detail"]["error"]`; it raises `TypeError: string indices must be integers`.
 - `proxploy/services/proxmox.py`'s module docstring rule holds absolutely: *every* proxmoxer call and *every* PVE-8-vs-9 branch lives in that one module. Routers, job handlers and pollers call `ProxmoxClient` methods; they never touch a proxmoxer object.
-- Nothing outside `proxploy/executor/` may `import asyncssh` or reference `get_ssh_private_key` (`backend/scripts/check_executor_isolation.py`, CI-wired). **Unaffected by this phase** — every Phase 6 operation goes through the Proxmox REST API, never SSH.
+- Nothing outside `proxploy/executor/` may `import asyncssh` or reference `get_ssh_private_key` (`backend/scripts/check_executor_isolation.py`, CI-wired). **Unaffected by this phase**: every Phase 6 operation goes through the Proxmox REST API, never SSH.
 - All new backend routers are registered in `proxploy/api/__init__.py` via `api_router.include_router(...)`; there is no auto-discovery. All new job-handler modules are imported in `proxploy/main.py`'s lifespan (the `# noqa: F401` block at lines 83-85) or their `HANDLERS` registration never runs.
 - **Route-ordering hazard (this phase's single most likely silent bug).** Starlette matches in registration order. `api/vms.py` ends with the catch-all `POST /{vm_id}/{action}` and `api/apps.py` with `POST /{app_id}/{action}`. Every new two-segment sibling (`/vms/{id}/snapshots`, `/vms/{id}/clone`, `/vms/{id}/network`, …) **must be registered above** that wildcard or the wildcard swallows it and the action string arrives as `"snapshots"`. `apps.py:266-271` already carries the warning comment; each task that adds such a route asserts the ordering in a test.
 - **Entitlement dependency ordering** (`api/deps.py`): a module-level `_require_<role> = require_role("<role>")` singleton comes **first** in `dependencies=[...]`, the `require_entitlement(...)` second, and the same singleton is reused as the parameter dependency so FastAPI's dependency cache collapses them. A bare `dependencies=[Depends(require_entitlement(k))]` runs before auth and returns 403 to anonymous callers, which `tests/test_route_auth_invariant.py` fails on. Every new route is automatically subject to that invariant test plus `test_no_secret_echo.py`.
 - **Entitlement keys are already registered.** All 81 keys ship in `proxploy/entitlements/registry.py`; every key this phase needs (`storage.view/content/manage`, `network.view/guest_config/host_config`, `backups.pbs/run/restore/retention`, `vms.snapshots/create/clone`) already exists and defaults ON. **No registry edits.** Keys never change once shipped (doc 07 §3).
 - **Deliberate, documented deviation from doc 05's entitlement column:** doc 05 leaves the entitlement blank on `GET /storage`, `GET /storage/{h}/{n}`, `GET /storage/{h}/{n}/content`, `GET /network/bridges`, `GET /network/throughput` and `GET /vms/{id}/snapshots`. Doc 01 §§4-7 defines `storage.view`, `network.view` and `vms.snapshots` as real features with real keys, and doc 07 §3 is explicit that a feature without a key does not merge. This plan gates those reads with their doc-01 keys so the keys are live rather than dead. Functionally identical today (all flags ON); the phase notes doc records the amendment to doc 05.
 - Every DB-touching test uses the existing sqlite-per-`tmp_path` conventions (`tests/support.py::make_db`/`make_app`/`make_job_app`, `tests/conftest.py::client`). No new fixture infrastructure unless a task says so explicitly.
-- **No `relationship()` declarations** anywhere in `proxploy/models/__init__.py` — every association is a bare `ForeignKey` plus an explicit query. Follow that.
-- Frontend server state lives exclusively in TanStack Query (doc 06 §d). Small UI state (open dialog, active filter) lives in `useState` or URL search params. There is **no form library, no shadcn CLI install, no Radix, no `cn()` helper** in this repo — forms are `useState` + a `submit` handler, dialogs are hand-rolled fixed-overlay divs, tables are hand-rolled `<table>` markup. Match that, do not introduce a UI framework.
+- **No `relationship()` declarations** anywhere in `proxploy/models/__init__.py`, every association is a bare `ForeignKey` plus an explicit query. Follow that.
+- Frontend server state lives exclusively in TanStack Query (doc 06 §d). Small UI state (open dialog, active filter) lives in `useState` or URL search params. There is **no form library, no shadcn CLI install, no Radix, no `cn()` helper** in this repo; forms are `useState` + a `submit` handler, dialogs are hand-rolled fixed-overlay divs, tables are hand-rolled `<table>` markup. Match that, do not introduce a UI framework.
 - **The nav is fixed** (doc 01 §0) and `src/tests/nav.test.tsx` asserts its exact 8 labels in order. Storage/Network/Backups entries already exist and already point at `/storage`, `/network`, `/backups`. **Do not touch `SidebarNav.tsx` or `nav.test.tsx`.**
 - Design tokens: card surface is `rounded-card border border-line-soft bg-panel p-5` (copy the local `const card` string each route file declares). Numeric/identifier text is `font-mono`. Sizes are explicit arbitrary values (`text-[13px]`), not Tailwind's named scale. Violet (`STORAGE_GRADIENT`, `#A78BFA→#6D5AE6`) is reserved for storage; blue for network; red for danger and >80% usage. Terminal/code panels stay `#0a0e14` in both themes.
-- **Never hide a gated feature** (doc 06 §e rule 1) — veil it. `components/LockVeil.tsx` is written and currently unused; Phase 6's Pro surfaces (`storage.manage`, `network.host_config`, `backups.retention`, `vms.clone`) are its intended first consumers. Small inline actions use the disabled+tooltip treatment instead. Always gate on `ent.data != null && !ent.has(key)` — `has()` returns `false` before the first fetch resolves, so gating on `!has(x)` alone greys the control out for every plan during load.
+- **Never hide a gated feature** (doc 06 §e rule 1), veil it. `components/LockVeil.tsx` is written and currently unused; Phase 6's Pro surfaces (`storage.manage`, `network.host_config`, `backups.retention`, `vms.clone`) are its intended first consumers. Small inline actions use the disabled+tooltip treatment instead. Always gate on `ent.data != null && !ent.has(key)`, `has()` returns `false` before the first fetch resolves, so gating on `!has(x)` alone greys the control out for every plan during load.
 
 ---
 
@@ -36,16 +36,16 @@ name and signature below was read out of the repo while writing this plan.
 
 ### Backend spine
 
-- **`ProxmoxClient`** (`backend/proxploy/services/proxmox.py`) currently exposes exactly: `version()`, `permissions()`, `cluster_resources()`, `node_rrddata(node, timeframe="hour")`, `guest_action(kind, node, vmid, action)`, `task_status(node, upid)`, `task_log(node, upid, start=0, limit=500)`, `termproxy(kind, node, vmid)`, `node_termproxy(node)`, `vncproxy(node, vmid)`. Module helpers: `ProxmoxError`, `parse_token_id`, `token_public_meta`, `default_factory`, `resolve_target`, `open_validated_tcp_socket`, `tls_fingerprint_sha256`. Private `_wrap(prefix, e)` is the ONE credential-scrubbing point — every new method wraps its proxmoxer call in `try/except Exception as e: raise self._wrap("<prefix>", e)`.
-- **JobBackend** (`proxploy/jobs/__init__.py` re-export facade — import from there, never `.backend`): `HANDLERS: dict[str, Callable]` is the whole registry (a plain dict keyed by `"noun.verb"`), `TERMINAL = ("succeeded","failed","canceled","interrupted")`, `JobFailed`, `JobContext` (`.log(message, stream="stdout")`, `.progress(pct)`, `.backend.app`), `handler(kind)` decorator (defined, unused — existing modules assign `HANDLERS["x.y"] = fn` directly), `JobBackend.enqueue(db, *, kind, target_type=None, target_id=None, params=None, requested_by=None, schedule_id=None) -> Job` called as `request.app.state.jobs.enqueue(...)`.
+- **`ProxmoxClient`** (`backend/proxploy/services/proxmox.py`) currently exposes exactly: `version()`, `permissions()`, `cluster_resources()`, `node_rrddata(node, timeframe="hour")`, `guest_action(kind, node, vmid, action)`, `task_status(node, upid)`, `task_log(node, upid, start=0, limit=500)`, `termproxy(kind, node, vmid)`, `node_termproxy(node)`, `vncproxy(node, vmid)`. Module helpers: `ProxmoxError`, `parse_token_id`, `token_public_meta`, `default_factory`, `resolve_target`, `open_validated_tcp_socket`, `tls_fingerprint_sha256`. Private `_wrap(prefix, e)` is the ONE credential-scrubbing point, every new method wraps its proxmoxer call in `try/except Exception as e: raise self._wrap("<prefix>", e)`.
+- **JobBackend** (`proxploy/jobs/__init__.py` re-export facade, import from there, never `.backend`): `HANDLERS: dict[str, Callable]` is the whole registry (a plain dict keyed by `"noun.verb"`), `TERMINAL = ("succeeded","failed","canceled","interrupted")`, `JobFailed`, `JobContext` (`.log(message, stream="stdout")`, `.progress(pct)`, `.backend.app`), `handler(kind)` decorator (defined, unused; existing modules assign `HANDLERS["x.y"] = fn` directly), `JobBackend.enqueue(db, *, kind, target_type=None, target_id=None, params=None, requested_by=None, schedule_id=None) -> Job` called as `request.app.state.jobs.enqueue(...)`.
 - **Existing job kinds:** `app.{start,stop,restart,shutdown}`, `vm.{start,stop,restart,shutdown,pause,resume}` (`services/lifecycle.py`), `app.install` (`services/appstore.py`), `catalog.refresh` (`services/catalog.py`).
 - **`services/lifecycle.py::run_lifecycle`** is the canonical UPID-polling handler; `_resolve(app, target_type, target_id)` is its blocking target→`(client, kind, node, vmid, name)` resolver that opens `app.state.sessionmaker()`, loads the row + `Host` + `HostCredential(kind="api_token")`, `jsonlib.loads(app.state.secretstore.decrypt(cred.encrypted_blob))`, and constructs `ProxmoxClient(..., factory=app.state.proxmox_factory)`.
 - **`api/consoles.py:26::_proxmox_client_for_host(app_state, db, host)`** is the same decrypt-then-construct helper, carrying a comment that a 4th call site is the extraction tip-over point. Phase 6 is that tip-over point (Task 1).
 - **`api/apps.py::enqueue_lifecycle(request, db, user, *, target_type, target, action, name, confirm)`** is the canonical enqueue+audit+selfguard route helper. `api/jobs.py` exports `job_out(j) -> dict` and `backlog(db, job_id, after=0, limit=5000)`.
-- **`services/audit.py::write_audit(db, *, actor_type, action, actor_id=None, target_type=None, target_id=None, params=None, result="ok", ip=None, request_id=None, job_id=None)`** — commits itself, keyword-only after `db`. Also exports `redact(obj)`, `REDACT_KEYS`, `REDACT_SUBSTRINGS = ("secret","password","passwd","token","credential","url","dsn","private")`. Convention: `ip=request.client.host if request.client else None`; a row that spawned a job sets `job_id` (the activity feed skips those to avoid double display).
+- **`services/audit.py::write_audit(db, *, actor_type, action, actor_id=None, target_type=None, target_id=None, params=None, result="ok", ip=None, request_id=None, job_id=None)`**; commits itself, keyword-only after `db`. Also exports `redact(obj)`, `REDACT_KEYS`, `REDACT_SUBSTRINGS = ("secret","password","passwd","token","credential","url","dsn","private")`. Convention: `ip=request.client.host if request.client else None`; a row that spawned a job sets `job_id` (the activity feed skips those to avoid double display).
 - **`api/deps.py`**: `ROLE_ORDER = {"viewer":0,"operator":1,"admin":2,"owner":3}`, `get_db`, `get_current_user`, `user_role(db, user)`, `require_role(min_role)`, `default_team(db)`, `get_entitlements(request)`, `require_entitlement(key)`.
 - **`services/selfguard.py`**: `DESTRUCTIVE = frozenset({"stop","shutdown","restart","pause"})`, `is_self(db, target_type, target_id) -> bool` (fails open when the `self.ctid` setting is unset). `enqueue_lifecycle` raises `409 {"error":"self_target","confirm_phrase":name}` when `is_self()` and the action is destructive.
-- **Poller** (`proxploy/pollers/__init__.py`, one file): `HostSnapshot(host_id, ts, nodes, storage, net, guests, discovered)` dataclass, `ingest_cycle(db, host, resources, rrd_by_node, now) -> CycleResult`, `Poller.snapshots: dict[int, HostSnapshot]` (in-memory only). Per host it makes exactly two kinds of PVE call — one `cluster_resources()` and one `node_rrddata(n)` per node (doc 02 §3's O(nodes) budget; per-guest calls in the poll loop are forbidden). Its current storage handling is the whole storage story today:
+- **Poller** (`proxploy/pollers/__init__.py`, one file): `HostSnapshot(host_id, ts, nodes, storage, net, guests, discovered)` dataclass, `ingest_cycle(db, host, resources, rrd_by_node, now) -> CycleResult`, `Poller.snapshots: dict[int, HostSnapshot]` (in-memory only). Per host it makes exactly two kinds of PVE call, one `cluster_resources()` and one `node_rrddata(n)` per node (doc 02 §3's O(nodes) budget; per-guest calls in the poll loop are forbidden). Its current storage handling is the whole storage story today:
   ```python
   storage_rows = [r for r in resources if r.get("type") == "storage"]
   snap_storage = [
@@ -56,19 +56,19 @@ name and signature below was read out of the repo while writing this plan.
   ]
   ```
 - **`api/cluster.py::cluster_summary`** already aggregates `poller.snapshots[*].storage` deduped by name, with a `# ponytail:` comment at cluster.py:34-36 saying "per-datastore truth arrives with the Phase 6 Storage page". Enriching the snapshot dict must not break it.
-- **Models** (`proxploy/models/__init__.py`, single file): `Base`, `TimestampMixin`, `utcnow()`, `BigPK`. Relevant rows — `Host(id, name, address, node_name, cluster_name, verify_tls, tls_fingerprint, status, pve_version, last_seen_at, ssh_host_key_fingerprint, node_shell_enabled, team_id)`, `App(id, host_id, ctid→physical column "ct_id", name, slug, …, status_cached, …)`, `Vm(id, host_id, vmid, name, status, os_type, cpu_cores, mem_bytes, disk_bytes, uptime_s, synced_at)`, `Backup(id, host_id, storage, volid, guest_type, guest_vmid, guest_name, taken_at, size_bytes, verify_state, notes, synced_at)` + `TimestampMixin`, unique `ux_backups(host_id, volid)`, index `ix_backups_guest(guest_type, guest_vmid)`, `Job`, `JobEvent`, `AuditEvent`, `AppSetting(key, value JSON)`.
-- **Test infra**: `tests/support.py::make_db(tmp_path)`, `seed_host_row(db, name="host-01", node="pve1", status="connected")`, `make_app(tmp_path, fake=None, ssh_factory=None, **overrides)` (poller OFF by default), `seed_snapshot(app, host_id, **kw)` (builds a `HostSnapshot` and installs it into `poller.snapshots` — this is how a storage-endpoint test injects data without a poll loop), `make_job_app(tmp_path, fake=None, ssh_factory=None)` (must be called from inside a running event loop). `tests/conftest.py` gives exactly three fixtures: `client`, `csrf_header` (callable → `{"X-CSRF-Token": …}`, needed on every non-GET), `bootstrap_admin` (callable → logged-in owner client). `tests/fakes/pve.py::FakePVE(version=None, permissions=None, fail=False, resources=None, rrddata=None, task_exit="OK", running_ticks=0, rrd_fail=False)` + `make_fake_factory(fake)`; its node namespace `_NodeNS` currently wires `.rrddata`, `.tasks(upid).{status,log}`, `.lxc(vmid)`, `.qemu(vmid)`, `.termproxy`. Actions auto-record into `fake.actions` and mint a synthetic UPID; `_task_status` returns `{"status":"running"}` for `running_ticks` polls then `{"status":"stopped","exitstatus": fake.task_exit}`.
+- **Models** (`proxploy/models/__init__.py`, single file): `Base`, `TimestampMixin`, `utcnow()`, `BigPK`. Relevant rows, `Host(id, name, address, node_name, cluster_name, verify_tls, tls_fingerprint, status, pve_version, last_seen_at, ssh_host_key_fingerprint, node_shell_enabled, team_id)`, `App(id, host_id, ctid→physical column "ct_id", name, slug, …, status_cached, …)`, `Vm(id, host_id, vmid, name, status, os_type, cpu_cores, mem_bytes, disk_bytes, uptime_s, synced_at)`, `Backup(id, host_id, storage, volid, guest_type, guest_vmid, guest_name, taken_at, size_bytes, verify_state, notes, synced_at)` + `TimestampMixin`, unique `ux_backups(host_id, volid)`, index `ix_backups_guest(guest_type, guest_vmid)`, `Job`, `JobEvent`, `AuditEvent`, `AppSetting(key, value JSON)`.
+- **Test infra**: `tests/support.py::make_db(tmp_path)`, `seed_host_row(db, name="host-01", node="pve1", status="connected")`, `make_app(tmp_path, fake=None, ssh_factory=None, **overrides)` (poller OFF by default), `seed_snapshot(app, host_id, **kw)` (builds a `HostSnapshot` and installs it into `poller.snapshots`; this is how a storage-endpoint test injects data without a poll loop), `make_job_app(tmp_path, fake=None, ssh_factory=None)` (must be called from inside a running event loop). `tests/conftest.py` gives exactly three fixtures: `client`, `csrf_header` (callable → `{"X-CSRF-Token": …}`, needed on every non-GET), `bootstrap_admin` (callable → logged-in owner client). `tests/fakes/pve.py::FakePVE(version=None, permissions=None, fail=False, resources=None, rrddata=None, task_exit="OK", running_ticks=0, rrd_fail=False)` + `make_fake_factory(fake)`; its node namespace `_NodeNS` currently wires `.rrddata`, `.tasks(upid).{status,log}`, `.lxc(vmid)`, `.qemu(vmid)`, `.termproxy`. Actions auto-record into `fake.actions` and mint a synthetic UPID; `_task_status` returns `{"status":"running"}` for `running_ticks` polls then `{"status":"stopped","exitstatus": fake.task_exit}`.
 - **Test command:** `cd backend && python -m pytest tests/ -q -m "not pve_integration and not e2e"`. Markers: `pve_integration`, `e2e`. Phase 5 left the suite at **340 passed, 2 skipped, 3 deselected**.
 
 ### Frontend spine
 
-- **Routing is code-based**, assembled in `src/router.tsx`. Route files import `shellRoute` from `./shell`, **never from `../router`** (importing `router.tsx` forces its eager `createRouter()` to run mid-cycle). Cross-file `Link to=` / `navigate({to})` are all written with `as never` casts because circular route-file imports defeat inference — reproduce that, every existing call site does it. `useParams({ strict: false }) as { … }` is the params idiom.
+- **Routing is code-based**, assembled in `src/router.tsx`. Route files import `shellRoute` from `./shell`, **never from `../router`** (importing `router.tsx` forces its eager `createRouter()` to run mid-cycle). Cross-file `Link to=` / `navigate({to})` are all written with `as never` casts because circular route-file imports defeat inference, reproduce that, every existing call site does it. `useParams({ strict: false }) as { … }` is the params idiom.
 - **`src/router.tsx` currently declares three placeholder pages** via a local `page(path, title, phase, note)` helper → `storageRoute`, `networkRoute`, `backupsRoute` rendering `PlaceholderPage`. `routes/vms.tsx` declares a local `phaseTab(path, phase, note)` helper → `vmSnapshotsRoute` rendering an `EmptyState`. Phase 6 replaces all four and deletes both helpers plus `src/routes/placeholder.tsx`.
-- **`src/api/client.ts`**: `api<T>(path, opts)` prefixes `/api/v1`, sends `credentials: 'include'`, sets `Content-Type` when there is a body, sets `X-CSRF-Token` from the `pp_csrf` cookie on POST/PUT/PATCH/DELETE, returns `null` on 204, throws `ApiError(status, body)` otherwise. **A multipart upload cannot use `api()`** — it would force `Content-Type: application/json` over the `FormData` boundary; Task 13 uses a bare `fetch` that reproduces the CSRF + credentials behaviour.
+- **`src/api/client.ts`**: `api<T>(path, opts)` prefixes `/api/v1`, sends `credentials: 'include'`, sets `Content-Type` when there is a body, sets `X-CSRF-Token` from the `pp_csrf` cookie on POST/PUT/PATCH/DELETE, returns `null` on 204, throws `ApiError(status, body)` otherwise. **A multipart upload cannot use `api()`**: it would force `Content-Type: application/json` over the `FormData` boundary; Task 13 uses a bare `fetch` that reproduces the CSRF + credentials behaviour.
 - **Query keys in use:** `['cluster','summary'|'nodes'|'activity',…]`, `['hosts']`, `['apps',{host,q}]`, `['apps',id]`, `['vms',{}]`, `['vms',id]`, `['catalog',…]`, `['jobs',{status}]`, `['jobs',id]`, `['jobs',id,'events']`, `['metrics',target,metric,hours]`, `['entitlements']`, `['me']`, `['notifications','channels']`. Phase 6 adds `['storage']`, `['storage',hostId,name,…]`, `['network','bridges']`, `['network','throughput']`, `['backups']`, `['vms',id,'snapshots']`.
 - **`src/api/live.ts`** is the SSE→cache binding: `applyMetrics(qc,d)`, `applyResource(qc,d)`, `applyJob(qc,d,toast?)`. `applyResource` handles `d.type` of `'host'|'app'|'vm'` only and its `else` branch misroutes anything unknown into `['vms']`; `applyJob` only invalidates resource caches for `target_type` of `app`/`vm`. **Both must be extended for the new `storage`/`backup`/`network` types (Task 12).**
-- **`src/api/jobs.ts::useLifecycle`** is the model for every job-firing mutation, including its documented trap: **do not invalidate the resource key on success** — the poll cache would stomp the optimistic `pending` state and re-arm the button while the job is still queued. It invalidates only `['jobs']` and `['cluster','activity']` in `onSettled`.
-- **Job progress UI already exists** and needs no new machinery: `LiveProvider` toasts terminal jobs, `Topbar` badges the running count, `ActivityDrawer` (search-param driven, `?drawer=activity&job=N`, legal on every page) lists jobs with progress bars and expands `<JobLog jobId>`, and `InstallDialog` demonstrates the inline pattern — fire mutation → `setJobId(r.job.id)` → swap the dialog body for `<JobLog jobId={jobId}/>` + Close. **Every Phase 6 dialog that fires a job uses that inline pattern.**
+- **`src/api/jobs.ts::useLifecycle`** is the model for every job-firing mutation, including its documented trap: **do not invalidate the resource key on success**, the poll cache would stomp the optimistic `pending` state and re-arm the button while the job is still queued. It invalidates only `['jobs']` and `['cluster','activity']` in `onSettled`.
+- **Job progress UI already exists** and needs no new machinery: `LiveProvider` toasts terminal jobs, `Topbar` badges the running count, `ActivityDrawer` (search-param driven, `?drawer=activity&job=N`, legal on every page) lists jobs with progress bars and expands `<JobLog jobId>`, and `InstallDialog` demonstrates the inline pattern; fire mutation → `setJobId(r.job.id)` → swap the dialog body for `<JobLog jobId={jobId}/>` + Close. **Every Phase 6 dialog that fires a job uses that inline pattern.**
 - **Components available:** `Button` (`variant: 'primary'|'ghost'|'danger'|'go'`, small = `className="px-2 py-1 text-[11px]"`), `EmptyState({title,note})`, `KVGrid({items: [string, ReactNode][]})`, `StatusPill({status})`, `UsageBar({pct, gradient?})` + `CPU_GRADIENT`/`RAM_GRADIENT`/`STORAGE_GRADIENT`/`DANGER_GRADIENT`, `Ring`, `Sparkline({ts, values, color, width=300, height=52})`, `TerminalPanel({lines, height?})`, `JobLog({jobId})`, `LifecycleActions`, `ConfirmSelfDialog({phrase, detail, onConfirm, onCancel})`, `LockVeil({locked, title, subtitle, children})`, `useEntitlements()` (`{...q, tier, grace, has(key)}`), `lib/format.ts::fmtBytes/fmtUptime/fmtPct/fmtBps` (`fmtBps` was written for the Network page and is currently used only in `cluster.tsx`). Shared input class: `inputCls` exported from `components/LoginForm.tsx`. Toasts: `import { toast } from 'sonner'`. Destructive-but-not-self confirm precedent is native `window.confirm` (`routes/settings.tsx`).
 - **Dialog markup precedent** (no primitive exists), from `ConfirmSelfDialog`:
   ```tsx
@@ -76,8 +76,8 @@ name and signature below was read out of the repo while writing this plan.
     <div className="w-[420px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
   ```
   and from `InstallDialog`: `<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><div className="w-[520px] rounded-card border border-line bg-panel p-5">`.
-- **Multi-step wizard precedent:** `src/routes/onboarding.tsx::Wizard` — a single function with `const [step, setStep] = useState(0)`, a `STEPS` const rendering chips, and `{step === N && (…)}` blocks. Not a reusable component; the VM create wizard mirrors it inline.
-- **Tests:** vitest + jsdom + testing-library, all flat in `src/tests/<feature>.test.tsx`, **no MSW** — every test does `vi.mock('../api/client', () => ({ api: vi.fn((path: string) => …), ApiError: class extends Error {} }))` and mocks `@tanstack/react-router`'s `Link`/`useNavigate`/`useSearch`. Tests import the **page component**, never the route object. Harness is a fresh `new QueryClient({ defaultOptions: { queries: { retry: false } } })` in a `QueryClientProvider`. Commands: `cd frontend && npx vitest run`, `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint). Phase 5 left it at **71 passed, 20 files**.
+- **Multi-step wizard precedent:** `src/routes/onboarding.tsx::Wizard`, a single function with `const [step, setStep] = useState(0)`, a `STEPS` const rendering chips, and `{step === N && (…)}` blocks. Not a reusable component; the VM create wizard mirrors it inline.
+- **Tests:** vitest + jsdom + testing-library, all flat in `src/tests/<feature>.test.tsx`, **no MSW**, every test does `vi.mock('../api/client', () => ({ api: vi.fn((path: string) => …), ApiError: class extends Error {} }))` and mocks `@tanstack/react-router`'s `Link`/`useNavigate`/`useSearch`. Tests import the **page component**, never the route object. Harness is a fresh `new QueryClient({ defaultOptions: { queries: { retry: false } } })` in a `QueryClientProvider`. Commands: `cd frontend && npx vitest run`, `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint). Phase 5 left it at **71 passed, 20 files**.
 - **doc 06 §(a) rows 43-48** specify these exact page layouts and are normative; `proxploy-prototype.html` at repo root is the visual source of truth. Quote those layouts, do not reinvent them.
 
 ---
@@ -85,28 +85,28 @@ name and signature below was read out of the repo while writing this plan.
 ## File Structure
 
 **Backend, new files:**
-- `proxploy/services/hostclient.py` — `client_for_host(app, db, host) -> ProxmoxClient`, the single decrypt-then-construct helper (Task 1), replacing the duplicated bodies in `api/consoles.py` and `services/lifecycle.py`
-- `proxploy/services/pvetask.py` — `await_task(ctx, client, node, upid, *, timeout_s, start_pct, end_pct) -> dict`, the shared UPID poll-and-drain loop every mutating job uses (Task 2)
-- `proxploy/services/netconfig.py` — `parse_net(value) -> dict`, `build_net(parts) -> str`, the `netN=` string round-tripper that preserves `model=`/`macaddr=` (Task 6)
-- `proxploy/services/storagejobs.py` — `storage.upload`, `storage.delete_volume` handlers (Task 4)
-- `proxploy/services/backupjobs.py` — `backup.sync`, `backup.run`, `backup.restore`, `backup.delete`, `backup.prune` handlers (Tasks 8-9)
-- `proxploy/services/guestjobs.py` — `vm.snapshot_create`, `vm.snapshot_rollback`, `vm.snapshot_delete`, `vm.create`, `vm.clone`, `vm.delete`, `network.apply` handlers (Tasks 7, 10-11)
-- `proxploy/api/storage.py` — the `/storage` router (Tasks 3-5)
-- `proxploy/api/network.py` — the `/network` router (Tasks 6-7)
-- `proxploy/api/backups.py` — the `/backups` router (Tasks 8-9)
+- `proxploy/services/hostclient.py`: `client_for_host(app, db, host) -> ProxmoxClient`, the single decrypt-then-construct helper (Task 1), replacing the duplicated bodies in `api/consoles.py` and `services/lifecycle.py`
+- `proxploy/services/pvetask.py`: `await_task(ctx, client, node, upid, *, timeout_s, start_pct, end_pct) -> dict`, the shared UPID poll-and-drain loop every mutating job uses (Task 2)
+- `proxploy/services/netconfig.py`: `parse_net(value) -> dict`, `build_net(parts) -> str`, the `netN=` string round-tripper that preserves `model=`/`macaddr=` (Task 6)
+- `proxploy/services/storagejobs.py`: `storage.upload`, `storage.delete_volume` handlers (Task 4)
+- `proxploy/services/backupjobs.py`: `backup.sync`, `backup.run`, `backup.restore`, `backup.delete`, `backup.prune` handlers (Tasks 8-9)
+- `proxploy/services/guestjobs.py`: `vm.snapshot_create`, `vm.snapshot_rollback`, `vm.snapshot_delete`, `vm.create`, `vm.clone`, `vm.delete`, `network.apply` handlers (Tasks 7, 10-11)
+- `proxploy/api/storage.py`: the `/storage` router (Tasks 3-5)
+- `proxploy/api/network.py`: the `/network` router (Tasks 6-7)
+- `proxploy/api/backups.py`: the `/backups` router (Tasks 8-9)
 - Backend tests: `tests/test_proxmox_infra_reads.py`, `tests/test_pvetask.py`, `tests/test_storage_api.py`, `tests/test_storage_content.py`, `tests/test_storage_manage.py`, `tests/test_network_api.py`, `tests/test_netconfig.py`, `tests/test_network_hostconfig.py`, `tests/test_backups_sync.py`, `tests/test_backups_api.py`, `tests/test_snapshots_api.py`, `tests/test_vm_create_clone.py`
 
 **Backend, modified files:**
-- `proxploy/services/proxmox.py` — ~25 new methods across Tasks 1, 4, 5, 6, 7, 9, 10, 11 (each task adds the ones it consumes)
-- `proxploy/services/lifecycle.py` — refactored onto `await_task` + `client_for_host` (Tasks 1-2); no behaviour change, existing tests are the regression proof
-- `proxploy/api/consoles.py` — `_proxmox_client_for_host` deleted, call sites moved to `client_for_host` (Task 1)
-- `proxploy/pollers/__init__.py` — `snap_storage` keeps four more fields `/cluster/resources` already returns (Task 3)
-- `proxploy/api/vms.py` — snapshot, clone, delete, create and network routes added **above** the `/{vm_id}/{action}` wildcard (Tasks 6, 10, 11)
-- `proxploy/api/apps.py` — guest-network routes added above the `/{app_id}/{action}` wildcard (Task 6)
-- `proxploy/api/__init__.py` — register `storage`, `network`, `backups` routers
-- `proxploy/main.py` — import `storagejobs`, `backupjobs`, `guestjobs` in the lifespan `# noqa: F401` block
-- `proxploy/config.py` — `storage_upload_max_bytes: int`, `backup_sync_stale_s: float`, `pve_task_timeout_s: float`
-- `tests/fakes/pve.py` — storage/network/snapshot/config/nextid/vzdump/clone/create leaves (Tasks 1, 4-11)
+- `proxploy/services/proxmox.py`: ~25 new methods across Tasks 1, 4, 5, 6, 7, 9, 10, 11 (each task adds the ones it consumes)
+- `proxploy/services/lifecycle.py`: refactored onto `await_task` + `client_for_host` (Tasks 1-2); no behaviour change, existing tests are the regression proof
+- `proxploy/api/consoles.py`: `_proxmox_client_for_host` deleted, call sites moved to `client_for_host` (Task 1)
+- `proxploy/pollers/__init__.py`: `snap_storage` keeps four more fields `/cluster/resources` already returns (Task 3)
+- `proxploy/api/vms.py`: snapshot, clone, delete, create and network routes added **above** the `/{vm_id}/{action}` wildcard (Tasks 6, 10, 11)
+- `proxploy/api/apps.py`: guest-network routes added above the `/{app_id}/{action}` wildcard (Task 6)
+- `proxploy/api/__init__.py`: register `storage`, `network`, `backups` routers
+- `proxploy/main.py`: import `storagejobs`, `backupjobs`, `guestjobs` in the lifespan `# noqa: F401` block
+- `proxploy/config.py`: `storage_upload_max_bytes: int`, `backup_sync_stale_s: float`, `pve_task_timeout_s: float`
+- `tests/fakes/pve.py`: storage/network/snapshot/config/nextid/vzdump/clone/create leaves (Tasks 1, 4-11)
 
 **Frontend, new files:**
 - `src/api/storage.ts`, `src/api/network.ts`, `src/api/backups.ts`, `src/api/snapshots.ts`
@@ -115,10 +115,10 @@ name and signature below was read out of the repo while writing this plan.
 - Frontend tests: `src/tests/storage.test.tsx`, `src/tests/storage-mutations.test.tsx`, `src/tests/network.test.tsx`, `src/tests/backups.test.tsx`, `src/tests/snapshots.test.tsx`, `src/tests/vmcreate.test.tsx`
 
 **Frontend, modified files:**
-- `src/router.tsx` — delete the `page()` helper and the three placeholder consts; import the three real route objects
-- `src/routes/vms.tsx` — delete `phaseTab`, real `vmSnapshotsRoute`, "New VM" button, clone row action
-- `src/api/live.ts` — `applyResource`/`applyJob` learn the `storage`/`backup`/`network` types
-- `src/routes/placeholder.tsx` — **deleted** (dead once all three pages land)
+- `src/router.tsx`: delete the `page()` helper and the three placeholder consts; import the three real route objects
+- `src/routes/vms.tsx`: delete `phaseTab`, real `vmSnapshotsRoute`, "New VM" button, clone row action
+- `src/api/live.ts`: `applyResource`/`applyJob` learn the `storage`/`backup`/`network` types
+- `src/routes/placeholder.tsx`: **deleted** (dead once all three pages land)
 
 ---
 
@@ -128,7 +128,7 @@ Every task's `Interfaces` block below is **binding**. A later task's implementer
 sees only their own task, so these names and types are the contract between
 them. Do not rename anything here.
 
-### Task 1 — `client_for_host` extraction + `ProxmoxClient` infra reads + FakePVE read leaves
+### Task 1: `client_for_host` extraction + `ProxmoxClient` infra reads + FakePVE read leaves
 Produces:
 - `proxploy/services/hostclient.py::client_for_host(app, db, host: Host) -> ProxmoxClient`
 - `ProxmoxClient.storages(node: str) -> list[dict]`
@@ -141,63 +141,63 @@ Produces:
 - `ProxmoxClient.cluster_nextid() -> int`
 - FakePVE: `storages_by_node`, `storage_status_response`, `content_by_storage`, `cluster_storage_rows`, `networks_by_node`, `guest_configs`, `snapshots_by_guest`, `nextid` attributes + the namespace classes serving them
 
-### Task 2 — shared `await_task` + `enqueue_and_audit`, `lifecycle.py` refactored onto them
+### Task 2: shared `await_task` + `enqueue_and_audit`, `lifecycle.py` refactored onto them
 Produces:
-- `proxploy/services/pvetask.py::await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: str, *, timeout_s: float = 300.0, start_pct: int = 10, end_pct: int = 100) -> dict` — logs the UPID, polls `task_status`, drains `task_log` into `ctx.log`, raises `JobFailed` on non-`OK` `exitstatus` or timeout, returns the final status dict
-- `proxploy/api/jobs.py::enqueue_and_audit(request, db, user, *, kind: str, target_type: str | None, target_id: int | None, params: dict, action: str | None = None) -> dict` — enqueues, writes the audit row with `job_id`, returns `{"job": job_out(job)}`
+- `proxploy/services/pvetask.py::await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: str, *, timeout_s: float = 300.0, start_pct: int = 10, end_pct: int = 100) -> dict`: logs the UPID, polls `task_status`, drains `task_log` into `ctx.log`, raises `JobFailed` on non-`OK` `exitstatus` or timeout, returns the final status dict
+- `proxploy/api/jobs.py::enqueue_and_audit(request, db, user, *, kind: str, target_type: str | None, target_id: int | None, params: dict, action: str | None = None) -> dict`: enqueues, writes the audit row with `job_id`, returns `{"job": job_out(job)}`
 
-### Task 3 — storage reads: poller enrichment + `GET /storage`, `/storage/{host_id}/{name}`, `/storage/{host_id}/{name}/content`
+### Task 3: storage reads: poller enrichment + `GET /storage`, `/storage/{host_id}/{name}`, `/storage/{host_id}/{name}/content`
 Produces: `api/storage.py` router; `HostSnapshot.storage` dicts gain `type`, `content`, `shared`, `status`; response shapes
 `GET /storage -> [{host_id, host_name, node, storage, type, content: list[str], shared: bool, status: str, used_bytes, total_bytes, used_pct}]`,
 `GET /storage/{host_id}/{name} -> {…same…, avail_bytes, nodes: [str]}`,
 `GET /storage/{host_id}/{name}/content?node=&content= -> [{volid, format, size, used, vmid, ctime, content, notes, verification}]`
 
-### Task 4 — storage content mutations: upload + delete volume
+### Task 4: storage content mutations: upload + delete volume
 Produces: `ProxmoxClient.storage_upload(node, storage, content, filename, path) -> str` (UPID), `ProxmoxClient.storage_delete_volume(node, storage, volid) -> str | None`; job kinds `storage.upload`, `storage.delete_volume`; routes `POST /storage/{host_id}/{name}/content` (multipart), `DELETE /storage/{host_id}/{name}/content/{volid:path}`
 
-### Task 5 — storage manage: attach / edit / detach
+### Task 5: storage manage: attach / edit / detach
 Produces: `ProxmoxClient.storage_create(config: dict) -> None`, `storage_update(storage: str, config: dict) -> None`, `storage_remove(storage: str) -> None`; routes `POST /storage`, `PATCH /storage/{host_id}/{name}`, `DELETE /storage/{host_id}/{name}`
 
-### Task 6 — network reads + guest NIC read/edit
+### Task 6: network reads + guest NIC read/edit
 Produces: `services/netconfig.py::parse_net(value: str) -> dict`, `build_net(parts: dict) -> str`; `ProxmoxClient.guest_config_update(kind, node, vmid, config: dict) -> str | None`; `api/network.py` with `GET /network/bridges?host=`, `GET /network/throughput`; `GET /{apps|vms}/{id}/network`, `PUT /{apps|vms}/{id}/network/{iface}`
 
-### Task 7 — host network staging + apply/revert
+### Task 7: host network staging + apply/revert
 Produces: `ProxmoxClient.network_create(node, config) -> None`, `network_update(node, iface, config) -> None`, `network_delete(node, iface) -> None`, `network_apply(node) -> str` (UPID), `network_revert(node) -> None`; job kind `network.apply`; routes `POST /network/bridges`, `PUT /network/bridges/{host_id}/{node}/{iface}`, `DELETE /network/bridges/{host_id}/{node}/{iface}`, `POST /network/{host_id}/{node}/apply`, `POST /network/{host_id}/{node}/revert`
 
-### Task 8 — backups sync + list + stats
+### Task 8: backups sync + list + stats
 Produces: `services/backupjobs.py` with job kind `backup.sync`; `GET /api/v1/backups -> {backups: [...], stats: {total, total_bytes, ok_count, failed_count, success_rate_30d, datastores: [...]}, synced_at, stale}`
 
-### Task 9 — backups run / restore / delete / prune preview
+### Task 9: backups run / restore / delete / prune preview
 Produces: `ProxmoxClient.vzdump(node, params) -> str`, `restore_guest(kind, node, vmid, params) -> str`, `prune_preview(node, storage, params) -> list[dict]`, `prune_backups(node, storage, params) -> str`; job kinds `backup.run`, `backup.restore`, `backup.delete`, `backup.prune`; routes `POST /backups/run`, `POST /backups/{id}/restore`, `DELETE /backups/{id}`, `GET /backups/prune-preview`, `POST /backups/prune`
 
-### Task 10 — VM snapshots API
-Produces: `ProxmoxClient.snapshot_create(kind, node, vmid, name, description=None, vmstate=False) -> str`, `snapshot_rollback(kind, node, vmid, name) -> str`, `snapshot_delete(kind, node, vmid, name) -> str`; job kinds `vm.snapshot_create`, `vm.snapshot_rollback`, `vm.snapshot_delete`; routes `GET|POST /vms/{vm_id}/snapshots`, `POST /vms/{vm_id}/snapshots/{name}/rollback`, `DELETE /vms/{vm_id}/snapshots/{name}` — all registered above the `/{vm_id}/{action}` wildcard
+### Task 10: VM snapshots API
+Produces: `ProxmoxClient.snapshot_create(kind, node, vmid, name, description=None, vmstate=False) -> str`, `snapshot_rollback(kind, node, vmid, name) -> str`, `snapshot_delete(kind, node, vmid, name) -> str`; job kinds `vm.snapshot_create`, `vm.snapshot_rollback`, `vm.snapshot_delete`; routes `GET|POST /vms/{vm_id}/snapshots`, `POST /vms/{vm_id}/snapshots/{name}/rollback`, `DELETE /vms/{vm_id}/snapshots/{name}`, all registered above the `/{vm_id}/{action}` wildcard
 
-### Task 11 — VM create / clone / delete API
+### Task 11: VM create / clone / delete API
 Produces: `ProxmoxClient.vm_create(node, params) -> str`, `vm_clone(node, vmid, params) -> str`, `guest_delete(kind, node, vmid) -> str`; job kinds `vm.create`, `vm.clone`, `vm.delete`; routes `POST /vms`, `POST /vms/{vm_id}/clone`, `DELETE /vms/{vm_id}`
 
-### Cross-task couplings — read this before starting any task out of order
+### Cross-task couplings: read this before starting any task out of order
 
 These are the seams where two tasks touch the same lines. Each was found by
 drafting the tasks against each other, and each is the kind of thing a
 single-task implementer cannot see.
 
-1. **`tests/fakes/pve.py` is edited by eight tasks.** Task 1 creates the read-side namespaces (`_StorageNS`, `_NetworkNS`, `_SnapshotNS`, `_ConfigLeaf`, root `.storage`, `.cluster.nextid`). Later tasks **replace** rather than duplicate: Task 4 makes the content leaf callable, Task 5 makes root `.storage` callable, Task 7 makes `_NetworkNS` callable, Task 9 adds `_GuestFactory.post()` (recording into `fake.creates`) and wires `prunebackups`, Task 10 makes `_SnapshotNS` callable and adds `nextid_calls`, Task 11 **reuses** Task 9's `_GuestFactory.post()` and only adds a `create_error` injection hook. Each replacement block in the tasks below is self-contained and preserves the earlier `.get()` contract so earlier tasks' tests keep passing — re-run the prior task's test file after any such replacement, which each task's steps tell you to do.
+1. **`tests/fakes/pve.py` is edited by eight tasks.** Task 1 creates the read-side namespaces (`_StorageNS`, `_NetworkNS`, `_SnapshotNS`, `_ConfigLeaf`, root `.storage`, `.cluster.nextid`). Later tasks **replace** rather than duplicate: Task 4 makes the content leaf callable, Task 5 makes root `.storage` callable, Task 7 makes `_NetworkNS` callable, Task 9 adds `_GuestFactory.post()` (recording into `fake.creates`) and wires `prunebackups`, Task 10 makes `_SnapshotNS` callable and adds `nextid_calls`, Task 11 **reuses** Task 9's `_GuestFactory.post()` and only adds a `create_error` injection hook. Each replacement block in the tasks below is self-contained and preserves the earlier `.get()` contract so earlier tasks' tests keep passing, re-run the prior task's test file after any such replacement, which each task's steps tell you to do.
 2. **`api/vms.py`'s role singletons get hoisted once.** Tasks 6, 10 and 11 all add routes above the `/{vm_id}/{action}` wildcard. `_require_operator` currently sits at vms.py:54, *below* where those routes must go. **Task 6 hoists `_require_operator` to the top of the file and adds `_require_viewer` / `_require_admin` beside it**; Tasks 10 and 11 use them and must not re-declare them.
 3. **`services/guestjobs.py` is created by Task 7** (for `network.apply`) and appended to by Tasks 10 and 11. Task 7 also adds its `main.py` lifespan import; Tasks 10-11 must not add a second one.
 4. **`client_for_host(app, db, host)` takes the app, not `app.state`.** Every call site passes `request.app` from a route or `ctx.backend.app` from a handler.
 5. **`await_task` gained a keyword-only `poll_s`** beyond the contract signature, because `tests/test_lifecycle_jobs.py` monkeypatches `lifecycle.TASK_POLL_S` and a module constant in `pvetask` would silently break that patch. Purely additive; tasks that do not care omit it.
 6. **`ConfirmSelfDialog` gains an optional `title` prop** in Task 14, defaulting to its current hard-coded heading so `LifecycleActions` and `src/tests/lifecycle.test.tsx` stay byte-identical.
-7. **Task 16 must land before Task 17** — 16 removes the `phaseTab` helper from `routes/vms.tsx`, 17 rewrites `VmsPage` in the same file.
+7. **Task 16 must land before Task 17**: 16 removes the `phaseTab` helper from `routes/vms.tsx`, 17 rewrites `VmsPage` in the same file.
 8. **Two Phase 6 endpoints ship deliberately unconsumed by this phase's UI**, both recorded rather than quietly dropped: `POST /backups/prune` (the *destructive* prune; the preview is wired, but keep-rules have nowhere to live until Phase 7's scheduler owns retention policy) and the `vmstate` snapshot option on non-qemu guests (LXC has no RAM state). Task 18's notes doc carries both forward.
 
-### Task 12 — frontend Storage page + `live.ts` extension
-### Task 13 — frontend storage mutations (upload + attach/edit/detach)
-### Task 14 — frontend Network page
-### Task 15 — frontend Backups page
-### Task 16 — frontend VM snapshots tab
-### Task 17 — frontend VM create wizard + clone dialog
-### Task 18 — DoD verification, doc-05 amendment, notes doc, buildlog
+### Task 12: frontend Storage page + `live.ts` extension
+### Task 13: frontend storage mutations (upload + attach/edit/detach)
+### Task 14: frontend Network page
+### Task 15: frontend Backups page
+### Task 16: frontend VM snapshots tab
+### Task 17: frontend VM create wizard + clone dialog
+### Task 18: DoD verification, doc-05 amendment, notes doc, buildlog
 
 ---
 
@@ -237,7 +237,7 @@ single-task implementer cannot see.
 | `cluster_nextid` | `.cluster.nextid.get()` | `str` (cast to `int`) |
 
 **Hyphenated PVE params** (`prune-backups`, `vlan-id`, `vlan-raw-device`,
-`bridge_ports` is underscore but `vlan-id` is not) cannot be Python kwargs —
+`bridge_ports` is underscore but `vlan-id` is not) cannot be Python kwargs, 
 build a dict and unpack: `.get(**{"prune-backups": spec})`. Every method that
 needs one does this.
 
@@ -259,7 +259,7 @@ restoring *as new* takes a fresh vmid from `cluster_nextid()`.
 **Interfaces:**
 - Consumes: `ProxmoxClient.__init__(address, token_id, token_secret, verify_tls=True, tls_fingerprint=None, factory=None)` and `ProxmoxClient._wrap(prefix, e) -> ProxmoxError` (existing, `proxploy/services/proxmox.py:168`/`:180`); `Host`, `HostCredential` (existing, `proxploy/models/__init__.py`); `app.state.secretstore.decrypt(blob)` and `app.state.proxmox_factory` (existing, set in `main.py`'s lifespan / `create_app`).
 - Produces:
-  - `proxploy/services/hostclient.py::client_for_host(app, db, host: Host) -> ProxmoxClient` — raises `ProxmoxError` when the host has no `api_token` credential
+  - `proxploy/services/hostclient.py::client_for_host(app, db, host: Host) -> ProxmoxClient`: raises `ProxmoxError` when the host has no `api_token` credential
   - `ProxmoxClient.storages(node: str) -> list[dict]`
   - `ProxmoxClient.storage_status(node: str, storage: str) -> dict`
   - `ProxmoxClient.storage_content(node: str, storage: str, content: str | None = None) -> list[dict]`
@@ -464,7 +464,7 @@ def test_consoles_no_longer_carries_its_own_copy_of_the_helper():
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_proxmox_infra_reads.py -q`
-Expected: FAIL at collection — `ModuleNotFoundError: No module named 'proxploy.services.hostclient'` (the import at the top of the test file). Nothing runs yet.
+Expected: FAIL at collection, `ModuleNotFoundError: No module named 'proxploy.services.hostclient'` (the import at the top of the test file). Nothing runs yet.
 
 - [ ] **Step 3: Create `proxploy/services/hostclient.py`**
 
@@ -477,7 +477,7 @@ five lines; consoles.py's copy even carried a comment naming a 4th call site as
 the tip-over point for extracting it. Phase 6 adds three routers and twelve job
 handlers that all need it, so it is one function now and the copies are gone.
 
-It raises ProxmoxError — never HTTPException, never JobFailed — because both
+It raises ProxmoxError, never HTTPException, never JobFailed; because both
 kinds of caller live here: a route turns it into a 409, a job handler into a
 JobFailed. That translation is one line at each call site and keeps this module
 free of both FastAPI and the job engine.
@@ -509,7 +509,7 @@ def client_for_host(app, db, host: Host) -> ProxmoxClient:
 - [ ] **Step 4: Add the FakePVE read leaves**
 
 In `backend/tests/fakes/pve.py`, add these classes after `_KwLeaf` (they follow
-the file's existing one-small-class-per-leaf style — no lambdas, each leaf
+the file's existing one-small-class-per-leaf style, no lambdas, each leaf
 checks `owner.fail` itself):
 
 ```python
@@ -551,7 +551,7 @@ class _StorageContentLeaf:
 
 
 class _StorageNS:
-    """nodes(n).storage(name) — the per-datastore subtree."""
+    """nodes(n).storage(name), the per-datastore subtree."""
 
     def __init__(self, owner, node, storage):
         self.status = _StorageStatusLeaf(owner, node, storage)
@@ -577,7 +577,7 @@ class _NodeStorageNS:
 
 
 class _NetIfaceNS:
-    """nodes(n).network(iface) — the staging subtree Task 7 hangs put/delete
+    """nodes(n).network(iface), the staging subtree Task 7 hangs put/delete
     off. Present now only so `.network` has proxmoxer's full dual shape."""
 
     def __init__(self, owner, node, iface):
@@ -661,10 +661,10 @@ class _NodeNS:
 Finally, in `FakePVE.__init__`, add the Phase 6 attribute block **before** the
 namespaces are constructed and change the `_ClusterNS` call to pass `self`
 (everything else in `__init__` is unchanged; the constructor signature is NOT
-touched — tests assign these attributes after construction):
+touched, tests assign these attributes after construction):
 
 ```python
-        # infra reads (Phase 6) — set before the namespaces below, which read
+        # infra reads (Phase 6): set before the namespaces below, which read
         # them lazily so a test can reassign any of these post-construction
         self.storages_by_node: dict[str, list[dict]] = {}
         self.storage_status_response: dict = {}
@@ -681,7 +681,7 @@ touched — tests assign these attributes after construction):
 ```
 
 (the existing `self.cluster = _ClusterNS(resources or [], fail)` line is
-replaced by the two-line pair above — root `.storage` is the cluster-level
+replaced by the two-line pair above, root `.storage` is the cluster-level
 storage config, distinct from `nodes(n).storage`.)
 
 - [ ] **Step 5: Add the eight infra reads to `ProxmoxClient`**
@@ -717,7 +717,7 @@ after `vncproxy`:
                         content: str | None = None) -> list[dict]:
         """GET /nodes/{node}/storage/{storage}/content -> volume listing.
 
-        `content=` is a FILTER, so it is omitted rather than sent as None —
+        `content=` is a FILTER, so it is omitted rather than sent as None; 
         PVE would otherwise filter on the literal string and return nothing.
         """
         try:
@@ -729,7 +729,7 @@ after `vncproxy`:
             raise self._wrap(f"storage content failed for {storage!r} on {node}", e) from e
 
     def cluster_storage(self) -> list[dict]:
-        """GET /storage — the cluster-level storage.cfg, not a node's view."""
+        """GET /storage, the cluster-level storage.cfg, not a node's view."""
         try:
             return self._connect().storage.get()
         except ProxmoxError:
@@ -751,7 +751,7 @@ after `vncproxy`:
             raise self._wrap(f"network list failed on {node}", e) from e
 
     def guest_config(self, kind: str, node: str, vmid: int) -> dict:
-        """GET /nodes/{node}/{lxc|qemu}/{vmid}/config — the full config dict,
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/config, the full config dict,
         including every netN= line the network page round-trips."""
         try:
             return getattr(self._connect().nodes(node), kind)(vmid).config.get()
@@ -762,7 +762,7 @@ after `vncproxy`:
 
     def snapshots(self, kind: str, node: str, vmid: int) -> list[dict]:
         """GET /nodes/{node}/{lxc|qemu}/{vmid}/snapshot -> [{name, description,
-        snaptime, vmstate, parent}]. Includes PVE's synthetic `current` row —
+        snaptime, vmstate, parent}]. Includes PVE's synthetic `current` row, 
         callers decide whether to show it, this layer does not filter."""
         try:
             return getattr(self._connect().nodes(node), kind)(vmid).snapshot.get()
@@ -772,7 +772,7 @@ after `vncproxy`:
             raise self._wrap(f"snapshot list failed for {kind}/{vmid} on {node}", e) from e
 
     def cluster_nextid(self) -> int:
-        """GET /cluster/nextid — PVE answers with a JSON string; cast once here
+        """GET /cluster/nextid, PVE answers with a JSON string; cast once here
         so no caller has to remember to."""
         try:
             return int(self._connect().cluster.nextid.get())
@@ -800,7 +800,7 @@ from proxploy.services.proxmox import ProxmoxError
 ```
 
 (`HostCredential` and `ProxmoxClient` are no longer referenced in this file;
-`import json as jsonlib` stays — the VNC/PTY exit frame still uses it.)
+`import json as jsonlib` stays, the VNC/PTY exit frame still uses it.)
 
 Then replace each of the three call sites. In `app_console_ticket`:
 
@@ -829,7 +829,7 @@ and in `vm_console_ticket`:
         raise HTTPException(409, str(e)) from e
 ```
 
-The 409 and its exact message are unchanged from the deleted helper — only the
+The 409 and its exact message are unchanged from the deleted helper, only the
 raise site moved out of the shared code, because a job handler needs the same
 lookup and must not raise HTTPException.
 
@@ -845,7 +845,7 @@ from proxploy.services.proxmox import ProxmoxError
 ```
 
 (`import json as jsonlib`, `HostCredential` and `ProxmoxClient` all become
-unused here — delete them.) Then replace the body of `_resolve`:
+unused here, delete them.) Then replace the body of `_resolve`:
 
 ```python
 def _resolve(app, target_type: str, target_id: int):
@@ -861,7 +861,7 @@ def _resolve(app, target_type: str, target_id: int):
         try:
             client = client_for_host(app, db, host)
         except ProxmoxError as e:
-            # Same sentence as before the extraction — a job reports a missing
+            # Same sentence as before the extraction: a job reports a missing
             # credential as a failed job, never as a 502.
             raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
@@ -873,7 +873,7 @@ def _resolve(app, target_type: str, target_id: int):
 - [ ] **Step 8: Run the new tests**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_proxmox_infra_reads.py -q`
-Expected: PASS — 14 passed.
+Expected: PASS, 14 passed.
 
 - [ ] **Step 9: Run the full backend suite (the refactor must move nothing)**
 
@@ -1111,7 +1111,7 @@ def test_enqueue_and_audit_writes_the_job_the_audit_row_and_the_202_body(tmp_pat
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_pvetask.py -q`
-Expected: FAIL at collection — `ModuleNotFoundError: No module named 'proxploy.services.pvetask'`.
+Expected: FAIL at collection, `ModuleNotFoundError: No module named 'proxploy.services.pvetask'`.
 
 - [ ] **Step 3: Create `proxploy/services/pvetask.py` (the loop moved out of `run_lifecycle`, unedited)**
 
@@ -1126,7 +1126,7 @@ in Phase 3; Phase 6 adds twelve more handlers that need exactly it, so it lives
 here once instead of thirteen times.
 
 Both the cancellation breadcrumb and the fail-closed exitstatus check are
-carried over verbatim — they are the two pieces a re-derivation gets wrong:
+carried over verbatim; they are the two pieces a re-derivation gets wrong:
 a cancelled job must never imply the proxmox-side task was undone, and a
 stopped task with a missing exitstatus is an unknown outcome, not a success.
 """
@@ -1170,11 +1170,11 @@ async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: st
                 break
             if asyncio.get_running_loop().time() > deadline:
                 raise JobFailed(f"proxmox task {upid} still running after "
-                                f"{timeout_s:.0f}s — giving up on the log, the "
+                                f"{timeout_s:.0f}s, giving up on the log, the "
                                 f"task itself is untouched on the node")
             await asyncio.sleep(poll_s)
     except asyncio.CancelledError:
-        # The POST already reached proxmox and is unaffected by a local cancel —
+        # The POST already reached proxmox and is unaffected by a local cancel, 
         # telling the user it was "canceled" without this line would read as
         # "nothing happened", which is false.
         ctx.log(f"canceled locally; proxmox task {upid} keeps running on {node}",
@@ -1201,7 +1201,7 @@ In `backend/proxploy/config.py`, add one line to `Settings`, after
     console_idle_timeout_s: float = 1800.0
     # Wall-clock ceiling every Phase 6 job handler passes to
     # services/pvetask.py::await_task. services/lifecycle.py keeps its own
-    # module constant instead — a start/stop that needs five minutes is a
+    # module constant instead: a start/stop that needs five minutes is a
     # different animal from a restore that needs fifty, and lifecycle's
     # timeout is already exercised by tests that monkeypatch it.
     pve_task_timeout_s: float = 300.0
@@ -1209,8 +1209,8 @@ In `backend/proxploy/config.py`, add one line to `Settings`, after
 
 - [ ] **Step 5: Add `enqueue_and_audit` to `api/jobs.py`**
 
-In `backend/proxploy/api/jobs.py`, add after `backlog` (every import it needs —
-`Request`, `User`, `write_audit`, `job_out` — is already in the file):
+In `backend/proxploy/api/jobs.py`, add after `backlog` (every import it needs; 
+`Request`, `User`, `write_audit`, `job_out`; is already in the file):
 
 ```python
 def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
@@ -1222,7 +1222,7 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
     the fixed `{target_type}.{action}` kind; this is the plain version every
     Phase 6 mutation route uses. `action` overrides the audit action when the
     job kind is not the right name for the audit trail (a `backup.run` job
-    fired from the restore route, say) — it defaults to `kind`.
+    fired from the restore route, say); it defaults to `kind`.
 
     Both `params` copies are redacted at their own sink: JobBackend.enqueue
     redacts before writing `jobs.params`, write_audit before `audit_events.params`.
@@ -1241,7 +1241,7 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
 In `backend/proxploy/services/lifecycle.py`, delete the two module constants
 and import them from `pvetask` instead, so the names existing tests
 monkeypatch (`lc.TASK_POLL_S`, `lc.TASK_TIMEOUT_S`) still exist and still take
-effect — `run_lifecycle` reads both as module globals at call time:
+effect, `run_lifecycle` reads both as module globals at call time:
 
 ```python
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
@@ -1252,7 +1252,7 @@ from proxploy.services.pvetask import TASK_POLL_S, TASK_TIMEOUT_S, await_task
 ```
 
 (the `TASK_POLL_S = 1.0` / `TASK_TIMEOUT_S = 300.0` block and its ponytail
-comment are deleted here — the comment moved to `pvetask.py` in Step 3.)
+comment are deleted here, the comment moved to `pvetask.py` in Step 3.)
 
 Then replace everything in `run_lifecycle` from `ctx.log(f"proxmox task {upid}")`
 down to the `return`:
@@ -1263,11 +1263,11 @@ down to the `return`:
         upid = await asyncio.to_thread(client.guest_action, kind, node, vmid,
                                        PVE_VERB[action])
     except asyncio.CancelledError:
-        # to_thread cannot interrupt the thread once it has started — the POST
+        # to_thread cannot interrupt the thread once it has started: the POST
         # may already have reached proxmox, but the UPID it would return is
         # discarded here, so there is no task to point at. Leave a breadcrumb
         # even without one, rather than pretending the job vanished cleanly.
-        ctx.log(f"canceled while issuing {action} on {kind} {vmid} at {node} — "
+        ctx.log(f"canceled while issuing {action} on {kind} {vmid} at {node}, "
                 f"the request may have already reached proxmox; no task id was "
                 f"captured to track it", stream="stderr")
         raise
@@ -1276,7 +1276,7 @@ down to the `return`:
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
     # Nudge every open tab to refetch rather than assert a status we have not
-    # polled yet — the poller owns cached state (doc 04: Proxmox is the truth).
+    # polled yet: the poller owns cached state (doc 04: Proxmox is the truth).
     app.state.bus.publish("resource", {"type": target_type, "id": target_id,
                                        "change": "lifecycle"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -1287,19 +1287,19 @@ Two deliberate, asserted-nowhere deltas, both noted here rather than hidden:
 the redundant mid-loop `ctx.progress(50)` is gone (the 10 and 100 ticks still
 bracket the same window), and the exitstatus failure message is now
 `"proxmox task {upid} failed: {reason}"` instead of `"{action} failed: {reason}"`
-— the shared helper does not know the caller's verb, and `jobs.kind` already
+the shared helper does not know the caller's verb, and `jobs.kind` already
 records it. `tests/test_lifecycle_jobs.py::test_nonzero_exitstatus_fails_the_job`
 asserts on the proxmox-supplied `reason` substring, which is unchanged.
 
 - [ ] **Step 7: Run the new tests**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_pvetask.py -q`
-Expected: PASS — 8 passed.
+Expected: PASS, 8 passed.
 
-- [ ] **Step 8: Run the two existing lifecycle files UNCHANGED — this is the no-behaviour-change proof**
+- [ ] **Step 8: Run the two existing lifecycle files UNCHANGED; this is the no-behaviour-change proof**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_lifecycle_jobs.py tests/test_lifecycle_api.py -q`
-Expected: PASS — 20 passed, in roughly the same wall-clock time as before the
+Expected: PASS, 20 passed, in roughly the same wall-clock time as before the
 refactor (if it suddenly takes ~6 s longer, `poll_s=TASK_POLL_S` was dropped
 from the `await_task` call in Step 6 and the monkeypatched 0.01 s poll interval
 is being ignored). The four tests that matter most here:
@@ -1325,7 +1325,7 @@ git commit -m "refactor(jobs): extract await_task + enqueue_and_audit, move life
 
 ---
 
-## Task 3: Storage reads — poller enrichment + `GET /storage`, `/storage/{host_id}/{name}`, `/storage/{host_id}/{name}/content`
+## Task 3: Storage reads: poller enrichment + `GET /storage`, `/storage/{host_id}/{name}`, `/storage/{host_id}/{name}/content`
 
 **Files:**
 - Create: `backend/proxploy/api/storage.py`
@@ -1335,16 +1335,16 @@ git commit -m "refactor(jobs): extract await_task + enqueue_and_audit, move life
 **Interfaces:**
 - Consumes: `proxploy.services.hostclient::client_for_host(app, db, host) -> ProxmoxClient` (Task 1), `ProxmoxClient.storage_status(node, storage) -> dict` (Task 1), `ProxmoxClient.storage_content(node, storage, content=None) -> list[dict]` (Task 1), `FakePVE.storage_status_response` / `FakePVE.content_by_storage` (Task 1), `proxploy.api.deps::{get_db, require_role, require_entitlement}`, `tests.support::seed_snapshot`.
 - Produces:
-  - `HostSnapshot.storage` dicts gain `type` (from `/cluster/resources`' `plugintype`), `content: list[str]`, `shared: bool`, `status: str` — **no new PVE call**, these four fields already ride on every `type=="storage"` row of the one bulk `cluster_resources()` the poller already makes (doc 02 §3's O(nodes) budget is untouched).
+  - `HostSnapshot.storage` dicts gain `type` (from `/cluster/resources`' `plugintype`), `content: list[str]`, `shared: bool`, `status: str`, **no new PVE call**, these four fields already ride on every `type=="storage"` row of the one bulk `cluster_resources()` the poller already makes (doc 02 §3's O(nodes) budget is untouched).
   - `proxploy/api/storage.py::router = APIRouter(prefix="/storage", tags=["storage"])` with
     `GET /api/v1/storage -> [{host_id, host_name, node, storage, type, content: list[str], shared: bool, status: str, used_bytes, total_bytes, used_pct}]`,
     `GET /api/v1/storage/{host_id}/{name}?node= -> {…same…, avail_bytes, nodes: [str]}`,
     `GET /api/v1/storage/{host_id}/{name}/content?node=&content= -> [{volid, format, size, used, vmid, ctime, content, notes, verification}]`
-  - module helpers `_pct(used, total) -> float`, `_content_list(v) -> list[str]`, `_row(host, st) -> dict`, `_host_or_404(db, host_id) -> Host`, `_nodes_with(request, host_id, name) -> list[str]`, `_resolve_node(request, host, name, node) -> str` — Tasks 4 and 5 import `_host_or_404` and `_resolve_node` from this module rather than re-deriving the node.
+  - module helpers `_pct(used, total) -> float`, `_content_list(v) -> list[str]`, `_row(host, st) -> dict`, `_host_or_404(db, host_id) -> Host`, `_nodes_with(request, host_id, name) -> list[str]`, `_resolve_node(request, host, name, node) -> str`; Tasks 4 and 5 import `_host_or_404` and `_resolve_node` from this module rather than re-deriving the node.
 
 - [ ] **Step 1: Add the four already-returned fields to the poller fixture**
 
-`/cluster/resources` returns `plugintype`, `content`, `shared` on every storage row; the recorded fixture predates anything caring about them. Additive only — every existing assertion (`len(snap.storage) == 2`) still holds.
+`/cluster/resources` returns `plugintype`, `content`, `shared` on every storage row; the recorded fixture predates anything caring about them. Additive only, every existing assertion (`len(snap.storage) == 2`) still holds.
 
 ```json
 [
@@ -1400,7 +1400,7 @@ def test_snapshot_storage_carries_type_content_shared_status(tmp_path):
 - [ ] **Step 3: Run to verify the failure**
 
 Run: `cd backend && pytest tests/test_poller_ingest.py -v`
-Expected: FAIL — `test_snapshot_storage_carries_type_content_shared_status` fails with an `AssertionError` showing the snapshot dict is still the four-key `{'storage', 'node', 'used_bytes', 'total_bytes'}` form. The other four tests in the file PASS (the fixture change is additive).
+Expected: FAIL, `test_snapshot_storage_carries_type_content_shared_status` fails with an `AssertionError` showing the snapshot dict is still the four-key `{'storage', 'node', 'used_bytes', 'total_bytes'}` form. The other four tests in the file PASS (the fixture change is additive).
 
 - [ ] **Step 4: Enrich `snap_storage` in the poller**
 
@@ -1412,7 +1412,7 @@ In `backend/proxploy/pollers/__init__.py`, replace the `snap_storage = [...]` bl
          "used_bytes": int(r.get("disk") or 0),
          "total_bytes": int(r.get("maxdisk") or 0),
          # These four ride on the SAME /cluster/resources row the two above come
-         # from — the poller used to discard them. Reading them here is what
+         # from: the poller used to discard them. Reading them here is what
          # lets GET /storage answer from the snapshot instead of adding a
          # per-datastore PVE call, which doc 02 §3's O(nodes) budget forbids.
          "type": r.get("plugintype"),
@@ -1426,7 +1426,7 @@ In `backend/proxploy/pollers/__init__.py`, replace the `snap_storage = [...]` bl
 - [ ] **Step 5: Run the poller tests to verify they pass**
 
 Run: `cd backend && pytest tests/test_poller_ingest.py tests/test_poller_loop.py tests/test_cluster_api.py -v`
-Expected: PASS. In particular `test_cluster_api.py::test_summary_aggregates_and_dedupes_storage` still passes untouched — `cluster_summary` only reads `st["storage"]`, `st["used_bytes"]` and `st["total_bytes"]`, so four extra keys are invisible to it, and its `storage.setdefault(st["storage"], st)` dedupe is unchanged.
+Expected: PASS. In particular `test_cluster_api.py::test_summary_aggregates_and_dedupes_storage` still passes untouched, `cluster_summary` only reads `st["storage"]`, `st["used_bytes"]` and `st["total_bytes"]`, so four extra keys are invisible to it, and its `storage.setdefault(st["storage"], st)` dedupe is unchanged.
 
 - [ ] **Step 6: Update the `# ponytail:` comment in `api/cluster.py` that points at this phase**
 
@@ -1438,7 +1438,7 @@ cluster.py:33-36 currently promises "per-datastore truth arrives with the Phase 
             # (one datastore reported once per node) and undercounts a LOCAL
             # storage that happens to share a name across nodes (`local` on pve1
             # and pve2 is 2x the capacity, counted once). This is the cluster
-            # RING — a single number — and the snapshot dict now carries
+            # RING: a single number, and the snapshot dict now carries
             # `shared`, so the fix is one line (`key = st["storage"] if
             # st["shared"] else (st["node"], st["storage"])`) if the ring is ever
             # shown to disagree with the page. Per-datastore truth, which does
@@ -1580,7 +1580,7 @@ def test_storage_reads_require_a_session(tmp_path):
 - [ ] **Step 8: Run to verify the failure**
 
 Run: `cd backend && pytest tests/test_storage_api.py -v`
-Expected: FAIL — all 6 error with `404` bodies (`{"type":"about:blank","title":"Not Found",…}`) because no `/api/v1/storage` route is registered yet; `test_storage_reads_require_a_session` fails on `assert 404 == 401`.
+Expected: FAIL, all 6 error with `404` bodies (`{"type":"about:blank","title":"Not Found",…}`) because no `/api/v1/storage` route is registered yet; `test_storage_reads_require_a_session` fails on `assert 404 == 401`.
 
 - [ ] **Step 9: Write `api/storage.py`**
 
@@ -1589,7 +1589,7 @@ Expected: FAIL — all 6 error with `404` bodies (`{"type":"about:blank","title"
 """Storage routes (doc 05 §Storage, doc 01 §5).
 
 Reads only, in this task. The LIST is served from the poller's in-memory
-`HostSnapshot.storage` — doc 05 calls it a "live-refreshed cache", and since the
+`HostSnapshot.storage`: doc 05 calls it a "live-refreshed cache", and since the
 poll loop's single `cluster_resources()` already carries every field the page
 needs, listing costs zero PVE calls. Detail and content are on-demand
 passthroughs, one PVE call each, triggered by a human opening a datastore.
@@ -1598,7 +1598,7 @@ There is no storage table and none is added: doc 04 defines no storage entity.
 Entitlements: doc 05 leaves the column blank on all three reads. Doc 01 §5
 names `storage.view` (datastore overview) and `storage.content` (content
 browser) as real features, and doc 07 §3 says a feature without a key does not
-merge — so the reads are gated with their doc-01 keys rather than left ungated.
+merge, so the reads are gated with their doc-01 keys rather than left ungated.
 Functionally identical today (every flag defaults ON); recorded as a doc-05
 amendment in the phase notes.
 """
@@ -1617,7 +1617,7 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 # FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call that runs FIRST. A bare `dependencies=[Depends(require_entitlement(...))]`
 # lands at position 0 and runs BEFORE auth, answering an anonymous caller with
-# 403 instead of 401 — see tests/test_route_auth_invariant.py.
+# 403 instead of 401: see tests/test_route_auth_invariant.py.
 _require_viewer = require_role("viewer")
 
 
@@ -1671,7 +1671,7 @@ def _resolve_node(request: Request, host: Host, name: str, node: str | None) -> 
     if host.node_name:
         return host.node_name
     raise HTTPException(409, f"cannot tell which node serves {name!r} on "
-                             f"{host.name} — pass ?node=")
+                             f"{host.name}, pass ?node=")
 
 
 @router.get("", dependencies=[Depends(_require_viewer),
@@ -1740,7 +1740,7 @@ def storage_content(request: Request, host_id: int, name: str,
 
 - [ ] **Step 10: Register the router**
 
-In `backend/proxploy/api/__init__.py`, add `storage` to the import tuple (alphabetical, between `settings` and `vms`) and include it after `cluster` — a two-segment `/{host_id}/{name}` sibling never collides with the one-segment `""` route, so order within this router is free, but keeping the include next to `cluster` groups the two snapshot-backed routers:
+In `backend/proxploy/api/__init__.py`, add `storage` to the import tuple (alphabetical, between `settings` and `vms`) and include it after `cluster`; a two-segment `/{host_id}/{name}` sibling never collides with the one-segment `""` route, so order within this router is free, but keeping the include next to `cluster` groups the two snapshot-backed routers:
 
 ```python
 from fastapi import APIRouter
@@ -1777,7 +1777,7 @@ Expected: PASS (6 + 5 = 11 tests).
 - [ ] **Step 12: Run the full backend suite (three routes joined the invariant walk)**
 
 Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: PASS, up by exactly 7 tests versus the Task 2 baseline; `2 skipped, 3 deselected` unchanged. `test_route_auth_invariant.py` now walks `/api/v1/storage`, `/api/v1/storage/{host_id}/{name}` and `…/content` and must still report 401 for each — a 403 there means `require_entitlement` was listed before `_require_viewer`.
+Expected: PASS, up by exactly 7 tests versus the Task 2 baseline; `2 skipped, 3 deselected` unchanged. `test_route_auth_invariant.py` now walks `/api/v1/storage`, `/api/v1/storage/{host_id}/{name}` and `…/content` and must still report 401 for each; a 403 there means `require_entitlement` was listed before `_require_viewer`.
 
 - [ ] **Step 13: Commit**
 
@@ -1791,7 +1791,7 @@ git commit -m "feat(storage): keep plugintype/content/shared/status in the poll 
 
 ---
 
-## Task 4: Storage content mutations — upload + delete volume
+## Task 4: Storage content mutations: upload + delete volume
 
 > **Dependency correction, verified not assumed.** This plan's header originally
 > claimed Phase 6 adds no backend dependency because `UploadFile` is "already
@@ -1801,7 +1801,7 @@ git commit -m "feat(storage): keep plugintype/content/shared/status in the poll 
 > `pip install python-multipart`. Phase 6 therefore adds exactly one backend
 > dependency, in Step 0 below. It is Apache-2.0, already inside the doc-03
 > allowlist the CI license audit enforces (`--allow-only "…Apache;Apache
-> Software License…"`), so the audit leg passes without an allowlist edit —
+> Software License…"`), so the audit leg passes without an allowlist edit; 
 > but Step 0 runs the audit anyway, per doc 03's protocol of verifying the
 > license of every new dependency at the moment it is added rather than
 > trusting a remembered value.
@@ -1820,7 +1820,7 @@ Run: `cd backend && ./.venv/bin/python -m pip install "python-multipart>=0.0.9"`
 Expected: `Successfully installed python-multipart-<version>`
 
 Run: `cd backend && ./.venv/bin/python -m pip install pip-licenses && ./.venv/bin/pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"`
-Expected: exits 0 — `python-multipart` reports Apache-2.0 and is inside the allowlist. If it exits non-zero, stop and report; do not widen the allowlist.
+Expected: exits 0, `python-multipart` reports Apache-2.0 and is inside the allowlist. If it exits non-zero, stop and report; do not widen the allowlist.
 
 Run: `cd backend && ./.venv/bin/python -c "from fastapi import FastAPI, UploadFile, File; a=FastAPI(); a.post('/x')(lambda f=File(...): 1); print('UploadFile routes definable')"`
 Expected: `UploadFile routes definable` (before Step 0 this printed `pip install python-multipart`).
@@ -1840,7 +1840,7 @@ Expected: `UploadFile routes definable` (before Step 0 this printed `pip install
   - `Settings.storage_upload_max_bytes: int`
   - FakePVE: `uploads: list[dict]`, `deleted_volumes: list[tuple]`, callable `nodes(n).storage(s).content(volid)` + `nodes(n).storage(s).upload`
 
-> **Plan note — the upload path double-transfers the ISO, on purpose.**
+> **Plan note, the upload path double-transfers the ISO, on purpose.**
 > Proxmox's `/nodes/{node}/storage/{s}/upload` takes a multipart body; there is
 > no "tell PVE to fetch this URL" variant that Proxploy could use instead
 > (`download-url` exists but needs the file already published somewhere, which
@@ -1854,7 +1854,7 @@ Expected: `UploadFile routes definable` (before Step 0 this printed `pip install
 > What is NOT acceptable and is the whole reason the route is shaped this way:
 > `await file.read()` would materialise the entire ISO in the Proxploy process's
 > RAM before a single byte reached disk. The route reads in 1 MiB chunks and the
-> job deletes the temp file in a `finally` on every exit path — success, PVE
+> job deletes the temp file in a `finally` on every exit path, success, PVE
 > failure, cancellation, timeout.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1957,7 +1957,7 @@ def test_upload_job_posts_to_proxmox_and_always_deletes_the_temp_file(tmp_path):
     async def run():
         fake = FakePVE()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.storagejobs  # noqa: F401 — registers handlers
+        import proxploy.services.storagejobs  # noqa: F401, registers handlers
         backend = JobBackend(app)
         hid = _seed(app)
         spool = tmp_path / "ubuntu.iso"
@@ -2063,7 +2063,7 @@ def test_delete_volume_job_calls_delete_and_awaits_the_task(tmp_path):
 - [ ] **Step 2: Run to verify the failures**
 
 Run: `cd backend && pytest tests/test_storage_content.py -v`
-Expected: FAIL — the four job tests raise `KeyError: "no handler registered for job kind 'storage.upload'"` / `'storage.delete_volume'` from `JobBackend.enqueue`; the three route tests get 405/404 (no POST or DELETE registered under `/api/v1/storage/{host_id}/{name}/content`); `test_the_upload_route_never_buffers_the_whole_body_in_memory` fails on `assert "file.file.read(" in src`.
+Expected: FAIL, the four job tests raise `KeyError: "no handler registered for job kind 'storage.upload'"` / `'storage.delete_volume'` from `JobBackend.enqueue`; the three route tests get 405/404 (no POST or DELETE registered under `/api/v1/storage/{host_id}/{name}/content`); `test_the_upload_route_never_buffers_the_whole_body_in_memory` fails on `assert "file.file.read(" in src`.
 
 - [ ] **Step 3: Add the two `ProxmoxClient` methods**
 
@@ -2077,7 +2077,7 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
         """POST /nodes/{node}/storage/{storage}/upload -> UPID.
 
         `path` is a spooled temp file on the Proxploy host, opened here and
-        streamed by proxmoxer as the multipart part — the bytes are never held
+        streamed by proxmoxer as the multipart part, the bytes are never held
         in memory by us (see api/storage.py's upload route for the other half).
         """
         try:
@@ -2095,7 +2095,7 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
         """DELETE /nodes/{node}/storage/{storage}/content/{volid}.
 
         Returns a UPID for the plugins that delete asynchronously (PBS, ZFS) and
-        None for the ones that do it inline (dir) — the caller must handle both.
+        None for the ones that do it inline (dir), the caller must handle both.
         """
         try:
             return self._connect().nodes(node).storage(storage).content(volid).delete()
@@ -2108,11 +2108,11 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
 
 - [ ] **Step 4: Make the FakePVE storage namespace callable and add the upload/delete leaves**
 
-Task 1 added a per-node storage namespace serving `storages_by_node` / `storage_status_response` / `content_by_storage`. Replace that namespace and its `content` leaf with the versions below — same attributes, plus a callable `content(volid)` and an `upload` leaf. In `backend/tests/fakes/pve.py`:
+Task 1 added a per-node storage namespace serving `storages_by_node` / `storage_status_response` / `content_by_storage`. Replace that namespace and its `content` leaf with the versions below, same attributes, plus a callable `content(volid)` and an `upload` leaf. In `backend/tests/fakes/pve.py`:
 
 ```python
 class _VolumeLeaf:
-    """nodes(n).storage(s).content(volid) — .delete() records and mints a UPID."""
+    """nodes(n).storage(s).content(volid).delete() records and mints a UPID."""
 
     def __init__(self, owner, node, storage, volid):
         self._owner, self._node = owner, node
@@ -2166,7 +2166,7 @@ class _NodeStorageNS:
 
 
 class _NodeStorageFactory:
-    """nodes(n).storage — .get() lists the node's storages, .storage(s) drills in."""
+    """nodes(n).storage.get() lists the node's storages.storage(s) drills in."""
 
     def __init__(self, owner, node):
         self._owner, self._node = owner, node
@@ -2215,15 +2215,15 @@ Both handlers are the shape services/lifecycle.py established and Task 2
 extracted: resolve in a thread, POST to Proxmox, hand the UPID to `await_task`.
 
 The upload one carries one extra obligation. Proxmox's upload endpoint takes a
-multipart body — there is no "fetch this URL yourself" variant — so an ISO is
+multipart body; there is no "fetch this URL yourself" variant, so an ISO is
 transferred TWICE: browser -> Proxploy (spooled to `data_dir/uploads` by the
 route, never buffered in RAM) and Proxploy -> PVE (read back here). The Proxploy
 host therefore needs transient free disk equal to the file size for the life of
 the job, and the upload takes about twice as long as a direct PVE upload. That
 is the accepted cost of proxying it; what is not acceptable is holding the file
 in memory, which is why the route streams and this handler takes a path rather
-than bytes. The spool file is deleted in a `finally` on EVERY exit — success,
-PVE failure, timeout, cancellation — because nothing else ever will.
+than bytes. The spool file is deleted in a `finally` on EVERY exit, success,
+PVE failure, timeout, cancellation; because nothing else ever will.
 """
 from __future__ import annotations
 
@@ -2264,7 +2264,7 @@ async def run_upload(ctx: JobContext, params: dict) -> dict:
                 "storage": storage, "volid": f"{storage}:{content}/{filename}"}
     finally:
         # The ONLY place this file is ever removed. Suppressed because a failure
-        # to unlink must not turn a succeeded upload into a failed job — the
+        # to unlink must not turn a succeeded upload into a failed job: the
         # bytes are already on PVE by then.
         with contextlib.suppress(OSError):
             os.unlink(path)
@@ -2281,7 +2281,7 @@ async def run_delete_volume(ctx: JobContext, params: dict) -> dict:
     if upid:
         exitstatus = (await await_task(ctx, client, node, upid)).get("exitstatus")
     else:
-        # dir/lvm plugins delete inline and return no UPID — there is no task to
+        # dir/lvm plugins delete inline and return no UPID: there is no task to
         # poll, and treating a missing UPID as a failure would fail every
         # successful ISO delete on local storage.
         ctx.log("deleted synchronously (no task id)")
@@ -2301,10 +2301,10 @@ HANDLERS["storage.delete_volume"] = run_delete_volume
 Registration is by import side-effect only. In `backend/proxploy/main.py`, inside the lifespan import block (lines 83-85), add the fourth line:
 
 ```python
-        from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install
-        from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
-        from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
-        from proxploy.services import storagejobs as _storagejobs  # noqa: F401 — registers storage.upload/delete_volume
+        from proxploy.services import appstore as _appstore  # noqa: F401, registers app.install
+        from proxploy.services import catalog as _catalog  # noqa: F401, registers catalog.refresh
+        from proxploy.services import lifecycle  # noqa: F401, registers job handlers
+        from proxploy.services import storagejobs as _storagejobs  # noqa: F401, registers storage.upload/delete_volume
 ```
 
 - [ ] **Step 8: Add the two routes to `api/storage.py`**
@@ -2371,7 +2371,7 @@ def upload_content(request: Request, host_id: int, name: str,
                                              f"{max_bytes} byte limit")
                 out.write(chunk)
     except BaseException:
-        # Anything at all — cap exceeded, disconnect, cancellation — must not
+        # Anything at all: cap exceeded, disconnect, cancellation; must not
         # leave a partial multi-GB file behind on the Proxploy host.
         with contextlib.suppress(OSError):
             os.unlink(spool)
@@ -2390,7 +2390,7 @@ def upload_content(request: Request, host_id: int, name: str,
 def delete_content(request: Request, host_id: int, name: str, volid: str,
                    node: str | None = None, db=Depends(get_db),
                    user: User = Depends(_require_admin)):
-    """`:path` because a volid is `local:iso/ubuntu.iso` — it carries a slash,
+    """`:path` because a volid is `local:iso/ubuntu.iso`, it carries a slash,
     which a plain `{volid}` converter would refuse to match."""
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
@@ -2424,7 +2424,7 @@ git commit -m "feat(storage): streamed ISO upload + volume delete as tracked job
 
 ---
 
-## Task 5: Storage manage — attach / edit / detach
+## Task 5: Storage manage: attach / edit / detach
 
 **Files:**
 - Modify: `backend/proxploy/services/proxmox.py`, `backend/proxploy/api/storage.py`, `backend/tests/fakes/pve.py`
@@ -2433,25 +2433,25 @@ git commit -m "feat(storage): streamed ISO upload + volume delete as tracked job
 **Interfaces:**
 - Consumes: `proxploy.services.hostclient::client_for_host` (Task 1), `proxploy.api.storage::_host_or_404` (Task 3), `proxploy.services.audit::write_audit` and its `redact`/`REDACT_SUBSTRINGS`, `proxploy.api.deps::require_role`.
 - Produces:
-  - `ProxmoxClient.storage_create(config: dict) -> None`, `storage_update(storage: str, config: dict) -> None`, `storage_remove(storage: str) -> None` — the **cluster-level** `/storage` endpoints, which are **synchronous and return no UPID**, so none of them goes through `await_task` or the job engine.
+  - `ProxmoxClient.storage_create(config: dict) -> None`, `storage_update(storage: str, config: dict) -> None`, `storage_remove(storage: str) -> None`, the **cluster-level** `/storage` endpoints, which are **synchronous and return no UPID**, so none of them goes through `await_task` or the job engine.
   - routes `POST /api/v1/storage` (201, admin + `storage.manage`), `PATCH /api/v1/storage/{host_id}/{name}` (admin + `storage.manage`), `DELETE /api/v1/storage/{host_id}/{name}` (**owner** + `storage.manage`, per doc 05).
-  - FakePVE: root `.storage` becomes callable — `storage_creates: list[dict]`, `storage_updates: list[tuple[str, dict]]`, `storage_removes: list[str]`.
+  - FakePVE: root `.storage` becomes callable, `storage_creates: list[dict]`, `storage_updates: list[tuple[str, dict]]`, `storage_removes: list[str]`.
 
-> **Plan note — attaching PBS/CIFS/NFS storage carries live credentials.**
+> **Plan note, attaching PBS/CIFS/NFS storage carries live credentials.**
 > `POST /storage` with `type: "pbs"` takes a `password` and a `fingerprint`;
 > CIFS takes `username` + `password`; NFS none. Those values pass **straight
-> through to Proxmox and are never persisted by Proxploy** — there is no storage
+> through to Proxmox and are never persisted by Proxploy**; there is no storage
 > table (doc 04 defines none), these routes are synchronous so there is no
 > `jobs.params` row, and the only thing that touches durable storage is the
 > audit row, whose `params` go through `services/audit.py::redact`.
 > `REDACT_SUBSTRINGS` already contains `"password"`, and `redact` recurses into
 > nested dicts, so a nested `config.password` becomes `"[redacted]"` with no new
-> redaction code. What still needs writing is the **proof** — Step 1's
+> redaction code. What still needs writing is the **proof**, Step 1's
 > `test_pbs_attach_never_persists_or_echoes_the_password` asserts the secret is
 > absent from the response body, absent from every `audit_events.params`,
 > absent from `jobs`, and yet arrived at Proxmox verbatim. It is the
 > storage-shaped sibling of `tests/test_no_secret_echo.py`'s repo-wide
-> invariant. The routes also never echo `config` back — the responses return
+> invariant. The routes also never echo `config` back, the responses return
 > identifiers and, for PATCH, the *names* of the keys changed, mirroring the
 > `settings.update` convention that audits key names but never values.
 
@@ -2547,7 +2547,7 @@ def test_pbs_attach_never_persists_or_echoes_the_password(tmp_path, csrf_header,
             attach = next(x for x in rows if x.action == "storage.create")
             assert attach.params["config"]["password"] == "[redacted]"
             assert attach.params["config"]["server"] == "10.0.0.20"  # not over-redacted
-            # 4. these routes are synchronous — no job row, so no jobs.params copy
+            # 4. these routes are synchronous: no job row, so no jobs.params copy
             assert db.query(Job).count() == 0
         # 5. and it does not come back out of GET /audit either
         assert PBS_PASSWORD not in c.get("/api/v1/audit").text
@@ -2595,7 +2595,7 @@ def test_detach_removes_upstream_and_audits(tmp_path, csrf_header, bootstrap_adm
 
 def test_detach_is_owner_only_while_attach_is_admin(tmp_path, csrf_header,
                                                     bootstrap_admin):
-    """Doc 05: POST/PATCH are admin, DELETE is owner — detaching is the one that
+    """Doc 05: POST/PATCH are admin, DELETE is owner; detaching is the one that
     can strand a guest's disks behind a removed definition."""
     from fastapi.testclient import TestClient
     from tests.fakes.pve import FakePVE
@@ -2643,7 +2643,7 @@ def test_upstream_failure_is_a_502_that_leaks_no_secret(tmp_path, csrf_header,
 - [ ] **Step 2: Run to verify the failures**
 
 Run: `cd backend && pytest tests/test_storage_manage.py -v`
-Expected: FAIL — `POST /api/v1/storage` returns 405 (`""` is registered GET-only) and `PATCH`/`DELETE /api/v1/storage/{host_id}/{name}` return 405 too, so every assertion on `status_code == 201`/`200`/`403` fails.
+Expected: FAIL, `POST /api/v1/storage` returns 405 (`""` is registered GET-only) and `PATCH`/`DELETE /api/v1/storage/{host_id}/{name}` return 405 too, so every assertion on `status_code == 201`/`200`/`403` fails.
 
 - [ ] **Step 3: Add the three cluster-level `ProxmoxClient` methods**
 
@@ -2653,17 +2653,17 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
     # --- storage definition management (Phase 6) ----------------------------
     # These three hit the CLUSTER-level /storage endpoints, not /nodes/{n}/…:
     # a storage definition lives in /etc/pve/storage.cfg and is cluster-wide.
-    # They are SYNCHRONOUS — Proxmox returns no UPID, so there is nothing to
+    # They are SYNCHRONOUS: Proxmox returns no UPID, so there is nothing to
     # poll and these are plain route calls rather than jobs.
     #
     # `config` may carry a live credential (PBS `password`, CIFS `username`/
     # `password`). It is forwarded and forgotten: nothing here logs, stores or
-    # returns it, and _wrap below scrubs only OUR token — the caller's secret
+    # returns it, and _wrap below scrubs only OUR token: the caller's secret
     # never enters an exception message because it is a request body, not a
     # header, and proxmoxer does not echo request bodies in its errors.
 
     def storage_create(self, config: dict) -> None:
-        """POST /storage — `config` must include `storage` and `type`."""
+        """POST /storage, `config` must include `storage` and `type`."""
         try:
             self._connect().storage.post(**config)
         except ProxmoxError:
@@ -2673,7 +2673,7 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
                              e) from e
 
     def storage_update(self, storage: str, config: dict) -> None:
-        """PUT /storage/{storage} — only the keys given are changed."""
+        """PUT /storage/{storage}, only the keys given are changed."""
         try:
             self._connect().storage(storage).put(**config)
         except ProxmoxError:
@@ -2682,7 +2682,7 @@ Append to `class ProxmoxClient` in `backend/proxploy/services/proxmox.py`:
             raise self._wrap(f"updating storage {storage!r} failed", e) from e
 
     def storage_remove(self, storage: str) -> None:
-        """DELETE /storage/{storage} — drops the definition; upstream data stays."""
+        """DELETE /storage/{storage}, drops the definition; upstream data stays."""
         try:
             self._connect().storage(storage).delete()
         except ProxmoxError:
@@ -2697,7 +2697,7 @@ Task 1 wired a root `.storage` leaf serving `cluster_storage_rows` via `.get()`.
 
 ```python
 class _ClusterStorageLeaf:
-    """root .storage(name) — the cluster-level storage definition."""
+    """root .storage(name), the cluster-level storage definition."""
 
     def __init__(self, owner, name):
         self._owner, self._name = owner, name
@@ -2716,7 +2716,7 @@ class _ClusterStorageLeaf:
 
 
 class _ClusterStorageFactory:
-    """root .storage — .get() lists definitions, .post() creates one,
+    """root .storage.get() lists definitions.post() creates one,
     calling it drills into a named definition. All three are synchronous in
     Proxmox and return no UPID, so none of them mints one here either."""
 
@@ -2769,7 +2769,7 @@ class StorageAttachIn(BaseModel):
     """`config` is a free-form passthrough because the key set is per-plugin
     (dir wants `path`, nfs wants `server`+`export`, pbs wants `server`+
     `datastore`+`username`+`password`+`fingerprint`) and Proxmox is the
-    authority on what is valid — mirroring it here would be a second schema to
+    authority on what is valid, mirroring it here would be a second schema to
     keep in sync and a new way to reject a storage type Proxmox supports.
     It may carry a live credential; see the module note on where it does NOT go."""
     host_id: int
@@ -2794,7 +2794,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
 
     Synchronous: Proxmox returns no UPID for /storage, so there is no job and
     therefore no `jobs.params` row holding `body.config`. The audit row is the
-    only durable trace, and write_audit runs it through redact() — nested
+    only durable trace, and write_audit runs it through redact(); nested
     `config.password` included.
 
     The response deliberately echoes NO config: a credential the caller just
@@ -2824,7 +2824,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
                             Depends(require_entitlement("storage.manage"))])
 def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
                  db=Depends(get_db), user: User = Depends(_require_admin)):
-    """Audits the NAMES of the keys changed, never their values — the same rule
+    """Audits the NAMES of the keys changed, never their values; the same rule
     settings.py::patch_settings follows, and the reason a rotated PBS password
     leaves a legible audit trail without leaving the password in it."""
     host = _host_or_404(db, host_id)
@@ -2852,7 +2852,7 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
                    user: User = Depends(_require_owner)):
     """Owner, not admin (doc 05): detaching drops the definition while guest
     disks keep pointing at it, which is the one action here that can strand
-    running guests. Upstream data is left in place — this is not a wipe."""
+    running guests. Upstream data is left in place; this is not a wipe."""
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
@@ -2880,7 +2880,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 7: Re-run the repo-wide secret and auth invariants explicitly**
 
 Run: `cd backend && pytest tests/test_no_secret_echo.py tests/test_route_auth_invariant.py tests/test_audit.py tests/test_audit_api.py -v`
-Expected: PASS. `test_route_auth_invariant` now probes `POST /api/v1/storage`, `PATCH` and `DELETE /api/v1/storage/{host_id}/{name}` anonymously with `_features = {}` and must get 401 on all three — a 403 means the `require_entitlement("storage.manage")` was listed before the role singleton.
+Expected: PASS. `test_route_auth_invariant` now probes `POST /api/v1/storage`, `PATCH` and `DELETE /api/v1/storage/{host_id}/{name}` anonymously with `_features = {}` and must get 401 on all three; a 403 means the `require_entitlement("storage.manage")` was listed before the role singleton.
 
 - [ ] **Step 8: Run the full backend suite**
 
@@ -2905,12 +2905,12 @@ git commit -m "feat(storage): attach/edit/detach storage definitions with creden
 - Test: `backend/tests/test_netconfig.py`, `backend/tests/test_network_api.py`
 
 **Interfaces:**
-- Consumes: Task 1's `proxploy/services/hostclient.py::client_for_host(app, db, host) -> ProxmoxClient`, `ProxmoxClient.node_networks(node, iface_type=None) -> list[dict]`, `ProxmoxClient.guest_config(kind, node, vmid) -> dict`, and Task 1's `FakePVE.networks_by_node: dict[node, list[dict]]` / `FakePVE.guest_configs: dict[tuple[kind, vmid], dict]`. Also `proxploy.services.metrics::pick_resolution/query_series` (the exact pair `api/metrics.py::metrics_query` already uses — there is no second metrics reader in this codebase and this task does not add one), `api/deps.py::get_db/require_role/require_entitlement`, `services/audit.py::write_audit`.
+- Consumes: Task 1's `proxploy/services/hostclient.py::client_for_host(app, db, host) -> ProxmoxClient`, `ProxmoxClient.node_networks(node, iface_type=None) -> list[dict]`, `ProxmoxClient.guest_config(kind, node, vmid) -> dict`, and Task 1's `FakePVE.networks_by_node: dict[node, list[dict]]` / `FakePVE.guest_configs: dict[tuple[kind, vmid], dict]`. Also `proxploy.services.metrics::pick_resolution/query_series` (the exact pair `api/metrics.py::metrics_query` already uses; there is no second metrics reader in this codebase and this task does not add one), `api/deps.py::get_db/require_role/require_entitlement`, `services/audit.py::write_audit`.
 - Produces:
   - `proxploy/services/netconfig.py::parse_net(value: str) -> dict`, `build_net(parts: dict) -> str`, `nic_identity(parts: dict) -> dict`
   - `ProxmoxClient.guest_config_update(kind: str, node: str, vmid: int, config: dict) -> str | None`
   - `proxploy/api/network.py` → `router = APIRouter(prefix="/network", tags=["network"])` with `GET /api/v1/network/bridges?host=` and `GET /api/v1/network/throughput?hours=`, plus the two shared helpers `guest_nics(request, db, host, kind, vmid) -> list[dict]` and `set_guest_nic(request, db, user, *, target_type, target_id, host, kind, vmid, iface, body: NicIn) -> dict` and the `NicIn` pydantic model, all three imported by `api/apps.py` and `api/vms.py`
-  - `GET /api/v1/apps/{app_id}/network`, `PUT /api/v1/apps/{app_id}/network/{iface}`, `GET /api/v1/vms/{vm_id}/network`, `PUT /api/v1/vms/{vm_id}/network/{iface}` — declared in `apps.py`/`vms.py` **above** their `/{id}/{action}` wildcards
+  - `GET /api/v1/apps/{app_id}/network`, `PUT /api/v1/apps/{app_id}/network/{iface}`, `GET /api/v1/vms/{vm_id}/network`, `PUT /api/v1/vms/{vm_id}/network/{iface}`; declared in `apps.py`/`vms.py` **above** their `/{id}/{action}` wildcards
 
 - [ ] **Step 1: Write the failing round-trip test for `netconfig`**
 
@@ -2926,7 +2926,7 @@ below is the guard: unknown keys and the head token survive byte-for-byte.
 # backend/tests/test_netconfig.py
 """netN= round-tripping (doc 01 §6 guest network config).
 
-The MAC lives in the head token — `virtio=AA:BB:CC:DD:EE:FF` — so a parser
+The MAC lives in the head token, `virtio=AA:BB:CC:DD:EE:FF`, so a parser
 that keeps only the keys it understands and rebuilds from those loses it.
 These are the strings PVE actually emits; every one must survive
 build_net(parse_net(s)) == s exactly.
@@ -3002,7 +3002,7 @@ def test_nic_identity_reads_qemu_and_lxc_shapes():
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd backend && python -m pytest tests/test_netconfig.py -q`
-Expected: FAIL at collection — `ModuleNotFoundError: No module named 'proxploy.services.netconfig'`.
+Expected: FAIL at collection, `ModuleNotFoundError: No module named 'proxploy.services.netconfig'`.
 
 - [ ] **Step 3: Write `services/netconfig.py`**
 
@@ -3013,7 +3013,7 @@ Expected: FAIL at collection — `ModuleNotFoundError: No module named 'proxploy
 Proxmox stores a guest NIC as one comma-joined `k=v` string, and the NIC model
 and its MAC address share a single head token: `virtio=AA:BB:CC:DD:EE:FF`.
 That is the whole reason this module exists. Editing a NIC means read the
-string, change one key, write the string back — never rebuild it from a typed
+string, change one key, write the string back; never rebuild it from a typed
 struct, because anything the struct does not model (the MAC, `queues`, an
 option a future PVE adds) would be dropped, and a dropped MAC means Proxmox
 mints a new random one at next start, breaking every DHCP reservation and
@@ -3026,7 +3026,7 @@ back. No key is interpreted, no value is normalised, nothing is sorted.
 from __future__ import annotations
 
 # The qemu NIC models PVE accepts. Used ONLY to recognise which token is the
-# model=MAC head token when reporting a NIC's identity to the UI — never to
+# model=MAC head token when reporting a NIC's identity to the UI: never to
 # validate or rewrite it.
 QEMU_MODELS = frozenset({
     "virtio", "e1000", "e1000-82540em", "e1000-82544gc", "e1000-82545em",
@@ -3059,7 +3059,7 @@ def nic_identity(parts: dict) -> dict:
     """-> {"model", "macaddr"} for both flavours.
 
     qemu puts them in one head token (`virtio=AA:BB:...`); lxc splits them
-    across `type=veth` and `hwaddr=`. Read-only — neither value is ever
+    across `type=veth` and `hwaddr=`. Read-only, neither value is ever
     written back by this module's callers.
     """
     for key, val in parts.items():
@@ -3071,7 +3071,7 @@ def nic_identity(parts: dict) -> dict:
 - [ ] **Step 4: Run to verify the round-trip passes**
 
 Run: `cd backend && python -m pytest tests/test_netconfig.py -q`
-Expected: PASS — 21 passed (7 parametrised × 2 + 7 unparametrised).
+Expected: PASS, 21 passed (7 parametrised × 2 + 7 unparametrised).
 
 - [ ] **Step 5: Add `ProxmoxClient.guest_config_update`**
 
@@ -3084,7 +3084,7 @@ belongs with the other per-guest, user-triggered calls, above `task_status`):
         """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> UPID or None.
 
         NOT long-running: PVE writes the config file synchronously. A RUNNING
-        qemu guest is the one case that returns a UPID — the change lands in
+        qemu guest is the one case that returns a UPID, the change lands in
         the guest's pending-config section and PVE spawns a tiny task to record
         it; the guest itself only picks it up at next boot. A stopped guest or
         an lxc guest returns None and the write is already effective. Callers
@@ -3107,7 +3107,7 @@ attributes to `FakePVE.__init__`:
 
 ```python
 class _ConfigLeaf:
-    """nodes(n).lxc(vmid).config / .qemu(vmid).config — .get() reads, .put() records."""
+    """nodes(n).lxc(vmid).config / .qemu(vmid).config.get() reads.put() records."""
 
     def __init__(self, owner, kind, node, vmid):
         self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
@@ -3235,7 +3235,7 @@ def test_bridges_filters_by_host(tmp_path, csrf_header, bootstrap_admin):
 
 def test_throughput_reads_the_existing_host_metric_series(tmp_path, csrf_header,
                                                           bootstrap_admin):
-    """Same MetricsStore rows /metrics/query serves — no second reader."""
+    """Same MetricsStore rows /metrics/query serves, no second reader."""
     from proxploy.models import utcnow
     from tests.support import make_app
 
@@ -3415,7 +3415,7 @@ def test_missing_session_is_401_not_403(tmp_path, csrf_header):
 - [ ] **Step 8: Run to verify the failures**
 
 Run: `cd backend && python -m pytest tests/test_network_api.py -q`
-Expected: FAIL — every test errors with `404 Not Found` on
+Expected: FAIL, every test errors with `404 Not Found` on
 `/api/v1/network/bridges` and `/api/v1/vms/{id}/network`, and
 `test_network_routes_are_registered_above_the_lifecycle_wildcards` fails with
 `ValueError: '/api/v1/vms/{vm_id}/network' is not in list`.
@@ -3427,11 +3427,11 @@ Expected: FAIL — every test errors with `404 Not Found` on
 """Network reads + guest NIC edit (doc 05 §Network, doc 01 §6).
 
 Doc 05 calls /network/bridges a "live passthrough" and this is exactly that:
-no model, no cache, no migration — one GET /nodes/{node}/network per node of
+no model, no cache, no migration; one GET /nodes/{node}/network per node of
 the requested host(s), served straight back. Throughput is the opposite: it is
 NOT a passthrough, it comes from the `host` target's existing `net_in_bps` /
 `net_out_bps` MetricSample rows the poller has been writing since Phase 2,
-read through services/metrics.py::query_series — the same reader
+read through services/metrics.py::query_series, the same reader
 api/metrics.py::metrics_query uses. There is deliberately no second metrics
 path in this codebase.
 
@@ -3467,7 +3467,7 @@ _require_operator = require_role("operator")
 NET_KEY = re.compile(r"^net\d+$")
 
 # Keys a NIC edit may touch. The head token (model=MAC) and everything else in
-# the string is passed through untouched by netconfig — see that module.
+# the string is passed through untouched by netconfig: see that module.
 EDITABLE = ("bridge", "tag", "firewall", "rate", "mtu", "link_down")
 
 
@@ -3504,7 +3504,7 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[d
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                   target_id: int, host: Host, kind: str, vmid: int,
                   iface: str, body: NicIn) -> dict:
-    """Read-modify-write one netN. NOT a job — see ProxmoxClient.guest_config_update."""
+    """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update."""
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
     node = host.node_name or ""
@@ -3533,7 +3533,7 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         # Honest, not reassuring: PVE handed back a UPID, which for a config
         # write means it filed the change under the guest's PENDING section.
         # The running guest still has the old NIC.
-        "detail": ("Proxmox recorded this as a pending change — the guest keeps its "
+        "detail": ("Proxmox recorded this as a pending change, the guest keeps its "
                    "current NIC until it is rebooted (a shutdown/start, not a reset)."
                    if upid is not None else
                    "Applied immediately; no reboot needed."),
@@ -3567,7 +3567,7 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
     """Bridges/bonds/VLANs/physical NICs per node + the guest attachment map.
 
     # ponytail: the attachment map costs one guest_config read per adopted app
-    # and VM on the host — fine for a homelab, linear in guest count for a
+    # and VM on the host: fine for a homelab, linear in guest count for a
     # 200-guest fleet. This is a human-triggered route, explicitly outside the
     # poller's O(nodes) budget (proxmox.py's "per-guest, user-triggered calls"
     # section). If it ever gets slow, cache netN in the poller's cluster_resources
@@ -3640,7 +3640,7 @@ api_router.include_router(network.router)
 
 In `backend/proxploy/api/vms.py`, add the imports and insert these two routes
 **between `vm_detail` and the `_require_operator = require_role("operator")`
-line that precedes `vm_lifecycle`** — i.e. above `POST /{vm_id}/{action}`:
+line that precedes `vm_lifecycle`**, i.e. above `POST /{vm_id}/{action}`:
 
 ```python
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
@@ -3661,7 +3661,7 @@ def _vm_and_host(db, vm_id: int):
     return v, host
 
 
-# Registered ABOVE the /{vm_id}/{action} wildcard below — Starlette matches in
+# Registered ABOVE the /{vm_id}/{action} wildcard below: Starlette matches in
 # registration order, and although that wildcard is POST-only today, doc 05's
 # future two-segment siblings are not. Same WARNING as apps.py:266-271.
 # test_network_api.py asserts this ordering by route index.
@@ -3737,12 +3737,12 @@ of import introduces no cycle.)
 - [ ] **Step 13: Run the network tests**
 
 Run: `cd backend && python -m pytest tests/test_network_api.py tests/test_netconfig.py -q`
-Expected: PASS — 34 passed (21 netconfig + 13 network API).
+Expected: PASS, 34 passed (21 netconfig + 13 network API).
 
 - [ ] **Step 14: Run the full backend suite**
 
 Run: `cd backend && python -m pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: PASS — Task 5's total + 34. `test_route_auth_invariant.py` and
+Expected: PASS, Task 5's total + 34. `test_route_auth_invariant.py` and
 `test_no_secret_echo.py` must both still pass; a 403-instead-of-401 on any new
 route means the `dependencies=[...]` ordering in Step 9/11/12 was transposed.
 
@@ -3770,8 +3770,8 @@ git commit -m "feat(network): live bridge/throughput reads and MAC-preserving gu
 - Consumes: Task 1's `services/hostclient.py::client_for_host(app, db, host)`, Task 2's `services/pvetask.py::await_task(ctx, client, node, upid, *, timeout_s=300.0, start_pct=10, end_pct=100) -> dict` and `api/jobs.py::enqueue_and_audit(request, db, user, *, kind, target_type, target_id, params, action=None) -> dict`, Task 6's `api/network.py` router and `_require_viewer` singleton, `proxploy.jobs::HANDLERS/JobContext/JobFailed`.
 - Produces:
   - `ProxmoxClient.network_create(node: str, config: dict) -> None`, `network_update(node: str, iface: str, config: dict) -> None`, `network_delete(node: str, iface: str) -> None`, `network_apply(node: str) -> str`, `network_revert(node: str) -> None`
-  - `proxploy/services/guestjobs.py::run_network_apply(ctx: JobContext, params: dict) -> dict` registered as `HANDLERS["network.apply"]`. **This module is the shared home for Tasks 10 and 11's snapshot/create/clone/delete handlers** — they append to it, they do not create a second module.
-  - `POST /api/v1/network/bridges`, `PUT /api/v1/network/bridges/{host_id}/{node}/{iface}`, `DELETE /api/v1/network/bridges/{host_id}/{node}/{iface}`, `POST /api/v1/network/{host_id}/{node}/apply`, `POST /api/v1/network/{host_id}/{node}/revert` — all admin + `network.host_config`
+  - `proxploy/services/guestjobs.py::run_network_apply(ctx: JobContext, params: dict) -> dict` registered as `HANDLERS["network.apply"]`. **This module is the shared home for Tasks 10 and 11's snapshot/create/clone/delete handlers**: they append to it, they do not create a second module.
+  - `POST /api/v1/network/bridges`, `PUT /api/v1/network/bridges/{host_id}/{node}/{iface}`, `DELETE /api/v1/network/bridges/{host_id}/{node}/{iface}`, `POST /api/v1/network/{host_id}/{node}/apply`, `POST /api/v1/network/{host_id}/{node}/revert`, all admin + `network.host_config`
   - Apply's 409 contract: `{"error": "confirm_required", "confirm_phrase": "<node>", "detail": "..."}`, deliberately the same shape as `services/selfguard.py`'s `{"error": "self_target", "confirm_phrase": name, "detail": ...}` so the frontend reuses one dialog vocabulary.
 
 - [ ] **Step 1: Write the failing host-config tests**
@@ -3783,7 +3783,7 @@ git commit -m "feat(network): live bridge/throughput reads and MAC-preserving gu
 PVE stages every network edit into /etc/network/interfaces.new and does
 nothing to the live config until PUT /nodes/{node}/network is called. A bad
 bridge applied to a node takes that node off the network until someone walks
-to it with a keyboard — the single most dangerous call in this phase — so
+to it with a keyboard, the single most dangerous call in this phase, so
 apply requires the node name typed back, mirroring selfguard's confirm shape.
 """
 import asyncio
@@ -3937,7 +3937,7 @@ def test_apply_with_confirm_enqueues_the_job_and_audits_with_job_id(tmp_path, cs
 
 
 def test_revert_needs_no_confirm_and_is_not_a_job(tmp_path, csrf_header, bootstrap_admin):
-    """Reverting only discards /etc/network/interfaces.new — it cannot strand a node."""
+    """Reverting only discards /etc/network/interfaces.new, it cannot strand a node."""
     from tests.support import make_app
 
     fake = _fake()
@@ -3990,7 +3990,7 @@ def test_network_apply_handler_polls_the_upid_to_completion(tmp_path):
     async def run():
         fake = _fake()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers network.apply
+        import proxploy.services.guestjobs  # noqa: F401, registers network.apply
         backend = JobBackend(app)
         host_id = _seed(app)
         with app.state.sessionmaker() as db:
@@ -4035,7 +4035,7 @@ def test_network_apply_fails_the_job_when_proxmox_reports_a_bad_exit(tmp_path):
 - [ ] **Step 2: Run to verify the failures**
 
 Run: `cd backend && python -m pytest tests/test_network_hostconfig.py -q`
-Expected: FAIL — the route tests return `404 Not Found` (assertion errors on
+Expected: FAIL, the route tests return `404 Not Found` (assertion errors on
 status codes), and both handler tests fail with
 `KeyError: "no handler registered for job kind 'network.apply'"`.
 
@@ -4050,7 +4050,7 @@ In `backend/proxploy/services/proxmox.py`, after `guest_config_update` (Task 6):
     # promotes that file. network_revert deletes it.
 
     def network_create(self, node: str, config: dict) -> None:
-        """POST /nodes/{node}/network — stages a new iface. `config` carries
+        """POST /nodes/{node}/network, stages a new iface. `config` carries
         `iface` and `type` plus the PVE options (bridge_ports, cidr, ...)."""
         try:
             self._connect().nodes(node).network.post(**config)
@@ -4060,7 +4060,7 @@ In `backend/proxploy/services/proxmox.py`, after `guest_config_update` (Task 6):
             raise self._wrap(f"staging network interface failed on {node}", e) from e
 
     def network_update(self, node: str, iface: str, config: dict) -> None:
-        """PUT /nodes/{node}/network/{iface} — stages an edit."""
+        """PUT /nodes/{node}/network/{iface}, stages an edit."""
         try:
             self._connect().nodes(node).network(iface).put(**config)
         except ProxmoxError:
@@ -4069,7 +4069,7 @@ In `backend/proxploy/services/proxmox.py`, after `guest_config_update` (Task 6):
             raise self._wrap(f"staging {iface} failed on {node}", e) from e
 
     def network_delete(self, node: str, iface: str) -> None:
-        """DELETE /nodes/{node}/network/{iface} — stages a removal."""
+        """DELETE /nodes/{node}/network/{iface}, stages a removal."""
         try:
             self._connect().nodes(node).network(iface).delete()
         except ProxmoxError:
@@ -4093,7 +4093,7 @@ In `backend/proxploy/services/proxmox.py`, after `guest_config_update` (Task 6):
             raise self._wrap(f"applying network config failed on {node}", e) from e
 
     def network_revert(self, node: str) -> None:
-        """DELETE /nodes/{node}/network — discards /etc/network/interfaces.new."""
+        """DELETE /nodes/{node}/network, discards /etc/network/interfaces.new."""
         try:
             self._connect().nodes(node).network.delete()
         except ProxmoxError:
@@ -4110,7 +4110,7 @@ the class below (it keeps the same `.get()` contract), and wire it in
 
 ```python
 class _NetworkNS:
-    """nodes(n).network — .get() lists, .post/.put/.delete stage, .put() with no
+    """nodes(n).network.get() lists.post/.put/.delete stage.put() with no
     iface applies (returns a UPID), .delete() with no iface reverts. Callable
     for nodes(n).network(iface)."""
 
@@ -4167,7 +4167,7 @@ starting new ones. Shape is services/lifecycle.py's: a blocking `_resolve` in
 a thread, ctx.log/ctx.progress narration, the shared await_task poll loop,
 module-bottom HANDLERS registration.
 
-Registration is by import side effect — main.py's lifespan imports this module
+Registration is by import side effect, main.py's lifespan imports this module
 with a `# noqa: F401`, and without that import none of these kinds exist.
 """
 from __future__ import annotations
@@ -4195,7 +4195,7 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     The confirmation gate lives at the API layer (api/network.py::apply_network);
     by the time this runs the operator has already typed the node name back.
     A failure here can mean the node is unreachable rather than that the apply
-    failed — await_task raising on a lost connection is the honest outcome
+    failed, await_task raising on a lost connection is the honest outcome
     either way, and the transcript keeps the UPID so an operator at the console
     can look the task up locally.
     """
@@ -4222,7 +4222,7 @@ In `backend/proxploy/main.py`, in the `# noqa: F401` import block inside
 `lifespan` (alongside `_appstore` / `_catalog` / `lifecycle`):
 
 ```python
-        from proxploy.services import guestjobs as _guestjobs  # noqa: F401 — registers network.apply
+        from proxploy.services import guestjobs as _guestjobs  # noqa: F401, registers network.apply
 ```
 
 Without this line `HANDLERS["network.apply"]` never exists and every apply
@@ -4278,7 +4278,7 @@ class ApplyIn(BaseModel):
 # ponytail: Proxploy does not detect whether staged changes exist, so Apply and
 # Revert are always offered rather than enabled-when-dirty. PVE reports pending
 # state as a `changes` property SIBLING to `data` on GET /nodes/{node}/network,
-# and proxmoxer's .get() unwraps `data` and throws the rest away — reading it
+# and proxmoxer's .get() unwraps `data` and throws the rest away: reading it
 # would mean bypassing the client layer, which proxmox.py's module docstring
 # forbids outright. A no-op apply is handled gracefully by PVE (it reloads the
 # unchanged config), so the cost of not knowing is one wasted ifreload.
@@ -4388,14 +4388,14 @@ them in this order.
 - [ ] **Step 8: Run the host-config tests**
 
 Run: `cd backend && python -m pytest tests/test_network_hostconfig.py -q`
-Expected: PASS — 11 passed.
+Expected: PASS, 11 passed.
 
 - [ ] **Step 9: Run the full backend suite**
 
 Run: `cd backend && python -m pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: PASS — Task 6's total + 11. `test_route_auth_invariant.py` must still
+Expected: PASS, Task 6's total + 11. `test_route_auth_invariant.py` must still
 pass on all five new routes (`_require_admin` first in every
-`dependencies=[...]`), and `test_job_backend.py` must still pass — `guestjobs`
+`dependencies=[...]`), and `test_job_backend.py` must still pass; `guestjobs`
 adds a key to `HANDLERS`, it does not change the registry's shape.
 
 - [ ] **Step 10: Commit**
@@ -4421,7 +4421,7 @@ git commit -m "feat(network): host bridge/VLAN staging with confirmed apply and 
 - Consumes (Task 1): `proxploy.services.hostclient.client_for_host(app, db, host) -> ProxmoxClient`, `ProxmoxClient.storages(node: str) -> list[dict]`, `ProxmoxClient.storage_content(node: str, storage: str, content: str | None = None) -> list[dict]`, and the FakePVE attributes `storages_by_node: dict[str, list[dict]]` / `content_by_storage: dict[str, list[dict]]` with the namespace classes serving them. Also `proxploy.services.settings.get_setting/set_setting`, `proxploy.jobs.HANDLERS/JobContext`, `proxploy.api.deps.require_role/require_entitlement/get_db`.
 - Produces:
   - `proxploy/services/backupjobs.py::parse_volid(volid: str) -> tuple[str | None, int | None]`
-  - `proxploy/services/backupjobs.py::sync_host_backups(app, host_id: int) -> dict` — blocking; `{"host_id", "synced", "dropped"}`
+  - `proxploy/services/backupjobs.py::sync_host_backups(app, host_id: int) -> dict`: blocking; `{"host_id", "synced", "dropped"}`
   - `proxploy/services/backupjobs.py::sync_in_flight(db) -> bool`
   - `proxploy/services/backupjobs.py::SYNCED_AT_KEY = "backup.synced_at"`
   - job kind `backup.sync` → `sync_backups(ctx: JobContext, params: dict) -> dict`
@@ -4544,7 +4544,7 @@ def test_backup_sync_job_runs_end_to_end(tmp_path):
     async def run():
         fake = _fake_with_backups()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.backupjobs  # noqa: F401 — registers backup.sync
+        import proxploy.services.backupjobs  # noqa: F401, registers backup.sync
 
         assert "backup.sync" in HANDLERS
         backend = JobBackend(app)
@@ -4686,7 +4686,7 @@ def test_backups_list_requires_auth(tmp_path):
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_backups_sync.py -q`
-Expected: FAIL — every test errors with `ModuleNotFoundError: No module named 'proxploy.services.backupjobs'` (the two route tests fail on the same import; the last one fails with `assert 404 == 401`).
+Expected: FAIL, every test errors with `ModuleNotFoundError: No module named 'proxploy.services.backupjobs'` (the two route tests fail on the same import; the last one fails with `assert 404 == 401`).
 
 - [ ] **Step 3: Add the staleness setting**
 
@@ -4696,7 +4696,7 @@ In `backend/proxploy/config.py`, after `console_idle_timeout_s`:
     backup_sync_stale_s: float = 900.0
 ```
 
-- [ ] **Step 4: Write `services/backupjobs.py` — volid parsing + the per-host mirror**
+- [ ] **Step 4: Write `services/backupjobs.py`, volid parsing + the per-host mirror**
 
 ```python
 # backend/proxploy/services/backupjobs.py
@@ -4706,7 +4706,7 @@ In `backend/proxploy/config.py`, after `console_idle_timeout_s`:
 sync writes what Proxmox currently reports and deletes rows whose volid vanished
 upstream. Proxmox is the source of truth; this table only feeds the Backups page.
 
-Unlike `vms`, this is NOT on the 30 s poll cycle — listing storage content is a
+Unlike `vms`, this is NOT on the 30 s poll cycle; listing storage content is a
 per-storage call, not part of the `/cluster/resources` bulk read the doc-02 §3
 budget allows. It runs as a job: on demand from the page (when the cache is
 stale) and after every backup mutation.
@@ -4755,7 +4755,7 @@ def _has_backup_content(entry: dict) -> bool:
 def _taken_at(ctime) -> datetime | None:
     if ctime in (None, ""):
         return None
-    # naive UTC, matching models.utcnow() — every other datetime column is naive
+    # naive UTC, matching models.utcnow(): every other datetime column is naive
     return datetime.fromtimestamp(int(ctime), timezone.utc).replace(tzinfo=None)
 
 
@@ -4821,7 +4821,7 @@ Append to `backend/proxploy/services/backupjobs.py`:
 
 ```python
 async def sync_backups(ctx: JobContext, params: dict) -> dict:
-    """`backup.sync` — every connected host, or one when `host_id` is given.
+    """`backup.sync`, every connected host, or one when `host_id` is given.
 
     One bad host is recorded and skipped: a host missing its API token must not
     stop the other three from syncing (services/catalog.py::run_ingest's rule).
@@ -4838,7 +4838,7 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
     for i, hid in enumerate(host_ids):
         try:
             r = await asyncio.to_thread(sync_host_backups, app, hid)
-        except Exception as e:  # noqa: BLE001 — one bad host can't kill the batch
+        except Exception as e:  # noqa: BLE001, one bad host can't kill the batch
             failed.append({"host_id": hid, "reason": str(e)})
             ctx.log(f"host {hid}: {e}", stream="stderr")
             continue
@@ -4848,7 +4848,7 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
     with app.state.sessionmaker() as db:
         # Recorded even when zero backups were found: "the cache is empty" and
         # "the cache was never filled" are different, and only this key can tell
-        # the GET route apart — otherwise a cluster with no backups re-enqueues
+        # the GET route apart: otherwise a cluster with no backups re-enqueues
         # a sync on every page load.
         set_setting(db, SYNCED_AT_KEY, utcnow().isoformat())
     ctx.log(f"{synced} backups cached, {dropped} dropped, {len(failed)} host(s) failed")
@@ -4872,7 +4872,7 @@ HANDLERS["backup.sync"] = sync_backups
 In `backend/proxploy/main.py`, in the lifespan's `# noqa: F401` import block (next to `_appstore` and `_catalog`), add:
 
 ```python
-        from proxploy.services import backupjobs as _backupjobs  # noqa: F401 — registers backup.*
+        from proxploy.services import backupjobs as _backupjobs  # noqa: F401, registers backup.*
 ```
 
 Without this line `HANDLERS["backup.sync"]` never registers and `enqueue` raises `KeyError`.
@@ -4883,7 +4883,7 @@ Without this line `HANDLERS["backup.sync"]` never registers and `enqueue` raises
 # backend/proxploy/api/backups.py
 """Backups page endpoints (doc 05 §Backups, doc 01 §7).
 
-The list is served from the `backups` cache table, never live from Proxmox —
+The list is served from the `backups` cache table, never live from Proxmox; 
 listing storage content is a per-storage call and this page is polled. The
 `backup.sync` job is what fills it, and the GET below fires one when the cache
 has gone stale so a fresh install is never permanently blank.
@@ -4995,12 +4995,12 @@ api_router.include_router(backups.router)
 - [ ] **Step 9: Run the task's tests**
 
 Run: `cd backend && pytest tests/test_backups_sync.py -q`
-Expected: PASS — 9 passed.
+Expected: PASS, 9 passed.
 
 - [ ] **Step 10: Run the full backend suite**
 
 Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: Task 7's total + 9 passed, 0 failed, 0 errors. `test_route_auth_invariant.py` and `test_no_secret_echo.py` must still pass — the new route is automatically in their sweep.
+Expected: Task 7's total + 9 passed, 0 failed, 0 errors. `test_route_auth_invariant.py` and `test_no_secret_echo.py` must still pass, the new route is automatically in their sweep.
 
 - [ ] **Step 11: Commit**
 
@@ -5030,7 +5030,7 @@ git commit -m "feat(backups): backup.sync cache job + cached GET /backups with s
 
 **`selfguard.DESTRUCTIVE` is deliberately NOT extended.** It is a set of *guest
 lifecycle verbs* consumed by exactly one caller, `api/apps.py::enqueue_lifecycle`,
-via `if action in DESTRUCTIVE` — and `enqueue_lifecycle` is never reached with
+via `if action in DESTRUCTIVE`, and `enqueue_lifecycle` is never reached with
 `"restore"` or `"delete"`, because backups have their own routes with their own
 bodies. Adding the two strings would change no behaviour and would falsely imply
 the lifecycle wildcard accepts them. `DELETE /backups/{id}` deletes an *archive*,
@@ -5150,7 +5150,7 @@ def _run_job(tmp_path, kind, params, seed_status="stopped"):
     async def go():
         fake = _fake()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.backupjobs  # noqa: F401 — registers backup.*
+        import proxploy.services.backupjobs  # noqa: F401, registers backup.*
 
         backend = JobBackend(app)
         ids = _seed(app, ct_status=seed_status)
@@ -5299,7 +5299,7 @@ def test_in_place_restore_requires_the_typed_name(tmp_path, csrf_header,
         assert r.status_code == 409
         # main.py::problem_handler does `body.update(exc.detail)` for a dict
         # detail, so a dict HTTPException body serialises FLAT, not nested
-        # under "detail" — same shape test_lifecycle_api.py already asserts.
+        # under "detail": same shape test_lifecycle_api.py already asserts.
         assert r.json()["error"] == "confirm_required"
         assert r.json()["confirm_phrase"] == "Immich"
         r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
@@ -5336,7 +5336,7 @@ def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
         assert body["error"] == "self_target" and body["confirm_phrase"] == "Immich"
         with app.state.sessionmaker() as db:
             assert db.query(Job).filter_by(kind="backup.restore").count() == 0
-        # restore-as-new over the same backup is fine — it takes a fresh vmid
+        # restore-as-new over the same backup is fine: it takes a fresh vmid
         r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
                    json={"mode": "new"}, headers=csrf_header(c))
         assert r.status_code == 202, r.text
@@ -5414,7 +5414,7 @@ def test_literal_routes_are_registered_above_the_id_routes(tmp_path):
 
 
 def test_selfguard_destructive_set_is_unchanged():
-    """Backup restore/delete are NOT lifecycle verbs — see this task's note."""
+    """Backup restore/delete are NOT lifecycle verbs, see this task's note."""
     from proxploy.services.selfguard import DESTRUCTIVE
 
     assert DESTRUCTIVE == frozenset({"stop", "shutdown", "restart", "pause"})
@@ -5423,7 +5423,7 @@ def test_selfguard_destructive_set_is_unchanged():
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_backups_api.py -q`
-Expected: FAIL — the client-level tests fail with `AttributeError: 'ProxmoxClient' object has no attribute 'prune_preview'`, the job tests with `KeyError: "no handler registered for job kind 'backup.run'"`, and the route tests with `assert 404 == 202`.
+Expected: FAIL, the client-level tests fail with `AttributeError: 'ProxmoxClient' object has no attribute 'prune_preview'`, the job tests with `KeyError: "no handler registered for job kind 'backup.run'"`, and the route tests with `assert 404 == 202`.
 
 - [ ] **Step 3: Add the four `ProxmoxClient` methods**
 
@@ -5461,7 +5461,7 @@ In `backend/proxploy/services/proxmox.py`, after `task_log`:
             raise self._wrap(f"restore of {kind}/{vmid} failed on {node}", e) from e
 
     def prune_preview(self, node: str, storage: str, params: dict) -> list[dict]:
-        """GET /nodes/{node}/storage/{storage}/prunebackups — a DRY RUN.
+        """GET /nodes/{node}/storage/{storage}/prunebackups, a DRY RUN.
 
         Marks each volume keep|remove|protected and deletes nothing. The real
         deletion is the DELETE verb in prune_backups() below; the two must stay
@@ -5505,7 +5505,7 @@ class _VzdumpLeaf:
 
 
 class _PruneLeaf:
-    """nodes(n).storage(s).prunebackups — .get() previews, .delete() deletes.
+    """nodes(n).storage(s).prunebackups.get() previews.delete() deletes.
     Recorded separately so a test can prove the preview never deletes."""
 
     def __init__(self, owner, node, storage):
@@ -5531,7 +5531,7 @@ Wire `_VzdumpLeaf` into `_NodeNS.__init__`:
 ```
 
 Wire `_PruneLeaf` into the storage namespace class Task 1 added (`_StorageNS`, the
-object `.nodes(n).storage(name)` returns) — one line in its `__init__`, alongside
+object `.nodes(n).storage(name)` returns), one line in its `__init__`, alongside
 its existing `.status` / `.content` attributes:
 
 ```python
@@ -5539,7 +5539,7 @@ its existing `.status` / `.content` attributes:
 ```
 
 Give `_GuestFactory` a `.post()` so `.nodes(n).lxc.post(...)` works (the guest
-*create* endpoint — restore here, `vm.create` in Task 11):
+*create* endpoint, restore here, `vm.create` in Task 11):
 
 ```python
     def post(self, **kwargs):
@@ -5621,7 +5621,7 @@ Append to `backend/proxploy/services/backupjobs.py`:
 
 ```python
 async def run_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.run` — one vzdump task over the selected guests, or all of them."""
+    """`backup.run`, one vzdump task over the selected guests, or all of them."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
     client, node, host_name = await asyncio.to_thread(_host_target, app, host_id)
@@ -5651,7 +5651,7 @@ Append to `backend/proxploy/services/backupjobs.py`:
 
 ```python
 async def restore_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.restore` — in place (same vmid, force=1) or as new (fresh vmid).
+    """`backup.restore`, in place (same vmid, force=1) or as new (fresh vmid).
 
     The route already refused an in-place restore over a running guest or over
     Proxploy itself; this handler assumes that gate was passed.
@@ -5691,7 +5691,7 @@ Append to `backend/proxploy/services/backupjobs.py`:
 
 ```python
 async def delete_backup(ctx: JobContext, params: dict) -> dict:
-    """`backup.delete` — remove one archive upstream, then re-mirror."""
+    """`backup.delete`, remove one archive upstream, then re-mirror."""
     app = ctx.backend.app
     client, node, info = await asyncio.to_thread(
         _backup_target, app, int(params["backup_id"]))
@@ -5709,7 +5709,7 @@ async def delete_backup(ctx: JobContext, params: dict) -> dict:
 
 
 async def prune_backups_job(ctx: JobContext, params: dict) -> dict:
-    """`backup.prune` — apply a retention spec for real. `spec` was built and
+    """`backup.prune`, apply a retention spec for real. `spec` was built and
     validated by the route; an empty one would mark every archive `remove`."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
@@ -5756,11 +5756,11 @@ _require_admin = require_role("admin")
 ```
 
 Then append (these literal-segment routes are declared **before** any
-`/{backup_id}` route — Starlette matches in registration order):
+`/{backup_id}` route, Starlette matches in registration order):
 
 ```python
 class GuestRef(BaseModel):
-    type: str  # "app" | "vm" — Proxploy row ids, never raw vmids
+    type: str  # "app" | "vm", Proxploy row ids, never raw vmids
     id: int
 
 
@@ -5859,7 +5859,7 @@ def restore_backup_route(request: Request, backup_id: int,
             raise HTTPException(409, {
                 "error": "guest_missing",
                 "detail": (f"{b.guest_type} {b.guest_vmid} no longer exists on this "
-                           f"host — restore as new instead.")})
+                           f"host, restore as new instead.")})
         if isinstance(guest, App) and is_self(db, "app", guest.id):
             # Unlike enqueue_lifecycle's confirmable stop, this one is refused
             # outright: an in-place restore over Proxploy's own CT destroys the
@@ -5891,7 +5891,7 @@ def restore_backup_route(request: Request, backup_id: int,
                                      "storage": body.storage})
 ```
 
-**Note for the reviewer:** `services/selfguard.py` is deliberately untouched —
+**Note for the reviewer:** `services/selfguard.py` is deliberately untouched, 
 `DESTRUCTIVE` holds guest *lifecycle verbs* and its only consumer is
 `enqueue_lifecycle`, which backup routes never call. See this task's header note;
 `test_selfguard_destructive_set_is_unchanged` locks it.
@@ -5936,7 +5936,7 @@ def prune_preview_route(request: Request, host_id: int, storage: str,
                         keep_monthly: int | None = None, keep_yearly: int | None = None,
                         guest_type: str | None = None, vmid: int | None = None,
                         db=Depends(get_db), user: User = Depends(_require_admin)):
-    """Dry run. Calls the GET verb only — this endpoint cannot delete anything;
+    """Dry run. Calls the GET verb only, this endpoint cannot delete anything;
     POST /backups/prune is the one that does."""
     host = db.get(Host, host_id)
     if host is None:
@@ -6002,12 +6002,12 @@ from proxploy.services.hostclient import client_for_host
 - [ ] **Step 11: Run the task's tests**
 
 Run: `cd backend && pytest tests/test_backups_api.py -q`
-Expected: PASS — 20 passed.
+Expected: PASS, 20 passed.
 
 - [ ] **Step 12: Run the full backend suite**
 
 Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: Task 8's total + 20 passed, 0 failed, 0 errors. `test_route_auth_invariant.py` must still pass — all five new routes put the role singleton at position 0 in `dependencies=[...]`.
+Expected: Task 8's total + 20 passed, 0 failed, 0 errors. `test_route_auth_invariant.py` must still pass, all five new routes put the role singleton at position 0 in `dependencies=[...]`.
 
 - [ ] **Step 13: Commit**
 
@@ -6018,7 +6018,7 @@ git commit -m "feat(backups): run, restore (in place/as new), delete and prune j
 
 ---
 
-## Task 10: VM snapshots — list / create / rollback / delete
+## Task 10: VM snapshots: list / create / rollback / delete
 
 **Files:**
 - Modify: `backend/proxploy/services/proxmox.py`, `backend/proxploy/services/guestjobs.py`, `backend/proxploy/api/vms.py`, `backend/tests/fakes/pve.py`
@@ -6027,23 +6027,23 @@ git commit -m "feat(backups): run, restore (in place/as new), delete and prune j
 **Interfaces:**
 - Consumes (Task 1): `proxploy.services.hostclient.client_for_host(app, db, host) -> ProxmoxClient`, `ProxmoxClient.snapshots(kind: str, node: str, vmid: int) -> list[dict]`, FakePVE's `snapshots_by_guest: dict[tuple[str, int], list[dict]]` and its `_SnapshotNS` read class.
 - Consumes (Task 2): `proxploy.services.pvetask.await_task(ctx, client, node, upid, *, timeout_s=300.0, start_pct=10, end_pct=100) -> dict`; `proxploy.api.jobs.enqueue_and_audit(request, db, user, *, kind, target_type, target_id, params, action=None) -> dict`.
-- Consumes (Task 7): `proxploy/services/guestjobs.py` (created there, already imported in `main.py`'s lifespan `# noqa: F401` block — this task only appends to it).
+- Consumes (Task 7): `proxploy/services/guestjobs.py` (created there, already imported in `main.py`'s lifespan `# noqa: F401` block, this task only appends to it).
 - Consumes (existing): `proxploy.api.deps.{get_db, require_role, require_entitlement}`, `proxploy.jobs.{HANDLERS, JobContext, JobFailed}`, `proxploy.services.audit.write_audit`, `proxploy.api.jobs.job_out`.
 - Produces:
   - `ProxmoxClient.snapshot_create(kind: str, node: str, vmid: int, name: str, description: str | None = None, vmstate: bool = False) -> str` (UPID)
   - `ProxmoxClient.snapshot_rollback(kind: str, node: str, vmid: int, name: str) -> str` (UPID)
   - `ProxmoxClient.snapshot_delete(kind: str, node: str, vmid: int, name: str) -> str` (UPID)
-  - `proxploy/services/guestjobs.py::_vm_target(app, vm_id: int) -> tuple[ProxmoxClient, str, int, str, int]` — blocking; `(client, node, vmid, name, host_id)`
+  - `proxploy/services/guestjobs.py::_vm_target(app, vm_id: int) -> tuple[ProxmoxClient, str, int, str, int]`: blocking; `(client, node, vmid, name, host_id)`
   - job kinds `vm.snapshot_create`, `vm.snapshot_rollback`, `vm.snapshot_delete`
   - `proxploy/api/vms.py`: `SNAP_NAME_RE`, `_snapshot_out(s: dict) -> dict`, routes
     `GET /api/v1/vms/{vm_id}/snapshots` (viewer, `vms.snapshots`),
     `POST /api/v1/vms/{vm_id}/snapshots` (operator, `vms.snapshots`),
     `POST /api/v1/vms/{vm_id}/snapshots/{name}/rollback` (admin, `vms.snapshots`),
     `DELETE /api/v1/vms/{vm_id}/snapshots/{name}` (operator, `vms.snapshots`)
-    — **all four registered above the `POST /{vm_id}/{action}` wildcard**
+    **all four registered above the `POST /{vm_id}/{action}` wildcard**
   - FakePVE: `_SnapshotNS` gains `.post()` and `__call__`; new `_SnapshotItemNS`, `_RollbackLeaf`; recorders `fake.snapshot_creates`, `fake.snapshot_rollbacks`, `fake.snapshot_deletes`
 
-**No migration.** Snapshots are never persisted — doc 05 says "List snapshots (live from Proxmox)" and there is no snapshot model anywhere in `models/__init__.py`. The GET below reads Proxmox on every request.
+**No migration.** Snapshots are never persisted, doc 05 says "List snapshots (live from Proxmox)" and there is no snapshot model anywhere in `models/__init__.py`. The GET below reads Proxmox on every request.
 
 **The headline risk of this task is route ordering.** `api/vms.py` ends with the
 catch-all `POST /{vm_id}/{action}` and Starlette matches in registration order.
@@ -6060,7 +6060,7 @@ re-ordering is caught by both.
 """VM snapshots (doc 05 §VMs, doc 01 §4 "with-RAM option surfaced").
 
 Two properties here are load-bearing and each gets its own test:
-  1. all four routes sit ABOVE api/vms.py's POST /{vm_id}/{action} wildcard —
+  1. all four routes sit ABOVE api/vms.py's POST /{vm_id}/{action} wildcard, 
      otherwise POST /vms/3/snapshots is dispatched as the lifecycle action
      "snapshots" and 422s;
   2. PVE's snapshot list carries a synthetic `current` pseudo-snapshot for the
@@ -6303,7 +6303,7 @@ def _run_job(tmp_path, kind, params_from_ids):
     async def go():
         fake = _fake()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers vm.snapshot_*
+        import proxploy.services.guestjobs  # noqa: F401, registers vm.snapshot_*
 
         backend = JobBackend(app)
         ids = _seed(app)
@@ -6377,7 +6377,7 @@ def test_a_failing_pve_task_fails_the_snapshot_job(tmp_path):
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_snapshots_api.py -q`
-Expected: FAIL — 12 failed. The two client-level tests fail with
+Expected: FAIL, 12 failed. The two client-level tests fail with
 `AttributeError: 'ProxmoxClient' object has no attribute 'snapshot_create'`; the
 route tests fail with `assert 404 == 200` / `assert 422 == 202`
 (`test_post_snapshots_is_not_swallowed_by_the_lifecycle_wildcard` is the
@@ -6402,7 +6402,7 @@ In `backend/proxploy/services/proxmox.py`, after `task_log` (and after Task 1's
 
         `vmstate` is doc 01 §4's "with-RAM option": PVE dumps the guest's memory
         into the snapshot so a rollback resumes mid-execution. It exists only on
-        the qemu endpoint — PVE's lxc snapshot API has no such parameter — so a
+        the qemu endpoint, PVE's lxc snapshot API has no such parameter, so a
         container request for it is refused here rather than silently dropped,
         which would produce a snapshot the caller believes has RAM in it.
         """
@@ -6419,7 +6419,7 @@ In `backend/proxploy/services/proxmox.py`, after `task_log` (and after Task 1's
             return guest.snapshot.post(**call)
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001, one wrap point, like version()
             raise self._wrap(f"snapshot {name!r} of {kind}/{vmid} failed on {node}",
                              e) from e
 
@@ -6455,7 +6455,7 @@ In `backend/proxploy/services/proxmox.py`, after `task_log` (and after Task 1's
 In `backend/tests/fakes/pve.py`, **replace** the read-only `_SnapshotNS` Task 1
 added with the version below and add the two new leaf classes above it. The
 `snapshots_by_guest` attribute and the `_GuestNS.__init__` wiring line Task 1
-wrote are unchanged — `.get()` keeps the same behaviour, so Task 1's tests are
+wrote are unchanged, `.get()` keeps the same behaviour, so Task 1's tests are
 unaffected.
 
 ```python
@@ -6473,7 +6473,7 @@ class _RollbackLeaf:
 
 
 class _SnapshotItemNS:
-    """nodes(n).<kind>(vmid).snapshot(name) — .rollback.post() and .delete()."""
+    """nodes(n).<kind>(vmid).snapshot(name).rollback.post() and .delete()."""
 
     def __init__(self, owner, kind, node, vmid, name):
         self._owner, self._kind = owner, kind
@@ -6489,7 +6489,7 @@ class _SnapshotItemNS:
 
 
 class _SnapshotNS:
-    """nodes(n).<kind>(vmid).snapshot — .get() lists, .post() creates, and the
+    """nodes(n).<kind>(vmid).snapshot.get() lists.post() creates, and the
     object itself is callable with a snapshot name (proxmoxer's own shape)."""
 
     def __init__(self, owner, kind, node, vmid):
@@ -6540,7 +6540,7 @@ from proxploy.services.pvetask import await_task
 def _vm_target(app, vm_id: int):
     """Blocking: vms.id -> (client, node, vmid, name, host_id). Runs in a thread.
 
-    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch —
+    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch; 
     everything in this module is qemu-only (doc 05 puts snapshots, create and
     clone under /vms).
     """
@@ -6556,7 +6556,7 @@ def _vm_target(app, vm_id: int):
 
 
 async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_create` — take a snapshot, optionally with RAM."""
+    """`vm.snapshot_create`, take a snapshot, optionally with RAM."""
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
     name = params["name"]
@@ -6575,7 +6575,7 @@ async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
 
 
 async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_rollback` — discard everything since the snapshot.
+    """`vm.snapshot_rollback`, discard everything since the snapshot.
 
     The route already took the typed confirmation. PVE refuses a rollback of a
     running VM unless the snapshot carries vmstate, and that refusal is surfaced
@@ -6599,7 +6599,7 @@ async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
 
 
 async def snapshot_delete_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_delete` — remove one snapshot; the guest is untouched."""
+    """`vm.snapshot_delete`, remove one snapshot; the guest is untouched."""
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
     name = params["name"]
@@ -6623,7 +6623,7 @@ HANDLERS["vm.snapshot_delete"] = snapshot_delete_job
 - [ ] **Step 6: Hoist the role singletons in `api/vms.py`**
 
 The four snapshot routes must be registered **above** `vm_lifecycle`, and they
-need the role singletons — but `_require_operator` is currently assigned at
+need the role singletons, but `_require_operator` is currently assigned at
 vms.py:54, *below* where the new routes go, so referencing it there would raise
 `NameError` at import. Move the block to the top of the file, exactly as
 `api/apps.py:26-31` does.
@@ -6632,7 +6632,7 @@ Delete these lines from `backend/proxploy/api/vms.py` (currently lines 51-54,
 immediately above `@router.post("/{vm_id}/{action}"…)`):
 
 ```python
-# Same ordering fix as apps.py::app_lifecycle — see the comment there. Reusing
+# Same ordering fix as apps.py::app_lifecycle: see the comment there. Reusing
 # this one callable as both the route-level dependency and the parameter
 # dependency makes auth/role run first and collapses the two into one call.
 _require_operator = require_role("operator")
@@ -6641,7 +6641,7 @@ _require_operator = require_role("operator")
 and insert this block immediately after `router = APIRouter(prefix="/vms", tags=["vms"])`:
 
 ```python
-# Same ordering fix as apps.py::app_lifecycle — see the comment there. Reusing
+# Same ordering fix as apps.py::app_lifecycle: see the comment there. Reusing
 # one callable as both the route-level dependency and the parameter dependency
 # makes auth/role run first and collapses the two into one call. Declared up
 # here rather than beside the lifecycle wildcard because every route between
@@ -6669,7 +6669,7 @@ from proxploy.services.proxmox import ProxmoxError
 ```
 
 ```python
-# Registered ABOVE the /{vm_id}/{action} wildcard — see the WARNING on that
+# Registered ABOVE the /{vm_id}/{action} wildcard: see the WARNING on that
 # route. Out of order, `POST /vms/3/snapshots` lands in vm_lifecycle with
 # action="snapshots" and 422s (test_post_snapshots_is_not_swallowed_by_the_
 # lifecycle_wildcard proves it stays this way).
@@ -6715,11 +6715,11 @@ def _vm_and_host(db, vm_id: int):
 def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
                       user: User = Depends(_require_viewer)):
     """Live read on every request (doc 05: "List snapshots (live from
-    Proxmox)") — there is no snapshot table and this phase adds none.
+    Proxmox)"); there is no snapshot table and this phase adds none.
 
     PVE always includes a synthetic `current` entry describing the running
     state. It is not a snapshot, has no snaptime, and cannot be rolled back to
-    or deleted, so it is dropped here rather than in the UI — otherwise every
+    or deleted, so it is dropped here rather than in the UI; otherwise every
     consumer of this endpoint has to know the same trivia.
     """
     v, host = _vm_and_host(db, vm_id)
@@ -6763,7 +6763,7 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
                          body: RollbackIn = Body(default=RollbackIn()),
                          db=Depends(get_db),
                          user: User = Depends(_require_admin)):
-    """Rollback throws away every write since the snapshot was taken — there is
+    """Rollback throws away every write since the snapshot was taken; there is
     no undo and no second copy. It therefore reuses the exact 409 body
     `enqueue_lifecycle` uses for a self-targeted stop, so the frontend's
     existing ConfirmSelfDialog renders it with no new component.
@@ -6805,7 +6805,7 @@ def delete_vm_snapshot(request: Request, vm_id: int, name: str, db=Depends(get_d
 - [ ] **Step 8: Run the task's tests**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_snapshots_api.py -q`
-Expected: PASS — 12 passed.
+Expected: PASS, 12 passed.
 
 - [ ] **Step 9: Run the VM and lifecycle regressions**
 
@@ -6838,7 +6838,7 @@ git commit -m "feat(vms): snapshot list/create/rollback/delete routes and jobs"
 **Interfaces:**
 - Consumes (Task 1): `client_for_host(app, db, host)`, `ProxmoxClient.cluster_nextid() -> int` and FakePVE's `nextid` attribute + its `.cluster.nextid` leaf.
 - Consumes (Task 2): `await_task(...)`, `enqueue_and_audit(...)`.
-- Consumes (Task 9): `_GuestFactory.post()` on FakePVE, recording into `fake.creates` as `(kind, node, kwargs)` — **reused verbatim** by `vm_create`; this task only adds the `create_error` hook to it.
+- Consumes (Task 9): `_GuestFactory.post()` on FakePVE, recording into `fake.creates` as `(kind, node, kwargs)`; **reused verbatim** by `vm_create`; this task only adds the `create_error` hook to it.
 - Consumes (Task 10): `proxploy/services/guestjobs.py::_vm_target`, and `api/vms.py`'s hoisted `_require_viewer`/`_require_operator`/`_require_admin` singletons.
 - Consumes (existing): `proxploy.services.selfguard.is_self`, `proxploy.services.audit.write_audit`.
 - Produces:
@@ -6851,12 +6851,12 @@ git commit -m "feat(vms): snapshot list/create/rollback/delete routes and jobs"
     `POST /api/v1/vms` (admin, `vms.create`),
     `POST /api/v1/vms/{vm_id}/clone` (admin, `vms.clone`),
     `DELETE /api/v1/vms/{vm_id}` (owner, `vms.create` per doc 05)
-    — **clone and delete registered above the `POST /{vm_id}/{action}` wildcard**
+    **clone and delete registered above the `POST /{vm_id}/{action}` wildcard**
   - FakePVE: `_CloneLeaf`, `_GuestNS.delete()`, recorders `fake.clones`, `fake.guest_deletes`, injectors `fake.create_error`, `fake.clone_error`
 
 **No migration, and no `Vm` row is written.** The `vms` table is the poller's
 droppable mirror (doc 04: Proxmox is the truth). A created VM appears when the
-30 s poll cycle discovers it, a deleted one disappears the same way — exactly
+30 s poll cycle discovers it, a deleted one disappears the same way; exactly
 how `run_lifecycle` handles a status change. The handlers end with the same
 `app.state.bus.publish("resource", …)` nudge `run_lifecycle` uses, so an open
 tab refetches rather than waiting out the interval.
@@ -6879,8 +6879,8 @@ Same registration-order hazard as Task 10: POST /vms/{id}/clone and
 DELETE /vms/{id} live above api/vms.py's POST /{vm_id}/{action} wildcard, and
 both an ordering assertion and a behavioural one lock that in.
 
-DELETE is the most destructive route in this phase — it removes a guest and its
-disks — so it carries three separate gates: owner role, the selfguard, and a
+DELETE is the most destructive route in this phase, it removes a guest and its
+disks, so it carries three separate gates: owner role, the selfguard, and a
 typed confirmation, plus a refusal to touch a running guest.
 """
 import asyncio
@@ -6946,7 +6946,7 @@ def test_create_clone_and_delete_client_calls(tmp_path):
                            factory=make_fake_factory(fake))
     upid = client.vm_create("pve1", {"vmid": 999, "name": "web-01", "cores": 2})
     assert upid.startswith("UPID:")
-    # the guest-create leaf Task 9 added for restores — reused, not duplicated
+    # the guest-create leaf Task 9 added for restores: reused, not duplicated
     assert fake.creates == [("qemu", "pve1", {"vmid": 999, "name": "web-01",
                                               "cores": 2})]
     client.vm_clone("pve1", 201, {"newid": 999, "name": "web-02", "full": 1})
@@ -7025,7 +7025,7 @@ def test_create_mints_a_vmid_from_cluster_nextid(tmp_path, csrf_header,
         with app.state.sessionmaker() as db:
             row = db.query(AuditEvent).filter_by(action="vm.create").one()
             assert row.job_id is not None
-            # no Vm row is written by Proxploy — the poller discovers it
+            # no Vm row is written by Proxploy: the poller discovers it
             assert db.query(Vm).count() == 1
 
 
@@ -7064,7 +7064,7 @@ def _run_job(tmp_path, kind, params_from_ids, tweak=None):
         if tweak:
             tweak(fake)
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers vm.create etc.
+        import proxploy.services.guestjobs  # noqa: F401, registers vm.create etc.
 
         backend = JobBackend(app)
         ids = _seed(app)
@@ -7106,7 +7106,7 @@ def test_create_job_builds_the_qemu_params_and_publishes(tmp_path):
 def test_create_threads_the_wizards_vlan_tag_into_net0(tmp_path):
     """Task 17's Network step offers a VLAN. Pydantic drops unknown keys
     silently rather than 422-ing, so a missing `vlan_tag` on VmCreateIn would
-    build an untagged NIC and report success — a wrong result wearing a green
+    build an untagged NIC and report success, a wrong result wearing a green
     tick. Both halves are pinned here."""
     fake, status, _r, error, _e = _run_job(
         tmp_path, "vm.create",
@@ -7127,7 +7127,7 @@ def test_create_omits_the_tag_entirely_when_untagged(tmp_path):
                          "disk_gb": 8, "storage": "local-lvm", "iso": None,
                          "bridge": "vmbr0", "vlan_tag": tag, "ostype": "l26"})
         assert status == "succeeded", error
-        # never `tag=` with an empty value — PVE rejects that outright
+        # never `tag=` with an empty value: PVE rejects that outright
         assert fake.creates[0][2]["net0"] == "virtio,bridge=vmbr0"
 
 
@@ -7185,7 +7185,7 @@ def test_clone_job_passes_full_through_and_surfaces_pve_rejection(tmp_path):
                       "target": "pve2", "storage": "local-lvm"}
     assert result["newid"] == 999
 
-    # A linked clone of a non-template is refused by PVE, not by Proxploy —
+    # A linked clone of a non-template is refused by PVE, not by Proxploy; 
     # Proxploy does not track template-ness (see the route's ponytail comment).
     fake, status, _r, error, _e = _run_job(
         tmp_path, "vm.clone",
@@ -7241,7 +7241,7 @@ def test_delete_refuses_a_running_vm(tmp_path, csrf_header, bootstrap_admin):
 
 def test_delete_requires_owner_role(tmp_path, csrf_header, bootstrap_admin):
     """doc 05 puts DELETE /vms/{id} at owner, one rung above every other VM
-    route — an admin who may create and clone still may not destroy."""
+    route, an admin who may create and clone still may not destroy."""
     app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
     with c:
         c.post("/api/v1/users", json={"email": "adm@example.com",
@@ -7275,7 +7275,7 @@ def test_vm_mutations_require_auth(tmp_path, csrf_header):
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_vm_create_clone.py -q`
-Expected: FAIL — 20 failed. The client tests fail with
+Expected: FAIL, 20 failed. The client tests fail with
 `AttributeError: 'ProxmoxClient' object has no attribute 'vm_create'`;
 `test_create_routes_are_registered_above_the_lifecycle_wildcard` fails with
 `ValueError: '/api/v1/vms/{vm_id}/clone' is not in list`;
@@ -7296,14 +7296,14 @@ In `backend/proxploy/services/proxmox.py`, after the snapshot block from Task 10
 
         The same endpoint restore_guest() posts an `archive` to; here it carries
         a full spec (vmid, name, cores, memory, scsi0, net0, …). Building that
-        spec is the caller's job — this method only posts it, so every PVE
+        spec is the caller's job, this method only posts it, so every PVE
         parameter name lives in exactly one place (services/guestjobs.py).
         """
         try:
             return self._connect().nodes(node).qemu.post(**params)
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001, one wrap point, like version()
             raise self._wrap(f"vm create failed on {node}", e) from e
 
     def vm_clone(self, node: str, vmid: int, params: dict) -> str:
@@ -7354,7 +7354,7 @@ class _CloneLeaf:
                                           "clone")
 ```
 
-Replace `_GuestNS` with the version below — it keeps every existing attribute
+Replace `_GuestNS` with the version below, it keeps every existing attribute
 and adds `.clone` (qemu only, like `.vncproxy`) plus `.delete()`:
 
 ```python
@@ -7393,7 +7393,7 @@ restore path):
 And in `FakePVE.__init__`, after the snapshot recording block from Task 10:
 
 ```python
-        # guest create/clone/destroy (Phase 6, Task 11) — `creates` and `nextid`
+        # guest create/clone/destroy (Phase 6, Task 11): `creates` and `nextid`
         # already exist from Tasks 9 and 1
         self.clones: list[tuple[str, int, dict]] = []
         self.guest_deletes: list[tuple[str, str, int]] = []
@@ -7442,7 +7442,7 @@ def _create_params(params: dict) -> dict:
     def _net0(p: dict) -> str:
         # PVE spells a VLAN on a guest NIC as `,tag=N` inside the netN string
         # (same grammar services/netconfig.py round-trips for edits). Absent or
-        # falsy tag means untagged — never emit `tag=` with an empty value.
+        # falsy tag means untagged: never emit `tag=` with an empty value.
         spec = f"virtio,bridge={p.get('bridge') or 'vmbr0'}"
         tag = p.get("vlan_tag")
         return f"{spec},tag={int(tag)}" if tag else spec
@@ -7467,11 +7467,11 @@ def _create_params(params: dict) -> dict:
 
 
 async def create_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.create` — post the spec, poll the task, nudge the UI.
+    """`vm.create`, post the spec, poll the task, nudge the UI.
 
     No `Vm` row is written here. `vms` is the poller's droppable mirror (doc 04:
     Proxmox is the truth) and writing one from this side would create a row the
-    next poll cycle either confirms or deletes — a second, worse source of
+    next poll cycle either confirms or deletes, a second, worse source of
     truth. The resource publish below is the same nudge run_lifecycle emits, so
     an open tab refetches instead of waiting out the 30 s interval.
     """
@@ -7504,12 +7504,12 @@ Append to `backend/proxploy/services/guestjobs.py`:
 
 ```python
 async def clone_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.clone` — full or linked, per the caller's `full` flag.
+    """`vm.clone`, full or linked, per the caller's `full` flag.
 
     `full` is passed through untouched. PVE allows `full=0` (a linked clone)
     only from a template, and Proxploy has no way to know which VMs are
-    templates — the `vms` table has no `template` column and the poller does not
-    read `/cluster/resources`'s `template` field — so PVE's own rejection is the
+    templates, the `vms` table has no `template` column and the poller does not
+    read `/cluster/resources`'s `template` field, so PVE's own rejection is the
     answer the caller gets, verbatim, instead of a guess made here.
     """
     app = ctx.backend.app
@@ -7531,7 +7531,7 @@ async def clone_vm(ctx: JobContext, params: dict) -> dict:
 
 
 async def delete_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.delete` — destroy the guest and its disks.
+    """`vm.delete`, destroy the guest and its disks.
 
     The route already required owner role, a typed name, a non-running guest and
     a selfguard pass. As with create, the `vms` row is left to the poller to
@@ -7593,7 +7593,7 @@ def _pick_node(request: Request, host: Host, node: str | None) -> str:
                                      f"(known: {', '.join(known)})")
         return node
     if not known:
-        raise HTTPException(422, "this host has no known node yet — wait for the "
+        raise HTTPException(422, "this host has no known node yet; wait for the "
                                  "first poll or name a node explicitly")
     return known[0]
 
@@ -7611,7 +7611,7 @@ class VmCreateIn(BaseModel):
     bridge: str = "vmbr0"
     # Task 17's wizard has a VLAN field on its Network step. Pydantic ignores
     # unknown keys rather than rejecting them, so omitting this here would
-    # silently drop the operator's tag and build an untagged NIC — a wrong
+    # silently drop the operator's tag and build an untagged NIC: a wrong
     # result that looks like a success. Declared, validated, and threaded
     # through to net0 below.
     vlan_tag: int | None = None
@@ -7644,7 +7644,7 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
         # Minted here so the 202 can name the id and the audit row records it.
         # cluster_nextid is advisory, not a reservation: between this call and
         # the job's POST another orchestrator can take the id, and PVE then
-        # rejects the create. See create_vm()'s ponytail comment — no retry.
+        # rejects the create. See create_vm()'s ponytail comment: no retry.
         client = client_for_host(request.app, db, host)
         try:
             vmid = int(client.cluster_nextid())
@@ -7683,7 +7683,7 @@ def clone_vm_route(request: Request, vm_id: int,
     """`full` is passed through to PVE unvalidated.
 
     ponytail: PVE permits a linked clone (`full=false`) only from a template,
-    and Proxploy cannot tell templates apart — the `vms` table has no `template`
+    and Proxploy cannot tell templates apart, the `vms` table has no `template`
     column and this phase adds no migration. Pre-validating would mean guessing.
     Upgrade path if PVE's rejection proves confusing in practice: have the
     poller mirror `/cluster/resources`'s `template` flag onto `Vm`, then refuse
@@ -7734,13 +7734,13 @@ def delete_vm_route(request: Request, vm_id: int,
         raise HTTPException(409, payload)
 
     # One guard point for "is this Proxploy itself". is_self() answers False for
-    # every VM today (selfguard.py:21 — Proxploy ships as an LXC CT), so this is
+    # every VM today (selfguard.py:21: Proxploy ships as an LXC CT), so this is
     # currently always a pass. It is called anyway rather than reasoned around:
     # the day a VM-hosted install exists, the guard is already wired, and the
     # alternative is a comment asserting an invariant no code enforces.
     if is_self(db, "vm", v.id):
         _deny({"error": "self_target", "confirm_phrase": name,
-               "detail": f"{name} is the guest Proxploy itself runs in — "
+               "detail": f"{name} is the guest Proxploy itself runs in, "
                          f"destroying it would destroy this process."})
     if (v.status or "") == "running":
         _deny({"error": "guest_running",
@@ -7763,7 +7763,7 @@ from proxploy.services.selfguard import is_self
 - [ ] **Step 9: Run the task's tests**
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_vm_create_clone.py -q`
-Expected: PASS — 20 passed.
+Expected: PASS, 20 passed.
 
 - [ ] **Step 10: Run the VM, snapshot and invariant regressions**
 
@@ -7787,7 +7787,7 @@ git commit -m "feat(vms): create, clone and destroy routes and jobs"
 
 ---
 
-## Task 12: Frontend — Storage page, `api/storage.ts` read hooks, and the `live.ts` resource/job routing fix
+## Task 12: Frontend: Storage page, `api/storage.ts` read hooks, and the `live.ts` resource/job routing fix
 
 **Files:**
 - Create: `frontend/src/api/storage.ts`, `frontend/src/components/StorageCard.tsx`, `frontend/src/routes/storage.tsx`
@@ -7795,39 +7795,39 @@ git commit -m "feat(vms): create, clone and destroy routes and jobs"
 - Test: `frontend/src/tests/storage.test.tsx` (new), `frontend/src/tests/live.test.ts` (extend)
 
 **Interfaces:**
-- Consumes (Task 3's backend, exact shapes — do not re-derive):
+- Consumes (Task 3's backend, exact shapes; do not re-derive):
   `GET /api/v1/storage -> [{host_id, host_name, node, storage, type, content: string[], shared, status, used_bytes, total_bytes, used_pct}]`,
   `GET /api/v1/storage/{host_id}/{name} -> {…same…, avail_bytes, nodes: string[]}`,
   `GET /api/v1/storage/{host_id}/{name}/content?node=&content= -> [{volid, format, size, used, vmid, ctime, content, notes, verification}]`.
   Also `UsageBar` + `STORAGE_GRADIENT`/`DANGER_GRADIENT`, `EmptyState`, `KVGrid`, `Button`, `lib/format::{fmtBytes, fmtPct}`, `shellRoute` from `./shell`.
 - Produces:
-  - `api/storage.ts::useStorage() -> UseQueryResult<StorageRow[]>` — key `['storage']`, `refetchInterval: 60_000` (doc 06 §d)
-  - `api/storage.ts::useStorageDetail(hostId: number | null, name: string | null) -> UseQueryResult<StorageDetail>` — key `['storage', hostId, name]`
-  - `api/storage.ts::useStorageContent(hostId: number | null, name: string | null, contentType?: string) -> UseQueryResult<VolumeRow[]>` — key `['storage', hostId, name, 'content', contentType]`
+  - `api/storage.ts::useStorage() -> UseQueryResult<StorageRow[]>`: key `['storage']`, `refetchInterval: 60_000` (doc 06 §d)
+  - `api/storage.ts::useStorageDetail(hostId: number | null, name: string | null) -> UseQueryResult<StorageDetail>`: key `['storage', hostId, name]`
+  - `api/storage.ts::useStorageContent(hostId: number | null, name: string | null, contentType?: string) -> UseQueryResult<VolumeRow[]>`: key `['storage', hostId, name, 'content', contentType]`
   - types `StorageRow`, `StorageDetail`, `VolumeRow`
   - `components/StorageCard.tsx::StorageCard({ row: StorageRow; onOpen: (row: StorageRow) => void })`
   - `routes/storage.tsx::StoragePage` (component, imported by tests) and `routes/storage.tsx::storageRoute` (`createRoute`, `getParentRoute: () => shellRoute`, `path: '/storage'`)
-  - `api/live.ts::RESOURCE_KEY: Record<string, string>` — the single `d.type` / `d.target_type` → query-key-root map both `applyResource` and `applyJob` route through
+  - `api/live.ts::RESOURCE_KEY: Record<string, string>`: the single `d.type` / `d.target_type` → query-key-root map both `applyResource` and `applyJob` route through
 
-> **Plan note — why `live.ts` is in this task and not a later one.**
+> **Plan note, why `live.ts` is in this task and not a later one.**
 > `applyResource`'s `const key = d.type === 'app' ? 'apps' : 'vms'` is an
 > *else-is-vms* fallthrough: the very first `{"type": "storage"}` event Task 4's
 > upload job publishes invalidates `['vms']` and leaves `['storage']` stale, so
 > the Storage page would sit on dead data while the VM list refetched for no
-> reason. `applyJob` has the same shape one level up — it invalidates a resource
+> reason. `applyJob` has the same shape one level up, it invalidates a resource
 > cache only for `target_type` of `app`/`vm`, and every Phase 6 job carries
 > `storage`, `backup` or `network`. Both are one-line-per-type fixes, and both
 > have to land with the first page that depends on them. `['vms']` stays a
 > prefix match, so a `vm.snapshot_create` job still invalidates
 > `['vms', id, 'snapshots']` for free (Task 16).
 
-> **Plan note — no "Add storage" button in this task.**
+> **Plan note, no "Add storage" button in this task.**
 > Doc 06 §(a) row 43 puts one in the header and Task 13 adds it, wired to the
 > `StorageForm` dialog it opens, in this same file. A button that renders now
 > and does nothing for two commits is worse than no button: it is untestable,
 > it invites a placeholder `onClick`, and the header line it sits on is
-> re-touched by Task 13 anyway. The count subtitle — the normative part of that
-> row — ships here.
+> re-touched by Task 13 anyway. The count subtitle, the normative part of that
+> row, ships here.
 
 - [ ] **Step 1: Write the failing `live.ts` routing tests**
 
@@ -7840,7 +7840,7 @@ import { applyJob, applyMetrics, applyResource } from '../api/live'
 ```
 
 ```ts
-describe('applyResource — Phase 6 resource types', () => {
+describe('applyResource, Phase 6 resource types', () => {
   it('routes storage/backup/network events to their own keys, never to vms', () => {
     const qc = client()
     const spy = vi.spyOn(qc, 'invalidateQueries')
@@ -7863,7 +7863,7 @@ describe('applyResource — Phase 6 resource types', () => {
 
   it('never runs the id-keyed status patch for a non-guest type', () => {
     // A storage event's `id` is a HOST id, and ['storage'] rows have no `id`
-    // at all — patching by id there would silently corrupt whichever row
+    // at all, patching by id there would silently corrupt whichever row
     // happened to collide.
     const qc = client()
     qc.setQueryData(['storage'], [{ host_id: 7, storage: 'local', status: 'available' }])
@@ -7872,7 +7872,7 @@ describe('applyResource — Phase 6 resource types', () => {
   })
 })
 
-describe('applyJob — Phase 6 target types', () => {
+describe('applyJob, Phase 6 target types', () => {
   const terminal = (target_type: string) =>
     ({ id: 1, kind: `${target_type}.thing`, status: 'succeeded', target_type })
 
@@ -7899,7 +7899,7 @@ describe('applyJob — Phase 6 target types', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/live.test.ts`
-Expected: FAIL — 3 of the 5 new tests fail. "routes storage/backup/network events" fails on `expect(spy).not.toHaveBeenCalledWith({queryKey:['vms']})` (all three landed in `['vms']` via the else-branch). "ignores an unknown type" fails the same way. "invalidates the matching resource cache for storage/backup/network jobs" fails on `expect(spy).toHaveBeenCalledWith({queryKey:['storage']})` — `applyJob` only knows `app`/`vm`. The two pre-existing `applyResource` tests and both remaining new ones PASS.
+Expected: FAIL, 3 of the 5 new tests fail. "routes storage/backup/network events" fails on `expect(spy).not.toHaveBeenCalledWith({queryKey:['vms']})` (all three landed in `['vms']` via the else-branch). "ignores an unknown type" fails the same way. "invalidates the matching resource cache for storage/backup/network jobs" fails on `expect(spy).toHaveBeenCalledWith({queryKey:['storage']})`, `applyJob` only knows `app`/`vm`. The two pre-existing `applyResource` tests and both remaining new ones PASS.
 
 - [ ] **Step 3: Extend `api/live.ts`**
 
@@ -7912,7 +7912,7 @@ In `frontend/src/api/live.ts`, insert the map above `applyResource` and rewrite 
  * used to disagree: applyResource fell through to 'vms' for anything it did
  * not recognise and applyJob invalidated nothing at all, so Phase 6's storage /
  * backup / network events refreshed the VM list while their own pages went
- * stale. An unlisted type now routes NOWHERE, which is the honest answer —
+ * stale. An unlisted type now routes NOWHERE, which is the honest answer; 
  * a guess here is a wrong cache read somewhere else.
  */
 const RESOURCE_KEY: Record<string, string> = {
@@ -7933,7 +7933,7 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
   const key = RESOURCE_KEY[d.type]
   if (!key) return
   // Guests only. A storage/backup/network event's `id` is a HOST id and those
-  // caches hold no `id` column — running the row patch there would edit
+  // caches hold no `id` column, running the row patch there would edit
   // whichever unrelated row happened to collide.
   if (d.change === 'status' && d.id != null && (d.type === 'app' || d.type === 'vm')) {
     qc.setQueriesData({ queryKey: [key] }, (v: unknown) => {
@@ -7964,7 +7964,7 @@ with:
 
 ```ts
   // ['vms'] is a prefix match, so a vm.snapshot_* job invalidates
-  // ['vms', id, 'snapshots'] here for free — Task 16 adds no wiring.
+  // ['vms', id, 'snapshots'] here for free; Task 16 adds no wiring.
   const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
   if (resourceKey) qc.invalidateQueries({ queryKey: [resourceKey] })
 ```
@@ -8082,12 +8082,12 @@ describe('StoragePage', () => {
 - [ ] **Step 6: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/storage.test.tsx`
-Expected: FAIL — the whole file errors before any test runs with `Failed to resolve import "../routes/storage" from "src/tests/storage.test.tsx"`.
+Expected: FAIL, the whole file errors before any test runs with `Failed to resolve import "../routes/storage" from "src/tests/storage.test.tsx"`.
 
 - [ ] **Step 7: Write `src/api/storage.ts`**
 
 ```ts
-// api/storage.ts — read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
+// api/storage.ts, read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
 // Same shape as api/catalog.ts: plain useQuery wrappers, no client-side state.
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
@@ -8130,7 +8130,7 @@ export function useStorage() {
   })
 }
 
-/** One datastore, live from Proxmox — the only source of `avail_bytes` and the
+/** One datastore, live from Proxmox; the only source of `avail_bytes` and the
  *  full `nodes` list.
  *
  *  ponytail: keyed on (host, name) with no node, matching the interface
@@ -8171,7 +8171,7 @@ import { fmtBytes, fmtPct } from '../lib/format'
 import { DANGER_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 // doc 06 §a row 43 / §c: violet is storage's reserved accent, red takes over
-// past 80% — the one place on this page the palette is a warning and not a
+// past 80%, the one place on this page the palette is a warning and not a
 // decoration.
 const DANGER_PCT = 80
 
@@ -8225,7 +8225,7 @@ import { KVGrid } from '../components/KVGrid'
 import { StorageCard } from '../components/StorageCard'
 import { Button } from '../components/ui/button'
 import { fmtBytes } from '../lib/format'
-// shellRoute comes from ./shell, never ../router — importing router.tsx here
+// shellRoute comes from ./shell, never ../router; importing router.tsx here
 // would force its eager createRouter() to run mid-cycle (cluster.tsx carries
 // the same note).
 import { shellRoute } from './shell'
@@ -8243,7 +8243,7 @@ const CONTENT_TABS = [
 ] as const
 
 function fmtCtime(ctime: number | null) {
-  return ctime == null ? '—' : new Date(ctime * 1000).toLocaleString()
+  return ctime == null ? ', ' : new Date(ctime * 1000).toLocaleString()
 }
 
 function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
@@ -8265,9 +8265,9 @@ function VolumeTable({ volumes }: { volumes: VolumeRow[] }) {
         {volumes.map((v) => (
           <tr key={v.volid} className="border-t border-line-soft hover:bg-panel-2">
             <td className="py-2.5 font-mono">{v.volid}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.format ?? '—'}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.format ?? ', '}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtBytes(v.size)}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? '—'}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? ', '}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtCtime(v.ctime)}</td>
           </tr>
         ))}
@@ -8302,7 +8302,7 @@ export function ContentBrowser({ row, onClose }:
         ['Free', fmtBytes(detail.data?.avail_bytes)],
         ['Total', fmtBytes(row.total_bytes)],
         ['Nodes', (detail.data?.nodes ?? [row.node]).join(', ')],
-        ['Content', row.content.join(', ') || '—'],
+        ['Content', row.content.join(', ') || '; '],
       ]} />
 
       <div className="mb-4 mt-5 flex gap-1 border-b border-line-soft">
@@ -8323,7 +8323,7 @@ export function ContentBrowser({ row, onClose }:
 
       {isError ? (
         <EmptyState title="Content listing unavailable"
-          note="Proxploy could not reach this datastore — it may be offline or the node may be down." />
+          note="Proxploy could not reach this datastore; it may be offline or the node may be down." />
       ) : (
         <VolumeTable volumes={volumes ?? []} />
       )}
@@ -8389,7 +8389,7 @@ export const storageRoute = page('/storage', 'Storage', 'Phase 6 (Infra pages)',
   'Datastore cards and the content browser arrive in Phase 6.')
 ```
 
-and add the import alongside the other route-file imports (the `page()` helper and `PlaceholderPage` import stay — `networkRoute` and `backupsRoute` still use them until Tasks 14-15 delete them):
+and add the import alongside the other route-file imports (the `page()` helper and `PlaceholderPage` import stay, `networkRoute` and `backupsRoute` still use them until Tasks 14-15 delete them):
 
 ```tsx
 import { storeRoute } from './routes/store'
@@ -8401,7 +8401,7 @@ import { storageRoute } from './routes/storage'
 - [ ] **Step 12: Run the full frontend suite, build and lint**
 
 Run: `cd frontend && npx vitest run && npm run build && npm run lint`
-Expected: 71 + 5 + 5 = **81 passed across 21 files**; clean `tsc -b && vite build`; oxlint clean. (The 5 new `live.test.ts` tests land in the existing file, so the file count rises by one — `storage.test.tsx` — not two.)
+Expected: 71 + 5 + 5 = **81 passed across 21 files**; clean `tsc -b && vite build`; oxlint clean. (The 5 new `live.test.ts` tests land in the existing file, so the file count rises by one; `storage.test.tsx`, not two.)
 
 - [ ] **Step 13: Commit**
 
@@ -8415,7 +8415,7 @@ git commit -m "feat(storage): datastore cards + content browser, and route SSE s
 
 ---
 
-## Task 13: Frontend — storage mutations: multipart upload + attach / edit / detach
+## Task 13: Frontend: storage mutations: multipart upload + attach / edit / detach
 
 **Files:**
 - Create: `frontend/src/components/UploadDialog.tsx`, `frontend/src/components/StorageForm.tsx`
@@ -8424,38 +8424,38 @@ git commit -m "feat(storage): datastore cards + content browser, and route SSE s
 
 **Interfaces:**
 - Consumes (Tasks 4-5's backend, exact shapes):
-  `POST /api/v1/storage/{host_id}/{name}/content` — **multipart**, parts `file`, `content`, `node` → 202 `{job: {id, kind, …}}`;
-  `POST /api/v1/storage` — `{host_id, storage, type, config}` → 201 `{host_id, storage, type}` (echoes no config, by design);
-  `PATCH /api/v1/storage/{host_id}/{name}` — `{config}` → 200 `{host_id, storage, updated: string[]}`;
+  `POST /api/v1/storage/{host_id}/{name}/content`: **multipart**, parts `file`, `content`, `node` → 202 `{job: {id, kind, …}}`;
+  `POST /api/v1/storage`: `{host_id, storage, type, config}` → 201 `{host_id, storage, type}` (echoes no config, by design);
+  `PATCH /api/v1/storage/{host_id}/{name}`: `{config}` → 200 `{host_id, storage, updated: string[]}`;
   `DELETE /api/v1/storage/{host_id}/{name}` → 200 `{host_id, storage, detached: true}` (**owner**-only server-side).
   Also `LockVeil` (first consumer in the codebase), `useEntitlements` from `api/hooks`, `inputCls` from `components/LoginForm`, `JobLog`, `Button`, `toast` from `sonner`, Task 12's `StorageRow` / `StoragePage` / `ContentBrowser`.
 - Produces:
-  - `api/storage.ts::useUploadContent()` — `mutate({hostId, storage, node, content, file})`, returns `{job: {id: number; kind: string}}`
-  - `api/storage.ts::useAttachStorage()` — `mutate({host_id, storage, type, config})`
-  - `api/storage.ts::useEditStorage()` — `mutate({host_id, storage, config})`
-  - `api/storage.ts::useDetachStorage()` — `mutate({host_id, storage})`
+  - `api/storage.ts::useUploadContent()`: `mutate({hostId, storage, node, content, file})`, returns `{job: {id: number; kind: string}}`
+  - `api/storage.ts::useAttachStorage()`: `mutate({host_id, storage, type, config})`
+  - `api/storage.ts::useEditStorage()`: `mutate({host_id, storage, config})`
+  - `api/storage.ts::useDetachStorage()`: `mutate({host_id, storage})`
   - `components/UploadDialog.tsx::UploadDialog({ hostId, storage, node, contentTypes, onClose })`
   - `components/StorageForm.tsx::StorageForm({ existing, onClose })` where `existing: StorageRow | null` (null = attach, row = edit + detach)
 
-> **Plan note — the one `api()` exemption in the codebase, and why it must stay one.**
+> **Plan note, the one `api()` exemption in the codebase, and why it must stay one.**
 > `src/api/client.ts` does `if (opts.body != null) headers['Content-Type'] = 'application/json'`.
 > With a `FormData` body that overwrite is fatal: the browser generates
 > `multipart/form-data; boundary=…` itself and forcing `application/json` over
 > it strips the boundary, so FastAPI's `UploadFile` parse fails with 422 before
 > a byte of the ISO is read. `postForm()` below therefore calls `fetch`
-> directly — and reproduces **everything else** `api()` does (the `/api/v1`
+> directly, and reproduces **everything else** `api()` does (the `/api/v1`
 > prefix, `credentials: 'include'`, the `X-CSRF-Token` header read from the
 > `pp_csrf` cookie, `ApiError(status, body)` on non-ok) so the exemption stays
 > exactly one header wide. The comment in the source says so in as many words;
 > a test in Step 1 asserts the header set, so "tidying" it back to `api()`
 > fails CI rather than shipping a broken upload.
 
-> **Plan note — upload progress is indeterminate, and that is a named ceiling.**
+> **Plan note, upload progress is indeterminate, and that is a named ceiling.**
 > `fetch` fires no upload-progress events; `XMLHttpRequest.upload.onprogress`
 > does. This dialog uses `fetch` (per the plan spine) and shows an honest
 > "Uploading…" state, because switching to XHR means re-implementing the whole
 > response/CSRF/error path a second time in a second style for a progress bar
-> that covers only the browser→Proxploy half — the Proxploy→PVE half is already
+> that covers only the browser→Proxploy half, the Proxploy→PVE half is already
 > a real `JobLog` with real percentages the moment the POST returns. The
 > `ponytail:` comment in the source names XHR as the upgrade, and the honest
 > ceiling on a multi-GB ISO is: the bar you get is the job's, not the browser's.
@@ -8583,7 +8583,7 @@ describe('StorageForm', () => {
   it('veils the form when storage.manage is off, and never before entitlements resolve', async () => {
     features = {}
     withQuery(<StorageForm existing={null} onClose={vi.fn()} />)
-    // has() is false until the first fetch resolves — gating on !has() alone
+    // has() is false until the first fetch resolves, gating on !has() alone
     // would veil this for every plan during load.
     expect(screen.queryByText('Unlock Pro')).toBeNull()
     expect(await screen.findByText('Unlock Pro')).toBeInTheDocument()
@@ -8617,7 +8617,7 @@ describe('StorageForm', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/storage-mutations.test.tsx`
-Expected: FAIL — the file errors before any test runs with `Failed to resolve import "../components/StorageForm" from "src/tests/storage-mutations.test.tsx"`.
+Expected: FAIL, the file errors before any test runs with `Failed to resolve import "../components/StorageForm" from "src/tests/storage-mutations.test.tsx"`.
 
 - [ ] **Step 3: Add the four mutations to `src/api/storage.ts`**
 
@@ -8641,9 +8641,9 @@ export type JobResponse = { job: { id: number; kind: string } }
  * `multipart/form-data; boundary=…` itself; overwriting it strips the boundary
  * and FastAPI's UploadFile parse 422s before a byte of the ISO is read.
  *
- * Everything else `api()` does is reproduced here verbatim — the /api/v1
+ * Everything else `api()` does is reproduced here verbatim, the /api/v1
  * prefix, credentials: 'include', the X-CSRF-Token header read from the
- * pp_csrf cookie, ApiError(status, body) on non-ok — so this stays an
+ * pp_csrf cookie, ApiError(status, body) on non-ok; so this stays an
  * exemption exactly one header wide. DO NOT "fix" it back to api().
  *
  * ponytail: fetch fires no upload-progress events, so the dialog shows an
@@ -8680,7 +8680,7 @@ export function useUploadContent() {
       form.append('node', v.node)
       return postForm<JobResponse>(`/storage/${v.hostId}/${v.storage}/content`, form)
     },
-    // Same rule as api/jobs.ts::useLifecycle — the resource key is NOT
+    // Same rule as api/jobs.ts::useLifecycle, the resource key is NOT
     // invalidated here. The volume does not exist until the job succeeds, and
     // the SSE `resource` event applyResource now routes to ['storage'] is what
     // refreshes the browser at exactly the right moment (Task 12).
@@ -8741,7 +8741,7 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   hostId: number; storage: string; node: string; contentTypes: string[]; onClose: () => void
 }) {
   const upload = useUploadContent()
-  // Proxmox's upload endpoint accepts iso and vztmpl only — backups and disk
+  // Proxmox's upload endpoint accepts iso and vztmpl only, backups and disk
   // images get there by being written, not posted. Offering the other two would
   // be a 400 dressed up as a feature.
   const uploadable = contentTypes.filter((c) => c === 'iso' || c === 'vztmpl')
@@ -8791,7 +8791,7 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
                   className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text-2" />
               </div>
               <div className="text-[12px] text-text-2">
-                The file is streamed through Proxploy to the node — it crosses the
+                The file is streamed through Proxploy to the node, it crosses the
                 wire twice and needs that much free space on the Proxploy host
                 while the job runs.
               </div>
@@ -8870,7 +8870,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   const [name, setName] = useState(existing?.storage ?? '')
   // `defaultType` lets the Backups page open this same form pre-set to `pbs`
   // for its "Connect PBS datastore" affordance (doc 10's Phase 6 Backups
-  // deliverable) — connecting PBS *is* attaching a storage of type pbs, so it
+  // deliverable), connecting PBS *is* attaching a storage of type pbs, so it
   // reuses this form rather than growing a second, near-identical one.
   const [type, setType] = useState<string>(existing?.type ?? defaultType)
   const [cfg, setCfg] = useState<Record<string, string>>({
@@ -8881,7 +8881,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   const fields: [string, string, string][] = [
     ...(FIELDS[type] ?? []), ['content', 'Content', 'text'],
   ]
-  // Blank means "not supplied" — on edit that is how a password stays
+  // Blank means "not supplied", on edit that is how a password stays
   // unchanged, and on attach it is how an optional plugin key is omitted.
   const filled = Object.fromEntries(
     fields.map(([k]) => [k, (cfg[k] ?? '').trim()]).filter(([, v]) => v !== ''),
@@ -8927,7 +8927,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
           {editing ? `Edit ${existing?.storage}` : 'Add storage'}
         </h2>
 
-        {/* doc 06 §e rule 1: never hide a gated feature — veil it. The Close
+        {/* doc 06 §e rule 1: never hide a gated feature, veil it. The Close
             button below sits OUTSIDE the veil, because LockVeil sets
             pointer-events:none on its children and a dialog you cannot dismiss
             is a worse bug than the one being gated. */}
@@ -9005,7 +9005,7 @@ import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
 ```
 
-Give `ContentBrowser` the two actions. Replace its signature and header block —
+Give `ContentBrowser` the two actions. Replace its signature and header block, 
 
 find:
 
@@ -9053,7 +9053,7 @@ Then give `StoragePage` the header button and the form. Replace the whole `Stora
 export function StoragePage() {
   const { data: rows } = useStorage()
   const [open, setOpen] = useState<StorageRow | null>(null)
-  // 'new' = attach, a row = edit + detach. One dialog, two modes — a second
+  // 'new' = attach, a row = edit + detach. One dialog, two modes; a second
   // component would be the same form with two fields locked.
   const [form, setForm] = useState<'new' | StorageRow | null>(null)
 
@@ -9127,7 +9127,7 @@ Append to `frontend/src/tests/storage.test.tsx`:
 
 - [ ] **Step 8b: Add the delete-volume row action to the content browser**
 
-Task 4 ships `DELETE /api/v1/storage/{host_id}/{name}/content/{volid:path}` and doc 01 §5 defines the `storage.content` feature as "Browse ISOs, templates, backups, disk images per datastore; upload ISOs/templates; **delete content**" — a content browser that can only add is half the feature, and an endpoint with no caller is dead weight. Deleting a volume is destructive and irreversible, so it uses the `window.confirm` precedent from `routes/settings.tsx`, and the volid goes through `encodeURIComponent` because volids contain `/` (`local:iso/debian-12.iso`) and the route is declared `{volid:path}`.
+Task 4 ships `DELETE /api/v1/storage/{host_id}/{name}/content/{volid:path}` and doc 01 §5 defines the `storage.content` feature as "Browse ISOs, templates, backups, disk images per datastore; upload ISOs/templates; **delete content**", a content browser that can only add is half the feature, and an endpoint with no caller is dead weight. Deleting a volume is destructive and irreversible, so it uses the `window.confirm` precedent from `routes/settings.tsx`, and the volid goes through `encodeURIComponent` because volids contain `/` (`local:iso/debian-12.iso`) and the route is declared `{volid:path}`.
 
 In `src/api/storage.ts`, add:
 
@@ -9144,7 +9144,7 @@ export function useDeleteVolume() {
       qc.invalidateQueries({ queryKey: ['jobs'] })
       qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
       // The content listing is a live passthrough, not a poll-stomped resource
-      // cache, so re-reading it after the job is enqueued is correct here —
+      // cache, so re-reading it after the job is enqueued is correct here; 
       // the opposite of useLifecycle's rule for ['vms'].
       qc.invalidateQueries({ queryKey: ['storage', v.hostId, v.storage, 'content'] })
     },
@@ -9222,7 +9222,7 @@ git commit -m "feat(storage): multipart ISO upload + attach/edit/detach behind L
 
 ---
 
-## Task 14: Frontend — Network page (bridges, throughput, guest NICs, host config)
+## Task 14: Frontend: Network page (bridges, throughput, guest NICs, host config)
 
 **Files:**
 - Create: `frontend/src/api/network.ts`, `frontend/src/components/NicForm.tsx`, `frontend/src/components/BridgeForm.tsx`, `frontend/src/routes/network.tsx`
@@ -9244,11 +9244,11 @@ git commit -m "feat(storage): multipart ISO upload + attach/edit/detach behind L
 **Two deliberate deviations, both recorded here rather than silently:**
 
 1. **`ConfirmSelfDialog` gets a `title` prop.** Its `<h2>` is the hard-coded string "This is Proxploy's own container". Reusing it verbatim for the network apply would put a false sentence above the most dangerous control in the product. One optional prop with the current string as its default keeps `LifecycleActions` and `src/tests/lifecycle.test.tsx` byte-identical (that test asserts on `detail`, not the heading) and is smaller than a second dialog component.
-2. **One 409 envelope, verified flat — not two.** An earlier draft of this task assumed `HTTPException(409, {...})` serialises nested under `detail`. It does not: `main.py::problem_handler` does `body.update(exc.detail)` for a dict detail, so *every* dict-bodied error in this app — `selfguard`'s `self_target` and every Phase 6 route alike — arrives flat as `{type, title, status, error, confirm_phrase, detail}`, with `detail` a human-readable string. That is exactly why `LifecycleActions` reads `e.body.error` today. `errBody()` is kept as the single accessor so no call site re-derives the shape, but it is a thin reader, not an unwrapper; its `detail`-is-an-object branch never fires on the routes we ship. Task 15 imports the same helper.
+2. **One 409 envelope, verified flat; not two.** An earlier draft of this task assumed `HTTPException(409, {...})` serialises nested under `detail`. It does not: `main.py::problem_handler` does `body.update(exc.detail)` for a dict detail, so *every* dict-bodied error in this app; `selfguard`'s `self_target` and every Phase 6 route alike, arrives flat as `{type, title, status, error, confirm_phrase, detail}`, with `detail` a human-readable string. That is exactly why `LifecycleActions` reads `e.body.error` today. `errBody()` is kept as the single accessor so no call site re-derives the shape, but it is a thin reader, not an unwrapper; its `detail`-is-an-object branch never fires on the routes we ship. Task 15 imports the same helper.
 
 - [ ] **Step 1: Write the failing read-half tests**
 
-`uPlot` cannot render in jsdom — it calls `canvas.getContext('2d')` and jsdom returns `null`, so `_commit` throws `TypeError: Cannot read properties of null (reading 'clearRect')` the moment `Sparkline` is handed a non-empty series (`cluster.test.tsx` sidesteps this by feeding it empty arrays). This page's whole point is non-empty series, so mock the leaf component — the same treatment `vncconsole.test.tsx` already gives `@novnc/novnc`.
+`uPlot` cannot render in jsdom, it calls `canvas.getContext('2d')` and jsdom returns `null`, so `_commit` throws `TypeError: Cannot read properties of null (reading 'clearRect')` the moment `Sparkline` is handed a non-empty series (`cluster.test.tsx` sidesteps this by feeding it empty arrays). This page's whole point is non-empty series, so mock the leaf component; the same treatment `vncconsole.test.tsx` already gives `@novnc/novnc`.
 
 ```tsx
 // frontend/src/tests/network.test.tsx
@@ -9322,7 +9322,7 @@ vi.mock('../api/client', () => {
       if (path.startsWith('/network/throughput')) return Promise.resolve(THROUGHPUT)
       if (path.endsWith('/apply')) {
         if (!body.confirm) {
-          // FastAPI wraps HTTPException(409, {...}) bodies in `detail` — the
+          // FastAPI wraps HTTPException(409, {...}) bodies in `detail`; the
           // exact envelope api/network.py::apply_network produces.
           return Promise.reject(new ApiError(409, {
             detail: {
@@ -9351,7 +9351,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 
 // uPlot needs a real canvas 2D context; jsdom hands it null and uPlot's _commit
 // throws on the first paint with non-empty data. Same treatment vncconsole.test
-// gives @novnc/novnc — the chart is a leaf with nothing this page asserts on.
+// gives @novnc/novnc, the chart is a leaf with nothing this page asserts on.
 vi.mock('../components/charts/Sparkline', () => ({
   Sparkline: ({ values }: { values: (number | null)[] }) =>
     <div data-testid="sparkline">{values.length}</div>,
@@ -9379,7 +9379,7 @@ describe('NetworkPage reads', () => {
     expect(t.getByText('10.0.0.9/24')).toBeInTheDocument()
     expect(t.getByText('VLAN-aware')).toBeInTheDocument()
     expect(t.getByText('bond0')).toBeInTheDocument()          // vmbr0's port
-    // bonds and physical NICs are not bridges — doc 06's table is bridges only.
+    // bonds and physical NICs are not bridges, doc 06's table is bridges only.
     // They belong to the host-config section, which asserts them below.
     expect(t.queryByText('enp1s0 enp2s0')).toBeNull()
   })
@@ -9424,12 +9424,12 @@ describe('NetworkPage reads', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/network.test.tsx`
-Expected: FAIL — `Failed to resolve import "../routes/network" from "src/tests/network.test.tsx"`, so all 4 tests fail at collection.
+Expected: FAIL, `Failed to resolve import "../routes/network" from "src/tests/network.test.tsx"`, so all 4 tests fail at collection.
 
 - [ ] **Step 3: Write `src/api/network.ts`**
 
 ```ts
-// api/network.ts — Network page server state (doc 05 §Network, doc 06 §a row 44).
+// api/network.ts, Network page server state (doc 05 §Network, doc 06 §a row 44).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -9480,7 +9480,7 @@ export type Throughput = { hours: number; resolution: string; hosts: HostThrough
  * Every dict-bodied `HTTPException` in this app arrives FLAT: `main.py`'s
  * `problem_handler` does `body.update(exc.detail)`, so `HTTPException(409,
  * {"error": "confirm_required", ...})` serialises as
- * `{type, title, status, error, confirm_phrase, detail}` — `detail` is the
+ * `{type, title, status, error, confirm_phrase, detail}`: `detail` is the
  * human-readable string, not a nested object. That is why `LifecycleActions`
  * reads `e.body.error` directly and why it works for Phase 6's routes too.
  * The `detail`-is-an-object branch below is belt-and-braces for a plain
@@ -9536,7 +9536,7 @@ export function useSetNic() {
         { method: 'PUT', body: JSON.stringify(v.patch) }),
     // A config PUT is not a job (api/network.py::set_guest_nic writes the file
     // synchronously), so useLifecycle's "never invalidate the resource key"
-    // rule does not apply — there is no optimistic patch to stomp and the
+    // rule does not apply; there is no optimistic patch to stomp and the
     // attachment map is exactly what changed.
     onSettled: () => { qc.invalidateQueries({ queryKey: ['network'] }) },
   })
@@ -9626,7 +9626,7 @@ import { Button } from './ui/button'
  *
  * The NIC's model and MAC are shown but never submitted. Proxmox stores them in
  * the netN head token (`virtio=AA:BB:CC:DD:EE:FF`), and the backend edits the
- * string it read rather than rebuilding one — so this form sends only the keys
+ * string it read rather than rebuilding one, so this form sends only the keys
  * the operator touched and the head token survives untouched.
  */
 export function NicForm({ nic, bridges, onClose }: {
@@ -9650,13 +9650,13 @@ export function NicForm({ nic, bridges, onClose }: {
     set.mutate({ guestType: nic.guest_type, guestId: nic.guest_id, iface: nic.iface, patch }, {
       onSuccess: (r) => {
         // pending_reboot means PVE filed the change under the guest's PENDING
-        // section — say so plainly instead of a green "saved".
+        // section, say so plainly instead of a green "saved".
         if (r.pending_reboot) toast(r.detail)
         else toast.success(`${nic.iface} updated`)
         onClose()
       },
       onError: (err) =>
-        setError(String(errBody(err)?.detail ?? 'Could not update this NIC — try again.')),
+        setError(String(errBody(err)?.detail ?? 'Could not update this NIC, try again.')),
     })
   }
 
@@ -9670,12 +9670,12 @@ export function NicForm({ nic, bridges, onClose }: {
           {nic.name ?? `guest ${nic.vmid}`} · <span className="font-mono">{nic.iface}</span>
         </h2>
         <div className="mt-2 rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
-          <div>{nic.model ?? '—'} · {nic.macaddr ?? '—'}</div>
+          <div>{nic.model ?? ', '} · {nic.macaddr ?? ', '}</div>
           <div className="mt-1 break-all">{nic.raw}</div>
         </div>
         <p className="mt-2 text-[12px] text-text-3">
           The adapter model and MAC address are preserved exactly as Proxmox stores
-          them — this form only changes the three fields below.
+          them, this form only changes the three fields below.
         </p>
 
         <form onSubmit={submit} className="mt-4 space-y-3">
@@ -9713,7 +9713,7 @@ export function NicForm({ nic, bridges, onClose }: {
 }
 ```
 
-- [ ] **Step 5: Write `src/routes/network.tsx` — the read half**
+- [ ] **Step 5: Write `src/routes/network.tsx`, the read half**
 
 The gated host-config section lands in Step 10; this is everything doc 06 §(a) row 44 calls for plus the attachment map.
 
@@ -9747,7 +9747,7 @@ function lastValue(s?: NetSeries): number | null {
 function zoneLabel(i: Iface): string {
   if (i.vlan_id != null) return `VLAN ${i.vlan_id}`
   if (i.vlan_aware) return 'VLAN-aware'
-  return i.type ?? '—'
+  return i.type ?? ', '
 }
 
 function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
@@ -9758,7 +9758,7 @@ function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
       <h2 className="mb-3 font-display text-[16px] font-semibold">Bridges</h2>
       {rows.length === 0 ? (
         <p className="text-[12.5px] text-text-3">
-          No bridges reported yet — Proxploy reads them live from each node on every load.
+          No bridges reported yet, Proxploy reads them live from each node on every load.
         </p>
       ) : (
         <table aria-label="Bridges" className="w-full text-left text-[13px]">
@@ -9781,14 +9781,14 @@ function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
                 </td>
                 <td className="py-2.5 text-text-2">{node.node}</td>
                 <td className="py-2.5 font-mono text-text-2">
-                  {iface.cidr ?? iface.address ?? '—'}
+                  {iface.cidr ?? iface.address ?? ', '}
                 </td>
                 <td className="py-2.5">
                   <span className="rounded-full border border-blue/30 bg-blue-dim px-2 py-0.5 text-[11px] text-blue">
                     {zoneLabel(iface)}
                   </span>
                 </td>
-                <td className="py-2.5 font-mono text-text-2">{iface.bridge_ports || '—'}</td>
+                <td className="py-2.5 font-mono text-text-2">{iface.bridge_ports || ', '}</td>
               </tr>
             ))}
           </tbody>
@@ -9805,7 +9805,7 @@ function ThroughputCard() {
   const total = (pick: (h: HostThroughput) => NetSeries) =>
     hosts.length ? hosts.reduce((a, h) => a + (lastValue(pick(h)) ?? 0), 0) : null
   // ponytail: the two sparklines chart the first host's series, the same
-  // simplification cluster.tsx made for its network card — the ↓/↑ figures above
+  // simplification cluster.tsx made for its network card, the ↓/↑ figures above
   // them are already fleet-wide. Summed series when a real fleet shows it matters.
   const first = hosts[0]
   return (
@@ -9831,7 +9831,7 @@ function AttachmentMap({ attachments, nodes }: {
   attachments: Attachment[]; nodes: NodeIfaces[]
 }) {
   const ent = useEntitlements()
-  // has() is false until the first fetch resolves — gating on !has() alone
+  // has() is false until the first fetch resolves, gating on !has() alone
   // greys the button out for every plan during load.
   const denied = ent.data != null && !ent.has('network.guest_config')
   const [editing, setEditing] = useState<Attachment | null>(null)
@@ -9869,12 +9869,12 @@ function AttachmentMap({ attachments, nodes }: {
                   </span>
                 </td>
                 <td className="py-2.5 font-mono text-text-2">{a.iface}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? '—'}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.tag ?? '—'}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? ', '}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.tag ?? ', '}</td>
                 <td className={`py-2.5 text-[12px] ${a.firewall ? 'text-green' : 'text-text-3'}`}>
                   {a.firewall ? 'on' : 'off'}
                 </td>
-                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? '—'}</td>
+                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? ', '}</td>
                 <td className="py-2.5 text-right">
                   <Button variant="ghost" className="px-2 py-1 text-[11px]"
                           disabled={denied}
@@ -9913,7 +9913,7 @@ export function NetworkPage() {
 
       {isError ? (
         <EmptyState title="Network not readable"
-          note="Proxploy reads bridges live from each node — check that the host is connected." />
+          note="Proxploy reads bridges live from each node, check that the host is connected." />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -9927,7 +9927,7 @@ export function NetworkPage() {
   )
 }
 
-// shellRoute comes from ./shell, never ../router — importing router.tsx here
+// shellRoute comes from ./shell, never ../router; importing router.tsx here
 // would force its eager createRouter() to run mid-cycle (cluster.tsx:273-277).
 export const networkRoute = createRoute({
   getParentRoute: () => shellRoute,
@@ -9939,7 +9939,7 @@ export const networkRoute = createRoute({
 - [ ] **Step 6: Run to verify the read half passes**
 
 Run: `cd frontend && npx vitest run src/tests/network.test.tsx`
-Expected: PASS — 4 passed.
+Expected: PASS, 4 passed.
 
 - [ ] **Step 7: Append the gated host-config tests**
 
@@ -9989,7 +9989,7 @@ describe('NetworkPage host config', () => {
 - [ ] **Step 8: Run to verify the new failures**
 
 Run: `cd frontend && npx vitest run src/tests/network.test.tsx`
-Expected: FAIL — 4 passed, 3 failed: `Unable to find an element with the text: /Host network editing is a Pro feature/i`, `Unable to find an accessible element with the role "table" and name "Interfaces on pve1"`, and `Unable to find a button with the name /Apply staged config/i`.
+Expected: FAIL, 4 passed, 3 failed: `Unable to find an element with the text: /Host network editing is a Pro feature/i`, `Unable to find an accessible element with the role "table" and name "Interfaces on pve1"`, and `Unable to find a button with the name /Apply staged config/i`.
 
 - [ ] **Step 9: Add the `title` prop to `ConfirmSelfDialog`**
 
@@ -10062,7 +10062,7 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
     if (comments.trim()) config.comments = comments.trim()
     const done = {
       onSuccess: () => {
-        toast(`${name} staged on ${node} — nothing changes until you Apply.`)
+        toast(`${name} staged on ${node}, nothing changes until you Apply.`)
         onClose()
       },
       onError: (err: unknown) =>
@@ -10170,14 +10170,14 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
       onError: (e) => {
         const b = errBody(e)
         // The backend refuses an unconfirmed apply with the node name as the
-        // phrase, deliberately the same envelope selfguard uses — escalate to
+        // phrase, deliberately the same envelope selfguard uses; escalate to
         // the typed-confirmation dialog and re-fire with what was typed.
         if (b?.error === 'confirm_required') {
           setGuard({ hostId, node, phrase: String(b.confirm_phrase ?? node),
                      detail: String(b.detail ?? '') })
           return
         }
-        toast.error('Could not apply the staged config — the node was not changed.')
+        toast.error('Could not apply the staged config, the node was not changed.')
       },
     })
 
@@ -10205,7 +10205,7 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
           <p className="mt-2 rounded-ctl border border-red/30 bg-red-dim p-2 text-[12.5px] text-text-2">
             <span className="text-red">Applying reloads the node&apos;s interfaces.</span> If the
             staged config is wrong the node loses its network, and the only way back is its
-            physical console — there is no undo from here.
+            physical console; there is no undo from here.
           </p>
 
           {jobId != null && (
@@ -10255,12 +10255,12 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                   {n.interfaces.map((i) => (
                     <tr key={i.iface} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono">{i.iface}</td>
-                      <td className="py-2.5 text-text-2">{i.type ?? '—'}</td>
+                      <td className="py-2.5 text-text-2">{i.type ?? ', '}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.cidr ?? i.address ?? '—'}
+                        {i.cidr ?? i.address ?? ', '}
                       </td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.bridge_ports || i.slaves || '—'}
+                        {i.bridge_ports || i.slaves || ', '}
                       </td>
                       <td className={`py-2.5 text-[12px] ${i.active ? 'text-green' : 'text-text-3'}`}>
                         {i.active ? 'up' : 'down'}
@@ -10311,7 +10311,7 @@ And render it at the bottom of `NetworkPage`'s success branch, directly after `<
 - [ ] **Step 12: Run the network tests**
 
 Run: `cd frontend && npx vitest run src/tests/network.test.tsx`
-Expected: PASS — 7 passed.
+Expected: PASS, 7 passed.
 
 - [ ] **Step 13: Point `router.tsx` at the real network route**
 
@@ -10328,7 +10328,7 @@ and add the import to the route-import block below `indexRoute` (next to the sto
 import { networkRoute } from './routes/network'
 ```
 
-`routeTree` already lists `networkRoute` and needs no change. The `page()` helper stays for now — `backupsRoute` is its last consumer and Task 15 deletes both.
+`routeTree` already lists `networkRoute` and needs no change. The `page()` helper stays for now, `backupsRoute` is its last consumer and Task 15 deletes both.
 
 - [ ] **Step 14: Run the full frontend suite, build and lint**
 
@@ -10347,7 +10347,7 @@ git commit -m "feat(network): live bridges, throughput, guest NIC editor and con
 
 ---
 
-## Task 15: Frontend — Backups page (+ the last placeholder is deleted)
+## Task 15: Frontend: Backups page (+ the last placeholder is deleted)
 
 **Files:**
 - Create: `frontend/src/api/backups.ts`, `frontend/src/components/RestoreDialog.tsx`, `frontend/src/routes/backups.tsx`
@@ -10359,7 +10359,7 @@ git commit -m "feat(network): live bridges, throughput, guest NIC editor and con
 
 - Consumes (Task 8): `GET /api/v1/backups` → `{backups: [{id, host_id, host_name, storage, volid, guest_type, guest_vmid, guest_name, taken_at, size_bytes, verify_state, notes}], stats: {total, total_bytes, ok_count, failed_count, success_rate_30d: number|null, datastores: [{storage, count, size_bytes}]}, synced_at, stale}`.
 - Consumes (Task 9): `POST /api/v1/backups/run` `{guests: "all", host_id?}` → `202 {job}`; `POST /api/v1/backups/{id}/restore` `{mode: "new"|"in_place", confirm?}` → `202 {job}` or `409 {"detail": {...}}` with `error` of `confirm_required` / `self_target` / `guest_running` / `guest_missing`; `DELETE /api/v1/backups/{id}` → `202 {job}`; `GET /api/v1/backups/prune-preview?host_id=&storage=&keep_last=&keep_daily=` → `[{volid, type, vmid, ctime, mark: "keep"|"remove"|"protected"}]`.
-- Consumes (Task 14): `errBody(e)` from `../api/network` — the same `{"detail": {...}}` unwrapper; one helper, not two.
+- Consumes (Task 14): `errBody(e)` from `../api/network`, the same `{"detail": {...}}` unwrapper; one helper, not two.
 - Consumes (existing): `useEntitlements`, `LockVeil`, `ConfirmSelfDialog` (with Task 14's `title` prop), `JobLog`, `UsageBar` + `STORAGE_GRADIENT`, `EmptyState`, `Button`, `inputCls`, `fmtBytes`/`fmtPct`, `toast`, `window.confirm` (the `routes/settings.tsx` precedent), `shellRoute` from `./shell`.
 - Produces:
   - `src/api/backups.ts` → types `BackupRow`, `Datastore`, `BackupStats`, `BackupsResponse`, `PruneRow`, `PruneParams`; hooks `useBackups()`, `useRunBackup()`, `useRestoreBackup()`, `useDeleteBackup()`, `usePrunePreview(params)`
@@ -10369,7 +10369,7 @@ git commit -m "feat(network): live bridges, throughput, guest NIC editor and con
 
 **Three things worth stating before the steps:**
 
-1. **The `self_target` 409 is a refusal, not a confirmation.** Every other `self_target` in the product (`LifecycleActions`' stop) re-POSTs with the typed phrase and succeeds. `api/backups.py::restore_backup_route` raises it *unconditionally* for an in-place restore over Proxploy's own CT — `confirm` cannot bypass it, and re-POSTing gets the identical 409. So this page renders the backend's `detail` sentence and stops. `confirm_required` (an in-place restore over any *other* guest) is the one that opens `ConfirmSelfDialog`.
+1. **The `self_target` 409 is a refusal, not a confirmation.** Every other `self_target` in the product (`LifecycleActions`' stop) re-POSTs with the typed phrase and succeeds. `api/backups.py::restore_backup_route` raises it *unconditionally* for an in-place restore over Proxploy's own CT, `confirm` cannot bypass it, and re-POSTing gets the identical 409. So this page renders the backend's `detail` sentence and stops. `confirm_required` (an in-place restore over any *other* guest) is the one that opens `ConfirmSelfDialog`.
 2. **The doc-06 "Node" column shows the host.** `api/backups.py::_backup_out` returns `host_name`; the `backups` table carries no node column and Task 8's sync is single-node-per-host by design. The column is labelled **Host** rather than mislabelling a host as a node.
 3. **The retention section is preview-only.** `POST /backups/prune` exists and is not wired. A one-shot "prune now" button is a worse product than the retention *policy* the Phase 7 scheduler owns, and shipping a destructive button whose rules cannot be saved is the wrong half to build first. Recorded as a `ponytail:` comment naming the upgrade path.
 
@@ -10442,7 +10442,7 @@ vi.mock('../api/client', () => {
       }
       if (path.endsWith('/restore')) {
         if (body.mode === 'in_place' && restoreGuard === 'self') {
-          // Unconditional refusal — `confirm` does not bypass it.
+          // Unconditional refusal, `confirm` does not bypass it.
           return Promise.reject(new ApiError(409, { detail: {
             error: 'self_target', confirm_phrase: 'Immich',
             detail: 'Immich is the container Proxploy itself runs in. An in-place ' +
@@ -10578,7 +10578,7 @@ describe('BackupsPage', () => {
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true,
                  'backups.retention': true }
     wrap()
-    // enabled only once /backups resolves — the datastore and its host come from it
+    // enabled only once /backups resolves, the datastore and its host come from it
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Preview retention' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Preview retention' }))
@@ -10591,7 +10591,7 @@ describe('BackupsPage', () => {
   it('offers PBS datastore connect, reusing StorageForm pre-set to type pbs', async () => {
     // doc 10 lists "PBS datastore connect" as a Phase 6 Backups deliverable.
     // Connecting PBS *is* attaching a storage of type pbs, so this asserts the
-    // affordance exists and opens Task 13's form in the right mode — not that
+    // affordance exists and opens Task 13's form in the right mode, not that
     // a second, parallel PBS form was built.
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Connect PBS' }))
@@ -10604,12 +10604,12 @@ describe('BackupsPage', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/backups.test.tsx`
-Expected: FAIL — `Failed to resolve import "../routes/backups" from "src/tests/backups.test.tsx"`; all 8 tests fail at collection.
+Expected: FAIL, `Failed to resolve import "../routes/backups" from "src/tests/backups.test.tsx"`; all 8 tests fail at collection.
 
 - [ ] **Step 3: Write `src/api/backups.ts`**
 
 ```ts
-// api/backups.ts — Backups page server state (doc 05 §Backups, doc 06 §a row 45).
+// api/backups.ts, Backups page server state (doc 05 §Backups, doc 06 §a row 45).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -10636,7 +10636,7 @@ export type BackupStats = {
   total_bytes: number
   ok_count: number
   failed_count: number
-  /** null when nothing in the window was verified — never a fake 100%. */
+  /** null when nothing in the window was verified, never a fake 100%. */
   success_rate_30d: number | null
   datastores: Datastore[]
 }
@@ -10669,7 +10669,7 @@ export function useBackups() {
 }
 
 // Every mutation below fires a job. Per api/jobs.ts::useLifecycle's documented
-// rule they invalidate ['jobs'] and ['cluster','activity'] only — never
+// rule they invalidate ['jobs'] and ['cluster','activity'] only, never
 // ['backups'] on success. The handler's own `_resync` + the `resource`
 // {type:'backup'} SSE delta are what refresh the list, once the archive
 // actually exists upstream rather than while the job is still queued.
@@ -10719,7 +10719,7 @@ export type PruneParams = {
   keepDaily: number
 }
 
-/** Dry run. GET only — the destructive verb lives on POST /backups/prune. */
+/** Dry run. GET only, the destructive verb lives on POST /backups/prune. */
 export function usePrunePreview(p: PruneParams | null) {
   return useQuery({
     queryKey: ['backups', 'prune-preview', p],
@@ -10751,12 +10751,12 @@ import { fmtBytes } from '../lib/format'
  * Restore one archive, in place or as a new guest (doc 01 §7).
  *
  * Three 409 shapes reach this dialog and they are NOT interchangeable:
- *  - `confirm_required` — an in-place restore over another guest. Confirmable:
+ *  - `confirm_required`: an in-place restore over another guest. Confirmable:
  *    re-POST with the typed name.
- *  - `self_target` — an in-place restore over the CT Proxploy itself runs in.
+ *  - `self_target`: an in-place restore over the CT Proxploy itself runs in.
  *    Refused unconditionally by api/backups.py; `confirm` does not bypass it and
  *    re-POSTing returns the identical 409. Show the reason, offer nothing.
- *  - `guest_running` / `guest_missing` — same treatment: state the reason.
+ *  - `guest_running` / `guest_missing`, same treatment: state the reason.
  */
 export function RestoreDialog({ backup, onClose }: {
   backup: BackupRow; onClose: () => void
@@ -10779,7 +10779,7 @@ export function RestoreDialog({ backup, onClose }: {
           return
         }
         setGuard(null)
-        setRefusal(String(b?.detail ?? 'Could not start the restore — try again.'))
+        setRefusal(String(b?.detail ?? 'Could not start the restore, try again.'))
       },
     })
   }
@@ -10887,7 +10887,7 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
 
 function fmtWhen(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
+  return iso ? new Date(iso).toLocaleString() : ', '
 }
 
 function StatCard({ label, value, note }: { label: string; value: string; note: React.ReactNode }) {
@@ -10939,7 +10939,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
               <Button disabled={hostId == null || run.isPending}
                       onClick={() => run.mutate({ hostId }, {
                         onSuccess: (r) => setJobId(r.job.id),
-                        onError: () => toast.error('Could not start the backup — try again.'),
+                        onError: () => toast.error('Could not start the backup, try again.'),
                       })}>
                 {run.isPending ? 'Starting…' : 'Start backup'}
               </Button>
@@ -10989,7 +10989,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
           <h2 className="font-display text-[16px] font-semibold">Retention preview</h2>
           <p className="mt-1 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
             <span className="text-amber">Dry run.</span> This preview only asks Proxmox what a
-            retention rule <em>would</em> do — it deletes nothing, and there is no button here
+            retention rule <em>would</em> do, it deletes nothing, and there is no button here
             that does.
           </p>
 
@@ -11026,7 +11026,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
 
           {preview.isError && (
             <p className="mt-3 text-[12.5px] text-red">
-              Proxmox refused that rule — at least one keep value must be above zero.
+              Proxmox refused that rule, at least one keep value must be above zero.
             </p>
           )}
 
@@ -11049,10 +11049,10 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
                     <tr key={r.volid} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono text-[11.5px] text-text-2 break-all">{r.volid}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {r.type ?? '—'} {r.vmid ?? ''}
+                        {r.type ?? ', '} {r.vmid ?? ''}
                       </td>
                       <td className="py-2.5 text-text-2">
-                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : '—'}
+                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : ', '}
                       </td>
                       <td className="py-2.5">
                         <span className={`rounded-full border px-2 py-0.5 text-[11px] ${MARK_CLS[r.mark] ?? ''}`}>
@@ -11089,7 +11089,7 @@ export function BackupsPage() {
     if (!window.confirm(
       `Delete ${b.volid}? The archive is removed from ${b.storage} and cannot be recovered.`)) return
     del.mutate(b.id, {
-      onError: () => toast.error('Could not delete that archive — try again.'),
+      onError: () => toast.error('Could not delete that archive, try again.'),
     })
   }
 
@@ -11111,7 +11111,7 @@ export function BackupsPage() {
           {/* doc 10's "PBS datastore connect". Connecting PBS is exactly
               attaching a storage of type `pbs`, so this opens Task 13's
               StorageForm pre-set rather than duplicating it. Shown always,
-              not only when empty — a second datastore is a normal thing to
+              not only when empty, a second datastore is a normal thing to
               add. Server enforces `storage.manage`; the form carries its own
               LockVeil, so no gate is needed on the trigger. */}
           <Button variant="ghost" onClick={() => setConnecting(true)}>
@@ -11130,7 +11130,7 @@ export function BackupsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <StatCard label="Next scheduled" value="—"
+        <StatCard label="Next scheduled" value=", "
           note="Scheduled backups arrive with the Phase 7 scheduler; every run today is one you started." />
         <StatCard label="Datastore used" value={fmtBytes(stats?.total_bytes)}
           note={
@@ -11144,9 +11144,9 @@ export function BackupsPage() {
             </>
           } />
         <StatCard label="Success rate · 30d"
-          value={stats?.success_rate_30d == null ? '—' : fmtPct(stats.success_rate_30d)}
+          value={stats?.success_rate_30d == null ? ', ' : fmtPct(stats.success_rate_30d)}
           note={stats?.success_rate_30d == null
-            ? 'Nothing verified in the last 30 days — unverified archives are left out rather than counted as passes.'
+            ? 'Nothing verified in the last 30 days, unverified archives are left out rather than counted as passes.'
             : `${stats.ok_count} verified · ${stats.failed_count} failed`} />
       </div>
 
@@ -11154,7 +11154,7 @@ export function BackupsPage() {
         <h2 className="mb-3 font-display text-[16px] font-semibold">Recent backups</h2>
         {isError ? (
           <EmptyState title="Backups not readable"
-            note="Proxploy mirrors archives from each host's backup datastores — check that the host is connected." />
+            note="Proxploy mirrors archives from each host's backup datastores, check that the host is connected." />
         ) : (data?.backups.length ?? 0) === 0 ? (
           <EmptyState title="No backups yet"
             note="Archives Proxmox already holds appear here after the first sync." />
@@ -11176,12 +11176,12 @@ export function BackupsPage() {
               {(data?.backups ?? []).map((b) => (
                 <tr key={b.id} className="border-t border-line-soft hover:bg-panel-2">
                   <td className="py-2.5 font-mono">
-                    {b.guest_name ?? '—'}
+                    {b.guest_name ?? ', '}
                     <span className="ml-2 text-[11px] text-text-3">
                       {b.guest_type?.toUpperCase()} {b.guest_vmid}
                     </span>
                   </td>
-                  <td className="py-2.5 text-text-2">{b.host_name ?? '—'}</td>
+                  <td className="py-2.5 text-text-2">{b.host_name ?? ', '}</td>
                   <td className="py-2.5 text-text-2">{fmtWhen(b.taken_at)}</td>
                   <td className="py-2.5 font-mono text-text-2">{fmtBytes(b.size_bytes)}</td>
                   <td className={`py-2.5 text-[12px] ${
@@ -11231,7 +11231,7 @@ export const backupsRoute = createRoute({
 - [ ] **Step 6: Run the backups tests**
 
 Run: `cd frontend && npx vitest run src/tests/backups.test.tsx`
-Expected: PASS — 8 passed.
+Expected: PASS, 8 passed.
 
 - [ ] **Step 7: Point `router.tsx` at the real backups route and delete the `page()` helper**
 
@@ -11287,7 +11287,7 @@ Expected: `no references left`. A hit here means a route file still imports it a
 - [ ] **Step 9: Run the full frontend suite, build and lint**
 
 Run: `cd frontend && npx vitest run && npm run build && npm run lint`
-Expected: Task 14's total **+ 8 passed** across **+1 file**; `tsc -b && vite build` clean; oxlint clean. A `TS2307: Cannot find module './routes/placeholder'` means Step 7's rewrite was applied after the delete in a stale editor buffer — re-apply Step 7.
+Expected: Task 14's total **+ 8 passed** across **+1 file**; `tsc -b && vite build` clean; oxlint clean. A `TS2307: Cannot find module './routes/placeholder'` means Step 7's rewrite was applied after the delete in a stale editor buffer, re-apply Step 7.
 
 - [ ] **Step 10: Commit**
 
@@ -11301,7 +11301,7 @@ git commit -m "feat(backups): PBS page with run, restore, delete and retention p
 
 ---
 
-## Task 16: Frontend — VM snapshots tab (list / take / roll back / delete)
+## Task 16: Frontend: VM snapshots tab (list / take / roll back / delete)
 
 **Files:**
 - Create: `frontend/src/api/snapshots.ts`
@@ -11333,7 +11333,7 @@ let rollbackGuard = false
 
 const SNAPS = [
   // PVE's snapshot list always carries a synthetic `current` row for the live
-  // state — it is not a snapshot and must never be offered Rollback/Delete.
+  // state; it is not a snapshot and must never be offered Rollback/Delete.
   { name: 'current', description: 'You are here!', snaptime: null, vmstate: false, parent: 'pre-upgrade' },
   { name: 'pre-upgrade', description: 'before the 24.04 jump', snaptime: 1785369600,
     vmstate: true, parent: null, size_bytes: 2147483648 },
@@ -11447,7 +11447,7 @@ describe('SnapshotPanel', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/snapshots.test.tsx`
-Expected: FAIL — `Error: Failed to resolve import "../components/SnapshotPanel" from "src/tests/snapshots.test.tsx". Does the file exist?` (all 5 tests fail at collection; the file is never executed).
+Expected: FAIL, `Error: Failed to resolve import "../components/SnapshotPanel" from "src/tests/snapshots.test.tsx". Does the file exist?` (all 5 tests fail at collection; the file is never executed).
 
 - [ ] **Step 3: Write `src/api/snapshots.ts`**
 
@@ -11468,7 +11468,7 @@ export type SnapshotRow = {
   parent: string | null
   // PVE does not report a per-snapshot size for every storage plugin (LVM-thin
   // and ZFS internal snapshots have no standalone size), so this is optional on
-  // purpose: doc 06 row 48's Size column renders "—" rather than a fake number.
+  // purpose: doc 06 row 48's Size column renders ", " rather than a fake number.
   size_bytes?: number | null
 }
 
@@ -11511,13 +11511,13 @@ function request(v: SnapshotVars) {
  * onSettled rule: invalidate ['jobs'] and ['cluster','activity'].
  *
  * They ALSO invalidate ['vms', id, 'snapshots'], which useLifecycle deliberately
- * does not do for ['vms'] — and the difference is real, not an inconsistency.
+ * does not do for ['vms'], and the difference is real, not an inconsistency.
  * ['vms'] is the poller's 30s resource cache holding an optimistic `pending`
  * patch that a refetch would stomp with stale data. ['vms', id, 'snapshots'] is
  * a live read straight off Proxmox with no optimistic patch to protect, so a
  * refetch can only move it closer to the truth. It is best-effort at enqueue
  * time (the job has only been accepted); the terminal `job` SSE delta
- * invalidates the ['vms'] prefix — which matches this key too — and is the
+ * invalidates the ['vms'] prefix, which matches this key too, and is the
  * backstop that actually shows the finished result.
  */
 export function useSnapshotAction() {
@@ -11557,7 +11557,7 @@ const ROLLBACK_DETAIL =
 
 /** Unix seconds → "YYYY-MM-DD HH:MM" in UTC. Deterministic, unlike toLocaleString. */
 function fmtWhen(t: number | null | undefined): string {
-  if (!t) return '—'
+  if (!t) return ', '
   return new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16)
 }
 
@@ -11567,7 +11567,7 @@ function fmtWhen(t: number | null | undefined): string {
  * doc 01 §4's "with-RAM option surfaced".
  *
  * This panel only ever mounts under /vms/$vmId, i.e. qemu guests, which is why
- * the vmstate checkbox is unconditional — PVE rejects vmstate for LXC, so an
+ * the vmstate checkbox is unconditional, PVE rejects vmstate for LXC, so an
  * LXC consumer would have to hide it before reusing this component.
  */
 export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }) {
@@ -11579,7 +11579,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   const [desc, setDesc] = useState('')
   const [withRam, setWithRam] = useState(false)
 
-  // useEntitlements().has() is false until /entitlements resolves — gate on
+  // useEntitlements().has() is false until /entitlements resolves, gate on
   // ent.data != null too or every plan sees a dead panel during the first fetch.
   const denied = ent.data != null && !ent.has('vms.snapshots')
   const planTitle = denied ? 'Not included in your plan' : undefined
@@ -11693,7 +11693,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
                   <td className="py-2.5 font-mono text-text-2">{fmtWhen(s.snaptime)}</td>
                   <td className="py-2.5 font-mono text-text-2"
                     title={s.size_bytes == null ? 'Proxmox does not report a size for this storage plugin' : undefined}>
-                    {s.size_bytes == null ? '—' : fmtBytes(s.size_bytes)}
+                    {s.size_bytes == null ? ', ' : fmtBytes(s.size_bytes)}
                   </td>
                   <td className="flex items-center gap-2 py-2.5">
                     <Button variant="go" className="px-2 py-1 text-[11px]"
@@ -11730,7 +11730,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
 - [ ] **Step 5: Run the new test file to verify it passes**
 
 Run: `cd frontend && npx vitest run src/tests/snapshots.test.tsx`
-Expected: PASS — `Test Files 1 passed (1)`, `Tests 5 passed (5)`.
+Expected: PASS, `Test Files 1 passed (1)`, `Tests 5 passed (5)`.
 
 - [ ] **Step 6: Replace `vmSnapshotsRoute` and delete the dead `phaseTab` helper in `routes/vms.tsx`**
 
@@ -11776,24 +11776,24 @@ Add one import near the other component imports at the top of `vms.tsx`:
 import { SnapshotPanel } from '../components/SnapshotPanel'
 ```
 
-`EmptyState` stays imported — `VmsPage`, `VmDetail` and `VmConsole` all still use it. `createRoute`, `useParams`, `useQuery`, `api` and `VmRow` are already imported.
+`EmptyState` stays imported, `VmsPage`, `VmDetail` and `VmConsole` all still use it. `createRoute`, `useParams`, `useQuery`, `api` and `VmRow` are already imported.
 
 - [ ] **Step 7: Run the full frontend suite, build and lint**
 
 Run: `cd frontend && npx vitest run && npm run build && npm run lint`
-Expected: PASS — Task 15's total **+5 tests across +1 file** (`snapshots.test.tsx`, 5 passed). `tsc -b && vite build` clean; oxlint reports 0 warnings, 0 errors. Nothing in Tasks 12-15 touches `routes/vms.tsx`, so no pre-existing test changes count.
+Expected: PASS, Task 15's total **+5 tests across +1 file** (`snapshots.test.tsx`, 5 passed). `tsc -b && vite build` clean; oxlint reports 0 warnings, 0 errors. Nothing in Tasks 12-15 touches `routes/vms.tsx`, so no pre-existing test changes count.
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add frontend/src/api/snapshots.ts frontend/src/components/SnapshotPanel.tsx \
         frontend/src/routes/vms.tsx frontend/src/tests/snapshots.test.tsx
-git commit -m "feat(vms): real snapshots tab — list, take (with-RAM), roll back and delete"
+git commit -m "feat(vms): real snapshots tab, list, take (with-RAM), roll back and delete"
 ```
 
 ---
 
-## Task 17: Frontend — VM create wizard + clone dialog
+## Task 17: Frontend: VM create wizard + clone dialog
 
 **Files:**
 - Create: `frontend/src/components/VmCreateWizard.tsx`
@@ -11899,7 +11899,7 @@ describe('VmCreateWizard', () => {
     wrap(<VmCreateWizard onClose={() => {}} />)
 
     // Every <select> renders empty and fills in when its query resolves, so each
-    // pick waits for its own <option> — changing to a value with no matching
+    // pick waits for its own <option>, changing to a value with no matching
     // option is a silent no-op in jsdom.
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
@@ -12019,7 +12019,7 @@ describe('CloneDialog', () => {
 - [ ] **Step 2: Run to verify the failure**
 
 Run: `cd frontend && npx vitest run src/tests/vmcreate.test.tsx`
-Expected: FAIL — `Error: Failed to resolve import "../components/CloneDialog" from "src/tests/vmcreate.test.tsx". Does the file exist?` (collection error; none of the 5 tests run).
+Expected: FAIL, `Error: Failed to resolve import "../components/CloneDialog" from "src/tests/vmcreate.test.tsx". Does the file exist?` (collection error; none of the 5 tests run).
 
 - [ ] **Step 3: Write `src/components/VmCreateWizard.tsx`**
 
@@ -12066,7 +12066,7 @@ function Field({ id, label, children }: { id: string; label: string; children: R
 
 /**
  * Doc 06 §(a) row 42's "New VM". Mirrors routes/onboarding.tsx's wizard shape
- * on purpose — a step index, a STEPS chip row, `{step === N && (…)}` blocks —
+ * on purpose, a step index, a STEPS chip row, `{step === N && (…)}` blocks; 
  * rather than becoming a reusable <Wizard/>: there are exactly two multi-step
  * flows in this app and they share no fields.
  *
@@ -12215,7 +12215,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                   </select>
                 </Field>
                 <p className="text-[12px] text-text-3">
-                  No ISOs listed? Upload one on the Storage page — this list is the
+                  No ISOs listed? Upload one on the Storage page, this list is the
                   datastore's own <span className="font-mono">content=iso</span> listing.
                 </p>
               </div>
@@ -12266,7 +12266,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
               <div className="rounded-ctl border border-line-soft bg-elev p-3">
                 <KVGrid items={[
                   ['Name', f.name],
-                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? '—'} / ${f.node}`],
+                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? ', '} / ${f.node}`],
                   ['OS type', f.ostype],
                   ['ISO', f.iso],
                   ['Cores', f.cores],
@@ -12314,7 +12314,7 @@ type StorageRow = { host_id: number; node: string; storage: string; content: str
 
 /**
  * Clone a VM: new name, full vs linked, target storage. Same InstallDialog
- * pattern — fire, keep the job id, swap the body for the job log.
+ * pattern, fire, keep the job id, swap the body for the job log.
  */
 export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
   const qc = useQueryClient()
@@ -12380,12 +12380,12 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
                 <label htmlFor="clone-full" className="flex items-center gap-2 text-[13px] text-text-2">
                   <input id="clone-full" type="radio" name="clone-mode" checked={full}
                     onChange={() => setFull(true)} />
-                  Full clone — an independent copy of every disk
+                  Full clone, an independent copy of every disk
                 </label>
                 <label htmlFor="clone-linked" className="flex items-center gap-2 text-[13px] text-text-2">
                   <input id="clone-linked" type="radio" name="clone-mode" checked={!full}
                     onChange={() => setFull(false)} />
-                  Linked clone — shares the base disk, template sources only
+                  Linked clone, shares the base disk, template sources only
                 </label>
               </fieldset>
               <div>
@@ -12430,7 +12430,7 @@ import { CloneDialog } from '../components/CloneDialog'
 import { VmCreateWizard } from '../components/VmCreateWizard'
 ```
 
-(`import { useEffect } from 'react'` already exists — merge it into `import { useEffect, useState } from 'react'`; `useMetrics` is already imported from `../api/hooks`, so add `useEntitlements` to that import list.)
+(`import { useEffect } from 'react'` already exists, merge it into `import { useEffect, useState } from 'react'`; `useMetrics` is already imported from `../api/hooks`, so add `useEntitlements` to that import list.)
 
 Replace the `VmsPage` header block and the row-action cell. The whole updated function:
 
@@ -12446,7 +12446,7 @@ export function VmsPage() {
     refetchInterval: 30_000,
   })
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
-  // ent.has() is false until /entitlements resolves — gate on ent.data != null
+  // ent.has() is false until /entitlements resolves, gate on ent.data != null
   // too, or every plan sees a dead "New VM" button for the whole first fetch.
   const createDenied = ent.data != null && !ent.has('vms.create')
   const cloneDenied = ent.data != null && !ent.has('vms.clone')
@@ -12488,7 +12488,7 @@ export function VmsPage() {
                   <td className="py-2.5 font-mono">{v.name}</td>
                   <td className="py-2.5 text-text-2">{v.host_name}</td>
                   <td className="py-2.5 font-mono text-text-2">
-                    {v.cpu_cores ?? '—'} / {fmtBytes(v.mem_bytes)}
+                    {v.cpu_cores ?? ', '} / {fmtBytes(v.mem_bytes)}
                   </td>
                   <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                   <td className="py-2.5"><StatusPill status={v.status} /></td>
@@ -12500,7 +12500,7 @@ export function VmsPage() {
                     </Button>
                     {/* doc 06 §e rule 2: a table-cell button is a "small inline
                         action", so the Pro treatment here is disabled+tooltip,
-                        not LockVeil — veiling a 60px cell blurs nothing legible,
+                        not LockVeil, veiling a 60px cell blurs nothing legible,
                         and a disabled trigger makes a veil inside the dialog
                         unreachable dead code. */}
                     <Button variant="ghost" className="px-2 py-1 text-[11px]"
@@ -12529,12 +12529,12 @@ export function VmsPage() {
 - [ ] **Step 6: Run the new test file to verify it passes**
 
 Run: `cd frontend && npx vitest run src/tests/vmcreate.test.tsx`
-Expected: PASS — `Test Files 1 passed (1)`, `Tests 5 passed (5)`.
+Expected: PASS, `Test Files 1 passed (1)`, `Tests 5 passed (5)`.
 
 - [ ] **Step 7: Run the full frontend suite, build and lint**
 
 Run: `cd frontend && npx vitest run && npm run build && npm run lint`
-Expected: PASS — Task 16's total **+5 tests across +1 file** (`vmcreate.test.tsx`, 5 passed). `tsc -b && vite build` clean; oxlint 0 warnings, 0 errors. `src/tests/nav.test.tsx` is untouched and still passes — this task adds page controls, never a nav entry.
+Expected: PASS, Task 16's total **+5 tests across +1 file** (`vmcreate.test.tsx`, 5 passed). `tsc -b && vite build` clean; oxlint 0 warnings, 0 errors. `src/tests/nav.test.tsx` is untouched and still passes, this task adds page controls, never a nav entry.
 
 - [ ] **Step 8: Commit**
 
@@ -12549,7 +12549,7 @@ git commit -m "feat(vms): New VM wizard (target/OS/resources/network/confirm) + 
 ## Task 18: DoD verification, doc-05 amendment, notes doc, buildlog
 
 **Files:**
-- Create: `backend/dod_verify_phase6.py` (throwaway, **not committed** — same as `dod_verify_phase5.py`), `docs/notes/phase-6-infra.md`
+- Create: `backend/dod_verify_phase6.py` (throwaway, **not committed**; same as `dod_verify_phase5.py`), `docs/notes/phase-6-infra.md`
 - Modify: `docs/05-api-surface.md`, `buildlog.md`
 - Test: `backend/tests/test_infra_pve_integration.py` (new, `pve_integration`-marked)
 
@@ -12571,7 +12571,7 @@ one against a named artifact:
 
 The same standing limitation every prior phase has stated applies: there is no
 live Proxmox host on this box, so the real-PVE proof is written, marked, and
-skipped until a disposable PVE exists — exactly the pattern
+skipped until a disposable PVE exists, exactly the pattern
 `tests/test_console_pve_integration.py` and `tests/test_pve_integration.py`
 already use.
 
@@ -12588,7 +12588,7 @@ fakes in tests/fakes/pve.py deliberately do not:
   few-byte payload the fake accepts, and that the UPID it returns
   actually completes;
 - that a vzdump of a real CT to a real PBS datastore, and a restore of
-  that archive as a NEW ctid, both succeed — the one DoD clause with the
+  that archive as a NEW ctid, both succeed; the one DoD clause with the
   most moving upstream parts;
 - that `/nodes/{node}/network` PUT (apply) behaves as documented on both
   PVE 8.x and 9.x, the single most dangerous call in the phase;
@@ -12608,15 +12608,15 @@ _ENV = ("PROXPLOY_TEST_PVE_URL", "PROXPLOY_TEST_PVE_TOKEN_ID",
                     reason="needs a disposable live PVE (PROXPLOY_TEST_PVE_*)")
 def test_phase6_against_live_pve():
     pytest.skip("fill in against the disposable PVE fixture once one is "
-                "available (doc 11 §7) — no live PVE on this box, the "
+                "available (doc 11 §7), no live PVE on this box, the "
                 "standing limitation every phase has stated")
 ```
 
 - [ ] **Step 2: Write the DoD verification script**
 
 ```python
-# backend/dod_verify_phase6.py — run once from backend/, NOT committed
-"""Phase 6 DoD verification, doc 10. Uses tests.support.make_app + FakePVE —
+# backend/dod_verify_phase6.py: run once from backend/, NOT committed
+"""Phase 6 DoD verification, doc 10. Uses tests.support.make_app + FakePVE, 
 no live PVE, no browser on this box, matching every prior phase's stated
 limitation. Proves the three job-shaped DoD clauses end to end through the
 real routes, the real JobBackend, and the real audit path."""
@@ -12727,7 +12727,7 @@ def main():
         assert vmid == 999, "vmid must come from cluster/nextid"
 
         # A Vm row for the snapshot/clone routes to address. Proxploy never
-        # writes these itself — the poller discovers them — so seed it the way
+        # writes these itself: the poller discovers them, so seed it the way
         # a poll cycle would.
         from proxploy.models import Vm
         with app.state.sessionmaker() as db:
@@ -12832,7 +12832,7 @@ if __name__ == "__main__":
 - [ ] **Step 3: Run it and keep the real output**
 
 Run: `cd backend && ./.venv/bin/python dod_verify_phase6.py`
-Expected: every assertion passes and the script ends with the `PROVED:` line. Paste the **actual** output into the notes doc in Step 5 — not a reconstruction of it. If a clause fails, fix the code, not the script.
+Expected: every assertion passes and the script ends with the `PROVED:` line. Paste the **actual** output into the notes doc in Step 5, not a reconstruction of it. If a clause fails, fix the code, not the script.
 
 - [ ] **Step 4: Run every suite and gate**
 
@@ -12840,13 +12840,13 @@ Run: `cd backend && ./.venv/bin/python -m pytest tests/ -q -m "not pve_integrati
 Expected: Phase 5's 340 passed plus every test this plan added, zero failures. The new `pve_integration` test raises the deselected count from 3 to 4.
 
 Run: `cd backend && ./.venv/bin/python scripts/check_executor_isolation.py`
-Expected: `executor isolation: OK` — unaffected by this phase, which never touches SSH.
+Expected: `executor isolation: OK`, unaffected by this phase, which never touches SSH.
 
 Run: `cd backend && ./.venv/bin/pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"`
 Expected: exits 0 with `python-multipart` (Apache-2.0) now in the tree.
 
 Run: `cd backend && ./.venv/bin/python -m pytest tests/test_migrations.py -q`
-Expected: PASS, and **head is still `2330a95b98d2`** — this phase adds no migration. Confirm with `./.venv/bin/python -m alembic -c alembic.ini heads`.
+Expected: PASS, and **head is still `2330a95b98d2`**; this phase adds no migration. Confirm with `./.venv/bin/python -m alembic -c alembic.ini heads`.
 
 Run: `cd frontend && npx vitest run && npm run build && npm run lint`
 Expected: Phase 5's 71 passed plus this plan's frontend tests, a clean `tsc -b && vite build`, and clean oxlint.
@@ -12868,26 +12868,26 @@ subsystem", a DoD verification map table (clause | proving artifact | verdict)
 covering all four doc-10 clauses, the **real** command output from Steps 3-4,
 and a "What was NOT verified" section. That last section must name, at minimum:
 
-- **No live Proxmox host** — every PVE interaction in this phase was proved against `tests/fakes/pve.py`, not a real API. `tests/test_infra_pve_integration.py` is the placeholder for when one exists. This is the standing limitation every phase since Phase 1 has stated, and it bites hardest here: this is the first phase whose operations **write** to storage, network and guest configuration rather than reading them.
-- **No browser** — the three new pages and four new dialogs are proved by jsdom render tests, not by a human or a headless browser looking at them. Layout, the 80%-usage red bar, and the LockVeil visuals are unverified visually.
+- **No live Proxmox host**: every PVE interaction in this phase was proved against `tests/fakes/pve.py`, not a real API. `tests/test_infra_pve_integration.py` is the placeholder for when one exists. This is the standing limitation every phase since Phase 1 has stated, and it bites hardest here: this is the first phase whose operations **write** to storage, network and guest configuration rather than reading them.
+- **No browser**: the three new pages and four new dialogs are proved by jsdom render tests, not by a human or a headless browser looking at them. Layout, the 80%-usage red bar, and the LockVeil visuals are unverified visually.
 - **The host-network apply path is the highest-risk unverified code in the product.** A wrong bridge config applied to a node can permanently cut that node off the network, and no fake can prove PVE's real apply/revert semantics. Say so plainly.
 - **The ISO upload double-transfers** (browser → Proxploy → PVE) and needs transient disk on the Proxploy host equal to the file size; the cap is `storage_upload_max_bytes`. Only a 3 MiB payload was exercised, never a real multi-GB ISO.
 - **Two endpoints ship unconsumed by the UI** (`POST /backups/prune`, and the `vmstate` option on non-qemu guests), deliberately, per the plan's cross-task couplings note.
-- **`GET /backups` auto-enqueues a sync when the cache is stale**, so the first load of a fresh install returns an empty list and fills in moments later — correct, but a behaviour worth knowing before someone reports it as a bug.
+- **`GET /backups` auto-enqueues a sync when the cache is stale**, so the first load of a fresh install returns an empty list and fills in moments later; correct, but a behaviour worth knowing before someone reports it as a bug.
 
 - [ ] **Step 7: Update `buildlog.md`**
 
-Append a `### <ISO timestamp> — Phase 6 — execute-plan completed` entry matching
+Append a `### <ISO timestamp>, Phase 6, execute-plan completed` entry matching
 Phases 2/3/4/5's format exactly: plan path, what was built per subsystem,
 verification counts (backend passed/skipped/deselected, frontend passed/files),
 and a **Deviations** paragraph. The deviations that must appear, because each is
 a real departure from what the plan or the docs said at the start:
 
-- Phase 6 shipped **one** new backend dependency (`python-multipart`), not zero — the plan's own header claim was wrong and was corrected in Task 4 Step 0 after verifying FastAPI refuses to define an `UploadFile` route without it.
-- Phase 6 shipped **zero Alembic migrations**, as planned — the `backups` table and every column used had existed unused since migration 0001.
+- Phase 6 shipped **one** new backend dependency (`python-multipart`), not zero; the plan's own header claim was wrong and was corrected in Task 4 Step 0 after verifying FastAPI refuses to define an `UploadFile` route without it.
+- Phase 6 shipped **zero Alembic migrations**, as planned; the `backups` table and every column used had existed unused since migration 0001.
 - Doc 05 was amended (Step 5) for three omissions this phase surfaced.
 - The staged-network-changes indicator was deliberately not built: proxmoxer's `.get()` unwraps only the `data` key and drops the sibling `changes` property, so Apply/Revert are always offered rather than guessing at pending state.
-- Linked-clone validity is not pre-checked — Proxploy does not track template-ness, so PVE's rejection is surfaced verbatim.
+- Linked-clone validity is not pre-checked, Proxploy does not track template-ness, so PVE's rejection is surfaced verbatim.
 - Anything the per-task reviews parked, carried forward by name.
 
 - [ ] **Step 8: Commit**
@@ -12898,7 +12898,7 @@ git add docs/notes/phase-6-infra.md docs/05-api-surface.md buildlog.md \
 git commit -m "docs(phase-6): DoD verification notes, doc-05 amendment, buildlog entry"
 ```
 
-`backend/dod_verify_phase6.py` is deliberately **not** added — it is a
+`backend/dod_verify_phase6.py` is deliberately **not** added; it is a
 throwaway verification script, exactly like `dod_verify_phase5.py`, which is
 still sitting untracked in the working tree from the previous phase.
 

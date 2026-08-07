@@ -1,4 +1,4 @@
-"""Synthetic-fleet MetricsStore benchmark (doc 11 §4 — Phase 2 DoD hardening).
+"""Synthetic-fleet MetricsStore benchmark (doc 11 §4, Phase 2 DoD hardening).
 
 Answers: at what fleet size does SQLite metric writing start to hurt?
 Usage: python scripts/bench_metrics.py [hosts] [guests_per_host] [cycles]

@@ -52,7 +52,7 @@ describe('AppsPage', () => {
     expect(await screen.findByText('Immich')).toBeInTheDocument()
     expect(screen.getByText('1 shown')).toBeInTheDocument()
     // name and suggestion are both "plex" in this fixture, so two elements
-    // legitimately match /plex/ (the CT name and the "matches" badge) —
+    // legitimately match /plex/ (the CT name and the "matches" badge), 
     // findAllByText avoids the ambiguous-match error findByText would throw.
     expect((await screen.findAllByText(/plex/)).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /Adopt 1 container/i })).toBeInTheDocument()

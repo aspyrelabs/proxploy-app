@@ -3,7 +3,7 @@ wave, item 8): a bare `Depends(require_entitlement(k))` in a route's
 `dependencies=[...]` list lands at position 0 of the dependant tree and runs
 BEFORE auth, so an anonymous caller gets a 403 (leaking which feature flags
 are armed) instead of a 401. This exact bug recurred in four separate
-routers (jobs.py, apps.py, vms.py, notifications.py — each carries a
+routers (jobs.py, apps.py, vms.py, notifications.py, each carries a
 "ROUTE TEMPLATE" comment pointing back at it) before being fixed by listing
 `require_role`/`get_current_user` ahead of `require_entitlement` on every
 gated route.
@@ -11,7 +11,7 @@ gated route.
 Four hand-written per-router tests caught it four times. This one walks
 every route FastAPI actually registered and replaces all four: a brand-new
 router is wrong by default the moment it 403s an anonymous caller, unless
-someone deliberately adds it to PUBLIC below — a code-review-visible act,
+someone deliberately adds it to PUBLIC below, a code-review-visible act,
 unlike a missing regression test nobody thought to write.
 """
 import re
@@ -19,15 +19,15 @@ import re
 from fastapi.testclient import TestClient
 
 # Routes that legitimately answer a session-less caller with something other
-# than 401 — but NEVER with 403 (403 is reserved for "you have a session but
+# than 401: but NEVER with 403 (403 is reserved for "you have a session but
 # lack the role/entitlement"; an anonymous caller has no role or entitlement
 # state to leak in the first place). Keep this allowlist short and comment
-# each entry — anything not listed here is assumed to require a session.
+# each entry: anything not listed here is assumed to require a session.
 PUBLIC = {
     ("GET", "/api/v1/meta/health"),      # liveness probe, must work unauthenticated
-    ("GET", "/api/v1/meta/onboarding"),  # "does an admin exist yet" — needed pre-login
+    ("GET", "/api/v1/meta/onboarding"),  # "does an admin exist yet"; needed pre-login
     ("POST", "/api/v1/auth/login"),      # how a caller gets a session in the first place
-    ("POST", "/api/v1/users"),           # first-run owner bootstrap (doc 08 §8) — every
+    ("POST", "/api/v1/users"),           # first-run owner bootstrap (doc 08 §8), every
                                           # call after the first user exists 401s instead
                                           # (auth.py::create_user checks this itself,
                                           # not via a FastAPI dependency)
@@ -35,8 +35,8 @@ PUBLIC = {
                                             # first place; answers 404 when unconfigured/
                                             # not entitled, never 403 (doc 10 Task 11)
     ("GET", "/api/v1/auth/oidc/callback"), # IdP redirects here with no session cookie
-                                            # yet — this route is what mints the session
-    ("POST", "/api/v1/auth/totp"),         # second factor of login — pre-session by
+                                            # yet: this route is what mints the session
+    ("POST", "/api/v1/auth/totp"),         # second factor of login; pre-session by
                                             # definition (Task 9). No get_current_user
                                             # dependency exists to 401 an anonymous caller;
                                             # a bad/missing pending+code pair 422s or 401s
@@ -46,7 +46,7 @@ PUBLIC = {
 
 def test_no_gated_route_answers_403_to_an_anonymous_caller(tmp_path, csrf_header):
     """Walks every registered route. A new router is wrong by default until
-    someone adds it to PUBLIC — which is a code-review-visible act."""
+    someone adds it to PUBLIC, which is a code-review-visible act."""
     from tests.support import make_app
 
     app = make_app(tmp_path)
@@ -54,7 +54,7 @@ def test_no_gated_route_answers_403_to_an_anonymous_caller(tmp_path, csrf_header
         h = csrf_header(c)  # clears the unrelated CSRF gate; not a session
         # Every entitlement flag resolves ON by default (builtin tier), which
         # means require_entitlement()'s dep() never actually raises and the
-        # ordering bug this test exists to catch never fires either way —
+        # ordering bug this test exists to catch never fires either way, 
         # false green. Blanket-disable every flag (enabled() falls back to
         # False for any key not in the dict) so every gated route's
         # entitlement check is live for this walk, same as the per-router
@@ -67,7 +67,7 @@ def test_no_gated_route_answers_403_to_an_anonymous_caller(tmp_path, csrf_header
             probe_path = path
             for name in re.findall(r"{(\w+)}", path):
                 # every path param in this API is either a numeric id or the
-                # `action` verb on a lifecycle route — both need a value that
+                # `action` verb on a lifecycle route: both need a value that
                 # actually reaches the handler (a non-parsing value would
                 # 422 out of routing before any dependency runs).
                 probe_path = probe_path.replace(f"{{{name}}}",

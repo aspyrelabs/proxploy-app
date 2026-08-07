@@ -21,7 +21,7 @@ const SEV: Record<string, string> = {
 }
 
 function ago(iso: string | null): string {
-  if (!iso) return '—'
+  if (!iso) return ', '
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (s < 60) return `${s}s ago`
   if (s < 3600) return `${Math.round(s / 60)}m ago`
@@ -39,7 +39,7 @@ function AlertRowView({ a, onAck, acking }:
         </span>
       </td>
       <td className="py-2 text-[13px] text-text">{a.message}</td>
-      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? '—'}</td>
+      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? ', '}</td>
       <td className="font-mono text-[12px] text-text-3">{ago(a.fired_at)}</td>
       <td className="py-2 text-right">
         {a.acked_at
@@ -64,7 +64,7 @@ export function AlertsPage() {
   const rulesAllowed = ent.data != null && ent.has('alerts.rules')
   const rules = useAlertRules(rulesAllowed)
   // Warm the metrics-enum cache as soon as the page opens, not when the rule
-  // form mounts — AlertRuleForm's metric <select> needs its options in place
+  // form mounts, AlertRuleForm's metric <select> needs its options in place
   // before "New rule" can be clicked and immediately answered in a test (or
   // by an impatient user).
   useAlertMetrics(rulesAllowed)
@@ -74,12 +74,12 @@ export function AlertsPage() {
     mutationFn: (r: AlertRuleRow) => api(`/alert-rules/${r.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }),
     }),
-    onError: () => toast.error('Could not update that rule — try again.'),
+    onError: () => toast.error('Could not update that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
   const removeRule = useMutation({
     mutationFn: (id: number) => api(`/alert-rules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that rule — try again.'),
+    onError: () => toast.error('Could not remove that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
 

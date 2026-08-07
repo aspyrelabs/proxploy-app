@@ -10,7 +10,7 @@ import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
 import { Button } from '../components/ui/button'
 import { fmtBytes } from '../lib/format'
-// shellRoute comes from ./shell, never ../router — importing router.tsx here
+// shellRoute comes from ./shell, never ../router; importing router.tsx here
 // would force its eager createRouter() to run mid-cycle (cluster.tsx carries
 // the same note).
 import { shellRoute } from './shell'
@@ -28,7 +28,7 @@ const CONTENT_TABS = [
 ] as const
 
 function fmtCtime(ctime: number | null) {
-  return ctime == null ? '—' : new Date(ctime * 1000).toLocaleString()
+  return ctime == null ? ', ' : new Date(ctime * 1000).toLocaleString()
 }
 
 function VolumeTable({ volumes, hostId, node, storage }:
@@ -53,9 +53,9 @@ function VolumeTable({ volumes, hostId, node, storage }:
         {volumes.map((v) => (
           <tr key={v.volid} className="border-t border-line-soft hover:bg-panel-2">
             <td className="py-2.5 font-mono">{v.volid}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.format ?? '—'}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.format ?? ', '}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtBytes(v.size)}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? '—'}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? ', '}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtCtime(v.ctime)}</td>
             <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
               <Button
@@ -116,7 +116,7 @@ export function ContentBrowser({ row, onClose, onManage }:
         ['Free', fmtBytes(detail.data?.avail_bytes)],
         ['Total', fmtBytes(row.total_bytes)],
         ['Nodes', (detail.data?.nodes ?? [row.node]).join(', ')],
-        ['Content', row.content.join(', ') || '—'],
+        ['Content', row.content.join(', ') || '; '],
       ]} />
 
       <div className="mb-4 mt-5 flex gap-1 border-b border-line-soft">
@@ -137,7 +137,7 @@ export function ContentBrowser({ row, onClose, onManage }:
 
       {isError ? (
         <EmptyState title="Content listing unavailable"
-          note="Proxploy could not reach this datastore — it may be offline or the node may be down." />
+          note="Proxploy could not reach this datastore; it may be offline or the node may be down." />
       ) : (
         <VolumeTable volumes={volumes ?? []} hostId={row.host_id} node={row.node} storage={row.storage} />
       )}
@@ -149,7 +149,7 @@ export function StoragePage() {
   const storageQuery = useStorage()
   const rows = storageQuery.data
   const [open, setOpen] = useState<StorageRow | null>(null)
-  // 'new' = attach, a row = edit + detach. One dialog, two modes — a second
+  // 'new' = attach, a row = edit + detach. One dialog, two modes; a second
   // component would be the same form with two fields locked.
   const [form, setForm] = useState<'new' | StorageRow | null>(null)
 

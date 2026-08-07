@@ -47,7 +47,7 @@ def test_host_missing_address_does_not_echo_the_token_secret(tmp_path, csrf_head
 def test_license_missing_key_does_not_echo_a_mistyped_secret_field(tmp_path, csrf_header,
                                                                     bootstrap_admin):
     """license_key is LicenseIn's only field, so there's no sibling to omit
-    around it — the realistic leak is a caller who typos the field name and
+    around it, the realistic leak is a caller who typos the field name and
     the secret rides along as an unrecognized extra key in the same body."""
     from tests.support import make_app
 
@@ -63,7 +63,7 @@ def test_license_missing_key_does_not_echo_a_mistyped_secret_field(tmp_path, csr
 def test_validation_handler_survives_a_raw_exception_in_ctx(tmp_path):
     """Pydantic v2 puts the raw exception object in an error's `ctx` when a
     field_validator/model_validator raises ValueError (e.g. `ctx: {'error':
-    ValueError(...)}`) — that object isn't JSON-serializable on its own, so
+    ValueError(...)}`), that object isn't JSON-serializable on its own, so
     building the response with a plain dict (skipping jsonable_encoder, as
     FastAPI's own default handler does not) raises TypeError instead of
     returning 422. This repo has no field_validator/model_validator today, so
@@ -87,7 +87,7 @@ def test_validation_handler_survives_a_raw_exception_in_ctx(tmp_path):
 def test_problem_json_handler_for_http_exceptions_is_unaffected(tmp_path, csrf_header,
                                                                  bootstrap_admin):
     """The RequestValidationError handler is new and separate from the
-    existing RFC 9457 problem+json handler for StarletteHTTPException —
+    existing RFC 9457 problem+json handler for StarletteHTTPException, 
     confirm a plain HTTPException(422, ...) still gets the problem+json shape."""
     from tests.support import make_app
 
@@ -117,8 +117,8 @@ def test_audit_redact_covers_near_miss_secret_key_names():
     assert set(redact(leaky).values()) == {"[redacted]"}
 
     # ...while the keys that carry no value stay legible. settings.update
-    # audits {"keys": [...]} — the NAMES of the settings changed, never their
-    # values — and redacting that would blind the audit trail for nothing.
+    # audits {"keys": [...]}: the NAMES of the settings changed, never their
+    # values: and redacting that would blind the audit trail for nothing.
     kept = {"keys": ["a.b", "c.d"], "name": "ntfy", "kind": "webhook", "role": "admin"}
     assert redact(kept) == kept
 
@@ -143,7 +143,7 @@ REFRESH_CRED = "S3NTINEL-REFRESH-CRED-www"
 
 @contextlib.contextmanager
 def _root_log_capture():
-    """A handler on the ROOT logger only — the way an operator's
+    """A handler on the ROOT logger only, the way an operator's
     `logging.basicConfig()` behaves. Deliberately not `caplog`, which attaches
     itself to non-propagating loggers directly and so cannot observe a
     `propagate = False` guarantee (see test_notifier.py for the long form).
@@ -167,7 +167,7 @@ def _messages(records):
     for r in records:
         try:
             out.append(r.getMessage())
-        except Exception:  # noqa: BLE001 — a mis-formatted record is still evidence
+        except Exception:  # noqa: BLE001  (a mis-formatted record is still evidence)
             out.append(f"{r.msg!r}{r.args!r}")
     return "\n".join(out)
 
@@ -180,7 +180,7 @@ def _db_cells(db_path):
         cells = []
         for (table,) in conn.execute(
                 "select name from sqlite_master where type='table'"):
-            cur = conn.execute(f"select * from '{table}'")  # noqa: S608 — table names from sqlite_master
+            cur = conn.execute(f"select * from '{table}'")  # noqa: S608  (table names from sqlite_master)
             for row in cur.fetchall():
                 for value in row:
                     if isinstance(value, bytes):
@@ -195,14 +195,14 @@ def _db_cells(db_path):
 def test_proxmox_error_never_echoes_the_authorization_header(tmp_path, csrf_header,
                                                              bootstrap_admin):
     """urllib3 rejects a header value it cannot send by raising InvalidHeader
-    with the WHOLE header inline — for proxmoxer that header is
+    with the WHOLE header inline, for proxmoxer that header is
     `PVEAPIToken=user@realm!name=<secret>`. services/proxmox.py wraps whatever
     the client raised into ProxmoxError, api/hosts.py turns that into
     `HTTPException(502, str(e))`, and main.py::problem_handler serialises the
     detail straight into the body, so the secret reached the caller verbatim.
 
     The factory here raises the exact message a real urllib3 produced (captured
-    from a live TLS server against real proxmoxer 2.3.0 / requests 2.34.2) —
+    from a live TLS server against real proxmoxer 2.3.0 / requests 2.34.2), 
     that keeps the regression pinned without a network, and it also covers
     every OTHER third-party message shape that might carry the credential,
     which a `_header_safe` input check alone would not.
@@ -232,7 +232,7 @@ def test_proxmox_error_never_echoes_the_authorization_header(tmp_path, csrf_head
 
 def test_a_token_secret_that_cannot_be_a_header_is_refused_without_echoing_it():
     """The root cause of the InvalidHeader above: a copy-pasted secret with a
-    trailing newline. Rejected before it reaches urllib3 at all — asserted by
+    trailing newline. Rejected before it reaches urllib3 at all, asserted by
     the factory never being called, since `_wrap`'s redaction would otherwise
     make the resulting message look clean either way."""
     from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
@@ -289,7 +289,7 @@ def test_public_meta_is_rebuilt_from_parsed_parts_not_the_submitted_string(
     """The onboarding half of the same fix, from the other direction: when the
     operator DOES paste correctly, the row that lands in the unencrypted
     `host_credentials.public_meta` must be the one we constructed from the
-    parsed user/realm/name — not the caller's string, however validated.
+    parsed user/realm/name, not the caller's string, however validated.
 
     Proven by feeding a token id whose secret half is separated only by an
     invisible-to-a-denylist difference and asserting the sentinel is in none of
@@ -322,7 +322,7 @@ def test_public_meta_is_rebuilt_from_parsed_parts_not_the_submitted_string(
 
 
 def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
-    """The allowlist must not break onboarding — pinned so a future tightening
+    """The allowlist must not break onboarding, pinned so a future tightening
     cannot quietly reject the shapes Proxmox actually issues."""
     from proxploy.services.proxmox import parse_token_id
 
@@ -334,7 +334,7 @@ def test_a_real_token_id_still_works(tmp_path, csrf_header, bootstrap_admin):
 def test_an_ldap_username_with_spaces_and_non_ascii_is_accepted(tmp_path, csrf_header,
                                                                 bootstrap_admin):
     """Review item 6: the username class must stay WIDE. An AD/LDAP login is
-    routinely `Ana Sofía Ruiz` — a tightened allowlist would reject a legitimate
+    routinely `Ana Sofía Ruiz`, a tightened allowlist would reject a legitimate
     operator. Widening is safe only because the separators are what carry the
     secret, so the same test pins that the pasted-secret shape is STILL refused
     with the wide class in force, and that the widened name survives the round
@@ -371,7 +371,7 @@ def test_license_api_error_never_relays_the_remote_body(tmp_path, csrf_header,
     """`refresh()` sends a credential the caller never sees (decrypted from
     license.refresh_credential.enc). The client used to interpolate the remote
     response body into LicenseApiError, and api/entitlements.py puts that
-    straight into a 502 `detail` — so a licensing API that names the offending
+    straight into a 502 `detail`, so a licensing API that names the offending
     value in its error handed the credential to the browser."""
     import httpx
 
@@ -400,8 +400,8 @@ def test_license_api_error_never_relays_the_remote_body(tmp_path, csrf_header,
 
 def test_httpx_request_logging_cannot_reach_a_root_handler():
     """httpx logs `HTTP Request: POST <full url>` at INFO with the URL's
-    userinfo intact, so an api_base_url carrying basic-auth credentials — an
-    ordinary reverse-proxy setup — puts the password on the root logger. Same
+    userinfo intact, so an api_base_url carrying basic-auth credentials; an
+    ordinary reverse-proxy setup, puts the password on the root logger. Same
     shape as the urllib3 case in test_notifier.py; a local server is used so a
     REAL request/response cycle emits the real log line.
     """
@@ -444,7 +444,7 @@ def test_migrations_survive_a_percent_in_the_dsn(tmp_path):
     syntax: an unescaped DSN whose password contains "%" raised
     `ValueError: invalid interpolation syntax in '<the whole DSN>'` at startup,
     printing the password in the traceback. sqlite stands in for postgres here
-    — the ConfigParser behaviour is dialect-independent."""
+    the ConfigParser behaviour is dialect-independent."""
     from proxploy.config import Settings
     from proxploy.db import run_migrations
 

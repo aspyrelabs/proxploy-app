@@ -8,7 +8,7 @@ URL = "ntfy://ntfy.sh/proxploy-test"
 
 def test_anonymous_get_is_401(tmp_path):
     """Only covers the anonymous path (no session at all) -> 401. Does NOT
-    exercise require_role("admin")'s actual role comparison — see
+    exercise require_role("admin")'s actual role comparison, see
     test_viewer_role_is_refused for that, and
     test_entitlement_gate_runs_after_auth_not_before for the ordering fix."""
     from tests.support import make_app
@@ -39,7 +39,7 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
 
 
 def test_admin_with_entitlement_disabled_is_403(tmp_path, csrf_header, bootstrap_admin):
-    """A real admin session, but notify.channels gated off -> 403, not 401 —
+    """A real admin session, but notify.channels gated off -> 403, not 401; 
     the flip side of test_entitlement_gate_runs_after_auth_not_before."""
     from tests.support import make_app
 

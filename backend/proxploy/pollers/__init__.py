@@ -58,7 +58,7 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
     api/cluster.py::cluster_summary: a SHARED datastore is reported once per
     node and must count once, a LOCAL datastore with the same name on two
     nodes is two distinct pools. Doing it wrong here is not a cosmetic ring
-    error — it is an alert that fires at the wrong number.
+    error; it is an alert that fires at the wrong number.
     """
     pools: dict[tuple, dict] = {}
     for r in storage_rows:
@@ -98,7 +98,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
 
     # host.node_name is otherwise write-never: POST /hosts has no way to learn
     # it (PVE's /version carries no node name), so a host added through the
-    # real wizard sat at NULL forever — /cluster/nodes and the VM-create
+    # real wizard sat at NULL forever: /cluster/nodes and the VM-create
     # wizard's node picker both read this column directly, not the snapshot,
     # so they silently had nothing to offer. Only tests/support.py's
     # seed_host_row ever set it, which is why this never showed up until the
@@ -144,7 +144,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
             "uptime_s": int(r.get("uptime") or 0),
         }
 
-    # apps cache refresh (identity is ours; state is cached — doc 04) ----------
+    # apps cache refresh (identity is ours; state is cached: doc 04) ----------
     mapped_ctids: set[int] = set()
     for a in db.query(App).filter_by(host_id=host.id).all():
         mapped_ctids.add(a.ctid)
@@ -168,14 +168,14 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                     metric="mem_pct",
                                     value=_mem_pct(g["mem_bytes"],
                                                    g["mem_total_bytes"]), ts=now))
-        # ponytail: no disk_pct for apps/vms — /cluster/resources' `disk` field
+        # ponytail: no disk_pct for apps/vms: /cluster/resources' `disk` field
         # is meaningful for LXC but routinely 0 for QEMU, so a guest disk_pct
         # would be silently wrong for every VM. Task 12's rule validation
         # rejects disk_pct on app/vm targets with an explanatory 422 instead.
         targets.append({"t": "app", "id": a.id, "cpu_pct": g["cpu_pct"],
                         "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
 
-    # vms cache upsert (droppable mirror — doc 04) ------------------------------
+    # vms cache upsert (droppable mirror: doc 04) ------------------------------
     existing = {v.vmid: v for v in db.query(Vm).filter_by(host_id=host.id).all()}
     seen: set[int] = set()
     membership_changed = False
@@ -218,7 +218,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     if membership_changed:
         events.append(("resource", {"type": "vm", "change": "list"}))
 
-    # discovered CTs + adoption heuristic (NOT auto-adopted — Phase 4 owns that)
+    # discovered CTs + adoption heuristic (NOT auto-adopted: Phase 4 owns that)
     catalog = {_norm(c.slug): c.slug for c in db.query(CatalogEntry).all()}
     discovered = [
         {"ctid": vmid, "name": g["name"], "node": g["node"],
@@ -232,7 +232,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
          "used_bytes": int(r.get("disk") or 0),
          "total_bytes": int(r.get("maxdisk") or 0),
          # These four ride on the SAME /cluster/resources row the two above come
-         # from — the poller used to discard them. Reading them here is what
+         # from: the poller used to discard them. Reading them here is what
          # lets GET /storage answer from the snapshot instead of adding a
          # per-datastore PVE call, which doc 02 §3's O(nodes) budget forbids.
          "type": r.get("plugintype"),
@@ -278,12 +278,12 @@ class Poller:
                     if hid not in ids:
                         self._tasks.pop(hid).cancel()
                         self.snapshots.pop(hid, None)
-            except Exception:  # noqa: BLE001 — supervisor never dies
+            except Exception:  # noqa: BLE001  (supervisor never dies)
                 pass
             # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
             # loop". Here rather than in _host_loop: this supervisor already
             # ticks exactly once per interval no matter how many hosts exist,
-            # and every rule's answer is global — evaluating per host would be
+            # and every rule's answer is global: evaluating per host would be
             # N times the queries for the same result. Wrapped separately from
             # the block above so an alerting failure can never stop the
             # supervisor from (re)spawning host loops.
@@ -310,7 +310,7 @@ class Poller:
                     return alerts_svc.evaluate(db, utcnow())
 
             transitions = await asyncio.to_thread(work)
-        except Exception:  # noqa: BLE001 — one bad pass, not the end of polling
+        except Exception:  # noqa: BLE001  (one bad pass, not the end of polling)
             return
         if not transitions:
             return
@@ -319,7 +319,7 @@ class Poller:
         try:
             await asyncio.to_thread(alerts_svc.notify_transitions, self.app,
                                     transitions)
-        except Exception:  # noqa: BLE001 — a notification is a courtesy
+        except Exception:  # noqa: BLE001  (a notification is a courtesy)
             pass
 
     def stop(self) -> None:
@@ -344,7 +344,7 @@ class Poller:
                     self.app.state.bus.publish(name, data)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 — degrade this host only
+            except Exception:  # noqa: BLE001  (degrade this host only)
                 fails += 1
                 evt = await asyncio.to_thread(self._mark_unreachable, host_id)
                 if evt:

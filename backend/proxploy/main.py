@@ -70,7 +70,7 @@ def create_app(
                         out = app.state.license_client.refresh(
                             cred, install_row.value if install_row else None)
                         # apply via a fake-request shim: the helper only needs .app
-                        class _Req:  # noqa: N801 — minimal shim
+                        class _Req:  # noqa: N801  (minimal shim)
                             pass
                         req = _Req(); req.app = app
                         apply_new_token(req, db, out["token"])
@@ -89,20 +89,20 @@ def create_app(
 
         from proxploy.jobs import JobBackend, Scheduler
         from proxploy.pollers import Poller
-        from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install / app.update
-        from proxploy.services import backupjobs as _backupjobs  # noqa: F401 — registers backup.sync
-        from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
-        from proxploy.services import guestjobs as _guestjobs  # noqa: F401 — registers network.apply
-        from proxploy.services import lifecycle  # noqa: F401 — registers job handlers
-        from proxploy.services import migrate as _migrate  # noqa: F401 — registers migrate.app
-        from proxploy.services import storagejobs as _storagejobs  # noqa: F401 — registers storage.upload/delete_volume
-        from proxploy.services import metrics as _metrics  # noqa: F401 — registers metrics.maintain
+        from proxploy.services import appstore as _appstore  # noqa: F401  (registers app.install / app.update)
+        from proxploy.services import backupjobs as _backupjobs  # noqa: F401  (registers backup.sync)
+        from proxploy.services import catalog as _catalog  # noqa: F401  (registers catalog.refresh)
+        from proxploy.services import guestjobs as _guestjobs  # noqa: F401  (registers network.apply)
+        from proxploy.services import lifecycle  # noqa: F401  (registers job handlers)
+        from proxploy.services import migrate as _migrate  # noqa: F401  (registers migrate.app)
+        from proxploy.services import storagejobs as _storagejobs  # noqa: F401  (registers storage.upload/delete_volume)
+        from proxploy.services import metrics as _metrics  # noqa: F401  (registers metrics.maintain)
 
         app.state.jobs = JobBackend(app)
         app.state.jobs.sweep_orphans()  # doc 02 §3: mark orphans, never resume
         # A spooled upload belongs to a job sweep_orphans just marked
-        # `interrupted` above — this runner never resumes a job across a
-        # restart — so anything left in the upload spool dir at boot is
+        # `interrupted` above: this runner never resumes a job across a
+        # restart: so anything left in the upload spool dir at boot is
         # provably orphaned. Clear it rather than let a crash/OOM/deploy
         # mid-upload strand a multi-GB temp file on disk forever.
         shutil.rmtree(settings.data_dir / "uploads", ignore_errors=True)
@@ -149,16 +149,16 @@ def create_app(
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
     app.state.license_client = license_client or LicenseClient(settings.api_base_url)
     app.state.proxmox_factory = proxmox_factory
-    # OIDC single-use state store (services/oidc.py) — {state: (verifier, nonce,
+    # OIDC single-use state store (services/oidc.py): {state: (verifier, nonce,
     # expires_at)}, pruned on access. app.state.oidc_transport is deliberately
     # NOT set here: it defaults (via getattr) to None = real network, and is
     # the seam tests substitute an ASGITransport into.
     app.state.oidc_states = {}
-    # Pending-2FA store (Task 9, api/auth.py) — {sha256(raw): (user_id,
+    # Pending-2FA store (Task 9, api/auth.py): {sha256(raw): (user_id,
     # expires_at, attempts)}, pruned on access. Deliberately NOT a session:
     # holding this token lets a caller do exactly one thing (finish or
     # exhaust the second factor), never resolve_session()/get_current_user.
-    # ponytail: in-memory pending-2FA store — single-process app by design
+    # ponytail: in-memory pending-2FA store: single-process app by design
     # (in-process JobBackend); a restart mid-2FA costs one re-login. Move to
     # a table if multi-worker ever lands.
     app.state.pending_totp = {}
@@ -188,7 +188,7 @@ def create_app(
         # Pydantic v2's "missing" error carries the whole parent body as
         # `input` (e.g. omit HostIn.name and token_secret rides back out in
         # the 422). Three routes take a secret in the body (ChannelIn.url,
-        # HostIn.token_secret, LicenseIn.license_key) — strip `input` from
+        # HostIn.token_secret, LicenseIn.license_key): strip `input` from
         # every error repo-wide rather than patching each route.
         return JSONResponse(status_code=422, content=jsonable_encoder({
             "detail": [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]}))

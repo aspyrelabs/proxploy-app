@@ -59,7 +59,7 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
 
         assert client.post("/api/v1/entitlements/refresh",
                            headers=csrf_header(client)).status_code == 200
-        # refresh must send the same install_id activate used — Task 3 made
+        # refresh must send the same install_id activate used: Task 3 made
         # it required on the API side.
         assert stub.refreshes == [stub.activations[0][1]]
 
@@ -70,7 +70,7 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
 
 
 def test_client_revoke_sends_credential_and_install_id(monkeypatch):
-    """LicenseClient.revoke() is new (Task 8) — pin its request shape against
+    """LicenseClient.revoke() is new (Task 8), pin its request shape against
     POST /v1/licenses/revoke, which Task 3 made require both fields."""
     import httpx
 

@@ -64,7 +64,7 @@ const wrap = () => {
   return render(<QueryClientProvider client={qc}><SettingsPage /></QueryClientProvider>)
 }
 
-describe('SettingsPage — notification channels', () => {
+describe('SettingsPage, notification channels', () => {
   beforeEach(() => { calls.length = 0; notifyChannels = true; hostRows = [] })
 
   it('asks for confirmation before deleting a channel, and skips the call on cancel', async () => {
@@ -105,7 +105,7 @@ describe('SettingsPage — notification channels', () => {
   })
 })
 
-describe('SettingsPage — node shell toggle', () => {
+describe('SettingsPage, node shell toggle', () => {
   beforeEach(() => {
     calls.length = 0
     notifyChannels = true
@@ -126,7 +126,7 @@ describe('SettingsPage — node shell toggle', () => {
   })
 })
 
-describe('SettingsPage — host team assignment', () => {
+describe('SettingsPage, host team assignment', () => {
   beforeEach(() => {
     calls.length = 0
     notifyChannels = true
@@ -158,7 +158,7 @@ describe('SettingsPage — host team assignment', () => {
   })
 })
 
-describe('SettingsPage — hosts and channels error vs empty', () => {
+describe('SettingsPage, hosts and channels error vs empty', () => {
   beforeEach(() => {
     calls.length = 0
     notifyChannels = true

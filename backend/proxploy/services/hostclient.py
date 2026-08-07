@@ -6,7 +6,7 @@ five lines; consoles.py's copy even carried a comment naming a 4th call site as
 the tip-over point for extracting it. Phase 6 adds three routers and twelve job
 handlers that all need it, so it is one function now and the copies are gone.
 
-It raises ProxmoxError — never HTTPException, never JobFailed — because both
+It raises ProxmoxError, never HTTPException, never JobFailed; because both
 kinds of caller live here: a route turns it into a 409, a job handler into a
 JobFailed. That translation is one line at each call site and keeps this module
 free of both FastAPI and the job engine.

@@ -4,8 +4,8 @@ Same registration-order hazard as Task 10: POST /vms/{id}/clone and
 DELETE /vms/{id} live above api/vms.py's POST /{vm_id}/{action} wildcard, and
 both an ordering assertion and a behavioural one lock that in.
 
-DELETE is the most destructive route in this phase — it removes a guest and its
-disks — so it carries three separate gates: owner role, the selfguard, and a
+DELETE is the most destructive route in this phase, it removes a guest and its
+disks, so it carries three separate gates: owner role, the selfguard, and a
 typed confirmation, plus a refusal to touch a running guest.
 """
 import asyncio
@@ -71,7 +71,7 @@ def test_create_clone_and_delete_client_calls(tmp_path):
                            factory=make_fake_factory(fake))
     upid = client.vm_create("pve1", {"vmid": 999, "name": "web-01", "cores": 2})
     assert upid.startswith("UPID:")
-    # the guest-create leaf Task 9 added for restores — reused, not duplicated
+    # the guest-create leaf Task 9 added for restores: reused, not duplicated
     assert fake.creates == [("qemu", "pve1", {"vmid": 999, "name": "web-01",
                                               "cores": 2})]
     client.vm_clone("pve1", 201, {"newid": 999, "name": "web-02", "full": 1})
@@ -106,7 +106,7 @@ def _all_paths(app):
     `_IncludedRouter` node rather than eagerly copying child routes onto
     `app.routes`, so a plain `[r.path for r in app.routes if hasattr(r, "path")]`
     silently returns only the 4 top-level doc routes and none of api_router's
-    children — it would pass vacuously here. Reusing test_network_api.py's /
+    children; it would pass vacuously here. Reusing test_network_api.py's /
     test_snapshots_api.py's `_all_paths` pattern: `_IncludedRouter.
     effective_route_contexts()` is the same recursive walk Starlette's own
     dispatch uses to pick a route at request time.
@@ -170,7 +170,7 @@ def test_create_mints_a_vmid_from_cluster_nextid(tmp_path, csrf_header,
         with app.state.sessionmaker() as db:
             row = db.query(AuditEvent).filter_by(action="vm.create").one()
             assert row.job_id is not None
-            # no Vm row is written by Proxploy — the poller discovers it
+            # no Vm row is written by Proxploy: the poller discovers it
             assert db.query(Vm).count() == 1
 
 
@@ -209,7 +209,7 @@ def _run_job(tmp_path, kind, params_from_ids, tweak=None):
         if tweak:
             tweak(fake)
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers vm.create etc.
+        import proxploy.services.guestjobs  # noqa: F401  (registers vm.create etc.)
 
         backend = JobBackend(app)
         ids = _seed(app)
@@ -251,7 +251,7 @@ def test_create_job_builds_the_qemu_params_and_publishes(tmp_path):
 def test_create_threads_the_wizards_vlan_tag_into_net0(tmp_path):
     """Task 17's Network step offers a VLAN. Pydantic drops unknown keys
     silently rather than 422-ing, so a missing `vlan_tag` on VmCreateIn would
-    build an untagged NIC and report success — a wrong result wearing a green
+    build an untagged NIC and report success, a wrong result wearing a green
     tick. Both halves are pinned here."""
     fake, status, _r, error, _e = _run_job(
         tmp_path, "vm.create",
@@ -266,7 +266,7 @@ def test_create_threads_the_wizards_vlan_tag_into_net0(tmp_path):
 def test_create_omits_the_tag_entirely_when_untagged(tmp_path):
     for tag in (None, 0):
         sub = tmp_path / f"t{tag}"
-        sub.mkdir()  # each run gets its own sqlite db — avoids a hosts.name
+        sub.mkdir()  # each run gets its own sqlite db, avoids a hosts.name
         # UNIQUE collision from reusing one db across sequential job runs
         fake, status, _r, error, _e = _run_job(
             sub, "vm.create",
@@ -275,7 +275,7 @@ def test_create_omits_the_tag_entirely_when_untagged(tmp_path):
                          "disk_gb": 8, "storage": "local-lvm", "iso": None,
                          "bridge": "vmbr0", "vlan_tag": tag, "ostype": "l26"})
         assert status == "succeeded", error
-        # never `tag=` with an empty value — PVE rejects that outright
+        # never `tag=` with an empty value: PVE rejects that outright
         assert fake.creates[0][2]["net0"] == "virtio,bridge=vmbr0"
 
 
@@ -321,7 +321,7 @@ def test_a_taken_vmid_fails_the_job_once_without_retrying(tmp_path):
 
 
 def test_clone_job_passes_full_through_and_surfaces_pve_rejection(tmp_path):
-    # Each run gets its own sqlite db subdirectory — reusing one tmp_path
+    # Each run gets its own sqlite db subdirectory: reusing one tmp_path
     # across sequential job runs collides on the hosts.name UNIQUE constraint.
     (tmp_path / "full").mkdir()
     (tmp_path / "linked").mkdir()
@@ -336,7 +336,7 @@ def test_clone_job_passes_full_through_and_surfaces_pve_rejection(tmp_path):
                       "target": "pve2", "storage": "local-lvm"}
     assert result["newid"] == 999
 
-    # A linked clone of a non-template is refused by PVE, not by Proxploy —
+    # A linked clone of a non-template is refused by PVE, not by Proxploy; 
     # Proxploy does not track template-ness (see the route's ponytail comment).
     fake, status, _r, error, _e = _run_job(
         tmp_path / "linked", "vm.clone",
@@ -397,7 +397,7 @@ def test_delete_refuses_a_self_targeted_vm(tmp_path, csrf_header, bootstrap_admi
                                            monkeypatch):
     """is_self() answers False for every VM today (selfguard.py checks
     target_type == "app" first), so this branch is otherwise unreachable
-    through real settings — monkeypatched here so the _deny()/audit wiring on
+    through real settings, monkeypatched here so the _deny()/audit wiring on
     this specific gate is still under test, same as the other two refusals."""
     import proxploy.api.vms as vms_module
 
@@ -418,7 +418,7 @@ def test_delete_refuses_a_self_targeted_vm(tmp_path, csrf_header, bootstrap_admi
 
 def test_delete_requires_owner_role(tmp_path, csrf_header, bootstrap_admin):
     """doc 05 puts DELETE /vms/{id} at owner, one rung above every other VM
-    route — an admin who may create and clone still may not destroy."""
+    route, an admin who may create and clone still may not destroy."""
     app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
     with c:
         c.post("/api/v1/users", json={"email": "adm@example.com",

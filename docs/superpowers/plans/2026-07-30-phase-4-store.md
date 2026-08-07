@@ -4,57 +4,57 @@
 
 **Goal:** Ship the App Store: a server-side-cached community-scripts/ProxmoxVE catalog, a mechanical install-feasibility classifier, an isolated asyncssh install executor, and the install/adopt/script-edit flows end to end (backend + frontend).
 
-**Architecture:** A new `proxploy/executor/` package holds the only code allowed to touch asyncssh or the SSH private key (mechanically enforced by the existing `scripts/check_executor_isolation.py`). Catalog ingest reads `ct/*.sh` + `install/*.sh` pairs straight from the public `community-scripts/ProxmoxVE` GitHub repo (see "Catalog source" note below — this replaces the vaguer "community-scripts metadata" framing in doc 01 §3 with the concrete mechanism), classifies each pair with a pure function, and upserts into the already-schema-complete `catalog_entries` table. Install runs as a `JobBackend` handler (`app.install`), reusing Phase 3's job/SSE plumbing verbatim: SSH out via the executor, log lines in via `ctx.log`, pin the script into the already-schema-complete `app_scripts` table, create the `App` row on success.
+**Architecture:** A new `proxploy/executor/` package holds the only code allowed to touch asyncssh or the SSH private key (mechanically enforced by the existing `scripts/check_executor_isolation.py`). Catalog ingest reads `ct/*.sh` + `install/*.sh` pairs straight from the public `community-scripts/ProxmoxVE` GitHub repo (see "Catalog source" note below, this replaces the vaguer "community-scripts metadata" framing in doc 01 §3 with the concrete mechanism), classifies each pair with a pure function, and upserts into the already-schema-complete `catalog_entries` table. Install runs as a `JobBackend` handler (`app.install`), reusing Phase 3's job/SSE plumbing verbatim: SSH out via the executor, log lines in via `ctx.log`, pin the script into the already-schema-complete `app_scripts` table, create the `App` row on success.
 
-**Tech Stack:** FastAPI + SQLAlchemy 2 + Alembic (existing), `asyncssh` (new dependency, EPL-2.0 — already covered by `ci.yml`'s license allow-list), `httpx` (existing, used for the GitHub raw-content fetch), React 19 + TanStack Query/Router (existing).
+**Tech Stack:** FastAPI + SQLAlchemy 2 + Alembic (existing), `asyncssh` (new dependency, EPL-2.0; already covered by `ci.yml`'s license allow-list), `httpx` (existing, used for the GitHub raw-content fetch), React 19 + TanStack Query/Router (existing).
 
 ## Global Constraints
 
-- Nothing outside `proxploy/executor/` may `import asyncssh` or reference the name `get_ssh_private_key` — mechanically enforced by `backend/scripts/check_executor_isolation.py`, already wired into CI (`ci.yml` job `backend`, step `python scripts/check_executor_isolation.py`, run from `backend/`).
-- Every DB-touching test uses the existing sqlite-per-`tmp_path` conventions (`tests/support.py::make_db`/`make_app`/`make_job_app`, `tests/conftest.py::client`) — no new fixture infrastructure unless a task says so explicitly.
+- Nothing outside `proxploy/executor/` may `import asyncssh` or reference the name `get_ssh_private_key`, mechanically enforced by `backend/scripts/check_executor_isolation.py`, already wired into CI (`ci.yml` job `backend`, step `python scripts/check_executor_isolation.py`, run from `backend/`).
+- Every DB-touching test uses the existing sqlite-per-`tmp_path` conventions (`tests/support.py::make_db`/`make_app`/`make_job_app`, `tests/conftest.py::client`); no new fixture infrastructure unless a task says so explicitly.
 - Every job handler is `async def h(ctx: JobContext, params: dict) -> dict`, registered into `proxploy.jobs.HANDLERS` at **import time**, and that module must be imported from `main.py`'s `lifespan()` (mirrors `from proxploy.services import lifecycle  # noqa: F401`) or its handlers never run.
-- All new backend routes live under `/api/v1` via `proxploy/api/__init__.py`'s `api_router.include_router(...)` — there is no auto-discovery.
-- Frontend server state lives exclusively in TanStack Query (doc 06 §d) — no client store duplicates it.
-- Root-shell/SSH is confirmed structurally necessary (`docs/notes/phase-4-spike.md`, doc 08 §4, doc 11 §1) — do not attempt to route around it via the Proxmox API.
+- All new backend routes live under `/api/v1` via `proxploy/api/__init__.py`'s `api_router.include_router(...)`; there is no auto-discovery.
+- Frontend server state lives exclusively in TanStack Query (doc 06 §d), no client store duplicates it.
+- Root-shell/SSH is confirmed structurally necessary (`docs/notes/phase-4-spike.md`, doc 08 §4, doc 11 §1); do not attempt to route around it via the Proxmox API.
 
-**Catalog source — a correction to doc 01 §3's framing, discovered while grounding this plan in real code:** doc 01 §3 says catalog metadata is "community-scripts/ProxmoxVE metadata, fetched server-side only" as if there's a simple published JSON/API for it. There isn't one usable here: `community-scripts.org/docs/api/readme` confirms the website's catalog is PocketBase-backed content behind a Next.js frontend (`ProxmoxVE-Frontend`) with no public bulk-read endpoint — its only public `app/api/*` routes are narrow write-side actions (script requests, issue reports), and the telemetry service's `GET /api/scripts` is usage/ranking stats, not catalog metadata. What **is** public, stable, and already how this plan's classifier reads scripts anyway: the `ct/*.sh` files in `community-scripts/ProxmoxVE` itself declare `APP="<name>"` and `var_cpu`/`var_ram`/`var_disk`/`var_os`/`var_version`/`var_unprivileged` defaults directly (confirmed: `ct/immich.sh`, `ct/redis.sh`, `ct/postgresql.sh` all follow this shape), plus a `# Source: <url>` header comment for `website`. Task 3 below fetches and parses these directly via GitHub's raw-content + trees API — same source the classifier already needs to read, one fetch pass serves both. **Known v1 gap, called out rather than papered over:** `category`, `description`, `icon_url`, and `popularity` are not reliably derivable from script content alone; Task 3 ships a small hand-maintained `catalog_categories.py` slug→category map (defaulting unmapped slugs to `"Uncategorized"`) and leaves `description`/`icon_url`/`popularity` null/templated until a real source is found — this is an explicit, visible gap for review, not a silent placeholder.
+**Catalog source, a correction to doc 01 §3's framing, discovered while grounding this plan in real code:** doc 01 §3 says catalog metadata is "community-scripts/ProxmoxVE metadata, fetched server-side only" as if there's a simple published JSON/API for it. There isn't one usable here: `community-scripts.org/docs/api/readme` confirms the website's catalog is PocketBase-backed content behind a Next.js frontend (`ProxmoxVE-Frontend`) with no public bulk-read endpoint, its only public `app/api/*` routes are narrow write-side actions (script requests, issue reports), and the telemetry service's `GET /api/scripts` is usage/ranking stats, not catalog metadata. What **is** public, stable, and already how this plan's classifier reads scripts anyway: the `ct/*.sh` files in `community-scripts/ProxmoxVE` itself declare `APP="<name>"` and `var_cpu`/`var_ram`/`var_disk`/`var_os`/`var_version`/`var_unprivileged` defaults directly (confirmed: `ct/immich.sh`, `ct/redis.sh`, `ct/postgresql.sh` all follow this shape), plus a `# Source: <url>` header comment for `website`. Task 3 below fetches and parses these directly via GitHub's raw-content + trees API, same source the classifier already needs to read, one fetch pass serves both. **Known v1 gap, called out rather than papered over:** `category`, `description`, `icon_url`, and `popularity` are not reliably derivable from script content alone; Task 3 ships a small hand-maintained `catalog_categories.py` slug→category map (defaulting unmapped slugs to `"Uncategorized"`) and leaves `description`/`icon_url`/`popularity` null/templated until a real source is found; this is an explicit, visible gap for review, not a silent placeholder.
 
 ---
 
 ## File Structure
 
 **Backend, new files:**
-- `proxploy/executor/__init__.py` — public surface: `SSHExecutor`, `default_connect_factory`, `get_ssh_private_key`
-- `proxploy/executor/keys.py` — the one function allowed to decrypt the SSH private key
-- `proxploy/executor/ssh.py` — `SSHExecutor` (asyncssh wrapper: closed stdin, host-key TOFU pinning, line-streaming, timeout)
-- `proxploy/services/classifier.py` — pure function `classify_install_feasibility(ct_script, install_script) -> tuple[bool, str | None]`
-- `proxploy/services/catalog.py` — GitHub fetch/parse/upsert (`refresh_catalog` job handler) + `catalog_categories.py`'s map
-- `proxploy/services/catalog_categories.py` — the slug→category static map (small, hand-maintained)
-- `proxploy/services/appstore.py` — `app.install` job handler (consent check, pin+diff, SSH run, App row creation)
-- `proxploy/api/catalog.py` — `GET /catalog`, `GET /catalog/{slug}`, `POST /catalog/refresh`, `POST /catalog/{slug}/install`
-- `proxploy/migrations/versions/<rev>_0003_ssh_host_key_pin.py` — adds `hosts.ssh_host_key_fingerprint`
+- `proxploy/executor/__init__.py`: public surface: `SSHExecutor`, `default_connect_factory`, `get_ssh_private_key`
+- `proxploy/executor/keys.py`: the one function allowed to decrypt the SSH private key
+- `proxploy/executor/ssh.py`: `SSHExecutor` (asyncssh wrapper: closed stdin, host-key TOFU pinning, line-streaming, timeout)
+- `proxploy/services/classifier.py`: pure function `classify_install_feasibility(ct_script, install_script) -> tuple[bool, str | None]`
+- `proxploy/services/catalog.py`: GitHub fetch/parse/upsert (`refresh_catalog` job handler) + `catalog_categories.py`'s map
+- `proxploy/services/catalog_categories.py`: the slug→category static map (small, hand-maintained)
+- `proxploy/services/appstore.py`: `app.install` job handler (consent check, pin+diff, SSH run, App row creation)
+- `proxploy/api/catalog.py`: `GET /catalog`, `GET /catalog/{slug}`, `POST /catalog/refresh`, `POST /catalog/{slug}/install`
+- `proxploy/migrations/versions/<rev>_0003_ssh_host_key_pin.py`: adds `hosts.ssh_host_key_fingerprint`
 - Backend test files: `tests/test_classifier.py`, `tests/fixtures/community_scripts/*.sh`, `tests/test_executor.py`, `tests/test_catalog_ingest.py`, `tests/test_catalog_api.py`, `tests/test_appstore_install.py`, `tests/test_apps_adopt.py`, `tests/test_app_script_api.py`, `tests/fakes/ssh.py` (fake asyncssh-shaped connection, mirrors `tests/fakes/pve.py`)
 
 **Backend, modified files:**
-- `proxploy/models/__init__.py` — add `Host.ssh_host_key_fingerprint`
-- `proxploy/api/apps.py` — add `POST /apps/adopt`, `GET/PUT /apps/{id}/script`, `GET /apps/{id}/script/versions`
-- `proxploy/api/__init__.py` — register `catalog.router`
-- `proxploy/main.py` — import `proxploy.services.appstore` and `proxploy.services.catalog` for handler registration (mirrors the existing `lifecycle` import); add `ssh_factory` param to `create_app`
-- `pyproject.toml` — add `asyncssh`
+- `proxploy/models/__init__.py`: add `Host.ssh_host_key_fingerprint`
+- `proxploy/api/apps.py`: add `POST /apps/adopt`, `GET/PUT /apps/{id}/script`, `GET /apps/{id}/script/versions`
+- `proxploy/api/__init__.py`: register `catalog.router`
+- `proxploy/main.py`: import `proxploy.services.appstore` and `proxploy.services.catalog` for handler registration (mirrors the existing `lifecycle` import); add `ssh_factory` param to `create_app`
+- `pyproject.toml`: add `asyncssh`
 
 **Frontend, new files:**
-- `frontend/src/api/catalog.ts` — types + hooks (`useCatalog`, `useCatalogEntry`, `useRefreshCatalog`, `useInstall`)
+- `frontend/src/api/catalog.ts`: types + hooks (`useCatalog`, `useCatalogEntry`, `useRefreshCatalog`, `useInstall`)
 - `frontend/src/components/StoreCard.tsx`
 - `frontend/src/components/BulkAdoptDialog.tsx`
 - `frontend/src/components/InstallDialog.tsx`
-- `frontend/src/routes/store.tsx` — `StorePage`, `storeRoute`, `installRoute` (modal route)
-- `frontend/src/components/ScriptPanel.tsx` — CodePanel-backed script view/edit + diff
+- `frontend/src/routes/store.tsx`: `StorePage`, `storeRoute`, `installRoute` (modal route)
+- `frontend/src/components/ScriptPanel.tsx`: CodePanel-backed script view/edit + diff
 - Frontend test files: `frontend/src/tests/store.test.tsx`, `frontend/src/tests/adopt.test.tsx`, `frontend/src/tests/script.test.tsx`
 
 **Frontend, modified files:**
-- `frontend/src/router.tsx` — replace the `storeRoute` placeholder registration with the real one; wire `installRoute` as a child
-- `frontend/src/routes/apps.tsx` — wire `BulkAdoptDialog` to the existing discovered-panel UI
-- `frontend/src/routes/apps.tsx` (`appConfigRoute`) — replace the `phaseTab` placeholder with `ScriptPanel`
+- `frontend/src/router.tsx`: replace the `storeRoute` placeholder registration with the real one; wire `installRoute` as a child
+- `frontend/src/routes/apps.tsx`: wire `BulkAdoptDialog` to the existing discovered-panel UI
+- `frontend/src/routes/apps.tsx` (`appConfigRoute`), replace the `phaseTab` placeholder with `ScriptPanel`
 
 ---
 
@@ -99,7 +99,7 @@ def downgrade() -> None:
         batch.drop_column("ssh_host_key_fingerprint")
 ```
 
-Run `cd backend && alembic revision --autogenerate -m "0003 ssh host key pin"` first to get the real revision id, then hand-edit the body to match exactly the above (autogenerate may add unrelated noise from JSON/Text column comparisons — keep only the one column add).
+Run `cd backend && alembic revision --autogenerate -m "0003 ssh host key pin"` first to get the real revision id, then hand-edit the body to match exactly the above (autogenerate may add unrelated noise from JSON/Text column comparisons; keep only the one column add).
 
 - [ ] **Step 2: Add the model column**
 
@@ -238,7 +238,7 @@ def make_fake_connect_factory(fake: FakeSSHConnection):
 - [ ] **Step 4: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_executor.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.executor'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.executor'`
 
 - [ ] **Step 5: Implement `proxploy/executor/keys.py`**
 
@@ -261,13 +261,13 @@ def get_ssh_private_key(db, secretstore, host_id: int) -> bytes:
 
 ```python
 """asyncssh-backed root shell executor (doc 08 §4). This module is the only
-one (besides executor/keys.py) allowed to import asyncssh — enforced by
+one (besides executor/keys.py) allowed to import asyncssh, enforced by
 scripts/check_executor_isolation.py.
 
 Stdin is always closed (asyncssh.DEVNULL), never left open: the Phase 4
 entry-gate spike (docs/notes/phase-4-spike.md) proved that an unguarded
 upstream `read` prompt hard-aborts under closed stdin but hangs forever
-under an open, idle stdin — closed stdin is the only choice that fails fast
+under an open, idle stdin; closed stdin is the only choice that fails fast
 instead of parking a JobBackend semaphore slot indefinitely.
 """
 from __future__ import annotations
@@ -357,7 +357,7 @@ from proxploy.executor.ssh import SSHExecutor, SSHHostKeyMismatch, default_conne
 __all__ = ["SSHExecutor", "SSHHostKeyMismatch", "default_connect_factory", "get_ssh_private_key"]
 ```
 
-Update `tests/fakes/ssh.py`'s `create_process` stdin check to compare against `asyncssh.DEVNULL` instead of the placeholder `"DEVNULL_SENTINEL"` string once the real module exists — replace that line with `self.stdin_closed = stdin is not None`.
+Update `tests/fakes/ssh.py`'s `create_process` stdin check to compare against `asyncssh.DEVNULL` instead of the placeholder `"DEVNULL_SENTINEL"` string once the real module exists, replace that line with `self.stdin_closed = stdin is not None`.
 
 - [ ] **Step 7: Add `asyncssh` to `pyproject.toml`**
 
@@ -371,10 +371,10 @@ Expected: 3 passed
 - [ ] **Step 9: Confirm executor isolation still holds against the real new code**
 
 Run: `cd backend && python scripts/check_executor_isolation.py`
-Expected: `executor isolation: OK` — `asyncssh` and `get_ssh_private_key` only appear under `proxploy/executor/`.
+Expected: `executor isolation: OK`, `asyncssh` and `get_ssh_private_key` only appear under `proxploy/executor/`.
 
 Run: `cd backend && pytest tests/test_isolation_lint.py -v`
-Expected: 2 passed (this is the CI-enforced mechanism from doc 08 §4 / the user's acceptance criterion — it now runs against real `executor/` content instead of a no-op tree).
+Expected: 2 passed (this is the CI-enforced mechanism from doc 08 §4 / the user's acceptance criterion, it now runs against real `executor/` content instead of a no-op tree).
 
 - [ ] **Step 10: Wire an `ssh_factory` test seam into `create_app`/`make_app`/`make_job_app`**
 
@@ -406,14 +406,14 @@ git commit -m "feat(executor): asyncssh runner with closed stdin + host-key TOFU
 - Create: `backend/tests/fixtures/community_scripts/{redis,postgresql,docker,jellyfin-hwaccel}/{ct.sh,install.sh}`
 
 **Interfaces:**
-- Produces: `classify_install_feasibility(ct_script: str, install_script: str) -> tuple[bool, str | None]` — `(installable, unsupported_reason)`.
+- Produces: `classify_install_feasibility(ct_script: str, install_script: str) -> tuple[bool, str | None]`; `(installable, unsupported_reason)`.
 - Consumes: nothing (pure function over script text).
 
 - [ ] **Step 1: Vendor the real fixture scripts**
 
-These are trimmed, verbatim excerpts of real upstream files (MIT-licensed, `community-scripts/ProxmoxVE`), used only as static classifier test input — not executed.
+These are trimmed, verbatim excerpts of real upstream files (MIT-licensed, `community-scripts/ProxmoxVE`), used only as static classifier test input; not executed.
 
-`backend/tests/fixtures/community_scripts/redis/ct.sh` (fully silent, single-CT — expect `installable=True`):
+`backend/tests/fixtures/community_scripts/redis/ct.sh` (fully silent, single-CT; expect `installable=True`):
 ```bash
 #!/usr/bin/env bash
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
@@ -474,7 +474,7 @@ customize
 cleanup_lxc
 ```
 
-`backend/tests/fixtures/community_scripts/postgresql/ct.sh` (single-CT, but the install script prompts — expect `installable=False`):
+`backend/tests/fixtures/community_scripts/postgresql/ct.sh` (single-CT, but the install script prompts; expect `installable=False`):
 ```bash
 #!/usr/bin/env bash
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
@@ -503,7 +503,7 @@ build_container
 description
 ```
 
-`backend/tests/fixtures/community_scripts/postgresql/install.sh` (real, unconditional `read`, no default — this is the exact script the spike found aborts with `exit 64` on empty input):
+`backend/tests/fixtures/community_scripts/postgresql/install.sh` (real, unconditional `read`, no default; this is the exact script the spike found aborts with `exit 64` on empty input):
 ```bash
 #!/usr/bin/env bash
 
@@ -586,7 +586,7 @@ build_container
 description
 ```
 
-`backend/tests/fixtures/community_scripts/jellyfin-hwaccel/install.sh` (trimmed excerpt of the real GPU-passthrough prompt from `misc/tools.func`'s `setup_hwaccel`, reproduced here inline since the real prompt lives in a shared library file, not the app's own install script — this is the "guarded, still installable" case: env-var pre-check present):
+`backend/tests/fixtures/community_scripts/jellyfin-hwaccel/install.sh` (trimmed excerpt of the real GPU-passthrough prompt from `misc/tools.func`'s `setup_hwaccel`, reproduced here inline since the real prompt lives in a shared library file, not the app's own install script; this is the "guarded, still installable" case: env-var pre-check present):
 ```bash
 #!/usr/bin/env bash
 
@@ -677,7 +677,7 @@ def test_missing_build_container_call_is_unsupported():
 - [ ] **Step 3: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_classifier.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.services.classifier'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.services.classifier'`
 
 - [ ] **Step 4: Implement the classifier**
 
@@ -688,7 +688,7 @@ docs/notes/phase-4-spike.md). Mechanical, not a guess: every
 community-scripts install script runs under `catch_errors()`'s
 `set -Ee -o pipefail` + `trap ERR` (misc/error_handler.func), so a bare
 `read`/`whiptail`/`dialog` prompt returns a non-zero exit on EOF and
-hard-aborts the whole install rather than defaulting — confirmed
+hard-aborts the whole install rather than defaulting, confirmed
 empirically in the spike, not assumed. A prompt only counts as safe if it's
 guarded: either an env-var short-circuit within a few lines above it, or
 the read itself falls back via `||` (the jellyfin/plex hwaccel pattern)."""
@@ -859,13 +859,13 @@ def test_run_ingest_is_idempotent_on_unchanged_etag(tmp_path, monkeypatch):
 - [ ] **Step 3: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_catalog_ingest.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.services.catalog'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.services.catalog'`
 
 - [ ] **Step 4: Implement `proxploy/services/catalog.py`**
 
 ```python
 """CatalogSource: fetch community-scripts/ProxmoxVE ct/+install script pairs
-directly from GitHub raw content (see this plan's header note on why —
+directly from GitHub raw content (see this plan's header note on why, 
 there is no public bulk metadata API), parse resource defaults, classify
 feasibility, upsert into `catalog_entries`."""
 from __future__ import annotations
@@ -967,7 +967,7 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
 HANDLERS["catalog.refresh"] = refresh_catalog
 ```
 
-Note: `app.state.settings.catalog_slugs` doesn't exist on `Settings` yet — Task 4's route wiring adds a `catalog_slugs: list[str] = []` field to `Settings` (a small, explicit seed list of known-good slugs to sync; growing this list over time is a deliberate, reviewable product decision, not an unbounded live-scrape of the whole 572-script repo on day one).
+Note: `app.state.settings.catalog_slugs` doesn't exist on `Settings` yet, Task 4's route wiring adds a `catalog_slugs: list[str] = []` field to `Settings` (a small, explicit seed list of known-good slugs to sync; growing this list over time is a deliberate, reviewable product decision, not an unbounded live-scrape of the whole 572-script repo on day one).
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -979,7 +979,7 @@ Expected: 3 passed
 In `backend/proxploy/main.py`'s `lifespan()`, next to the existing `from proxploy.services import lifecycle  # noqa: F401`, add:
 
 ```python
-        from proxploy.services import catalog as _catalog  # noqa: F401 — registers catalog.refresh
+        from proxploy.services import catalog as _catalog  # noqa: F401, registers catalog.refresh
 ```
 
 - [ ] **Step 7: Commit**
@@ -1016,7 +1016,7 @@ In `backend/proxploy/config.py`'s `Settings` class, after `ent_extra_keys_file`:
     ]
 ```
 
-(The same 24-app cross-category sample from `docs/notes/phase-4-spike.md` — a deliberately small, known-good seed list; growing it is a follow-up, not blocked on this plan.)
+(The same 24-app cross-category sample from `docs/notes/phase-4-spike.md`, a deliberately small, known-good seed list; growing it is a follow-up, not blocked on this plan.)
 
 - [ ] **Step 2: Write the failing API test**
 
@@ -1078,7 +1078,7 @@ def test_refresh_enqueues_a_job(client, csrf_header, bootstrap_admin, monkeypatc
 - [ ] **Step 3: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_catalog_api.py -v`
-Expected: FAIL — 404s on undefined routes
+Expected: FAIL, 404s on undefined routes
 
 - [ ] **Step 4: Implement `proxploy/api/catalog.py`**
 
@@ -1133,7 +1133,7 @@ def _job_out(job) -> dict:
     return {"id": job.id, "kind": job.kind, "status": job.status}
 ```
 
-`refresh_catalog`'s `request: Request` parameter needs adding explicitly (`from fastapi import Request`) — match the exact parameter-ordering convention used in `proxploy/api/hosts.py`'s `POST /hosts` (read that function's signature before writing this one, so `Depends()` ordering matches house style).
+`refresh_catalog`'s `request: Request` parameter needs adding explicitly (`from fastapi import Request`), match the exact parameter-ordering convention used in `proxploy/api/hosts.py`'s `POST /hosts` (read that function's signature before writing this one, so `Depends()` ordering matches house style).
 
 - [ ] **Step 5: Register the router**
 
@@ -1261,12 +1261,12 @@ def test_install_fails_without_an_enrolled_ssh_key(tmp_path):
     asyncio.run(scenario())
 ```
 
-`JobContext`'s real constructor signature must be confirmed against `backend/proxploy/jobs/backend.py` before writing this test verbatim (the plan's Task 3 research pass read it but didn't quote the exact `__init__` — confirm `JobContext(backend, job_id=...)` matches, adjusting the test call if the real signature differs).
+`JobContext`'s real constructor signature must be confirmed against `backend/proxploy/jobs/backend.py` before writing this test verbatim (the plan's Task 3 research pass read it but didn't quote the exact `__init__`, confirm `JobContext(backend, job_id=...)` matches, adjusting the test call if the real signature differs).
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_appstore_install.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.services.appstore'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.services.appstore'`
 
 - [ ] **Step 3: Implement `proxploy/services/appstore.py`**
 
@@ -1341,7 +1341,7 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
 
     # host_id is part of the slug, not just catalog_slug+ctid: App.slug is
     # globally unique, and two different hosts can each run a CTID 150
-    # "redis" install — omitting host_id would collide on the second one.
+    # "redis" install: omitting host_id would collide on the second one.
     slug = f"{catalog_slug}-{host_id}-{ctid}"
     with app.state.sessionmaker() as db:
         row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
@@ -1370,13 +1370,13 @@ Expected: 3 passed
 
 - [ ] **Step 5: Register the handler module from `main.py`**
 
-Add `from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.install` next to the `catalog` import from Task 3.
+Add `from proxploy.services import appstore as _appstore  # noqa: F401, registers app.install` next to the `catalog` import from Task 3.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd backend && git add proxploy/services/appstore.py tests/test_appstore_install.py proxploy/main.py
-git commit -m "feat(appstore): app.install job — pin script, SSH install, create App row"
+git commit -m "feat(appstore): app.install job, pin script, SSH install, create App row"
 ```
 
 ---
@@ -1454,7 +1454,7 @@ def test_install_refuses_a_host_without_an_enrolled_ssh_key(client, csrf_header,
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_catalog_install_api.py -v`
-Expected: FAIL — 404 (route doesn't exist)
+Expected: FAIL, 404 (route doesn't exist)
 
 - [ ] **Step 3: Add the route**
 
@@ -1568,7 +1568,7 @@ def test_adopt_rejects_a_ctid_already_adopted_on_that_host(client, csrf_header, 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_apps_adopt.py -v`
-Expected: FAIL — 404
+Expected: FAIL, 404
 
 - [ ] **Step 3: Add the route to `apps.py`**
 
@@ -1630,7 +1630,7 @@ git commit -m "feat(apps): POST /apps/adopt bulk-adopts discovered containers"
 - Create: `backend/tests/test_app_script_api.py`
 
 **Interfaces:**
-- Produces: `GET /api/v1/apps/{id}/script` (`{content, version, source, diff_vs_upstream}` — `diff_vs_upstream` is a unified diff string, or `null` if the pinned content matches the app's `catalog_slug`'s current `catalog_entries.raw.install_script` exactly), `PUT /api/v1/apps/{id}/script` (new version row), `GET /api/v1/apps/{id}/script/versions`.
+- Produces: `GET /api/v1/apps/{id}/script` (`{content, version, source, diff_vs_upstream}`; `diff_vs_upstream` is a unified diff string, or `null` if the pinned content matches the app's `catalog_slug`'s current `catalog_entries.raw.install_script` exactly), `PUT /api/v1/apps/{id}/script` (new version row), `GET /api/v1/apps/{id}/script/versions`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1725,7 +1725,7 @@ def test_edited_script_shows_a_real_diff_against_current_upstream(client, csrf_h
 
 
 def test_upstream_moving_on_after_pin_also_surfaces_a_diff(client, csrf_header, bootstrap_admin):
-    """Not just locally-edited scripts drift from upstream — a catalog refresh
+    """Not just locally-edited scripts drift from upstream, a catalog refresh
     that picks up a new upstream version must surface that too, even though
     this app's own pinned content never changed (doc 10 DoD: "diffed against
     upstream before every run", not just "diffed against local edits")."""
@@ -1746,7 +1746,7 @@ def test_upstream_moving_on_after_pin_also_surfaces_a_diff(client, csrf_header, 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && pytest tests/test_app_script_api.py -v`
-Expected: FAIL — 404
+Expected: FAIL, 404
 
 - [ ] **Step 3: Add the routes to `apps.py`**
 
@@ -1806,7 +1806,7 @@ def list_app_script_versions(app_id: int, db=Depends(get_db), _=Depends(require_
            for r in rows]
 ```
 
-`require_role("admin")`'s injected `user` object's exact shape (does it expose `.id`?) must be confirmed against an existing admin-gated route in `apps.py`/`hosts.py` before finalizing — match whatever the existing convention is (e.g. `deps.py`'s `require_role` may return a `User` ORM row or a lighter session-derived object; use the same pattern `POST /hosts` already uses for `requested_by`-style fields).
+`require_role("admin")`'s injected `user` object's exact shape (does it expose `.id`?) must be confirmed against an existing admin-gated route in `apps.py`/`hosts.py` before finalizing, match whatever the existing convention is (e.g. `deps.py`'s `require_role` may return a `User` ORM row or a lighter session-derived object; use the same pattern `POST /hosts` already uses for `requested_by`-style fields).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1860,7 +1860,7 @@ describe('useCatalog', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/store.test.tsx`
-Expected: FAIL — no `../api/catalog` module
+Expected: FAIL, no `../api/catalog` module
 
 - [ ] **Step 3: Implement `frontend/src/api/catalog.ts`**
 
@@ -1999,7 +1999,7 @@ describe('StoreCard', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/store.test.tsx`
-Expected: FAIL — no `StoreCard` module
+Expected: FAIL, no `StoreCard` module
 
 - [ ] **Step 3: Implement `frontend/src/components/StoreCard.tsx`**
 
@@ -2034,7 +2034,7 @@ export function StoreCard({ entry, onInstall, installed }: {
       <div className="mt-3 border-t border-line-soft pt-3">
         {!entry.installable ? (
           <div className="text-[12px] text-text-3">
-            Not installable — {entry.unsupported_reason}
+            Not installable, {entry.unsupported_reason}
             {entry.website && (
               <>
                 {' '}
@@ -2063,7 +2063,7 @@ Expected: 4 passed
 
 ```bash
 cd frontend && git add src/components/StoreCard.tsx src/tests/store.test.tsx
-git commit -m "feat(store): StoreCard — install/installed/unsupported states"
+git commit -m "feat(store): StoreCard, install/installed/unsupported states"
 ```
 
 ---
@@ -2118,7 +2118,7 @@ describe('StorePage', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/store.test.tsx`
-Expected: FAIL — no `routes/store` module
+Expected: FAIL, no `routes/store` module
 
 - [ ] **Step 3: Implement `frontend/src/routes/store.tsx`**
 
@@ -2220,10 +2220,10 @@ Add `import { storeRoute } from './routes/store'` alongside the other route impo
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run src/tests/store.test.tsx`
-Expected: 6 passed (this task's 2 + Task 9/10's 5, minus the `InstallDialog` import which will fail until Task 12 — stub `frontend/src/components/InstallDialog.tsx` with a minimal placeholder returning `null` for now so this task's own tests pass in isolation, then Task 12 replaces it)
+Expected: 6 passed (this task's 2 + Task 9/10's 5, minus the `InstallDialog` import which will fail until Task 12; stub `frontend/src/components/InstallDialog.tsx` with a minimal placeholder returning `null` for now so this task's own tests pass in isolation, then Task 12 replaces it)
 
 ```tsx
-// frontend/src/components/InstallDialog.tsx — temporary stub, replaced in Task 12
+// frontend/src/components/InstallDialog.tsx, temporary stub, replaced in Task 12
 export function InstallDialog(_: { slug: string; onClose: () => void }) { return null }
 ```
 
@@ -2231,7 +2231,7 @@ export function InstallDialog(_: { slug: string; onClose: () => void }) { return
 
 ```bash
 cd frontend && git add src/routes/store.tsx src/router.tsx src/components/InstallDialog.tsx src/tests/store.test.tsx
-git commit -m "feat(store): /store route — tile grid, category chips, true installable count"
+git commit -m "feat(store): /store route, tile grid, category chips, true installable count"
 ```
 
 ---
@@ -2299,7 +2299,7 @@ describe('InstallDialog', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/install.test.tsx`
-Expected: FAIL — stub returns `null`
+Expected: FAIL, stub returns `null`
 
 - [ ] **Step 3: Implement `frontend/src/components/InstallDialog.tsx`**
 
@@ -2363,7 +2363,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
                 {entry.default_os} {entry.default_os_version}
               </div>
               <div className="text-[12px] text-text-2">
-                This installs and runs a community-scripts.org script — it runs as root on the
+                This installs and runs a community-scripts.org script, it runs as root on the
                 target node, exactly as if you ran it yourself.
               </div>
               <label className="flex items-center gap-2 text-[12px] text-text-2">
@@ -2394,7 +2394,7 @@ Expected: 1 passed
 
 ```bash
 cd frontend && git add src/components/InstallDialog.tsx src/tests/install.test.tsx
-git commit -m "feat(store): install dialog — host/resources, root-consent gate, live job stream"
+git commit -m "feat(store): install dialog, host/resources, root-consent gate, live job stream"
 ```
 
 ---
@@ -2450,7 +2450,7 @@ describe('BulkAdoptDialog', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/adopt.test.tsx`
-Expected: FAIL — no `BulkAdoptDialog` module
+Expected: FAIL, no `BulkAdoptDialog` module
 
 - [ ] **Step 3: Implement `frontend/src/components/BulkAdoptDialog.tsx`**
 
@@ -2500,7 +2500,7 @@ export function BulkAdoptDialog({ items, onClose }: {
             return (
               <label key={key} className="flex items-center gap-2 font-mono text-[12px] text-text-2">
                 <input type="checkbox" checked={checked.has(key)} onChange={() => toggle(key)} />
-                CT {i.ctid} · {i.name ?? '—'} · {i.host_name}
+                CT {i.ctid} · {i.name ?? ', '} · {i.host_name}
                 {i.suggestion && <span className="text-amber">matches "{i.suggestion}"</span>}
               </label>
             )
@@ -2544,7 +2544,7 @@ git commit -m "feat(apps): wire bulk-adopt dialog into the discovered-containers
 
 ---
 
-## Task 14: App detail Config tab — script view/edit + diff
+## Task 14: App detail Config tab: script view/edit + diff
 
 **Files:**
 - Create: `frontend/src/components/ScriptPanel.tsx`
@@ -2604,7 +2604,7 @@ describe('ScriptPanel', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/script.test.tsx`
-Expected: FAIL — no `ScriptPanel` module
+Expected: FAIL, no `ScriptPanel` module
 
 - [ ] **Step 3: Implement `frontend/src/components/ScriptPanel.tsx`**
 
@@ -2636,7 +2636,7 @@ export function ScriptPanel({ appId }: { appId: number }) {
           </pre>
         </div>
       ) : (
-        <div className="mb-3 text-[12px] text-text-3">Matches upstream — no local edits.</div>
+        <div className="mb-3 text-[12px] text-text-3">Matches upstream, no local edits.</div>
       )}
       <pre className="overflow-x-auto rounded-card bg-[#0a0e14] p-4 font-mono text-[12px] text-text-2">
         {data.content}
@@ -2646,7 +2646,7 @@ export function ScriptPanel({ appId }: { appId: number }) {
 }
 ```
 
-(This ships a plain `<pre>`-based diff/content view — not yet doc 06's CodeMirror 6 syntax-highlighted *editor*. The diff itself, which is the acceptance criterion, is real and computed against the live `catalog_entries` row, not deferred. Wiring an actual editable textarea to the existing `PUT /apps/{id}/script` route is a small, separable follow-up — read-only display is what this task's tests check.)
+(This ships a plain `<pre>`-based diff/content view, not yet doc 06's CodeMirror 6 syntax-highlighted *editor*. The diff itself, which is the acceptance criterion, is real and computed against the live `catalog_entries` row, not deferred. Wiring an actual editable textarea to the existing `PUT /apps/{id}/script` route is a small, separable follow-up; read-only display is what this task's tests check.)
 
 - [ ] **Step 4: Wire it into `routes/apps.tsx`**
 
@@ -2684,19 +2684,19 @@ git commit -m "feat(apps): Config tab renders the pinned install script"
 ## Task 15: Phase 4 DoD verification script + notes doc
 
 **Files:**
-- Create: `backend/dod_verify_phase4.py` (scratch, run once, not committed — mirrors Phase 3's pattern per `docs/notes/phase-3-act.md`)
+- Create: `backend/dod_verify_phase4.py` (scratch, run once, not committed; mirrors Phase 3's pattern per `docs/notes/phase-3-act.md`)
 - Create: `docs/notes/phase-4-store.md`
 
 **Interfaces:** none (verification-only task).
 
 - [ ] **Step 1: Write the DoD verification script**
 
-Doc 10 Phase 4 DoD: *"a real app (e.g. Immich) installs from the store onto a chosen host as exactly one CT, with live log, archived log, audit row, and consent step; catalog survives upstream being unreachable (serves cache with staleness banner); an edited script shows its diff against upstream before every run; the store reports the true installable count — no '300+ scripts' placeholder — with unsupported entries counted and shown separately; a host with pre-existing CTs shows them in the discovered panel and bulk-adopts cleanly."*
+Doc 10 Phase 4 DoD: *"a real app (e.g. Immich) installs from the store onto a chosen host as exactly one CT, with live log, archived log, audit row, and consent step; catalog survives upstream being unreachable (serves cache with staleness banner); an edited script shows its diff against upstream before every run; the store reports the true installable count, no '300+ scripts' placeholder, with unsupported entries counted and shown separately; a host with pre-existing CTs shows them in the discovered panel and bulk-adopts cleanly."*
 
 ```python
-# backend/dod_verify_phase4.py — run once from backend/ with the project venv, not committed
+# backend/dod_verify_phase4.py: run once from backend/ with the project venv, not committed
 """Phase 4 DoD verification, doc 10. Uses tests.support.make_app +
-tests/fakes/ssh.py's FakeSSHConnection — no live PVE, no real SSH, matching
+tests/fakes/ssh.py's FakeSSHConnection, no live PVE, no real SSH, matching
 the same no-PVE/no-Docker verification approach Phases 1-3 used."""
 import asyncio
 from pathlib import Path
@@ -2751,18 +2751,18 @@ Run: `cd backend && python dod_verify_phase4.py`
 
 - [ ] **Step 3: Run the full backend + frontend suites**
 
-Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"` — expect all prior counts (Phase 3: 190 passed, 1 skipped, 2 deselected) plus this plan's new tests, zero failures.
-Run: `cd backend && python scripts/check_executor_isolation.py` — expect `executor isolation: OK`.
-Run: `cd frontend && npm test` — expect all prior counts (Phase 3: 33 passed, 11 files) plus this plan's new tests, zero failures.
-Run: `cd frontend && npm run build` — expect a clean build.
+Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"`, expect all prior counts (Phase 3: 190 passed, 1 skipped, 2 deselected) plus this plan's new tests, zero failures.
+Run: `cd backend && python scripts/check_executor_isolation.py`, expect `executor isolation: OK`.
+Run: `cd frontend && npm test`, expect all prior counts (Phase 3: 33 passed, 11 files) plus this plan's new tests, zero failures.
+Run: `cd frontend && npm run build`, expect a clean build.
 
 - [ ] **Step 4: Write `docs/notes/phase-4-store.md`**
 
-Follow `docs/notes/phase-3-act.md`'s exact structure: "What shipped, per subsystem", a DoD verification map table (clause | proving artifact | verdict) covering all five doc 10 DoD clauses above, real command output, and a "What was NOT verified" section — call out explicitly: no real Proxmox host, no real SSH connection, no browser UI check (matching every prior phase's stated limitation), and the catalog-categories/description/icon gap from this plan's header note.
+Follow `docs/notes/phase-3-act.md`'s exact structure: "What shipped, per subsystem", a DoD verification map table (clause | proving artifact | verdict) covering all five doc 10 DoD clauses above, real command output, and a "What was NOT verified" section; call out explicitly: no real Proxmox host, no real SSH connection, no browser UI check (matching every prior phase's stated limitation), and the catalog-categories/description/icon gap from this plan's header note.
 
 - [ ] **Step 5: Update `buildlog.md`**
 
-Append a `### <timestamp> — Phase 4 — execute-plan completed` entry matching Phases 2/3's format exactly (plan path, verification counts, what was built, deviations).
+Append a `### <timestamp>, Phase 4, execute-plan completed` entry matching Phases 2/3's format exactly (plan path, verification counts, what was built, deviations).
 
 - [ ] **Step 6: Commit**
 

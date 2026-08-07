@@ -17,7 +17,7 @@ router = APIRouter(prefix="/hosts", tags=["hosts"])
 
 # Singletons so FastAPI's dependency cache (keyed on the callable) collapses
 # repeated uses into one call per request. Only the actions this router's
-# routes actually gate get a singleton here — host.sync/credentials/remove/
+# routes actually gate get a singleton here: host.sync/credentials/remove/
 # console have no route in this file yet (doc 05 lists them; no task in the
 # Phase 8 plan adds them), so no dead singleton for them either.
 _read = authorize("host", "read")
@@ -25,7 +25,7 @@ _manage = authorize("host", "manage", scope_of=scope_host())
 _manage_global = authorize("host", "manage")          # no host id yet (probe, create)
 
 CONSENT_NOTE = ("This key gives Proxploy a root shell on the node, used only for "
-                "App Store install/update/migration scripts — exactly as if you ran "
+                "App Store install/update/migration scripts, exactly as if you ran "
                 "them yourself as root on the node. Every use is audit-logged and its "
                 "full output archived. Authorize it by adding the line to "
                 "/root/.ssh/authorized_keys on the node.")
@@ -214,7 +214,7 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
     The wizard used to take the operator's word for it, so a mis-pasted
     authorized_keys line surfaced at the first app install instead of here,
     far from its cause. `true` is the whole command: this asks one question
-    — does the key authenticate and can we run anything — and nothing else.
+    does the key authenticate and can we run anything, and nothing else.
     """
     host = db.query(Host).filter_by(id=host_id).one_or_none()
     if host is None:

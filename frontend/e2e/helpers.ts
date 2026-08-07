@@ -4,14 +4,14 @@ import { mkdirSync, rmdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Matches playwright.config.ts's `use.baseURL` — kept as a plain constant
+// Matches playwright.config.ts's `use.baseURL`, kept as a plain constant
 // (not a shared module) since this is a small e2e harness.
 export const BASE_URL = 'http://127.0.0.1:5173'
 export const ADMIN_EMAIL = 'e2e-admin@example.com'
 export const ADMIN_PASSWORD = 'e2e-smoke-passphrase-1'
 
-// Lives inside playwright.config.ts's `.e2e-data` — the throwaway dir its
-// webServer command `rm -rf`s and recreates at the start of every run — so a
+// Lives inside playwright.config.ts's `.e2e-data`, the throwaway dir its
+// webServer command `rm -rf`s and recreates at the start of every run, so a
 // lock directory left behind by a killed previous run can never wedge this
 // one.
 const LOCK_DIR = join(dirname(fileURLToPath(import.meta.url)), '../.e2e-data/seed.lock')
@@ -19,11 +19,11 @@ const LOCK_STALE_MS = 20_000
 
 /**
  * `mkdir` is an atomic exclusive-create at the OS level, so it works as a
- * mutex across separate Playwright worker *processes* — an in-memory lock
+ * mutex across separate Playwright worker *processes*, an in-memory lock
  * cannot. seedAdmin() needs one: the e2e backend is a single dev uvicorn
  * process over SQLite, `test.beforeAll` runs once per worker, and
  * fullyParallel means several workers can call seedAdmin() at once. A
- * concurrent duplicate `POST /users` there doesn't fail cleanly — it throws
+ * concurrent duplicate `POST /users` there doesn't fail cleanly, it throws
  * past Starlette's own error handling (confirmed against this backend:
  * "ERROR: Exception in ASGI application" in its logs) and can disrupt other
  * requests in flight at the same moment, not just the one that raced. This
@@ -49,7 +49,7 @@ async function withSeedLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // SidebarNav's accessible link names, in page order (frontend/src/components/
-// SidebarNav.tsx) — every one of them renders an `<h1>` with the identical
+// SidebarNav.tsx), every one of them renders an `<h1>` with the identical
 // text (verified against each route file), so the same list drives both the
 // click and the heading assertion.
 export const NAV_PAGES = [
@@ -58,15 +58,15 @@ export const NAV_PAGES = [
 ] as const
 
 /**
- * Seed through the app's own real endpoints — no direct DB/ORM writes.
+ * Seed through the app's own real endpoints, no direct DB/ORM writes.
  * Mirrors the onboarding wizard's "Admin account" + "Done" steps
  * (frontend/src/routes/onboarding.tsx: POST /users, POST /auth/login, PATCH
  * /settings 'onboarding.complete'). Deliberately skips the wizard's "First
- * host" step — the stranger journey (Task 16) is what exercises that.
+ * host" step, the stranger journey (Task 16) is what exercises that.
  *
  * Idempotent: playwright.config.ts's webServer boots ONE backend for the
  * whole run, so every spec file that calls this shares one database, and
- * `test.beforeAll` runs once per *worker*, not once per file — with
+ * `test.beforeAll` runs once per *worker*, not once per file; with
  * fullyParallel this can mean several concurrent first-callers. `withSeedLock`
  * serializes them; whichever runs first creates the admin, the rest find
  * admin_exists already true and skip straight to login. The retry below is a
@@ -122,7 +122,7 @@ async function seedAdminOnce(baseURL: string) {
   }
 }
 
-/** Fill and submit the login form. Does not assert what renders next —
+/** Fill and submit the login form. Does not assert what renders next, 
  *  callers want different things after (a heading, a console-error check). */
 export async function signIn(page: Page) {
   await page.goto('/')
@@ -130,11 +130,11 @@ export async function signIn(page: Page) {
   await page.getByLabel('Email').fill(ADMIN_EMAIL)
   await page.getByLabel('Password').fill(ADMIN_PASSWORD)
   // The e2e backend is one dev uvicorn process over SQLite, shared by every
-  // spec file this run — a login POST racing another spec's concurrent
+  // spec file this run, a login POST racing another spec's concurrent
   // write can occasionally hit real contention and surface as a genuine
   // "Sign-in failed" in the UI (LoginForm.tsx's non-401 branch). The form
   // keeps email/password filled on a completed failure, so resubmitting is
-  // safe — but only once that failure has actually landed: racing a second
+  // safe, but only once that failure has actually landed: racing a second
   // click against a first submit that is merely slow (not failed) double-
   // submits into a button that is about to be unmounted by the real
   // success, which is worse than waiting.

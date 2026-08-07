@@ -60,12 +60,12 @@ def test_denied_attempt_writes_an_audit_row(app_client, csrf_header, tmp_path):
 
 
 def test_team_scoped_route_checks_the_owning_team(app_client, csrf_header):
-    """Admin of team B cannot patch team A's host — the domain comes from
+    """Admin of team B cannot patch team A's host, the domain comes from
     hosts.team_id, not from 'has admin anywhere'.
 
     NOTE: the plan's Step 1 test posted to POST /hosts/{id}/sync, which does
     not exist in hosts.py (doc 05 lists it, but no task in this plan adds it
-    — see the Task 2 report). PATCH /hosts/{id} exercises the identical
+    see the Task 2 report). PATCH /hosts/{id} exercises the identical
     scope_host()-driven domain check on an admin-gated action that does
     exist."""
     with app_client.app.state.sessionmaker() as db:

@@ -5,15 +5,15 @@ Both handlers are the shape services/lifecycle.py established and Task 2
 extracted: resolve in a thread, POST to Proxmox, hand the UPID to `await_task`.
 
 The upload one carries one extra obligation. Proxmox's upload endpoint takes a
-multipart body — there is no "fetch this URL yourself" variant — so an ISO is
+multipart body; there is no "fetch this URL yourself" variant, so an ISO is
 transferred TWICE: browser -> Proxploy (spooled to `data_dir/uploads` by the
 route, never buffered in RAM) and Proxploy -> PVE (read back here). The Proxploy
 host therefore needs transient free disk equal to the file size for the life of
 the job, and the upload takes about twice as long as a direct PVE upload. That
 is the accepted cost of proxying it; what is not acceptable is holding the file
 in memory, which is why the route streams and this handler takes a path rather
-than bytes. The spool file is deleted in a `finally` on EVERY exit — success,
-PVE failure, timeout, cancellation — because nothing else ever will.
+than bytes. The spool file is deleted in a `finally` on EVERY exit, success,
+PVE failure, timeout, cancellation; because nothing else ever will.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ async def run_upload(ctx: JobContext, params: dict) -> dict:
                 "storage": storage, "volid": f"{storage}:{content}/{filename}"}
     finally:
         # The ONLY place this file is ever removed. Suppressed because a failure
-        # to unlink must not turn a succeeded upload into a failed job — the
+        # to unlink must not turn a succeeded upload into a failed job: the
         # bytes are already on PVE by then.
         with contextlib.suppress(OSError):
             os.unlink(path)
@@ -78,7 +78,7 @@ async def run_delete_volume(ctx: JobContext, params: dict) -> dict:
             ctx, client, node, upid,
             timeout_s=app.state.settings.pve_task_timeout_s)).get("exitstatus")
     else:
-        # dir/lvm plugins delete inline and return no UPID — there is no task to
+        # dir/lvm plugins delete inline and return no UPID: there is no task to
         # poll, and treating a missing UPID as a failure would fail every
         # successful ISO delete on local storage.
         ctx.log("deleted synchronously (no task id)")

@@ -65,7 +65,7 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Dep
     settings = request.app.state.settings
     shape = updater.detect_shape(settings)
     if shape not in updater.CAN_SELF_APPLY:
-        # Not a failure — a deliberate capability boundary (spec D3). The
+        # Not a failure: a deliberate capability boundary (spec D3). The
         # container never rewrites its own image.
         raise HTTPException(409, {"error": "docker_shape", "compose_hint": COMPOSE_HINT})
     status = updater.check(settings)
@@ -80,7 +80,7 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Dep
                                   "latest": status["latest"]})
     if not Path(settings.update_script).exists():
         raise HTTPException(503, {"error": "updater_missing",
-                                  "detail": f"{settings.update_script} is not installed — "
+                                  "detail": f"{settings.update_script} is not installed, "
                                             f"re-run the installer to repair it"})
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="system.update.start", target_type="system",

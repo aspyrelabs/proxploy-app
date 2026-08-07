@@ -98,7 +98,7 @@ describe('TotpCard', () => {
     expect(await screen.findByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
     expect(screen.getByText(/otpauth:\/\/totp\/Proxploy/)).toBeInTheDocument()
     for (const code of RECOVERY_CODES) expect(screen.getByText(code)).toBeInTheDocument()
-    expect(screen.getByText(/shown once — store them now/i)).toBeInTheDocument()
+    expect(screen.getByText(/shown once, store them now/i)).toBeInTheDocument()
   })
 
   it('confirming the code calls /auth/totp/confirm and flips to enabled state with a Disable flow', async () => {

@@ -2,7 +2,7 @@
 Authelia"; there is no browser, no Authelia, and no live IdP on this machine):
 this serves a real discovery document, enforces PKCE S256 end-to-end
 (challenge stored at /authorize, verifier checked at /token), and signs real
-RS256 ID tokens verified by the app against this fixture's real /jwks — the
+RS256 ID tokens verified by the app against this fixture's real /jwks, the
 protocol is fully exercised; only the third-party implementation is absent."""
 import base64
 import hashlib

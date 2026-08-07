@@ -37,8 +37,8 @@ def test_seeding_does_not_resurrect_a_system_schedule_the_operator_disabled(tmp_
 def test_every_system_schedule_names_a_registered_handler():
     """Seeding a kind with no handler would disable itself on first tick."""
     from proxploy.jobs import HANDLERS
-    import proxploy.services.metrics          # noqa: F401 — registers metrics.maintain
-    import proxploy.services.catalog          # noqa: F401 — registers catalog.refresh
+    import proxploy.services.metrics          # noqa: F401  (registers metrics.maintain)
+    import proxploy.services.catalog          # noqa: F401  (registers catalog.refresh)
     for s in SYSTEM_SCHEDULES:
         assert s["job_kind"] in HANDLERS, s["name"]
 

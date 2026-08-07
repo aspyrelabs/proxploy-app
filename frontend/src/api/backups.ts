@@ -1,4 +1,4 @@
-// api/backups.ts — Backups page server state (doc 05 §Backups, doc 06 §a row 45).
+// api/backups.ts, Backups page server state (doc 05 §Backups, doc 06 §a row 45).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -25,7 +25,7 @@ export type BackupStats = {
   total_bytes: number
   ok_count: number
   failed_count: number
-  /** null when nothing in the window was verified — never a fake 100%. */
+  /** null when nothing in the window was verified, never a fake 100%. */
   success_rate_30d: number | null
   datastores: Datastore[]
 }
@@ -58,7 +58,7 @@ export function useBackups() {
 }
 
 // Every mutation below fires a job. Per api/jobs.ts::useLifecycle's documented
-// rule they invalidate ['jobs'] and ['cluster','activity'] only — never
+// rule they invalidate ['jobs'] and ['cluster','activity'] only, never
 // ['backups'] on success. The handler's own `_resync` + the `resource`
 // {type:'backup'} SSE delta are what refresh the list, once the archive
 // actually exists upstream rather than while the job is still queued.
@@ -108,7 +108,7 @@ export type PruneParams = {
   keepDaily: number
 }
 
-/** Dry run. GET only — the destructive verb lives on POST /backups/prune. */
+/** Dry run. GET only, the destructive verb lives on POST /backups/prune. */
 export function usePrunePreview(p: PruneParams | null) {
   return useQuery({
     queryKey: ['backups', 'prune-preview', p],

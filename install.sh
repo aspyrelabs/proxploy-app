@@ -3,8 +3,8 @@
 #
 # The one-liner is `curl -fsSL https://proxploy.com/install.sh | bash`. On a
 # Proxmox node that means: create a CT and re-run this script inside it
-# (the PVE-host half, below). Everywhere else — a plain Debian box, or
-# inside the CT that half creates — this script IS the install: OS deps,
+# (the PVE-host half, below). Everywhere else: a plain Debian box, or
+# inside the CT that half creates: this script IS the install: OS deps,
 # system user, the versioned layout, fetch+verify+unpack a release, the env
 # file, migrations, the updater, the systemd unit.
 #
@@ -38,7 +38,7 @@ DEFAULT_CHANNEL="https://proxploy.com/releases/latest"
 # makes the no-argument one-liner possible: there is nothing unpacked yet
 # for this script to read a key out of, so the key has to arrive WITH the
 # script. That is sound because the script itself arrives over TLS from a
-# host the user already chose to trust — the same trust the curl already
+# host the user already chose to trust: the same trust the curl already
 # places. Replacing this block is step 1 of
 # docs/runbooks/publishing-a-release.md.
 RELEASE_PUBKEY_PEM='-----BEGIN PUBLIC KEY-----
@@ -64,7 +64,7 @@ Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
              signature against. Default: the release key compiled into
              this script. Pass this to verify against a different key.
   --dry-parse Exit 0 immediately after argument validation and defaulting
-             — prints the resolved shape/channel/version/pubkey and never
+             prints the resolved shape/channel/version/pubkey and never
              fetches, installs, or requires root. For testing the argument
              handling itself.
   --ctid     CT id to create. Default: first free id >= 150.
@@ -76,7 +76,7 @@ Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
              serves TLS, via its own self-signed CA (`tls internal`), on
              https://<this host's primary IP>/.
   --pve-only Force the PVE-host path (skip auto-detection) and stop after
-             creating and staging the CT — never recurse into the
+             creating and staging the CT, never recurse into the
              in-container half.
   --dry-run  PVE-host path only: stop right after `pct create`, before
              starting, pushing into, or execing inside the CT.
@@ -135,14 +135,14 @@ resolve_bridge() { [ -n "$BRIDGE" ] || BRIDGE="vmbr0"; }
 
 # resolve_version: no-op when --version was already given (every existing
 # harness passes it explicitly and never reaches the fetch_to call below).
-# Otherwise fetch the channel's manifest.json and read its version out —
+# Otherwise fetch the channel's manifest.json and read its version out, 
 # the same manifest_field extraction proxploy-update and verify_release()
 # use, so there is exactly one manifest field parser in this codebase.
 # --dry-parse never touches the network: this is called before root, curl
 # availability, or a real channel can be assumed, so it substitutes a
 # placeholder instead of fetching.
 # ponytail: an installer with no --version fetches manifest.json twice
-# (once here, once in step 4 below) — a second small GET, not worth
+# (once here, once in step 4 below): a second small GET, not worth
 # threading a shared work dir through both call sites for.
 resolve_version() {
   [ -n "$VERSION" ] && return 0
@@ -161,7 +161,7 @@ resolve_version() {
 resolve_template() {  # resolve_template <storage> -> sets TEMPLATE
   local storage="$1"
   if [ "$DRY_RUN" -eq 1 ]; then
-    # ponytail: dry-run never calls pveam — nothing is downloaded and
+    # ponytail: dry-run never calls pveam: nothing is downloaded and
     # nothing reads a real template catalog, so the harness needs no pveam
     # stub. A real (non-dry) run always takes the branch below instead.
     TEMPLATE="$storage:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
@@ -181,7 +181,7 @@ resolve_template() {  # resolve_template <storage> -> sets TEMPLATE
 
 # pve_wait_for_ready: pct exec only succeeds once the CT's init is up, so
 # polling it is also a network-readiness proxy for the push/exec steps that
-# follow. ponytail: fixed 60s ceiling — generous for DHCP+boot on a fresh CT;
+# follow. ponytail: fixed 60s ceiling: generous for DHCP+boot on a fresh CT;
 # raise it if a slower storage backend needs more.
 pve_wait_for_ready() {
   local ctid="$1" tries=0
@@ -258,7 +258,7 @@ fi
 
 if [ -z "$SHAPE" ]; then
   usage
-  die "--shape is required (systemd|lxc) — this does not look like a Proxmox host, so it cannot be auto-detected"
+  die "--shape is required (systemd|lxc); this does not look like a Proxmox host, so it cannot be auto-detected"
 fi
 case "$SHAPE" in
   systemd|lxc) ;;
@@ -356,7 +356,7 @@ fi
 # head is idempotent, so re-running it here on an existing DB is safe.
 if [ -f "$PP_DATA/proxploy.db" ]; then
   log "running database migrations"
-  # config.py's Settings has no env_file — it only reads PROXPLOY_* from the
+  # config.py's Settings has no env_file: it only reads PROXPLOY_* from the
   # process environment. The app itself gets those from systemd's
   # EnvironmentFile=, but this manual invocation needs them sourced by hand,
   # or alembic's env.py falls back to the default relative sqlite path and
@@ -367,7 +367,7 @@ if [ -f "$PP_DATA/proxploy.db" ]; then
   set +a
   migrate_release "$PP_RELEASES/$VERSION"
 else
-  log "no existing database — the app will migrate and generate its master key on first boot"
+  log "no existing database, the app will migrate and generate its master key on first boot"
 fi
 
 # --- 7. install the updater and its shared library --------------------------
@@ -423,7 +423,7 @@ configure_tls() {
     # 127.0.0.1 is listed alongside the primary IP, not instead of it: Caddy
     # matches a request to a site block by SNI/Host, so a bare IP-only site
     # address answers that IP but sends a TLS-level "internal error" (no
-    # matching site) to anything that connects via 127.0.0.1 or localhost —
+    # matching site) to anything that connects via 127.0.0.1 or localhost, 
     # including this box's own health checks and an admin who SSHes in and
     # browses locally. `tls internal` happily issues one cert covering every
     # address listed here.

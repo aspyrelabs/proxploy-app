@@ -64,7 +64,7 @@ vi.mock('../api/client', () => {
       }
       if (path.endsWith('/restore')) {
         if (body.mode === 'in_place' && restoreGuard === 'self') {
-          // Unconditional refusal — `confirm` does not bypass it. Flat body,
+          // Unconditional refusal, `confirm` does not bypass it. Flat body,
           // matching main.py::problem_handler's `body.update(exc.detail)`
           // (Task 14 confirmed the real backend never nests under `detail`).
           return Promise.reject(new ApiError(409, {
@@ -194,7 +194,7 @@ describe('BackupsPage', () => {
     restoreGuard = null
   })
 
-  it('disables Delete without backups.retention — the entitlement DELETE /backups/{id} now checks', async () => {
+  it('disables Delete without backups.retention, the entitlement DELETE /backups/{id} now checks', async () => {
     // BLOCKING 3/item 6 moved the route's gate from backups.pbs to
     // backups.retention; the button must follow, or a tenant with backups.pbs
     // and without backups.retention gets a Delete button that just 403s.
@@ -217,7 +217,7 @@ describe('BackupsPage', () => {
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true,
                  'backups.retention': true }
     wrap()
-    // enabled only once /backups resolves — the datastore and its host come from it
+    // enabled only once /backups resolves, the datastore and its host come from it
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Preview retention' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Preview retention' }))
@@ -230,7 +230,7 @@ describe('BackupsPage', () => {
   it('offers PBS datastore connect, reusing StorageForm pre-set to type pbs', async () => {
     // doc 10 lists "PBS datastore connect" as a Phase 6 Backups deliverable.
     // Connecting PBS *is* attaching a storage of type pbs, so this asserts the
-    // affordance exists and opens Task 13's form in the right mode — not that
+    // affordance exists and opens Task 13's form in the right mode, not that
     // a second, parallel PBS form was built.
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Connect PBS' }))

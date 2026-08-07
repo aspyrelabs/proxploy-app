@@ -1,13 +1,13 @@
 """Alert evaluation (doc 04 `alert_rules` / `alerts`, doc 10 Phase 7).
 
-Reads only the DB. No HTTP, no Apprise, no event bus — it opens and closes
+Reads only the DB. No HTTP, no Apprise, no event bus; it opens and closes
 `alerts` rows and returns the TRANSITIONS. Task 10's notifier and Task 11's
 poll-loop hook do everything outward-facing, so a change to how alerts are
 delivered never touches how they are decided.
 
 Semantics, once, so nothing has to guess:
 
-  * `duration_s` means CONTINUOUSLY breaching for at least that long — the
+  * `duration_s` means CONTINUOUSLY breaching for at least that long, the
     doc 04 prototype phrase is "85% CPU for 5 minutes", and a five-minute
     average that dipped to 10% in the middle is not that. Implemented by
     walking samples newest-first and taking the breaching prefix.
@@ -15,7 +15,7 @@ Semantics, once, so nothing has to guess:
     rule yields no transition, which is what stops a 30 s poll cadence from
     re-notifying twice a minute.
   * Recovery resolves automatically on the first non-breaching cycle. An
-    acknowledged alert still resolves — ack silences, it does not pin.
+    acknowledged alert still resolves, ack silences, it does not pin.
   * No samples is not a breach. Absence of data is not evidence of a problem,
     and a freshly-added host must not alarm on its first cycle.
   * `host_offline` and `backup_failed` have nothing to compare, so they ignore
@@ -100,7 +100,7 @@ def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
         if rule.target_type not in kinds:
             return []
         label = _label(db, rule.target_type, rule.target_id)
-        # A rule pointing at a deleted host/app/vm is skipped, not crashed —
+        # A rule pointing at a deleted host/app/vm is skipped, not crashed; 
         # nothing cascades alert_rules on target deletion.
         return [] if label is None else [(rule.target_type, rule.target_id, label)]
 
@@ -170,7 +170,7 @@ def _status_state(db, rule: AlertRule, target_id: int,
                 return False, 1.0
         return True, 1.0
 
-    # backup_failed — only the LATEST finished backup.run for this host counts.
+    # backup_failed: only the LATEST finished backup.run for this host counts.
     # An old failure that has since been fixed is not a live alert.
     latest = (db.query(Job)
               .filter(Job.kind == "backup.run", Job.target_type == "host",
@@ -206,10 +206,10 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
     `ix_samples(target_type, target_id, metric, ts)`. At the single-digit rule
     counts a self-hoster has this is a handful of queries every 30 s. If a
     fleet ever makes it hurt, the fix is one grouped query per (metric,
-    duration) bucket rather than per target — not a different design.
+    duration) bucket rather than per target, not a different design.
 
-    A firing Alert whose (rule, target) this pass never visits — its rule got
-    disabled, or its target row got deleted — would otherwise stay `firing`
+    A firing Alert whose (rule, target) this pass never visits; its rule got
+    disabled, or its target row got deleted; would otherwise stay `firing`
     forever (deleting the RULE cascades its alerts away, so a missing rule row
     can't happen here; only a missing target or a disabled rule can). The
     orphan sweep at the bottom closes those the same way a normal recovery
@@ -220,7 +220,7 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
     visited: set[tuple[int, str, int]] = set()
     for rule in db.query(AlertRule).filter(AlertRule.enabled.is_(True)).all():
         if rule.metric not in METRIC_TARGETS:
-            # A metric this build does not know — a downgrade, or a row edited
+            # A metric this build does not know: a downgrade, or a row edited
             # by hand. Skip it; one unusable rule must not stop the others.
             logger.debug("alert rule %s: unknown metric %r", rule.id, rule.metric)
             continue
@@ -232,7 +232,7 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
                 else:
                     breaching, value = _metric_state(db, rule, target_type,
                                                      target_id, now)
-            except Exception:  # noqa: BLE001 — one bad target never stops the pass
+            except Exception:  # noqa: BLE001  (one bad target never stops the pass)
                 logger.debug("alert rule %s target %s:%s raised", rule.id,
                              target_type, target_id, exc_info=True)
                 continue
@@ -268,7 +268,7 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
             f"{alert.target_type} #{alert.target_id}")
         alert.state = "resolved"
         alert.resolved_at = now
-        alert.message = f"Resolved: {rule.name} — target removed or rule disabled"
+        alert.message = f"Resolved: {rule.name}, target removed or rule disabled"
         db.commit()
         transitions.append(_transition(rule, alert, label, "resolved"))
     return transitions
@@ -303,7 +303,7 @@ def notify_transitions(app, transitions: list[dict]) -> int:
         try:
             reached += notify(app, event, title, t["message"],
                               only_ids=t.get("channel_ids") or None)
-        except Exception:  # noqa: BLE001 — a broken channel never breaks alerting
+        except Exception:  # noqa: BLE001  (a broken channel never breaks alerting)
             logger.debug("alert %s notification failed", t.get("alert_id"),
                          exc_info=True)
     return reached

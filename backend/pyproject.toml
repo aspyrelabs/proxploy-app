@@ -1,7 +1,7 @@
 [project]
 name = "proxploy"
 dynamic = ["version"]
-description = "Proxploy — Unraid's experience, for Proxmox"
+description = "Proxploy, Unraid's experience, for Proxmox"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
@@ -22,12 +22,12 @@ dependencies = [
   "websockets>=14",
   "python-multipart>=0.0.9",
   "requests-toolbelt>=1.0",
-  # Cron math ONLY (proxploy/jobs/scheduler.py) — CronTrigger's parsing and
+  # Cron math ONLY (proxploy/jobs/scheduler.py): CronTrigger's parsing and
   # DST-correct next-fire arithmetic. Its BaseScheduler/jobstores are unused:
   # doc 04 makes the `schedules` table authoritative, so a second in-memory
   # registry would be two sources of truth. Docs say "APScheduler 4"; no 4.x
   # release exists (alphas only, verified 2026-08-01) and doc 03 marks
-  # Scheduling "Provisional (seam: Scheduler)" — see docs/notes/phase-7-operate.md.
+  # Scheduling "Provisional (seam: Scheduler)": see docs/notes/phase-7-operate.md.
   "APScheduler>=3.11,<4",
   # Phase 8 (Scale). Licenses verified against PyPI 2026-08-05 and run through
   # the ci.yml allowlist: casbin Apache-2.0 (pulls simpleeval, MIT), Authlib
@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pip-licenses>=5"]
-# LGPL-3.0 (doc 00 §3: never linked into the shipped app) — installed only for
+# LGPL-3.0 (doc 00 §3: never linked into the shipped app): installed only for
 # the opt-in Postgres CI leg, kept out of the license-audited `dev` extra.
 postgres = ["psycopg[binary]>=3.2"]
 # Heavy dev-only tooling (mutation testing, doc 11 mutation-gate follow-up),
@@ -67,7 +67,7 @@ markers = [
 [tool.mutmut]
 # Mutation-testing gate (standing rule, doc 11): scoped to the
 # security/infra-critical modules named by the rule. "RLS" doesn't exist in
-# this codebase (no row-level security anywhere) — api/deps.py is the actual
+# this codebase (no row-level security anywhere): api/deps.py is the actual
 # authz surface (Phase-1 RBAC stub) and stands in for it here; see
 # backend/README.md for why.
 source_paths = ["proxploy"]

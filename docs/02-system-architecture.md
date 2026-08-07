@@ -1,4 +1,4 @@
-# Proxploy — System Architecture
+# Proxploy: System Architecture
 
 Status: planning. Governed by `00-decision-brief.md`; if anything here conflicts
 with the brief, the brief wins (and must be changed first).
@@ -9,13 +9,13 @@ Proxploy is one installable thing: **proxploy-app**, a single Python process
 serving a React SPA and a REST/WebSocket API, talking to one or more Proxmox VE
 nodes over their HTTP API (agentless by default). There is no message broker,
 no sidecar database, no agent to deploy on nodes. Everything that looks like
-infrastructure — job queue, scheduler, metrics store, log fanout — lives inside
+infrastructure, job queue, scheduler, metrics store, log fanout; lives inside
 the process, behind seams named in the brief (§5) so any piece can be swapped
 out if a deployment outgrows it.
 
 The other three properties (proxploy-api, proxploy-web, proxploy-docs) are
 Aspyre-hosted and never installed by users. The app talks to exactly one of
-them — proxploy-api — for exactly one purpose: entitlement token refresh
+them, proxploy-api, for exactly one purpose: entitlement token refresh
 (doc 07). No analytics, no telemetry, no other call path.
 
 ## 2. Component diagram
@@ -75,24 +75,24 @@ graph TB
 One OS process (per deployment form, see §9), one Uvicorn server, one asyncio
 event loop. Inside it:
 
-- **FastAPI application** — REST API under `/api/v1/*`, SSE endpoints at
+- **FastAPI application**: REST API under `/api/v1/*`, SSE endpoints at
   `/api/v1/*/stream` and WebSocket endpoints at `/api/v1/*/ws` (doc 05
   §Streaming), OpenAPI docs for free. Serves the built
   SPA as static files at `/` (single origin; no CORS in production).
-- **React SPA** — built by Vite at release time, shipped as static assets
+- **React SPA**: built by Vite at release time, shipped as static assets
   inside the app package. TanStack Query owns all server state; polling
   endpoints plus SSE-driven cache invalidation give the "live" feel.
-- **JobBackend** — the in-process asyncio job runner from brief §5. Every
+- **JobBackend**: the in-process asyncio job runner from brief §5. Every
   state-changing operation (lifecycle action, install, update, backup,
   migration) is a job: a DB row in `jobs`, log/progress lines in `job_events`,
   executed as an asyncio task. Enqueue/status/cancel/log-stream is the seam;
   Celery+Redis is the swap-in if multi-worker ever matters. Jobs survive
   restarts as records (a restarted app marks orphaned `running` jobs as
-  `interrupted` on boot — it does not attempt to resume half-run root scripts).
-- **Poller loops** — one long-lived asyncio task per connected host, polling
-  Proxmox's **bulk** endpoints every 30s — `/cluster/resources` (node/CT/VM
+  `interrupted` on boot; it does not attempt to resume half-run root scripts).
+- **Poller loops**: one long-lived asyncio task per connected host, polling
+  Proxmox's **bulk** endpoints every 30s, `/cluster/resources` (node/CT/VM
   status and summary metrics for the whole host/cluster in one call) plus
-  per-node `rrddata` for history-quality series — **never per-guest status
+  per-node `rrddata` for history-quality series, **never per-guest status
   calls**, so the poll cost stays flat as guest count grows. Writes
   `metric_samples` and refreshes the soft caches (`apps`, `vms`, `backups`
   state columns). A slow or dead host degrades only its own loop, never the
@@ -100,25 +100,25 @@ event loop. Inside it:
 
   **Per-cycle API-call budget (per host):** one `/cluster/resources` call
   (covers every node/CT/VM in the host or cluster) plus one
-  `/nodes/{node}/rrddata` call per node — budget target **O(nodes)**, never
+  `/nodes/{node}/rrddata` call per node, budget target **O(nodes)**, never
   O(guests): a host with 200 CTs costs the same poll-cycle call count as one
   with 20. Any per-guest call (e.g. a live detail fetch triggered by opening
   an app) is user-triggered and outside the poll loop, not part of this
   budget.
-- **APScheduler 3.11** — cron-like triggers (update windows, scheduled
+- **APScheduler 3.11**: cron-like triggers (update windows, scheduled
   backups, metric rollup/pruning, catalog refresh, entitlement token refresh).
   Triggers never do work themselves; they enqueue jobs into JobBackend so
   everything scheduled is also logged, streamable, and cancellable.
   **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:**
   this said "APScheduler 4"; no 4.x release exists (PyPI's maximum stable is
-  3.11.3, verified 2026-08-01). Only `CronTrigger` is used — the tick loop in
+  3.11.3, verified 2026-08-01). Only `CronTrigger` is used, the tick loop in
   `jobs/scheduler.py` reads the `schedules` table directly rather than
   running APScheduler's own scheduler/jobstore.
-- **Database** — SQLAlchemy 2.x + Alembic. SQLite in WAL mode by default;
+- **Database**: SQLAlchemy 2.x + Alembic. SQLite in WAL mode by default;
   Postgres via a single DSN change. Schema stays in the portable subset of
   both. All Proxmox-derived tables are named and treated as caches; Proxmox
   remains the source of truth for infra state, Proxploy owns app identity
-  (app ↔ (host, ctid), scripts, metadata) — brief §9.
+  (app ↔ (host, ctid), scripts, metadata); brief §9.
 
 Concurrency model in one sentence: the event loop multiplexes I/O (HTTP to
 Proxmox, SSH streams, websockets, DB); nothing CPU-heavy runs on it, and the
@@ -140,33 +140,33 @@ Two distinct channels to a Proxmox node, deliberately kept apart:
    as root on the node, so installs need a real shell. The key is generated by
    Proxploy at host onboarding, authorized by the user, never reused for
    anything else, and every invocation is audit-logged with full output
-   archived (brief §8). Consoles do **not** use SSH — Proxmox's own API
+   archived (brief §8). Consoles do **not** use SSH, Proxmox's own API
    provides the PTY websocket.
 
 Both channels sit behind the **`Executor` seam**: `run(host, script, env) →
 async stream of (stream, line)` plus lifecycle (cancel, timeout). The default
-and only day-one implementation is `SSHExecutor`. The **optional agent** — an
+and only day-one implementation is `SSHExecutor`. The **optional agent**, an
 outbound-only daemon on the node speaking to the app, removing the inbound SSH
-requirement — is a later phase that implements the same interface. Nothing
+requirement, is a later phase that implements the same interface. Nothing
 anywhere else in the codebase may know which executor is in use, and no
 feature may depend on the agent existing. That is the whole boundary: one
 interface, one default implementation, agent slot reserved but empty.
 
 `executor/` (doc 09) is the one component holding root-on-node power, so it
 carries the repo's highest test-coverage bar and tightest review requirement
-— unit tests plus integration tests against a throwaway PVE (doc 10 Phase
+unit tests plus integration tests against a throwaway PVE (doc 10 Phase
 1/4). It is also the one place with a **hard, CI-enforced structural rule**:
 an import-graph check fails the build if any module outside `executor/`
 imports the SSH client or calls the SecretStore accessor that returns the
-SSH key (doc 08 §4, doc 09) — enforced mechanically, not by convention.
+SSH key (doc 08 §4, doc 09); enforced mechanically, not by convention.
 Before Phase 4 invests further in `SSHExecutor`, a spike checks whether
 current community-scripts tooling exposes a non-interactive or API-drivable
 install path that would reduce or remove the need for root SSH; the design
-above is what ships if — as expected — raw SSH-root remains necessary (doc
+above is what ships if, as expected, raw SSH-root remains necessary (doc
 08 §4, doc 11 §1). The proxmoxer client layer behind `PXC`
 (`backend/proxploy/services/proxmox.py`, doc 09) adapts the existing
-lab-cluster-deploy proxmoxer module — CT lifecycle, cluster/node/guest reads,
-migration calls — rather than being written from scratch; all PVE-8-vs-9
+lab-cluster-deploy proxmoxer module, CT lifecycle, cluster/node/guest reads,
+migration calls, rather than being written from scratch; all PVE-8-vs-9
 version branching is isolated to that one layer (doc 03, doc 11 §7).
 
 ## 5. Consoles: proxied Proxmox websockets with our auth in front
@@ -203,14 +203,14 @@ VM consoles are identical in shape with `vncproxy` + `vncwebsocket` and noVNC
 on the client; node shells use node-level `termproxy` (gated by the stricter
 `Sys.Console` scope and an admin-role casbin rule). The Proxploy ticket
 is a single-use, short-TTL server-side handle (doc 05 §Streaming) binding the
-upgrade request to the Proxmox ticket already fetched — the Proxmox ticket
+upgrade request to the Proxmox ticket already fetched, the Proxmox ticket
 itself never reaches the browser. This whole path is the `PtyBridge`/`ConsoleProxy` seam from the
 brief; Guacamole is the arm's-length swap-in if SPICE/RDP demand appears.
 
 ## 6. Install script execution and streaming
 
 An App Store install is root-on-your-node, exactly like running the community
-script yourself; Proxploy adds provenance, streaming, and an archive — not
+script yourself; Proxploy adds provenance, streaming, and an archive; not
 sandboxing (brief §8). The pipeline:
 
 1. **Resolve + pin.** The install job snapshots the exact script content from
@@ -222,19 +222,19 @@ sandboxing (brief §8). The pipeline:
    piped to bash, env vars for non-interactive answers). One `audit_events`
    row records actor, host, script version hash, and result.
 3. **Stream.** Every stdout/stderr line becomes a `job_events` row
-   (job_id, seq, stream, line, ts) — the DB is the source of truth for the
+   (job_id, seq, stream, line, ts); the DB is the source of truth for the
    log, written as the lines arrive.
 4. **Fan out.** An in-process pub/sub (plain asyncio queues keyed by job_id)
    pushes new `job_events` to any subscribed WebSocket/SSE clients. A browser
    attaching mid-install first reads the backlog from the DB, then follows
    live. Zero subscribers costs nothing; the DB write always happens.
 5. **Archive.** On completion the full log persists in `job_events`
-   (retention per doc 04 — install/update transcripts kept for the app's
+   (retention per doc 04, install/update transcripts kept for the app's
    lifetime), the job row records exit status and
    duration, the app ↔ (host, ctid) mapping is written, and Apprise fires
    configured notifications.
 
-Updates and migrations run through the identical pipeline — same executor,
+Updates and migrations run through the identical pipeline, same executor,
 same streaming, same archive; only the script and the job type differ.
 
 ## 7. Catalog layer: fetch, cache, refresh
@@ -245,17 +245,17 @@ Brief rule 2: the browser never fetches the catalog; the backend does.
   metadata (and, on demand, script bodies) server-side over HTTPS.
 - **Cache.** Everything lands in `catalog_entries` (metadata, script body,
   upstream ETag/commit ref, fetched_at). The App Store UI reads only from the
-  DB — it works offline and is immune to GitHub rate limits and outages.
+  DB, it works offline and is immune to GitHub rate limits and outages.
 - **Refresh.** A scheduled job (`catalog.refresh`, fired by the
   `jobs/scheduler.py` tick loop against the seeded "Catalog refresh" row) re-
   fetches on an interval using conditional requests (`If-None-Match` with the
   stored ETag); 304 costs one request and no writes. Manual "refresh now"
   enqueues the same job. **Amendment, Phase 7, 2026-08-01:** "An APScheduler
-  job" corrected — see the line-108 amendment above; the mechanism is the
+  job" corrected, see the line-108 amendment above; the mechanism is the
   same tick loop everywhere in this doc, not APScheduler's own scheduler.
 - **Fallback.** If the optional Aspyre-hosted mirror is configured it is
   tried first as a dumb CDN, but the app **always** falls back to fetching
-  upstream directly — the mirror is a bandwidth nicety, never a dependency,
+  upstream directly, the mirror is a bandwidth nicety, never a dependency,
   and is entirely separate from proxploy-api.
 
 ## 8. Four-property topology and the entitlement call path
@@ -272,7 +272,7 @@ Inside the app, the Entitlements client is consulted on every gated request
 via `GET /api/v1/entitlements`. UI hides or veils; the server always re-enforces.
 Dormant default: everything on. Doc 07 owns the detail.
 
-## 9. Security and trust model (summary — doc 08 owns detail)
+## 9. Security and trust model (summary: doc 08 owns detail)
 
 - Scoped Proxmox API tokens per capability, never root@pam passwords.
 - Host credentials and the SSH private key encrypted at rest
@@ -303,7 +303,7 @@ All four forms run the same single process; only packaging differs.
 | LXC install (flagship) | One-line installer creates a Proxploy CT on a PVE node | Mirrors the community-scripts experience users already know. Installer sets up systemd unit + Caddy + master key file inside the CT. |
 | Docker / Compose | Image + compose file; volume for DB, secrets dir, config | Caddy as an optional second service in the compose file, or bring-your-own reverse proxy. |
 | systemd (bare) | pipx/venv install + provided unit file | For "just run it on this VM" users. |
-| Caddy in front | Arm's-length process managed by the installer for TLS/HTTP2 | App also serves plain HTTP behind it, and can self-sign via `cryptography` if Caddy is declined — TLS-by-default either way. |
+| Caddy in front | Arm's-length process managed by the installer for TLS/HTTP2 | App also serves plain HTTP behind it, and can self-sign via `cryptography` if Caddy is declined; TLS-by-default either way. |
 
 SQLite (WAL) is the default everywhere; Postgres is a DSN change, not a
 different deployment form.
@@ -321,10 +321,10 @@ publishes an invalidation event on the in-process bus → SSE endpoint
 TanStack Query invalidates the matching queries → SPA refetches
 `/api/v1/cluster/summary` and `/api/v1/metrics/query` → uPlot re-renders. If SSE is
 absent (proxy strips it), Query's normal refetch interval keeps the dashboard
-merely 30s-fresh instead of push-fresh. The `metrics.maintain` job — fired
+merely 30s-fresh instead of push-fresh. The `metrics.maintain` job, fired
 hourly by the seeded "Metrics maintenance" `schedules` row, via the
 `jobs/scheduler.py` tick loop, not APScheduler's own scheduler (**amendment,
-Phase 7, 2026-08-01**, see the line-108 amendment above) — rolls raw samples
+Phase 7, 2026-08-01**, see the line-108 amendment above); rolls raw samples
 into 5m/1h `metric_rollups` and prunes per retention; chart queries pick raw
 vs rollup by requested time range.
 

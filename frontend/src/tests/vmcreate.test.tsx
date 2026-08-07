@@ -87,7 +87,7 @@ describe('VmCreateWizard', () => {
     wrap(<VmCreateWizard onClose={() => {}} />)
 
     // Every <select> renders empty and fills in when its query resolves, so each
-    // pick waits for its own <option> — changing to a value with no matching
+    // pick waits for its own <option>, changing to a value with no matching
     // option is a silent no-op in jsdom.
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })

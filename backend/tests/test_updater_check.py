@@ -1,5 +1,5 @@
 """The update check talks to a channel we do not control. Every failure mode
-of that channel must degrade to 'no update available, here is why' — never to
+of that channel must degrade to 'no update available, here is why'; never to
 an exception that takes the Settings page down with it."""
 import json
 

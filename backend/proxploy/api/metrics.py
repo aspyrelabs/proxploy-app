@@ -50,7 +50,7 @@ def metrics_query(request: Request, target: str, metric: str,
     if frm_dt >= to_dt:
         raise HTTPException(422, "from must be before to")
 
-    # metrics.history gates only the deep past (doc 05) — inline conditional
+    # metrics.history gates only the deep past (doc 05): inline conditional
     # check, hosts.multi precedent
     if (frm_dt < now - timedelta(hours=48)
             and not request.app.state.entitlements.enabled("metrics.history")):

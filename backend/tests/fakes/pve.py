@@ -57,7 +57,7 @@ class _StorageStatusLeaf:
 
 
 class _VolumeLeaf:
-    """nodes(n).storage(s).content(volid) — .delete() records and mints a UPID."""
+    """nodes(n).storage(s).content(volid).delete() records and mints a UPID."""
 
     def __init__(self, owner, node, storage, volid):
         self._owner, self._node = owner, node
@@ -106,7 +106,7 @@ class _UploadLeaf:
 
 
 class _PruneLeaf:
-    """nodes(n).storage(s).prunebackups — .get() previews, .delete() deletes.
+    """nodes(n).storage(s).prunebackups.get() previews.delete() deletes.
     Recorded separately so a test can prove the preview never deletes."""
 
     def __init__(self, owner, node, storage):
@@ -126,7 +126,7 @@ class _PruneLeaf:
 
 
 class _NodeStorageNS:
-    """nodes(n).storage(name) — the per-datastore subtree."""
+    """nodes(n).storage(name), the per-datastore subtree."""
 
     def __init__(self, owner, node, storage):
         self.status = _StorageStatusLeaf(owner, node, storage)
@@ -154,7 +154,7 @@ class _NodeStorageFactory:
 
 
 class _NetworkNS:
-    """nodes(n).network — .get() lists, .post/.put/.delete stage, .put() with no
+    """nodes(n).network.get() lists.post/.put/.delete stage.put() with no
     iface applies (returns a UPID), .delete() with no iface reverts. Callable
     for nodes(n).network(iface)."""
 
@@ -192,7 +192,7 @@ class _NetworkNS:
 
 
 class _GuestConfigLeaf:
-    """nodes(n).lxc(vmid).config / .qemu(vmid).config — .get() reads, .put() records."""
+    """nodes(n).lxc(vmid).config / .qemu(vmid).config.get() reads.put() records."""
 
     def __init__(self, owner, kind, vmid):
         self._owner, self._kind, self._vmid = owner, kind, vmid
@@ -224,7 +224,7 @@ class _RollbackLeaf:
 
 
 class _SnapshotItemNS:
-    """nodes(n).<kind>(vmid).snapshot(name) — .rollback.post() and .delete()."""
+    """nodes(n).<kind>(vmid).snapshot(name).rollback.post() and .delete()."""
 
     def __init__(self, owner, kind, node, vmid, name):
         self._owner, self._kind = owner, kind
@@ -240,7 +240,7 @@ class _SnapshotItemNS:
 
 
 class _SnapshotNS:
-    """nodes(n).<kind>(vmid).snapshot — .get() lists, .post() creates, and the
+    """nodes(n).<kind>(vmid).snapshot.get() lists.post() creates, and the
     object itself is callable with a snapshot name (proxmoxer's own shape)."""
 
     def __init__(self, owner, kind, node, vmid):
@@ -264,7 +264,7 @@ class _SnapshotNS:
 
 
 class _NextidLeaf:
-    """cluster.nextid — increments nextid_calls so a test can prove a
+    """cluster.nextid, increments nextid_calls so a test can prove a
     caller-supplied vmid never asked PVE for one (Phase 6 Task 11)."""
 
     def __init__(self, owner):
@@ -287,7 +287,7 @@ class _ClusterNS:
 
 
 class _ActionLeaf:
-    """nodes(n).lxc(vmid).status.<action> — .post() records and mints a UPID."""
+    """nodes(n).lxc(vmid).status.<action>.post() records and mints a UPID."""
 
     def __init__(self, owner, kind, vmid, action):
         self._owner, self._kind, self._vmid, self._action = owner, kind, vmid, action
@@ -348,7 +348,7 @@ class _CloneLeaf:
 
 
 class _MigrateLeaf:
-    """nodes(n).<kind>(vmid).migrate — .post() records (kind, node, vmid,
+    """nodes(n).<kind>(vmid).migrate.post() records (kind, node, vmid,
     params) into fake.migrations and mints a UPID via _record_action
     (Phase 8 Task 14/15)."""
 
@@ -382,7 +382,7 @@ class _GuestNS:
 
 
 class _GuestFactory:
-    """nodes(n).lxc / nodes(n).qemu — callable with a vmid, and postable for
+    """nodes(n).lxc / nodes(n).qemu, callable with a vmid, and postable for
     the guest create/restore endpoint (Phase 6 Task 9; Task 11's vm_create
     reuses this same .post())."""
 
@@ -439,7 +439,7 @@ class _TaskFactory:
 
 
 class _ClusterStorageLeaf:
-    """root .storage(name) — the cluster-level storage definition."""
+    """root .storage(name), the cluster-level storage definition."""
 
     def __init__(self, owner, name):
         self._owner, self._name = owner, name
@@ -458,7 +458,7 @@ class _ClusterStorageLeaf:
 
 
 class _ClusterStorageFactory:
-    """root .storage — .get() lists definitions, .post() creates one,
+    """root .storage.get() lists definitions.post() creates one,
     calling it drills into a named definition. All three are synchronous in
     Proxmox and return no UPID, so none of them mints one here either."""
 
@@ -491,7 +491,7 @@ class _VzdumpLeaf:
         self._owner.vzdumps.append((self._node, kwargs))
         # ponytail deviation from the brief's literal snippet: `vmid` here may
         # be a comma-joined multi-guest string ("150,201") or absent entirely
-        # (the `all=1` selection), and `int()` on either raises — this only
+        # (the `all=1` selection), and `int()` on either raises: this only
         # needs a *number* for the synthetic UPID, not the real selection.
         raw = kwargs.get("vmid", 0) or 0
         try:
@@ -532,17 +532,17 @@ class FakePVE:
         self.rrd_by_node = rrddata or {}
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
         self.access = _Access(permissions or {}, fail)
-        # infra reads (Phase 6) — set before the namespaces below, which read
+        # infra reads (Phase 6): set before the namespaces below, which read
         # them lazily so a test can reassign any of these post-construction
         self.storages_by_node: dict[str, list[dict]] = {}
         self.storage_status_response: dict = {}
         self.content_by_storage: dict[str, list[dict]] = {}
         # per-storage failure injection (Phase 6 Task 8 review): a storage
-        # name in here raises on .content.get() while its siblings succeed —
+        # name in here raises on .content.get() while its siblings succeed, 
         # unlike `fail`, which is all-or-nothing across the whole fake.
         self.content_fail_storages: set[str] = set()
         self.cluster_storage_rows: list[dict] = []
-        # cluster membership (Phase 8 Task 14) — [] means "standalone node",
+        # cluster membership (Phase 8 Task 14): [] means "standalone node",
         # matching real PVE's /cluster/status shape for a non-clustered host.
         self.cluster_status_rows: list[dict] = []
         self.networks_by_node: dict[str, list[dict]] = {}
@@ -562,7 +562,7 @@ class FakePVE:
         self.storage_creates: list[dict] = []
         self.storage_updates: list[tuple] = []
         self.storage_removes: list[str] = []
-        # `list(resources)` copies whatever a test passed via `resources=` —
+        # `list(resources)` copies whatever a test passed via `resources=`, 
         # a test never gets a handle on this list itself, only on the copy.
         # Stored as an attribute (not just captured inside _ClusterNS) so
         # add_ct() below can append to it after construction and have
@@ -597,7 +597,7 @@ class FakePVE:
         self.snapshot_creates: list[tuple[str, str, int, dict]] = []
         self.snapshot_rollbacks: list[tuple[str, str, int, str]] = []
         self.snapshot_deletes: list[tuple[str, str, int, str]] = []
-        # guest create/clone/destroy (Phase 6, Task 11) — `creates` and `nextid`
+        # guest create/clone/destroy (Phase 6, Task 11): `creates` and `nextid`
         # already exist from Tasks 9 and 1
         self.clones: list[tuple[str, int, dict]] = []
         self.guest_deletes: list[tuple[str, str, int]] = []
@@ -643,7 +643,7 @@ def make_fake_factory(fake: FakePVE):
 def make_addressed_factory(fakes: dict[str, "FakePVE"]):
     """Two-host tests (Phase 8 Task 14): one FakePVE per host, keyed by the
     hostname the client's factory is called with (ProxmoxClient passes
-    host=<hostname parsed from Host.address> — see ProxmoxClient._connect)."""
+    host=<hostname parsed from Host.address>, see ProxmoxClient._connect)."""
     def factory(**kwargs):
         fake = fakes[kwargs["host"]]
         if fake.fail:

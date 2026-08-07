@@ -2,7 +2,7 @@
 # exposed directly (doc 10 Phase 9: locked-down defaults, LAN bind, TLS on).
 #
 # {$PROXPLOY_SITE_ADDRESS} and {$PROXPLOY_TLS_DIRECTIVE} below are Caddyfile
-# placeholder syntax, not shell variables — install.sh's configure_tls()
+# placeholder syntax, not shell variables: install.sh's configure_tls()
 # renders this template with sed before writing /etc/caddy/Caddyfile, so the
 # values are baked in; Caddy itself never reads these env vars.
 {$PROXPLOY_SITE_ADDRESS} {

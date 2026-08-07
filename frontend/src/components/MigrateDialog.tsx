@@ -17,7 +17,7 @@ import { Button } from './ui/button'
 type HostRow = { id: number; name: string; status: string }
 
 const STRATEGY_LABEL: Record<MigrateStrategy, (pf: Preflight) => string> = {
-  cluster: () => 'These hosts share a cluster — native migration',
+  cluster: () => 'These hosts share a cluster, native migration',
   shared_storage: (pf) => `Via shared storage ${pf.shared_storage}`,
   transfer: () => 'Backup, transfer, restore',
 }
@@ -25,12 +25,12 @@ const STRATEGY_LABEL: Record<MigrateStrategy, (pf: Preflight) => string> = {
 /**
  * Cross-host migration (backend/proxploy/services/migrate.py, doc 05 Tasks
  * 14-16). Pick a target host, run the real preflight, show the honest
- * strategy/size/downtime picture — blockers refuse submission, warnings
- * don't — then fire the job and follow it with the existing JobLog.
+ * strategy/size/downtime picture, blockers refuse submission, warnings
+ * don't, then fire the job and follow it with the existing JobLog.
  *
  * The preflight's `est_downtime_s` is an ESTIMATE derived from an assumed
  * transfer rate (`est_note`/`downtime_statement` say so themselves). Once
- * the job is running, this dialog polls it and — on completion — shows the
+ * the job is running, this dialog polls it and; on completion, shows the
  * job's own `result.downtime_s`, which is MEASURED wall-clock time, right
  * next to the estimate. The two numbers are never merged into one: an
  * estimate presented as a measurement would be exactly the kind of
@@ -50,7 +50,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
   const preflight = usePreflight()
   const migrate = useMigrate()
 
-  // Independent poll from JobLog's own SSE stream — this only needs to know
+  // Independent poll from JobLog's own SSE stream, this only needs to know
   // when `result.downtime_s` (the measured number) shows up, not the
   // transcript. TERMINAL matches jobs.ts's own terminal-status list.
   const job = useQuery({
@@ -67,7 +67,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
     setError('')
     preflight.mutate({ appId: app.id, targetHostId: hostId }, {
       onSuccess: (r) => setPf(r),
-      onError: (e) => setError(String(errBody(e)?.detail ?? 'Could not run preflight — try again.')),
+      onError: (e) => setError(String(errBody(e)?.detail ?? 'Could not run preflight, try again.')),
     })
   }
 
@@ -84,14 +84,14 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
         }
         setGuard(null)
         // A fresh preflight inside the route found blockers the dialog's own
-        // (now-stale) preflight didn't — state changed in the gap between
+        // (now-stale) preflight didn't, state changed in the gap between
         // opening the dialog and clicking Migrate. Show the real reason, not
         // a bare "migration_blocked".
         if (b?.error === 'migration_blocked' && Array.isArray(b.blockers)) {
           setError(b.blockers.join('; '))
           return
         }
-        setError(String(b?.detail ?? b?.error ?? 'Could not start the migration — try again.'))
+        setError(String(b?.detail ?? b?.error ?? 'Could not start the migration, try again.'))
       },
     })
   }
@@ -151,7 +151,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                       transfer size:{' '}
                       {pf.transfer_bytes != null
                         ? `${fmtBytes(pf.transfer_bytes)} (${pf.estimate_basis === 'last_backup' ? 'from last backup' : 'live disk size'})`
-                        : 'unknown — no measured backup and no live disk size were available'}
+                        : 'unknown, no measured backup and no live disk size were available'}
                     </div>
                     <div>
                       est. downtime: {pf.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)

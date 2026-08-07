@@ -10,7 +10,7 @@ import { Button } from './ui/button'
  *
  * The NIC's model and MAC are shown but never submitted. Proxmox stores them in
  * the netN head token (`virtio=AA:BB:CC:DD:EE:FF`), and the backend edits the
- * string it read rather than rebuilding one — so this form sends only the keys
+ * string it read rather than rebuilding one, so this form sends only the keys
  * the operator touched and the head token survives untouched.
  */
 export function NicForm({ nic, bridges, onClose }: {
@@ -34,13 +34,13 @@ export function NicForm({ nic, bridges, onClose }: {
     set.mutate({ guestType: nic.guest_type, guestId: nic.guest_id, iface: nic.iface, patch }, {
       onSuccess: (r) => {
         // pending_reboot means PVE filed the change under the guest's PENDING
-        // section — say so plainly instead of a green "saved".
+        // section, say so plainly instead of a green "saved".
         if (r.pending_reboot) toast(r.detail)
         else toast.success(`${nic.iface} updated`)
         onClose()
       },
       onError: (err) =>
-        setError(String(errBody(err)?.detail ?? 'Could not update this NIC — try again.')),
+        setError(String(errBody(err)?.detail ?? 'Could not update this NIC, try again.')),
     })
   }
 
@@ -54,12 +54,12 @@ export function NicForm({ nic, bridges, onClose }: {
           {nic.name ?? `guest ${nic.vmid}`} · <span className="font-mono">{nic.iface}</span>
         </h2>
         <div className="mt-2 rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
-          <div>{nic.model ?? '—'} · {nic.macaddr ?? '—'}</div>
+          <div>{nic.model ?? ', '} · {nic.macaddr ?? ', '}</div>
           <div className="mt-1 break-all">{nic.raw}</div>
         </div>
         <p className="mt-2 text-[12px] text-text-3">
           The adapter model and MAC address are preserved exactly as Proxmox stores
-          them — this form only changes the three fields below.
+          them, this form only changes the three fields below.
         </p>
 
         <form onSubmit={submit} className="mt-4 space-y-3">

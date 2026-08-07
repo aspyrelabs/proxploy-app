@@ -16,7 +16,7 @@ def test_self_ctid_from_settings_is_persisted_on_boot(tmp_path):
 
 def test_absent_self_ctid_writes_nothing(tmp_path):
     """A dev checkout or a bare-metal install has no CTID. selfguard is
-    documented to block NOTHING when identity is unknown — writing a bogus
+    documented to block NOTHING when identity is unknown, writing a bogus
     value here would be worse than writing none."""
     app = make_app(tmp_path)
     with TestClient(app):

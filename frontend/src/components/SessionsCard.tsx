@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed — try again.'
+    ? (e.body as any).detail : 'Request failed, try again.'
 
 // No entitlement gate: GET/DELETE /auth/sessions are self-service on the
 // caller's own login state (api/auth.py's comment on that section), not an
@@ -52,11 +52,11 @@ export function SessionsCard() {
             <tbody>
               {list.map((r) => (
                 <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
-                  <td className="py-2 font-mono">{r.ip ?? '—'}</td>
-                  <td className="text-text-2">{r.user_agent ?? '—'}</td>
+                  <td className="py-2 font-mono">{r.ip ?? ', '}</td>
+                  <td className="text-text-2">{r.user_agent ?? ', '}</td>
                   <td className="text-text-3">{new Date(r.created_at).toLocaleString()}</td>
                   <td className="text-text-3">
-                    {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : '—'}
+                    {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : ', '}
                   </td>
                   <td className="py-2 text-right">
                     {r.current ? (

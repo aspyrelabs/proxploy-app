@@ -5,7 +5,7 @@ Both directions are guarantees now, not incidental behavior. Before Phase 8,
 `api/deps.py::user_role()` fell back to "viewer" for a user in no team, so a
 membership-less account could read everything and a mistake in the bootstrap
 path would have been invisible. `services/authz.py::enforce` has no such
-fallback, which makes the bootstrap owner's membership load-bearing — hence
+fallback, which makes the bootstrap owner's membership load-bearing; hence
 these two tests, driven through the real `POST /users` first-run route rather
 than a hand-seeded row, so they fail if that route ever stops writing it.
 """
@@ -22,7 +22,7 @@ def test_a_user_in_no_team_is_denied_everything_including_reads(tmp_path):
     e = build_enforcer(db)
 
     assert db.query(TeamMember).filter_by(user_id=orphan.id).count() == 0
-    # Reads too — this is the behavior change A1 records. The old
+    # Reads too: this is the behavior change A1 records. The old
     # user_role() default would have granted every one of these.
     for resource, action in (("host", "read"), ("app", "read"), ("vm", "read"),
                              ("metric", "read"), ("job", "read")):

@@ -1,5 +1,5 @@
 """The docs site's API reference is generated from this artifact, so the
-export has to be a pure function of the app — no server, no network."""
+export has to be a pure function of the app, no server, no network."""
 import json
 import subprocess
 import sys

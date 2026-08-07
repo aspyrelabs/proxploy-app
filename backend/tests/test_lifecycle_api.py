@@ -24,13 +24,13 @@ def _seed(app, ctid=150, vmid=201):
 
 
 def test_missing_session_is_401_not_403(tmp_path, csrf_header, bootstrap_admin):
-    """A missing session must 401, never 403 — even with the entitlement gate
+    """A missing session must 401, never 403; even with the entitlement gate
     stacked on the route. The CSRF double-submit is a separate, mutation-only
     gate (doc 08 §5): a bare POST with no cookie at all trips CSRF first, so
     the CSRF pair is supplied here (same as every other unauth-POST-is-401
     test in this suite, e.g. test_auth.py) to isolate the check this test is
-    actually about — auth must run before the entitlement gate. (This does
-    NOT exercise the operator-role branch — see test_viewer_role_is_refused
+    actually about, auth must run before the entitlement gate. (This does
+    NOT exercise the operator-role branch, see test_viewer_role_is_refused
     below for that.)"""
     from tests.fakes.pve import FakePVE
     from tests.support import make_app
@@ -44,10 +44,10 @@ def test_missing_session_is_401_not_403(tmp_path, csrf_header, bootstrap_admin):
 
 def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
     """authorize("app"/"vm", "lifecycle") must actually refuse a logged-in
-    user whose role is below operator — a plain signup defaults to "viewer"
+    user whose role is below operator, a plain signup defaults to "viewer"
     (UserIn.role) and gets a real viewer membership. (A user with NO team
     membership is a different case entirely and is denied outright, reads
-    included — Phase 8 amendment A1, pinned by test_authz_bootstrap.py.)
+    included, Phase 8 amendment A1, pinned by test_authz_bootstrap.py.)
     Covers both the
     apps and vms routes: this is the endpoint that stops a customer's
     container, and "operator required" was previously asserted nowhere in

@@ -52,7 +52,7 @@ def test_run_inlines_env_vars_into_the_command_string():
 
 
 def test_run_rejects_a_shell_metacharacter_in_an_env_key():
-    """Regression test: env values are shlex-quoted but keys never were —
+    """Regression test: env values are shlex-quoted but keys never were, 
     an admin-supplied overrides key like `"os; touch /tmp/x"` used to be
     inlined literally into the command, running as a second root command.
     Uses a connect_factory that blows up if called at all, to prove
@@ -127,7 +127,7 @@ class _AcceptAnyKeyServer(asyncssh.SSHServer):
 def test_default_connect_factory_pins_then_accepts_then_rejects_changed_key():
     """Regression test for the bug a reviewer caught: known_hosts=None makes
     asyncssh skip validate_host_public_key entirely, silently disabling TOFU
-    pinning. Runs against a real local asyncssh server/client pair — the
+    pinning. Runs against a real local asyncssh server/client pair, the
     fakes/ssh.py-based tests above never touch this code path."""
 
     async def scenario():
@@ -226,7 +226,7 @@ def test_normalize_ssh_host(address, expected):
 def test_run_for_host_strips_scheme_and_port_from_the_stored_address(tmp_path):
     """Regression test: `Host.address` is stored as a full `https://host:port`
     URL (api/hosts.py), but every SSH call site used to hand that straight to
-    asyncssh, which wants a bare hostname — `://` and the embedded port are
+    asyncssh, which wants a bare hostname; `://` and the embedded port are
     not valid hostname characters, so this failed name resolution against any
     real node. `seed_host_row`'s default address is `https://10.0.0.9:8006`;
     the fake connect factory below is keyed by the bare hostname `10.0.0.9`

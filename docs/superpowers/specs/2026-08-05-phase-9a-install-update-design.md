@@ -1,4 +1,4 @@
-# Phase 9a — Install & Update (design)
+# Phase 9a: Install & Update (design)
 
 **Date:** 2026-08-05
 **Status:** approved, ready for implementation planning
@@ -25,8 +25,8 @@ spec → plan → implement cycle:
 Order is 9a → 9b → 9c → 9d. 9a carries the phase's Definition of Done; 9c
 cannot be written honestly until the installer it documents exists.
 
-**Phase 9a's slice of the doc-10 DoD** — *"a stranger installs via the
-one-liner on a clean PVE box … and self-updates to the next tagged release —
+**Phase 9a's slice of the doc-10 DoD**: *"a stranger installs via the
+one-liner on a clean PVE box … and self-updates to the next tagged release, 
 without reading source code."* The onboarding, app-install, VM-create and
 backup-schedule clauses of that sentence are already shipped (Phases 4–7) or
 belong to 9b.
@@ -35,15 +35,15 @@ belong to 9b.
 
 ## Decisions settled during design
 
-### D1 — Release channel: public repo + GitHub Releases
+### D1: Release channel: public repo + GitHub Releases
 
 Artifacts live in GitHub Releases on `aspyrelabs/proxploy-app`, which becomes
 public (matching the source-available posture stated in doc 11:165). The
 one-liner fetches `install.sh`; the installer and updater fetch a tarball plus
 `manifest.json` and `manifest.json.sig` from the release.
 
-Channels are expressed with GitHub's existing prerelease flag — `latest` is
-**stable**, prereleases are **edge** — which gives doc 11:297's staged rollout
+Channels are expressed with GitHub's existing prerelease flag, `latest` is
+**stable**, prereleases are **edge**; which gives doc 11:297's staged rollout
 without building a channel service.
 
 **Rejected:** serving artifacts from `proxploy-api` (puts the update path on
@@ -51,7 +51,7 @@ licensing infrastructure and makes us a CDN), and a split
 artifacts-on-GitHub / channel-resolved-by-api design (two systems must agree
 before any user can update).
 
-### D2 — Artifact signing: a separate Ed25519 release key
+### D2: Artifact signing: a separate Ed25519 release key
 
 Doc 11:300 leaves the signing scheme explicitly deferred. Resolved: a
 **dedicated release keypair, never the entitlement key.** A leaked release key
@@ -59,21 +59,21 @@ must not also be able to mint entitlements, and the two rotate on different
 cadences.
 
 The release **public** key ships inside the release artifact, so rotating it
-requires publishing a release — the same bootstrap constraint doc 09:153–156
+requires publishing a release, the same bootstrap constraint doc 09:153–156
 already records for the entitlement key. Named here so it is a known property
 rather than a discovery.
 
 The private key never touches this repo or CI secrets during 9a; it is
 generated offline as part of the publication runbook (D4).
 
-### D3 — Self-update applies to LXC and systemd installs only
+### D3: Self-update applies to LXC and systemd installs only
 
 `install_shape` (`lxc` | `systemd` | `docker`) is detected once at boot and
 reported by the API.
 
-- **lxc / systemd** — full in-app apply: pre-update backup, new versioned
+- **lxc / systemd**: full in-app apply: pre-update backup, new versioned
   directory, switch-over, health check, automatic rollback.
-- **docker** — the update is detected and displayed, with the exact
+- **docker**: the update is detected and displayed, with the exact
   `docker compose pull && docker compose up -d` to run on the host and a link
   to the release notes. **The app never rewrites its own image.**
 
@@ -82,7 +82,7 @@ socket. Mounting the socket gives the container host-root-equivalent
 authority, which contradicts the locked-down-defaults posture doc 10 sets for
 this phase. A capability the product declines to have is not a gap.
 
-### D4 — 9a builds and proves; publication is a separate gated runbook
+### D4: 9a builds and proves; publication is a separate gated runbook
 
 9a implements the installer, the manifest format, the signer, the update check
 and the apply path, and proves the whole upgrade and rollback cycle against a
@@ -120,7 +120,7 @@ Three properties this layout buys:
    shared venv would make rollback a reinstall, which is exactly the fragile
    path doc 11:286 warns against.
 3. **`main.py:167` already resolves the SPA at `parents[2]/frontend/dist`,**
-   so this layout matches the code as written — no path rework.
+   so this layout matches the code as written, no path rework.
 
 Data and secrets live outside `releases/` entirely, so "never update in
 place" holds structurally rather than by discipline.
@@ -158,8 +158,8 @@ The UI observes the outcome by polling `/meta/version` until it changes or the
 timeout expires; on timeout it says it lost contact with the server, which is
 the truth, rather than reporting success it cannot know.
 
-The manual path — running `proxploy-update --to 1.1.0` by hand, or re-running
-the installer — always works and is what the docs (9c) present first, per
+The manual path, running `proxploy-update --to 1.1.0` by hand, or re-running
+the installer, always works and is what the docs (9c) present first, per
 doc 11:295.
 
 ### Installer
@@ -191,7 +191,7 @@ code.
 | `POST /api/v1/meta/update` | launch the updater (lxc/systemd only; 409 on docker with the compose command in the body) |
 
 Both are `settings`-domain authorized through the existing `authorize()` path
-established in Phase 8 — this spec adds no new authorization concept. The
+established in Phase 8, this spec adds no new authorization concept. The
 update check reuses the existing entitlement-refresh pattern for outbound HTTP.
 
 ### Version, single source of truth
@@ -231,5 +231,5 @@ publication runbook (D4) is where it stops being a substitution.
 
 Onboarding polish, empty and error states, finding F1 (9b); marketing and docs
 sites (9c); `proxploy-api` hardening and opt-in error reporting (9d);
-multi-node HA; unattended/automatic updates — 9a's apply is always operator-
+multi-node HA; unattended/automatic updates, 9a's apply is always operator-
 initiated.

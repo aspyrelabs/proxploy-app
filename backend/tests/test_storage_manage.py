@@ -25,7 +25,7 @@ def _seed(app):
 def _api(tmp_path, fake=None):
     # ponytail: app.state.sessionmaker only exists inside the FastAPI lifespan
     # (proxploy/main.py), so seeding must happen inside a `with client:` block
-    # rather than before it — same precedent as test_storage_content.py::_api.
+    # rather than before it: same precedent as test_storage_content.py::_api.
     from fastapi.testclient import TestClient
     from tests.support import make_app
 
@@ -65,7 +65,7 @@ def test_config_storage_collision_does_not_override_the_route_storage(tmp_path, 
                                                                        bootstrap_admin):
     """BLOCKING 2 regression: storage.py applies NO key filter at all (a
     deliberate free-form plugin passthrough), so a caller-supplied
-    `config.storage`/`config.type` used to silently override the route's own —
+    `config.storage`/`config.type` used to silently override the route's own, 
     verified live: `{"storage": "newpbs", ..., "config": {"storage": "local",
     "type": "dir", ...}}` returned 201 saying newpbs while creating local.
     Asserted against what FakePVE actually recorded, not the response body."""
@@ -117,7 +117,7 @@ def test_pbs_attach_never_persists_or_echoes_the_password(tmp_path, csrf_header,
             attach = next(x for x in rows if x.action == "storage.create")
             assert attach.params["config"]["password"] == "[redacted]"
             assert attach.params["config"]["server"] == "10.0.0.20"  # not over-redacted
-            # 4. these routes are synchronous — no job row, so no jobs.params copy
+            # 4. these routes are synchronous: no job row, so no jobs.params copy
             assert db.query(Job).count() == 0
         # 5. and it does not come back out of GET /audit either
         assert PBS_PASSWORD not in c.get("/api/v1/audit").text
@@ -165,7 +165,7 @@ def test_detach_removes_upstream_and_audits(tmp_path, csrf_header, bootstrap_adm
 
 def test_detach_is_owner_only_while_attach_is_admin(tmp_path, csrf_header,
                                                     bootstrap_admin):
-    """Doc 05: POST/PATCH are admin, DELETE is owner — detaching is the one that
+    """Doc 05: POST/PATCH are admin, DELETE is owner; detaching is the one that
     can strand a guest's disks behind a removed definition."""
     from fastapi.testclient import TestClient
     from tests.fakes.pve import FakePVE

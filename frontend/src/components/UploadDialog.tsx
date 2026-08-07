@@ -11,7 +11,7 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   hostId: number; storage: string; node: string; contentTypes: string[]; onClose: () => void
 }) {
   const upload = useUploadContent()
-  // Proxmox's upload endpoint accepts iso and vztmpl only — backups and disk
+  // Proxmox's upload endpoint accepts iso and vztmpl only, backups and disk
   // images get there by being written, not posted. Offering the other two would
   // be a 400 dressed up as a feature.
   const uploadable = contentTypes.filter((c) => c === 'iso' || c === 'vztmpl')
@@ -64,7 +64,7 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
                   className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text-2" />
               </div>
               <div className="text-[12px] text-text-2">
-                The file is streamed through Proxploy to the node — it crosses the
+                The file is streamed through Proxploy to the node, it crosses the
                 wire twice and needs that much free space on the Proxploy host
                 while the job runs.
               </div>

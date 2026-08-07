@@ -17,7 +17,7 @@ const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px]
 // has to be honest about.
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed — try again.'
+    ? (e.body as any).detail : 'Request failed, try again.'
 
 function TeamMembers({ team, users, usersError, onRemove }: {
   team: TeamRow; users: UserRow[]; usersError: boolean

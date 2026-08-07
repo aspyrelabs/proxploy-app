@@ -72,7 +72,7 @@ def test_alerts_disabled_evaluates_nothing(tmp_path):
 
 
 def test_an_evaluator_failure_never_kills_the_supervisor(tmp_path, monkeypatch):
-    """The supervisor also (re)spawns host loops — if alerting can kill it,
+    """The supervisor also (re)spawns host loops, if alerting can kill it,
     one bad rule stops all polling."""
     async def go():
         app = make_job_app(tmp_path)

@@ -1,8 +1,8 @@
-# Proxploy — Risks & Open Decisions
+# Proxploy: Risks & Open Decisions
 
 Doc 11. Subordinate to `00-decision-brief.md`. This is the honest register:
 what can hurt us, how likely, what we do about it, and which decisions we are
-deliberately not making yet — with the information that would settle each one.
+deliberately not making yet, with the information that would settle each one.
 
 Likelihood/impact scale: Low / Medium / High.
 
@@ -19,7 +19,7 @@ SSH at all.
 **Likelihood:** Medium (upstream is active and well-reviewed, but it is a
 third-party repo of root shell scripts). **Impact:** High.
 
-**Mitigations — provenance and honesty, not sandboxing theater:**
+**Mitigations, provenance and honesty, not sandboxing theater:**
 
 - Script content is **pinned** at install time into `app_scripts`; every
   subsequent run executes the pinned content, never a silent upstream fetch.
@@ -35,7 +35,7 @@ third-party repo of root shell scripts). **Impact:** High.
 - We do **not** claim sandboxing, containment, or safety review we don't do.
   Any future hardening (e.g. `ForceCommand` wrappers, restricted key options)
   is additive, never marketed as isolation.
-- **Non-root/API-first spike (Phase 4 entry gate, doc 08 §4, doc 10) — RAN,
+- **Non-root/API-first spike (Phase 4 entry gate, doc 08 §4, doc 10); RAN,
   SETTLED:** confirmed raw SSH-root is structurally necessary, not assumed.
   Community-scripts creates every LXC via the host-local `pct create` CLI
   (never the Proxmox API) and enforces `root_check()`; Proxmox's own REST
@@ -58,7 +58,7 @@ PBS-mediated (backup → restore on target) or vzdump + transfer where no PBS
 exists. That means real downtime proportional to disk size, plus MAC/IP/DHCP
 wrinkles on the new host, and a window where the guest exists in two places.
 
-**Likelihood:** High (the feature will be used on non-clustered hosts — that's
+**Likelihood:** High (the feature will be used on non-clustered hosts, that's
 the audience). **Impact:** Medium (downtime and confusion, not data loss, if
 we sequence correctly).
 
@@ -75,13 +75,13 @@ we sequence correctly).
 
 **Deferred decision:** offering an rsync-based delta pre-copy (sync while
 running, short final stop-and-sync) to shrink downtime. Resolves with:
-measured downtime numbers from Phase 8 testing on realistic disk sizes —
+measured downtime numbers from Phase 8 testing on realistic disk sizes, 
 build it only if PBS-path downtime is unacceptable in practice.
 
 ## 3. Agentless SSH vs. optional agent
 
 **Risk.** The agentless default requires users to authorize an SSH key with
-root capability on their hypervisor — a trust hurdle and a standing credential
+root capability on their hypervisor, a trust hurdle and a standing credential
 we hold (encrypted). An agent avoids inbound SSH but adds a daemon to install,
 update, and secure on every node, plus a second code path to maintain.
 
@@ -94,14 +94,14 @@ update, and secure on every node, plus a second code path to maintain.
 - Key is dedicated, ed25519, used only by the executor, revocable, encrypted
   at rest via SecretStore; docs show exactly what it's used for.
 - Consoles/lifecycle/backups never touch SSH (Proxmox API websockets), so the
-  SSH surface is limited to install/update/migrate — refusing SSH still
+  SSH surface is limited to install/update/migrate, refusing SSH still
   yields a mostly-working product, and the UI says precisely which features
   need it.
 - The executor is behind one interface, so the later agent is a pluggable
   implementation, not a rewrite (brief §8: nothing else may depend on it).
 
 **Deferred decision:** whether/when to build the outbound-only agent, and its
-update channel. Resolves with: post-launch demand data — count of users who
+update channel. Resolves with: post-launch demand data, count of users who
 decline SSH enrolment (we can see feature-blocked states locally, reported
 only via opt-in error/feedback channels, never telemetry).
 
@@ -120,7 +120,7 @@ write to one SQLite file. Write contention can stall the API or corrupt the
   transaction per poll cycle, not per sample).
 - Rollups (5m/1h) + retention pruning keep raw tables small; queries hit
   rollups for anything beyond the recent window.
-- Postgres via DSN is a first-class, tested path — the escape hatch is a
+- Postgres via DSN is a first-class, tested path; the escape hatch is a
   connection string, and the schema stays in the portable subset.
 - VictoriaMetrics behind the `MetricsStore` seam as the arm's-length swap for
   genuinely big fleets.
@@ -144,19 +144,19 @@ possible.
 **Mitigations:**
 
 - Server-side ingest validates against a versioned schema; on mismatch the
-  cached catalog keeps serving with a staleness banner — drift never breaks
+  cached catalog keeps serving with a staleness banner, drift never breaks
   installed apps or the rest of the product.
 - Pinning (risk 1) means upstream changes never silently alter what runs;
   diffs surface them instead.
 - License verification at import: repo-level license recorded per catalog
   sync ("verified <date>" per brief §3); entries with unclear licensing are
   displayed with their upstream link and license field, and we consume
-  metadata + call entrypoints only — we never vendor their code.
+  metadata + call entrypoints only, we never vendor their code.
 - Ingest failures alert us (proxploy-api side canary fetch) so we fix the
   parser before most users notice.
 
 **Deferred decision:** whether the optional Aspyre-hosted catalog mirror
-(brief §5 — dumb CDN, app always falls back to upstream) ships at launch or
+(brief §5, dumb CDN, app always falls back to upstream) ships at launch or
 later. Resolves with: observed upstream rate-limit/outage behavior during
 Phases 4–9 dogfooding.
 
@@ -175,7 +175,7 @@ honesty, not un-patchable bits).
 - The moat is hosted-signed Ed25519 tokens plus a fair deal: offline grace
   (~30 d), air-gapped free tier forever, no phone-home beyond entitlement
   refresh, no telemetry on that path. People pay products that respect them.
-- **No DRM arms race** — no obfuscation, no kill switches, no remote
+- **No DRM arms race**: no obfuscation, no kill switches, no remote
   attestation, ever. Cost of the race exceeds recovered revenue and poisons
   trust, which is the actual product.
 - Server-side things stay server-side: anything genuinely hosted (the mirror,
@@ -191,56 +191,56 @@ being **source-available**: "anyone can patch `Entitlements.enabled()`" is
 only a live risk if anyone can read the source to find `Entitlements.
 enabled()` in the first place, and the "Deferred decision: none" line closes
 the book on it as *accepted* rather than mitigated, reasoning that customers
-buy "support, updates, and honesty, not un-patchable bits" — a sentence that
+buy "support, updates, and honesty, not un-patchable bits"; a sentence that
 only makes sense addressed to people who can see the bits.
 
 **What actually changed.** `proxploy-app` is **private**, and staying
 private is Aspyre Labs' own decision, made 2026-08-06. This was not decided
-by anything in Phase 9c's plan or spec — it is an owner decision the docs
+by anything in Phase 9c's plan or spec; it is an owner decision the docs
 are catching up to, not a mitigation this phase engineered.
 
 **Why that makes the section's premise stale, not wrong.** The reasoning
 above still holds *if the repo is public*. It doesn't hold today:
 
 - The patching risk this section accepts is now closer to moot than
-  mitigated — nobody can patch a copy of `Entitlements.enabled()` they were
+  mitigated, nobody can patch a copy of `Entitlements.enabled()` they were
   never given. That is a stronger position than the "accepted, not
   mitigated away" framing describes, and it happened by policy change, not
   by anything in the entitlement design itself.
 - The source-available claim this section's opening sentence rests on is no
   longer true of the product, and "source-available" is a specific,
-  checkable claim — repeating it in marketing or trust copy while the repo
+  checkable claim, repeating it in marketing or trust copy while the repo
   is private would be a false statement about the product, not a stale
   risk note. `proxploy-docs`' trust page (`src/content/docs/trust/index.md`,
   written in this same phase) already states the current, accurate
-  position — **"Proxploy is not source-available today"** — precisely
+  position, **"Proxploy is not source-available today"**, precisely
   because it was written after the repo went private and this doc was not.
 
 **This is recorded as an open decision, not resolved here.** Per this
 document's own convention (§6 was itself marked "none" to close the book on
-a question — this note reopens exactly that framing, deliberately, rather
+a question, this note reopens exactly that framing, deliberately, rather
 than silently rewriting the text above it), two paths exist and neither is
 taken by this note:
 
 1. **Amend §6 above** to drop the source-available framing and restate the
    free-rider risk in terms that hold for a private repo (the risk shrinks,
-   it does not vanish — an employee leak, a compromised build host, or a
+   it does not vanish, an employee leak, a compromised build host, or a
    future decision to open the repo all reintroduce it).
 2. **Make the repository public**, restoring §6's original premise and
    argument as written.
 
-Which of these happens, and when, is **owned by Aspyre Labs** — a business
+Which of these happens, and when, is **owned by Aspyre Labs**; a business
 and trust-posture decision this build phase has no standing to make on its
 own. Until one is chosen, this document carries a contradiction on
 purpose: §6 above is left as originally written (per this file's own rule
 against silently rewriting history), and this amendment is the record that
 its premise no longer matches the product.
 
-### 2026-08-06 resolution: path 2 — source-available stands, private is temporary
+### 2026-08-06 resolution: path 2: source-available stands, private is temporary
 
 Aspyre Labs chose **option 2 above**, same day: Proxploy **is**
 source-available as §6 describes, and the repository will be made public.
-Private is a **staging state, not a posture** — it holds until the owner
+Private is a **staging state, not a posture**; it holds until the owner
 judges the project ready to launch, and is not a decision to close the
 source.
 
@@ -251,7 +251,7 @@ Consequences, so later work does not re-litigate this:
 - **Entitlement enforcement is bounded by §6's own concession.** Anyone can
   patch `Entitlements.enabled()` once the source is public, and this
   document accepts that. Enforcement work should be proportionate to that
-  reality — enough to make the honest path obvious, not an arms race §6
+  reality, enough to make the honest path obvious, not an arms race §6
   already declined to enter.
 - **Distribution stays as Phase 9a designed it**: a public repo plus GitHub
   Releases. No alternative artifact host is needed, and the install URLs the
@@ -259,7 +259,7 @@ Consequences, so later work does not re-litigate this:
 - **Trust and marketing copy must not claim source-available until it is
   true.** `proxploy-docs`' trust page currently states "not source-available
   today", which is accurate now and **must be updated as part of going
-  public** — not before. Publishing the claim ahead of the repo would make
+  public**, not before. Publishing the claim ahead of the repo would make
   it false in the window between.
 
 ## 7. Proxmox API version drift (PVE 8 / PVE 9)
@@ -267,7 +267,7 @@ Consequences, so later work does not re-litigate this:
 **Risk.** We manage hosts across PVE major versions with differing API
 behavior (endpoint params, return shapes, termproxy/vncproxy details,
 vzdump/PBS options). A fleet can legitimately mix 8.x and 9.x mid-upgrade.
-proxmoxer is thin — it will not paper over semantic differences for us.
+proxmoxer is thin; it will not paper over semantic differences for us.
 
 **Likelihood:** High (PVE 9 is current; 8.x remains widespread).
 **Impact:** Medium.
@@ -277,12 +277,12 @@ proxmoxer is thin — it will not paper over semantic differences for us.
 - Capture `pveversion` per host at onboarding and each poll; all
   version-dependent calls go through one internal Proxmox client layer
   (`backend/proxploy/services/proxmox.py`, adapted from the existing
-  lab-cluster-deploy proxmoxer module — doc 02 §4, doc 03; the only place
+  lab-cluster-deploy proxmoxer module, doc 02 §4, doc 03; the only place
   allowed to branch on version), not scattered call sites.
 - CI matrix: integration tests against disposable PVE 8.latest and 9.latest
   instances (doc 10 Phase 1 test-infrastructure deliverable); release notes
   state the supported window (current and previous major).
-- Unknown-version hosts get a warning banner, not a refusal — degrade
+- Unknown-version hosts get a warning banner, not a refusal; degrade
   honestly.
 
 **Deferred decision:** how long to support a PVE major after Proxmox EOLs it.
@@ -311,7 +311,7 @@ cases in the store).
   Phase 4 entry-gate spike confirms this is the common case, not a hope:
   568 of 572 upstream `ct/` scripts (99.3%) call `build_container` exactly
   once (`docs/notes/phase-4-spike.md`).
-- Docker-in-LXC entries (upstream has these) are still one CT — the CT is
+- Docker-in-LXC entries (upstream has these) are still one CT, the CT is
   the app boundary; what runs inside is the script's business, shown honestly
   on the app detail page.
 - Adoption (`apps.adopt`) maps one CT to one app only; no synthetic grouping.
@@ -319,7 +319,7 @@ cases in the store).
 **Deferred decision:** whether a future "app group" cosmetic layer (multiple
 apps visually grouped, still one CT each) is ever worth it. Resolves with:
 count of real catalog entries excluded by the one-CT rule after Phase 4
-ingest — if it's a handful, never build it.
+ingest, if it's a handful, never build it.
 
 ## 9. Secrets master-key loss / recovery
 
@@ -330,7 +330,7 @@ unrecoverable ciphertext; the DB alone is not enough to restore service.
 
 **Likelihood:** Medium (self-hosters lose files). **Impact:** High for the
 install, though bounded: re-onboarding hosts (new tokens + re-enrolled SSH
-keys) fully recovers — infra state lives in Proxmox, app identity in the DB.
+keys) fully recovers, infra state lives in Proxmox, app identity in the DB.
 
 **Mitigations:**
 
@@ -341,7 +341,7 @@ keys) fully recovers — infra state lives in Proxmox, app identity in the DB.
 - Explicit recovery runbook in proxploy-docs: restore DB + key ⇒ full
   recovery; DB only ⇒ guided re-onboarding flow that preserves app identity
   and history (credentials are the only loss).
-- App refuses to silently regenerate a missing key over an existing DB — it
+- App refuses to silently regenerate a missing key over an existing DB, it
   stops with the recovery instructions instead of bricking ciphertext
   ambiguously.
 
@@ -353,7 +353,7 @@ sufficient in beta support load; build the kit if key-loss reports appear.
 
 **Risk.** Self-update mutates the running system: a failed migration, a
 half-written release, or an update that breaks the updater itself can strand
-users on a broken install — the worst possible outcome for software whose
+users on a broken install, the worst possible outcome for software whose
 pitch is "manages your infrastructure."
 
 **Likelihood:** Medium (updates are frequent; each is a chance).
@@ -376,7 +376,7 @@ pitch is "manages your infrastructure."
   break ourselves before users.
 
 **Deferred decision:** artifact signing scheme (reuse the Ed25519
-entitlement keypair vs. a dedicated release key — leaning dedicated, since
+entitlement keypair vs. a dedicated release key, leaning dedicated, since
 license and release trust should be revocable independently). Resolves with:
 Phase 9 installer design; must be decided before the first public release,
 and the checksummed-manifest requirement stands regardless.
@@ -392,7 +392,7 @@ and the checksummed-manifest requirement stands regardless.
 | 3 | SSH trust hurdle vs. agent cost | Medium | Medium | Agentless default; agent later behind executor seam |
 | 4 | SQLite metric write load | Medium | Medium | WAL + batching + rollups; Postgres/VM seams |
 | 5 | community-scripts drift/licensing | High | Medium | Versioned ingest, pinning, license verify at import |
-| 6 | Entitlement free-riders | High | Low–Med | Accepted; signed tokens + fairness, no DRM — closed |
+| 6 | Entitlement free-riders | High | Low–Med | Accepted; signed tokens + fairness, no DRM; closed |
 | 7 | PVE 8/9 API drift | High | Medium | Version-aware client layer + CI matrix |
 | 8 | One-CT rule vs. upstream patterns | Medium | Medium | Classify at ingest; exclude honestly; no grouping |
 | 9 | Master-key loss | Medium | High | Backup guidance, rotation, recovery runbook |

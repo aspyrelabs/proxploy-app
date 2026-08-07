@@ -12,12 +12,12 @@ import { fmtBytes } from '../lib/format'
  * Restore one archive, in place or as a new guest (doc 01 §7).
  *
  * Three 409 shapes reach this dialog and they are NOT interchangeable:
- *  - `confirm_required` — an in-place restore over another guest. Confirmable:
+ *  - `confirm_required`: an in-place restore over another guest. Confirmable:
  *    re-POST with the typed name.
- *  - `self_target` — an in-place restore over the CT Proxploy itself runs in.
+ *  - `self_target`: an in-place restore over the CT Proxploy itself runs in.
  *    Refused unconditionally by api/backups.py; `confirm` does not bypass it and
  *    re-POSTing returns the identical 409. Show the reason, offer nothing.
- *  - `guest_running` / `guest_missing` — same treatment: state the reason.
+ *  - `guest_running` / `guest_missing`, same treatment: state the reason.
  */
 export function RestoreDialog({ backup, onClose }: {
   backup: BackupRow; onClose: () => void
@@ -40,7 +40,7 @@ export function RestoreDialog({ backup, onClose }: {
           return
         }
         setGuard(null)
-        setRefusal(String(b?.detail ?? 'Could not start the restore — try again.'))
+        setRefusal(String(b?.detail ?? 'Could not start the restore, try again.'))
       },
     })
   }

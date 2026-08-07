@@ -2,7 +2,7 @@
 
 The ONLY module that imports casbin. The enforcer is in-memory: static
 p-lines generated from PERMISSIONS below, g-lines derived from team_members.
-The casbin_rules table stays empty — doc 04's "mirrored into casbin_rules"
+The casbin_rules table stays empty, doc 04's "mirrored into casbin_rules"
 design would be two sources of truth for the same memberships; team_members
 is authoritative and the enforcer is a pure function of it (rebuilt at boot,
 patched by sync_user() on every membership write). Amendment recorded in
@@ -17,7 +17,7 @@ from proxploy.models import TeamMember, User
 # RBAC with domains (doc 08 §6): sub = user:<id>, dom = team:<id>,
 # obj = resource type, act = verb. p.dom is always "*" (the role→permission
 # matrix is identical in every team; WHICH team a user holds a role in is
-# what the g-lines scope). Matching is exact — no keyMatch, no regex, so an
+# what the g-lines scope). Matching is exact: no keyMatch, no regex, so an
 # unknown obj/act can never accidentally glob onto a policy.
 MODEL_TEXT = """
 [request_definition]
@@ -39,7 +39,7 @@ m = g(r.sub, p.sub, r.dom) && (p.dom == "*" || p.dom == r.dom) && p.obj == r.obj
 # (resource, action) -> minimum role. Derived row-by-row from doc 05's Role
 # column. This is the single authoritative matrix: authorize() (api/deps.py)
 # refuses at import time to build a dependency for a pair not listed here.
-# `read` is deliberately the only viewer-reachable action — doc 10's DoD
+# `read` is deliberately the only viewer-reachable action: doc 10's DoD
 # ("a viewer cannot mutate anything") is a property of this table first and
 # a test (test_rbac_invariant.py) second.
 PERMISSIONS: dict[tuple[str, str], str] = {
@@ -120,7 +120,7 @@ def build_enforcer(db) -> casbin.Enforcer:
     # imports THIS module lazily inside route-registration singletons in
     # hosts.py/cluster.py, which are themselves imported as part of
     # proxploy.api's package init. A module-level `from proxploy.api.deps
-    # import ROLE_ORDER` here creates a two-way circular import — whichever
+    # import ROLE_ORDER` here creates a two-way circular import: whichever
     # side loads first deadlocks on the other's not-yet-defined names (hit
     # by test_authz_bootstrap.py, which imports this module before anything
     # has imported proxploy.api). Local import breaks the cycle without
@@ -150,7 +150,7 @@ def sync_user(enforcer, db, user_id: int) -> None:
 def enforce(enforcer, db, user: User, resource: str, action: str, *,
             team_id: int | None = None) -> bool:
     """Domain-scoped when team_id is given (host/app/vm resources); otherwise
-    a global resource — allowed if ANY of the user's memberships grants it.
+    a global resource, allowed if ANY of the user's memberships grants it.
     Fail-closed: no membership, unknown resource, unknown action all deny."""
     sub = _sub(user.id)
     if team_id is not None:

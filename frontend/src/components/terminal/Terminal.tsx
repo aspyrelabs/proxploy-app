@@ -25,7 +25,7 @@ export function Terminal({ wsUrl, onDrop }:
     let unmounting = false
     // Set when an exit control frame carries an `error` (the actionable
     // PtyBridge/PVE-rejection message, e.g. the token-vs-termproxy PVE
-    // limitation the plan documents) — that drop is terminal, not transient,
+    // limitation the plan documents), that drop is terminal, not transient,
     // so the caller should stop retrying instead of burning its reconnect
     // budget on a connection that will fail the same way every time.
     let fatal = false
@@ -42,11 +42,11 @@ export function Terminal({ wsUrl, onDrop }:
           if (control.error) fatal = true
           return
         }
-      } catch { /* not a control frame — raw terminal text */ }
+      } catch { /* not a control frame, raw terminal text */ }
       term.write(data)
     }
     // The bridge (backend PtyBridge/ConsoleProxy) or the upstream Proxmox
-    // socket can drop independently of anything the user did — doc 06's
+    // socket can drop independently of anything the user did, doc 06's
     // "Reconnect = new ticket" / DoD "survive reconnect" means the CALLER
     // re-mints a ticket and remounts with a fresh wsUrl; this component only
     // has to tell them a drop happened, and not confuse its own teardown

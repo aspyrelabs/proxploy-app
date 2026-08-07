@@ -15,7 +15,7 @@ let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
-// server still knows — GET /hosts then GET /hosts/{id}.
+// server still knows, GET /hosts then GET /hosts/{id}.
 function mockStoredHost(h: HostDetail) { hostList = [{ id: h.id }]; hostDetail[h.id] = h }
 function mockVerifyFailure(body: unknown) { verifyOutcome = { ok: false, body } }
 

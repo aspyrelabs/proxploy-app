@@ -90,7 +90,7 @@ export function AppsPage() {
             {discovered.map((d) => (
               <div key={`${d.host_id}:${d.ctid}`} className="flex items-center gap-3 font-mono text-[12px] text-text-2">
                 <span>CT {d.ctid}</span>
-                <span className="text-text">{d.name ?? '—'}</span>
+                <span className="text-text">{d.name ?? ', '}</span>
                 <span className="text-text-3">{d.host_name}</span>
                 <StatusPill status={d.status} />
                 {d.suggestion && (
@@ -179,7 +179,7 @@ export function AppDetail() {
                 errorTitle="This app could not be loaded"
                 errorNote="Proxploy could not reach the backend, or the app no longer exists.">
       {(app) => {
-        // Same wait-for-first-fetch gate as vms.tsx's cloneDenied — otherwise every
+        // Same wait-for-first-fetch gate as vms.tsx's cloneDenied, otherwise every
         // plan sees a dead Migrate button for the whole first entitlements fetch.
         const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
         return (
@@ -277,9 +277,9 @@ export function AppOverview() {
         <KVGrid items={[
           ['CTID', app.ctid],
           ['Node', app.node],
-          ['IP', app.ip ?? '—'],
-          ['Category', app.category ?? '—'],
-          ['Web port', app.web_port ?? '—'],
+          ['IP', app.ip ?? ', '],
+          ['Category', app.category ?? ', '],
+          ['Web port', app.web_port ?? ', '],
           ['Update', app.update_available ?? 'Up to date'],
         ]} />
       </div>
@@ -292,7 +292,7 @@ export function AppOverview() {
 }
 
 /** Doc 06 App detail Overview: the Details KV grid's "Update" row plus an
- *  "Update to vX" button. X is a short commit sha, not a version — see
+ *  "Update to vX" button. X is a short commit sha, not a version; see
  *  services/appstore.py::mark_updates_available for why that is the only
  *  honest thing community-scripts lets us say. */
 export function UpdatePanel({ appId, app }:
@@ -301,7 +301,7 @@ export function UpdatePanel({ appId, app }:
   const ent = useEntitlements()
   const [consent, setConsent] = useState(false)
   // Wait for the first entitlements fetch before deciding (settings.tsx
-  // precedent) — otherwise this fires GET /update for every viewer of every
+  // precedent), otherwise this fires GET /update for every viewer of every
   // app overview and offers a consent+button whose POST always 403s.
   const updatesAllowed = ent.data != null && ent.has('store.updates')
   const info = useQuery({
@@ -313,8 +313,8 @@ export function UpdatePanel({ appId, app }:
     mutationFn: () => api(`/apps/${appId}/update`, {
       method: 'POST', body: JSON.stringify({ consent: true }),
     }),
-    onSuccess: () => toast.success('Update started — follow it in the activity drawer.'),
-    onError: () => toast.error('Could not start the update — try again.'),
+    onSuccess: () => toast.success('Update started, follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start the update, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -355,7 +355,7 @@ export function UpdatePanel({ appId, app }:
   )
 }
 
-// Route objects — imported by router.tsx (cluster.tsx precedent). shellRoute
+// Route objects, imported by router.tsx (cluster.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
 // entry point (e.g. in tests), before appsRoute/appDetailRoute exist.
@@ -407,14 +407,14 @@ export function AppLogs({ appId }: { appId: number }) {
     queryKey: ['apps', appId, 'logs'],
     queryFn: () => api<{ stream: string; message: string }[]>(`/apps/${appId}/logs`),
     // Stop polling once the backend has answered with an error (currently
-    // always — see GET /apps/{id}/logs's 501) instead of retrying a dead
+    // always, see GET /apps/{id}/logs's 501) instead of retrying a dead
     // endpoint every 5s forever.
     refetchInterval: (query) => (query.state.error ? false : 5_000),
     retry: false,
   })
   if (isError) {
     return <EmptyState title="Logs not available yet"
-      note="Proxploy has no CT journal/exec channel wired up yet — this is a known gap, not a bug." />
+      note="Proxploy has no CT journal/exec channel wired up yet; this is a known gap, not a bug." />
   }
   return <TerminalPanel lines={data ?? []} />
 }

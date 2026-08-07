@@ -20,7 +20,7 @@ function LoginPage() {
       <div className="flex flex-col items-center gap-3">
         {ssoFailed && (
           <p className="w-[360px] text-center text-[12.5px] text-red">
-            Single sign-on failed — try again or use a password.
+            Single sign-on failed, try again or use a password.
           </p>
         )}
         {/* cast: circular import with router.tsx blocks full route-tree inference here */}

@@ -48,7 +48,7 @@ def test_host_samples_and_snapshot(tmp_path):
 
 def test_first_poll_learns_the_hosts_node_name(tmp_path):
     """A host created through POST /hosts has no way to learn its node name at
-    create time (PVE's /version carries none) — node_name sat at NULL forever
+    create time (PVE's /version carries none), node_name sat at NULL forever
     until a poll ran, which /cluster/nodes and the VM-create wizard's node
     picker both read directly. Only tests/support.py's seed_host_row ever set
     it by hand; this is the real path."""
@@ -202,7 +202,7 @@ def test_ingest_persists_a_host_disk_pct_from_its_datastores(tmp_path):
          "disk": 30, "maxdisk": 100, "shared": 0},
         {"type": "storage", "storage": "local", "node": "pve2",
          "disk": 10, "maxdisk": 100, "shared": 0},
-        # shared datastore, reported once per node — must count ONCE
+        # shared datastore, reported once per node: must count ONCE
         {"type": "storage", "storage": "nfs", "node": "pve1",
          "disk": 60, "maxdisk": 200, "shared": 1},
         {"type": "storage", "storage": "nfs", "node": "pve2",

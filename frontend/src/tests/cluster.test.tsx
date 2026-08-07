@@ -69,7 +69,7 @@ describe('ClusterPage', () => {
 
   it('says the nodes could not be read rather than showing "no nodes yet"', async () => {
     // The bug this task exists to fix: a failed fetch used to render as a
-    // bare, message-less <div> — indistinguishable from a fresh install
+    // bare, message-less <div>; indistinguishable from a fresh install
     // with zero hosts.
     nodesResult = 'error'
     withQuery(<ClusterPage />)

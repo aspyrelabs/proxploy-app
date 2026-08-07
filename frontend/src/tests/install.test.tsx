@@ -32,7 +32,7 @@ describe('InstallDialog', () => {
     const installBtn = screen.getByRole('button', { name: 'Install' })
     expect(installBtn).toBeDisabled()
 
-    // Fill host/name/ctid — button must stay disabled until consent is also checked.
+    // Fill host/name/ctid, button must stay disabled until consent is also checked.
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
     fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
     fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '105' } })

@@ -9,7 +9,7 @@ import { Button } from './ui/button'
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed — try again.'
+    ? (e.body as any).detail : 'Request failed, try again.'
 
 export function TotpCard() {
   const ent = useEntitlements()
@@ -70,16 +70,16 @@ export function TotpCard() {
       </div>
       {!totpAllowed ? (
         <p className="text-[12.5px] text-text-3">
-          {ent.unknown ? 'Could not check your plan — try reloading.'
+          {ent.unknown ? 'Could not check your plan, try reloading.'
             : ent.data == null ? 'Loading…' : 'Not included in your plan.'}
         </p>
       ) : me.isError ? (
         // Security-relevant: me.data is undefined on error same as on a
         // genuine "not enrolled" response, so without this branch a failed
-        // /auth/me read would fall straight to "Enable two-factor" — offering
+        // /auth/me read would fall straight to "Enable two-factor", offering
         // to enroll a user who may already have TOTP on.
         <p className="text-[12.5px] text-text-3">
-          Could not check two-factor status — try reloading.
+          Could not check two-factor status, try reloading.
         </p>
       ) : me.data?.totp_enabled ? (
         <div>
@@ -151,7 +151,7 @@ export function TotpCard() {
           </div>
 
           <p className="mt-4 text-[12.5px] font-semibold text-amber">
-            These recovery codes are shown once — store them now. Proxploy keeps
+            These recovery codes are shown once, store them now. Proxploy keeps
             only a hash of each one; if you lose them there is no way to recover them.
           </p>
           <div className="mt-2 grid grid-cols-2 gap-1.5">

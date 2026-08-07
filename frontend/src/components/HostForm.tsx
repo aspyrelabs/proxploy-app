@@ -9,7 +9,7 @@ export type HostCreated = {
 }
 
 const CONSENT_COPY = 'App Store installs run community scripts through a dedicated ' +
-  'SSH key — a root shell on the node, exactly as if you ran them yourself. ' +
+  'SSH key, a root shell on the node, exactly as if you ran them yourself. ' +
   'Optional: skip it and everything except installs/updates/migration still works.'
 
 // Each kind names a different fix. "Request failed" named none of them.
@@ -45,7 +45,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     try {
       const r = await api<{ version: string; release: string }>('/hosts/probe', {
         method: 'POST', body: JSON.stringify(f) })
-      setProbe(`Connected — PVE ${r.version}`)
+      setProbe(`Connected, PVE ${r.version}`)
     } catch (e) { setError(errText(e)) }
   }
 

@@ -1,6 +1,6 @@
 """Console ticket + websocket routes (doc 05 §2/§3, doc 02 §5 PtyBridge/
 ConsoleProxy). Every ticket-issuing POST is a normal cookie+CSRF+entitlement
-route; every WS route below takes NO cookie — the one-time ticket already
+route; every WS route below takes NO cookie, the one-time ticket already
 proves auth (doc 05 "Auth model for streams"), so these follow jobs.py's
 "manual auth inside the handler" idiom only where the SSE precedent doesn't
 apply (session auth is not needed at all on the WS side)."""
@@ -144,7 +144,7 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
     if host is None:
         raise HTTPException(404, "host not found")
     if not host.node_shell_enabled:
-        raise HTTPException(409, "node shell is not enabled for this host — "
+        raise HTTPException(409, "node shell is not enabled for this host; "
                              "opt in via host settings first (doc 08 §9: a "
                              "second, deliberate gate on top of RBAC)")
     try:

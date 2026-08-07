@@ -107,7 +107,7 @@ def _run_job(tmp_path, kind, params, seed_status="stopped"):
     async def go():
         fake = _fake()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.backupjobs  # noqa: F401 — registers backup.*
+        import proxploy.services.backupjobs  # noqa: F401  (registers backup.*)
 
         backend = JobBackend(app)
         ids = _seed(app, ct_status=seed_status)
@@ -256,7 +256,7 @@ def test_in_place_restore_requires_the_typed_name(tmp_path, csrf_header,
         assert r.status_code == 409
         # main.py::problem_handler does `body.update(exc.detail)` for a dict
         # detail, so a dict HTTPException body serialises FLAT, not nested
-        # under "detail" — same shape test_lifecycle_api.py already asserts.
+        # under "detail": same shape test_lifecycle_api.py already asserts.
         assert r.json()["error"] == "confirm_required"
         assert r.json()["confirm_phrase"] == "Immich"
         r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
@@ -291,7 +291,7 @@ def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
                    headers=csrf_header(c))
         assert r.status_code == 409
         # FLAT envelope (main.py::problem_handler does `body.update(exc.detail)`
-        # for a dict detail) — the brief's own draft asserted
+        # for a dict detail): the brief's own draft asserted
         # `r.json()["detail"]["error"]` here, which is wrong: `detail` in the
         # flattened body is the human-readable STRING from the exception dict's
         # own "detail" key, not a nested object, and indexing a string with
@@ -303,13 +303,13 @@ def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
             assert db.query(Job).filter_by(kind="backup.restore").count() == 0
             # The refused restore's only durable trace: the route calls
             # write_audit(..., result="denied") before it raises. Assert the
-            # DB row itself, not the HTTP body — a future refactor could drop
+            # DB row itself, not the HTTP body: a future refactor could drop
             # the write_audit call, misspell the action, or flip the result
             # string, and the response-only assertions above would stay green.
             row = db.query(AuditEvent).filter_by(action="backup.restore",
                                                  target_type="backup").one()
             assert row.target_id == ids["ct_backup"] and row.result == "denied"
-        # restore-as-new over the same backup is fine — it takes a fresh vmid
+        # restore-as-new over the same backup is fine: it takes a fresh vmid
         r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
                    json={"mode": "new"}, headers=csrf_header(c))
         assert r.status_code == 202, r.text
@@ -343,7 +343,7 @@ def test_prune_preview_route_reads_and_prune_route_deletes(tmp_path, csrf_header
 
 def test_prune_preview_upstream_failure_is_a_502_not_a_500(tmp_path, csrf_header,
                                                             bootstrap_admin):
-    """BLOCKING 3: prune_preview_route had no ProxmoxError handling at all —
+    """BLOCKING 3: prune_preview_route had no ProxmoxError handling at all, 
     an unreachable host bare-500'd instead of the 502 every other read in
     this phase returns."""
     app, c, fake, ids = _authed(tmp_path, bootstrap_admin)
@@ -378,7 +378,7 @@ def test_delete_route_enqueues(tmp_path, csrf_header, bootstrap_admin):
 
 
 def test_every_mutation_is_authenticated(tmp_path, csrf_header):
-    """`csrf_header(c)` is required even here — CSRFMiddleware runs ahead of
+    """`csrf_header(c)` is required even here, CSRFMiddleware runs ahead of
     routing for every mutating verb and 403s a header-less POST/DELETE before
     auth ever gets a look, same fix test_network_api.py's
     test_missing_session_is_401_not_403 already needed. Omitting it (the
@@ -403,7 +403,7 @@ def _all_paths(app):
     `_IncludedRouter` node rather than eagerly copying child routes onto
     `app.routes`, so a plain `[r.path for r in app.routes if hasattr(r, "path")]`
     (the brief's own snippet) silently returns only the 4 top-level doc routes
-    and none of api_router's children — every `paths.index(...)` below would
+    and none of api_router's children, every `paths.index(...)` below would
     raise `ValueError`. `_IncludedRouter.effective_route_contexts()` is the same
     recursive walk Starlette's own dispatch uses to pick a route at request
     time, so reading it here reflects the real match order. Copied verbatim
@@ -429,7 +429,7 @@ def test_literal_routes_are_registered_above_the_id_routes(tmp_path):
 
 
 def test_selfguard_destructive_set_is_unchanged():
-    """Backup restore/delete are NOT lifecycle verbs — see this task's note."""
+    """Backup restore/delete are NOT lifecycle verbs, see this task's note."""
     from proxploy.services.selfguard import DESTRUCTIVE
 
     assert DESTRUCTIVE == frozenset({"stop", "shutdown", "restart", "pause"})

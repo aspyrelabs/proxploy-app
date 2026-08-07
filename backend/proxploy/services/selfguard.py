@@ -5,8 +5,8 @@ recorded at install time as the `self.ctid` / `self.host_id` settings keys (the
 Phase 9 installer writes them from inside the CT it creates).
 
 Deliberate asymmetry: when nothing is recorded this returns False and NOTHING
-is blocked. Detection can miss — Proxploy relocated without re-detection, an
-ambiguous hostname, a bare-metal install that is not a CT at all — so a false
+is blocked. Detection can miss, Proxploy relocated without re-detection, an
+ambiguous hostname, a bare-metal install that is not a CT at all; so a false
 *refusal* is the worse failure. The typed-confirmation prompt callers put in
 front of a True answer is the backstop, not the only guard.
 """
@@ -32,5 +32,5 @@ def is_self(db, target_type: str, target_id: int) -> bool:
         return host_id is None or app.host_id == int(host_id)
     except (TypeError, ValueError):
         # A malformed setting (e.g. "" or "ct-150") must fail open, same as an
-        # unset one — see the module docstring's asymmetry.
+        # unset one: see the module docstring's asymmetry.
         return False

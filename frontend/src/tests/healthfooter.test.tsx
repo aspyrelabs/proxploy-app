@@ -57,7 +57,7 @@ describe('HealthFooter', () => {
     await waitFor(() => expect(screen.getByText(/1 node unreachable/i)).toBeInTheDocument())
   })
 
-  it('never claims "healthy" when a query errors — reports status unknown instead', async () => {
+  it('never claims "healthy" when a query errors, reports status unknown instead', async () => {
     state.error = true
     const { container } = wrap(<HealthFooter />)
     await waitFor(() => expect(screen.getByText(/status unknown/i)).toBeInTheDocument())

@@ -7,7 +7,7 @@ starting new ones. Shape is services/lifecycle.py's: a blocking `_resolve` in
 a thread, ctx.log/ctx.progress narration, the shared await_task poll loop,
 module-bottom HANDLERS registration.
 
-Registration is by import side effect — main.py's lifespan imports this module
+Registration is by import side effect, main.py's lifespan imports this module
 with a `# noqa: F401`, and without that import none of these kinds exist.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _resolve_host(app, host_id: int):
         try:
             return client_for_host(app, db, host), host.name
         except ProxmoxError as e:
-            # Same sentence as lifecycle.py::_resolve — a job reports a missing
+            # Same sentence as lifecycle.py::_resolve: a job reports a missing
             # credential as a failed job, never as a 502.
             raise JobFailed(str(e)) from e
 
@@ -41,7 +41,7 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     The confirmation gate lives at the API layer (api/network.py::apply_network);
     by the time this runs the operator has already typed the node name back.
     A failure here can mean the node is unreachable rather than that the apply
-    failed — await_task raising on a lost connection is the honest outcome
+    failed, await_task raising on a lost connection is the honest outcome
     either way, and the transcript keeps the UPID so an operator at the console
     can look the task up locally.
     """
@@ -66,7 +66,7 @@ HANDLERS["network.apply"] = run_network_apply
 def _vm_target(app, vm_id: int):
     """Blocking: vms.id -> (client, node, vmid, name, host_id). Runs in a thread.
 
-    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch —
+    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch; 
     everything in this module is qemu-only (doc 05 puts snapshots, create and
     clone under /vms).
     """
@@ -86,7 +86,7 @@ def _vm_target(app, vm_id: int):
 
 
 async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_create` — take a snapshot, optionally with RAM."""
+    """`vm.snapshot_create`, take a snapshot, optionally with RAM."""
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
     name = params["name"]
@@ -106,7 +106,7 @@ async def snapshot_create_job(ctx: JobContext, params: dict) -> dict:
 
 
 async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_rollback` — discard everything since the snapshot.
+    """`vm.snapshot_rollback`, discard everything since the snapshot.
 
     The route already took the typed confirmation. PVE refuses a rollback of a
     running VM unless the snapshot carries vmstate, and that refusal is surfaced
@@ -131,7 +131,7 @@ async def snapshot_rollback_job(ctx: JobContext, params: dict) -> dict:
 
 
 async def snapshot_delete_job(ctx: JobContext, params: dict) -> dict:
-    """`vm.snapshot_delete` — remove one snapshot; the guest is untouched."""
+    """`vm.snapshot_delete`, remove one snapshot; the guest is untouched."""
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
     name = params["name"]
@@ -179,7 +179,7 @@ def _create_params(params: dict) -> dict:
     def _net0(p: dict) -> str:
         # PVE spells a VLAN on a guest NIC as `,tag=N` inside the netN string
         # (same grammar services/netconfig.py round-trips for edits). Absent or
-        # falsy tag means untagged — never emit `tag=` with an empty value.
+        # falsy tag means untagged: never emit `tag=` with an empty value.
         spec = f"virtio,bridge={p.get('bridge') or 'vmbr0'}"
         tag = p.get("vlan_tag")
         return f"{spec},tag={int(tag)}" if tag else spec
@@ -204,11 +204,11 @@ def _create_params(params: dict) -> dict:
 
 
 async def create_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.create` — post the spec, poll the task, nudge the UI.
+    """`vm.create`, post the spec, poll the task, nudge the UI.
 
     No `Vm` row is written here. `vms` is the poller's droppable mirror (doc 04:
     Proxmox is the truth) and writing one from this side would create a row the
-    next poll cycle either confirms or deletes — a second, worse source of
+    next poll cycle either confirms or deletes, a second, worse source of
     truth. The resource publish below is the same nudge run_lifecycle emits, so
     an open tab refetches instead of waiting out the 30 s interval.
     """
@@ -237,12 +237,12 @@ HANDLERS["vm.create"] = create_vm
 
 
 async def clone_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.clone` — full or linked, per the caller's `full` flag.
+    """`vm.clone`, full or linked, per the caller's `full` flag.
 
     `full` is passed through untouched. PVE allows `full=0` (a linked clone)
     only from a template, and Proxploy has no way to know which VMs are
-    templates — the `vms` table has no `template` column and the poller does not
-    read `/cluster/resources`'s `template` field — so PVE's own rejection is the
+    templates, the `vms` table has no `template` column and the poller does not
+    read `/cluster/resources`'s `template` field, so PVE's own rejection is the
     answer the caller gets, verbatim, instead of a guess made here.
     """
     app = ctx.backend.app
@@ -265,7 +265,7 @@ async def clone_vm(ctx: JobContext, params: dict) -> dict:
 
 
 async def delete_vm(ctx: JobContext, params: dict) -> dict:
-    """`vm.delete` — destroy the guest and its disks.
+    """`vm.delete`, destroy the guest and its disks.
 
     The route already required owner role, a typed name, a non-running guest and
     a selfguard pass. As with create, the `vms` row is left to the poller to

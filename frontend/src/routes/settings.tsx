@@ -46,7 +46,7 @@ export function SchedulesCard() {
   const schedules = useSchedules()
   const [adding, setAdding] = useState(false)
   // Wait for the first entitlements fetch before deciding (alerts.tsx
-  // precedent) — POST/PATCH /schedules require sched.windows, so offering
+  // precedent), POST/PATCH /schedules require sched.windows, so offering
   // "New schedule"/"Run now" to everyone flashes controls that always 403.
   const windowsAllowed = ent.data != null && ent.has('sched.windows')
 
@@ -54,13 +54,13 @@ export function SchedulesCard() {
     mutationFn: (s: ScheduleRow) => api(`/schedules/${s.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !s.enabled }),
     }),
-    onError: () => toast.error('Could not update that schedule — try again.'),
+    onError: () => toast.error('Could not update that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
-    onSuccess: () => toast.success('Started — follow it in the activity drawer.'),
-    onError: () => toast.error('Could not start that job — try again.'),
+    onSuccess: () => toast.success('Started, follow it in the activity drawer.'),
+    onError: () => toast.error('Could not start that job, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -68,7 +68,7 @@ export function SchedulesCard() {
   })
   const remove = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that schedule — try again.'),
+    onError: () => toast.error('Could not remove that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
 
@@ -104,7 +104,7 @@ export function SchedulesCard() {
                   <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
                   <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
                   <td className="font-mono text-[11.5px] text-text-3">
-                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}
+                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ', '}
                     <span className="ml-1">{s.timezone}</span>
                   </td>
                   <td className={s.enabled ? 'text-green' : 'text-text-3'}>
@@ -148,14 +148,14 @@ export function SettingsPage() {
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
   // The only editable host field (doc 08 §9's deliberate second, admin-only
-  // opt-in gate on top of RBAC) — NodeDetailPage's node-shell section reads
+  // opt-in gate on top of RBAC), NodeDetailPage's node-shell section reads
   // this same value, so invalidating the 'hosts' query key here (a prefix
   // match in TanStack Query v5) keeps both in sync without a second fetch.
   const toggleNodeShell = useMutation({
     mutationFn: (h: HostRow) => api(`/hosts/${h.id}`, {
       method: 'PATCH', body: JSON.stringify({ node_shell_enabled: !h.node_shell_enabled }),
     }),
-    onError: () => toast.error('Could not update node shell setting — try again.'),
+    onError: () => toast.error('Could not update node shell setting, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
@@ -171,11 +171,11 @@ export function SettingsPage() {
       method: 'PATCH',
       body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled, team_id: teamId }),
     }),
-    onError: () => toast.error('Could not assign that host to a team — try again.'),
+    onError: () => toast.error('Could not assign that host to a team, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
-  // Wait for the first entitlements fetch before deciding — `has()` defaults
+  // Wait for the first entitlements fetch before deciding, `has()` defaults
   // to false until then, which would 403 the query and open an "Add channel"
   // form that always errors for the sliver of a second before the flag
   // resolves true.
@@ -196,7 +196,7 @@ export function SettingsPage() {
   const deleteChannel = useMutation({
     mutationFn: (id: number) =>
       api(`/notifications/channels/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that channel — try again.'),
+    onError: () => toast.error('Could not remove that channel, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const toggleChannel = useMutation({
@@ -204,12 +204,12 @@ export function SettingsPage() {
       api(`/notifications/channels/${ch.id}`, {
         method: 'PATCH', body: JSON.stringify({ enabled: !ch.enabled }),
       }),
-    onError: () => toast.error('Could not update that channel — try again.'),
+    onError: () => toast.error('Could not update that channel, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const removeChannel = (ch: ChannelRow) => {
     // The URL is genuinely unrecoverable once deleted (never shown again
-    // after creation) — one misclick next to Test would otherwise cost a
+    // after creation), one misclick next to Test would otherwise cost a
     // bot token with no undo.
     if (window.confirm(`Remove notification channel "${ch.name}"? This cannot be undone.`)) {
       deleteChannel.mutate(ch.id)
@@ -223,9 +223,9 @@ export function SettingsPage() {
       <Card title="Plan">
         <p className="text-[13.5px] text-text-2">
           <span className="font-mono text-amber">{tier === 'builtin' ? 'FREE' : tier.toUpperCase()}</span>
-          {' — '}all features are enabled. Licensing is dormant; entering a license key
+          {', '}all features are enabled. Licensing is dormant; entering a license key
           activates against the Proxploy licensing service.
-          {grace?.in_grace && <span className="text-amber"> License refresh failing — working offline until {grace.grace_until}.</span>}
+          {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
         </p>
       </Card>
 
@@ -244,7 +244,7 @@ export function SettingsPage() {
                   <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
                     <td className="py-2 font-mono">{h.name}</td>
                     <td className="font-mono text-text-2">{h.address}</td>
-                    <td className="text-text-2">{h.pve_version ?? '—'}</td>
+                    <td className="text-text-2">{h.pve_version ?? ', '}</td>
                     <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
                     <td>
                       <label className="inline-flex items-center gap-1.5">
@@ -268,7 +268,7 @@ export function SettingsPage() {
                           <option value="">Unassigned</option>
                           {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                         </select>
-                      ) : <span className="text-text-3">—</span>}
+                      ) : <span className="text-text-3">, </span>}
                     </td>
                   </tr>
                 ))}
@@ -353,7 +353,7 @@ export function SettingsPage() {
       <Card title="General">
         <p className="text-[12.5px] text-text-3">
           Auto-update windows, scheduled backups and catalog sync are all
-          schedules — add them above. Alert rules live on the{' '}
+          schedules, add them above. Alert rules live on the{' '}
           <Link to={'/alerts' as never} className="text-amber">Alerts</Link> page.
         </p>
       </Card>

@@ -80,7 +80,7 @@ def _vm_and_host(db, vm_id: int):
     return v, host
 
 
-# Registered ABOVE the /{vm_id}/{action} wildcard below — Starlette matches in
+# Registered ABOVE the /{vm_id}/{action} wildcard below: Starlette matches in
 # registration order, and although that wildcard is POST-only today, doc 05's
 # future two-segment siblings are not. Same WARNING as apps.py:266-271.
 # test_network_api.py asserts this ordering by route index.
@@ -127,7 +127,7 @@ def _pick_node(request: Request, host: Host, node: str | None) -> str:
                                      f"(known: {', '.join(known)})")
         return node
     if not known:
-        raise HTTPException(422, "this host has no known node yet — wait for the "
+        raise HTTPException(422, "this host has no known node yet; wait for the "
                                  "first poll or name a node explicitly")
     return known[0]
 
@@ -145,7 +145,7 @@ class VmCreateIn(BaseModel):
     bridge: str = "vmbr0"
     # Task 17's wizard has a VLAN field on its Network step. Pydantic ignores
     # unknown keys rather than rejecting them, so omitting this here would
-    # silently drop the operator's tag and build an untagged NIC — a wrong
+    # silently drop the operator's tag and build an untagged NIC: a wrong
     # result that looks like a success. Declared, validated, and threaded
     # through to net0 below.
     vlan_tag: int | None = None
@@ -178,7 +178,7 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
         # Minted here so the 202 can name the id and the audit row records it.
         # cluster_nextid is advisory, not a reservation: between this call and
         # the job's POST another orchestrator can take the id, and PVE then
-        # rejects the create. See create_vm()'s ponytail comment — no retry.
+        # rejects the create. See create_vm()'s ponytail comment: no retry.
         client = client_for_host(request.app, db, host)
         try:
             vmid = int(client.cluster_nextid())
@@ -194,7 +194,7 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
     return {**out, "vmid": int(vmid)}
 
 
-# Registered ABOVE the /{vm_id}/{action} wildcard — see the WARNING on that
+# Registered ABOVE the /{vm_id}/{action} wildcard: see the WARNING on that
 # route. Out of order, `POST /vms/3/snapshots` lands in vm_lifecycle with
 # action="snapshots" and 422s (test_post_snapshots_is_not_swallowed_by_the_
 # lifecycle_wildcard proves it stays this way).
@@ -230,11 +230,11 @@ def _snapshot_out(s: dict) -> dict:
 def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
                       user: User = Depends(_read)):
     """Live read on every request (doc 05: "List snapshots (live from
-    Proxmox)") — there is no snapshot table and this phase adds none.
+    Proxmox)"); there is no snapshot table and this phase adds none.
 
     PVE always includes a synthetic `current` entry describing the running
     state. It is not a snapshot, has no snaptime, and cannot be rolled back to
-    or deleted, so it is dropped here rather than in the UI — otherwise every
+    or deleted, so it is dropped here rather than in the UI; otherwise every
     consumer of this endpoint has to know the same trivia.
     """
     v, host = _vm_and_host(db, vm_id)
@@ -278,11 +278,11 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
                          body: RollbackIn = Body(default=RollbackIn()),
                          db=Depends(get_db),
                          user: User = Depends(_rollback)):
-    """Rollback throws away every write since the snapshot was taken — there is
+    """Rollback throws away every write since the snapshot was taken; there is
     no undo and no second copy. It therefore reuses the same three-key 409
     *shape* (`error`/`confirm_phrase`/`detail`) `enqueue_lifecycle` uses, so
     the frontend's existing typed-confirmation dialog renders it with no new
-    component — but the `error` value here is `"confirm_required"`, not
+    component, but the `error` value here is `"confirm_required"`, not
     `enqueue_lifecycle`'s self-targeted-stop `"self_target"`: rollback asks
     for confirmation from *every* caller, not only when the VM happens to be
     the one Proxploy itself runs in. The frontend keys on this exact string,
@@ -339,7 +339,7 @@ def clone_vm_route(request: Request, vm_id: int,
     """`full` is passed through to PVE unvalidated.
 
     ponytail: PVE permits a linked clone (`full=false`) only from a template,
-    and Proxploy cannot tell templates apart — the `vms` table has no `template`
+    and Proxploy cannot tell templates apart, the `vms` table has no `template`
     column and this phase adds no migration. Pre-validating would mean guessing.
     Upgrade path if PVE's rejection proves confusing in practice: have the
     poller mirror `/cluster/resources`'s `template` flag onto `Vm`, then refuse
@@ -390,13 +390,13 @@ def delete_vm_route(request: Request, vm_id: int,
         raise HTTPException(409, payload)
 
     # One guard point for "is this Proxploy itself". is_self() answers False for
-    # every VM today (selfguard.py:21 — Proxploy ships as an LXC CT), so this is
+    # every VM today (selfguard.py:21: Proxploy ships as an LXC CT), so this is
     # currently always a pass. It is called anyway rather than reasoned around:
     # the day a VM-hosted install exists, the guard is already wired, and the
     # alternative is a comment asserting an invariant no code enforces.
     if is_self(db, "vm", v.id):
         _deny({"error": "self_target", "confirm_phrase": name,
-               "detail": f"{name} is the guest Proxploy itself runs in — "
+               "detail": f"{name} is the guest Proxploy itself runs in, "
                          f"destroying it would destroy this process."})
     if (v.status or "") == "running":
         _deny({"error": "guest_running",

@@ -74,7 +74,7 @@ export type LifecycleVars = {
 /**
  * Optimistic status patch + SSE reconciliation (plan decision 13): the truth
  * arrives with the job's terminal `resource` delta or the next 30s poll, so
- * there is no rollback cache to keep in sync — only an invalidate on error.
+ * there is no rollback cache to keep in sync, only an invalidate on error.
  */
 export function useLifecycle() {
   const qc = useQueryClient()
@@ -98,10 +98,10 @@ export function useLifecycle() {
     // poller-fed cache still reads "running" for up to 30s, so a success-path
     // refetch would stomp the optimistic "pending" patch with stale data and
     // re-arm the destructive action while the job is still queued. Every
-    // terminal path already clears it without our help — a successful job
+    // terminal path already clears it without our help, a successful job
     // publishes `resource`/`change:lifecycle` (applyResource invalidates it),
     // a failed/canceled job publishes the terminal `job` delta (applyJob
-    // invalidates it) — and the list's own 30s refetchInterval is the backstop.
+    // invalidates it), and the list's own 30s refetchInterval is the backstop.
     onError: (_e, v) => { qc.invalidateQueries({ queryKey: [key(v.target)] }) },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })

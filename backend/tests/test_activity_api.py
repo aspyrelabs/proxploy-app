@@ -120,7 +120,7 @@ def test_activity_merges_alerts_with_jobs_and_audits(client, csrf_header,
     assert alert_row["severity"] == "critical"
     assert alert_row["target_type"] == "host"
     assert alert_row["job_id"] is None
-    # newest first — the alert fired after the job was created
+    # newest first: the alert fired after the job was created
     assert kinds.index("alert") < kinds.index("job")
 
 
@@ -151,7 +151,7 @@ def test_a_resolved_alert_shows_as_resolved_in_the_feed(client, csrf_header,
 def test_alerts_do_not_starve_the_other_sources_of_the_feed(client, csrf_header,
                                                             bootstrap_admin):
     """Each source is queried with the full `limit` so the merged top-N is the
-    true top-N — adding a third source must not change that."""
+    true top-N, adding a third source must not change that."""
     from proxploy.models import Alert, AlertRule, Job, utcnow
     from tests.support import seed_host_row
 

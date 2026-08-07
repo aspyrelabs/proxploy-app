@@ -1,4 +1,4 @@
-// LockVeil.tsx — doc 06 §e rule 1: never hide gated features; veil them.
+// LockVeil.tsx, doc 06 §e rule 1: never hide gated features; veil them.
 import type { ReactNode } from 'react'
 import { Button } from './ui/button'
 import { useNavigate } from '@tanstack/react-router'

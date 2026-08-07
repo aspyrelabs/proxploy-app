@@ -77,7 +77,7 @@ def test_a_breach_held_for_the_full_duration_fires(tmp_path):
 
 
 def test_a_dip_inside_the_window_resets_the_clock(tmp_path):
-    """"85% for 5 minutes" means continuously — one healthy sample two minutes
+    """"85% for 5 minutes" means continuously, one healthy sample two minutes
     ago means it has only been breaching for two minutes."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -137,7 +137,7 @@ def test_recovery_resolves_the_open_alert(tmp_path):
 
     a = db.query(Alert).one()
     assert a.state == "resolved" and a.resolved_at is not None
-    # and it stays resolved — no re-resolve transition on the next cycle
+    # and it stays resolved: no re-resolve transition on the next cycle
     assert evaluate(db, later + timedelta(seconds=30)) == []
 
 
@@ -309,7 +309,7 @@ def test_backup_failed_fires_on_the_hosts_latest_failed_backup_job(tmp_path):
 
 
 def test_backup_failed_does_not_fire_when_the_latest_run_succeeded(tmp_path):
-    """Only the LATEST run matters — an old failure already fixed is not a
+    """Only the LATEST run matters, an old failure already fixed is not a
     live alert."""
     db = make_db(tmp_path)
     host = seed_host_row(db)

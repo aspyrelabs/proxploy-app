@@ -2,71 +2,71 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship consoles: an xterm.js `PtyBridge` for CT terminals and node shells (proxying Proxmox's `termproxy`), and a noVNC `ConsoleProxy` for VM consoles (proxying Proxmox's `vncproxy`/`vncwebsocket`) — browser never talks to Proxmox directly, every open is ticket-authed and audited.
+**Goal:** Ship consoles: an xterm.js `PtyBridge` for CT terminals and node shells (proxying Proxmox's `termproxy`), and a noVNC `ConsoleProxy` for VM consoles (proxying Proxmox's `vncproxy`/`vncwebsocket`); browser never talks to Proxmox directly, every open is ticket-authed and audited.
 
-**Architecture:** A one-time, single-use Proxploy ticket (`console_tickets` table, `SessionRow`-shaped: raw value hashed at rest) is minted by a normal cookie+CSRF-authed POST route, which is also where Proxmox's own `termproxy`/`vncproxy` call happens and its short-lived upstream ticket gets stored server-side (doc 02 §5 — the upstream ticket never reaches the browser). The browser then opens a plain WebSocket with `?ticket=<ours>` and no cookie is needed on the socket itself — the ticket already proves auth, redeemed exactly once. Two backend proxy shapes, because Proxmox's two upstream protocols are different shapes: `services/ptybridge.py` speaks Proxmox's line-oriented `0:`/`1:`/`2` xtermjs framing (CT + node shell, **reverse-engineered from Proxmox's own `pve-xtermjs` client** — see the correction note below) and translates it to/from Proxploy's own simpler framing (raw text + one JSON resize control frame, doc 05 §Streaming); `services/consoleproxy.py` is a dumb transparent binary pipe for VM VNC (RFB is opaque to us, doc 05 §3). Both reuse `services/proxmox.py`'s existing SSRF-guard (`resolve_target`) and TLS-fingerprint-pinning (`tls_fingerprint_sha256`) rather than inventing a second one.
+**Architecture:** A one-time, single-use Proxploy ticket (`console_tickets` table, `SessionRow`-shaped: raw value hashed at rest) is minted by a normal cookie+CSRF-authed POST route, which is also where Proxmox's own `termproxy`/`vncproxy` call happens and its short-lived upstream ticket gets stored server-side (doc 02 §5; the upstream ticket never reaches the browser). The browser then opens a plain WebSocket with `?ticket=<ours>` and no cookie is needed on the socket itself, the ticket already proves auth, redeemed exactly once. Two backend proxy shapes, because Proxmox's two upstream protocols are different shapes: `services/ptybridge.py` speaks Proxmox's line-oriented `0:`/`1:`/`2` xtermjs framing (CT + node shell, **reverse-engineered from Proxmox's own `pve-xtermjs` client**; see the correction note below) and translates it to/from Proxploy's own simpler framing (raw text + one JSON resize control frame, doc 05 §Streaming); `services/consoleproxy.py` is a dumb transparent binary pipe for VM VNC (RFB is opaque to us, doc 05 §3). Both reuse `services/proxmox.py`'s existing SSRF-guard (`resolve_target`) and TLS-fingerprint-pinning (`tls_fingerprint_sha256`) rather than inventing a second one.
 
-**Tech Stack:** FastAPI + SQLAlchemy 2 + Alembic (existing), `websockets` (new *direct* dependency — already present transitively via `uvicorn[standard]`, pinned explicitly now that first-party code imports it), `@xterm/xterm` + `@xterm/addon-fit` (new, MIT), `@novnc/novnc` (new, MPL-2.0 — link only, per doc 03; never copy its files into this tree).
+**Tech Stack:** FastAPI + SQLAlchemy 2 + Alembic (existing), `websockets` (new *direct* dependency; already present transitively via `uvicorn[standard]`, pinned explicitly now that first-party code imports it), `@xterm/xterm` + `@xterm/addon-fit` (new, MIT), `@novnc/novnc` (new, MPL-2.0; link only, per doc 03; never copy its files into this tree).
 
 ## Global Constraints
 
-- Nothing outside `proxploy/executor/` may `import asyncssh` or reference `get_ssh_private_key` (`backend/scripts/check_executor_isolation.py`, CI-wired) — **unaffected by this phase**, consoles never touch SSH, Proxmox's own API provides the PTY/VNC websocket (doc 02 §5).
-- Every DB-touching test uses the existing sqlite-per-`tmp_path` conventions (`tests/support.py::make_db`/`make_app`/`make_job_app`, `tests/conftest.py::client`) — no new fixture infrastructure unless a task says so explicitly.
-- All new backend routes live under `/api/v1` via `proxploy/api/__init__.py`'s `api_router.include_router(...)` — there is no auto-discovery.
-- Frontend server state lives exclusively in TanStack Query (doc 06 §d) — consoles are the one deliberate exception already documented (doc 06: "Consoles connect on tab activation, disconnect on route leave — never a shared connection"), so console WebSocket lifecycle is local component state, not a query.
+- Nothing outside `proxploy/executor/` may `import asyncssh` or reference `get_ssh_private_key` (`backend/scripts/check_executor_isolation.py`, CI-wired); **unaffected by this phase**, consoles never touch SSH, Proxmox's own API provides the PTY/VNC websocket (doc 02 §5).
+- Every DB-touching test uses the existing sqlite-per-`tmp_path` conventions (`tests/support.py::make_db`/`make_app`/`make_job_app`, `tests/conftest.py::client`); no new fixture infrastructure unless a task says so explicitly.
+- All new backend routes live under `/api/v1` via `proxploy/api/__init__.py`'s `api_router.include_router(...)`; there is no auto-discovery.
+- Frontend server state lives exclusively in TanStack Query (doc 06 §d), consoles are the one deliberate exception already documented (doc 06: "Consoles connect on tab activation, disconnect on route leave; never a shared connection"), so console WebSocket lifecycle is local component state, not a query.
 - `proxploy/services/proxmox.py`'s module docstring rule holds: every proxmoxer call and every PVE-8-vs-9 branch lives there, never in routers/services. The two new REST calls (`termproxy`, `vncproxy`) go there; the websocket byte-bridging itself is a different concern (not a proxmoxer call) and lives in its own `services/ptybridge.py`/`services/consoleproxy.py`.
-- Doc 08 §9 requirements this phase must satisfy: every console open is audited (who/where/when, never *what was typed* — a deliberate privacy call already made in doc 08, not something this plan revisits); an idle timeout closes both sides; the ticket is single-use and short-TTL; node shell is a stricter, separate opt-in (admin-only + `terminal.node` entitlement + a per-host toggle) on top of the base CT/VM console gates.
+- Doc 08 §9 requirements this phase must satisfy: every console open is audited (who/where/when, never *what was typed*; a deliberate privacy call already made in doc 08, not something this plan revisits); an idle timeout closes both sides; the ticket is single-use and short-TTL; node shell is a stricter, separate opt-in (admin-only + `terminal.node` entitlement + a per-host toggle) on top of the base CT/VM console gates.
 
-**Spike correction — Proxmox API tokens cannot open `/termproxy` xtermjs websockets on all supported PVE versions (a real gap in docs 00/02/08's assumptions, found while grounding this plan, not papered over):**
+**Spike correction, Proxmox API tokens cannot open `/termproxy` xtermjs websockets on all supported PVE versions (a real gap in docs 00/02/08's assumptions, found while grounding this plan, not papered over):**
 
-Doc 08's "always a scoped API token, never root@pam password" rule is correct and unchanged for **every other** Proxmox call this app makes, including the VM `vncproxy` path — confirmed working with tokens (`websocket=1` param on the REST call). But the *xtermjs text-mode* `/termproxy` → `/vncwebsocket` handshake is different: Proxmox's own client (`pve-xtermjs`, see Task 3) sends an initial line `"{user}:{ticket}\n"` over the socket itself, and multiple Proxmox forum threads plus **Proxmox bugzilla #6079** document that an API-token-derived `user` string (`root@pam!mytoken`) is rejected there with *"does not look like a valid user name"* — a real PVE-side bug, not a Proxploy bug. It was fixed for the **VM** case in `qemu-server` 9.1.7+ (commit switching to a `--vncticket-endpoint`-aware ticket format); whether the equivalent **LXC**/**node-shell** `termproxy` path is fixed on the same timeline is not confirmed by any source found. Since this project has no live PVE host to test against (a standing limitation every prior phase has stated), this plan does **not** invent a workaround (e.g. a second, password-based PVE identity, which doc 08 explicitly forbids) — instead:
+Doc 08's "always a scoped API token, never root@pam password" rule is correct and unchanged for **every other** Proxmox call this app makes, including the VM `vncproxy` path; confirmed working with tokens (`websocket=1` param on the REST call). But the *xtermjs text-mode* `/termproxy` → `/vncwebsocket` handshake is different: Proxmox's own client (`pve-xtermjs`, see Task 3) sends an initial line `"{user}:{ticket}\n"` over the socket itself, and multiple Proxmox forum threads plus **Proxmox bugzilla #6079** document that an API-token-derived `user` string (`root@pam!mytoken`) is rejected there with *"does not look like a valid user name"*; a real PVE-side bug, not a Proxploy bug. It was fixed for the **VM** case in `qemu-server` 9.1.7+ (commit switching to a `--vncticket-endpoint`-aware ticket format); whether the equivalent **LXC**/**node-shell** `termproxy` path is fixed on the same timeline is not confirmed by any source found. Since this project has no live PVE host to test against (a standing limitation every prior phase has stated), this plan does **not** invent a workaround (e.g. a second, password-based PVE identity, which doc 08 explicitly forbids); instead:
 - Task 5/6's routes use the existing scoped API token uniformly, exactly like every other Proxmox call in this codebase (no special-casing).
 - Task 3 makes the specific PVE rejection message detectable and surfaces it as a clear, actionable error (`"this Proxmox host's termproxy does not accept API-token auth; upgrade qemu-server / pve-manager"`) rather than a generic timeout or a silently-broken terminal.
-- A `pve_integration`-marked (existing pytest marker, already the gate every live-PVE test in this repo uses) live test is added in Task 12 to prove-or-disprove this on whatever real PVE host is available whenever one is — this is the actual verification point for this finding, deferred exactly like every other live-PVE-dependent proof in Phases 1-4.
+- A `pve_integration`-marked (existing pytest marker, already the gate every live-PVE test in this repo uses) live test is added in Task 12 to prove-or-disprove this on whatever real PVE host is available whenever one is; this is the actual verification point for this finding, deferred exactly like every other live-PVE-dependent proof in Phases 1-4.
 
-**Confirmed, not assumed — the exact xtermjs wire protocol** (Proxmox has no written spec for this; the following was read directly out of Proxmox's own `pve-xtermjs` project, `git.proxmox.com/pve-xtermjs.git`, `src/www/main.js`, the same client PVE's own web UI uses for CT/node consoles):
+**Confirmed, not assumed; the exact xtermjs wire protocol** (Proxmox has no written spec for this; the following was read directly out of Proxmox's own `pve-xtermjs` project, `git.proxmox.com/pve-xtermjs.git`, `src/www/main.js`, the same client PVE's own web UI uses for CT/node consoles):
 - Client connects `wss://{host}:{port}/api2/json/nodes/{node}[/lxc/{vmid}|/qemu/{vmid}]/vncwebsocket?port={port}&vncticket={urlencoded ticket}` with WS subprotocol `"binary"`.
-- First client→server frame: `f"{user}:{ticket}\n"` (the `user` and `ticket` are exactly what `/termproxy` returned — never re-derived).
+- First client→server frame: `f"{user}:{ticket}\n"` (the `user` and `ticket` are exactly what `/termproxy` returned, never re-derived).
 - First server→client frame on success starts with literal `"OK"`, followed by any already-buffered PTY output; anything else in that first frame is treated as an auth failure.
-- Subsequent server→client frames after the first are raw output text — no further framing.
+- Subsequent server→client frames after the first are raw output text, no further framing.
 - Client→server keystroke frames: `f"0:{len(utf8_bytes)}:{data}"`.
 - Client→server resize frame: `f"1:{cols}:{rows}:"`.
 - Client→server keepalive: bare `"2"` (Proxmox's own client sends one every 30s; PtyBridge does the same so idle PVE-side timeouts don't fire under a silent terminal).
-- **This is entirely internal, backend↔Proxmox wire format.** The browser↔Proxploy side is doc 05's own simpler framing (raw bytes both ways, one JSON control frame `{"type":"resize","cols":...,"rows":...}` from client, one `{"type":"exit","code":...}` from server before close) — `PtyBridge` is the translator between the two, per doc 02 §5's "this whole path is the PtyBridge/ConsoleProxy seam."
-- VM `vncproxy`/`vncwebsocket` needs **no** such line-based handshake — the ticket is validated via the URL query params at websocket-upgrade time, and the very first server→client frame is the raw RFB protocol greeting (`"RFB 003.008\n"`-shaped bytes); noVNC's own `RFB` class on the browser side handles the entire RFB handshake including using the VNC ticket as the RFB password. `ConsoleProxy` is therefore a dumb byte-for-byte relay, no translation — matches doc 05 §3 exactly ("opaque RFB byte stream, no Proxploy framing").
+- **This is entirely internal, backend↔Proxmox wire format.** The browser↔Proxploy side is doc 05's own simpler framing (raw bytes both ways, one JSON control frame `{"type":"resize","cols":...,"rows":...}` from client, one `{"type":"exit","code":...}` from server before close); `PtyBridge` is the translator between the two, per doc 02 §5's "this whole path is the PtyBridge/ConsoleProxy seam."
+- VM `vncproxy`/`vncwebsocket` needs **no** such line-based handshake, the ticket is validated via the URL query params at websocket-upgrade time, and the very first server→client frame is the raw RFB protocol greeting (`"RFB 003.008\n"`-shaped bytes); noVNC's own `RFB` class on the browser side handles the entire RFB handshake including using the VNC ticket as the RFB password. `ConsoleProxy` is therefore a dumb byte-for-byte relay, no translation; matches doc 05 §3 exactly ("opaque RFB byte stream, no Proxploy framing").
 
 ---
 
 ## File Structure
 
 **Backend, new files:**
-- `proxploy/services/consoletickets.py` — `ConsoleTicket` minting (`mint_ticket`) and single-use redemption (`redeem_ticket`), `SessionRow`/`create_session` pattern (hash-at-rest, never store the raw ticket)
-- `proxploy/services/ptybridge.py` — `connect_upstream_pty(...)` (opens the wss connection to Proxmox with the SSRF/TLS-pin reuse, sends the auth line, checks `"OK"`) + `bridge_pty(browser_ws, upstream_ws, idle_timeout_s)` (the byte/frame translation loop)
-- `proxploy/services/consoleproxy.py` — `connect_upstream_vnc(...)` + `bridge_binary(browser_ws, upstream_ws, idle_timeout_s)` (transparent relay, no translation)
-- `proxploy/api/consoles.py` — `POST /apps/{id}/console/tickets`, `WS /apps/{id}/console/ws`, `POST /hosts/{id}/shell/tickets`, `WS /hosts/{id}/shell/ws`, `POST /vms/{id}/console/tickets`, `WS /vms/{id}/vnc/ws`
-- `proxploy/migrations/versions/<rev>_0004_console_tickets.py` — `console_tickets` table + `hosts.node_shell_enabled` column
+- `proxploy/services/consoletickets.py`: `ConsoleTicket` minting (`mint_ticket`) and single-use redemption (`redeem_ticket`), `SessionRow`/`create_session` pattern (hash-at-rest, never store the raw ticket)
+- `proxploy/services/ptybridge.py`: `connect_upstream_pty(...)` (opens the wss connection to Proxmox with the SSRF/TLS-pin reuse, sends the auth line, checks `"OK"`) + `bridge_pty(browser_ws, upstream_ws, idle_timeout_s)` (the byte/frame translation loop)
+- `proxploy/services/consoleproxy.py`: `connect_upstream_vnc(...)` + `bridge_binary(browser_ws, upstream_ws, idle_timeout_s)` (transparent relay, no translation)
+- `proxploy/api/consoles.py`: `POST /apps/{id}/console/tickets`, `WS /apps/{id}/console/ws`, `POST /hosts/{id}/shell/tickets`, `WS /hosts/{id}/shell/ws`, `POST /vms/{id}/console/tickets`, `WS /vms/{id}/vnc/ws`
+- `proxploy/migrations/versions/<rev>_0004_console_tickets.py`: `console_tickets` table + `hosts.node_shell_enabled` column
 - Backend test files: `tests/test_proxmox_console_calls.py`, `tests/test_consoletickets.py`, `tests/test_ptybridge.py`, `tests/test_consoleproxy.py`, `tests/test_consoles_api.py`, `tests/fakes/pve_ws.py` (an in-process fake upstream websocket server speaking the documented xtermjs/RFB-greeting protocol, `websockets.serve`-based, mirrors `tests/fakes/ssh.py`'s role for Phase 4)
 
 **Backend, modified files:**
-- `proxploy/services/proxmox.py` — add `termproxy(kind, node, vmid)`, `node_termproxy(node)`, `vncproxy(node, vmid)` methods; extract `open_validated_tcp_socket(host, port, timeout=10)` out of `tls_fingerprint_sha256` (the one line that already does `resolve_target` + `socket.create_connection`) so `ptybridge`/`consoleproxy` reuse it instead of re-deriving the SSRF guard
-- `proxploy/models/__init__.py` — add `ConsoleTicket` model, `Host.node_shell_enabled` column
-- `proxploy/api/__init__.py` — register `consoles.router`
-- `proxploy/api/hosts.py` — add `PATCH /hosts/{id}` (the one field it needs: `node_shell_enabled`; no other host fields are made editable — that's out of this phase's scope)
-- `proxploy/config.py` — add `console_ticket_ttl_s: float = 30.0`, `console_idle_timeout_s: float = 1800.0`
-- `tests/fakes/pve.py` — extend `_NodeNS`/`_GuestNS` with `.termproxy`/`.vncproxy` leaves
-- `pyproject.toml` — add `websockets>=13`
+- `proxploy/services/proxmox.py`: add `termproxy(kind, node, vmid)`, `node_termproxy(node)`, `vncproxy(node, vmid)` methods; extract `open_validated_tcp_socket(host, port, timeout=10)` out of `tls_fingerprint_sha256` (the one line that already does `resolve_target` + `socket.create_connection`) so `ptybridge`/`consoleproxy` reuse it instead of re-deriving the SSRF guard
+- `proxploy/models/__init__.py`: add `ConsoleTicket` model, `Host.node_shell_enabled` column
+- `proxploy/api/__init__.py`: register `consoles.router`
+- `proxploy/api/hosts.py`: add `PATCH /hosts/{id}` (the one field it needs: `node_shell_enabled`; no other host fields are made editable, that's out of this phase's scope)
+- `proxploy/config.py`: add `console_ticket_ttl_s: float = 30.0`, `console_idle_timeout_s: float = 1800.0`
+- `tests/fakes/pve.py`: extend `_NodeNS`/`_GuestNS` with `.termproxy`/`.vncproxy` leaves
+- `pyproject.toml`: add `websockets>=13`
 
 **Frontend, new files:**
-- `frontend/src/components/terminal/Terminal.tsx` — xterm.js wrapper (mount, fit addon, theme, keystroke→ws, resize→JSON control frame)
-- `frontend/src/components/console/VncConsole.tsx` — noVNC wrapper (RFB instance, Ctrl-Alt-Del/fullscreen toolbar)
-- `frontend/src/api/consoles.ts` — `useConsoleTicket(kind, id)` mutation hook (mirrors `useInstall`'s POST-then-use-result shape)
+- `frontend/src/components/terminal/Terminal.tsx`: xterm.js wrapper (mount, fit addon, theme, keystroke→ws, resize→JSON control frame)
+- `frontend/src/components/console/VncConsole.tsx`: noVNC wrapper (RFB instance, Ctrl-Alt-Del/fullscreen toolbar)
+- `frontend/src/api/consoles.ts`: `useConsoleTicket(kind, id)` mutation hook (mirrors `useInstall`'s POST-then-use-result shape)
 - Frontend test files: `frontend/src/tests/terminal.test.tsx`, `frontend/src/tests/vncconsole.test.tsx`, `frontend/src/tests/consoles-api.test.tsx`
 
 **Frontend, modified files:**
-- `frontend/src/routes/apps.tsx` — replace the `appConsoleRoute`/`appLogsRoute` `phaseTab` placeholders with real `AppConsole`/`AppLogs` components; `AppCard.tsx` gains a Console quick-action button
-- `frontend/src/routes/vms.tsx` — replace the `vmConsoleRoute` placeholder with `VmConsole`; VM table row gains a Console quick-action button
-- `frontend/src/routes/cluster.tsx` — `NodeDetailPage` gains a node-shell section, gated by `terminal.node` entitlement + `host.node_shell_enabled`
-- `frontend/package.json` — add `@xterm/xterm`, `@xterm/addon-fit`, `@novnc/novnc`
+- `frontend/src/routes/apps.tsx`: replace the `appConsoleRoute`/`appLogsRoute` `phaseTab` placeholders with real `AppConsole`/`AppLogs` components; `AppCard.tsx` gains a Console quick-action button
+- `frontend/src/routes/vms.tsx`: replace the `vmConsoleRoute` placeholder with `VmConsole`; VM table row gains a Console quick-action button
+- `frontend/src/routes/cluster.tsx`: `NodeDetailPage` gains a node-shell section, gated by `terminal.node` entitlement + `host.node_shell_enabled`
+- `frontend/package.json`: add `@xterm/xterm`, `@xterm/addon-fit`, `@novnc/novnc`
 
 ---
 
@@ -140,7 +140,7 @@ def test_open_validated_tcp_socket_refuses_link_local():
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_proxmox_console_calls.py -v`
-Expected: FAIL — `AttributeError: 'ProxmoxClient' object has no attribute 'termproxy'` (and the fake's response/call-tracking attributes don't exist yet either).
+Expected: FAIL, `AttributeError: 'ProxmoxClient' object has no attribute 'termproxy'` (and the fake's response/call-tracking attributes don't exist yet either).
 
 - [ ] **Step 3: Add the fake's termproxy/vncproxy leaves**
 
@@ -172,7 +172,7 @@ class _VncproxyLeaf:
         return self._owner.vncproxy_response
 ```
 
-Modify `_GuestNS`/`_GuestFactory`/`_NodeNS` to add `.termproxy` for `nodes(n).lxc(vmid).termproxy` / `nodes(n).qemu(vmid).termproxy` / `nodes(n).termproxy` (node shell), and `.vncproxy` for the qemu case only (matching Proxmox — LXC has no `vncproxy`). `_GuestNS` doesn't know its own node name today (only `_NodeNS` does), so `node` needs threading through `_GuestFactory` too — replace all three classes:
+Modify `_GuestNS`/`_GuestFactory`/`_NodeNS` to add `.termproxy` for `nodes(n).lxc(vmid).termproxy` / `nodes(n).qemu(vmid).termproxy` / `nodes(n).termproxy` (node shell), and `.vncproxy` for the qemu case only (matching Proxmox; LXC has no `vncproxy`). `_GuestNS` doesn't know its own node name today (only `_NodeNS` does), so `node` needs threading through `_GuestFactory` too; replace all three classes:
 
 ```python
 class _GuestNS:
@@ -219,7 +219,7 @@ In `backend/proxploy/services/proxmox.py`, replace the body of `tls_fingerprint_
 def open_validated_tcp_socket(host: str, port: int, timeout: float = 10.0) -> socket.socket:
     """resolve_target + connect to the literal we validated (doc 02 §5's SSRF
     guard, shared by the TLS-fingerprint check and the new console websocket
-    connections — nothing here reaches Proxmox's own address string again)."""
+    connections, nothing here reaches Proxmox's own address string again)."""
     ip = resolve_target(host, port)
     return socket.create_connection((ip, port), timeout=timeout)
 
@@ -297,7 +297,7 @@ git commit -m "feat(proxmox): termproxy/node_termproxy/vncproxy calls + shared S
 
 **Interfaces:**
 - Produces: `ConsoleTicket` model (`console_tickets` table). `mint_ticket(db, *, user_id: int, kind: str, target_id: int, node: str, guest_kind: str | None, vmid: int | None, upstream_user: str, upstream_ticket: str, upstream_port: str, ttl_s: float) -> tuple[str, datetime]` (returns the raw ticket string and its `expires_at`; only the sha256 hash is persisted). `redeem_ticket(db, raw: str) -> ConsoleTicket | None` (atomic: returns `None` if not found, expired, or already redeemed; otherwise sets `redeemed_at` and returns the row in one transaction so a race can't redeem twice).
-- Consumes: `proxploy.models.utcnow`, `secrets.token_urlsafe`, `hashlib.sha256` (same primitives `services/authn.py::create_session`/`resolve_session` already use — same pattern, new table).
+- Consumes: `proxploy.models.utcnow`, `secrets.token_urlsafe`, `hashlib.sha256` (same primitives `services/authn.py::create_session`/`resolve_session` already use; same pattern, new table).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -356,14 +356,14 @@ def test_raw_ticket_value_is_not_persisted(tmp_path):
     row = db.query(ConsoleTicket).one()
     assert raw not in row.token_hash
     assert row.upstream_ticket == "PVEVNC:abc"  # only the UPSTREAM ticket is
-    # stored in the clear — that one never reaches the browser (doc 02 §5);
+    # stored in the clear: that one never reaches the browser (doc 02 §5);
     # OUR ticket (`raw`, the browser-facing one) is what gets hashed.
 ```
 
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_consoletickets.py -v`
-Expected: FAIL — `ImportError: cannot import name 'mint_ticket'` (module doesn't exist yet).
+Expected: FAIL, `ImportError: cannot import name 'mint_ticket'` (module doesn't exist yet).
 
 - [ ] **Step 3: Add the migration**
 
@@ -415,15 +415,15 @@ def downgrade() -> None:
     op.drop_table("console_tickets")
 ```
 
-Run `cd backend && alembic revision --autogenerate -m "0004 console tickets"` first to get the real revision id, then hand-edit the body to match exactly the above (autogenerate may add unrelated noise — keep only these two changes).
+Run `cd backend && alembic revision --autogenerate -m "0004 console tickets"` first to get the real revision id, then hand-edit the body to match exactly the above (autogenerate may add unrelated noise; keep only these two changes).
 
 - [ ] **Step 4: Add the model**
 
-In `backend/proxploy/models/__init__.py`, after `Host` (or wherever `TimestampMixin`-free append-style models live — follow `AuditEvent`'s un-mixed style since this table also never gets ORM-updated except the one `redeemed_at` set), add:
+In `backend/proxploy/models/__init__.py`, after `Host` (or wherever `TimestampMixin`-free append-style models live; follow `AuditEvent`'s un-mixed style since this table also never gets ORM-updated except the one `redeemed_at` set), add:
 
 ```python
 class ConsoleTicket(Base):
-    """Single-use, short-TTL. Only `token_hash` is stored — never the raw,
+    """Single-use, short-TTL. Only `token_hash` is stored, never the raw,
     browser-facing ticket (SessionRow's exact pattern, doc 04). `upstream_ticket`
     IS stored in the clear: it's Proxmox's own short-TTL ticket, never reaches
     the browser (doc 02 §5), and is meaningless without a live upstream socket
@@ -465,7 +465,7 @@ In `backend/proxploy/config.py`, after `poll_timeout_s`:
 ```python
 """Single-use, short-TTL console websocket tickets (doc 05 §Streaming "Auth
 model for streams"). Same hash-at-rest shape as services/authn.py's
-create_session/resolve_session — a new table because these bind to a Proxmox
+create_session/resolve_session, a new table because these bind to a Proxmox
 target + upstream ticket, which sessions don't carry."""
 import hashlib
 import secrets
@@ -532,7 +532,7 @@ git commit -m "feat(console): single-use ticket table + mint/redeem service"
 
 ---
 
-## Task 3: `PtyBridge` — outbound xtermjs websocket client + protocol translation
+## Task 3: `PtyBridge`: outbound xtermjs websocket client + protocol translation
 
 **Files:**
 - Create: `backend/proxploy/services/ptybridge.py`
@@ -540,7 +540,7 @@ git commit -m "feat(console): single-use ticket table + mint/redeem service"
 - Test: `backend/tests/test_ptybridge.py`
 
 **Interfaces:**
-- Produces: `PtyBridgeError(RuntimeError)`. `async connect_upstream_pty(*, address: str, node: str, guest_kind: str | None, vmid: int | None, upstream_user: str, upstream_ticket: str, upstream_port: str, verify_tls: bool, tls_fingerprint: str | None, ws_connect=None) -> websockets client connection` (raises `PtyBridgeError` if the handshake's first frame isn't `"OK"`-prefixed — this is where the Task-header's token-vs-termproxy PVE rejection surfaces as a clear message). `async bridge_pty(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None` (runs until either side closes or `idle_timeout_s` passes with no traffic; sends `{"type":"exit","code":...}` to `browser_ws` before returning).
+- Produces: `PtyBridgeError(RuntimeError)`. `async connect_upstream_pty(*, address: str, node: str, guest_kind: str | None, vmid: int | None, upstream_user: str, upstream_ticket: str, upstream_port: str, verify_tls: bool, tls_fingerprint: str | None, ws_connect=None) -> websockets client connection` (raises `PtyBridgeError` if the handshake's first frame isn't `"OK"`-prefixed; this is where the Task-header's token-vs-termproxy PVE rejection surfaces as a clear message). `async bridge_pty(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None` (runs until either side closes or `idle_timeout_s` passes with no traffic; sends `{"type":"exit","code":...}` to `browser_ws` before returning).
 - Consumes: `proxploy.services.proxmox.open_validated_tcp_socket`, `websockets.asyncio.client.connect`.
 
 - [ ] **Step 1: Write the fake upstream xtermjs websocket server**
@@ -548,7 +548,7 @@ git commit -m "feat(console): single-use ticket table + mint/redeem service"
 ```python
 # backend/tests/fakes/pve_ws.py
 """In-process fake Proxmox vncwebsocket server speaking the documented xtermjs
-protocol (see plan doc's "Confirmed, not assumed" note) — enough to prove
+protocol (see plan doc's "Confirmed, not assumed" note); enough to prove
 PtyBridge's translation logic without a real PVE host."""
 import asyncio
 
@@ -618,7 +618,7 @@ from tests.fakes.pve_ws import FakeXtermUpstream
 
 
 async def _connect_direct(url):
-    """Bypass the SSRF/TLS-pinning wrapper for handshake-only tests — a plain
+    """Bypass the SSRF/TLS-pinning wrapper for handshake-only tests, a plain
     ws:// loopback fake server, so this exercises connect_upstream_pty's
     protocol logic without also re-testing Task 1's already-covered TLS path."""
     return await websockets.connect(url, subprotocols=["binary"])
@@ -698,7 +698,7 @@ def test_bridge_pty_translates_resize_and_keystrokes():
 - [ ] **Step 3: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_ptybridge.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.services.ptybridge'`.
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.services.ptybridge'`.
 
 - [ ] **Step 4: Write `services/ptybridge.py`**
 
@@ -822,12 +822,12 @@ Expected: 318 + 3 = 321 passed.
 
 ```bash
 git add backend/proxploy/services/ptybridge.py backend/tests/fakes/pve_ws.py backend/tests/test_ptybridge.py
-git commit -m "feat(console): PtyBridge — xtermjs protocol translation over the upstream websocket"
+git commit -m "feat(console): PtyBridge, xtermjs protocol translation over the upstream websocket"
 ```
 
 ---
 
-## Task 4: `ConsoleProxy` — transparent binary VNC bridge
+## Task 4: `ConsoleProxy`: transparent binary VNC bridge
 
 **Files:**
 - Create: `backend/proxploy/services/consoleproxy.py`
@@ -849,7 +849,7 @@ from proxploy.services.consoleproxy import bridge_binary, connect_upstream_vnc
 
 
 class FakeRfbUpstream:
-    """No auth-line handshake for VNC — the ticket is validated by Proxmox at
+    """No auth-line handshake for VNC, the ticket is validated by Proxmox at
     the URL-query-param stage; the first frame IS the RFB greeting."""
 
     def __init__(self):
@@ -932,13 +932,13 @@ def test_bridge_binary_relays_bytes_untranslated():
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_consoleproxy.py -v`
-Expected: FAIL — `ModuleNotFoundError`.
+Expected: FAIL, `ModuleNotFoundError`.
 
 - [ ] **Step 3: Write `services/consoleproxy.py`**
 
 ```python
 """Transparent binary VNC bridge (doc 05 §3): no protocol translation, unlike
-PtyBridge — the ticket is validated by Proxmox at websocket-upgrade time via
+PtyBridge, the ticket is validated by Proxmox at websocket-upgrade time via
 the URL query params, so there's no client-sent auth line; the first upstream
 frame is the RFB greeting itself, which noVNC's own RFB class consumes."""
 import asyncio
@@ -1012,7 +1012,7 @@ Expected: 321 + 2 = 323 passed.
 
 ```bash
 git add backend/proxploy/services/consoleproxy.py backend/tests/test_consoleproxy.py
-git commit -m "feat(console): ConsoleProxy — transparent binary VNC bridge"
+git commit -m "feat(console): ConsoleProxy, transparent binary VNC bridge"
 ```
 
 ---
@@ -1025,7 +1025,7 @@ git commit -m "feat(console): ConsoleProxy — transparent binary VNC bridge"
 - Test: `backend/tests/test_consoles_api.py`
 
 **Interfaces:**
-- Produces: `router = APIRouter(prefix="", tags=["consoles"])` registered at the top level (paths already carry their own `/apps`, `/hosts`, `/vms` prefixes per doc 05, so this router does NOT get a shared prefix like `apps.router`/`vms.router` do — mirrors how `jobs.router` is mounted).
+- Produces: `router = APIRouter(prefix="", tags=["consoles"])` registered at the top level (paths already carry their own `/apps`, `/hosts`, `/vms` prefixes per doc 05, so this router does NOT get a shared prefix like `apps.router`/`vms.router` do; mirrors how `jobs.router` is mounted).
 - Consumes: `services.lifecycle._resolve`-shaped host/node lookup (this task writes its own small resolver instead of importing the private `_resolve`, since that one is job-context-only and blocking-via-thread; here it's a plain sync route so no thread hop is needed), `services.consoletickets.mint_ticket`/`redeem_ticket`, `services.ptybridge.connect_upstream_pty`/`bridge_pty`, `services.proxmox.ProxmoxClient.termproxy`, `services.audit.write_audit`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1150,19 +1150,19 @@ def test_console_ws_bridges_after_redeeming_ticket(tmp_path):
         asyncio.run(fake_ws.stop())
 ```
 
-*(Note for the implementer: `login_as_owner`/similar session-cookie test helpers already exist somewhere in Phase 1's `tests/conftest.py` — grep for how existing authed-route tests, e.g. in `test_hosts_api.py`, get a logged-in `TestClient` and reuse that exact helper name/shape rather than the placeholder name above if it differs.)*
+*(Note for the implementer: `login_as_owner`/similar session-cookie test helpers already exist somewhere in Phase 1's `tests/conftest.py`, grep for how existing authed-route tests, e.g. in `test_hosts_api.py`, get a logged-in `TestClient` and reuse that exact helper name/shape rather than the placeholder name above if it differs.)*
 
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_consoles_api.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.api.consoles'`.
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.api.consoles'`.
 
 - [ ] **Step 3: Write `api/consoles.py`**
 
 ```python
 """Console ticket + websocket routes (doc 05 §2/§3, doc 02 §5 PtyBridge/
 ConsoleProxy). Every ticket-issuing POST is a normal cookie+CSRF+entitlement
-route; every WS route below takes NO cookie — the one-time ticket already
+route; every WS route below takes NO cookie, the one-time ticket already
 proves auth (doc 05 "Auth model for streams"), so these follow jobs.py's
 "manual auth inside the handler" idiom only where the SSE precedent doesn't
 apply (session auth is not needed at all on the WS side)."""
@@ -1186,7 +1186,7 @@ router = APIRouter(tags=["consoles"])
 
 def _proxmox_client_for_host(app_state, db, host: Host) -> ProxmoxClient:
     """Same three-line decrypt-then-construct pattern as services/lifecycle.py's
-    _resolve and api/hosts.py's test_host — kept inline rather than extracted,
+    _resolve and api/hosts.py's test_host, kept inline rather than extracted,
     matching this codebase's existing (already 3x-duplicated) style; a 4th
     call site is the tip-over point a future pass could extract, not this one."""
     cred = db.query(HostCredential).filter_by(host_id=host.id, kind="api_token").one_or_none()
@@ -1316,7 +1316,7 @@ async def vm_vnc_ws(websocket: WebSocket, vm_id: int, ticket: str | None = None)
         await upstream.close()
 ```
 
-*(Node-shell route (`/hosts/{id}/shell/tickets` + `/hosts/{id}/shell/ws`) is deliberately Task 6, not here — it needs the `node_shell_enabled` opt-in check this task's `_run_pty_ws` helper already dispatches on via `row.kind`.)*
+*(Node-shell route (`/hosts/{id}/shell/tickets` + `/hosts/{id}/shell/ws`) is deliberately Task 6, not here; it needs the `node_shell_enabled` opt-in check this task's `_run_pty_ws` helper already dispatches on via `row.kind`.)*
 
 - [ ] **Step 4: Register the router**
 
@@ -1325,7 +1325,7 @@ In `backend/proxploy/api/__init__.py`, add `from proxploy.api import consoles` a
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && pytest tests/test_consoles_api.py -v`
-Expected: PASS (3 tests). If `login_as_owner`-shaped helper name doesn't match what `tests/conftest.py` actually exports, adjust the test's import to the real helper (grep `tests/test_hosts_api.py` for the exact name in use — do not invent a second login-helper).
+Expected: PASS (3 tests). If `login_as_owner`-shaped helper name doesn't match what `tests/conftest.py` actually exports, adjust the test's import to the real helper (grep `tests/test_hosts_api.py` for the exact name in use; do not invent a second login-helper).
 
 - [ ] **Step 6: Run the full backend suite**
 
@@ -1341,7 +1341,7 @@ git commit -m "feat(console): app console + VM VNC ticket and websocket routes"
 
 ---
 
-## Task 6: Node shell — `node_shell_enabled` opt-in + `POST/WS /hosts/{id}/shell/*`
+## Task 6: Node shell: `node_shell_enabled` opt-in + `POST/WS /hosts/{id}/shell/*`
 
 **Files:**
 - Modify: `backend/proxploy/api/consoles.py`, `backend/proxploy/api/hosts.py`
@@ -1404,7 +1404,7 @@ def test_shell_ticket_requires_node_shell_enabled(tmp_path):
 - [ ] **Step 2: Run to verify failures**
 
 Run: `cd backend && pytest tests/test_hosts_api.py tests/test_consoles_api.py -v -k "node_shell or shell_ticket"`
-Expected: FAIL — `404` (route doesn't exist).
+Expected: FAIL, `404` (route doesn't exist).
 
 - [ ] **Step 3: Add `PATCH /hosts/{host_id}` to `api/hosts.py`**
 
@@ -1438,7 +1438,7 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
     if host is None:
         raise HTTPException(404, "host not found")
     if not host.node_shell_enabled:
-        raise HTTPException(409, "node shell is not enabled for this host — "
+        raise HTTPException(409, "node shell is not enabled for this host; "
                              "opt in via host settings first (doc 08 §9: a "
                              "second, deliberate gate on top of RBAC)")
     client = _proxmox_client_for_host(request.app.state, db, host)
@@ -1460,7 +1460,7 @@ async def node_shell_ws(websocket: WebSocket, host_id: int, ticket: str | None =
     await _run_pty_ws(websocket, ticket)
 ```
 
-`_run_pty_ws`'s existing `{"app_console": ..., "node_shell": lambda: row.target_id}` dispatch (Task 5) already resolves a `node_shell` ticket's `host_id` correctly (`row.target_id` IS the host id for this kind) — no change needed there.
+`_run_pty_ws`'s existing `{"app_console"..., "node_shell": lambda: row.target_id}` dispatch (Task 5) already resolves a `node_shell` ticket's `host_id` correctly (`row.target_id` IS the host id for this kind), no change needed there.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1481,7 +1481,7 @@ git commit -m "feat(console): node shell opt-in toggle + ticket/websocket routes
 
 ---
 
-## Task 7: Frontend — `Terminal` (xterm.js) wrapper + console ticket hook
+## Task 7: Frontend: `Terminal` (xterm.js) wrapper + console ticket hook
 
 **Files:**
 - Create: `frontend/src/components/terminal/Terminal.tsx`, `frontend/src/api/consoles.ts`
@@ -1489,7 +1489,7 @@ git commit -m "feat(console): node shell opt-in toggle + ticket/websocket routes
 - Test: `frontend/src/tests/terminal.test.tsx`, `frontend/src/tests/consoles-api.test.tsx`
 
 **Interfaces:**
-- Produces: `Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void })` component — mounts xterm.js, opens the WebSocket itself, tears down on unmount. `onDrop` fires when the socket closes for any reason OTHER than this component's own unmount-cleanup (doc 06: "Reconnect = new ticket" — DoD "survive reconnect"); callers use it to re-mint a ticket and remount with a fresh `wsUrl`, done once in Task 8 and reused unchanged by Tasks 9/10. `useConsoleTicket(kind: 'app' | 'host' | 'vm', id: number)` — `useMutation` returning `{ ticket: string; expires_at: string }`, POSTing to the right path per `kind`.
+- Produces: `Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void })` component, mounts xterm.js, opens the WebSocket itself, tears down on unmount. `onDrop` fires when the socket closes for any reason OTHER than this component's own unmount-cleanup (doc 06: "Reconnect = new ticket", DoD "survive reconnect"); callers use it to re-mint a ticket and remount with a fresh `wsUrl`, done once in Task 8 and reused unchanged by Tasks 9/10. `useConsoleTicket(kind: 'app' | 'host' | 'vm', id: number)`, `useMutation` returning `{ ticket: string; expires_at: string }`, POSTing to the right path per `kind`.
 
 - [ ] **Step 1: Add dependencies**
 
@@ -1497,7 +1497,7 @@ git commit -m "feat(console): node shell opt-in toggle + ticket/websocket routes
 cd frontend && npm install @xterm/xterm @xterm/addon-fit
 ```
 
-*(Deviation from doc 06's "fit + webgl addons": the webgl addon adds context-loss/fallback handling for a marginal render-perf gain over the default canvas renderer with no functional difference to the user — skipped as unrequested-complexity-for-its-own-sake; noted here rather than silently, matching this project's practice of calling out documented deviations.)*
+*(Deviation from doc 06's "fit + webgl addons": the webgl addon adds context-loss/fallback handling for a marginal render-perf gain over the default canvas renderer with no functional difference to the user, skipped as unrequested-complexity-for-its-own-sake; noted here rather than silently, matching this project's practice of calling out documented deviations.)*
 
 - [ ] **Step 2: Write the failing hook test**
 
@@ -1546,7 +1546,7 @@ describe('useConsoleTicket', () => {
 - [ ] **Step 3: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/consoles-api.test.tsx`
-Expected: FAIL — `Failed to resolve import "../api/consoles"`.
+Expected: FAIL, `Failed to resolve import "../api/consoles"`.
 
 - [ ] **Step 4: Write `api/consoles.ts`**
 
@@ -1647,7 +1647,7 @@ describe('Terminal', () => {
 - [ ] **Step 7: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/terminal.test.tsx`
-Expected: FAIL — `Failed to resolve import "../components/terminal/Terminal"`.
+Expected: FAIL, `Failed to resolve import "../components/terminal/Terminal"`.
 
 - [ ] **Step 8: Write `components/terminal/Terminal.tsx`**
 
@@ -1683,11 +1683,11 @@ export function Terminal({ wsUrl, onDrop }: { wsUrl: string; onDrop?: () => void
       try {
         const control = JSON.parse(data)
         if (control?.type === 'exit') { term.write(`\r\n[session ended: ${control.code}]\r\n`); return }
-      } catch { /* not a control frame — raw terminal text */ }
+      } catch { /* not a control frame, raw terminal text */ }
       term.write(data)
     }
     // The bridge (backend PtyBridge/ConsoleProxy) or the upstream Proxmox
-    // socket can drop independently of anything the user did — doc 06's
+    // socket can drop independently of anything the user did, doc 06's
     // "Reconnect = new ticket" / DoD "survive reconnect" means the CALLER
     // re-mints a ticket and remounts with a fresh wsUrl; this component only
     // has to tell them a drop happened, and not confuse its own teardown
@@ -1770,7 +1770,7 @@ describe('AppConsole', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/terminal.test.tsx -t AppConsole`
-Expected: FAIL — `AppConsole` is not exported.
+Expected: FAIL, `AppConsole` is not exported.
 
 - [ ] **Step 3: Replace the `appConsoleRoute`/`appLogsRoute` placeholders in `apps.tsx`**
 
@@ -1823,7 +1823,7 @@ Inside the existing `<div className="mt-3 border-t border-line-soft pt-3" onClic
 </Button>
 ```
 
-*(`Button` has no `size` prop today per the explored source — use the same `className="px-2 py-1 text-[11px]"` inline sizing `LifecycleActions` uses for its `size="sm"` case instead, for visual consistency without adding a prop the component doesn't have.)*
+*(`Button` has no `size` prop today per the explored source, use the same `className="px-2 py-1 text-[11px]"` inline sizing `LifecycleActions` uses for its `size="sm"` case instead, for visual consistency without adding a prop the component doesn't have.)*
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1842,11 +1842,11 @@ git add frontend/src/routes/apps.tsx frontend/src/components/AppCard.tsx fronten
 git commit -m "feat(apps): wire CT console tab + Console quick-action on the app card"
 ```
 
-*(Reconnect note for this task and Tasks 9/10, which share the exact same shape: `AppConsole` should pass `onDrop={() => ticket.mutate()}` to `Terminal` and key the `Terminal` remount on `ticket.data?.ticket` — e.g. `<Terminal key={ticket.data.ticket} wsUrl={...} onDrop={() => ticket.mutate()} />` — so a dropped socket re-mints a ticket and a fresh `Terminal` instance opens a new one, satisfying doc 06's "Reconnect = new ticket" / the DoD's "survive reconnect" clause. Add this same one-line wiring to `VmConsole` (Task 9) and `NodeShellSection` (Task 10) — no new test needed there beyond Task 7's `onDrop` unit test, since the wiring is identical and mechanical.)*
+*(Reconnect note for this task and Tasks 9/10, which share the exact same shape: `AppConsole` should pass `onDrop={() => ticket.mutate()}` to `Terminal` and key the `Terminal` remount on `ticket.data?.ticket`, e.g. `<Terminal key={ticket.data.ticket} wsUrl={...} onDrop={() => ticket.mutate()} />`, so a dropped socket re-mints a ticket and a fresh `Terminal` instance opens a new one, satisfying doc 06's "Reconnect = new ticket" / the DoD's "survive reconnect" clause. Add this same one-line wiring to `VmConsole` (Task 9) and `NodeShellSection` (Task 10), no new test needed there beyond Task 7's `onDrop` unit test, since the wiring is identical and mechanical.)*
 
 ---
 
-## Task 9: Frontend — `VncConsole` (noVNC) wrapper + wire the VM console tab
+## Task 9: Frontend: `VncConsole` (noVNC) wrapper + wire the VM console tab
 
 **Files:**
 - Create: `frontend/src/components/console/VncConsole.tsx`
@@ -1863,7 +1863,7 @@ git commit -m "feat(apps): wire CT console tab + Console quick-action on the app
 cd frontend && npm install @novnc/novnc
 ```
 
-*(MPL-2.0, link-only per doc 03 — `import RFB from '@novnc/novnc/core/rfb'` below imports it as a normal npm dependency; no noVNC file is ever copied into this tree.)*
+*(MPL-2.0, link-only per doc 03; `import RFB from '@novnc/novnc/core/rfb'` below imports it as a normal npm dependency; no noVNC file is ever copied into this tree.)*
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1904,7 +1904,7 @@ describe('VncConsole', () => {
     const { unmount } = render(<VncConsole wsUrl="wss://test/vnc" onDisconnect={onDisconnect} />)
     await waitFor(() => expect(rfbInstances).toHaveLength(1))
     const rfb = rfbInstances[0]
-    // addEventListener is a vi.fn() mock — grab the handler it was registered
+    // addEventListener is a vi.fn() mock, grab the handler it was registered
     // with and invoke it directly, exactly as the real RFB would on a drop.
     const [, handler] = rfb.addEventListener.mock.calls.find((c: any[]) => c[0] === 'disconnect')
     handler()
@@ -1919,7 +1919,7 @@ describe('VncConsole', () => {
 - [ ] **Step 3: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/vncconsole.test.tsx`
-Expected: FAIL — `Failed to resolve import "../components/console/VncConsole"`.
+Expected: FAIL, `Failed to resolve import "../components/console/VncConsole"`.
 
 - [ ] **Step 4: Write `components/console/VncConsole.tsx`**
 
@@ -1981,7 +1981,7 @@ function VmConsole() {
   const ticket = useConsoleTicket('vm', id)
   useEffect(() => { ticket.mutate() }, [id])
   if (!ticket.data) return <EmptyState title="Opening console…" note="" />
-  // VncConsole has no onDrop today (Task 9 doesn't add one — noVNC's RFB
+  // VncConsole has no onDrop today (Task 9 doesn't add one, noVNC's RFB
   // class exposes its own 'disconnect' event for this instead of a generic
   // prop); wire the same re-mint-on-drop behavior via that event:
   return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={() => ticket.mutate()} />
@@ -2029,14 +2029,14 @@ git commit -m "feat(vms): noVNC VncConsole wrapper + wire the VM console tab and
 
 ---
 
-## Task 10: Frontend — node shell on `NodeDetailPage`, gated by entitlement + opt-in
+## Task 10: Frontend: node shell on `NodeDetailPage`, gated by entitlement + opt-in
 
 **Files:**
 - Modify: `frontend/src/routes/cluster.tsx`
 - Test: extend `frontend/src/tests/terminal.test.tsx` or a new `frontend/src/tests/nodeshell.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 7's `Terminal`/`useConsoleTicket`, `useEntitlements` (`terminal.node` flag), the host row's `node_shell_enabled` (already returned by `GET /hosts/{id}` per Task 6's `HostCredential`-adjacent read path — confirm `host_detail`'s output includes it; if not, this task's Step 3 adds it).
+- Consumes: Task 7's `Terminal`/`useConsoleTicket`, `useEntitlements` (`terminal.node` flag), the host row's `node_shell_enabled` (already returned by `GET /hosts/{id}` per Task 6's `HostCredential`-adjacent read path; confirm `host_detail`'s output includes it; if not, this task's Step 3 adds it).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2073,7 +2073,7 @@ describe('node shell section', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/nodeshell.test.tsx`
-Expected: FAIL — no "node shell" text in the rendered page.
+Expected: FAIL, no "node shell" text in the rendered page.
 
 - [ ] **Step 3: Add the node-shell section to `NodeDetailPage` in `cluster.tsx`**
 
@@ -2104,7 +2104,7 @@ function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeSh
     <div className={card}>
       <h2 className="mb-2 text-[13px] uppercase text-text-3">Node shell</h2>
       <Button variant="ghost" disabled={!allowed}
-        title={!ent.has('terminal.node') ? 'Pro — Node shells'
+        title={!ent.has('terminal.node') ? 'Pro, Node shells'
              : !nodeShellEnabled ? 'Enable node shell in host settings first' : undefined}
         onClick={() => { setOpen(true); ticket.mutate() }}>
         Open node shell
@@ -2118,7 +2118,7 @@ Render it inside `NodeDetailPage`'s existing layout, passing `hostId={Number(hos
 
 - [ ] **Step 4: Confirm `GET /hosts/{id}` returns `node_shell_enabled`**
 
-Check `backend/proxploy/api/hosts.py`'s `host_detail` response dict; if it doesn't already include `node_shell_enabled` (Task 6 only added it to the `PATCH` response), add it there too — one field, same pattern as every other host column already returned.
+Check `backend/proxploy/api/hosts.py`'s `host_detail` response dict; if it doesn't already include `node_shell_enabled` (Task 6 only added it to the `PATCH` response), add it there too; one field, same pattern as every other host column already returned.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -2139,14 +2139,14 @@ git commit -m "feat(cluster): node shell section on node detail, gated by entitl
 
 ---
 
-## Task 11: Logs tab — live-follow CT logs sharing the log-viewer with job transcripts
+## Task 11: Logs tab: live-follow CT logs sharing the log-viewer with job transcripts
 
 **Files:**
 - Modify: `frontend/src/routes/apps.tsx`
 - Test: extend `frontend/src/tests/terminal.test.tsx`
 
 **Interfaces:**
-- Consumes: doc 10's Phase 5 scope line "Logs tabs finalized: live-follow CT logs and archived job logs share one log-viewer component" — the existing static-mode `TerminalPanel` (already the shared component per doc 06) plus a live source. CT log output has no existing SSE/stream endpoint from prior phases (`apps.py`'s `GET /apps/{id}/logs` is a point-in-time tail per doc 05, not a stream) — this task wires the **existing** `GET /apps/{id}/logs` on a poll, not a new streaming endpoint, since doc 10's Phase 5 scope names only Console-proper (PtyBridge/ConsoleProxy) as new backend surface; a genuinely live-tailing CT log stream is not in doc 05's endpoint list and would be new backend scope this plan does not invent speculatively.
+- Consumes: doc 10's Phase 5 scope line "Logs tabs finalized: live-follow CT logs and archived job logs share one log-viewer component", the existing static-mode `TerminalPanel` (already the shared component per doc 06) plus a live source. CT log output has no existing SSE/stream endpoint from prior phases (`apps.py`'s `GET /apps/{id}/logs` is a point-in-time tail per doc 05, not a stream); this task wires the **existing** `GET /apps/{id}/logs` on a poll, not a new streaming endpoint, since doc 10's Phase 5 scope names only Console-proper (PtyBridge/ConsoleProxy) as new backend surface; a genuinely live-tailing CT log stream is not in doc 05's endpoint list and would be new backend scope this plan does not invent speculatively.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2167,7 +2167,7 @@ describe('AppLogs', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/terminal.test.tsx -t AppLogs`
-Expected: FAIL — `AppLogs` not exported.
+Expected: FAIL, `AppLogs` not exported.
 
 - [ ] **Step 3: Replace the `appLogsRoute` placeholder**
 
@@ -2228,7 +2228,7 @@ Doc 10 Phase 5 DoD: *"CT terminal, node shell, and VM noVNC session all work thr
 """Needs a disposable live PVE (PROXPLOY_TEST_PVE_* env, same gate as every
 other pve_integration test in this repo). Proves-or-disproves this plan's
 documented open question: does this host's termproxy accept API-token auth
-for LXC/node-shell consoles (doc's "Spike correction" note — fixed for VMs in
+for LXC/node-shell consoles (doc's "Spike correction" note, fixed for VMs in
 qemu-server 9.1.7+, unconfirmed for the LXC/node-shell path)."""
 import os
 
@@ -2249,19 +2249,19 @@ def test_app_console_ticket_and_ws_against_real_pve(tmp_path):
     # ... exercises POST /apps/{id}/console/tickets and WS /apps/{id}/console/ws
     # against the real host from PROXPLOY_TEST_PVE_* env, asserting either a
     # working PTY round-trip OR the PtyBridgeError message this plan's Task 3
-    # makes explicit for the known token/termproxy PVE limitation — either
+    # makes explicit for the known token/termproxy PVE limitation: either
     # outcome is a pass for THIS test; a bare hang/timeout is the only failure.
     pytest.skip("fill in against the disposable PVE fixture once one is available "
-                "(doc 11 pattern) — no live PVE on this box (standing limitation, "
+                "(doc 11 pattern), no live PVE on this box (standing limitation, "
                 "every phase)")
 ```
 
 - [ ] **Step 2: Write and run the DoD verification script (fakes-based, matching every prior phase's no-live-PVE approach)**
 
 ```python
-# backend/dod_verify_phase5.py — run once from backend/ with the project venv, not committed
+# backend/dod_verify_phase5.py: run once from backend/ with the project venv, not committed
 """Phase 5 DoD verification, doc 10. Uses tests.support.make_app + the fakes
-from Tasks 1-4 — no live PVE, no real websocket to Proxmox, no browser on this
+from Tasks 1-4, no live PVE, no real websocket to Proxmox, no browser on this
 box, matching every prior phase's stated limitation."""
 import asyncio
 from pathlib import Path
@@ -2337,18 +2337,18 @@ Run: `cd backend && python dod_verify_phase5.py`
 
 - [ ] **Step 4: Run the full backend + frontend suites**
 
-Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"` — expect Phase 4's 308 passed, 2 skipped, 2 deselected plus this plan's new tests (Task 1: 5, Task 2: 5, Task 3: 3, Task 4: 2, Task 5: 3, Task 6: 2 = 20), zero failures, ~328 passed.
-Run: `cd backend && python scripts/check_executor_isolation.py` — expect `executor isolation: OK` (unaffected by this phase).
-Run: `cd frontend && npx vitest run` — expect Phase 4's 52 passed plus this plan's new tests (Task 7: 6, Task 8: 1, Task 9: 3, Task 10: 1, Task 11: 1 = 12), ~64 passed.
-Run: `cd frontend && npm run build` — expect a clean build.
+Run: `cd backend && pytest tests/ -q -m "not pve_integration and not e2e"`, expect Phase 4's 308 passed, 2 skipped, 2 deselected plus this plan's new tests (Task 1: 5, Task 2: 5, Task 3: 3, Task 4: 2, Task 5: 3, Task 6: 2 = 20), zero failures, ~328 passed.
+Run: `cd backend && python scripts/check_executor_isolation.py`, expect `executor isolation: OK` (unaffected by this phase).
+Run: `cd frontend && npx vitest run`, expect Phase 4's 52 passed plus this plan's new tests (Task 7: 6, Task 8: 1, Task 9: 3, Task 10: 1, Task 11: 1 = 12), ~64 passed.
+Run: `cd frontend && npm run build`, expect a clean build.
 
 - [ ] **Step 5: Write `docs/notes/phase-5-console.md`**
 
-Follow `docs/notes/phase-4-store.md`'s exact structure: "What shipped, per subsystem", a DoD verification map table (clause | proving artifact | verdict) covering the one doc 10 DoD clause above, real command output, and a "What was NOT verified" section — call out explicitly: no real Proxmox host (the `pve_integration`-marked test in Step 1 is skipped without one, same as every prior phase's live-PVE gate), no browser UI check, and this plan's own "spike correction" finding (API-token-vs-termproxy PVE version dependency) as an open item for whenever a live PVE becomes available.
+Follow `docs/notes/phase-4-store.md`'s exact structure: "What shipped, per subsystem", a DoD verification map table (clause | proving artifact | verdict) covering the one doc 10 DoD clause above, real command output, and a "What was NOT verified" section; call out explicitly: no real Proxmox host (the `pve_integration`-marked test in Step 1 is skipped without one, same as every prior phase's live-PVE gate), no browser UI check, and this plan's own "spike correction" finding (API-token-vs-termproxy PVE version dependency) as an open item for whenever a live PVE becomes available.
 
 - [ ] **Step 6: Update `buildlog.md`**
 
-Append a `### <timestamp> — Phase 5 — execute-plan completed` entry matching Phases 2/3/4's format exactly (plan path, verification counts, what was built, deviations — including the webgl-addon skip from Task 7 and the token/termproxy open question from this plan's header).
+Append a `### <timestamp>, Phase 5, execute-plan completed` entry matching Phases 2/3/4's format exactly (plan path, verification counts, what was built, deviations; including the webgl-addon skip from Task 7 and the token/termproxy open question from this plan's header).
 
 - [ ] **Step 7: Commit**
 

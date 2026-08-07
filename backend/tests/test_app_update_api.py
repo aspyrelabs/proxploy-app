@@ -53,7 +53,7 @@ def test_get_update_404s_an_unknown_app(client, csrf_header, bootstrap_admin):
 
 
 def test_post_update_requires_explicit_consent(client, csrf_header, bootstrap_admin):
-    """Same root-consent gate as install (api/catalog.py) — this runs a
+    """Same root-consent gate as install (api/catalog.py), this runs a
     community script as root on the node."""
     bootstrap_admin(client)
     app_id = _seed(client)
@@ -151,7 +151,7 @@ def test_post_update_on_an_edited_app_names_revert_not_refresh_the_catalog(clien
 
 def test_revert_clears_a_stale_update_available(client, csrf_header, bootstrap_admin):
     """Review finding: revert pins to the catalog's CURRENT sha, so by
-    definition nothing is pending afterwards — GET must not go on reporting
+    definition nothing is pending afterwards, GET must not go on reporting
     both "up to date" (from_ref == to_ref) and a stale update_available."""
     bootstrap_admin(client)
     app_id = _seed(client)  # pinned="a"*40, upstream="b"*40 -> update pending

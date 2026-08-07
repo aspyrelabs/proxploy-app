@@ -12,7 +12,7 @@ type DrawerSearch = { drawer?: 'activity'; job?: number }
 export function useActivityDrawer() {
   const search = useSearch({ strict: false }) as DrawerSearch
   const navigate = useNavigate()
-  // as never: the search type can't be narrowed from a strict:false read —
+  // as never: the search type can't be narrowed from a strict:false read, 
   // same router-typing workaround used across the route files.
   const set = (patch: DrawerSearch) =>
     navigate({ search: ((prev: DrawerSearch) => ({ ...prev, ...patch })) as never,
@@ -66,7 +66,7 @@ export function ActivityDrawer() {
   const { open, jobId, openJob, close } = useActivityDrawer()
   // GET /jobs already orders newest-first server-side (doc 06). Do not
   // re-sort here: string-comparing ISO created_at timestamps client-side
-  // reproduces the zero-microsecond tie bug the backend explicitly avoids —
+  // reproduces the zero-microsecond tie bug the backend explicitly avoids, 
   // a bare 'Z' sorts after a fractional-second suffix like '.123456Z', so a
   // zero-microsecond row would sort as newer than a genuinely later
   // same-second row.

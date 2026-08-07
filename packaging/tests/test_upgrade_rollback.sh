@@ -24,7 +24,7 @@ container_start "$name"
 # settings.value are the real column names (backend/proxploy/models); the
 # table also has NOT NULL created_at/updated_at with no DB-side default
 # (they are Python-side defaults in the ORM), so the raw insert must supply
-# them itself — same as test_install.sh's canary insert.
+# them itself: same as test_install.sh's canary insert.
 install_in_container 1.0.0
 docker exec "$name" bash -c "sqlite3 /var/lib/proxploy/proxploy.db \
   \"insert into settings (key, value, created_at, updated_at) values ('harness.canary', 'keep-me', datetime('now'), datetime('now'))\""
@@ -43,7 +43,7 @@ docker exec "$name" bash -c "sqlite3 /var/lib/proxploy/proxploy.db \
 docker exec "$name" test -f /var/lib/proxploy/pre-update/1.0.0/proxploy.db \
   || { echo "FAIL: no pre-update backup was taken"; exit 1; }
 # The API answering is not the same claim as "a stranger can browse to this
-# and see the app" — that is the SPA at /, served as a static file, not a
+# and see the app": that is the SPA at /, served as a static file, not a
 # route. install_release() is shared between install.sh and
 # proxploy-update, but the updater has its own call site (Task 9), and a
 # non-editable pip install there would silently break exactly this while
@@ -53,7 +53,7 @@ docker exec "$name" curl -fsSk https://127.0.0.1/ | grep -q 'id="root"' \
   || { echo "FAIL: TLS front does not serve the SPA at / after upgrade"; exit 1; }
 echo "OK: 1.0.0 -> 1.0.1 upgrade, data intact, backup present, SPA serves"
 
-# 3. try the poisoned 1.0.2 — it must fail AND put us back on 1.0.1
+# 3. try the poisoned 1.0.2: it must fail AND put us back on 1.0.1
 if docker exec "$name" /opt/proxploy/bin/proxploy-update --to 1.0.2 \
      --channel file:///channel/1.0.2; then
   echo "FAIL: poisoned release reported success"; exit 1
@@ -61,7 +61,7 @@ fi
 docker exec "$name" readlink /opt/proxploy/current | grep -q '1\.0\.1' \
   || { echo "FAIL: did not roll back to 1.0.1"; exit 1; }
 docker exec "$name" curl -fsS http://127.0.0.1:8000/api/v1/meta/health | grep -q ok \
-  || { echo "FAIL: app is down after rollback — the worst outcome"; exit 1; }
+  || { echo "FAIL: app is down after rollback, the worst outcome"; exit 1; }
 docker exec "$name" bash -c "sqlite3 /var/lib/proxploy/proxploy.db \
   \"select value from settings where key='harness.canary'\"" | grep -q keep-me \
   || { echo "FAIL: rollback lost data"; exit 1; }

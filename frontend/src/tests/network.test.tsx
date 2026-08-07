@@ -71,7 +71,7 @@ vi.mock('../api/client', () => {
         if (!body.confirm) {
           // The real 409 is FLAT: main.py::problem_handler does
           // body.update(exc.detail), so error/confirm_phrase are top-level
-          // and detail is a plain string — the same convention
+          // and detail is a plain string, the same convention
           // lifecycle.test.tsx uses for self_target. Verified against the
           // live endpoint (task-14 review, finding 1).
           return Promise.reject(new ApiError(409, {
@@ -100,7 +100,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 
 // uPlot needs a real canvas 2D context; jsdom hands it null and uPlot's _commit
 // throws on the first paint with non-empty data. Same treatment vncconsole.test
-// gives @novnc/novnc — the chart is a leaf with nothing this page asserts on.
+// gives @novnc/novnc, the chart is a leaf with nothing this page asserts on.
 vi.mock('../components/charts/Sparkline', () => ({
   Sparkline: ({ values }: { values: (number | null)[] }) =>
     <div data-testid="sparkline">{values.length}</div>,
@@ -128,7 +128,7 @@ describe('NetworkPage reads', () => {
     expect(t.getByText('10.0.0.9/24')).toBeInTheDocument()
     expect(t.getByText('VLAN-aware')).toBeInTheDocument()
     expect(t.getByText('bond0')).toBeInTheDocument()          // vmbr0's port
-    // bonds and physical NICs are not bridges — doc 06's table is bridges only.
+    // bonds and physical NICs are not bridges, doc 06's table is bridges only.
     // They belong to the host-config section, which asserts them below.
     expect(t.queryByText('enp1s0 enp2s0')).toBeNull()
   })
@@ -149,7 +149,7 @@ describe('NetworkPage reads', () => {
       const banner = await screen.findByRole('alert')
       expect(banner).toHaveTextContent('1 host could not be read')
       expect(banner).toHaveTextContent('host-02')
-      // the rest of the page still renders — this is a degrade, not a wipeout
+      // the rest of the page still renders; this is a degrade, not a wipeout
       expect(await screen.findByRole('table', { name: 'Bridges' })).toBeInTheDocument()
     } finally {
       BRIDGES.errors = []

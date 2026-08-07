@@ -23,7 +23,7 @@ export function StorePage() {
   const refresh = useRefreshCatalog()
   // Same query key as cluster.tsx's unfiltered /apps fetch, so this shares one
   // cache entry rather than adding a second request. Drives the real
-  // `installed` prop below — it used to be hardcoded false, which made
+  // `installed` prop below, it used to be hardcoded false, which made
   // StoreCard's tested "Installed" disabled state unreachable in the real page.
   const { data: apps } = useQuery({
     queryKey: ['apps', {}],

@@ -72,7 +72,7 @@ def get_entitlements(request: Request):
 
 
 def require_entitlement(key: str):
-    """Doc 07 §2 backend enforcement — stack after auth/role deps on every gated route."""
+    """Doc 07 §2 backend enforcement, stack after auth/role deps on every gated route."""
     def dep(request: Request):
         if not request.app.state.entitlements.enabled(key):
             raise HTTPException(403, {"error": "entitlement_required", "feature": key})
@@ -128,13 +128,13 @@ def scope_backup(param: str = "backup_id"):
 
 
 def authorize(resource: str, action: str, *, scope_of=None):
-    """Doc 08 §6 enforcement point — the only authorization path in the
+    """Doc 08 §6 enforcement point, the only authorization path in the
     product (the Phase-1 require_role RBAC stub is retired). Fail-closed
     twice over: an unregistered (resource, action) pair refuses to even
     build a dependency (so an ungoverned route cannot be registered), and
     the enforcer denies anything it does not recognise.
     Order on routes: dependencies=[Depends(authorize(...)),
-    Depends(require_entitlement(...))] — authorize resolves get_current_user
+    Depends(require_entitlement(...))], authorize resolves get_current_user
     first, so an anonymous caller still gets 401 before any 403."""
     from proxploy.services.authz import PERMISSIONS
     from proxploy.services.authz import enforce as _enforce
@@ -145,7 +145,7 @@ def authorize(resource: str, action: str, *, scope_of=None):
             user: User = Depends(get_current_user)) -> User:
         from proxploy.services.audit import write_audit
 
-        # A key can only narrow its user, never widen — this runs BEFORE the
+        # A key can only narrow its user, never widen: this runs BEFORE the
         # casbin check so a key's scopes are a ceiling on the session's own
         # role, never an alternate grant. Empty scopes = full user rights
         # (doc 04): a key with no scopes list still cannot exceed enforce()

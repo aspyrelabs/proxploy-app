@@ -1,11 +1,11 @@
-"""`app.update` — same pin/stream/archive path as install (doc 10 Phase 7)."""
+"""`app.update`, same pin/stream/archive path as install (doc 10 Phase 7)."""
 import asyncio
 
 import pytest
 
 from proxploy.jobs import HANDLERS, JobBackend, JobContext, JobFailed
 from proxploy.models import App, AppScript, CatalogEntry, Host, HostCredential, Job, utcnow
-from proxploy.services import appstore as _appstore  # noqa: F401 — registers app.update
+from proxploy.services import appstore as _appstore  # noqa: F401  (registers app.update)
 from tests.fakes.pve import FakePVE
 from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
 from tests.support import make_job_app, seed_host_row
@@ -53,7 +53,7 @@ def _ssh(recorder, exit_status=0, lines=("updating...",), on_run=None):
     """Fake asyncssh connect factory: records the composed command into
     `recorder` (matching FakeSSHConnection.last_command, captured because env
     vars are inlined onto the command string) and, if given, calls `on_run`
-    right after the command is issued — used to simulate the catalog script
+    right after the command is issued, used to simulate the catalog script
     creating a stray CT mid-run, before the post-check reads back."""
     def _on_create_process(command):
         recorder.append(command)
@@ -81,7 +81,7 @@ def test_update_runs_the_new_pinned_commit_and_advances_the_script_pin(tmp_path)
 
         assert out["from_ref"] == "a" * 40
         assert out["to_ref"] == "b" * 40
-        # Pinned to the NEW commit, never to `main` — same rule as install.
+        # Pinned to the NEW commit, never to `main`: same rule as install.
         assert "b" * 40 in cmds[0]
         assert "/main/" not in cmds[0].split("build.func")[0]
 
@@ -122,8 +122,8 @@ def test_update_fails_loudly_if_a_new_container_appeared(tmp_path):
     rather than report success over a stray container.
 
     Review B1/B2: the message must (a) never issue a bare "remove it"
-    instruction — this is a whole-cluster snapshot diff and JobBackend runs
-    jobs concurrently, so a stray id is not proof of what built it — and (b)
+    instruction; this is a whole-cluster snapshot diff and JobBackend runs
+    jobs concurrently, so a stray id is not proof of what built it; and (b)
     warn that a bare retry will likely hit the same install branch again."""
     async def go():
         fake = FakePVE()
@@ -305,7 +305,7 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
     """api/apps.py::put_app_script writes source="edited" WITHOUT an
     upstream_ref (verified live, Task 4 review finding). Re-running the
     upstream script over an edited one would silently discard the operator's
-    edits — this must fail before anything reaches SSH.
+    edits; this must fail before anything reaches SSH.
 
     Task 6 built api/apps.py::revert_app_script as the way out, so the
     message now points at it by name (`POST .../script/revert`) instead of

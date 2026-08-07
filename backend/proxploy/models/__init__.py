@@ -1,4 +1,4 @@
-"""All Proxploy entities — schema per docs/04-data-model.md, portable SQLite/Postgres subset."""
+"""All Proxploy entities, schema per docs/04-data-model.md, portable SQLite/Postgres subset."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -45,7 +45,7 @@ class User(TimestampMixin, Base):
 
 
 class TotpRecoveryCode(Base):
-    """One row per recovery code (Phase 8 Task 8 amendment — see
+    """One row per recovery code (Phase 8 Task 8 amendment, see
     docs/notes/phase-8-scale.md: the plan's zero-migration design packed
     these inside `users.totp_secret_enc`; a real column replaces that so
     burning a code is an ordinary UPDATE, never a decrypt-mutate-re-encrypt
@@ -147,7 +147,7 @@ class HostCredential(TimestampMixin, Base):
     public_meta: Mapped[str | None] = mapped_column(Text)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Set by POST /hosts/{id}/ssh/verify. NULL means "never confirmed working"
-    # — which is exactly what the onboarding wizard's authorize step reads to
+    #, which is exactly what the onboarding wizard's authorize step reads to
     # know whether it still has something to ask the operator for.
     ssh_verified_at: Mapped[datetime | None] = mapped_column(DateTime)
     __table_args__ = (UniqueConstraint("host_id", "kind", name="ux_host_creds"),)
@@ -292,9 +292,9 @@ class Schedule(TimestampMixin, Base):
 # unencrypted). This is the single source of truth for `kind`'s allowlist:
 # `notifier.kind_for()` imports this dict rather than defining its own copy, and
 # migration 0002 imports `ALLOWED_NOTIFICATION_KINDS` to build the DB-level
-# CHECK constraint — one Python constant, never two literals that can drift.
+# CHECK constraint: one Python constant, never two literals that can drift.
 # Tokens verified at v1.12.0 via `apprise.plugins.N_MGR.schemas()` / each
-# plugin's `service_name` — not guessed. `http`/`https` are not real Apprise
+# plugin's `service_name`: not guessed. `http`/`https` are not real Apprise
 # schemes (its generic-webhook plugins are the json/form/xml entries below);
 # MS Teams' current scheme is `workflow(s)` (Power Automate), not `msteams`.
 KIND_FROM_SCHEME = {
@@ -462,7 +462,7 @@ class AuditEvent(Base):
 
 
 class ConsoleTicket(Base):
-    """Single-use, short-TTL. Only `token_hash` is stored — never the raw,
+    """Single-use, short-TTL. Only `token_hash` is stored, never the raw,
     browser-facing ticket (SessionRow's exact pattern, doc 04). `upstream_ticket`
     IS stored in the clear: it's Proxmox's own short-TTL ticket, never reaches
     the browser (doc 02 §5), and is meaningless without a live upstream socket

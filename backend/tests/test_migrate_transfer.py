@@ -3,7 +3,7 @@
 plus the `STRATEGY_TRANSFER` branch of `services/migrate.py::migrate_app`,
 for two hosts that share neither a PVE cluster nor a backup storage.
 
-FAKES vs HARDWARE — read this before trusting a green run: there is no live
+FAKES vs HARDWARE, read this before trusting a green run: there is no live
 Proxmox host and no real SSH target in this repo, ever. Every assertion here
 is proven against `tests/fakes/pve.py::FakePVE` (a hand-maintained mimic of
 the proxmoxer attribute surface) and `tests/fakes/ssh.py::FakeSSHConnection`/
@@ -14,11 +14,11 @@ that proves: the handler's call sequence (vzdump -> locate archive -> SFTP
 copy -> restore from the target-local copy -> start -> health check ->
 repoint), the SFTP chunk/progress mechanics, the honesty properties (measured
 downtime, source never destroyed, transfer scratch files cleaned up on both
-hosts on both success and failure), and the JobFailed/rollback messaging —
+hosts on both success and failure), and the JobFailed/rollback messaging; 
 all GIVEN the PVE API shapes FakePVE encodes and the SFTP semantics FakeSFTP
 encodes. What it does NOT prove: that a real PVE dir storage's `dump/`
 layout, a real OpenSSH sshd, or a real asyncssh SFTP session over an actual
-network behaves this way end-to-end on real disks — that needs live
+network behaves this way end-to-end on real disks, that needs live
 hardware.
 """
 import asyncio
@@ -43,11 +43,11 @@ TGT_HOSTNAME = "10.0.0.102"
 FAKE_KEY = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"
 
 
-# --- executor/transfer.py::sftp_copy — unit -----------------------------------
+# --- executor/transfer.py::sftp_copy: unit -----------------------------------
 
 def test_sftp_copy_streams_bytes_and_reports_progress(monkeypatch):
     """4 MiB chunking forced down to 4 bytes so one 12-byte payload exercises
-    three chunks — bytes land intact at the destination path, on_progress
+    three chunks, bytes land intact at the destination path, on_progress
     fires once per chunk with a running total, and the return value is the
     total byte count."""
     monkeypatch.setattr(transfer_mod, "CHUNK_SIZE", 4)
@@ -161,7 +161,7 @@ PAYLOAD = b"pretend-vzdump-archive-bytes" * 1000
 
 def _no_shared_storage_pair():
     """Two standalone hosts, each with its own dir-type backup storage at a
-    DIFFERENT filesystem path — the no-cluster, no-shared-storage setup that
+    DIFFERENT filesystem path, the no-cluster, no-shared-storage setup that
     forces `preflight()` to pick STRATEGY_TRANSFER."""
     a, b = FakePVE(), FakePVE()
     a.cluster_storage_rows = [{"storage": "local-src", "type": "dir",
@@ -225,7 +225,7 @@ def test_transfer_strategy_copies_archive_restores_on_target_and_cleans_up(tmp_p
         assert fake_src.guest_deletes == fake_tgt.guest_deletes == []
         assert ("lxc", 500, "start") in fake_tgt.actions
 
-        # both scratch archives cleaned up on success — no orphaned dump files
+        # both scratch archives cleaned up on success: no orphaned dump files
         assert ("pve-src", "local-src", SRC_VOLID) in fake_src.deleted_volumes
         assert ("pve-tgt", "local-tgt", DST_VOLID) in fake_tgt.deleted_volumes
 
@@ -263,7 +263,7 @@ def test_transfer_strategy_missing_dir_storage_on_target_fails_naming_the_side(t
 
 
 def test_transfer_strategy_ssh_host_key_mismatch_fails_and_cleans_up_source_archive(tmp_path):
-    """The target's SSH host key has changed since it was pinned — the
+    """The target's SSH host key has changed since it was pinned, the
     hard-fail-never-auto-accept rule (doc 08 §4) surfaces as JobFailed, the
     already-created source vzdump archive is deleted rather than orphaned,
     and nothing is touched on the target."""

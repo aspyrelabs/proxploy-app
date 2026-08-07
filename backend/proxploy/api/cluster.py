@@ -9,10 +9,10 @@ from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
 
 # Cluster reads are host-shaped aggregates, not a distinct "cluster" resource
-# — there is no ("cluster", "read") entry in PERMISSIONS, so this reuses
+#; there is no ("cluster", "read") entry in PERMISSIONS, so this reuses
 # ("host", "read"). Same singleton for the route-level dependencies=[...] copy
 # and the parameter-level copy (see _read's use on /activity below) so
-# FastAPI's dependency cache collapses them into one call that runs first —
+# FastAPI's dependency cache collapses them into one call that runs first, 
 # ordering fix, doc 10 "auth before entitlement" invariant.
 _read = authorize("host", "read")
 
@@ -43,7 +43,7 @@ def cluster_summary(request: Request, db=Depends(get_db),
             # (one datastore reported once per node) and undercounts a LOCAL
             # storage that happens to share a name across nodes (`local` on pve1
             # and pve2 is 2x the capacity, counted once). This is the cluster
-            # RING — a single number — and the snapshot dict now carries
+            # RING: a single number, and the snapshot dict now carries
             # `shared`, so the fix is one line (`key = st["storage"] if
             # st["shared"] else (st["node"], st["storage"])`) if the ring is ever
             # shown to disagree with the page. Per-datastore truth, which does
@@ -128,17 +128,17 @@ def activity(limit: int = 20, db=Depends(get_db),
 
     An audit row that spawned a job is skipped: the job entry already represents
     it, and showing both would double every lifecycle action. Alerts are the
-    third source — the `kind` discriminator lets the frontend distinguish all
+    third source, the `kind` discriminator lets the frontend distinguish all
     three without extra endpoints.
 
     Paging: each source is independently queried with `LIMIT limit` (not
     `limit // 3`), so the merged-then-sliced result is always the true
-    top-`limit` rows across all three kinds — the top `limit` merged rows can
+    top-`limit` rows across all three kinds, the top `limit` merged rows can
     contain at most `limit` rows from any one source, and each source already
     supplies that many. A source can only return fewer than `limit` rows
     (including zero) than the feed asks for when it genuinely has fewer
     displayable rows, e.g. every audit row in view is a job-spawned dupe that
-    gets skipped — that is the intended dedup, not starvation.
+    gets skipped; that is the intended dedup, not starvation.
 
     The merge sorts on the raw `datetime`, not the serialized `.isoformat()`
     string used for the `at` field: Python's `isoformat()` drops the
@@ -169,7 +169,7 @@ def activity(limit: int = 20, db=Depends(get_db),
         "severity": None, "message": None}) for a in audits]
 
     # Third source (doc 05: "jobs + alerts + audit highlights, merged"). Like
-    # the two above it is queried with the FULL `limit`, not `limit // 3` —
+    # the two above it is queried with the FULL `limit`, not `limit // 3`; 
     # that is what makes the merged-then-sliced result the true top-`limit`.
     alerts = (db.query(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
               .limit(limit).all())

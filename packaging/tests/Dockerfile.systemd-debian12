@@ -1,4 +1,4 @@
-# The stock `debian:12` image has no /sbin/init — it is a minimal userland,
+# The stock `debian:12` image has no /sbin/init: it is a minimal userland,
 # not a bootable systemd system, so plans that assume `docker run debian:12
 # /sbin/init` works are wrong. This adds just systemd on top so the install
 # harnesses (Tasks 12, 13) get a real systemd as PID 1, matching a Proxmox

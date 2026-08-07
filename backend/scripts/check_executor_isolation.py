@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hard structural rule (docs 08 §4, 09): no module outside proxploy/executor/ may
 import the SSH client (asyncssh) or call the SecretStore accessor that returns the
-SSH private key. Mechanical enforcement, not convention. Wired from Phase 1 —
+SSH private key. Mechanical enforcement, not convention. Wired from Phase 1, 
 passes trivially until executor/ exists in Phase 4."""
 import argparse
 import ast

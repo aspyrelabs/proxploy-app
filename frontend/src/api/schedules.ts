@@ -13,7 +13,7 @@ export type ScheduleRow = {
  *  backend accepts any registered kind, so this list is the curated surface,
  *  not the security boundary.
  *
- *  ponytail: `backup.prune` is left out on purpose — its handler
+ *  ponytail: `backup.prune` is left out on purpose, its handler
  *  (backupjobs.py) hard-requires `params.storage`/`params.spec`, which this
  *  form has no fields for, so scheduling it would create cleanly and then
  *  KeyError at every fire. Add it once the form grows a datastore + keep-rule

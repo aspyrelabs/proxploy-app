@@ -62,7 +62,7 @@ def test_leaves_a_current_app_alone(tmp_path):
 
 
 def test_clears_the_flag_once_the_app_catches_up(tmp_path):
-    """The flag is derived state, not a latch — an app that updated (or whose
+    """The flag is derived state, not a latch; an app that updated (or whose
     catalog entry rolled back) must stop advertising an update."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
@@ -91,7 +91,7 @@ def test_ignores_an_adopted_app_with_no_catalog_slug(tmp_path):
 
 
 def test_ignores_an_app_with_no_pinned_script(tmp_path):
-    """Adopted apps have no app_scripts row — there is no "from" commit, so
+    """Adopted apps have no app_scripts row; there is no "from" commit, so
     there is no honest diff to offer."""
     db = make_db(tmp_path)
     host = seed_host_row(db)

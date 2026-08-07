@@ -8,13 +8,13 @@ export type TeamRow = {
 
 export type MemberRow = { user_id: number; email: string; display_name: string | null; role: string }
 
-// Mirrors GET /users (auth.py::list_users) — the member-picker source.
+// Mirrors GET /users (auth.py::list_users), the member-picker source.
 export type UserRow = {
   id: number; email: string; display_name: string | null; is_active: boolean
   teams: { team_id: number; role: string }[]
 }
 
-// Matches backend ROLE_ORDER (api/deps.py) — MemberIn._known_role rejects anything else.
+// Matches backend ROLE_ORDER (api/deps.py), MemberIn._known_role rejects anything else.
 export const ROLE_OPTIONS = ['viewer', 'operator', 'admin', 'owner'] as const
 
 export function useTeams(enabled = true) {

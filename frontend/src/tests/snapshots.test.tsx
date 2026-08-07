@@ -8,7 +8,7 @@ let rollbackGuard = false
 
 const SNAPS = [
   // PVE's snapshot list always carries a synthetic `current` row for the live
-  // state — it is not a snapshot and must never be offered Rollback/Delete.
+  // state; it is not a snapshot and must never be offered Rollback/Delete.
   { name: 'current', description: 'You are here!', snaptime: null, vmstate: false, parent: 'pre-upgrade' },
   { name: 'pre-upgrade', description: 'before the 24.04 jump', snaptime: 1785369600,
     vmstate: true, parent: null, size_bytes: 2147483648 },

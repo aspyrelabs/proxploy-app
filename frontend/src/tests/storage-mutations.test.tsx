@@ -34,13 +34,13 @@ vi.mock('../api/client', () => ({
     if (path === '/storage') return Promise.resolve([LOCAL, LOCAL_LVM])
     if (path.startsWith('/storage/1/local-lvm/content')) return Promise.resolve([ISO_VOL])
     if (path.includes('/content')) return Promise.resolve([])
-    // Only a plain GET is the detail shape — PATCH to this same path is the
+    // Only a plain GET is the detail shape, PATCH to this same path is the
     // edit mutation and falls through to the generic case below.
     if (path === '/storage/1/local' && (opts?.method ?? 'GET') === 'GET') {
       return Promise.resolve({ ...LOCAL, avail_bytes: 300, nodes: ['pve1'] })
     }
     // Generic fallthrough covers attach (POST /storage), detach (DELETE
-    // /storage/1/local) and edit (PATCH /storage/1/local — same path as the
+    // /storage/1/local) and edit (PATCH /storage/1/local, same path as the
     // GET-detail special case above, which only matches a plain GET).
     // `updated` is here because StorageForm's edit onSuccess reads
     // `r.updated.join(...)`; leaving it off crashes that handler with an
@@ -139,7 +139,7 @@ describe('StorageForm', () => {
   it('veils the form when storage.manage is off, and never before entitlements resolve', async () => {
     features = {}
     withQuery(<StorageForm existing={null} onClose={vi.fn()} />)
-    // has() is false until the first fetch resolves — gating on !has() alone
+    // has() is false until the first fetch resolves, gating on !has() alone
     // would veil this for every plan during load.
     expect(screen.queryByText('Unlock Pro')).toBeNull()
     expect(await screen.findByText('Unlock Pro')).toBeInTheDocument()
@@ -161,7 +161,7 @@ describe('StorageForm', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Detach' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('local'))
     // mutate() runs its mutationFn in a microtask, so a synchronous check here
-    // passes even with the window.confirm guard removed entirely — flush a
+    // passes even with the window.confirm guard removed entirely, flush a
     // macrotask first (idiom borrowed from settings.test.tsx) so this actually
     // exercises the guard.
     await new Promise((r) => setTimeout(r, 10))

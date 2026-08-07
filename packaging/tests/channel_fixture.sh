@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds a local, file-served release channel for the install/upgrade/
 # rollback harnesses (Tasks 12-13) and the manifest round-trip check
-# (Task 11 Step 3). Nothing here touches a real GitHub release — spec D4
+# (Task 11 Step 3). Nothing here touches a real GitHub release: spec D4
 # keeps publication out of implementation.
 #
 # Normal mode:   channel_fixture.sh <dir>

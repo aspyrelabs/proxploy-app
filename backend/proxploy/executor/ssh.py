@@ -1,11 +1,11 @@
 """asyncssh-backed root shell executor (doc 08 §4). This module is the only
-one (besides executor/keys.py) allowed to import asyncssh — enforced by
+one (besides executor/keys.py) allowed to import asyncssh, enforced by
 scripts/check_executor_isolation.py.
 
 Stdin is always closed (asyncssh.DEVNULL), never left open: the Phase 4
 entry-gate spike (docs/notes/phase-4-spike.md) proved that an unguarded
 upstream `read` prompt hard-aborts under closed stdin but hangs forever
-under an open, idle stdin — closed stdin is the only choice that fails fast
+under an open, idle stdin; closed stdin is the only choice that fails fast
 instead of parking a JobBackend semaphore slot indefinitely.
 """
 from __future__ import annotations
@@ -23,8 +23,8 @@ CONNECT_TIMEOUT_S = 15.0
 
 def normalize_ssh_host(address: str) -> str:
     """`Host.address` (api/hosts.py) is stored as a full `scheme://host:port`
-    URL — the same shape services/proxmox.py::ProxmoxClient._connect parses
-    for HTTPS — but asyncssh's `host` argument wants a bare hostname/IP.
+    URL, the same shape services/proxmox.py::ProxmoxClient._connect parses
+    for HTTPS, but asyncssh's `host` argument wants a bare hostname/IP.
     Strips scheme and port; falls back to the raw string when there is no
     scheme (`urlparse(...).hostname` is None for a bare host/IP), which also
     covers a bare unbracketed IPv6 literal. A bare bracketed IPv6 literal
@@ -39,7 +39,7 @@ def normalize_ssh_host(address: str) -> str:
     return address
 
 # POSIX shell variable name. `env` keys are inlined literally (unquoted) into
-# the command string below, so a key isn't just data like a value is — an
+# the command string below, so a key isn't just data like a value is: an
 # unvalidated key IS shell syntax. shlex.quote on the value can't help here;
 # this is the only thing standing between an admin-supplied override key
 # (proxploy/api/catalog.py InstallIn.overrides, untyped keys) and a second
@@ -68,7 +68,7 @@ async def default_connect_factory(host: str, private_key_pem: bytes, *,
             # fingerprint here. Returning False on a mismatch would make
             # asyncssh itself abort the handshake with its own
             # HostKeyNotVerifiable *before* the caller gets a chance to see
-            # a proper SSHHostKeyMismatch — the mismatch decision belongs to
+            # a proper SSHHostKeyMismatch: the mismatch decision belongs to
             # the post-connect check below, which can also close the
             # connection cleanly instead of asyncssh tearing it down mid-kex.
             captured["fingerprint"] = key_.get_fingerprint()
@@ -78,7 +78,7 @@ async def default_connect_factory(host: str, private_key_pem: bytes, *,
         _PinningClient, host, port, username="root", client_keys=[key],
         # known_hosts=None disables asyncssh's own trust store AND skips
         # calling validate_host_public_key entirely (asyncssh sets
-        # _trusted_host_keys=None and never invokes the callback) — that
+        # _trusted_host_keys=None and never invokes the callback): that
         # silently no-ops our TOFU pinning. known_hosts=b'' (an empty inline
         # trust store, not "no check") keeps _trusted_host_keys as an empty
         # set, which is what makes asyncssh actually call
@@ -115,7 +115,7 @@ class SSHExecutor:
         command string, NOT passed through asyncssh's `env=` kwarg. This is
         not a style choice: asyncssh's `env=` sends each variable as an SSH
         protocol `env` channel request, and stock OpenSSH `sshd` silently
-        drops every variable not listed in its `AcceptEnv` directive — which
+        drops every variable not listed in its `AcceptEnv` directive, which
         defaults to empty (only `LANG`/`LC_*` survive on most builds). On a
         default-configured Proxmox node that means `MODE`, `PHS_SILENT` and
         every `var_*` override would vanish before the remote script saw
@@ -158,7 +158,7 @@ class SSHExecutor:
                            timeout_s: float = 1800.0) -> int:
         """Same contract as `run`, but resolves the private key from
         SecretStore itself so the raw key bytes never have to leave
-        executor/ (docs 08 §4) — callers outside this package pass a
+        executor/ (docs 08 §4), callers outside this package pass a
         sessionmaker + host_id instead of a key, and
         scripts/check_executor_isolation.py enforces that only this module
         ever references `get_ssh_private_key`. Raises LookupError if the

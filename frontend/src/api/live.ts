@@ -36,7 +36,7 @@ export function applyMetrics(qc: QueryClient, data: { targets: MetricTarget[] })
  * used to disagree: applyResource fell through to 'vms' for anything it did
  * not recognise and applyJob invalidated nothing at all, so Phase 6's storage /
  * backup / network events refreshed the VM list while their own pages went
- * stale. An unlisted type now routes NOWHERE, which is the honest answer —
+ * stale. An unlisted type now routes NOWHERE, which is the honest answer; 
  * a guess here is a wrong cache read somewhere else.
  */
 const RESOURCE_KEY: Record<string, string> = {
@@ -57,7 +57,7 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
   const key = RESOURCE_KEY[d.type]
   if (!key) return
   // Guests only. A storage/backup/network event's `id` is a HOST id and those
-  // caches hold no `id` column — running the row patch there would edit
+  // caches hold no `id` column, running the row patch there would edit
   // whichever unrelated row happened to collide.
   if (d.change === 'status' && d.id != null && (d.type === 'app' || d.type === 'vm')) {
     qc.setQueriesData({ queryKey: [key] }, (v: unknown) => {
@@ -84,7 +84,7 @@ type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number })
 
 /** SSE `job` event → patch ['jobs'] (list AND detail shapes), and on a
  *  terminal state invalidate the affected resource + activity feed and raise
- *  a toast (doc 06 §d, doc 05 §Streaming 4 — the payload carries target_type). */
+ *  a toast (doc 06 §d, doc 05 §Streaming 4; the payload carries target_type). */
 export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   let wasTerminal = false
   const patch = (r: any) => {
@@ -98,13 +98,13 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   })
   if (!d.status || !(TERMINAL as string[]).includes(d.status)) return
   // A duplicate delivery of the same terminal delta (SSE has no replay/dedup
-  // today — see the job-log stream's Last-Event-ID for the pattern if that
+  // today, see the job-log stream's Last-Event-ID for the pattern if that
   // changes) would otherwise re-invalidate and re-toast for nothing.
   if (wasTerminal) return
   qc.invalidateQueries({ queryKey: ['jobs'] })
   qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
   // ['vms'] is a prefix match, so a vm.snapshot_* job invalidates
-  // ['vms', id, 'snapshots'] here for free — Task 16 adds no wiring.
+  // ['vms', id, 'snapshots'] here for free; Task 16 adds no wiring.
   const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
   if (resourceKey) qc.invalidateQueries({ queryKey: [resourceKey] })
   toast?.({
@@ -128,7 +128,7 @@ type AlertToastFn = (t: { kind: 'ok' | 'err'; text: string; alertId: number }) =
  *  write a half-row into the cache. Doc 06's rule is "patch when the delta is
  *  complete, invalidate when it isn't".
  *
- *  A `resolved` transition always toasts, at any severity — an info-level
+ *  A `resolved` transition always toasts, at any severity; an info-level
  *  alert that quietly went away is still worth one line of good news, and it
  *  is the only signal that an earlier toast is stale. */
 export function applyAlert(qc: QueryClient, d: AlertDelta, toast?: AlertToastFn) {

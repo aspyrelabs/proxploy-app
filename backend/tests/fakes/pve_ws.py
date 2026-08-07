@@ -1,5 +1,5 @@
 """In-process fake Proxmox vncwebsocket server speaking the documented xtermjs
-protocol (see plan doc's "Confirmed, not assumed" note) — enough to prove
+protocol (see plan doc's "Confirmed, not assumed" note); enough to prove
 PtyBridge's translation logic without a real PVE host."""
 import asyncio
 

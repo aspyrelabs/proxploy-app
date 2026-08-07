@@ -4,12 +4,12 @@ import { api } from '../api/client'
 import { useFiringAlerts } from '../api/alerts'
 import type { NodeRow } from '../api/hooks'
 
-/** Doc 06 §(b) `HealthFooter`: `.side-foot` — "All systems healthy", green dot,
+/** Doc 06 §(b) `HealthFooter`: `.side-foot`, "All systems healthy", green dot,
  *  "3 nodes · 0 alerts". Bound to `/alerts?state=firing` + host status; the dot
  *  turns `--red` when anything is firing.
  *
  *  Until Phase 7 this was three hard-coded lines in SidebarNav that always said
- *  "All systems healthy" — the one piece of UI that must never lie. */
+ *  "All systems healthy", the one piece of UI that must never lie. */
 export function HealthFooter() {
   const alerts = useFiringAlerts()
   const nodes = useQuery({
@@ -18,12 +18,12 @@ export function HealthFooter() {
     refetchInterval: 30_000,
   })
 
-  // Don't say "healthy" before either query has answered — that's the exact
+  // Don't say "healthy" before either query has answered, that's the exact
   // lie this footer used to tell unconditionally.
   if (alerts.isPending || nodes.isPending) return null
 
   // isPending goes false on error too (data stays undefined), so a 401/500/
-  // dropped network would otherwise fall through to firing=0, down=0 —
+  // dropped network would otherwise fall through to firing=0, down=0; 
   // "All systems healthy" while the backend is unreachable. Say so instead.
   if (alerts.isError || nodes.isError) {
     return (

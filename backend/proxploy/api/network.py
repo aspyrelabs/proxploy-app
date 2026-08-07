@@ -2,11 +2,11 @@
 """Network reads + guest NIC edit (doc 05 §Network, doc 01 §6).
 
 Doc 05 calls /network/bridges a "live passthrough" and this is exactly that:
-no model, no cache, no migration — one GET /nodes/{node}/network per node of
+no model, no cache, no migration; one GET /nodes/{node}/network per node of
 the requested host(s), served straight back. Throughput is the opposite: it is
 NOT a passthrough, it comes from the `host` target's existing `net_in_bps` /
 `net_out_bps` MetricSample rows the poller has been writing since Phase 2,
-read through services/metrics.py::query_series — the same reader
+read through services/metrics.py::query_series, the same reader
 api/metrics.py::metrics_query uses. There is deliberately no second metrics
 path in this codebase.
 
@@ -39,7 +39,7 @@ router = APIRouter(prefix="/network", tags=["network"])
 # auth runs before the entitlement gate and FastAPI collapses the two
 # (deps.py idiom; test_route_auth_invariant.py enforces it). Both reads below
 # take `host` as a query param, not a path param, so there is nothing for
-# scope_host() to resolve — global, same as before this had a scope.
+# scope_host() to resolve: global, same as before this had a scope.
 _read = authorize("network", "read")
 
 NET_KEY = re.compile(r"^net\d+$")
@@ -82,7 +82,7 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[d
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                   target_id: int, host: Host, kind: str, vmid: int,
                   iface: str, body: NicIn) -> dict:
-    """Read-modify-write one netN. NOT a job — see ProxmoxClient.guest_config_update."""
+    """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update."""
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
     node = host.node_name or ""
@@ -123,7 +123,7 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         # Honest, not reassuring: PVE handed back a UPID, which for a config
         # write means it filed the change under the guest's PENDING section.
         # The running guest still has the old NIC.
-        "detail": ("Proxmox recorded this as a pending change — the guest keeps its "
+        "detail": ("Proxmox recorded this as a pending change, the guest keeps its "
                    "current NIC until it is rebooted (a shutdown/start, not a reset)."
                    if upid is not None else
                    "Applied immediately; no reboot needed."),
@@ -157,13 +157,13 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
     """Bridges/bonds/VLANs/physical NICs per node + the guest attachment map.
 
     # ponytail: the attachment map costs one guest_config read per adopted app
-    # and VM on the host — fine for a homelab, linear in guest count for a
+    # and VM on the host: fine for a homelab, linear in guest count for a
     # 200-guest fleet. This is a human-triggered route, explicitly outside the
     # poller's O(nodes) budget (proxmox.py's "per-guest, user-triggered calls"
     # section). If it ever gets slow, cache netN in the poller's cluster_resources
     # pass; do not add per-guest calls to the poll loop to get it.
 
-    One bad host (unreachable, or missing its API token credential — a
+    One bad host (unreachable, or missing its API token credential; a
     routine state, not an outage) must not 500 the whole page: it is degraded
     out into `errors` and every other host is still served.
     """
@@ -265,7 +265,7 @@ class ApplyIn(BaseModel):
 # ponytail: Proxploy does not detect whether staged changes exist, so Apply and
 # Revert are always offered rather than enabled-when-dirty. PVE reports pending
 # state as a `changes` property SIBLING to `data` on GET /nodes/{node}/network,
-# and proxmoxer's .get() unwraps `data` and throws the rest away — reading it
+# and proxmoxer's .get() unwraps `data` and throws the rest away: reading it
 # would mean bypassing the client layer, which proxmox.py's module docstring
 # forbids outright. A no-op apply is handled gracefully by PVE (it reloads the
 # unchanged config), so the cost of not knowing is one wasted ifreload.
@@ -280,8 +280,8 @@ def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
                   user: User = Depends(_host_global)):
     host = _host_or_404(db, body.host_id)
     # Route-controlled keys (iface/type) go LAST in the unpack so a
-    # caller-supplied config.iface or config.type — both admitted by
-    # _SAFE_KEY — can never override what this route says it is staging.
+    # caller-supplied config.iface or config.type: both admitted by
+    # _SAFE_KEY: can never override what this route says it is staging.
     cfg = {**_check_config(body.config), "iface": body.iface, "type": body.type}
     ip = request.client.host if request.client else None
     try:

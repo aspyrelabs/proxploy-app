@@ -1,7 +1,7 @@
 """VM snapshots (doc 05 §VMs, doc 01 §4 "with-RAM option surfaced").
 
 Two properties here are load-bearing and each gets its own test:
-  1. all four routes sit ABOVE api/vms.py's POST /{vm_id}/{action} wildcard —
+  1. all four routes sit ABOVE api/vms.py's POST /{vm_id}/{action} wildcard, 
      otherwise POST /vms/3/snapshots is dispatched as the lifecycle action
      "snapshots" and 422s;
   2. PVE's snapshot list carries a synthetic `current` pseudo-snapshot for the
@@ -120,7 +120,7 @@ def _all_paths(app):
     `_IncludedRouter` node rather than eagerly copying child routes onto
     `app.routes`, so a plain `[r.path for r in app.routes if hasattr(r, "path")]`
     silently returns only the 4 top-level doc routes and none of api_router's
-    children (it would pass vacuously here — `paths.index(...)` would raise
+    children (it would pass vacuously here, `paths.index(...)` would raise
     ValueError on both sides rather than proving ordering). Reusing
     test_network_api.py's `_all_paths` pattern: `_IncludedRouter.
     effective_route_contexts()` is the same recursive walk Starlette's own
@@ -175,7 +175,7 @@ def test_snapshot_name_is_validated(tmp_path, csrf_header, bootstrap_admin):
         # the same rule guards the path parameter on rollback/delete. Starlette
         # keeps the literal ".." segment (it does not dot-normalize the path
         # before matching), so no api/v1 route matches at all and the request
-        # falls through to main.py's SPA static mount at "/" — which only
+        # falls through to main.py's SPA static mount at "/": which only
         # allows GET/HEAD, hence 405. Whichever of the three, the traversal
         # payload never reaches rollback_vm_snapshot.
         assert c.post(f"/api/v1/vms/{vid}/snapshots/..%2Fescape/rollback",
@@ -279,7 +279,7 @@ def _run_job(tmp_path, kind, params_from_ids):
         db_dir = tmp_path / kind
         db_dir.mkdir(parents=True, exist_ok=True)
         app = make_job_app(db_dir, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers vm.snapshot_*
+        import proxploy.services.guestjobs  # noqa: F401  (registers vm.snapshot_*)
 
         backend = JobBackend(app)
         ids = _seed(app)

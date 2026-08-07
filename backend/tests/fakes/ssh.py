@@ -69,7 +69,7 @@ class FakeSFTPFile:
 class FakeSFTP:
     """`.open()` returns an object usable both awaited and as `async with
     sftp.open(path, mode)`, matching asyncssh's real `@async_context_manager`
-    -decorated `SFTPClient.open` — sftp_copy only ever uses the `async with`
+    -decorated `SFTPClient.open`, sftp_copy only ever uses the `async with`
     form, so that's the only shape implemented here."""
 
     def __init__(self, store: dict[str, bytes]):
@@ -91,7 +91,7 @@ class FakeSSHConnection:
         self.exit_status = exit_status
         self.hang = hang
         # Shared (or private, if a test passes none) in-memory "filesystem"
-        # for start_sftp_client() below — two FakeSSHConnections constructed
+        # for start_sftp_client() below: two FakeSSHConnections constructed
         # with the SAME dict instance behave like two SSH sessions into two
         # hosts that happen to be reachable from the same fake "network"
         # (Phase 8 Task 16's sftp_copy tests pass distinct storage `path`
@@ -100,7 +100,7 @@ class FakeSSHConnection:
         self.stdin_closed: bool | None = None
         # The exact command string handed to create_process. Captured because
         # env vars are inlined into it (SSH env channel requests are dropped
-        # by default sshd AcceptEnv) — asserting on it is the only way to
+        # by default sshd AcceptEnv): asserting on it is the only way to
         # prove an override actually reaches the remote process.
         self.last_command: str | None = None
         # Fires right after the command is recorded, before the process
@@ -141,7 +141,7 @@ def make_fake_connect_factory(fake: FakeSSHConnection):
 
 def make_addressed_connect_factory(fakes: dict[str, FakeSSHConnection]):
     """Two-host tests (Phase 8 Task 16): route to the right fake connection by
-    the `host` argument the connect_factory is called with — mirrors
+    the `host` argument the connect_factory is called with, mirrors
     tests/fakes/pve.py's `make_addressed_factory`."""
     async def factory(host, private_key_pem, *, pinned_fingerprint, on_new_fingerprint):
         fake = fakes[host]

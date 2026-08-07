@@ -1,11 +1,11 @@
 """Service-level half of Task 10 (doc 10): discovery, PKCE, joserfc ID-token
-validation, JIT provisioning — all driven against the in-process mock IdP
+validation, JIT provisioning, all driven against the in-process mock IdP
 (tests/fakes/oidc.py), never a real network call. The route half (login/
 callback/config endpoints, the full HTTP round-trip) is Task 11.
 
 Also covers the gap-review addendum: services/authz.py is fail-closed on
 team_members, so a JIT-provisioned user with no membership is a silent
-lockout unless `oidc_default_role` is configured — see oidc.py's module
+lockout unless `oidc_default_role` is configured, see oidc.py's module
 docstring and PENDING_APPROVAL_MESSAGE."""
 import asyncio
 from urllib.parse import parse_qs, urlparse
@@ -27,7 +27,7 @@ def _configure(app, db, *, default_role=None, default_team_slug=None, **idp_kwar
     """Wires the fake IdP as the transport seam, stores real oidc config, and
     (when asked) overrides the auto-provisioning settings introduced by the
     gap-review addendum. `default_team()` seeds the "default" team the same
-    way every other bootstrap path in this codebase does — the JIT path
+    way every other bootstrap path in this codebase does, the JIT path
     itself must NOT auto-create a missing team (that's a config error), so
     tests that expect a role grant to succeed seed it explicitly here."""
     idp = make_idp(**idp_kwargs)
@@ -143,7 +143,7 @@ def test_id_token_signed_by_a_different_key_is_rejected(tmp_path):
 
             # Simulate the IdP rotating its signing key without the app's
             # cache having refreshed (kid is unchanged, so the "refetch once
-            # on a kid miss" path never fires — this is a straight forgery,
+            # on a kid miss" path never fires: this is a straight forgery,
             # not a rotation, and must be rejected, not silently retried).
             idp.state.key = RSAKey.generate_key(2048, {"alg": "RS256", "kid": "test-1"})
             with pytest.raises(oidc.OIDCError):
@@ -289,10 +289,10 @@ def test_oidc_login_and_callback_round_trip_creates_a_jit_session(client, csrf_h
     """The Task 11 round-trip, and the closest honest substitute for doc 10's
     DoD ("OIDC round-trips against a real Authelia") available on this
     machine: there is no browser and no live IdP here, so tests/fakes/oidc.py
-    stands in for Authelia. What this genuinely proves — a real discovery
+    stands in for Authelia. What this genuinely proves, a real discovery
     document is fetched, S256 PKCE is enforced end-to-end (challenge stored
     at /authorize, verifier checked at /token), and a real RS256 ID token is
-    verified against a real JWKS endpoint — is exactly what the app would do
+    verified against a real JWKS endpoint, is exactly what the app would do
     against Authelia; only the third-party implementation is absent.
 
     PUT config (owner) -> anonymous GET /login (307, real PKCE params in the
@@ -357,7 +357,7 @@ def test_oidc_pending_approval_gets_its_own_redirect_and_grants_no_session(
     oidc_default_role provisions a real, inactive, teamless user row (proven
     directly below) and services/oidc.py raises OIDCError(PENDING_APPROVAL_
     MESSAGE). The callback must not turn that into a session, a 500, or the
-    same undifferentiated "?error=oidc" every other failure gets — it is not
+    same undifferentiated "?error=oidc" every other failure gets; it is not
     a login failure, it is a successful sign-up awaiting an administrator."""
     bootstrap_admin(client)
     idp = _configure_via_api(client, csrf_header, sub="pending-1",

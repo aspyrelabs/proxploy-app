@@ -162,7 +162,7 @@ describe('AlertsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /new rule/i }))
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'App CPU high' } })
     fireEvent.change(screen.getByLabelText(/^target$/i), { target: { value: 'app' } })
-    // Wait for the app list itself (not just the label) — the picker's
+    // Wait for the app list itself (not just the label), the picker's
     // <select> exists before its options do, and setting a value with no
     // matching <option> is a silent no-op.
     await waitFor(() => expect(screen.getByRole('option', { name: 'jellyfin' })).toBeInTheDocument())

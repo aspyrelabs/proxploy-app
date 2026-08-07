@@ -1,9 +1,9 @@
 """TOTP enrollment (services/totp.py + api/auth.py's three routes, Phase 8
 Task 8). The login step and pending-session/5-attempt-burn machinery are
-Task 9 — not covered here.
+Task 9, not covered here.
 
 Recovery-code hashes live in their own table (`TotpRecoveryCode`), not
-packed inside `users.totp_secret_enc` — see the migration docstring
+packed inside `users.totp_secret_enc`, see the migration docstring
 (6cf6a0722d23_0005_totp_recovery_codes.py) for why. That split is exactly
 what test_verify_login_burns_a_recovery_code_exactly_once and
 test_disable_clears_the_blob_and_recovery_codes below are checking: burning
@@ -45,7 +45,7 @@ def test_enrollment_returns_secret_uri_and_ten_codes_once(tmp_path, csrf_header,
         assert user.totp_secret_enc != result["secret"].encode()
         assert ss.decrypt(user.totp_secret_enc).decode() == result["secret"]
 
-        # DB holds only encrypted argon2 hashes — never a raw code anywhere.
+        # DB holds only encrypted argon2 hashes: never a raw code anywhere.
         rows = db.query(TotpRecoveryCode).filter_by(user_id=user.id).all()
         assert len(rows) == 10
         for row in rows:
@@ -98,7 +98,7 @@ def test_verify_login_burns_a_recovery_code_exactly_once(tmp_path, csrf_header,
         codes = result["recovery_codes"]
 
         assert totp.verify_login(db, ss, user, codes[0]) is True
-        # Second use of the SAME code fails — single-use, no replay.
+        # Second use of the SAME code fails: single-use, no replay.
         assert totp.verify_login(db, ss, user, codes[0]) is False
 
         rows = db.query(TotpRecoveryCode).filter_by(user_id=user.id).all()

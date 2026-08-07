@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # Installed layout is $PP_BIN/proxploy-update sourcing $PP_LIB/common.sh
-# (both under /opt/proxploy — see install.sh step 7), so the relative and
+# (both under /opt/proxploy: see install.sh step 7), so the relative and
 # fallback paths below resolve to the same file in production. The relative
 # path also lets this script run straight out of a release/build checkout
 # before it has been installed anywhere.
@@ -43,7 +43,7 @@ rollback() {
   # on RestartSec=3 for up to the 120s deadline below, so restoring under a
   # live unit races a process that is starting up on the same database. That
   # loop also trips systemd's default start-limit (5 starts / 10s), which
-  # leaves the unit in a failed state a bare `start` will not clear —
+  # leaves the unit in a failed state a bare `start` will not clear, 
   # reset-failed is a no-op otherwise, so it is safe unconditionally.
   systemctl stop proxploy.service 2>/dev/null || true
   systemctl reset-failed proxploy.service 2>/dev/null || true
@@ -55,7 +55,7 @@ rollback() {
     # Plain cp then chown, NOT `cp -a`: the backup was written by `sqlite3
     # .backup` running as root, so preserving its ownership hands the live
     # database back as root:root while the unit runs as User=proxploy. The
-    # app then crash-loops on "attempt to write a readonly database" — a
+    # app then crash-loops on "attempt to write a readonly database": a
     # rollback that restores the data perfectly and still leaves the box down.
     cp "$BACKUP/proxploy.db" "$PP_DATA/proxploy.db"
     chown "$PP_USER:$PP_USER" "$PP_DATA/proxploy.db"
@@ -63,7 +63,7 @@ rollback() {
   systemctl start proxploy.service || true
   # Type=exec reports "active" the moment the process execs, not once uvicorn
   # has opened the port. Wait for the same health signal the forward path
-  # waits for, on a shorter deadline since $FROM was healthy moments ago —
+  # waits for, on a shorter deadline since $FROM was healthy moments ago; 
   # otherwise a caller checking health right after we exit sees a false "down".
   local rb_deadline
   rb_deadline=$(($(date +%s) + 60))
@@ -80,7 +80,7 @@ if [ -d "$PP_RELEASES/$TO" ] && [ "$FORCE" -eq 0 ]; then
   die "$TO is already unpacked; use --force"
 fi
 avail=$(df -Pk "$PP_ROOT" | awk 'NR==2 {print $4}')
-[ "$avail" -gt 2097152 ] || die "less than 2 GiB free on $PP_ROOT — refusing to update"
+[ "$avail" -gt 2097152 ] || die "less than 2 GiB free on $PP_ROOT, refusing to update"
 
 # --- backup ----------------------------------------------------------------
 log "backing up $FROM"
@@ -107,7 +107,7 @@ verify_release "$work" "$PP_CURRENT/backend/proxploy/release_pubkey.pem"
 log "installing $TO"
 install_release "$work/$tarball" "$TO"
 log "migrating database"
-# config.py's Settings has no env_file — it only reads PROXPLOY_* from the
+# config.py's Settings has no env_file: it only reads PROXPLOY_* from the
 # process environment, which systemd-run (services/updater.py::launch) does
 # not hand this script. Source the installer's env file by hand, the same
 # way install.sh does, or alembic's env.py falls back to the default
@@ -119,7 +119,7 @@ set +a
 if ! migrate_release "$PP_RELEASES/$TO"; then
   # Nothing was switched: the old version is still running and its database
   # was never touched by a migration that failed to apply. Rolling back here
-  # would restore a backup over a database that is already unchanged — that
+  # would restore a backup over a database that is already unchanged: that
   # would be the bug, not the fix.
   log "migration failed; nothing was switched"
   exit 1

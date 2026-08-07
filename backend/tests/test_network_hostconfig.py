@@ -3,7 +3,7 @@
 PVE stages every network edit into /etc/network/interfaces.new and does
 nothing to the live config until PUT /nodes/{node}/network is called. A bad
 bridge applied to a node takes that node off the network until someone walks
-to it with a keyboard — the single most dangerous call in this phase — so
+to it with a keyboard, the single most dangerous call in this phase, so
 apply requires the node name typed back, mirroring selfguard's confirm shape.
 """
 import asyncio
@@ -67,7 +67,7 @@ def test_config_iface_collision_does_not_override_the_route_iface(tmp_path, csrf
                                                                    bootstrap_admin):
     """BLOCKING 1 regression: `_SAFE_KEY` admits `iface`/`type` inside
     `config`, so a caller-supplied `config.iface` used to silently override
-    the route's own — verified live: `{"iface": "vmbr9", ..., "config":
+    the route's own, verified live: `{"iface": "vmbr9"..., "config":
     {"iface": "vmbr0", ...}}` staged a redefinition of vmbr0 (the management
     bridge) while claiming vmbr9 in both the response and the audit row.
     Asserted against what FakePVE actually recorded, not the response body,
@@ -94,7 +94,7 @@ def test_config_iface_collision_does_not_override_the_route_iface(tmp_path, csrf
 def test_mutation_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
                                                             bootstrap_admin):
     """BLOCKING 3: network.py's synchronous mutations used to have no
-    ProxmoxError handling at all — a failed stage produced a bare 500 and no
+    ProxmoxError handling at all, a failed stage produced a bare 500 and no
     audit trace, unlike storage.py's identical routes."""
     from tests.support import make_app
 
@@ -163,7 +163,7 @@ def test_apply_without_confirm_is_409_with_the_node_as_the_phrase(tmp_path, csrf
         assert r.status_code == 409
         # main.py::problem_handler flattens a dict HTTPException.detail via
         # body.update(exc.detail), so these are top-level keys, not nested
-        # under r.json()["detail"] — mirrors selfguard's self_target shape.
+        # under r.json()["detail"]: mirrors selfguard's self_target shape.
         body = r.json()
         assert body["error"] == "confirm_required"
         assert body["confirm_phrase"] == "pve1"
@@ -210,7 +210,7 @@ def test_apply_with_confirm_enqueues_the_job_and_audits_with_job_id(tmp_path, cs
 
 
 def test_revert_needs_no_confirm_and_is_not_a_job(tmp_path, csrf_header, bootstrap_admin):
-    """Reverting only discards /etc/network/interfaces.new — it cannot strand a node."""
+    """Reverting only discards /etc/network/interfaces.new, it cannot strand a node."""
     from tests.support import make_app
 
     fake = _fake()
@@ -263,7 +263,7 @@ def test_network_apply_handler_polls_the_upid_to_completion(tmp_path):
     async def run():
         fake = _fake()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.guestjobs  # noqa: F401 — registers network.apply
+        import proxploy.services.guestjobs  # noqa: F401  (registers network.apply)
         backend = JobBackend(app)
         host_id = _seed(app)
         with app.state.sessionmaker() as db:

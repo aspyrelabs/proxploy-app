@@ -1,6 +1,6 @@
 """Self-management guardrail (doc 02 §9, doc 08 §1 and §9 row 14).
 
-Detection can miss — an unset identity must NEVER block an action, because the
+Detection can miss, an unset identity must NEVER block an action, because the
 typed-confirmation prompt is the backstop, not the only guard."""
 from proxploy.models import App
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
@@ -55,7 +55,7 @@ def test_vms_are_never_self(tmp_path):
 
 def test_malformed_ctid_setting_fails_open_instead_of_raising(tmp_path):
     """A non-numeric self.ctid (e.g. hand-edited or corrupted) must return
-    False, same as an unset one — not throw ValueError up into the route."""
+    False, same as an unset one; not throw ValueError up into the route."""
     db = make_db(tmp_path)
     a = _app(db, seed_host_row(db))
     set_setting(db, "self.ctid", "ct-150")

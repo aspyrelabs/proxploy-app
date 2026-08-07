@@ -119,7 +119,7 @@ def test_cancel_of_a_still_queued_job_finishes_it_and_keeps_the_pool_healthy(
         tmp_path, monkeypatch):
     """Critical fix: a job cancelled while still blocked acquiring the
     Semaphore (i.e. `queued`, never got to run) must still land in `canceled`
-    with finished_at + a status job_event — and must not leak/corrupt the
+    with finished_at + a status job_event, and must not leak/corrupt the
     semaphore so the four running jobs behind it still complete normally."""
     from proxploy.jobs import HANDLERS, JobBackend
     from tests.support import make_job_app
@@ -176,7 +176,7 @@ def test_cancel_of_a_job_still_in__pending_is_honoured_even_with_the_pool_full(
     `_spawn` run first (job already in `_tasks`, blocked on `_sem.acquire()`)
     before cancelling, which `cancel()` handles via a direct `task.cancel()`.
     Here `cancel()` is called in the same synchronous breath as `enqueue()`,
-    before the loop has had a turn to run `_spawn` — job_id is still in
+    before the loop has had a turn to run `_spawn`, job_id is still in
     `_pending`, so `cancel()` can only record intent in `_cancel_requested`.
     With MAX_CONCURRENT hogs holding every slot and never releasing them
     during this test, the old code (which checked `_cancel_requested` only
@@ -211,7 +211,7 @@ def test_cancel_of_a_job_still_in__pending_is_honoured_even_with_the_pool_full(
             victim_id = backend.enqueue(db, kind="test.victim").id
         # No `await` between enqueue and cancel: `_spawn` (scheduled via
         # call_soon_threadsafe) has not run yet, so victim_id is still in
-        # `_pending`, not `_tasks` — this is the pre-spawn window.
+        # `_pending`, not `_tasks`: this is the pre-spawn window.
         assert backend.cancel(victim_id) is True
 
         assert await backend.wait(victim_id, timeout=1) is True  # not 0.5s of `queued`
@@ -309,7 +309,7 @@ def test_sweep_orphans_marks_interrupted_and_never_resumes(tmp_path):
             db.commit()
         backend = JobBackend(app)
         assert backend.sweep_orphans() == 2
-        # Drain the fire-and-forget notify task before the loop closes —
+        # Drain the fire-and-forget notify task before the loop closes, 
         # hermetic teardown (no channels here, so it's a no-op notify(), but
         # asyncio.run() tearing down a still-pending task is exactly the
         # "does real work during teardown" hazard this test should not risk).

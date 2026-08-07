@@ -2,7 +2,7 @@
 audit: every path the frontend hands to api() must resolve to a documented
 route. Template params (`${x}`) match any {param} segment. SSE/WebSocket
 URLs are consumed by EventSource/WebSocket constructors, not api(), so this
-regex covering api() calls covers exactly the REST surface — which is the
+regex covering api() calls covers exactly the REST surface, which is the
 claim being audited."""
 import re
 from pathlib import Path
@@ -23,21 +23,21 @@ def _normalise(path: str) -> tuple:
 # The line-regex extractor above is text-based, not a JS/TS parser: it can't
 # resolve a path whose FIRST segment is itself a computed expression (a
 # ternary, a function call) rather than a literal prefixed with `${` at a
-# segment boundary — the capture cuts off at the first quote/`?`/whitespace
+# segment boundary: the capture cuts off at the first quote/`?`/whitespace
 # inside that expression. Three call sites in the frontend do this; each is
 # checked by hand below against every route it can actually produce at
 # runtime, rather than silently allowlisted. If a documented route the
 # resolved set expects goes away, this test still catches it.
 KNOWN_DYNAMIC = {
-    # api/storage.ts:71 — `/storage/${hostId}/${name}/content${qs ? `?${qs}` : ''}`
+    # api/storage.ts:71: `/storage/${hostId}/${name}/content${qs ? `?${qs}` : ''}`
     # the regex stops at the un-terminated `${qs ...}` and swallows it whole.
     ("storage", "{}", "{}", "content${qs"): (
         ("storage", "{}", "{}", "content"),),
-    # api/network.ts:104 — `` `/${v.guestType === 'app' ? 'apps' : 'vms'}/${v.guestId}/network/${v.iface}` ``
+    # api/network.ts:104: `` `/${v.guestType === 'app' ? 'apps' : 'vms'}/${v.guestId}/network/${v.iface}` ``
     # the regex stops at the space before `===`, capturing only `/${v.guestType`.
     ("{}",): (
         ("apps", "{}", "network", "{}"), ("vms", "{}", "network", "{}")),
-    # api/jobs.ts:92 — `` `/${key(v.target)}/${v.id}/${v.action}` ``
+    # api/jobs.ts:92: `` `/${key(v.target)}/${v.id}/${v.action}` ``
     # `key(v.target)` is a function call, not a literal-prefixed template slot.
     ("{}", "{}", "{}"): (
         ("apps", "{}", "{}"), ("vms", "{}", "{}")),
@@ -65,7 +65,7 @@ def test_every_frontend_api_call_is_a_documented_route(tmp_path):
                 f"those routes is no longer documented")
             del missing[key]
 
-    assert calls, "regex matched nothing — the extractor itself broke"
+    assert calls, "regex matched nothing; the extractor itself broke"
     assert not missing, f"UI calls without a documented route: {missing}"
 
 

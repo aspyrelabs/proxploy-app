@@ -1,16 +1,16 @@
-"""JobBackend — the in-process asyncio job runner (brief §5, doc 02 §3, doc 03).
+"""JobBackend, the in-process asyncio job runner (brief §5, doc 02 §3, doc 03).
 
 Every state-changing operation that takes time is a job: a `jobs` row, log and
 progress lines in `job_events`, executed as one asyncio task. Enqueue / status /
 cancel / log-stream is the seam; Celery+Redis is the swap-in if multi-worker
-ever matters — nothing outside this module may know how a job is executed.
+ever matters, nothing outside this module may know how a job is executed.
 
 The DB is the transcript. Every line is written before it is fanned out, so a
 browser attaching mid-job reads the backlog from `job_events` and then follows
 live (doc 02 §6). Zero subscribers costs nothing; the write always happens.
 
 Restart semantics (doc 02 §3, verbatim): orphaned `running` jobs are marked
-`interrupted` on boot and are NEVER resumed — half-run root scripts do not get
+`interrupted` on boot and are NEVER resumed, half-run root scripts do not get
 a second, blind execution.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from proxploy.services.audit import redact
 
 TERMINAL = ("succeeded", "failed", "canceled", "interrupted")
 
-# ponytail: fixed pool — `queued` is real because a task waits on this before it
+# ponytail: fixed pool: `queued` is real because a task waits on this before it
 # runs. A settings knob belongs with Phase 7's scheduler UI, where a user would
 # actually go looking for it.
 MAX_CONCURRENT = 4
@@ -46,7 +46,7 @@ def handler(kind: str):
 class JobContext:
     """The only way a handler emits output. Handed in by JobBackend._run.
 
-    ponytail: job-row and job_events writes run inline on the event loop — one
+    ponytail: job-row and job_events writes run inline on the event loop, one
     small SQLite insert each (tens of microseconds), and the cancellation path
     must persist its terminal row without an `await` (awaiting inside a
     cancelled task's except block is a re-cancellation hazard). Phase 4's
@@ -96,7 +96,7 @@ class JobBackend:
         # doc 02 §3 DoD "a cancelled job stops cleanly" needs three small pieces
         # of bookkeeping beyond _tasks:
         # - _pending: enqueued, `_spawn` hasn't had its loop turn yet (the same
-        #   call_soon_threadsafe gap the `wait()` fix above works around) — a
+        #   call_soon_threadsafe gap the `wait()` fix above works around): a
         #   cancel() that lands in this window has no Task to call .cancel() on.
         # - _cancel_requested: job ids cancelled while still in _pending; _run
         #   checks this before acquiring the semaphore and finishes the
@@ -117,7 +117,7 @@ class JobBackend:
         Called from lifespan startup once the loop is running (main.py sets
         `app.state.loop` just before this). `job.interrupted` still owes the
         orphans a Notifier courtesy, but Apprise is blocking (~8s/channel
-        worst case) and a restart can orphan an arbitrarily large backlog —
+        worst case) and a restart can orphan an arbitrarily large backlog, 
         one `_notify` per orphan would queue that many blocking sends onto
         the loop's shared default executor (poller, metrics loop and SSE
         auth hops all use it too) all at once. Send a single aggregate
@@ -193,10 +193,10 @@ class JobBackend:
 
     async def wait(self, job_id: int, timeout: float = 30.0) -> bool:
         """Test/DoD helper: block until the job settles. Returns True if it
-        did, False on timeout — lets a caller tell "settled" from "gave up".
+        did, False on timeout; lets a caller tell "settled" from "gave up".
 
         Waits on a per-job Event set (and popped) in `_run`'s finally, rather
-        than polling `_tasks` — that dict is pruned on completion (see `_run`)
+        than polling `_tasks`, that dict is pruned on completion (see `_run`)
         so a poll-based wait would busy-spin its full timeout on a job that
         already finished.
         """
@@ -242,7 +242,7 @@ class JobBackend:
         try:
             # Checked BEFORE the semaphore acquire, not inside it: a job
             # cancelled while still in `_pending` (the `_spawn` call_soon_
-            # threadsafe gap) only ever sets `_cancel_requested` — nothing
+            # threadsafe gap) only ever sets `_cancel_requested`: nothing
             # re-checks it once the pool is full, so gating this check on
             # having already acquired a slot means a pre-spawn cancel of a
             # job stuck behind MAX_CONCURRENT running jobs is silently
@@ -250,7 +250,7 @@ class JobBackend:
             # `cancel()` already told the caller "canceled". A cancel that
             # arrives AFTER this point finds the job in `_tasks` and calls
             # `task.cancel()` directly instead (see `cancel()`), which
-            # raises CancelledError out of the semaphore acquire below —
+            # raises CancelledError out of the semaphore acquire below, 
             # that path is unaffected by hoisting this check.
             if job_id in self._cancel_requested:
                 self._cancel_requested.discard(job_id)
@@ -262,7 +262,7 @@ class JobBackend:
             # CancelledError out of `await self._sem.acquire()`, before the
             # `with` block below is entered. If `try` only wrapped the body,
             # that CancelledError escaped uncaught and the row was stranded
-            # in `queued` forever — no finished_at, no status event, no
+            # in `queued` forever: no finished_at, no status event, no
             # terminal frame for any subscriber.
             async with self._sem:
                 self._set_running(job_id)
@@ -274,13 +274,13 @@ class JobBackend:
             raise
         except JobFailed as e:
             self._finish(ctx, kind, "failed", error=str(e), target_type=target_type)
-        except Exception as e:  # noqa: BLE001 — a handler bug is a failed job
+        except Exception as e:  # noqa: BLE001  (a handler bug is a failed job)
             self._finish(ctx, kind, "failed", error=f"{type(e).__name__}: {e}",
                          target_type=target_type)
         else:
             self._finish(ctx, kind, "succeeded", result=result or {}, target_type=target_type)
         finally:
-            # Bound _tasks/_done to in-flight jobs only — otherwise a daemon
+            # Bound _tasks/_done to in-flight jobs only: otherwise a daemon
             # running for months holds every completed Task (and its retained
             # result/exception) and every Event forever.
             self._tasks.pop(job_id, None)
@@ -338,7 +338,7 @@ class JobBackend:
         async def go():
             try:
                 await asyncio.to_thread(notifier.notify, self.app, event, title, body)
-            except Exception:  # noqa: BLE001 — notifications never fail a job
+            except Exception:  # noqa: BLE001  (notifications never fail a job)
                 pass
 
         task = asyncio.ensure_future(go())

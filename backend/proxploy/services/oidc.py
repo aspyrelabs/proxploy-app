@@ -1,18 +1,18 @@
 """OIDC authorization-code+PKCE flow (doc 08 §6, doc 10 Task 10).
 
-`authlib.jose` is deprecated at 1.7 ("use joserfc instead") — every byte of ID
+`authlib.jose` is deprecated at 1.7 ("use joserfc instead"), every byte of ID
 token verification here goes through joserfc, never authlib.jose. Authlib
 (OAuth2Client/AsyncOAuth2Client) is used only for the mechanical parts of the
 protocol: building the authorization URL and doing the code/verifier exchange
 over httpx. A signature/claims/nonce failure is always an `OIDCError`, never a
-500 and never a silently-accepted token — see `_verify_id_token`.
+500 and never a silently-accepted token, see `_verify_id_token`.
 
 JIT provisioning (`_jit_provision`) does not treat an IdP's user population as
 automatically the application's authorized population: auto-admitting every
 identity the directory happens to contain is the accidental-access failure
 mode this deliberately avoids. `settings.oidc_default_role` unset (the
 default) provisions the account with no team membership and `is_active=False`
-— a deny-with-an-explanation, not a silent lockout, since `is_active` is the
+a deny-with-an-explanation, not a silent lockout, since `is_active` is the
 same gate `services/authn.py` and the password login path already check.
 Setting it opts into auto-granting that one role in `oidc_default_team_slug`
 instead; both are validated at first use and fail loudly (never silently
@@ -40,8 +40,8 @@ STATE_TTL_S = 600  # doc 10 Task 10: single-use, 10-minute expiring state store
 
 # Gap review finding: api/auth.py's user-creation route was, before this,
 # the ONLY code path in the tree that ever minted a team_members row. A JIT-
-# provisioned OIDC user with none is invisible to services/authz.py — every
-# enforce() call denies (fail-closed by construction) — which is a silent
+# provisioned OIDC user with none is invisible to services/authz.py: every
+# enforce() call denies (fail-closed by construction): which is a silent
 # lockout with no explanation, not a security property. This message is what
 # that lockout now says instead, and it is the exact text both the pending-
 # after-creation path and the deactivated-account path raise below.
@@ -56,7 +56,7 @@ PENDING_APPROVAL_MESSAGE = (
 class OIDCError(Exception):
     """Raised on any discovery/exchange/validation/provisioning failure. The
     route layer (Task 11) turns every one of these into the same generic
-    redirect — the message here is for logs/tests, never sent to the browser."""
+    redirect, the message here is for logs/tests, never sent to the browser."""
 
 
 # --- Config (settings-backed; client_secret Fernet-encrypted) --------------
@@ -87,7 +87,7 @@ def clear_config(db) -> None:
 
 def configured(db) -> bool:
     """Cheap existence check (no decrypt) for routes that only need to know
-    whether OIDC is set up, not the secret itself — Task 11's login gate and
+    whether OIDC is set up, not the secret itself; Task 11's login gate and
     /meta/onboarding's `oidc` flag both go through this instead of `config()`."""
     return bool(get_setting(db, "oidc.issuer") and get_setting(db, "oidc.client_id")
                 and get_setting(db, "oidc.client_secret.enc"))
@@ -138,7 +138,7 @@ def _states(app) -> dict:
     now = utcnow()
     # ponytail: single in-memory dict, fine for the single-process deployment
     # this phase targets; a multi-worker deploy needs a shared store (Redis/db
-    # row) instead — same shape of note as the Task 9 pending-TOTP store.
+    # row) instead: same shape of note as the Task 9 pending-TOTP store.
     for k in [k for k, (_, _, exp) in states.items() if exp < now]:
         del states[k]
     return states
@@ -194,7 +194,7 @@ async def complete(app, db, state: str, code: str, redirect_uri: str) -> User:
 
 async def _verify_id_token(app, cfg: dict, metadata: dict, id_token: str, nonce: str) -> dict:
     """Signature (joserfc, against the IdP's real JWKS) + iss/aud/exp/sub
-    (JWTClaimsRegistry) + nonce (manual — joserfc has no built-in claim for
+    (JWTClaimsRegistry) + nonce (manual, joserfc has no built-in claim for
     it). Any failure anywhere in this chain is OIDCError: never a leaked 500,
     never a claim trusted before it is verified."""
     jwks = await _jwks(app, cfg["issuer"], metadata)
@@ -203,7 +203,7 @@ async def _verify_id_token(app, cfg: dict, metadata: dict, id_token: str, nonce:
     except InvalidKeyIdError:
         # The one legitimate retry: the IdP rotated to a kid we haven't seen
         # yet. A signature that fails against a *known* kid (below) is a
-        # forgery, not a rotation, and must never trigger this retry — that
+        # forgery, not a rotation, and must never trigger this retry: that
         # would let a stale-cache-adjacent attack just get a free do-over.
         jwks = await _jwks(app, cfg["issuer"], metadata, refresh=True)
         try:
@@ -242,7 +242,7 @@ def _create_user(app, db, issuer: str, sub: str, claims: dict) -> User:
         raise OIDCError("IdP returned no email claim")
     existing = db.query(User).filter_by(email=email).one_or_none()
     if existing is not None:
-        # No silent account linking — a local (password) account owning this
+        # No silent account linking: a local (password) account owning this
         # email is a takeover vector if OIDC just annexes it.
         raise OIDCError("account exists with password login")
 
@@ -251,7 +251,7 @@ def _create_user(app, db, issuer: str, sub: str, claims: dict) -> User:
     if role is None:
         # Deny-with-an-explanation default (see module docstring): mint the
         # user row only, no membership. Fail-closed casbin means this account
-        # already has zero permissions the moment it exists — is_active=False
+        # already has zero permissions the moment it exists: is_active=False
         # additionally blocks even issuing it a session.
         user = User(email=email, display_name=claims.get("name"), oidc_issuer=issuer,
                    oidc_sub=sub, password_hash=None, is_active=False)
@@ -264,7 +264,7 @@ def _create_user(app, db, issuer: str, sub: str, claims: dict) -> User:
     if role not in ROLE_ORDER:
         # Loud, not a fallback: an operator who typos oidc_default_role must
         # not get a working-but-wrong grant, and must not get a silently
-        # unprovisioned account either — nothing is written at all.
+        # unprovisioned account either: nothing is written at all.
         raise RuntimeError(
             f"oidc_default_role={role!r} is not a known role; must be one of "
             f"{sorted(ROLE_ORDER)}")
@@ -277,7 +277,7 @@ def _create_user(app, db, issuer: str, sub: str, claims: dict) -> User:
     user = User(email=email, display_name=claims.get("name"), oidc_issuer=issuer,
                oidc_sub=sub, password_hash=None)
     db.add(user)
-    db.flush()  # assigns user.id inside the still-open transaction — the
+    db.flush()  # assigns user.id inside the still-open transaction, the
                 # membership below commits in the SAME transaction, so a crash
                 # between the two can never strand a permissionless user row.
     db.add(TeamMember(team_id=team.id, user_id=user.id, role=role))

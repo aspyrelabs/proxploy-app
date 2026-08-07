@@ -66,7 +66,7 @@ def test_app_start_calls_proxmox_and_archives_the_task_log(tmp_path):
     async def run():
         fake = FakePVE()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.lifecycle  # noqa: F401 — registers handlers
+        import proxploy.services.lifecycle  # noqa: F401  (registers handlers)
         backend = JobBackend(app)
         host_id = _seed_host(app)
         app_id = _seed_app(app, host_id)
@@ -298,7 +298,7 @@ def test_task_log_lines_are_not_dropped_or_duplicated_across_polls(tmp_path):
 
     class GrowingLogPVE(FakePVE):
         """Appends one new task-log line per status poll (up to running_ticks),
-        instead of a single static line — proves the cursor advances rather
+        instead of a single static line, proves the cursor advances rather
         than reprocessing lines it already emitted."""
 
         def _task_status(self, upid):
@@ -343,7 +343,7 @@ def test_task_log_lines_are_not_dropped_or_duplicated_across_polls(tmp_path):
 
 
 def test_cancel_mid_poll_reports_the_proxmox_task_is_still_running(tmp_path):
-    """A cancelled job must never claim the infra mutation was undone — the
+    """A cancelled job must never claim the infra mutation was undone, the
     stop/start/etc POST already reached proxmox and keeps running there
     regardless of what happens to the local asyncio task."""
     from proxploy.jobs import JobBackend

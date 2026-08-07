@@ -121,7 +121,7 @@ def test_install_sends_var_ctid_and_overrides_inline_on_the_command(tmp_path):
 
 def test_install_refuses_an_entry_with_no_pinned_commit(tmp_path):
     """No upstream_sha means there is no commit to execute that matches what
-    was classified and diffed — refuse rather than fall back to `main`."""
+    was classified and diffed, refuse rather than fall back to `main`."""
     async def scenario():
         app = make_job_app(tmp_path)
         with app.state.sessionmaker() as db:

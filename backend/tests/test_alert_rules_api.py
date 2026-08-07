@@ -56,7 +56,7 @@ def test_rejects_an_unknown_metric(client, csrf_header, bootstrap_admin):
 
 
 def test_rejects_disk_pct_on_a_guest_target(client, csrf_header, bootstrap_admin):
-    """The poller writes disk_pct for hosts only — a guest disk rule would sit
+    """The poller writes disk_pct for hosts only, a guest disk rule would sit
     enabled forever and never fire. Say so instead of accepting it."""
     bootstrap_admin(client)
     h = csrf_header(client)
@@ -130,7 +130,7 @@ def test_accepts_a_channel_id_that_exists(client, csrf_header, bootstrap_admin):
 
 def test_status_metrics_do_not_require_a_threshold(client, csrf_header,
                                                    bootstrap_admin):
-    """host_offline has nothing to compare — demanding a threshold would be
+    """host_offline has nothing to compare, demanding a threshold would be
     theatre."""
     bootstrap_admin(client)
     hid = _host(client)
@@ -166,7 +166,7 @@ def test_patch_can_disable_a_rule(client, csrf_header, bootstrap_admin):
 
 
 def test_delete_cascades_its_fired_alerts(client, csrf_header, bootstrap_admin):
-    """alerts.rule_id is ON DELETE CASCADE (migration 0001) — assert the
+    """alerts.rule_id is ON DELETE CASCADE (migration 0001), assert the
     behaviour rather than trusting the DDL from memory."""
     bootstrap_admin(client)
     h = csrf_header(client)

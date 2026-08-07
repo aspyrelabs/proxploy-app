@@ -19,7 +19,7 @@ def _create(client, h, **over):
 
 
 def _by_id(rows, sid):
-    """Look a schedule up by id rather than list position — the boot-seeded
+    """Look a schedule up by id rather than list position, the boot-seeded
     system schedules (doc 04 SYSTEM_SCHEDULES) are always present alongside
     whatever a test creates, so index [0] is not reliably "the row I just
     made"."""
@@ -119,7 +119,7 @@ def test_patch_rejects_a_bad_cron_without_corrupting_the_stored_row(
 
 
 def test_patch_audits_the_new_job_kind(client, csrf_header, bootstrap_admin):
-    """schedule.update's audit must carry job_kind — PATCH can change it, and
+    """schedule.update's audit must carry job_kind, PATCH can change it, and
     it is the exact field the store.auto_update gate keys on."""
     h = _admin(client, csrf_header, bootstrap_admin)
     sid = _create(client, h, job_kind="catalog.refresh", cron="0 2 * * *",
@@ -153,7 +153,7 @@ def test_run_now_enqueues_the_schedules_job_and_stamps_last_run(
 
 
 def test_run_now_does_not_move_next_run_at(client, csrf_header, bootstrap_admin):
-    """"Run now" is an extra run, not a reschedule — the window still opens
+    """"Run now" is an extra run, not a reschedule; the window still opens
     when the operator said it would."""
     h = _admin(client, csrf_header, bootstrap_admin)
     sid = _create(client, h, job_kind="catalog.refresh", params={}).json()["id"]
@@ -206,12 +206,12 @@ def test_auto_update_entitlement_gates_app_update_schedules_only(
 def test_run_now_gates_app_update_on_store_auto_update(tmp_path, csrf_header,
                                                         bootstrap_admin):
     """POST /schedules/{id}/run re-checks store.auto_update for an app.update
-    schedule too — firing one by hand is still an auto-update action. A
+    schedule too, firing one by hand is still an auto-update action. A
     backup.run schedule must stay runnable regardless.
 
     `app.update` has no registered job handler yet, so it cannot be created
     through POST /schedules while store.auto_update is on (that would 422 on
-    the missing handler before ever reaching this route) — the row is seeded
+    the missing handler before ever reaching this route), the row is seeded
     directly to isolate the run-now gate from that unrelated gap."""
     app = make_app(tmp_path)
     with TestClient(app) as c:

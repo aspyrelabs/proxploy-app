@@ -19,7 +19,7 @@ export type AlertRuleRow = {
   channel_ids: number[]; enabled: boolean
 }
 
-/** GET /alert-rules/metrics — the enum lives on the backend, never twice. */
+/** GET /alert-rules/metrics, the enum lives on the backend, never twice. */
 export type MetricSpec = { metric: string; targets: string[]; needs_threshold: boolean }
 
 /** Doc 06 §d: `['alerts','firing']`, 60 s, health-footer source. */

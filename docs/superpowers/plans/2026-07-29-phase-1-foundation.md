@@ -1,10 +1,10 @@
-# Phase 1 — Foundation Implementation Plan
+# Phase 1: Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is an unattended run: no human checkpoints — on ambiguity make the best spec-supported call, note it in the commit message, and keep going.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is an unattended run: no human checkpoints, on ambiguity make the best spec-supported call, note it in the commit message, and keep going.
 
 **Goal:** Land Phase 1 of `docs/10-build-sequence.md`: repo scaffolds for all four properties, DB bootstrap + full-schema migration 0001, local auth (argon2 + DB sessions + CSRF + rate limiting), SecretStore, the dormant entitlement layer (all 81 flags ON) in both proxploy-app and proxploy-api, host onboarding with proxmoxer connectivity check + SSH key enrolment, append-only audit log, settings service, the app shell + onboarding wizard v1 frontend, and the Phase-1 test infrastructure (proxmoxer fake layer, app↔api contract test, CI with the executor-isolation and license-audit checks and a wired disposable-PVE path).
 
-**Architecture:** One Python 3.12+ FastAPI process (sync SQLAlchemy 2 sessions run in FastAPI's threadpool — async engines are YAGNI at Phase 1 scale), SQLite-WAL by default with Postgres via DSN, serving a React 19 + Vite SPA. proxploy-api is a second, tiny FastAPI service holding the Ed25519 signing key; the app bundles only public keys (a `kid`-keyed set). Specs: docs/00–11 in this repo are the approved source of truth; doc numbers cited per task.
+**Architecture:** One Python 3.12+ FastAPI process (sync SQLAlchemy 2 sessions run in FastAPI's threadpool, async engines are YAGNI at Phase 1 scale), SQLite-WAL by default with Postgres via DSN, serving a React 19 + Vite SPA. proxploy-api is a second, tiny FastAPI service holding the Ed25519 signing key; the app bundles only public keys (a `kid`-keyed set). Specs: docs/00–11 in this repo are the approved source of truth; doc numbers cited per task.
 
 **Tech Stack:** FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2, Alembic, argon2-cffi, cryptography (Fernet/MultiFernet + Ed25519), PyJWT (EdDSA), slowapi, httpx, proxmoxer / React 19, TypeScript, Vite, Tailwind v4, TanStack Query + Router, vitest.
 
@@ -18,7 +18,7 @@
 - The fixed nav is exactly: Cluster · Apps · App Store · Virtual Machines · Storage · Network · Backups · Settings (doc 01 §0).
 - Design tokens are the prototype's verbatim values (doc 06 §c). Dark is canonical; light is a `[data-theme]` variable swap.
 - Git: every repo commits directly to `main` (user standing rule). `git init -b main`; no branches, no PRs.
-- No module outside `backend/proxploy/executor/` may ever import `asyncssh` or call an SSH-key SecretStore accessor — CI-enforced from Phase 1 even though `executor/` doesn't exist yet (docs 08 §4, 09).
+- No module outside `backend/proxploy/executor/` may ever import `asyncssh` or call an SSH-key SecretStore accessor, CI-enforced from Phase 1 even though `executor/` doesn't exist yet (docs 08 §4, 09).
 - Working directories: `~/workspace/aspyrelabs/proxploy/proxploy-app` (app), `…/proxploy-api`, `…/proxploy-web`, `…/proxploy-docs`. All commands below give the repo-relative path; run them from the right repo root.
 - Backend venv: `backend/.venv` in proxploy-app, `.venv` in proxploy-api. Test commands assume it.
 - No live PVE and no Docker on this box: unit tests use the fake PVE layer; the disposable-PVE and Postgres CI legs are wired but env-gated.
@@ -61,8 +61,8 @@ proxploy-api/
 ├── tests/ conftest.py, contract/entitlement_token.fixture.json, test_*.py
 └── .github/workflows/ci.yml
 
-proxploy-web/  README.md, .gitignore          (empty scaffold — content is Phase 9)
-proxploy-docs/ README.md, .gitignore          (empty scaffold — content is Phase 9)
+proxploy-web/  README.md.gitignore          (empty scaffold; content is Phase 9)
+proxploy-docs/ README.md.gitignore          (empty scaffold; content is Phase 9)
 ```
 
 ---
@@ -129,12 +129,12 @@ def test_problem_json_shape(client):
     assert r.json()["status"] == 404
 ```
 
-- [ ] **Step 3: Run it — expect import error**
+- [ ] **Step 3: Run it, expect import error**
 
 ```bash
 cd proxploy-app/backend && python3 -m venv .venv && .venv/bin/pip -q install -e '.[dev]' 2>/dev/null; .venv/bin/python -m pytest tests/ -q
 ```
-(First run fails because pyproject/package don't exist yet — that's the red state.)
+(First run fails because pyproject/package don't exist yet, that's the red state.)
 
 - [ ] **Step 4: Implement**
 
@@ -143,7 +143,7 @@ cd proxploy-app/backend && python3 -m venv .venv && .venv/bin/pip -q install -e 
 [project]
 name = "proxploy"
 version = "0.1.0"
-description = "Proxploy — Unraid's experience, for Proxmox"
+description = "Proxploy, Unraid's experience, for Proxmox"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
@@ -278,7 +278,7 @@ def create_app(
     return app
 ```
 
-- [ ] **Step 5: Run tests — expect PASS**
+- [ ] **Step 5: Run tests, expect PASS**
 
 ```bash
 cd proxploy-app/backend && .venv/bin/pip -q install -e '.[dev]' && .venv/bin/python -m pytest tests/ -q
@@ -294,7 +294,7 @@ cd proxploy-app && printf 'logs/\n' >> .gitignore && git add -A && git commit -m
 
 ### Task 2: Full data model + Alembic migration 0001
 
-Doc refs: 04 (every table, verbatim columns), 10 Phase 1 ("Alembic migration 0001 with the full entity list from brief §9" — we create the **full** doc-04 entity list now, 24 tables; later phases alter, they don't bolt on the basics), 02 §3 (SQLite WAL).
+Doc refs: 04 (every table, verbatim columns), 10 Phase 1 ("Alembic migration 0001 with the full entity list from brief §9"; we create the **full** doc-04 entity list now, 24 tables; later phases alter, they don't bolt on the basics), 02 §3 (SQLite WAL).
 
 **Files:**
 - Create: `backend/proxploy/models/__init__.py`, `backend/proxploy/db.py`, `backend/alembic.ini`, `backend/proxploy/migrations/*` (alembic init + one autogenerated revision)
@@ -356,7 +356,7 @@ def test_migration_0001_postgres():
     assert EXPECTED <= tables
 ```
 
-- [ ] **Step 2: Run — FAIL (`No module named 'proxploy.db'`)**
+- [ ] **Step 2: Run, FAIL (`No module named 'proxploy.db'`)**
 
 `cd proxploy-app/backend && .venv/bin/python -m pytest tests/test_migrations.py -q`
 
@@ -364,7 +364,7 @@ def test_migration_0001_postgres():
 
 `backend/proxploy/models/__init__.py`:
 ```python
-"""All Proxploy entities — schema per docs/04-data-model.md, portable SQLite/Postgres subset."""
+"""All Proxploy entities, schema per docs/04-data-model.md, portable SQLite/Postgres subset."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -872,9 +872,9 @@ from proxploy.db import make_engine, make_sessionmaker, run_migrations
                   openapi_url="/api/openapi.json", lifespan=lifespan)
 ```
 
-- [ ] **Step 6: Run all tests — expect PASS** (`.venv/bin/python -m pytest tests/ -q`)
+- [ ] **Step 6: Run all tests, expect PASS** (`.venv/bin/python -m pytest tests/ -q`)
 
-- [ ] **Step 7: Commit** — `git add -A && git commit -m "feat(backend): full doc-04 schema, Alembic 0001, SQLite WAL, startup migrations"`
+- [ ] **Step 7: Commit**, `git add -A && git commit -m "feat(backend): full doc-04 schema, Alembic 0001, SQLite WAL, startup migrations"`
 
 ---
 
@@ -888,7 +888,7 @@ Doc refs: 08 §3, 04 (encrypted blobs), 11 §9 (never silently regenerate a miss
 - Test: `backend/tests/test_secretstore.py`
 
 **Interfaces:**
-- Produces: `SecretStore(key_file: Path)` with `.encrypt(data: bytes) -> tuple[bytes, int]` (ciphertext, key_version), `.decrypt(blob: bytes) -> bytes`, `.key_version: int`; classmethod `SecretStore.ensure_key_file(path: Path, db_file_exists: bool) -> None` (creates 0400 key; raises `MasterKeyMissing` if the DB already exists but the key doesn't); `.rotate()` = prepend a new key line to the file externally then call `SecretStore.reencrypt(blob) -> tuple[bytes, int]` — full rotation job is later-phase, the seam is `encrypt/decrypt/reencrypt`.
+- Produces: `SecretStore(key_file: Path)` with `.encrypt(data: bytes) -> tuple[bytes, int]` (ciphertext, key_version), `.decrypt(blob: bytes) -> bytes`, `.key_version: int`; classmethod `SecretStore.ensure_key_file(path: Path, db_file_exists: bool) -> None` (creates 0400 key; raises `MasterKeyMissing` if the DB already exists but the key doesn't); `.rotate()` = prepend a new key line to the file externally then call `SecretStore.reencrypt(blob) -> tuple[bytes, int]`; full rotation job is later-phase, the seam is `encrypt/decrypt/reencrypt`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -938,7 +938,7 @@ def test_rotation_decrypts_old_and_reencrypts(tmp_path):
     assert ver2 == 2 and new.decrypt(blob2) == b"s3cret"
 ```
 
-- [ ] **Step 2: Run — FAIL (no module)**
+- [ ] **Step 2: Run, FAIL (no module)**
 
 - [ ] **Step 3: Implement**
 
@@ -970,7 +970,7 @@ class SecretStore:
         if path.exists():
             return
         if db_file_exists:
-            # Doc 11 §9: never silently regenerate a key over an existing DB —
+            # Doc 11 §9: never silently regenerate a key over an existing DB, 
             # that would strand every stored credential as ambiguous ciphertext.
             raise MasterKeyMissing(
                 f"master key {path} is missing but a database already exists. "
@@ -1002,8 +1002,8 @@ In `main.py` lifespan, before `run_migrations(settings)`:
 ```
 (add `from pathlib import Path` to main.py imports).
 
-- [ ] **Step 4: Run tests — PASS**
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): SecretStore — Fernet/MultiFernet, 0400 key file, regeneration guard"`
+- [ ] **Step 4: Run tests, PASS**
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): SecretStore, Fernet/MultiFernet, 0400 key file, regeneration guard"`
 
 ---
 
@@ -1052,14 +1052,14 @@ def test_no_update_or_delete_helpers():
     assert not any(n.startswith(("update", "delete")) for n in dir(m))
 ```
 
-- [ ] **Step 2: Run — FAIL**
+- [ ] **Step 2: Run, FAIL**
 
 - [ ] **Step 3: Implement**
 
 `backend/proxploy/services/audit.py`:
 ```python
 """Append-only audit writer (docs 04/08 §7). There is deliberately no update or
-delete function in this module — archival is a Phase-8+ export job, never mutation."""
+delete function in this module, archival is a Phase-8+ export job, never mutation."""
 from proxploy.models import AuditEvent
 
 REDACT_KEYS = {"password", "secret", "token_secret", "token", "key",
@@ -1087,12 +1087,12 @@ def write_audit(db, *, actor_type: str, action: str, actor_id: int | None = None
     db.commit()
 ```
 
-- [ ] **Step 4: Run tests — PASS**
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): append-only audit writer with secret redaction"`
+- [ ] **Step 4: Run tests, PASS**
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): append-only audit writer with secret redaction"`
 
 ---
 
-### Task 5: AuthN — argon2 passwords, DB sessions, CSRF, rate limiting, users + RBAC stub
+### Task 5: AuthN: argon2 passwords, DB sessions, CSRF, rate limiting, users + RBAC stub
 
 Doc refs: 08 §5 (hardening table), 05 (auth endpoints), 10 Phase 1 (login/logout/me + `POST /api/v1/users`), 04 (`users`, `sessions`, `teams`, `team_members`).
 
@@ -1103,8 +1103,8 @@ Doc refs: 08 §5 (hardening table), 05 (auth endpoints), 10 Phase 1 (login/logou
 
 **Interfaces:**
 - Produces (services.authn): `hash_password(pw: str) -> str`, `verify_password(hash: str, pw: str) -> bool`, `create_session(db, user, ip, user_agent, ttl_hours) -> str` (returns the raw cookie token), `resolve_session(db, raw: str) -> User | None`, `revoke_session(db, raw: str) -> None`.
-- Produces (api.deps): `get_db(request)` dependency yielding a Session; `get_current_user(...) -> User` (401 problem when unauthenticated); `user_role(db, user) -> str`; `require_role(min_role: str)` returning a dependency that yields the User (403 when below); `ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}`. `require_role` is the Phase-1 **RBAC stub** — the seam pycasbin replaces in Phase 8 (roles read from `team_members`, default team).
-- Produces (middleware): `CSRFMiddleware` — double-submit: issues `pp_csrf` cookie when absent; on mutating `/api/*` requests without an `Authorization` header, requires header `X-CSRF-Token` equal (`hmac.compare_digest`) to the cookie.
+- Produces (api.deps): `get_db(request)` dependency yielding a Session; `get_current_user(...) -> User` (401 problem when unauthenticated); `user_role(db, user) -> str`; `require_role(min_role: str)` returning a dependency that yields the User (403 when below); `ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}`. `require_role` is the Phase-1 **RBAC stub**, the seam pycasbin replaces in Phase 8 (roles read from `team_members`, default team).
+- Produces (middleware): `CSRFMiddleware`, double-submit: issues `pp_csrf` cookie when absent; on mutating `/api/*` requests without an `Authorization` header, requires header `X-CSRF-Token` equal (`hmac.compare_digest`) to the cookie.
 - Produces (api.auth): `POST /api/v1/auth/login` (rate-limited `10/minute` per IP via slowapi), `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, `POST /api/v1/users`. First-ever user may be created unauthenticated and becomes `owner` of the auto-created `Default` team (doc 08 §8 forced first-run owner creation); afterwards `POST /users` requires admin, and granting `owner` requires owner.
 - Produces (conftest helpers): `bootstrap_admin(client, email="admin@example.com", password="correct-horse-battery")` → creates first user + logs in, returns the client (cookies set); `csrf(client) -> dict` returns `{"X-CSRF-Token": ...}` after ensuring the cookie exists via a GET.
 
@@ -1198,7 +1198,7 @@ def bootstrap_admin(csrf_header):
     return _make
 ```
 
-- [ ] **Step 2: Run — FAIL (404s / missing modules)**
+- [ ] **Step 2: Run, FAIL (404s / missing modules)**
 
 - [ ] **Step 3: Implement**
 
@@ -1325,7 +1325,7 @@ def user_role(db, user: User) -> str:
 
 
 def require_role(min_role: str):
-    """Phase-1 RBAC stub — the seam pycasbin replaces in Phase 8 (doc 08 §6)."""
+    """Phase-1 RBAC stub, the seam pycasbin replaces in Phase 8 (doc 08 §6)."""
     def dep(request: Request, db=Depends(get_db),
             user: User = Depends(get_current_user)) -> User:
         if ROLE_ORDER[user_role(db, user)] < ROLE_ORDER[min_role]:
@@ -1479,10 +1479,10 @@ independent:
     from proxploy.api.auth import limiter
     limiter.reset()
 ```
-`EmailStr` needs `email-validator` — add `"email-validator>=2.0"` to pyproject dependencies and `pip install -e '.[dev]'` again.
+`EmailStr` needs `email-validator`, add `"email-validator>=2.0"` to pyproject dependencies and `pip install -e '.[dev]'` again.
 
-- [ ] **Step 4: Run tests — PASS** (whole suite: `.venv/bin/python -m pytest tests/ -q`)
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): local auth — argon2, DB sessions, CSRF, per-IP rate limit, first-run owner bootstrap, RBAC stub"`
+- [ ] **Step 4: Run tests, PASS** (whole suite: `.venv/bin/python -m pytest tests/ -q`)
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): local auth, argon2, DB sessions, CSRF, per-IP rate limit, first-run owner bootstrap, RBAC stub"`
 
 ---
 
@@ -1518,7 +1518,7 @@ def test_audit_lists_login_events(client, csrf_header, bootstrap_admin):
     assert len(r2.json()) == 1
 ```
 
-- [ ] **Step 2: Run — FAIL (404)**
+- [ ] **Step 2: Run, FAIL (404)**
 
 - [ ] **Step 3: Implement**
 
@@ -1558,14 +1558,14 @@ def list_audit(response: Response, db=Depends(get_db), action: str | None = None
 
 Add to `api/__init__.py`: `from proxploy.api import audit` … `api_router.include_router(audit.router)`.
 
-- [ ] **Step 4: Run tests — PASS**
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): read-only audit endpoint (admin, filterable, paged)"`
+- [ ] **Step 4: Run tests, PASS**
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): read-only audit endpoint (admin, filterable, paged)"`
 
 ---
 
 ### Task 7: Entitlement registry (all 81 flags) + client + `GET /api/v1/entitlements`
 
-Doc refs: 01 §17 (canonical flag index — exactly 81 keys), 07 §2/§5/§6/§8 (client, verification, no-license path, failure matrix), 05 (entitlements endpoints).
+Doc refs: 01 §17 (canonical flag index, exactly 81 keys), 07 §2/§5/§6/§8 (client, verification, no-license path, failure matrix), 05 (entitlements endpoints).
 
 **Files:**
 - Create: `backend/proxploy/entitlements/__init__.py` (empty), `backend/proxploy/entitlements/registry.py`, `backend/proxploy/entitlements/keys.py`, `backend/proxploy/entitlements/client.py`, `backend/proxploy/api/entitlements.py`
@@ -1573,9 +1573,9 @@ Doc refs: 01 §17 (canonical flag index — exactly 81 keys), 07 §2/§5/§6/§8
 - Test: `backend/tests/test_entitlements.py`
 
 **Interfaces:**
-- Produces (registry): `FLAG_KEYS: tuple[str, ...]` (exactly the 81 doc-01 §17 keys), `DEFAULT_FEATURES: dict[str, bool]` (all `True` — the dormant built-in map).
-- Produces (keys): `BUNDLED_PUBLIC_KEYS: dict[str, str]` (kid → PEM; dev key pasted in Task 9), `load_public_keys(settings) -> dict[str, str]` (bundled ∪ optional JSON file at `settings.ent_extra_keys_file` — the test/dev injection seam).
-- Produces (client): `TokenInvalid(Exception)`; `EntitlementStatus` dataclass (`tier, source: "builtin"|"token", expires_at, grace_until, in_grace, clock_skew`); `Entitlements(public_keys: dict[str, str])` with `.verify(token) -> dict` (EdDSA + kid set, exp NOT enforced by JWT — grace window is ours), `.apply_claims(claims)`, `.reset_builtin()`, `.load(db, secretstore)`, `.enabled(key) -> bool` (pure dict lookup, unknown → `False`), `.snapshot() -> dict`, `.status() -> EntitlementStatus`.
+- Produces (registry): `FLAG_KEYS: tuple[str...]` (exactly the 81 doc-01 §17 keys), `DEFAULT_FEATURES: dict[str, bool]` (all `True`; the dormant built-in map).
+- Produces (keys): `BUNDLED_PUBLIC_KEYS: dict[str, str]` (kid → PEM; dev key pasted in Task 9), `load_public_keys(settings) -> dict[str, str]` (bundled ∪ optional JSON file at `settings.ent_extra_keys_file`; the test/dev injection seam).
+- Produces (client): `TokenInvalid(Exception)`; `EntitlementStatus` dataclass (`tier, source: "builtin"|"token", expires_at, grace_until, in_grace, clock_skew`); `Entitlements(public_keys: dict[str, str])` with `.verify(token) -> dict` (EdDSA + kid set, exp NOT enforced by JWT; grace window is ours), `.apply_claims(claims)`, `.reset_builtin()`, `.load(db, secretstore)`, `.enabled(key) -> bool` (pure dict lookup, unknown → `False`), `.snapshot() -> dict`, `.status() -> EntitlementStatus`.
 - Produces (deps): `get_entitlements(request) -> Entitlements` (reads `app.state.entitlements`); `require_entitlement(key)` → dependency raising 403 `{"error": "entitlement_required", "feature": key}`.
 - Produces (api): `GET /api/v1/entitlements` (any authenticated user) → `{"tier": str, "features": {key: bool}, "grace": null | {"expires_at", "grace_until", "in_grace"}}`.
 
@@ -1669,11 +1669,11 @@ def test_entitlements_endpoint(client, csrf_header, bootstrap_admin):
     assert all(body["features"].values())
 ```
 
-- [ ] **Step 2: Run — FAIL (no `proxploy.entitlements`)**
+- [ ] **Step 2: Run, FAIL (no `proxploy.entitlements`)**
 
 - [ ] **Step 3: Implement**
 
-`backend/proxploy/entitlements/registry.py` — the full doc-01 §17 index, one flag per feature, all ON while dormant:
+`backend/proxploy/entitlements/registry.py`: the full doc-01 §17 index, one flag per feature, all ON while dormant:
 ```python
 """Canonical entitlement flag registry (doc 01 §17). 81 keys, all ON while dormant.
 A feature without a key does not merge (doc 07 §3); keys never change once shipped."""
@@ -1731,7 +1731,7 @@ def load_public_keys(settings) -> dict[str, str]:
 ```python
 """Entitlements client (docs 00 §7, 07). OpenFeature-shaped; dormant = all-on.
 Resolution: valid signed token within grace → its features claim; otherwise the
-built-in default map. Unknown keys are False — fail closed (doc 07 §2)."""
+built-in default map. Unknown keys are False, fail closed (doc 07 §2)."""
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -1850,7 +1850,7 @@ def get_entitlements(request: Request):
 
 
 def require_entitlement(key: str):
-    """Doc 07 §2 backend enforcement — stack after auth/role deps on every gated route."""
+    """Doc 07 §2 backend enforcement, stack after auth/role deps on every gated route."""
     def dep(request: Request):
         if not request.app.state.entitlements.enabled(key):
             raise HTTPException(403, {"error": "entitlement_required", "feature": key})
@@ -1871,12 +1871,12 @@ and inside the lifespan, after `app.state.sessionmaker = ...`:
 ```
 Add `ent_extra_keys_file: Path | None = None` to `Settings`. Register the router in `api/__init__.py`: `api_router.include_router(entitlements.router)`.
 
-- [ ] **Step 4: Run tests — PASS** (`.venv/bin/python -m pytest tests/ -q`)
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): entitlement registry (81 flags, all ON), Ed25519 client with grace window, /api/v1/entitlements"`
+- [ ] **Step 4: Run tests, PASS** (`.venv/bin/python -m pytest tests/ -q`)
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): entitlement registry (81 flags, all ON), Ed25519 client with grace window, /api/v1/entitlements"`
 
 ---
 
-### Task 8: proxploy-api — dormant licensing resolver
+### Task 8: proxploy-api: dormant licensing resolver
 
 Doc refs: 07 §4/§9 (endpoints, tables, signing custody), 09 (repo layout, tiers.yaml as the arming switch), 10 Phase 1 (`licenses` + `issued_tokens` created now, resolver returns "all entitled").
 
@@ -1888,7 +1888,7 @@ Repo: `~/workspace/aspyrelabs/proxploy/proxploy-api` (already `git init -b main`
 **Interfaces:**
 - Produces (HTTP, the doc-09 contract, verbatim paths): `POST /v1/licenses/activate` `{license_key, install_id}` → `{token, refresh_credential}` (404 unknown/revoked key; 409 already bound to a different install); `POST /v1/entitlements/refresh` `{refresh_credential}` → `{token}` (403 unknown/revoked); `POST /v1/licenses/revoke` `{refresh_credential}` → `{revoked: true}`; `GET /v1/health` → `{status: "ok"}`.
 - Produces (signing): `sign_token(*, private_pem: str, kid: str, license_id: str, tier: str, features: dict, ttl_hours=72, grace_days=30) -> tuple[str, dict]` (returns JWT + its claims).
-- Produces (tiers): `resolve_features(tier: str, tiers_path: Path) -> dict[str, bool]` — dormant: every tier → all 81 keys `True` (`tiers.yaml` is the arming switch; editing it later is config, never refactor).
+- Produces (tiers): `resolve_features(tier: str, tiers_path: Path) -> dict[str, bool]`; dormant: every tier → all 81 keys `True` (`tiers.yaml` is the arming switch; editing it later is config, never refactor).
 - Produces (scripts): `gen_signing_key.py --kid dev-2026-07` writes `var/signing/<kid>.key` (0400) and prints the public PEM; `create_license.py --tier pro` inserts a license row and prints the key.
 
 - [ ] **Step 1: Write the failing test**
@@ -1975,11 +1975,11 @@ def test_unknown_license_404(client):
         "license_key": "PPL-NOPE", "install_id": "i"}).status_code == 404
 ```
 
-- [ ] **Step 2: Run — FAIL** (`cd proxploy-api && python3 -m venv .venv && .venv/bin/pip -q install -e '.[dev]'; .venv/bin/python -m pytest tests/ -q` — red because nothing exists)
+- [ ] **Step 2: Run, FAIL** (`cd proxploy-api && python3 -m venv .venv && .venv/bin/pip -q install -e '.[dev]'.venv/bin/python -m pytest tests/ -q`, red because nothing exists)
 
 - [ ] **Step 3: Implement**
 
-`pyproject.toml` (name `proxploy-api`, package `proxploy_api`, same build backend/style as Task 1): dependencies `fastapi>=0.115, uvicorn[standard]>=0.30, pydantic-settings>=2.4, sqlalchemy>=2.0, alembic>=1.13, PyJWT>=2.9, cryptography>=43, PyYAML>=6`; dev extra `pytest>=8, httpx>=0.27`. `.gitignore`: `.venv/`, `__pycache__/`, `*.egg-info/`, `data/`, `var/`, `.pytest_cache/` (— `var/` keeps the private signing key out of git, doc 09).
+`pyproject.toml` (name `proxploy-api`, package `proxploy_api`, same build backend/style as Task 1): dependencies `fastapi>=0.115, uvicorn[standard]>=0.30, pydantic-settings>=2.4, sqlalchemy>=2.0, alembic>=1.13, PyJWT>=2.9, cryptography>=43, PyYAML>=6`; dev extra `pytest>=8, httpx>=0.27`. `.gitignore`: `.venv/`, `__pycache__/`, `*.egg-info/`, `data/`, `var/`, `.pytest_cache/` (; `var/` keeps the private signing key out of git, doc 09).
 
 `proxploy_api/config.py` (env prefix `PROXPLOY_API_`, `@lru_cache get_settings()` like the app): `db_url: str = "sqlite:///./data/api.db"`, `signing_key_file: Path = Path("./var/signing/dev-2026-07.key")`, `kid: str = "dev-2026-07"`, `token_ttl_hours: int = 72`, `grace_days: int = 30`, `tiers_file: Path | None = None` (None → packaged `tiers.yaml`).
 
@@ -2033,7 +2033,7 @@ class IssuedToken(Base):
 `proxploy_api/signing.py`:
 ```python
 """Ed25519 signing (doc 07 §5). The private key lives in a root-only file/KMS on
-Aspyre infra with an offline encrypted backup — never in this repo (doc 09)."""
+Aspyre infra with an offline encrypted backup, never in this repo (doc 09)."""
 import secrets
 from datetime import timedelta
 from pathlib import Path
@@ -2061,7 +2061,7 @@ def sign_token(*, private_pem: str, kid: str, license_id: str, tier: str,
                       headers={"kid": kid}), claims
 ```
 
-`proxploy_api/tiers.yaml` — **the arming switch** (doc 07 §7). Dormant state: one rule, all entitled:
+`proxploy_api/tiers.yaml`: **the arming switch** (doc 07 §7). Dormant state: one rule, all entitled:
 ```yaml
 # Tier → features mapping. INERT while dormant: all_entitled resolves every tier
 # to every flag ON. Arming Pro later = editing this file. Never a refactor.
@@ -2346,7 +2346,7 @@ print(priv.public_key().public_bytes(
 `scripts/create_license.py`:
 ```python
 #!/usr/bin/env python3
-"""Insert a license row (dev/support tool — there is no sales flow while dormant)."""
+"""Insert a license row (dev/support tool; there is no sales flow while dormant)."""
 import argparse
 import secrets
 
@@ -2373,20 +2373,20 @@ with Session(create_engine(settings.db_url)) as db:
 print(key)
 ```
 
-- [ ] **Step 4: Run tests — PASS** (`.venv/bin/python -m pytest tests/ -q` in proxploy-api)
-- [ ] **Step 5: Commit (proxploy-api repo)** — `git add -A && git commit -m "feat: dormant licensing resolver — activate/refresh/revoke, Ed25519 signing, licenses+issued_tokens, tiers.yaml arming switch"`
+- [ ] **Step 4: Run tests, PASS** (`.venv/bin/python -m pytest tests/ -q` in proxploy-api)
+- [ ] **Step 5: Commit (proxploy-api repo)**, `git add -A && git commit -m "feat: dormant licensing resolver, activate/refresh/revoke, Ed25519 signing, licenses+issued_tokens, tiers.yaml arming switch"`
 
 ---
 
 ### Task 9: app↔api contract fixture + contract tests + license activation path + background refresh
 
-Doc refs: 09 §SHARED CONTRACT ("a contract test in each repo asserting its serialization matches a shared static fixture — fails loudly on drift"), 07 §5 (lifecycle), 10 Phase 1 (test-infrastructure deliverable (c); dormant-api-signed token verified by `Entitlements.enabled()` — the DoD line).
+Doc refs: 09 §SHARED CONTRACT ("a contract test in each repo asserting its serialization matches a shared static fixture, fails loudly on drift"), 07 §5 (lifecycle), 10 Phase 1 (test-infrastructure deliverable (c); dormant-api-signed token verified by `Entitlements.enabled()`, the DoD line).
 
 **Files:**
 - Create (BOTH repos, byte-identical): `proxploy-app/backend/tests/contract/entitlement_token.fixture.json` and `proxploy-api/tests/contract/entitlement_token.fixture.json`
 - Create (app): `backend/tests/contract/test_contract.py`, `backend/proxploy/services/license_client.py`, `backend/tests/test_license_flow.py`, `backend/tests/test_e2e_entitlement.py`
 - Create (api): `tests/contract/test_contract.py`
-- Modify (app): `backend/proxploy/entitlements/keys.py` (paste dev public key), `backend/proxploy/api/entitlements.py` (license endpoints), `backend/proxploy/main.py` (refresh task), `backend/proxploy/api/deps.py` (no change — uses `require_role("owner")`)
+- Modify (app): `backend/proxploy/entitlements/keys.py` (paste dev public key), `backend/proxploy/api/entitlements.py` (license endpoints), `backend/proxploy/main.py` (refresh task), `backend/proxploy/api/deps.py` (no change; uses `require_role("owner")`)
 
 **Interfaces:**
 - Fixture shape: `{"kid": "test-fixture-1", "claims": {sub, tier, features, iat, exp, grace_until}, "private_key_pem": "...", "public_key_pem": "..."}`. The keypair is **TEST-ONLY** (committed on purpose so both repos share one fixture; it never signs anything outside tests).
@@ -2396,7 +2396,7 @@ Doc refs: 09 §SHARED CONTRACT ("a contract test in each repo asserting its seri
 
 - [ ] **Step 1: Write the shared fixture (both repos, identical bytes)**
 
-`tests/contract/entitlement_token.fixture.json` (this exact content in **both** repos — the claims sample is doc 07 §9's table rendered concrete; the keypair was generated once for this plan and is test-only):
+`tests/contract/entitlement_token.fixture.json` (this exact content in **both** repos, the claims sample is doc 07 §9's table rendered concrete; the keypair was generated once for this plan and is test-only):
 ```json
 {
   "_comment": "Shared app<->api entitlement-token contract fixture (doc 09). TEST-ONLY keypair - never used outside contract tests. Do not edit without amending docs/09 in proxploy-app and updating BOTH repos in the same change.",
@@ -2416,7 +2416,7 @@ Doc refs: 09 §SHARED CONTRACT ("a contract test in each repo asserting its seri
 
 - [ ] **Step 2: Write the failing contract tests**
 
-App side — `backend/tests/contract/test_contract.py`:
+App side, `backend/tests/contract/test_contract.py`:
 ```python
 """app-side entitlement contract test (doc 09): the app must deserialize a token
 built from the shared fixture exactly. Fails loudly on drift, not at runtime."""
@@ -2446,7 +2446,7 @@ def test_fixture_features_keys_are_known_flags():
     assert set(FIXTURE["claims"]["features"]) <= set(FLAG_KEYS)
 ```
 
-API side — `proxploy-api/tests/contract/test_contract.py`:
+API side, `proxploy-api/tests/contract/test_contract.py`:
 ```python
 """api-side entitlement contract test (doc 09): sign_token must emit exactly the
 fixture's claim set (plus jti) with the EdDSA/kid header the app expects."""
@@ -2475,7 +2475,7 @@ def test_api_signs_tokens_matching_fixture_shape():
     assert jwt.get_unverified_header(token)["kid"] == FIXTURE["kid"]
 ```
 
-Run both — Expected: app test FAILS only if Task 7 drifted (it should pass immediately — that is fine, the fixture is the regression tripwire, note it and move on); api test PASSES likewise. If either fails, the (de)serialization drifted from doc 09 — fix the code, never the fixture.
+Run both, Expected: app test FAILS only if Task 7 drifted (it should pass immediately; that is fine, the fixture is the regression tripwire, note it and move on); api test PASSES likewise. If either fails, the (de)serialization drifted from doc 09; fix the code, never the fixture.
 
 - [ ] **Step 3: Generate + bundle the dev signing key**
 
@@ -2563,7 +2563,7 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
         assert ent["tier"] == "builtin" and len(ent["features"]) == 81
 ```
 
-Run — FAIL (404 on the license endpoints).
+Run, FAIL (404 on the license endpoints).
 
 - [ ] **Step 5: Implement license client + endpoints + refresh loop**
 
@@ -2693,9 +2693,9 @@ def remove_license(request: Request, db=Depends(get_db),
                 action="entitlement.license.remove")
     return {"ok": True}
 ```
-(`class LicenseIn(BaseModel): license_key: str`. Export `_ts` from `entitlements/client.py` — it already exists there.)
+(`class LicenseIn(BaseModel): license_key: str`. Export `_ts` from `entitlements/client.py`, it already exists there.)
 
-In `main.py` `create_app`: `app.state.license_client = license_client or LicenseClient(settings.api_base_url)`. In the lifespan, after entitlements load — start the background refresh **only when licensed** (doc 07 §6):
+In `main.py` `create_app`: `app.state.license_client = license_client or LicenseClient(settings.api_base_url)`. In the lifespan, after entitlements load; start the background refresh **only when licensed** (doc 07 §6):
 ```python
         import asyncio
 
@@ -2714,7 +2714,7 @@ In `main.py` `create_app`: `app.state.license_client = license_client or License
                         cred = app.state.secretstore.decrypt(row.value.encode()).decode()
                         out = app.state.license_client.refresh(cred)
                         # apply via a fake-request shim: the helper only needs .app
-                        class _Req:  # noqa: N801 — minimal shim
+                        class _Req:  # noqa: N801, minimal shim
                             pass
                         req = _Req(); req.app = app
                         apply_new_token(req, db, out["token"])
@@ -2731,9 +2731,9 @@ In `main.py` `create_app`: `app.state.license_client = license_client or License
 ```
 (Move the existing bare `yield` accordingly; `from proxploy.models import AppSetting` in main.py.)
 
-- [ ] **Step 6: Run tests — PASS** (`pytest tests/ -q` in the app; `pytest tests/ -q` in proxploy-api)
+- [ ] **Step 6: Run tests, PASS** (`pytest tests/ -q` in the app; `pytest tests/ -q` in proxploy-api)
 
-- [ ] **Step 7: e2e — the DoD line, real dormant api process**
+- [ ] **Step 7: e2e, the DoD line, real dormant api process**
 
 `backend/tests/test_e2e_entitlement.py`:
 ```python
@@ -2812,7 +2812,7 @@ def test_roundtrip_against_real_dormant_api(tmp_path, csrf_header, bootstrap_adm
         proc.terminate()
         proc.wait(timeout=10)
 ```
-Add `"e2e: cross-repo roundtrip against a local proxploy-api"` to the pytest markers list in pyproject. Run: `.venv/bin/python -m pytest tests/test_e2e_entitlement.py -q` — Expected: PASS (proxploy-api venv exists from Task 8).
+Add `"e2e: cross-repo roundtrip against a local proxploy-api"` to the pytest markers list in pyproject. Run: `.venv/bin/python -m pytest tests/test_e2e_entitlement.py -q`, Expected: PASS (proxploy-api venv exists from Task 8).
 
 - [ ] **Step 8: Commit (both repos)**
 
@@ -2831,7 +2831,7 @@ Doc refs: 02 §4 (one client layer, PVE-8-vs-9 branching isolated here), 03 (pro
 - Create: `backend/proxploy/services/proxmox.py`, `backend/tests/fakes/__init__.py` (empty), `backend/tests/fakes/pve.py`, `backend/tests/fixtures/pve/version_pve8.json`, `backend/tests/fixtures/pve/version_pve9.json`, `backend/tests/fixtures/pve/permissions_full.json`, `backend/tests/test_proxmox.py`, `backend/tests/test_pve_integration.py`
 
 **Interfaces:**
-- Produces: `ProxmoxError(RuntimeError)`; `parse_token_id("user@realm!name") -> tuple[str, str]` (user-with-realm, token name; raises `ProxmoxError` on bad shape); `ProxmoxClient(address, token_id, token_secret, verify_tls=True, tls_fingerprint=None, factory=None)` with `.version() -> {"version": str, "release": str}` and `.permissions() -> dict` (both raise `ProxmoxError` on any transport/auth failure); `default_factory(**kw)` (real proxmoxer); `tls_fingerprint_sha256(host, port=8006) -> str` ("AA:BB:…" of the presented cert — used when `verify_tls=False` with a pinned fingerprint, doc 08 §2).
+- Produces: `ProxmoxError(RuntimeError)`; `parse_token_id("user@realm!name") -> tuple[str, str]` (user-with-realm, token name; raises `ProxmoxError` on bad shape); `ProxmoxClient(address, token_id, token_secret, verify_tls=True, tls_fingerprint=None, factory=None)` with `.version() -> {"version": str, "release": str}` and `.permissions() -> dict` (both raise `ProxmoxError` on any transport/auth failure); `default_factory(**kw)` (real proxmoxer); `tls_fingerprint_sha256(host, port=8006) -> str` ("AA:BB:…" of the presented cert; used when `verify_tls=False` with a pinned fingerprint, doc 08 §2).
 - Produces (fakes): `FakePVE(version={...}, permissions={...}, fail=False)` mimicking the proxmoxer attribute surface used (`api.version.get()`, `api.access.permissions.get()`); `make_fake_factory(fake) -> factory` matching the `factory` kwarg; recorded JSON fixtures with a docstring explaining how to re-record from a live PVE (`pvesh get /version --output-format json`).
 - The app factory kwarg `proxmox_factory` (accepted since Task 1) reaches this layer: `create_app(proxmox_factory=...)` → `app.state.proxmox_factory` → hosts routes (Task 11) build `ProxmoxClient(..., factory=app.state.proxmox_factory)`.
 
@@ -2886,7 +2886,7 @@ def test_unreachable_raises_proxmox_error():
         c.version()
 ```
 
-`backend/tests/test_pve_integration.py` (the wired disposable-PVE path — runs only with env; CI matrix in Task 16):
+`backend/tests/test_pve_integration.py` (the wired disposable-PVE path, runs only with env; CI matrix in Task 16):
 ```python
 import os
 
@@ -2912,7 +2912,7 @@ def test_live_version_and_permissions():
     assert isinstance(c.permissions(), dict)
 ```
 
-- [ ] **Step 2: Run — FAIL (no `proxploy.services.proxmox`)** — also add an empty `backend/tests/__init__.py` and `backend/tests/fakes/__init__.py` so `from tests.fakes...` imports resolve.
+- [ ] **Step 2: Run, FAIL (no `proxploy.services.proxmox`)**, also add an empty `backend/tests/__init__.py` and `backend/tests/fakes/__init__.py` so `from tests.fakes...` imports resolve.
 
 - [ ] **Step 3: Implement**
 
@@ -2958,7 +2958,7 @@ def make_fake_factory(fake: FakePVE):
 `backend/proxploy/services/proxmox.py`:
 ```python
 """The ONE Proxmox client layer (docs 02 §4, 11 §7). Every proxmoxer call and every
-PVE-8-vs-9 behavioural branch lives here — never in routers, pollers, or jobs.
+PVE-8-vs-9 behavioural branch lives here, never in routers, pollers, or jobs.
 (No version branches exist yet; when PVE 9 diverges, branch on self.version()["release"]
 inside this module only.) Scoped API tokens, never root@pam passwords (doc 00 §8)."""
 import hashlib
@@ -3046,16 +3046,16 @@ class ProxmoxClient:
         except Exception as e:
             raise ProxmoxError(f"permission read failed: {e}") from e
 ```
-(The fake factory raising in `factory(...)` exercises the connect-failure path; `FakePVE(fail=True)` leaf raising exercises call-failure — both surface as `ProxmoxError`.)
+(The fake factory raising in `factory(...)` exercises the connect-failure path; `FakePVE(fail=True)` leaf raising exercises call-failure, both surface as `ProxmoxError`.)
 
 In `main.py` `create_app`: `app.state.proxmox_factory = proxmox_factory` (may be `None` → `ProxmoxClient` uses `default_factory`).
 
-- [ ] **Step 4: Run tests — PASS** (`pytest tests/test_proxmox.py -q`; integration file reports SKIPPED without env — that is the wired-but-gated state)
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): proxmox client layer (single branching point) + fake PVE fixture infra + gated live-PVE test"`
+- [ ] **Step 4: Run tests, PASS** (`pytest tests/test_proxmox.py -q`; integration file reports SKIPPED without env; that is the wired-but-gated state)
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): proxmox client layer (single branching point) + fake PVE fixture infra + gated live-PVE test"`
 
 ---
 
-### Task 11: Host onboarding — probe, create (token + optional SSH enrolment), list, test
+### Task 11: Host onboarding: probe, create (token + optional SSH enrolment), list, test
 
 Doc refs: 10 Phase 1 (host onboarding bullet + DoD), 08 §2 (verification), §4 (SSH key handling, explicit consent), 05 (hosts endpoints; `hosts.multi` gates the 2nd+ host), 04 (`hosts`, `host_credentials`), 06 (wizard step 3 shows public key + authorize command).
 
@@ -3065,9 +3065,9 @@ Doc refs: 10 Phase 1 (host onboarding bullet + DoD), 08 §2 (verification), §4 
 - Test: `backend/tests/test_hosts.py`
 
 **Interfaces:**
-- Produces (services.sshkeys): `generate_ed25519(comment: str) -> tuple[bytes, str]` — (private key PEM/PKCS8 bytes, one-line OpenSSH public key ending in ` comment`). Library-generated via `cryptography` (doc 08 §4 — never shell out to ssh-keygen). **This module does not exist for anyone but the hosts-onboarding flow and, later, `executor/`** — the private key goes straight into SecretStore.
+- Produces (services.sshkeys): `generate_ed25519(comment: str) -> tuple[bytes, str]`; (private key PEM/PKCS8 bytes, one-line OpenSSH public key ending in ` comment`). Library-generated via `cryptography` (doc 08 §4, never shell out to ssh-keygen). **This module does not exist for anyone but the hosts-onboarding flow and, later, `executor/`**: the private key goes straight into SecretStore.
 - Produces (api.hosts):
-  - `POST /api/v1/hosts/probe` (admin) `{address, token_id, token_secret, verify_tls?, tls_fingerprint?}` → `{ok, version, release}` or 502 problem — the wizard's non-persisting "Test connection".
+  - `POST /api/v1/hosts/probe` (admin) `{address, token_id, token_secret, verify_tls?, tls_fingerprint?}` → `{ok, version, release}` or 502 problem; the wizard's non-persisting "Test connection".
   - `POST /api/v1/hosts` (admin; **2nd+ host additionally requires `hosts.multi`**) `{name, address, token_id, token_secret, verify_tls?, tls_fingerprint?, ssh_enroll?, ssh_consent?}` → 201 `{id, name, address, node_name, pve_version, status, ssh_public_key?, authorized_keys_line?, consent_note?}`. Connectivity check first; credentials stored only through SecretStore; `ssh_enroll` without `ssh_consent: true` → 400 with the explicit consent copy.
   - `GET /api/v1/hosts` (viewer) → list (never any credential material; `public_meta` only).
   - `GET /api/v1/hosts/{id}` (viewer) → detail + `credentials: [{kind, public_meta, last_used_at}]`.
@@ -3185,7 +3185,7 @@ def test_host_test_endpoint_updates_status(pve_client, csrf_header):
                   headers=csrf_header(c)).json()["status"] == "connected"
 ```
 
-- [ ] **Step 2: Run — FAIL (404s)**
+- [ ] **Step 2: Run, FAIL (404s)**
 
 - [ ] **Step 3: Implement**
 
@@ -3226,7 +3226,7 @@ from proxploy.services.sshkeys import generate_ed25519
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
 CONSENT_NOTE = ("This key gives Proxploy a root shell on the node, used only for "
-                "App Store install/update/migration scripts — exactly as if you ran "
+                "App Store install/update/migration scripts, exactly as if you ran "
                 "them yourself as root on the node. Every use is audit-logged and its "
                 "full output archived. Authorize it by adding the line to "
                 "/root/.ssh/authorized_keys on the node.")
@@ -3365,8 +3365,8 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
 
 Register in `api/__init__.py` (`from proxploy.api import hosts` … `api_router.include_router(hosts.router)`).
 
-- [ ] **Step 4: Run tests — PASS** (whole suite)
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): host onboarding — probe, create with encrypted creds + consented SSH enrolment, list/detail/test; the audited route template"`
+- [ ] **Step 4: Run tests, PASS** (whole suite)
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): host onboarding, probe, create with encrypted creds + consented SSH enrolment, list/detail/test; the audited route template"`
 
 ---
 
@@ -3381,8 +3381,8 @@ Doc refs: 05 (settings + `/meta/version`, `/meta/onboarding`), 10 Phase 1 ("Sett
 
 **Interfaces:**
 - Produces (services.settings): `get_setting(db, key: str, default=None)`, `set_setting(db, key: str, value) -> None` (upsert + commit). Keys ending `.enc` hold SecretStore ciphertext and are **never** returned by the API.
-- Produces (api.settings): `GET /api/v1/settings` (admin) → `{key: value}` excluding `.enc` keys; `PATCH /api/v1/settings` (admin) `{key: value, ...}` → upserts, rejects keys ending `.enc` (422 — secrets go through their own flows), audits `settings.update` with changed keys.
-- Produces (api.meta): `GET /api/v1/meta/version` (any authenticated) → `{version, db_backend}`; `GET /api/v1/meta/onboarding` (public, booleans only per doc 05) → `{admin_exists, host_added, complete}` where `complete = bool(get_setting(db, "onboarding.complete", False))` — the wizard finishes by `PATCH /api/v1/settings {"onboarding.complete": true}`.
+- Produces (api.settings): `GET /api/v1/settings` (admin) → `{key: value}` excluding `.enc` keys; `PATCH /api/v1/settings` (admin) `{key: value...}` → upserts, rejects keys ending `.enc` (422; secrets go through their own flows), audits `settings.update` with changed keys.
+- Produces (api.meta): `GET /api/v1/meta/version` (any authenticated) → `{version, db_backend}`; `GET /api/v1/meta/onboarding` (public, booleans only per doc 05) → `{admin_exists, host_added, complete}` where `complete = bool(get_setting(db, "onboarding.complete", False))`; the wizard finishes by `PATCH /api/v1/settings {"onboarding.complete": true}`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3424,7 +3424,7 @@ def test_meta_version(client, csrf_header, bootstrap_admin):
     assert body["version"] and body["db_backend"] == "sqlite"
 ```
 
-- [ ] **Step 2: Run — FAIL**
+- [ ] **Step 2: Run, FAIL**
 
 - [ ] **Step 3: Implement**
 
@@ -3446,7 +3446,7 @@ def set_setting(db, key: str, value) -> None:
         db.add(AppSetting(key=key, value=value))
     db.commit()
 ```
-(Refactor Task 9's local `_setting/_set_setting` in `api/entitlements.py` to import these — one implementation.)
+(Refactor Task 9's local `_setting/_set_setting` in `api/entitlements.py` to import these, one implementation.)
 
 `backend/proxploy/api/settings.py`:
 ```python
@@ -3508,12 +3508,12 @@ def onboarding(db=Depends(get_db)):
 
 Register `settings.router` in `api/__init__.py`.
 
-- [ ] **Step 4: Run tests — PASS**
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(backend): settings service (+.enc hygiene) and meta version/onboarding — wizard backend complete"`
+- [ ] **Step 4: Run tests, PASS**
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(backend): settings service (+.enc hygiene) and meta version/onboarding, wizard backend complete"`
 
 ---
 
-### Task 13: Frontend scaffold — Vite + React 19 + Tailwind v4 tokens + API client + Login
+### Task 13: Frontend scaffold: Vite + React 19 + Tailwind v4 tokens + API client + Login
 
 Doc refs: 06 §(c) (tokens, verbatim), 06 §(a) (`/login` flow design), 03 (frontend stack), 09 (frontend layout).
 
@@ -3576,11 +3576,11 @@ describe('LoginForm', () => {
   })
 })
 ```
-Run: `npm test` — Expected: FAIL (missing files).
+Run: `npm test`, Expected: FAIL (missing files).
 
 - [ ] **Step 3: Implement**
 
-`frontend/src/styles/tokens.css` — doc 06 §(c) verbatim plus base/body styles and the derived light block:
+`frontend/src/styles/tokens.css`: doc 06 §(c) verbatim plus base/body styles and the derived light block:
 ```css
 @import "tailwindcss";
 
@@ -3719,7 +3719,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       onSuccess()
     } catch (err) {
       setError(err instanceof ApiError && err.status === 401
-        ? 'Invalid email or password.' : 'Sign-in failed — is the server reachable?')
+        ? 'Invalid email or password.' : 'Sign-in failed, is the server reachable?')
     } finally { setBusy(false) }
   }
 
@@ -3759,7 +3759,7 @@ function LoginPage() {
 }
 ```
 
-`frontend/src/router.tsx` (grown in Tasks 14–15 — Task 13 state):
+`frontend/src/router.tsx` (grown in Tasks 14–15, Task 13 state):
 ```tsx
 import { Outlet, createRootRoute, createRouter } from '@tanstack/react-router'
 
@@ -3806,12 +3806,12 @@ createRoot(document.getElementById('root')!).render(
 ```
 Delete Vite's demo `App.tsx`, `App.css`, `index.css` imports; set `<html lang="en" data-theme="dark">` and `<title>Proxploy</title>` in `index.html`.
 
-- [ ] **Step 4: Run — PASS** (`npm test` and `npm run build` both green)
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(frontend): Vite+React19 scaffold, verbatim design tokens, API client with CSRF, login"`
+- [ ] **Step 4: Run, PASS** (`npm test` and `npm run build` both green)
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(frontend): Vite+React19 scaffold, verbatim design tokens, API client with CSRF, login"`
 
 ---
 
-### Task 14: App shell — sidebar nav, topbar, theme switch, entitlements hook, placeholders
+### Task 14: App shell: sidebar nav, topbar, theme switch, entitlements hook, placeholders
 
 Doc refs: 06 §(a) routes, §(b) `AppShell/SidebarNav/Topbar/TierPill/HealthFooter/EmptyState/LockVeil`, §(e) entitlement UI rules, 10 Phase 1 ("app shell UI: sidebar with the fixed nav, topbar, theme tokens, dark/light switch").
 
@@ -3820,7 +3820,7 @@ Doc refs: 06 §(a) routes, §(b) `AppShell/SidebarNav/Topbar/TierPill/HealthFoot
 - Modify: `frontend/src/router.tsx` (shell layout route + guards + the 8 nav routes)
 
 **Interfaces:**
-- Produces: `NAV` (exported const — two groups, 8 entries, fixed order per doc 01 §0); `useMe()`, `useEntitlements() -> {has(key), tier, grace, isLoading}` (TanStack Query over `/auth/me`, `/entitlements`; 5 min refetch for entitlements per doc 06 §d); `shellRoute` with `beforeLoad` guard: onboarding incomplete → `/onboarding`, no session → `/login`; `<LockVeil title subtitle>` wrapper (blur + amber lock, doc 06 §e — dormant phase never shows it, but it ships now); `PlaceholderPage({title, phase, note})` honest empty state; `ThemeToggle` flips `document.documentElement.dataset.theme` + persists to `localStorage.pp_theme`.
+- Produces: `NAV` (exported const, two groups, 8 entries, fixed order per doc 01 §0); `useMe()`, `useEntitlements() -> {has(key), tier, grace, isLoading}` (TanStack Query over `/auth/me`, `/entitlements`; 5 min refetch for entitlements per doc 06 §d); `shellRoute` with `beforeLoad` guard: onboarding incomplete → `/onboarding`, no session → `/login`; `<LockVeil title subtitle>` wrapper (blur + amber lock, doc 06 §e; dormant phase never shows it, but it ships now); `PlaceholderPage({title, phase, note})` honest empty state; `ThemeToggle` flips `document.documentElement.dataset.theme` + persists to `localStorage.pp_theme`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3829,7 +3829,7 @@ Doc refs: 06 §(a) routes, §(b) `AppShell/SidebarNav/Topbar/TierPill/HealthFoot
 import { describe, expect, it } from 'vitest'
 import { NAV } from '../components/SidebarNav'
 
-describe('fixed nav (doc 01 §0 — never reshaped by tier/config/entitlement)', () => {
+describe('fixed nav (doc 01 §0, never reshaped by tier/config/entitlement)', () => {
   it('is exactly the 8 pages in order', () => {
     const labels = NAV.flatMap(g => g.items.map(i => i.label))
     expect(labels).toEqual(['Cluster', 'Apps', 'App Store', 'Virtual Machines',
@@ -3840,7 +3840,7 @@ describe('fixed nav (doc 01 §0 — never reshaped by tier/config/entitlement)',
   })
 })
 ```
-Run `npm test` — FAIL.
+Run `npm test`, FAIL.
 
 - [ ] **Step 2: Implement**
 
@@ -4014,7 +4014,7 @@ export function EmptyState({ title, note }: { title: string; note: string }) {
 }
 ```
 ```tsx
-// LockVeil.tsx — doc 06 §e rule 1: never hide gated features; veil them.
+// LockVeil.tsx, doc 06 §e rule 1: never hide gated features; veil them.
 import type { ReactNode } from 'react'
 import { Button } from './ui/button'
 import { useNavigate } from '@tanstack/react-router'
@@ -4054,7 +4054,7 @@ export function PlaceholderPage({ title, phase, note }:
 }
 ```
 
-Rewrite `frontend/src/router.tsx` — shell route with guards + the 8 pages (Settings is replaced by the real page in Task 15):
+Rewrite `frontend/src/router.tsx`, shell route with guards + the 8 pages (Settings is replaced by the real page in Task 15):
 ```tsx
 import { Outlet, createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
 import { api } from './api/client'
@@ -4117,8 +4117,8 @@ declare module '@tanstack/react-router' {
 }
 ```
 
-- [ ] **Step 3: Run — PASS** (`npm test`, `npm run build`)
-- [ ] **Step 4: Commit** — `git add -A && git commit -m "feat(frontend): app shell — fixed 8-page nav, topbar, theme switch, entitlements hook, LockVeil, honest placeholders"`
+- [ ] **Step 3: Run, PASS** (`npm test`, `npm run build`)
+- [ ] **Step 4: Commit**, `git add -A && git commit -m "feat(frontend): app shell, fixed 8-page nav, topbar, theme switch, entitlements hook, LockVeil, honest placeholders"`
 
 ---
 
@@ -4131,7 +4131,7 @@ Doc refs: 06 §(a) (`/onboarding` 4-step flow design, Settings page contents), 1
 - Modify: `frontend/src/router.tsx` (add `onboardingRoute`, replace Settings placeholder with `settingsRoute`)
 
 **Interfaces:**
-- Produces: `HostForm({onCreated, probeFirst})` — shared by wizard step 2/3 and Settings "Add host": fields name/address/token id/token secret/verify-TLS toggle/SSH-enrol checkbox with consent copy; "Test connection" → `POST /hosts/probe`; submit → `POST /hosts`; on `ssh_enroll` success shows `authorized_keys_line` + copy button + `consent_note`. `onboardingRoute` (4 steps: admin → host+SSH → key display → done, finishing with `PATCH /settings {"onboarding.complete": true}` then navigate `/cluster`); `settingsRoute` (Plan card from `useEntitlements`, Hosts card listing `GET /hosts` + Add-host, General card honest Phase-7 stubs).
+- Produces: `HostForm({onCreated, probeFirst})`; shared by wizard step 2/3 and Settings "Add host": fields name/address/token id/token secret/verify-TLS toggle/SSH-enrol checkbox with consent copy; "Test connection" → `POST /hosts/probe`; submit → `POST /hosts`; on `ssh_enroll` success shows `authorized_keys_line` + copy button + `consent_note`. `onboardingRoute` (4 steps: admin → host+SSH → key display → done, finishing with `PATCH /settings {"onboarding.complete": true}` then navigate `/cluster`); `settingsRoute` (Plan card from `useEntitlements`, Hosts card listing `GET /hosts` + Add-host, General card honest Phase-7 stubs).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4153,7 +4153,7 @@ describe('HostForm', () => {
   })
 })
 ```
-Run — FAIL.
+Run, FAIL.
 
 - [ ] **Step 2: Implement**
 
@@ -4170,7 +4170,7 @@ export type HostCreated = {
 }
 
 const CONSENT_COPY = 'App Store installs run community scripts through a dedicated ' +
-  'SSH key — a root shell on the node, exactly as if you ran them yourself. ' +
+  'SSH key, a root shell on the node, exactly as if you ran them yourself. ' +
   'Optional: skip it and everything except installs/updates/migration still works.'
 
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
@@ -4188,7 +4188,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     try {
       const r = await api<{ version: string; release: string }>('/hosts/probe', {
         method: 'POST', body: JSON.stringify(f) })
-      setProbe(`Connected — PVE ${r.version}`)
+      setProbe(`Connected, PVE ${r.version}`)
     } catch (e) { setError(errText(e)) }
   }
 
@@ -4379,9 +4379,9 @@ function SettingsPage() {
       <Card title="Plan">
         <p className="text-[13.5px] text-text-2">
           <span className="font-mono text-amber">{tier === 'builtin' ? 'FREE' : tier.toUpperCase()}</span>
-          {' — '}all features are enabled. Licensing is dormant; entering a license key
+          {', '}all features are enabled. Licensing is dormant; entering a license key
           activates against the Proxploy licensing service.
-          {grace?.in_grace && <span className="text-amber"> License refresh failing — working offline until {grace.grace_until}.</span>}
+          {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
         </p>
       </Card>
 
@@ -4394,7 +4394,7 @@ function SettingsPage() {
               <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
                 <td className="py-2 font-mono">{h.name}</td>
                 <td className="font-mono text-text-2">{h.address}</td>
-                <td className="text-text-2">{h.pve_version ?? '—'}</td>
+                <td className="text-text-2">{h.pve_version ?? ', '}</td>
                 <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
               </tr>
             ))}
@@ -4417,9 +4417,9 @@ function SettingsPage() {
 }
 ```
 
-In `router.tsx`: import `onboardingRoute` and `settingsRoute`, add `onboardingRoute` to the root children and `settingsRoute` to the shell children (there is no Settings placeholder to remove — it was never created in Task 14's `page()` list; verify the nav's `/settings` link now resolves).
+In `router.tsx`: import `onboardingRoute` and `settingsRoute`, add `onboardingRoute` to the root children and `settingsRoute` to the shell children (there is no Settings placeholder to remove; it was never created in Task 14's `page()` list; verify the nav's `/settings` link now resolves).
 
-- [ ] **Step 3: Run — PASS** (`npm test`, `npm run build`)
+- [ ] **Step 3: Run, PASS** (`npm test`, `npm run build`)
 
 - [ ] **Step 4: Manual DoD walk-through against the real backend (fake-free, no PVE needed for the UI shell)**
 
@@ -4429,11 +4429,11 @@ cd ../frontend && npm run dev &
 ```
 `curl -s http://127.0.0.1:8000/api/v1/meta/onboarding` → `admin_exists: false`. (With a real PVE host available this is the full DoD flow: wizard → admin → host + token → connectivity check → key display. Without one, the fake-backed pytest suite in Tasks 11–12 is the executable proof.) Kill both dev servers afterwards.
 
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(frontend): onboarding wizard v1 (admin → host → SSH consent → done) + settings page (plan, hosts, add-host)"`
+- [ ] **Step 5: Commit**, `git add -A && git commit -m "feat(frontend): onboarding wizard v1 (admin → host → SSH consent → done) + settings page (plan, hosts, add-host)"`
 
 ---
 
-### Task 16: CI wiring — executor-isolation lint, license audit, Postgres leg, disposable-PVE path, SPA serving
+### Task 16: CI wiring: executor-isolation lint, license audit, Postgres leg, disposable-PVE path, SPA serving
 
 Doc refs: 09 (import-graph CI check "from Phase 1, even though executor/ doesn't exist yet"), 03 §License verification protocol (CI license-audit step), 10 Phase 1 test infra (b) + DoD ("disposable-PVE integration path is wired"), 02 §3 (backend serves the built SPA).
 
@@ -4444,8 +4444,8 @@ Doc refs: 09 (import-graph CI check "from Phase 1, even though executor/ doesn't
 - Test: `backend/tests/test_isolation_lint.py`
 
 **Interfaces:**
-- Produces: `python backend/scripts/check_executor_isolation.py` — exit 0 when no module outside `backend/proxploy/executor/` imports `asyncssh` or references the SSH-key SecretStore accessor (`get_ssh_private_key`); exit 1 listing offenders. Runs in CI on every push; passes trivially until Phase 4 creates `executor/`.
-- Produces: GitHub Actions workflows (the "wired" artifact — no remote exists yet on this box; they activate the day the repos are pushed).
+- Produces: `python backend/scripts/check_executor_isolation.py`, exit 0 when no module outside `backend/proxploy/executor/` imports `asyncssh` or references the SSH-key SecretStore accessor (`get_ssh_private_key`); exit 1 listing offenders. Runs in CI on every push; passes trivially until Phase 4 creates `executor/`.
+- Produces: GitHub Actions workflows (the "wired" artifact, no remote exists yet on this box; they activate the day the repos are pushed).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4475,7 +4475,7 @@ def test_violation_is_caught(tmp_path):
     assert "services/evil.py" in r.stdout
     assert "executor/ok.py" not in r.stdout
 ```
-Run — FAIL (script missing).
+Run, FAIL (script missing).
 
 - [ ] **Step 2: Implement the lint**
 
@@ -4484,7 +4484,7 @@ Run — FAIL (script missing).
 #!/usr/bin/env python3
 """Hard structural rule (docs 08 §4, 09): no module outside proxploy/executor/ may
 import the SSH client (asyncssh) or call the SecretStore accessor that returns the
-SSH private key. Mechanical enforcement, not convention. Wired from Phase 1 —
+SSH private key. Mechanical enforcement, not convention. Wired from Phase 1, 
 passes trivially until executor/ exists in Phase 4."""
 import argparse
 import ast
@@ -4568,7 +4568,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: python -m pytest tests/ -q -m "not pve_integration and not e2e"
       - run: python scripts/check_executor_isolation.py
-      - name: license audit (doc 03 protocol — fails on anything outside brief §3)
+      - name: license audit (doc 03 protocol, fails on anything outside brief §3)
         run: pip-licenses --partial-match --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;The Unlicense;CMU License (MIT-CMU)"
 
   backend-postgres:
@@ -4664,16 +4664,16 @@ cd ~/workspace/aspyrelabs/proxploy/proxploy-api && git add -A && git commit -m "
 
 ---
 
-## Phase-1 Definition of Done — verification map (doc 10)
+## Phase-1 Definition of Done: verification map (doc 10)
 
 Run this checklist after Task 16; every line names its executable proof.
 
 | DoD line (doc 10) | Proof |
 |---|---|
-| Fresh install: wizard creates admin, adds a PVE host with a scoped token, connectivity check passes, credentials round-trip encrypted | `tests/test_auth.py` (bootstrap), `tests/test_hosts.py::test_create_host_with_ssh_enrolment` (fake PVE; encrypted blobs asserted), wizard UI in Task 15. The *real*-PVE leg is `tests/test_pve_integration.py` — env-gated by design on this box. |
+| Fresh install: wizard creates admin, adds a PVE host with a scoped token, connectivity check passes, credentials round-trip encrypted | `tests/test_auth.py` (bootstrap), `tests/test_hosts.py::test_create_host_with_ssh_enrolment` (fake PVE; encrypted blobs asserted), wizard UI in Task 15. The *real*-PVE leg is `tests/test_pve_integration.py`, env-gated by design on this box. |
 | Every subsequent route template runs through auth, RBAC stub, audit, and an entitlement check | `api/hosts.py` is the documented template; `test_hosts.py` asserts 401/403/audit/entitlement paths. |
 | `Entitlements.enabled()` verifies a token signed by the dormant proxploy-api and falls back to the built-in map offline | `tests/test_e2e_entitlement.py` (real api subprocess), `tests/test_entitlements.py` (grace + builtin fallback), contract tests in both repos. |
-| Alembic migrates SQLite and Postgres from empty to current | `tests/test_migrations.py` — SQLite locally; PG leg in the `backend-postgres` CI job (or locally with `PROXPLOY_TEST_PG_DSN`). |
+| Alembic migrates SQLite and Postgres from empty to current | `tests/test_migrations.py`, SQLite locally; PG leg in the `backend-postgres` CI job (or locally with `PROXPLOY_TEST_PG_DSN`). |
 | proxmoxer fake/fixture layer + app↔api contract test run in CI; disposable-PVE path wired | `tests/fakes/pve.py` + fixtures (backend job), `tests/contract/` in both workflows, `pve-integration` matrix job (dispatch/schedule, secrets-gated). |
 
 Also confirm: `git -C proxploy-app log --oneline` shows one commit per task; `proxploy-web`/`proxploy-docs` each have their scaffold commit; `proxploy-api` has Tasks 8/9/16 commits. Append a dated completion note to `buildlog.md`.
@@ -4681,8 +4681,8 @@ Also confirm: `git -C proxploy-app log --oneline` shows one commit per task; `pr
 ## Execution notes (unattended run)
 
 - **Order matters:** Tasks 1→12 are strictly sequential (each imports the last). 13–15 (frontend) depend only on Task 12's endpoints existing for the manual walk-through; 16 last.
-- **If `npm create vite` prompts**, pass `--yes`/pipe `printf 'y\n'`; if the shadcn-style prompt for package name appears, accept defaults — the scaffold files are immediately overwritten per Task 13.
-- **If autogenerate emits `BigInteger` vs `INTEGER` variant noise on SQLite**, keep the generated file as-is — the `BigPK` variant renders correctly; do not hand-edit types in 0001 beyond removing spurious `op.alter_column` no-ops.
+- **If `npm create vite` prompts**, pass `--yes`/pipe `printf 'y\n'`; if the shadcn-style prompt for package name appears, accept defaults; the scaffold files are immediately overwritten per Task 13.
+- **If autogenerate emits `BigInteger` vs `INTEGER` variant noise on SQLite**, keep the generated file as-is; the `BigPK` variant renders correctly; do not hand-edit types in 0001 beyond removing spurious `op.alter_column` no-ops.
 - **Never edit migration 0001 after Task 2's commit.** Schema changes in later phases are new revisions.
 - **Secrets hygiene tripwires:** no test may assert on a plaintext secret read back from the DB (only through SecretStore); `pp_session` cookie is HttpOnly; `.enc` settings never appear in `GET /api/v1/settings`.
 - The three quality gates that must never regress while executing: `pytest -q` green in both repos, `check_executor_isolation.py` exit 0, frontend `npm run build` green.

@@ -12,7 +12,7 @@ const label = 'mb-1 block text-[11.5px] uppercase tracking-wide text-text-3'
 type HostRow = { id: number; name: string }
 
 /** Create one alert rule. The metric enum, and which target kinds each metric
- *  supports, come from GET /alert-rules/metrics — never a second hard-coded
+ *  supports, come from GET /alert-rules/metrics; never a second hard-coded
  *  copy that can drift from services/alerts.py::METRIC_TARGETS. */
 export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   const qc = useQueryClient()
@@ -71,7 +71,7 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
     onError: (e) => toast.error(
       e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
         ? (e.body as any).detail
-        : 'Could not create that rule — check the fields and try again.'),
+        : 'Could not create that rule, check the fields and try again.'),
   })
 
   function pickMetric(next: string) {

@@ -3,7 +3,7 @@
 Proxmox stores a guest NIC as one comma-joined `k=v` string, and the NIC model
 and its MAC address share a single head token: `virtio=AA:BB:CC:DD:EE:FF`.
 That is the whole reason this module exists. Editing a NIC means read the
-string, change one key, write the string back — never rebuild it from a typed
+string, change one key, write the string back; never rebuild it from a typed
 struct, because anything the struct does not model (the MAC, `queues`, an
 option a future PVE adds) would be dropped, and a dropped MAC means Proxmox
 mints a new random one at next start, breaking every DHCP reservation and
@@ -16,7 +16,7 @@ back. No key is interpreted, no value is normalised, nothing is sorted.
 from __future__ import annotations
 
 # The qemu NIC models PVE accepts. Used ONLY to recognise which token is the
-# model=MAC head token when reporting a NIC's identity to the UI — never to
+# model=MAC head token when reporting a NIC's identity to the UI: never to
 # validate or rewrite it.
 QEMU_MODELS = frozenset({
     "virtio", "e1000", "e1000-82540em", "e1000-82544gc", "e1000-82545em",
@@ -49,7 +49,7 @@ def nic_identity(parts: dict) -> dict:
     """-> {"model", "macaddr"} for both flavours.
 
     qemu puts them in one head token (`virtio=AA:BB:...`); lxc splits them
-    across `type=veth` and `hwaddr=`. Read-only — neither value is ever
+    across `type=veth` and `hwaddr=`. Read-only, neither value is ever
     written back by this module's callers.
     """
     for key, val in parts.items():

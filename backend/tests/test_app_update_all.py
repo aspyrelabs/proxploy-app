@@ -98,7 +98,7 @@ def test_update_all_with_nothing_stale_is_an_empty_202_not_an_error(
 def test_update_all_is_not_matched_as_an_app_id(client, csrf_header,
                                                 bootstrap_admin):
     """`/apps/{app_id}` would parse "update-all" as an id if ordering
-    regressed — FastAPI would 422 on the int coercion."""
+    regressed, FastAPI would 422 on the int coercion."""
     bootstrap_admin(client)
     h = csrf_header(client)
     assert client.post("/api/v1/apps/update-all", json={"consent": True},
@@ -109,7 +109,7 @@ def test_update_all_skips_an_edited_app_and_enqueues_no_job(client, csrf_header,
                                                             bootstrap_admin):
     """Task 5's _resolve_update refuses to re-run upstream over local edits
     (JobFailed). If update-all enqueued a job for an edited app anyway, that
-    job would be guaranteed to fail — this proves it's skipped instead, with
+    job would be guaranteed to fail, this proves it's skipped instead, with
     the same remedy POST /{app_id}/update's 409 names (script/revert, not
     "refresh the catalog").
 

@@ -22,7 +22,7 @@ def test_every_known_scheme_maps_to_its_expected_label(scheme, label):
 
 
 # kind_for's invariant, pinned: it returns ONLY a fixed label from
-# KIND_FROM_SCHEME or "webhook" — NEVER any text derived from the input.
+# KIND_FROM_SCHEME or "webhook": NEVER any text derived from the input.
 # Every credential-shaped candidate below must produce "webhook" and must
 # not leak any fragment of itself, regardless of case, script, embedded NUL,
 # length, or where/how many times "://" appears.
@@ -53,7 +53,7 @@ ALLOWED_KINDS = set(KIND_FROM_SCHEME.values()) | {"webhook"}
 
 @pytest.mark.parametrize("candidate,secret_fragment", CREDENTIAL_SHAPED_INPUTS)
 def test_kind_for_never_echoes_caller_supplied_text(candidate, secret_fragment):
-    """`kind` is an unencrypted `Text` column — kind_for must never return
+    """`kind` is an unencrypted `Text` column, kind_for must never return
     anything derived from the input, only a fixed allowlisted label. A
     shape/length guard on the derived scheme is not enough (it can always be
     walked around by appending "://" or picking a short lowercase token);
@@ -65,7 +65,7 @@ def test_kind_for_never_echoes_caller_supplied_text(candidate, secret_fragment):
 
 def test_kind_for_codomain_is_closed_over_the_allowlist():
     """The structural claim behind `kind_for`, pinned directly: its codomain
-    is exactly `KIND_FROM_SCHEME`'s values plus "webhook" — nothing else can
+    is exactly `KIND_FROM_SCHEME`'s values plus "webhook", nothing else can
     ever come out, for a legitimate scheme, an adversarial credential-shaped
     string, or anything in between. This is what `ALLOWED_NOTIFICATION_KINDS`
     (proxploy.models) mirrors into the DB CHECK constraint; if this test and
@@ -97,7 +97,7 @@ def test_redact_url_never_echoes_caller_supplied_text(candidate, secret_fragment
 
 
 def test_send_one_actually_calls_apprise_offline():
-    """The one Apprise call site — every other test in this file monkeypatches
+    """The one Apprise call site, every other test in this file monkeypatches
     it away, so this pins that the real dependency is actually exercised.
     A bogus scheme is rejected by ap.add() with no network access."""
     import logging
@@ -310,8 +310,8 @@ def test_a_broken_channel_never_fails_the_job_that_triggered_it(tmp_path, monkey
 
 
 def test_send_one_false_is_isolated_same_as_a_raise(tmp_path, monkeypatch):
-    """`ap.add()` rejecting a URL returns False from send_one — the ordinary
-    Apprise failure mode, distinct from an exception — and must be isolated
+    """`ap.add()` rejecting a URL returns False from send_one, the ordinary
+    Apprise failure mode, distinct from an exception; and must be isolated
     the same way a raise is."""
     from proxploy.services import notifier
     from tests.support import make_job_app
@@ -415,7 +415,7 @@ def test_a_cancelled_job_still_gets_its_notification_scheduled_and_delivered(
         tmp_path, monkeypatch):
     """_finish runs (synchronously, no await) inside the CancelledError handler
     of an already-cancelling task. Creating a fire-and-forget task there is
-    exactly the kind of thing that can silently do nothing — confirm it doesn't.
+    exactly the kind of thing that can silently do nothing, confirm it doesn't.
     """
     from proxploy.jobs import HANDLERS, JobBackend
     from proxploy.services import notifier
@@ -455,7 +455,7 @@ def test_sweep_orphans_fires_one_aggregate_notification_without_blocking_startup
         tmp_path, monkeypatch):
     """`sweep_orphans` runs during lifespan startup; the bulk UPDATE that
     marks orphans is the only writer of `interrupted` in the backend, so it
-    must be the one that schedules the Notifier — but as a single background
+    must be the one that schedules the Notifier, but as a single background
     task regardless of backlog size (not one send per orphan, which would
     queue N blocking Apprise calls onto the shared default executor that the
     poller/metrics/SSE hops also use), and never awaited inline."""

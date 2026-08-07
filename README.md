@@ -1,6 +1,6 @@
 # Proxploy
 
-Self-hosted web UI for managing Proxmox VE — "Unraid's experience, for
+Self-hosted web UI for managing Proxmox VE, "Unraid's experience, for
 Proxmox." Backend is FastAPI + SQLAlchemy (`backend/`), frontend is React 19
 + Vite + TanStack Router (`frontend/`).
 
@@ -8,7 +8,7 @@ This repository, `proxploy-app`, is **the product**: backend, frontend, and
 installer ship together as one versioned release artifact that installs onto
 a customer's own Proxmox host (or a plain Debian box, or via Docker). It is
 **not** a hosted service and there is nothing here to deploy to Coolify or
-any other PaaS — see `docs/09-repository-structure.md` for why the app,
+any other PaaS, see `docs/09-repository-structure.md` for why the app,
 API, web, and docs are four separate repos with four separate deployment
 models.
 
@@ -26,8 +26,40 @@ design, start at `docs/00-decision-brief.md` and read `docs/01` through
   compiled-in release public key at `backend/proxploy/release_pubkey.pem` is
   still a **placeholder** and the matching release private key does not
   exist. `docs/runbooks/publishing-a-release.md` is the runbook that
-  generates the real keypair and cuts the first real release — do that
+  generates the real keypair and cuts the first real release, do that
   before pointing anyone at the one-liner.
+## Public keys
+
+Two public keys reach this app from outside, and **both accept either
+spelling**: a full PEM, or just its base64 body with no `-----BEGIN`/`-----END`
+lines. A PEM is that same base64 wrapped in two label lines, and the labels
+say what the bytes are without contributing any, so dropping them changes
+nothing about the key. One line pastes into a config field or a JSON value
+without the armor getting mangled on the way.
+
+| Key | Where it comes from | What it verifies |
+|---|---|---|
+| Entitlement signing keys | `backend/proxploy/entitlements/keys.py::BUNDLED_PUBLIC_KEYS`, plus the `ent_extra_keys_file` overlay | Entitlement tokens minted by proxploy-api |
+| Release signing key | `backend/proxploy/release_pubkey.pem`, or `PROXPLOY_RELEASE_PUBKEY_FILE` | The release manifest, before an update installs anything |
+
+Both go through `backend/proxploy/pubkey.py::load_public_key`, which parses
+either form. Entitlement keys are then normalised to canonical PEM by
+`load_public_keys`, because PyJWT wants one, so `entitlements/client.py` never
+sees the bare form at all. The bundled set is stored bare.
+
+A key in the `ent_extra_keys_file` overlay that does not parse is **dropped
+with an error logged**, not raised: one bad entry in an operator-supplied file
+must not take the bundled set down with it. A dropped `kid` then fails closed
+at verify time as "unknown signing key id", the same path an unrecognised
+`kid` already takes. Watch for that log line if a token is unexpectedly
+rejected, because a dropped key and a key that was never added look identical
+from the outside.
+
+Neither of these is secret. The private halves live elsewhere: the
+entitlement signing key in proxploy-api's `PROXPLOY_API_SIGNING_KEY`, and the
+release signing key in the runbook at
+`docs/runbooks/publishing-a-release.md`. Neither exists in this repo, ever.
+
 - **The database defaults to SQLite in WAL mode**, with Postgres available
   via `PROXPLOY_DB_URL`. That's deliberate for a self-hosted, single-box
   product, not a gap to close.
@@ -39,14 +71,14 @@ design, start at `docs/00-decision-brief.md` and read `docs/01` through
 
 > **Not installable today.** No release has been published (see "Status"
 > above). The commands below are what the finished installer accepts and
-> what Phase 9a proved end-to-end against local fixtures — they are not yet
+> what Phase 9a proved end-to-end against local fixtures; they are not yet
 > usable against the real `proxploy.com` channel, because there is nothing
 > published there to fetch. `docs/runbooks/publishing-a-release.md` is what
 > makes them real.
 
 Proxploy has three install shapes, all built in Phase 9a
 (`docs/notes/phase-9a-install-update.md`, `install.sh --help`). None of them
-apply to *this* repo as a hosted deployment — they're how the product lands
+apply to *this* repo as a hosted deployment, they're how the product lands
 on a customer's own hardware, once a release exists.
 
 ### 1. LXC on a Proxmox node (the one-liner)
@@ -56,7 +88,7 @@ curl -fsSL https://proxploy.com/install.sh | bash
 ```
 
 Run on a Proxmox VE node (detected via `pct` + `/etc/pve`), this creates a
-CT and installs Proxploy inside it — OS packages, a dedicated system user, a
+CT and installs Proxploy inside it, OS packages, a dedicated system user, a
 versioned release layout under `/opt/proxploy/releases/<version>/`, the
 `proxploy.service` systemd unit, and Caddy in front with a real Let's
 Encrypt certificate (`--hostname`) or a self-signed `tls internal` cert
@@ -68,7 +100,7 @@ otherwise.
 curl -fsSL https://proxploy.com/install.sh | bash -s -- --shape systemd
 ```
 
-Same install, minus the CT-creation step — for a bare Debian 12 host or VM
+Same install, minus the CT-creation step; for a bare Debian 12 host or VM
 that isn't itself a Proxmox node.
 
 ### 3. Docker / Compose
@@ -82,8 +114,8 @@ docker compose up -d
 of the backend into a slim Python image; `packaging/docker/compose.yml`
 maps port 8006 on the host to 8000 in the container and persists
 `/var/lib/proxploy` in a named volume. This pulls `ghcr.io/aspyrelabs/
-proxploy:latest`, which — same caveat as above — has never been published.
-**This shape also deliberately cannot self-update** once it exists — a
+proxploy:latest`, which; same caveat as above, has never been published.
+**This shape also deliberately cannot self-update** once it exists, a
 container replacing its own image from inside is how you lose the
 container. `POST /meta/update` returns `409` with the fix:
 
@@ -127,7 +159,7 @@ gets; the installer and Docker image override the relevant ones.
 | `PROXPLOY_TOTP_PENDING_TTL_S` | `300.0` | How long a pending-2FA token stays redeemable. |
 | `PROXPLOY_MIGRATE_ASSUMED_BPS` | `80e6` | Assumed LAN transfer rate used only for the migration preflight estimate. |
 | `PROXPLOY_RELEASE_CHANNEL_URL` | GitHub releases URL | Base URL of the release channel (manifest + signed tarball). |
-| `PROXPLOY_RELEASE_PUBKEY_FILE` | unset (uses the key shipped in the package) | Path to a release public key, to verify against a non-default key. |
+| `PROXPLOY_RELEASE_PUBKEY_FILE` | unset (uses the key shipped in the package) | Path to a release public key, to verify against a non-default key. The file may hold a PEM or just its base64 body; see [Public keys](#public-keys). |
 | `PROXPLOY_INSTALL_SHAPE` | unset | Set by the installer in `/etc/proxploy/proxploy.env`; unset means a dev checkout (self-update `check` works, `apply` refuses). |
 | `PROXPLOY_UPDATE_SCRIPT` | `/opt/proxploy/bin/proxploy-update` | Path to the updater script `POST /meta/update` runs via `systemd-run`. |
 | `PROXPLOY_UPDATE_TIMEOUT_S` | `600.0` | Timeout for the self-update run. |
@@ -135,10 +167,10 @@ gets; the installer and Docker image override the relevant ones.
 
 Two more variables exist outside the `Settings` class:
 
-- **`PROXPLOY_IN_DOCKER`** — checked directly (`services/updater.py`), set to
+- **`PROXPLOY_IN_DOCKER`**: checked directly (`services/updater.py`), set to
   `1` by `packaging/docker/Dockerfile`. Forces `detect_shape()` to report
   `docker`, which is what makes `POST /meta/update` refuse to self-apply.
-- **`PROXPLOY_TEST_PG_DSN`** — test-only, read by
+- **`PROXPLOY_TEST_PG_DSN`**: test-only, read by
   `backend/tests/test_migrations.py`. Unset, the Postgres half of the
   dual-DB migration tests is skipped; the `backend-postgres` CI leg
   (`.github/workflows/ci.yml`) sets it to a local `postgres:16` service
@@ -181,12 +213,12 @@ cd backend
 831 passed, 2 skipped, 4 deselected. `pve_integration` needs a disposable
 live Proxmox host (`PROXPLOY_TEST_PVE_*`) that doesn't exist in this
 environment; pytest's `e2e` marker is a cross-repo roundtrip against a local
-`proxploy-api`, not the Playwright suite below — don't confuse the two.
+`proxploy-api`, not the Playwright suite below; don't confuse the two.
 `test_backups_sync.py::test_concurrent_stale_reads_enqueue_only_one_sync` is
-a known flake (a real concurrency test, timing-sensitive on a loaded box) —
+a known flake (a real concurrency test, timing-sensitive on a loaded box); 
 if it's the only failure, rerun before assuming something broke.
 
-Frontend unit tests — **the `--no-file-parallelism` flag is required**;
+Frontend unit tests, **the `--no-file-parallelism` flag is required**;
 suites flake under vitest's default parallelism on this box:
 
 ```bash
@@ -195,7 +227,7 @@ npx vitest run --no-file-parallelism
 ```
 
 End-to-end (real Chromium via Playwright, against
-`backend/tests/e2e_server.py`'s fake PVE/SSH — spins up its own backend and
+`backend/tests/e2e_server.py`'s fake PVE/SSH, spins up its own backend and
 frontend dev server, see `frontend/playwright.config.ts`):
 
 ```bash
@@ -205,7 +237,7 @@ npx playwright test
 
 ## Cutting a release
 
-Not part of day-to-day development — see
+Not part of day-to-day development, see
 `docs/runbooks/publishing-a-release.md` for the full procedure (generate
 the release keypair, make the repo public, build the signed artifact with
 `packaging/build_release.sh`, publish the GitHub release, verify against a

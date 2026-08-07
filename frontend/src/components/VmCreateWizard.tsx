@@ -40,7 +40,7 @@ function Field({ id, label, children }: { id: string; label: string; children: R
 
 /**
  * Doc 06 §(a) row 42's "New VM". Mirrors routes/onboarding.tsx's wizard shape
- * on purpose — a step index, a STEPS chip row, `{step === N && (…)}` blocks —
+ * on purpose, a step index, a STEPS chip row, `{step === N && (…)}` blocks; 
  * rather than becoming a reusable <Wizard/>: there are exactly two multi-step
  * flows in this app and they share no fields.
  *
@@ -201,7 +201,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                   </select>
                 </Field>
                 <p className="text-[12px] text-text-3">
-                  No ISOs listed? Upload one on the Storage page — this list is the
+                  No ISOs listed? Upload one on the Storage page, this list is the
                   datastore's own <span className="font-mono">content=iso</span> listing.
                 </p>
               </div>
@@ -258,7 +258,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
               <div className="rounded-ctl border border-line-soft bg-elev p-3">
                 <KVGrid items={[
                   ['Name', f.name],
-                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? '—'} / ${f.node}`],
+                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? ', '} / ${f.node}`],
                   ['OS type', f.ostype],
                   ['ISO', f.iso],
                   ['Cores', f.cores],

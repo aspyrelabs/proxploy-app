@@ -8,7 +8,7 @@
 # pre-migration step run from the shell creates the sqlite file (a side
 # effect of `alembic upgrade head` connecting) before the key exists, which
 # trips SecretStore's "database exists but no key" guard on every fresh
-# volume — proved by running this image against an empty volume during
+# volume: proved by running this image against an empty volume during
 # Task 10 verification. Let the app migrate itself.
 set -euo pipefail
 

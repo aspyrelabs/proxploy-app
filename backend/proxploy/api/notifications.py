@@ -1,6 +1,6 @@
 """Notification channels (doc 05 §Notifications).
 
-The Apprise URL is write-only: it goes in encrypted and never comes back out —
+The Apprise URL is write-only: it goes in encrypted and never comes back out, 
 not in a response, not in an audit row, not in an error message.
 """
 from __future__ import annotations
@@ -20,9 +20,9 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 # single call. A bare `dependencies=[Depends(require_entitlement(...))]` sits
 # at position 0 of the dependant and would run BEFORE this auth check,
 # leaking 403 to an anonymous caller who should see 401 (Tasks 3 and 5 hit
-# this — see jobs.py/apps.py). Putting `_manage` first in the dependencies
+# this: see jobs.py/apps.py). Putting `_manage` first in the dependencies
 # list forces auth -> authz -> entitlement, in that order. Doc 05: every
-# notifications route is admin, no viewer read tier — one permission covers
+# notifications route is admin, no viewer read tier: one permission covers
 # the whole router.
 _manage = authorize("channel", "manage")
 
@@ -76,7 +76,7 @@ def create_channel(request: Request, body: ChannelIn, db=Depends(get_db),
                               events=body.events or [], enabled=body.enabled)
     db.add(row)
     db.commit()
-    # params carries the label only — the URL is a secret and never enters audit.
+    # params carries the label only: the URL is a secret and never enters audit.
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="notify.channel.create", target_type="notification_channel",
                 target_id=row.id, params={"name": row.name, "kind": row.kind},
@@ -144,7 +144,7 @@ def test_channel(request: Request, channel_id: int, db=Depends(get_db),
     try:
         sent = bool(send_one(url, "Proxploy test notification",
                              f"This is a test from Proxploy for channel {row.name!r}."))
-    except Exception:  # noqa: BLE001 — a bad target is a report, not a 500
+    except Exception:  # noqa: BLE001  (a bad target is a report, not a 500)
         sent = False
     if sent:
         row.last_notified_at = utcnow()

@@ -29,7 +29,7 @@ export function StoreCard({ entry, onInstall, installed }: {
       <div className="mt-3 border-t border-line-soft pt-3">
         {!entry.installable ? (
           <div className="text-[12px] text-text-3">
-            Not installable — {entry.unsupported_reason}
+            Not installable, {entry.unsupported_reason}
             {entry.website && (
               <>
                 {' '}

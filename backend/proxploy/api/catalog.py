@@ -17,13 +17,13 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 # Reused as BOTH the route-level dependency and the parameter-level one below
 # so FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call, and so authorize() in `dependencies=[...]` runs BEFORE
-# require_entitlement — a bare `Depends(require_entitlement(...))` first would
+# require_entitlement: a bare `Depends(require_entitlement(...))` first would
 # leak 403 to an anonymous caller who should see 401 (same fix as
 # jobs.py/apps.py/vms.py/notifications.py; see their comments).
 _read = authorize("catalog", "read")
 _refresh = authorize("catalog", "refresh")
 # Install is a store-wide ("app", "install") permission, not scoped by
-# catalog entry — its team lives in the request BODY (host_id), not a path
+# catalog entry: its team lives in the request BODY (host_id), not a path
 # param, so there's no scope_of resolver to hand it (deps.py's scope_*
 # helpers all resolve off request.path_params). ponytail: global-domain
 # install for now; body-derived team scoping is the upgrade path if a
@@ -103,7 +103,7 @@ class InstallIn(BaseModel):
 # independent gates, either can 400 first (order doesn't matter, both are
 # exercised in tests/test_catalog_install_api.py): explicit `consent: true`
 # (mirrors hosts.py's CONSENT_NOTE shape) and an already-enrolled `ssh_key`
-# HostCredential — no key, no route, regardless of consent.
+# HostCredential: no key, no route, regardless of consent.
 @router.post("/{slug}/install", status_code=202,
              dependencies=[Depends(_install),
                           Depends(require_entitlement("store.install"))])
@@ -123,7 +123,7 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
         raise HTTPException(400, f"not installable: {entry.unsupported_reason}")
     # Pre-flight the (host_id, ctid) uniqueness the DB enforces anyway. Without
     # it a repeat install runs the whole script to completion on the real node
-    # and only then hits IntegrityError inside the job handler — leaving an
+    # and only then hits IntegrityError inside the job handler: leaving an
     # untracked container behind. Cheap check, real node mutation avoided.
     if (db.query(App).filter_by(host_id=body.host_id, ctid=body.ctid)
             .one_or_none()) is not None:

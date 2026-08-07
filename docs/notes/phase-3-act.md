@@ -1,8 +1,8 @@
-# Phase 3 (Act) — verification notes
+# Phase 3 (Act): verification notes
 
 ## What shipped, per subsystem
 
-**JobBackend (in-process asyncio runner)** — `backend/proxploy/jobs/backend.py`,
+**JobBackend (in-process asyncio runner)**: `backend/proxploy/jobs/backend.py`,
 `backend/proxploy/jobs/__init__.py`. `app.state.jobs`, built in `main.py`'s
 lifespan alongside the Poller. `enqueue()` writes the `jobs` row in the
 caller's (threadpool) session, then hops to the loop via
@@ -10,30 +10,30 @@ caller's (threadpool) session, then hops to the loop via
 `Semaphore(4)`, so `queued` is a real, observable status. Handlers are
 `async def h(ctx, params) -> dict` registered by kind in `HANDLERS`; `ctx.log()`
 / `ctx.progress()` write a `job_events` row (or the `jobs.progress_pct`
-column) to the DB *before* fanning out to SSE subscribers — the DB is the
+column) to the DB *before* fanning out to SSE subscribers, the DB is the
 transcript, SSE is a follower. `sweep_orphans()` runs once at boot and flips
 every `queued`/`running` row to `interrupted` (never resumed). `stop()`
 cancels every in-flight task at shutdown.
 
-**Jobs REST + per-job SSE** — `backend/proxploy/api/jobs.py`. `GET /jobs`,
+**Jobs REST + per-job SSE**: `backend/proxploy/api/jobs.py`. `GET /jobs`,
 `GET /jobs/{id}`, `GET /jobs/{id}/events` (DB backlog), `GET
 /jobs/{id}/events/stream` (SSE: `line`/`progress`/`status` frames per doc 05
 §Streaming 1, `line` carries `id:` as the `Last-Event-ID` resume cursor),
 `POST /jobs/{id}/cancel`.
 
-**Lifecycle handlers + guardrail** — `backend/proxploy/services/lifecycle.py`
+**Lifecycle handlers + guardrail**: `backend/proxploy/services/lifecycle.py`
 (`app.*`/`vm.*` handlers over `ProxmoxClient.guest_action`/`task_status`/
 `task_log`, verb-to-Proxmox-action map, `TASK_POLL_S`/`TASK_TIMEOUT_S`),
 `backend/proxploy/services/selfguard.py` (`is_self()`, `DESTRUCTIVE` verb
-set — doc 02 §9 / doc 08 §1). `backend/proxploy/services/proxmox.py` gained
+set, doc 02 §9 / doc 08 §1). `backend/proxploy/services/proxmox.py` gained
 `guest_action`, `task_status`, `task_log` (Task 1).
 
-**Lifecycle routes** — `backend/proxploy/api/apps.py` (`POST
+**Lifecycle routes**: `backend/proxploy/api/apps.py` (`POST
 /apps/{id}/{action}`), `backend/proxploy/api/vms.py` (`POST
 /vms/{id}/{action}`), sharing `enqueue_lifecycle()` for the guardrail-check +
 enqueue + audit-write shape.
 
-**Notifier + routing** — `backend/proxploy/services/notifier.py`
+**Notifier + routing**: `backend/proxploy/services/notifier.py`
 (`send_one` is the one Apprise call site; `kind_for` is an allowlist-only
 scheme→label lookup, never echoes caller text; `channels_for`/`notify` fan a
 terminal event out to every subscribed, enabled channel). `JobBackend._finish`
@@ -41,17 +41,17 @@ calls `_notify` → `_notify_async`, which runs `notifier.notify` in
 `asyncio.to_thread` off the event loop, fire-and-forget, tracked in `_side`
 so the task isn't GC'd mid-flight.
 
-**Notification channels CRUD** — `backend/proxploy/api/notifications.py`:
-list/create/patch/delete/test. The Apprise URL is write-only — encrypted via
+**Notification channels CRUD**: `backend/proxploy/api/notifications.py`:
+list/create/patch/delete/test. The Apprise URL is write-only, encrypted via
 `SecretStore` into `url_enc`, never returned by any endpoint, never audited,
 never logged.
 
-**Activity feed** — `backend/proxploy/api/cluster.py`, `GET
+**Activity feed**: `backend/proxploy/api/cluster.py`, `GET
 /cluster/activity`: merges `jobs` + `audit_events`, deduped by
 `audit_events.job_id` so a lifecycle action doesn't appear twice, sorted
 newest-first, `limit` honoured and capped.
 
-**Frontend** — `frontend/src/api/jobs.ts` (types + hooks), `frontend/src/api/live.ts`
+**Frontend**: `frontend/src/api/jobs.ts` (types + hooks), `frontend/src/api/live.ts`
 (`applyJob`: SSE `job` delta → cache patch + toast), `frontend/src/components/TerminalPanel.tsx`,
 `JobLog.tsx`, `ActivityDrawer.tsx`, `ActivityFeed.tsx`, `LifecycleActions.tsx`,
 `ConfirmSelfDialog.tsx`, `ChannelForm.tsx`; `Topbar.tsx` activity bell;
@@ -69,16 +69,16 @@ job-failure notification."*
 | Clause | Proving artifact | Verdict |
 |---|---|---|
 | start/stop/restart works end-to-end (backend half) | `dod_verify.py` (below): `POST /apps/{id}/start` → 202 → polled to `succeeded` via `GET /jobs/{id}` | PROVED |
-| start/stop/restart works end-to-end (UI half: optimistic patch + reconciliation) | `frontend/src/tests/lifecycle.test.tsx` (`LifecycleActions` — action routing, running/stopped verb sets, self-target 409 → typed-confirm dialog + retry), `frontend/src/tests/jobs.test.ts` (`applyJob` — cache patch on `running`, invalidate + toast on terminal, dedupe on duplicate delivery) | PROVED BY TEST, NOT BY BROWSER — see "What was NOT verified" |
+| start/stop/restart works end-to-end (UI half: optimistic patch + reconciliation) | `frontend/src/tests/lifecycle.test.tsx` (`LifecycleActions`, action routing, running/stopped verb sets, self-target 409 → typed-confirm dialog + retry), `frontend/src/tests/jobs.test.ts` (`applyJob`; cache patch on `running`, invalidate + toast on terminal, dedupe on duplicate delivery) | PROVED BY TEST, NOT BY BROWSER; see "What was NOT verified" |
 | a cancelled job stops cleanly | `dod_verify.py`: slow job (`FakePVE(running_ticks=10_000)`) cancelled mid-poll via `POST /jobs/{id}/cancel` → settles `canceled` with `finished_at` set; backend unit coverage in `tests/test_lifecycle_jobs.py::test_cancel_mid_poll_reports_the_proxmox_task_is_still_running` (asserts the Proxmox-side action already fired and is never claimed undone) and `test_job_backend.py`'s cancel-while-queued/cancel-while-running matrix | PROVED |
 | every action appears in audit and the feed | `dod_verify.py`: audit row with matching `job_id` exists after `start`; `GET /cluster/activity` shows the job exactly once (dedup by `job_id`) | PROVED |
 | a Telegram/ntfy channel receives a job-failure notification | `dod_verify.py`: channel registered with `events=["job.failed"]`, `notifier.send_one` monkeypatched to a recorder, forced failure via `FakePVE(task_exit="CT is locked")` → recorder saw exactly one send | PROVED |
 
-### `dod_verify.py` — real output
+### `dod_verify.py`: real output
 
 Run against `tests.support.make_app` + `tests.fakes.pve.FakePVE`, from
 `backend/` with the project venv. Script was written to the scratchpad
-(not committed — throwaway per Task 14's brief).
+(not committed, throwaway per Task 14's brief).
 
 ```
 --- Clause 1: start -> 202, settles succeeded, audit row, feed shows once ---
@@ -119,11 +119,11 @@ RESULT: ALL DoD CLAUSES PROVED
 | Gate | Command | Result |
 |---|---|---|
 | Backend tests | `pytest tests/ -q -m "not pve_integration and not e2e"` | **190 passed, 1 skipped, 2 deselected** |
-| Executor isolation | `scripts/check_executor_isolation.py` | **OK** — no module outside `executor/` imports asyncssh/an SSH-key accessor (Phase 3 touches no SSH) |
-| Backend license audit | `pip-licenses --partial-match --allow-only "..."` (doc 03 protocol) | **OK, exit 0** — no disallowed licenses |
+| Executor isolation | `scripts/check_executor_isolation.py` | **OK**, no module outside `executor/` imports asyncssh/an SSH-key accessor (Phase 3 touches no SSH) |
+| Backend license audit | `pip-licenses --partial-match --allow-only "..."` (doc 03 protocol) | **OK, exit 0**; no disallowed licenses |
 | Frontend tests | `npm test` | **33 passed (11 files)** |
 | Frontend build | `npm run build` | **clean** (`tsc -b` + vite build) |
-| Frontend license audit | `license-checker-rseidelsohn --production --excludePackages "frontend@0.0.0" --onlyAllow "..."` | **OK, exit 0** (root `package.json` has no `license` field — pre-existing, expected, excluded by name) |
+| Frontend license audit | `license-checker-rseidelsohn --production --excludePackages "frontend@0.0.0" --onlyAllow "..."` | **OK, exit 0** (root `package.json` has no `license` field; pre-existing, expected, excluded by name) |
 
 ## Every endpoint added this phase
 
@@ -133,7 +133,7 @@ RESULT: ALL DoD CLAUSES PROVED
 | `GET /api/v1/jobs/{id}` | viewer | `jobs.history` | job detail row |
 | `GET /api/v1/jobs/{id}/events` | viewer | `jobs.history` | DB backlog, `after`/`limit` |
 | `GET /api/v1/jobs/{id}/events/stream` | viewer (checked inside the generator) | `jobs.stream` | SSE, `line`/`progress`/`status` frames |
-| `POST /api/v1/jobs/{id}/cancel` | operator | *(ungated — you may always stop what you started)* | idempotent-safe via conditional UPDATE |
+| `POST /api/v1/jobs/{id}/cancel` | operator | *(ungated; you may always stop what you started)* | idempotent-safe via conditional UPDATE |
 | `POST /api/v1/apps/{id}/{action}` | operator | `apps.lifecycle` | `action` ∈ `start,stop,restart,shutdown`; self-target guardrail |
 | `POST /api/v1/vms/{id}/{action}` | operator | `vms.lifecycle` | `action` ∈ `start,stop,restart,shutdown,pause,resume` |
 | `GET /api/v1/cluster/activity` | viewer | `cluster.activity_feed` | merged jobs+audit feed, `limit` |
@@ -149,14 +149,14 @@ RESULT: ALL DoD CLAUSES PROVED
   /apps/{id}/start|stop|restart` and `POST /vms/{id}/start|stop|restart|pause`;
   apps also accept `shutdown`, and VMs also accept `shutdown`/`resume`,
   covering doc 10 Phase 3's and doc 01 §2's fuller verb lists. No documented
-  path was removed — every doc-05 path still exists and behaves as specified.
+  path was removed, every doc-05 path still exists and behaves as specified.
 - **Jobs endpoints are entitlement-gated** (`jobs.history` on list/detail/
   events, `jobs.stream` on the SSE route) and `GET /cluster/activity` is
   gated on `cluster.activity_feed`, although doc 05's tables leave those
-  entitlement columns blank. This is a deliberate superset — doc 01 §11
+  entitlement columns blank. This is a deliberate superset, doc 01 §11
   defines both flags as real features, and an unchecked key can never be
   armed later. Behaviourally invisible today since all 81 flags resolve ON.
-  `POST /jobs/{id}/cancel` was deliberately left ungated — you may always
+  `POST /jobs/{id}/cancel` was deliberately left ungated; you may always
   stop what you started.
 - **`docs/05-api-surface.md` §Streaming 4 was AMENDED**: `target_type` was
   added to the documented `job` SSE event payload. The plan's frontend
@@ -179,7 +179,7 @@ RESULT: ALL DoD CLAUSES PROVED
 - **The channels table only wires an enable/disable toggle to `PATCH
   /notifications/channels/{id}`, not full editing.** The final fix-wave
   review found `PATCH` implemented and tested on the backend with no UI
-  caller at all — an admin could not silence a noisy channel without
+  caller at all, an admin could not silence a noisy channel without
   destroying its token. The toggle (`{enabled}`) closes that hole, the worst
   of the gap. Still missing from the UI: editing a channel's `events` list
   after creation, and rotating its `url` without delete-and-recreate. Both
@@ -188,30 +188,30 @@ RESULT: ALL DoD CLAUSES PROVED
   named them.
 - **The activity bell's running-job count uses a dedicated
   `['jobs', 'running-count']` query** rather than `useJobs({status: 'running'})`,
-  because `useJobs` couples `enabled` to `refetchInterval` — the brief's
+  because `useJobs` couples `enabled` to `refetchInterval`, the brief's
   original version would have left a permanent 10s `['jobs']` poll running on
   every page, violating doc 06 §(d)'s "polling is fallback, SSE is primary,
   and only while the drawer is open" rule.
 
 ## Known ceilings (`ponytail:` comments this phase, plus undocumented-but-real ones)
 
-- `backend/proxploy/jobs/backend.py:26` — `MAX_CONCURRENT = 4` is a fixed
+- `backend/proxploy/jobs/backend.py:26`: `MAX_CONCURRENT = 4` is a fixed
   `Semaphore`, not a settings knob. Upgrade path: a knob belongs with Phase
   7's scheduler UI, where a user would actually go looking for it.
-- `backend/proxploy/jobs/backend.py:49` — job-row/`job_events` writes are
+- `backend/proxploy/jobs/backend.py:49`: job-row/`job_events` writes are
   inline on the event loop (tens-of-microseconds SQLite inserts). Upgrade
   path: Phase 4's multi-thousand-line install transcripts are the trigger to
   move line writes onto a batched writer thread.
-- `backend/proxploy/services/lifecycle.py:35` — `TASK_TIMEOUT_S = 300.0` is
+- `backend/proxploy/services/lifecycle.py:35`: `TASK_TIMEOUT_S = 300.0` is
   one flat wall-clock ceiling for every lifecycle action. Upgrade path: a
   per-kind timeout table, worth building once a real workload proves one
   action needs longer.
 - `channels_for()` (`backend/proxploy/services/notifier.py`) is O(all enabled
-  channels) per terminal job — it loads every enabled row and filters
+  channels) per terminal job, it loads every enabled row and filters
   "empty events means all" in Python rather than pushing the filter into
   SQL. Fine at the channel counts a self-hosted install will ever have;
   revisit if that assumption breaks.
-- `JobBackend.stop()` does not drain `_side` — jobs cancelled at process
+- `JobBackend.stop()` does not drain `_side`, jobs cancelled at process
   shutdown (via `stop()`'s `task.cancel()` loop) lose their courtesy
   `job.canceled` notification, because the fire-and-forget notify task in
   `_side` is never awaited before the process exits. Acceptable: a
@@ -225,7 +225,7 @@ payload, but the code emits them as two separate `EventBus` events:
 `JobBackend._run`/`_finish` publish `{id, status, kind, target_type}` and
 `JobContext.progress` publishes `{id, progress_pct}` separately. This
 mismatch predates Phase 3 (noted during Task 9's review) and is recorded
-here per that task's carry-forward, not fixed — Phase 9 (docs) should decide
+here per that task's carry-forward, not fixed; Phase 9 (docs) should decide
 whether to change the doc or the wire shape.
 
 ## What was NOT verified
@@ -234,7 +234,7 @@ whether to change the doc or the wire shape.
   `FakePVE`. The Task 1 live-PVE integration test stays behind the
   `pve_integration` marker as designed.
 - **No Docker.** Not needed by anything in this phase (no executor, no
-  installs — those are Phase 4/5).
+  installs; those are Phase 4/5).
 - **No browser on this box.** Clause 1's UI half (optimistic status patch on
   click, reconciliation on the job's terminal SSE delta or the next 30s
   poll, the typed self-target confirmation dialog) is proved by
@@ -242,7 +242,7 @@ whether to change the doc or the wire shape.
   under jsdom, **not by a visual run in an actual browser**. No screenshot,
   no manual click-through happened or is claimed to have happened.
 - Postgres-backend behavior for the new tables (`jobs`, `job_events`,
-  `notification_channels`) — Phase 1/2's Postgres CI leg covers schema
+  `notification_channels`), Phase 1/2's Postgres CI leg covers schema
   portability generically; nothing in Phase 3 added Postgres-specific
   exercises.
 
@@ -255,7 +255,7 @@ whether to change the doc or the wire shape.
   you to type the container's name before a destructive self-targeted
   action) and its known blind spot: a Proxploy deployed inside a VM rather
   than the documented LXC CT has no backstop (doc 02 decision, out of scope
-  for Phase 3 — VM routes are deliberately unguarded).
-- Resolve the doc 05 `job`-event `status`/`progress_pct` split noted above —
+  for Phase 3, VM routes are deliberately unguarded).
+- Resolve the doc 05 `job`-event `status`/`progress_pct` split noted above, 
   either document the two-event wire shape or change the code to match the
   single-payload example.

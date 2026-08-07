@@ -54,7 +54,7 @@ DENIED = [
     "240.0.0.1",             # reserved
 ]
 ALLOWED = [
-    "10.0.0.5", "192.168.1.10", "172.16.5.4",  # RFC1918 — the NORMAL case here
+    "10.0.0.5", "192.168.1.10", "172.16.5.4",  # RFC1918; the NORMAL case here
     "fd00::1",                                 # IPv6 unique-local
     "203.0.113.7",                             # a routable node over a VPN/WAN
 ]
@@ -81,7 +81,7 @@ def test_probe_target_allows_rfc1918_and_routable_nodes(host):
 def test_a_name_is_judged_by_what_it_resolves_to_not_by_its_spelling(monkeypatch):
     """Validating the string would be theatre: `metadata.example.com` looks
     like an ordinary hostname and resolves to the metadata address. Every
-    resolved address must pass, not merely the first — the mixed case below is
+    resolved address must pass, not merely the first; the mixed case below is
     a real DNS answer an attacker controls."""
     import socket
 
@@ -102,7 +102,7 @@ def test_a_name_is_judged_by_what_it_resolves_to_not_by_its_spelling(monkeypatch
 
 
 def test_the_guard_covers_the_proxmoxer_path_too_not_just_the_fingerprint_fetch():
-    """`_connect()` reaches the network twice — the CERT_NONE fingerprint socket
+    """`_connect()` reaches the network twice, the CERT_NONE fingerprint socket
     and proxmoxer's own session. Gating only the first would leave the second a
     working SSRF, so the factory must never even be called."""
     from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
@@ -148,7 +148,7 @@ def _self_signed(tmp_path, cn, serial):
 
 
 def test_a_rotated_certificate_is_refused_by_the_pin(tmp_path, monkeypatch):
-    """CERT_NONE is legitimate for exactly one moment — capturing the
+    """CERT_NONE is legitimate for exactly one moment, capturing the
     fingerprint at onboarding. Every connection after that must verify against
     the pin. Proven end to end against a real TLS listener whose certificate is
     swapped underneath a live pin, not by stubbing the comparison.
@@ -156,7 +156,7 @@ def test_a_rotated_certificate_is_refused_by_the_pin(tmp_path, monkeypatch):
     Tension with the SSRF guard: the only address a test can serve TLS on is
     127.0.0.1, which that guard denies. Resolved by the same opt-in an operator
     running Proxploy ON the PVE node uses (PROXPLOY_ALLOW_LOOPBACK_TARGET=1),
-    flipped here as the module attribute — so the test exercises the real
+    flipped here as the module attribute, so the test exercises the real
     guard rather than bypassing it.
     """
     import socket
@@ -201,7 +201,7 @@ def test_a_rotated_certificate_is_refused_by_the_pin(tmp_path, monkeypatch):
         serving[0] = _self_signed(tmp_path, "pve.local", 2)  # cert rotated / MITM
         rotated = tls_fingerprint_sha256("127.0.0.1", port)
         assert rotated != pinned
-        # a fresh client per request is how the API uses this — the pin is
+        # a fresh client per request is how the API uses this: the pin is
         # re-checked on every _connect(), only cached within one instance.
         with pytest.raises(ProxmoxError, match="TLS fingerprint mismatch"):
             client().version()

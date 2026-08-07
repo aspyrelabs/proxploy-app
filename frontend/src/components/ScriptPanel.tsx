@@ -25,7 +25,7 @@ export function ScriptPanel({ appId }: { appId: number }) {
           </pre>
         </div>
       ) : (
-        <div className="mb-3 text-[12px] text-text-3">Matches upstream — no local edits.</div>
+        <div className="mb-3 text-[12px] text-text-3">Matches upstream, no local edits.</div>
       )}
       <pre className="overflow-x-auto rounded-card bg-[#0a0e14] p-4 font-mono text-[12px] text-text-2">
         {data.content}

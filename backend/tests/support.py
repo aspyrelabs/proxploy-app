@@ -55,7 +55,7 @@ def seed_snapshot(app, host_id, **kw):
 def make_job_app(tmp_path, fake=None, ssh_factory=None):
     """Minimal app-shaped namespace for JobBackend/handler unit tests.
 
-    MUST be called from inside a running event loop — `state.loop` is the
+    MUST be called from inside a running event loop, `state.loop` is the
     cross-thread hop `JobBackend.enqueue` uses (main.py:74 precedent).
     """
     import asyncio

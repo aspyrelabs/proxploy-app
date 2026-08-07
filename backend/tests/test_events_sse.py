@@ -38,7 +38,7 @@ def test_sse_streams_published_events(tmp_path, csrf_header, bootstrap_admin):
     # starlette (1.3.1) TestClient's _TestClientTransport.handle_request runs
     # the whole ASGI app via a single blocking `portal.call(...)` and only
     # returns once the app coroutine *fully finishes* (fully buffering the
-    # body first) — verified with a minimal repro outside of any proxploy
+    # body first): verified with a minimal repro outside of any proxploy
     # code. Our SSE generator is intentionally infinite (a persistent
     # connection), so that call never returns and TestClient.stream() hangs
     # forever, regardless of app.state.loop wiring. A real server thread +
@@ -128,7 +128,7 @@ def test_the_live_stream_denies_an_authenticated_user_with_no_membership(tmp_pat
         c.post("/api/v1/auth/logout", headers=h)
 
         # Strip the membership POST /users granted, leaving a real account
-        # that belongs to nothing — the A1 case.
+        # that belongs to nothing: the A1 case.
         with app.state.sessionmaker() as db:
             orphan = db.query(User).filter_by(email="orphan@x.io").one()
             db.query(TeamMember).filter_by(user_id=orphan.id).delete()

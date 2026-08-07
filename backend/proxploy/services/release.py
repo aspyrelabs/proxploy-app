@@ -13,7 +13,8 @@ from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+from proxploy.pubkey import load_public_key
 
 MANIFEST_SCHEMA_VERSION = 1
 _CHUNK = 1024 * 1024
@@ -25,7 +26,11 @@ class ReleaseError(Exception):
 
 def verify_manifest(raw: bytes, sig: bytes, pubkey_pem: bytes) -> dict:
     try:
-        key = load_pem_public_key(pubkey_pem)
+        # PEM or the bare base64 body: same bytes, and the signature either
+        # verifies against them or it does not. Accepting both spellings
+        # widens nothing an attacker can reach, it only stops a correct key
+        # being rejected over its label lines.
+        key = load_public_key(pubkey_pem)
     except Exception as e:
         raise ReleaseError(f"release public key is unreadable: {e}") from e
     if not isinstance(key, Ed25519PublicKey):
@@ -44,7 +49,7 @@ def verify_manifest(raw: bytes, sig: bytes, pubkey_pem: bytes) -> dict:
     if manifest.get("schema") != MANIFEST_SCHEMA_VERSION:
         raise ReleaseError(
             f"manifest schema {manifest.get('schema')!r} is not supported "
-            f"(this build understands {MANIFEST_SCHEMA_VERSION}) — update "
+            f"(this build understands {MANIFEST_SCHEMA_VERSION}), update "
             f"Proxploy manually, then retry")
     for field in ("version", "artifacts"):
         if field not in manifest:
@@ -66,7 +71,7 @@ def verify_artifact(path: Path, entry: dict) -> None:
             digest.update(chunk)
     actual = digest.hexdigest()
     if actual != entry["sha256"]:
-        raise ReleaseError(f"{path.name}: sha256 mismatch — refusing to install")
+        raise ReleaseError(f"{path.name}: sha256 mismatch, refusing to install")
 
 
 def _parts(v: str) -> tuple[int, ...]:

@@ -10,7 +10,7 @@ vi.mock('../api/client', () => ({ api: vi.fn() }))
 // StorePage reads/writes category+q through router search params. Mock
 // useSearch/useNavigate with a tiny external store (same shape as apps.test.tsx's
 // static stub, but reactive) so a chip click's navigate() actually re-renders
-// the page with the new search — needed to assert useCatalog gets re-called.
+// the page with the new search, needed to assert useCatalog gets re-called.
 let mockSearch: { category?: string; q?: string } = {}
 const searchListeners = new Set<() => void>()
 vi.mock('@tanstack/react-router', async (importOriginal) => ({

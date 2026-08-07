@@ -7,7 +7,7 @@ from proxploy.services.consoleproxy import bridge_binary, connect_upstream_vnc
 
 
 class FakeRfbUpstream:
-    """No auth-line handshake for VNC — the ticket is validated by Proxmox at
+    """No auth-line handshake for VNC, the ticket is validated by Proxmox at
     the URL-query-param stage; the first frame IS the RFB greeting."""
 
     def __init__(self):

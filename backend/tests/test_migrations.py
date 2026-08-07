@@ -54,7 +54,7 @@ def test_sqlite_wal(tmp_path):
 PG_DSN = os.environ.get("PROXPLOY_TEST_PG_DSN")
 requires_pg = pytest.mark.skipif(
     not PG_DSN,
-    reason=("PROXPLOY_TEST_PG_DSN is unset — the Postgres half of the dual-DB "
+    reason=("PROXPLOY_TEST_PG_DSN is unset, the Postgres half of the dual-DB "
             "claim (docs 02 §3, 04) is UNVERIFIED in this run, not passing. "
             "Set it to e.g. postgresql+psycopg://user:pw@host:5432/db."),
 )
@@ -75,7 +75,7 @@ def pg_engine():
 @requires_pg
 def test_migration_0001_postgres(pg_engine):
     """0001 creates every table on Postgres, and `apps` uses the physical
-    column `ct_id` — `ctid` is a Postgres system column and would make the
+    column `ct_id`, `ctid` is a Postgres system column and would make the
     CREATE TABLE fail outright."""
     tables = _upgraded_tables(PG_DSN)
     assert EXPECTED <= tables

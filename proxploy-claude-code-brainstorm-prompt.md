@@ -1,4 +1,4 @@
-# Claude Code kickoff prompt — Proxploy
+# Claude Code kickoff prompt: Proxploy
 
 Paste everything below the line into Claude Code. Have `proxploy-prototype.html` (the clickable mockup) and `proxploy-dashboard.html` in the working directory first, and point Claude Code at them.
 
@@ -41,10 +41,10 @@ The failure modes to avoid are both real: do not hand-wave the whole stack as "T
 
 Proxploy is not one deployable. Plan it as four separate repos/properties with clean boundaries:
 
-- **proxploy-app** — the self-hosted product the user installs on or beside their Proxmox host (backend + frontend + optional agent + installer). This is the only piece that ships to users.
-- **proxploy-api** — an Aspyre-hosted licensing and entitlement API. It issues and validates licenses and resolves feature entitlements. It is **never bundled into proxploy-app**; the app calls it as a remote dependency. This is what makes Pro enforcement real, since a self-hosted app cannot be trusted to gate itself with local flags alone.
-- **proxploy-web** — the marketing site (proxploy.com): landing, pricing, download.
-- **proxploy-docs** — the documentation site (install, connect a host, security model, troubleshooting, API reference).
+- **proxploy-app**: the self-hosted product the user installs on or beside their Proxmox host (backend + frontend + optional agent + installer). This is the only piece that ships to users.
+- **proxploy-api**: an Aspyre-hosted licensing and entitlement API. It issues and validates licenses and resolves feature entitlements. It is **never bundled into proxploy-app**; the app calls it as a remote dependency. This is what makes Pro enforcement real, since a self-hosted app cannot be trusted to gate itself with local flags alone.
+- **proxploy-web**: the marketing site (proxploy.com): landing, pricing, download.
+- **proxploy-docs**: the documentation site (install, connect a host, security model, troubleshooting, API reference).
 
 Design rules for the app-to-api relationship:
 - The self-hosted app talks to proxploy-api **only for licensing/entitlement**, behind the swappable entitlement interface. Keep this call minimal and separate from any analytics or telemetry.
@@ -85,39 +85,39 @@ Plan all of this. Group into a build sequence, but scope the whole thing.
 - Packaged as an easy self-hosted install: a one-line LXC installer in the Community Scripts spirit, plus a Docker/Compose option, systemd, and automatic TLS.
 - proxploy.com landing/download site and documentation (install, connect a host, security model, troubleshooting) as a planned workstream.
 
-## Starting candidates to evaluate (not final choices — verify license and fit)
+## Starting candidates to evaluate (not final choices: verify license and fit)
 
 Treat these as leads for the "reuse" mandate. Confirm each is current, maintained, and correctly licensed, and swap freely if you find better.
 
-- Proxmox API: **proxmoxer** (Python, MIT) — we already use this; it is the engine to build on.
+- Proxmox API: **proxmoxer** (Python, MIT); we already use this; it is the engine to build on.
 - Backend: **FastAPI** + Uvicorn + Pydantic (MIT), **SQLAlchemy** + Alembic (MIT). DB: SQLite default, Postgres option.
-- Task queue: **Celery** (BSD) or **RQ** (BSD). Note **Dramatiq** is LGPL — arm's-length or avoid porting.
+- Task queue: **Celery** (BSD) or **RQ** (BSD). Note **Dramatiq** is LGPL, arm's-length or avoid porting.
 - Web terminal: **xterm.js** (MIT) + a PTY bridge. VM console: **noVNC** (MPL-2.0), or **Apache Guacamole** (Apache-2.0) for a heavier multi-protocol option.
 - RBAC / authz: **Casbin / pycasbin** (Apache-2.0).
 - AuthN: **Authlib** (BSD) for OIDC, argon2/passlib for local, **pyotp** for 2FA; or integrate an external IdP (Authelia Apache-2.0, Keycloak Apache-2.0) at arm's length.
 - Secrets at rest: **age** (BSD) / **SOPS** (MPL-2.0) / **libsodium via PyNaCl** (ISC); full secrets manager: **OpenBao** (MPL-2.0, the open Vault fork). Do **not** use Vault (BUSL).
 - Feature flags / entitlement: **OpenFeature** (Apache-2.0 spec) with a self-hosted provider, or **Unleash** (Apache-2.0) / **Flagsmith** (BSD) / **GrowthBook** (MIT). A lightweight internal flag service implementing OpenFeature may be cleanest for the dormant-gating requirement.
-- Notifications: **Apprise** (BSD-2) — one library, dozens of targets. Strong single reuse pick.
+- Notifications: **Apprise** (BSD-2), one library, dozens of targets. Strong single reuse pick.
 - Scheduling: **APScheduler** (MIT).
 - Metrics/time-series: store in the DB, or **VictoriaMetrics** / **Prometheus** (Apache-2.0) at arm's length. Charts: **uPlot** (MIT) / **Chart.js** (MIT) / **Recharts** (MIT).
 - Reverse proxy + auto-TLS: **Caddy** (Apache-2.0).
 - Catalog: **community-scripts/ProxmoxVE** metadata (verify license before porting anything beyond metadata).
-- Frontend: **Vue 3** or **React** (MIT) + **Tailwind** (MIT), matching the mockup's tokens; a permissive component layer (Radix/shadcn, PrimeVue — MIT).
+- Frontend: **Vue 3** or **React** (MIT) + **Tailwind** (MIT), matching the mockup's tokens; a permissive component layer (Radix/shadcn, PrimeVue; MIT).
 
 ## Deliverables from this brainstorm
 
 Produce these as separate markdown documents in a `/docs` (or `/planning`) folder:
 
-1. **Product spec** — the exhaustive feature catalogue, each feature with a one-line description and its intended tier flag (all defaulting to on/unarmed).
-2. **System architecture** — components and data flow, the agentless model and the optional-agent boundary, the security and trust model, and how script execution on hosts is isolated and streamed.
-3. **Technology + dependency map** — a table: subsystem, chosen project, license, reuse mode (port/link/arm's-length), and a one-line justification. Mark each row as **locked** (foundational spine) or **provisional** (swappable leaf behind an interface). Flag every copyleft or non-OSS item and how you are handling it.
-4. **Data model** — entities and schema (hosts, apps, VMs, jobs, users, roles, audit events, flags, catalog cache, notifications, schedules).
-5. **API surface** — the REST endpoint list grouped by domain, with the WebSocket/SSE channels for live logs, consoles, and metrics.
-6. **Frontend spec** — page map and routes derived from `proxploy-prototype.html`, the component inventory, the design-token system, and how state/streaming binds to the API.
-7. **Entitlement / feature-flag architecture** — how every feature is wrapped from day 0; the split between the in-app entitlement client and the hosted **proxploy-api**; offline-tolerant validation via cached signed entitlement tokens with a grace window; the default-on/unarmed behavior; and the (inert) tier-mapping config on proxploy-api that we fill in only when we decide to sell.
-8. **Security + secrets design** — token scoping, encryption at rest, audit logging, locked-down defaults, session/auth hardening, all built on the reused components above.
-9. **Repository structure** — the layout across the four properties (**proxploy-app**, **proxploy-api**, **proxploy-web**, **proxploy-docs**): what lives in each, how proxploy-app is internally organized (backend / frontend / optional agent / installer), and the shared contract between app and api (the entitlement token format and the endpoints).
-10. **Build sequence** — dependency-ordered phases that converge on the complete product, each phase listing what gets built and what it unblocks. Not scope cuts.
-11. **Risks + open decisions** — call out the hard ones honestly: script-execution sandboxing, cross-host migration without a Proxmox cluster, agent-vs-agentless trade-offs, and where the reuse strategy has gaps that force custom code.
+1. **Product spec**: the exhaustive feature catalogue, each feature with a one-line description and its intended tier flag (all defaulting to on/unarmed).
+2. **System architecture**: components and data flow, the agentless model and the optional-agent boundary, the security and trust model, and how script execution on hosts is isolated and streamed.
+3. **Technology + dependency map**: a table: subsystem, chosen project, license, reuse mode (port/link/arm's-length), and a one-line justification. Mark each row as **locked** (foundational spine) or **provisional** (swappable leaf behind an interface). Flag every copyleft or non-OSS item and how you are handling it.
+4. **Data model**: entities and schema (hosts, apps, VMs, jobs, users, roles, audit events, flags, catalog cache, notifications, schedules).
+5. **API surface**: the REST endpoint list grouped by domain, with the WebSocket/SSE channels for live logs, consoles, and metrics.
+6. **Frontend spec**: page map and routes derived from `proxploy-prototype.html`, the component inventory, the design-token system, and how state/streaming binds to the API.
+7. **Entitlement / feature-flag architecture**: how every feature is wrapped from day 0; the split between the in-app entitlement client and the hosted **proxploy-api**; offline-tolerant validation via cached signed entitlement tokens with a grace window; the default-on/unarmed behavior; and the (inert) tier-mapping config on proxploy-api that we fill in only when we decide to sell.
+8. **Security + secrets design**: token scoping, encryption at rest, audit logging, locked-down defaults, session/auth hardening, all built on the reused components above.
+9. **Repository structure**: the layout across the four properties (**proxploy-app**, **proxploy-api**, **proxploy-web**, **proxploy-docs**): what lives in each, how proxploy-app is internally organized (backend / frontend / optional agent / installer), and the shared contract between app and api (the entitlement token format and the endpoints).
+10. **Build sequence**: dependency-ordered phases that converge on the complete product, each phase listing what gets built and what it unblocks. Not scope cuts.
+11. **Risks + open decisions**: call out the hard ones honestly: script-execution sandboxing, cross-host migration without a Proxmox cluster, agent-vs-agentless trade-offs, and where the reuse strategy has gaps that force custom code.
 
 Ask me any clarifying questions you need before you begin, then run `/brainstorm` and produce the documents. When they are ready, stop and let me review before any implementation.

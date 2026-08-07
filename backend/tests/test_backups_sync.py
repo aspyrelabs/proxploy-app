@@ -110,7 +110,7 @@ def test_backup_sync_job_runs_end_to_end(tmp_path):
     async def run():
         fake = _fake_with_backups()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.backupjobs  # noqa: F401 — registers backup.sync
+        import proxploy.services.backupjobs  # noqa: F401  (registers backup.sync)
 
         assert "backup.sync" in HANDLERS
         backend = JobBackend(app)
@@ -160,11 +160,11 @@ def test_a_failed_storage_read_does_not_drop_the_hosts_existing_backups(tmp_path
     `rows` list (one PVE call per backup-capable storage) BEFORE it queries
     `existing` or touches the DB at all, so a raise partway through that loop
     must propagate out with nothing added, deleted, or committed for this
-    host — the whole host's sync is skipped this cycle, not partially
+    host, the whole host's sync is skipped this cycle, not partially
     applied. The job handler records it as a per-host failure and moves on
     (`services/catalog.py::run_ingest`'s rule), exactly like a missing
     credential, but a missing credential fails before any PVE call and
-    before the `existing` query — it never exercises this delete-scope
+    before the `existing` query, it never exercises this delete-scope
     protection. This test does, by pre-seeding real rows and asserting none
     of them vanish."""
     from proxploy.jobs import JobBackend
@@ -181,7 +181,7 @@ def test_a_failed_storage_read_does_not_drop_the_hosts_existing_backups(tmp_path
             {"storage": "pbs-ds", "type": "pbs", "content": "backup"})
         fake.content_fail_storages = {"pbs-ds"}
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.backupjobs  # noqa: F401 — registers backup.sync
+        import proxploy.services.backupjobs  # noqa: F401  (registers backup.sync)
 
         hid = _seed_host(app)
         with app.state.sessionmaker() as db:  # rows a prior, successful sync left behind
@@ -308,7 +308,7 @@ def test_backups_list_requires_auth(tmp_path):
 
 def test_concurrent_stale_reads_enqueue_only_one_sync(tmp_path, bootstrap_admin):
     """The anti-stampede guard (api/backups.py's module-level lock) must hold
-    under REAL concurrency, not just sequential calls from one client — the
+    under REAL concurrency, not just sequential calls from one client; the
     page is polled every 60s and may be open in several tabs at once, each
     hitting GET /backups from a different FastAPI threadpool thread at
     roughly the same time. A bare check-then-enqueue (no lock) races: N

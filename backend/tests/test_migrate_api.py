@@ -1,12 +1,12 @@
 # backend/tests/test_migrate_api.py
-"""`POST /apps/{app_id}/migrate` (Phase 8 Task 15) — the route half of
+"""`POST /apps/{app_id}/migrate` (Phase 8 Task 15), the route half of
 `migrate.app`. services/migrate.py's own preflight/handler tests
 (test_migrate_preflight.py, test_migrate_job.py) cover the migration logic
 itself; this file is auth/entitlement/404/409/wildcard wiring only, same
 split as every other Phase 6/7/8 route test in this suite.
 
 FAKES vs HARDWARE: same FakePVE-only proof as test_migrate_preflight.py and
-test_migrate_job.py — no live Proxmox host anywhere in this repo.
+test_migrate_job.py, no live Proxmox host anywhere in this repo.
 """
 import json
 
@@ -235,7 +235,7 @@ def test_route_does_not_get_shadowed_by_the_lifecycle_wildcard(tmp_path, csrf_he
                                                                 bootstrap_admin):
     """apps.py's WARNING on the `/{app_id}/{action}` wildcard: it is
     registered last and would swallow a two-segment sibling. `/migrate` is
-    two segments, matching that WARNING exactly — a 422 'action must be one
+    two segments, matching that WARNING exactly; a 422 'action must be one
     of start, stop, restart, shutdown' here would mean the wildcard ate this
     route and nobody registered it above the wildcard."""
     fake_src, fake_tgt = _fake_pair()

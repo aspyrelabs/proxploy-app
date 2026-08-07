@@ -156,7 +156,7 @@ def test_pve_task_timeout_is_configurable(tmp_path, monkeypatch):
 
 
 def test_pve_task_timeout_actually_reaches_await_task(tmp_path):
-    """Root-cause proof for BLOCKING 4: the setting parsing is not enough —
+    """Root-cause proof for BLOCKING 4: the setting parsing is not enough, 
     every Phase 6 job handler must actually pass it to await_task. Configure a
     timeout far below await_task's own TASK_TIMEOUT_S default (300s) and prove
     a real handler (network.apply) honors the SHORT configured value rather
@@ -172,7 +172,7 @@ def test_pve_task_timeout_actually_reaches_await_task(tmp_path):
         fake = FakePVE(running_ticks=10_000)  # never stops on its own
         app = make_job_app(tmp_path, fake=fake)
         app.state.settings.pve_task_timeout_s = 0.05  # far below the 300s fallback
-        import proxploy.services.guestjobs  # noqa: F401 — registers network.apply
+        import proxploy.services.guestjobs  # noqa: F401  (registers network.apply)
         with app.state.sessionmaker() as db:
             host = Host(name="host-01", address="https://10.0.0.9:8006",
                        node_name="pve1", status="connected", pve_version="8.4.1")

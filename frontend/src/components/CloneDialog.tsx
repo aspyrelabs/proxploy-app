@@ -11,7 +11,7 @@ type StorageRow = { host_id: number; node: string; storage: string; content: str
 
 /**
  * Clone a VM: new name, full vs linked, target storage. Same InstallDialog
- * pattern — fire, keep the job id, swap the body for the job log.
+ * pattern, fire, keep the job id, swap the body for the job log.
  */
 export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
   const qc = useQueryClient()
@@ -77,12 +77,12 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
                 <label htmlFor="clone-full" className="flex items-center gap-2 text-[13px] text-text-2">
                   <input id="clone-full" type="radio" name="clone-mode" checked={full}
                     onChange={() => setFull(true)} />
-                  Full clone — an independent copy of every disk
+                  Full clone, an independent copy of every disk
                 </label>
                 <label htmlFor="clone-linked" className="flex items-center gap-2 text-[13px] text-text-2">
                   <input id="clone-linked" type="radio" name="clone-mode" checked={!full}
                     onChange={() => setFull(false)} />
-                  Linked clone — shares the base disk, template sources only
+                  Linked clone, shares the base disk, template sources only
                 </label>
               </fieldset>
               <div>

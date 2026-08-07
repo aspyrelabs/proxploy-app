@@ -1,7 +1,7 @@
 """Phase 8 DoD invariants (doc 10): every route is casbin-governed, and a
 viewer -- whether cookie-authed or bearer-token-authed (api_keys, Task 12) --
 can mutate nothing. All three tests walk app.openapi()/app.routes, so a
-route added after this task lands is automatically covered — extending an
+route added after this task lands is automatically covered, extending an
 allowlist below is a code-review-visible act, exactly like PUBLIC in
 test_route_auth_invariant.py."""
 import re
@@ -22,19 +22,19 @@ UNGOVERNED = {
     ("GET", "/api/v1/auth/me"),              # self-service
     # Self-service 2FA on the caller's own account: gated on get_current_user
     # + the totp entitlement, no authorize(). Reviewed against the landed
-    # implementation (api/auth.py), not granted in advance — see
+    # implementation (api/auth.py), not granted in advance: see
     # test_no_exemption_names_a_route_that_does_not_exist below.
     ("POST", "/api/v1/auth/totp/enroll"),
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
-    # Second factor of login (Task 9): pre-session by construction — there is
+    # Second factor of login (Task 9): pre-session by construction: there is
     # no user yet for authorize() to check a role against, that's the whole
     # point of the route. Ownership/single-use/attempt-cap is enforced by the
     # pending-2FA store itself (api/auth.py), not by casbin.
     ("POST", "/api/v1/auth/totp"),
     # Self-service session list/revoke (Task 9): "my own sessions" has no
     # (resource, action) pair in services/authz.py's PERMISSIONS matrix and
-    # doesn't need one — every role may always manage its own login state.
+    # doesn't need one: every role may always manage its own login state.
     # Ownership is enforced by filtering the query on user_id=user.id
     # (list_sessions) / .filter_by(id=sid, user_id=user.id) (revoke), the
     # same idiom api/apikeys.py uses for "my own API keys" below.
@@ -43,7 +43,7 @@ UNGOVERNED = {
     ("GET", "/api/v1/auth/oidc/login"),      # public, pre-session (Task 11)
     ("GET", "/api/v1/auth/oidc/callback"),
     ("POST", "/api/v1/users"),               # first-run bootstrap; enforcer-checked inline
-    # Both SSE routes DO enforce authorize() — they call the dependency
+    # Both SSE routes DO enforce authorize(): they call the dependency
     # directly inside the handler instead of via Depends, because a
     # StreamingResponse would otherwise hold a DI-scoped DB session open for
     # the life of the connection. The marker walk cannot see a directly
@@ -58,7 +58,7 @@ UNGOVERNED = {
 
 # Mutations a viewer session IS allowed: own-account self-service only.
 VIEWER_SELF = {
-    ("POST", "/api/v1/auth/login"),          # UNGOVERNED (public, pre-session) — the
+    ("POST", "/api/v1/auth/login"),          # UNGOVERNED (public, pre-session); the
                                              # walk still probes it with json={} since
                                              # it's a POST; it 422s on the missing
                                              # required body before any authz would run
@@ -69,7 +69,7 @@ VIEWER_SELF = {
     ("POST", "/api/v1/auth/totp/enroll"),    # own account
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
-    ("POST", "/api/v1/auth/totp"),           # UNGOVERNED (pre-session second factor) —
+    ("POST", "/api/v1/auth/totp"),           # UNGOVERNED (pre-session second factor); 
                                              # like /auth/login above, json={} 422s on the
                                              # missing body before anything role-shaped
                                              # runs; there is no authorize() here to deny
@@ -78,7 +78,7 @@ VIEWER_SELF = {
     ("DELETE", "/api/v1/api-keys/{key_id}"),
     ("POST", "/api/v1/users"),               # 403s inline anyway post-bootstrap; listed
                                              # because its DENIAL is enforcer-driven, and
-                                             # a viewer probing it must see 403 — asserted
+                                             # a viewer probing it must see 403: asserted
                                              # separately below, not skipped
 }
 
@@ -94,7 +94,7 @@ def _api_routes(app):
     """Yield (method, full_path, route) for every registered API route.
 
     This installed FastAPI does NOT flatten `include_router` into
-    `app.routes` — it leaves a `_IncludedRouter` wrapper, so the obvious
+    `app.routes`: it leaves a `_IncludedRouter` wrapper, so the obvious
     `[r for r in app.routes if isinstance(r, APIRoute)]` yields NOTHING and
     any test built on it passes vacuously while proving zero. That is exactly
     how this file first shipped. Descend through `original_router` instead.
@@ -130,7 +130,7 @@ def test_every_route_carries_an_authorize_dependency(tmp_path):
             missing.append((method, path))
     # Guards against the vacuous-pass failure mode described in _api_routes:
     # a walk that silently finds nothing must fail, not report success.
-    assert checked >= 100, f"route walk only found {checked} routes — enumeration is broken"
+    assert checked >= 100, f"route walk only found {checked} routes; enumeration is broken"
     assert not missing, f"routes without authorize(): {sorted(missing)}"
 
 
@@ -231,7 +231,7 @@ def test_no_exemption_names_a_route_that_does_not_exist(tmp_path):
 
     So an exemption must name a route that exists RIGHT NOW. A new
     self-service route fails the suite until someone consciously adds it
-    here, having read what actually landed — which is the review gate, and
+    here, having read what actually landed; which is the review gate, and
     the whole point of the allowlist being code-review-visible.
     """
     app = make_app(tmp_path)

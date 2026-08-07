@@ -3,7 +3,7 @@ docs/notes/phase-4-spike.md). Mechanical, not a guess: every
 community-scripts install script runs under `catch_errors()`'s
 `set -Ee -o pipefail` + `trap ERR` (misc/error_handler.func), so a bare
 `read`/`whiptail`/`dialog` prompt returns a non-zero exit on EOF and
-hard-aborts the whole install rather than defaulting — confirmed
+hard-aborts the whole install rather than defaulting, confirmed
 empirically in the spike, not assumed. A prompt only counts as safe if it's
 guarded: either an env-var short-circuit within a few lines above it, or
 the read itself falls back via `||` (the jellyfin/plex hwaccel pattern)."""
@@ -24,7 +24,7 @@ READ_RE = re.compile(r"(?:^|[;&|]|\b(?:then|do|else)\b)\s*read\b")
 # (`read x < file`, `read x <<< "$s"`), a pipe (`… | read x`), or a non-stdin fd
 # (`read -u 3 x`). Checked against the line with quoted strings removed, so a
 # `<` inside prompt text (`<y/N>`) is not mistaken for a redirect. `while`/
-# `until` must precede the `read` on the line — a `for` loop doesn't consume
+# `until` must precede the `read` on the line: a `for` loop doesn't consume
 # stdin, and a genuine prompt inside a loop body must still be flagged.
 NOT_A_PROMPT_RE = re.compile(
     r"\b(?:while|until)\s+[^;]*\bread\b|<|\|\s*read\b|\bread\s+(?:-\w+\s+)*-\w*u\b")
@@ -55,7 +55,7 @@ def _read_targets(bare: str) -> set[str]:
 def _is_guarded(preceding: list[str], targets: set[str]) -> bool:
     """True if one of the preceding lines actually guards THIS prompt.
 
-    Requires the guard to name a variable the `read` also names — an
+    Requires the guard to name a variable the `read` also names, an
     unrelated `${FOO:-bar}` a line above a `read BAR` prompt is not a guard,
     which is what the old "any `${x:-}` nearby" check wrongly accepted.
     A whiptail/dialog prompt has no assignment target to correlate against,

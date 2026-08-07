@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const posted: { path: string; method: string; body: any }[] = []
 let schedules: any[] = []
-// Mutable so the "target required" test can put more than one host in play —
+// Mutable so the "target required" test can put more than one host in play, 
 // with exactly one, ScheduleForm auto-selects it and there is nothing to gate.
 let hosts: any[] = [{ id: 1, name: 'host-01' }]
 let features: Record<string, boolean> = { 'sched.windows': true, 'store.auto_update': true }
@@ -60,7 +60,7 @@ describe('ScheduleForm', () => {
     wrap(<ScheduleForm onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly backup' } })
     fireEvent.change(screen.getByLabelText(/what to run/i), { target: { value: 'backup.run' } })
-    // Wait for the host list itself (not just the label) — the picker's
+    // Wait for the host list itself (not just the label), the picker's
     // <select> exists before its options do, and setting a value with no
     // matching <option> is a silent no-op (mirrors alerts.test.tsx's app pick).
     await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())

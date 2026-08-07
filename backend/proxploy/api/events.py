@@ -17,7 +17,7 @@ PING_S = 15
 # Called directly inside the handler, not via Depends: a StreamingResponse
 # would hold a DI-scoped DB session open for the whole connection. Same
 # pattern api/jobs.py::job_stream uses. Authentication alone is NOT enough
-# here — this bus carries host, app, job and alert deltas for the entire
+# here: this bus carries host, app, job and alert deltas for the entire
 # cluster, so a user with no team membership (denied everything else by
 # Phase 8 amendment A1) could otherwise still watch the whole system through
 # it. viewer-level `meta.read` is the "is an authorized user of this install"
@@ -27,7 +27,7 @@ _read = authorize("meta", "read")
 
 @router.get("/stream")
 async def events_stream(request: Request):
-    # Resolve auth with a short-lived session — never hold a DB connection
+    # Resolve auth with a short-lived session: never hold a DB connection
     # open for the lifetime of the stream.
     raw = request.cookies.get(request.app.state.settings.session_cookie)
 

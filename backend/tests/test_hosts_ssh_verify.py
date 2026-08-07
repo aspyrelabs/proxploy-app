@@ -1,4 +1,4 @@
-"""POST /hosts/{id}/ssh/verify — the wizard's authorize step, made honest."""
+"""POST /hosts/{id}/ssh/verify, the wizard's authorize step, made honest."""
 import pytest
 
 from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
@@ -36,7 +36,7 @@ def test_verify_marks_the_credential_verified(tmp_path, csrf_header, bootstrap_a
 
 
 def test_verify_reports_a_nonzero_exit_as_command_failed(tmp_path, csrf_header, bootstrap_admin):
-    """The key authenticated but the command did not run — a real, different
+    """The key authenticated but the command did not run, a real, different
     failure from 'the key is not authorized', and the copy must differ."""
     from fastapi.testclient import TestClient
     from proxploy.config import Settings

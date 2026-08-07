@@ -1,5 +1,5 @@
 """AuthZ core (doc 08 §6, doc 10 Phase 8): the casbin model, the static
-permission matrix, and membership-driven grouping rules. Pure — no HTTP."""
+permission matrix, and membership-driven grouping rules. Pure, no HTTP."""
 import pytest
 
 from proxploy.api.deps import ROLE_ORDER
@@ -41,7 +41,7 @@ def test_matrix_uses_only_known_roles():
 
 def test_matrix_reads_are_viewer_and_matrix_has_no_write_at_viewer():
     """Doc 10 DoD: a viewer cannot mutate anything. The matrix itself must
-    already say so — every non-read action requires operator or above."""
+    already say so, every non-read action requires operator or above."""
     for (resource, action), min_role in PERMISSIONS.items():
         if action != "read":
             assert ROLE_ORDER[min_role] >= ROLE_ORDER["operator"], (

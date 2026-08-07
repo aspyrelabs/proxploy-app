@@ -42,7 +42,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       else onSuccess()
     } catch (err) {
       setError(err instanceof ApiError && err.status === 401
-        ? 'Invalid email or password.' : 'Sign-in failed — is the server reachable?')
+        ? 'Invalid email or password.' : 'Sign-in failed, is the server reachable?')
     } finally { setBusy(false) }
   }
 
@@ -55,7 +55,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     } catch {
       // Pending token is deliberately kept (not cleared): a wrong code
       // re-shows this same screen, matching the backend's attempt-capped
-      // pending store — only 5 wrong guesses burn it, not 1 (Task 9).
+      // pending store, only 5 wrong guesses burn it, not 1 (Task 9).
       setError('That code was not accepted, try again or use a recovery code.')
     } finally { setBusy(false) }
   }

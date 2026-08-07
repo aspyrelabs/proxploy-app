@@ -31,7 +31,7 @@ docker exec "$name" curl -fsSk https://127.0.0.1/api/v1/meta/health | grep -q '"
 echo "OK: TLS front serves"
 
 # The API answering is not the same claim as "a stranger can browse to this
-# and see the app" — that is the SPA at /, served as a static file, not a
+# and see the app": that is the SPA at /, served as a static file, not a
 # route. A non-editable pip install of the release once broke exactly this
 # while /meta/health kept answering fine, so check for real page content,
 # not just a 200.

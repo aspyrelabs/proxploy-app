@@ -1,6 +1,6 @@
 """Entitlements client (docs 00 §7, 07). OpenFeature-shaped; dormant = all-on.
 Resolution: valid signed token within grace → its features claim; otherwise the
-built-in default map. Unknown keys are False — fail closed (doc 07 §2)."""
+built-in default map. Unknown keys are False, fail closed (doc 07 §2)."""
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 

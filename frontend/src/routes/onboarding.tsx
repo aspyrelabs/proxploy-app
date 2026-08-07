@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 // shellRoute's sibling routes import rootRoute from ./shell, never ../router
-// — importing router.tsx here would force its eager createRouter() to run
+//, importing router.tsx here would force its eager createRouter() to run
 // mid-cycle (cluster.tsx and storage.tsx carry the same note).
 import { rootRoute } from './shell'
 import { api, ApiError } from '../api/client'
@@ -58,7 +58,7 @@ export function Wizard() {
   }
 
   // authorized_keys_line is only ever returned once, from POST /hosts. A
-  // reload lands here with `host` null — the only way back to that line is
+  // reload lands here with `host` null, the only way back to that line is
   // the ssh_key credential's public_meta, which is the same string.
   const needStoredHost = step === 2 && !host
   const storedHost = useQuery({
@@ -77,7 +77,7 @@ export function Wizard() {
   async function verifySsh() {
     setVerifyError('')
     try {
-      // Don't wait on the storedHost query's own timing — the id it would
+      // Don't wait on the storedHost query's own timing, the id it would
       // supply is one more fetch away either way, and this can't run before
       // ssh_pending said a host exists.
       const id = hostId ?? (await api<{ id: number }[]>('/hosts'))[0]?.id
@@ -86,11 +86,11 @@ export function Wizard() {
       advance(3)
     } catch (e) {
       // A mis-pasted key used to surface at the first app install instead of
-      // here, far from its cause. host_key_mismatch is a security event —
+      // here, far from its cause. host_key_mismatch is a security event, 
       // everything else just means "not authorized yet".
       setVerifyError(e instanceof ApiError && (e.body as any)?.error === 'host_key_mismatch'
         ? "The node's SSH host key changed since Proxploy first saw it. Stop and investigate."
-        : 'Not authorized yet — Proxploy still cannot open a root shell on the node. '
+        : 'Not authorized yet, Proxploy still cannot open a root shell on the node. '
           + 'Check the line was added to /root/.ssh/authorized_keys and saved.')
     }
   }

@@ -62,7 +62,7 @@ describe('applyJob', () => {
 
   it('invalidates the resource cache from the delta alone, no cache seeded', () => {
     // Regression guard: the backend's SSE `job` payload carries target_type
-    // directly (doc 05 §Streaming 4 / JobBackend._publish) — invalidation
+    // directly (doc 05 §Streaming 4 / JobBackend._publish), invalidation
     // must not depend on any job row already sitting in the cache.
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')

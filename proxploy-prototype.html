@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Proxploy — Prototype</title>
+<title>Proxploy, Prototype</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -479,7 +479,7 @@ function appCard(a){
   return `<div class="app-c fade" data-action="detail" data-type="apps" data-id="${a.id}" style="${stopped?'opacity:.72':''}">
     ${a.update?`<span class="updtag">UPDATE</span>`:''}
     <div class="ah">${ico(a)}<div><div class="an">${a.name}</div><div class="ah2"><span class="host">${a.host}</span>${statusPill(a.status)}</div></div></div>
-    <div class="app-usage"><div class="u"><div class="ul">CPU <b>${a.cpu}%</b></div><div class="bar"><i style="width:${Math.max(a.cpu,1)}%;background:#F5B544"></i></div></div><div class="u"><div class="ul">RAM <b>${a.ram?a.ram+'G':'—'}</b></div><div class="bar"><i style="width:${a.ramPct}%;background:#34D3C6"></i></div></div></div>
+    <div class="app-usage"><div class="u"><div class="ul">CPU <b>${a.cpu}%</b></div><div class="bar"><i style="width:${Math.max(a.cpu,1)}%;background:#F5B544"></i></div></div><div class="u"><div class="ul">RAM <b>${a.ram?a.ram+'G':', '}</b></div><div class="bar"><i style="width:${a.ramPct}%;background:#34D3C6"></i></div></div></div>
     <div class="actions" onclick="event.stopPropagation()">
       ${primary}
       <button class="iconbtn" title="Restart" data-action="restart" data-id="${a.id}">${ic('restart')}</button>
@@ -536,7 +536,7 @@ function vContainers(){
     <td class="spec" style="color:var(--amber)">${a.ctid}</td>
     <td><div class="vn"><span class="os">${ic('ct')}</span>${a.name.toLowerCase().replace(/ /g,'-')}</div></td>
     <td class="spec">${a.host}</td><td class="spec">${a.ip}</td>
-    <td class="spec">${a.cpu>0?'1-2':'—'} · ${a.ram||0} GB</td>
+    <td class="spec">${a.cpu>0?'1-2':', '} · ${a.ram||0} GB</td>
     <td>${statusPill(a.status)}</td>
     <td onclick="event.stopPropagation()"><div class="rowact">
       ${a.status==='stopped'?`<button title="Start" style="color:var(--green)" data-action="toggle" data-type="apps" data-id="${a.id}">${ic('play')}</button>`:`<button title="Console" data-action="detail" data-type="apps" data-id="${a.id}" data-tab="console">${ic('console')}</button><button title="Restart" data-action="restart" data-id="${a.id}">${ic('restart')}</button>`}
@@ -615,7 +615,7 @@ function vDetail(type,id){
     body=`<div class="three" style="margin-top:18px">
       <div class="card"><div class="ct">CPU</div><div style="font-family:var(--font-mono);font-size:22px;margin:8px 0">${cpu}%</div>${spark(stopped?rnd(14,0,1):rnd(14,cpu*0.4,cpu*1.3),'#F5B544','dc'+id)}</div>
       <div class="card"><div class="ct">Memory</div><div style="font-family:var(--font-mono);font-size:22px;margin:8px 0">${isVM?a.ramGB+' GB':(a.ram||0)+' GB'}</div><div class="bar" style="margin-top:8px"><i style="width:${rp}%;background:linear-gradient(90deg,#34D3C6,#5B9DF9)"></i></div><div class="host" style="margin-top:8px">${rp}% of allocated</div></div>
-      <div class="card"><div class="ct">Status</div><div style="margin:10px 0">${statusPill(a.status)}</div><div class="host">Uptime ${stopped?'—':'6d 4h'}</div></div>
+      <div class="card"><div class="ct">Status</div><div style="margin:10px 0">${statusPill(a.status)}</div><div class="host">Uptime ${stopped?', ':'6d 4h'}</div></div>
     </div>
     <div class="card" style="margin-top:16px"><div class="ct" style="margin-bottom:14px">Details</div><div class="kv">
       <div><div class="k">${isVM?'VMID':'CTID'}</div><div class="v">${isVM?a.vmid:a.ctid}</div></div>
@@ -647,7 +647,7 @@ function vDetail(type,id){
    Active: <span class="g">active (running)</span> since Tue 2026-07-22; 6 days ago
 <span class="g">root@${a.name.toLowerCase().replace(/ /g,'-')}</span>:<span class="b">~</span># <span style="border-left:2px solid var(--amber);animation:none">&nbsp;</span></div></div>`;
   } else if(tab==='config'){
-    body=`<div class="card" style="margin-top:18px"><div class="sec-h" style="margin-bottom:12px"><h2 style="font-size:14px">Saved Community Script</h2><div class="right"><button class="btn ghost sm" data-action="toast" data-msg="Config saved and container reloaded" data-type="ok">${ic('check')}Save</button></div></div><div class="code"><span class="cm"># ${a.name} — proxploy managed (ct ${a.ctid})</span>
+    body=`<div class="card" style="margin-top:18px"><div class="sec-h" style="margin-bottom:12px"><h2 style="font-size:14px">Saved Community Script</h2><div class="right"><button class="btn ghost sm" data-action="toast" data-msg="Config saved and container reloaded" data-type="ok">${ic('check')}Save</button></div></div><div class="code"><span class="cm"># ${a.name}, proxploy managed (ct ${a.ctid})</span>
 <span class="kw">source</span> <span class="str">"$FUNCTIONS_FILE_PATH"</span>
 <span class="var">APP</span>=<span class="str">"${a.name}"</span>
 <span class="var">var_cpu</span>=<span class="str">"2"</span>

@@ -7,7 +7,7 @@ in Phase 3; Phase 6 adds twelve more handlers that need exactly it, so it lives
 here once instead of thirteen times.
 
 Both the cancellation breadcrumb and the fail-closed exitstatus check are
-carried over verbatim — they are the two pieces a re-derivation gets wrong:
+carried over verbatim; they are the two pieces a re-derivation gets wrong:
 a cancelled job must never imply the proxmox-side task was undone, and a
 stopped task with a missing exitstatus is an unknown outcome, not a success.
 """
@@ -51,11 +51,11 @@ async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: st
                 break
             if asyncio.get_running_loop().time() > deadline:
                 raise JobFailed(f"proxmox task {upid} still running after "
-                                f"{timeout_s:.0f}s — giving up on the log, the "
+                                f"{timeout_s:.0f}s, giving up on the log, the "
                                 f"task itself is untouched on the node")
             await asyncio.sleep(poll_s)
     except asyncio.CancelledError:
-        # The POST already reached proxmox and is unaffected by a local cancel —
+        # The POST already reached proxmox and is unaffected by a local cancel, 
         # telling the user it was "canceled" without this line would read as
         # "nothing happened", which is false.
         ctx.log(f"canceled locally; proxmox task {upid} keeps running on {node}",

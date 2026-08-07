@@ -20,7 +20,7 @@ jobs:
       - run: python scripts/check_executor_isolation.py
       - name: openapi schema exports cleanly
         run: python scripts/export_openapi.py /tmp/openapi.json
-      - name: license audit (doc 03 protocol — fails on anything outside brief §3)
+      - name: license audit (doc 03 protocol, fails on anything outside brief §3)
         run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"
 
   backend-postgres:
@@ -88,8 +88,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: 22}
       # The harness launches the backend itself (frontend/playwright.config.ts
-      # webServer), so it needs a real venv at backend/.venv — the path that
-      # config hardcodes — not just a pip install on the runner python.
+      # webServer), so it needs a real venv at backend/.venv: the path that
+      # config hardcodes: not just a pip install on the runner python.
       - run: python -m venv .venv && .venv/bin/pip install -e '.[dev]'
         working-directory: backend
       - run: npm ci
@@ -107,7 +107,7 @@ jobs:
       # -x follows sourced files; -P SCRIPTDIR lets it resolve the dynamic
       # `$(dirname "$0")/../lib/common.sh` sourcing both install.sh and
       # proxploy-update use. A bare `shellcheck <path>` SC1091s on every one
-      # of them — established while implementing Tasks 7 and 9.
+      # of them: established while implementing Tasks 7 and 9.
       - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
 
   install-harness:
@@ -121,9 +121,9 @@ jobs:
       - run: bash packaging/tests/test_upgrade_rollback.sh
       - run: bash packaging/tests/test_pve_half.sh
 
-  # Task 12 lowered requires-python to >=3.11, because Debian 12 — which is
+  # Task 12 lowered requires-python to >=3.11, because Debian 12: which is
   # what a Proxmox VE 8 CT template is, and therefore the actual LXC install
-  # target — ships 3.11 and pip refused to install at all. A supported-version
+  # target: ships 3.11 and pip refused to install at all. A supported-version
   # claim nothing tests is not a claim; the `backend` job above runs 3.12, so
   # this leg holds the floor honest.
   backend-py311:

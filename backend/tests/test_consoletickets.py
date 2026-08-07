@@ -56,5 +56,5 @@ def test_raw_ticket_value_is_not_persisted(tmp_path):
     row = db.query(ConsoleTicket).one()
     assert raw not in row.token_hash
     assert row.upstream_ticket == "PVEVNC:abc"  # only the UPSTREAM ticket is
-    # stored in the clear — that one never reaches the browser (doc 02 §5);
+    # stored in the clear: that one never reaches the browser (doc 02 §5);
     # OUR ticket (`raw`, the browser-facing one) is what gets hashed.

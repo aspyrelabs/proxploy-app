@@ -3,7 +3,7 @@ stream + archive). Mirrors services/lifecycle.py's shape: blocking _resolve
 helper in a thread, ctx.log/ctx.progress narration, JobFailed for expected
 errors, module-bottom HANDLERS registration.
 
-Root-consent gating lives at the API layer (Task 6) — this handler assumes
+Root-consent gating lives at the API layer (Task 6), this handler assumes
 the caller has already obtained consent and only does the pin + SSH-install
 + archive work.
 """
@@ -43,10 +43,10 @@ def mark_updates_available(db) -> dict:
     an update. `cleared` counts exactly that.
 
     Skipped, each for a reason rather than as an oversight:
-      - no `catalog_slug` — a hand-rolled CT adopted in Phase 4 has no upstream;
-      - no `app_scripts` row — an adopted app has no "from" commit, so there is
+      - no `catalog_slug`, a hand-rolled CT adopted in Phase 4 has no upstream;
+      - no `app_scripts` row, an adopted app has no "from" commit, so there is
         no diff to show and nothing to consent to;
-      - catalog entry with no `upstream_sha` — never successfully refreshed.
+      - catalog entry with no `upstream_sha`, never successfully refreshed.
     """
     shas = {c.slug: c.upstream_sha
             for c in db.query(CatalogEntry.slug, CatalogEntry.upstream_sha).all()}
@@ -74,7 +74,7 @@ def _resolve(app, catalog_slug: str, host_id: int):
 
     Deliberately does NOT fetch the SSH private key here: only
     proxploy/executor/ may reference `get_ssh_private_key`
-    (scripts/check_executor_isolation.py) — the key is instead resolved
+    (scripts/check_executor_isolation.py), the key is instead resolved
     inside `SSHExecutor.run_for_host` at connect time.
     """
     with app.state.sessionmaker() as db:
@@ -85,7 +85,7 @@ def _resolve(app, catalog_slug: str, host_id: int):
             raise JobFailed(f"{catalog_slug} is not installable: {entry.unsupported_reason}")
         if not entry.upstream_sha:
             # Without a pinned commit there is nothing to execute that matches
-            # what was classified and diffed — never silently fall back to
+            # what was classified and diffed: never silently fall back to
             # `main`, which is the bug this guard exists to prevent.
             raise JobFailed(f"{catalog_slug} has no pinned upstream commit; "
                             f"refresh the catalog before installing")
@@ -121,7 +121,7 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
 
     def on_new_fingerprint(fp: str) -> None:
-        # Fresh session, not the `_resolve` one above — that session is
+        # Fresh session, not the `_resolve` one above: that session is
         # already closed by the time the SSH connection is made.
         with app.state.sessionmaker() as db:
             h = db.get(Host, host_id)
@@ -129,7 +129,7 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
-    # Pinned to the exact commit that was ingested, classified and diffed —
+    # Pinned to the exact commit that was ingested, classified and diffed; 
     # not to `main`, which would be a fresh, possibly-different fetch at
     # execution time and would make the app_scripts pin decorative.
     #
@@ -138,7 +138,7 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # line. That line's text is frozen at this commit, but the framework file
     # it names is still fetched live from `main` at execution time, one level
     # down. Full transitive vendoring of the community-scripts framework is a
-    # separate, larger piece of work — see docs/notes/phase-4-store.md.
+    # separate, larger piece of work: see docs/notes/phase-4-store.md.
     command = (
         f"bash -c \"$(curl -fsSL {raw_url(entry.upstream_sha, entry.script_path)})\""
     )
@@ -194,7 +194,7 @@ def _resolve_update(app, app_id: int):
             raise JobFailed(f"app {app_id} not found")
         if not a.catalog_slug:
             raise JobFailed(f"{a.name} was adopted, not installed from the catalog "
-                            f"— there is no upstream script to update it with")
+                            f"; there is no upstream script to update it with")
         entry = db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
         if entry is None:
             raise JobFailed(f"catalog entry {a.catalog_slug} not found; "
@@ -205,7 +205,7 @@ def _resolve_update(app, app_id: int):
         latest = (db.query(AppScript).filter_by(app_id=app_id)
                   .order_by(AppScript.version.desc()).first())
         # api/apps.py::put_app_script writes an "edited" row WITHOUT an
-        # upstream_ref, so from_ref would read None below regardless — but
+        # upstream_ref, so from_ref would read None below regardless: but
         # that's an accident of that route, not something to depend on here.
         # Checked explicitly: if it's ever backfilled with a ref, silently
         # trusting upstream_ref==None would stop catching this and overwrite
@@ -244,7 +244,7 @@ def _resolve_update(app, app_id: int):
 def _lxc_ids(app, host_id: int) -> set[int]:
     """Blocking: every LXC id currently on the host, straight from PVE.
 
-    One `/cluster/resources` call — the same read the poller makes. Deliberately
+    One `/cluster/resources` call, the same read the poller makes. Deliberately
     NOT the poller's cached snapshot: this is a safety check, and a cache up to
     30 s stale is exactly what would miss a container created seconds ago.
     """
@@ -270,8 +270,8 @@ _GUEST_CREATING_KINDS = ("app.install", "vm.create", "vm.clone")
 def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
                             window_start, window_end) -> set[int]:
     """Blocking: ctids from OTHER guest-creating jobs whose run overlapped
-    this job's SSH window, so the stray-CT check doesn't blame — and point an
-    operator at destroying — a legitimate container an unrelated job built at
+    this job's SSH window, so the stray-CT check doesn't blame; and point an
+    operator at destroying, a legitimate container an unrelated job built at
     the same time.
 
     Only `app.install`'s target id is knowable without guessing: run_install
@@ -279,7 +279,7 @@ def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
     the id it actually built regardless of whether that job has finished yet.
     `vm.create`/`vm.clone` are qemu-only (services/guestjobs.py, doc 05) and
     can never produce an LXC row in the first place, so nothing is extracted
-    for them — they're queried (per review) alongside app.install for
+    for them, they're queried (per review) alongside app.install for
     completeness, not because either can contribute an id `_lxc_ids` would
     ever see.
     """
@@ -303,7 +303,7 @@ def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
 
 
 async def run_update(ctx: JobContext, params: dict) -> dict:
-    """`app.update` — re-run the app's catalog script, pinned to the CURRENT
+    """`app.update`, re-run the app's catalog script, pinned to the CURRENT
     upstream commit, over the same SSH path install uses (doc 10 Phase 7:
     "same pin/diff/consent/stream/archive path as install").
 
@@ -311,9 +311,9 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     install splits them; this handler assumes both were obtained.
 
     Two guards bracket the SSH run. A community-scripts `ct/*.sh` decides for
-    itself whether it is installing or updating — `build.func`'s `start` routes
+    itself whether it is installing or updating, `build.func`'s `start` routes
     to `update_script()` when it finds the container and to `build_container()`
-    when it does not — and Proxploy cannot see inside that decision. The
+    when it does not, and Proxploy cannot see inside that decision. The
     failure mode when it goes the wrong way is a second container built while
     the `apps` row still points at the first. So the CT must exist BEFORE
     (otherwise the script would certainly install fresh), and no new CT may
@@ -324,12 +324,12 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     update path is non-interactive is a property of that upstream script.
     services/classifier.py classifies INSTALL feasibility only. An update path
     that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
-    the full transcript archived — the honest outcome. Classifying update paths
+    the full transcript archived, the honest outcome. Classifying update paths
     is separate, larger work; see docs/notes/phase-7-operate.md.
 
     A SECOND, more severe residual limitation (Task 5 review B4): the post-
     check is an id-SET comparison (before vs. after), and a set diff is blind
-    to a script that destroys CT <ctid> and rebuilds it at the SAME id — no id
+    to a script that destroys CT <ctid> and rebuilds it at the SAME id, no id
     is added, none is missing, the diff sees nothing wrong, and this handler
     reports success and advances the pin over what is now a freshly built,
     EMPTY container. This is undetected. It is the one failure mode here with
@@ -349,7 +349,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     before = await asyncio.to_thread(_lxc_ids, app, a["host_id"])
     if a["ctid"] not in before:
         raise JobFailed(
-            f"CT {a['ctid']} is not present on {host['name']} — refusing to run "
+            f"CT {a['ctid']} is not present on {host['name']}, refusing to run "
             f"the catalog script, which would install a NEW container rather "
             f"than update this one")
     ctx.progress(10)
@@ -364,7 +364,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
                 db.commit()
 
     # Pinned to the exact commit that was ingested and classified, never to
-    # `main` — identical rule and identical raw_url() helper as run_install,
+    # `main`: identical rule and identical raw_url() helper as run_install,
     # and it carries the same one-level-down residual: the pinned script's own
     # `source <(curl ... /main/misc/build.func)` line is frozen text but still
     # fetches live. See docs/notes/phase-4-store.md.
@@ -396,9 +396,9 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
         names = ", ".join(f"CT {s}" for s in sorted(strays))
         # Never an imperative "remove it" (Task 5 review B1): this is a
         # whole-cluster snapshot diff and JobBackend runs jobs concurrently,
-        # so a stray id here is not proof this update's script built it — it
+        # so a stray id here is not proof this update's script built it: it
         # could just as well be an unrelated job that landed in the same
-        # window. B2: also tell the truth about retrying — the pin and
+        # window. B2: also tell the truth about retrying: the pin and
         # update_available are both left untouched below, and a plain retry
         # hits the same install branch again.
         raise JobFailed(
@@ -406,7 +406,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
             f"{a['name']} (CT {a['ctid']}) that {'was' if len(strays) == 1 else 'were'} "
             f"not there before. {names} may have been created by this update's "
             f"script taking the catalog's install branch, or by something else "
-            f"running on this host at the same time — verify which before "
+            f"running on this host at the same time, verify which before "
             f"removing anything. This update was NOT recorded as applied, an "
             f"update is still shown as available, and simply retrying will "
             f"likely hit the same install branch again and create yet another "

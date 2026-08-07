@@ -1,4 +1,4 @@
-# Phase 9a — Install & Update Implementation Plan
+# Phase 9a: Install & Update Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -23,7 +23,7 @@ for the two new routes, React + Vitest for the Settings card, Docker for the
 install/upgrade test harnesses.
 
 **Spec:** `docs/superpowers/specs/2026-08-05-phase-9a-install-update-design.md`
-— read it before Task 1. Decisions D1–D4 there are settled; do not relitigate
+read it before Task 1. Decisions D1–D4 there are settled; do not relitigate
 them mid-implementation. If implementation contradicts the spec, the spec wins
 unless you record an amendment in `docs/notes/phase-9a-install-update.md` the
 way Phase 8 recorded A1–A3.
@@ -55,18 +55,18 @@ way Phase 8 recorded A1–A3.
 - **Authorization uses the existing `authorize()` path** from Phase 8. Both new
   routes are `authorize("settings", "manage")` / `authorize("settings",
   "read")`. Do not invent a new authorization concept, and do not add a route
-  to any invariant allowlist — if `test_rbac_invariant.py` fails, the route is
+  to any invariant allowlist, if `test_rbac_invariant.py` fails, the route is
   wrong, not the test.
 - **Test floors:** backend ≥ 784 passed, frontend ≥ 199 passed across 36 files.
-  Frontend runs must use `npx vitest run --no-file-parallelism` — this box
+  Frontend runs must use `npx vitest run --no-file-parallelism`, this box
   flakes unrelated suites under parallel load (see
   `docs/notes/phase-8-scale.md`).
-- **Commit to `main` directly**, one commit per task, no branches — the
+- **Commit to `main` directly**, one commit per task, no branches; the
   convention every prior phase used.
 
 ## File Structure
 
-**New — release plumbing (backend)**
+**New, release plumbing (backend)**
 
 | File | Responsibility |
 |---|---|
@@ -74,7 +74,7 @@ way Phase 8 recorded A1–A3.
 | `backend/proxploy/services/updater.py` | I/O around `release.py`: fetch manifest from a channel URL, detect `install_shape`, launch the updater script detached. |
 | `backend/proxploy/release_pubkey.pem` | The release **public** key, shipped inside the artifact. A placeholder self-generated key during 9a; the publication runbook replaces it. |
 
-**New — scripts**
+**New, scripts**
 
 | File | Responsibility |
 |---|---|
@@ -87,7 +87,7 @@ way Phase 8 recorded A1–A3.
 | `packaging/docker/compose.yml` | Compose file the docs and the UI's copy-button reference. |
 | `packaging/build_release.sh` | Builds `proxploy-<version>.tar.gz`, `manifest.json`, `manifest.json.sig`. |
 
-**New — tests**
+**New, tests**
 
 | File | Responsibility |
 |---|---|
@@ -135,7 +135,7 @@ Task 11. Task 9 consumes the layout Task 6 defines. Task 16 is last.
 - Test: `backend/tests/test_version.py` (create)
 
 **Interfaces:**
-- Produces: `proxploy.__version__` — the single authoritative version string,
+- Produces: `proxploy.__version__`, the single authoritative version string,
   read by `api/meta.py`, `packaging/build_release.sh`, and every task below.
 
 Today `0.1.0` is written in two places that can drift. `pyproject.toml` becomes
@@ -176,7 +176,7 @@ def test_installed_metadata_matches_the_package():
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_version.py -q`
-Expected: FAIL — version is `0.1.0`, and `pyproject.toml` hardcodes it.
+Expected: FAIL, version is `0.1.0`, and `pyproject.toml` hardcodes it.
 
 - [ ] **Step 3: Implement**
 
@@ -186,7 +186,7 @@ Expected: FAIL — version is `0.1.0`, and `pyproject.toml` hardcodes it.
 __version__ = "1.0.0"
 ```
 
-`backend/pyproject.toml` — replace the `version = "0.1.0"` line in `[project]`
+`backend/pyproject.toml`: replace the `version = "0.1.0"` line in `[project]`
 with `dynamic = ["version"]`, and add below the `[build-system]` block:
 
 ```toml
@@ -194,7 +194,7 @@ with `dynamic = ["version"]`, and add below the `[build-system]` block:
 version = {attr = "proxploy.__version__"}
 ```
 
-Check the existing `[build-system]` block first — if the backend uses a
+Check the existing `[build-system]` block first, if the backend uses a
 backend other than setuptools, use that backend's equivalent attr-reading
 mechanism rather than switching build backends.
 
@@ -203,7 +203,7 @@ mechanism rather than switching build backends.
 Run: `cd backend && .venv/bin/pip install -e '.[dev]' -q && .venv/bin/python -m pytest tests/test_version.py -q`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: Full backend suite** — `cd backend && .venv/bin/python -m pytest tests/ -m "not pve_integration and not e2e" -q`. Expected ≥ 787 passed. If a test asserted the literal string `0.1.0`, fix that test — it was pinning a placeholder.
+- [ ] **Step 5: Full backend suite**, `cd backend && .venv/bin/python -m pytest tests/ -m "not pve_integration and not e2e" -q`. Expected ≥ 787 passed. If a test asserted the literal string `0.1.0`, fix that test; it was pinning a placeholder.
 
 - [ ] **Step 6: Commit**
 
@@ -222,9 +222,9 @@ git commit -m "chore(release): single source of truth for the version; 1.0.0"
 **Interfaces:**
 - Produces, for Tasks 3, 5, 9 and 11:
   - `MANIFEST_SCHEMA_VERSION = 1`
-  - `verify_manifest(raw: bytes, sig: bytes, pubkey_pem: bytes) -> dict` — returns the parsed manifest, raises `ReleaseError` on a bad signature or an unparseable/unknown-schema body. **Signature is verified over the exact bytes**, before any parsing, so a tampered body can never reach the parser.
-  - `verify_artifact(path: Path, entry: dict) -> None` — raises `ReleaseError` unless the file's sha256 equals `entry["sha256"]` and its size equals `entry["size"]`.
-  - `is_upgrade(current: str, candidate: str) -> bool` — semver compare, False for equal or older.
+  - `verify_manifest(raw: bytes, sig: bytes, pubkey_pem: bytes) -> dict`: returns the parsed manifest, raises `ReleaseError` on a bad signature or an unparseable/unknown-schema body. **Signature is verified over the exact bytes**, before any parsing, so a tampered body can never reach the parser.
+  - `verify_artifact(path: Path, entry: dict) -> None`: raises `ReleaseError` unless the file's sha256 equals `entry["sha256"]` and its size equals `entry["size"]`.
+  - `is_upgrade(current: str, candidate: str) -> bool`: semver compare, False for equal or older.
   - `class ReleaseError(Exception)`.
 
 The manifest shape, fixed here and consumed everywhere below:
@@ -345,7 +345,7 @@ def test_upgrade_comparison_rejects_equal_and_older():
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_release_verify.py -q`
-Expected: FAIL — `ModuleNotFoundError: proxploy.services.release`
+Expected: FAIL, `ModuleNotFoundError: proxploy.services.release`
 
 - [ ] **Step 3: Implement `backend/proxploy/services/release.py`**
 
@@ -396,7 +396,7 @@ def verify_manifest(raw: bytes, sig: bytes, pubkey_pem: bytes) -> dict:
     if manifest.get("schema") != MANIFEST_SCHEMA_VERSION:
         raise ReleaseError(
             f"manifest schema {manifest.get('schema')!r} is not supported "
-            f"(this build understands {MANIFEST_SCHEMA_VERSION}) — update "
+            f"(this build understands {MANIFEST_SCHEMA_VERSION}), update "
             f"Proxploy manually, then retry")
     for field in ("version", "artifacts"):
         if field not in manifest:
@@ -418,7 +418,7 @@ def verify_artifact(path: Path, entry: dict) -> None:
             digest.update(chunk)
     actual = digest.hexdigest()
     if actual != entry["sha256"]:
-        raise ReleaseError(f"{path.name}: sha256 mismatch — refusing to install")
+        raise ReleaseError(f"{path.name}: sha256 mismatch, refusing to install")
 
 
 def _parts(v: str) -> tuple[int, ...]:
@@ -460,10 +460,10 @@ git commit -m "feat(release): Ed25519 manifest verification, checksums, downgrad
 **Interfaces:**
 - Consumes: `release.verify_manifest`, `release.verify_artifact`, `release.is_upgrade`, `release.ReleaseError` (Task 2).
 - Produces, for Tasks 5 and 14:
-  - `detect_shape(settings) -> str` — `"lxc"` | `"systemd"` | `"docker"`.
+  - `detect_shape(settings) -> str`: `"lxc"` | `"systemd"` | `"docker"`.
   - `CAN_SELF_APPLY = {"lxc", "systemd"}`
-  - `check(settings) -> dict` — `{"current", "latest", "update_available", "notes_url", "channel", "error"}`. **Never raises**: a channel that is unreachable, unsigned, or malformed returns `error` as a human-readable string with `update_available: False`. A broken update channel must not break the Settings page.
-  - `launch(settings, version: str) -> None` — Task 5 uses it; implemented there.
+  - `check(settings) -> dict`: `{"current", "latest", "update_available", "notes_url", "channel", "error"}`. **Never raises**: a channel that is unreachable, unsigned, or malformed returns `error` as a human-readable string with `update_available: False`. A broken update channel must not break the Settings page.
+  - `launch(settings, version: str) -> None`: Task 5 uses it; implemented there.
 
 New settings, appended to `backend/proxploy/config.py`:
 
@@ -490,7 +490,7 @@ New settings, appended to `backend/proxploy/config.py`:
 ```python
 # backend/tests/test_updater_check.py
 """The update check talks to a channel we do not control. Every failure mode
-of that channel must degrade to 'no update available, here is why' — never to
+of that channel must degrade to 'no update available, here is why'; never to
 an exception that takes the Settings page down with it."""
 import json
 
@@ -586,7 +586,7 @@ def test_only_lxc_and_systemd_may_self_apply():
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_updater_check.py -q`
-Expected: FAIL — `ModuleNotFoundError: proxploy.services.updater`
+Expected: FAIL, `ModuleNotFoundError: proxploy.services.updater`
 
 - [ ] **Step 3: Implement `backend/proxploy/services/updater.py`** (the `check`/`detect_shape` half; `launch` lands in Task 5)
 
@@ -658,7 +658,7 @@ def check(settings: Settings) -> dict:
     return out
 ```
 
-Note `urljoin` is imported but unused in the snippet above — drop the import;
+Note `urljoin` is imported but unused in the snippet above, drop the import;
 the f-string join is deliberate, because `urljoin` would discard a channel URL
 path segment.
 
@@ -689,7 +689,7 @@ PY
 ```
 
 Add to `.gitignore`: `packaging/tests/DEV_ONLY_release_key.pem`. The **private**
-key is never committed, even a throwaway one — a committed private key in a
+key is never committed, even a throwaway one; a committed private key in a
 release-signing path is the kind of thing that gets copy-pasted into
 production. Add a header comment in `release_pubkey.pem` marking it a
 placeholder.
@@ -742,7 +742,7 @@ def test_self_ctid_from_settings_is_persisted_on_boot(tmp_path):
 
 def test_absent_self_ctid_writes_nothing(tmp_path):
     """A dev checkout or a bare-metal install has no CTID. selfguard is
-    documented to block NOTHING when identity is unknown — writing a bogus
+    documented to block NOTHING when identity is unknown, writing a bogus
     value here would be worse than writing none."""
     app = make_app(tmp_path)
     with TestClient(app):
@@ -773,9 +773,9 @@ def test_an_operator_edit_is_not_overwritten_on_the_next_boot(tmp_path):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_self_identity.py -q`
-Expected: FAIL — the setting is never written.
+Expected: FAIL, the setting is never written.
 
-- [ ] **Step 3: Implement** — in `backend/proxploy/main.py`'s lifespan, alongside the other boot-time writes (find where `SYSTEM_SCHEDULES` seeding happens and put it near there):
+- [ ] **Step 3: Implement**, in `backend/proxploy/main.py`'s lifespan, alongside the other boot-time writes (find where `SYSTEM_SCHEDULES` seeding happens and put it near there):
 
 ```python
     # Phase 9a: the installer knows which CT it built Proxploy into and puts
@@ -820,7 +820,7 @@ git commit -m "feat(install): persist self.ctid at boot so selfguard can see its
 - Produces, for Task 14 (frontend):
   - `GET /api/v1/meta/update` → `{"current", "latest", "update_available", "notes_url", "channel", "error", "install_shape", "can_self_apply": bool, "compose_hint": str | None}`
   - `POST /api/v1/meta/update` body `{"version": "1.0.1"}` → `202 {"ok": true, "version": "1.0.1"}`; `409 {"error": "docker_shape", "compose_hint": "docker compose pull && docker compose up -d"}` on Docker; `409 {"error": "no_such_version"}` when the channel's latest does not match the requested version; `503` when the update script is missing.
-  - `updater.launch(settings, version) -> None` — runs `systemd-run --unit=proxploy-update-<version> --collect <update_script> --to <version> --channel <url>`, detached, and returns immediately.
+  - `updater.launch(settings, version) -> None`: runs `systemd-run --unit=proxploy-update-<version> --collect <update_script> --to <version> --channel <url>`, detached, and returns immediately.
 
 **Why the requested version is echoed back and checked:** the client sends the
 version it was *shown*. If the channel moved on between the check and the
@@ -961,19 +961,19 @@ def test_a_viewer_cannot_apply_an_update(tmp_path, csrf_header, bootstrap_admin)
 
 **Fixture semantics, verified against `backend/tests/conftest.py`:**
 `bootstrap_admin(client)` creates the first user *and logs it in*, returning
-the client — authentication is the session cookie, so GETs need no headers.
+the client, authentication is the session cookie, so GETs need no headers.
 `csrf_header(client)` returns the `X-CSRF-Token` header dict every mutating
 request needs. There is no `viewer_session` fixture; the viewer is built
 inline above, the same way `tests/test_rbac_invariant.py` does it.
 
 **Note the monkeypatch target:** `proxploy.api.meta.updater.launch`, not
-`proxploy.services.updater.launch` — `api/meta.py` imports the *module*, so
+`proxploy.services.updater.launch`: `api/meta.py` imports the *module*, so
 patching the attribute on the module object is what the route actually calls.
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_update_api.py -q`
-Expected: FAIL — 404 on both routes.
+Expected: FAIL, 404 on both routes.
 
 - [ ] **Step 3: Implement `launch()` in `services/updater.py`**
 
@@ -1033,7 +1033,7 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage)):
     settings = request.app.state.settings
     shape = updater.detect_shape(settings)
     if shape not in updater.CAN_SELF_APPLY:
-        # Not a failure — a deliberate capability boundary (spec D3). The
+        # Not a failure: a deliberate capability boundary (spec D3). The
         # container never rewrites its own image.
         raise HTTPException(409, {"error": "docker_shape", "compose_hint": COMPOSE_HINT})
     status = updater.check(settings)
@@ -1048,7 +1048,7 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage)):
                                   "latest": status["latest"]})
     if not Path(settings.update_script).exists():
         raise HTTPException(503, {"error": "updater_missing",
-                                  "detail": f"{settings.update_script} is not installed — "
+                                  "detail": f"{settings.update_script} is not installed, "
                                             f"re-run the installer to repair it"})
     write_audit(db_from(request), actor_type="user", actor_id=user.id,
                 action="system.update.start", target_type="system",
@@ -1057,7 +1057,7 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage)):
     return {"ok": True, "version": body.version}
 ```
 
-`write_audit` needs a session — this router does not currently take `db`. Add
+`write_audit` needs a session, this router does not currently take `db`. Add
 `db=Depends(get_db)` to the `apply_update` signature and call
 `write_audit(db, ...)`; drop the `db_from` placeholder above. `get_db` is
 already imported in this module. Import `HTTPException` from `fastapi`.
@@ -1066,7 +1066,7 @@ already imported in this module. Import `HTTPException` from `fastapi`.
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_update_api.py tests/test_rbac_invariant.py tests/test_route_auth_invariant.py -q`
 Expected: PASS. If an invariant test fails, the route's authorization is
-wrong — fix the route, never the allowlist.
+wrong, fix the route, never the allowlist.
 
 - [ ] **Step 6: Full backend suite**, then **Commit**
 
@@ -1086,7 +1086,7 @@ git commit -m "feat(update): status and apply routes, with a hard docker boundar
 - Produces, for Tasks 7, 9, 12, 13:
   - Layout constants in `common.sh`: `PP_ROOT=/opt/proxploy`, `PP_RELEASES=$PP_ROOT/releases`, `PP_CURRENT=$PP_ROOT/current`, `PP_BIN=$PP_ROOT/bin`, `PP_DATA=/var/lib/proxploy`, `PP_ETC=/etc/proxploy`, `PP_ENV=$PP_ETC/proxploy.env`.
   - `log()`, `die()`, `need_root()`, `fetch_to(url, dest)`, `verify_release(dir, pubkey)`, `install_release(tarball, version)` → unpacks to `$PP_RELEASES/$version`, creates its venv, installs deps.
-  - `install.sh --shape systemd|lxc --channel <url> --version <v>` — the in-container half, idempotent.
+  - `install.sh --shape systemd|lxc --channel <url> --version <v>`: the in-container half, idempotent.
 
 **The layout, fixed here:**
 
@@ -1128,7 +1128,7 @@ WantedBy=multi-user.target
 ```
 
 **Note on `--factory`:** `backend/proxploy/main.py` exposes `create_app()` and
-no module-level `app`. Verify this before writing the unit — if a module-level
+no module-level `app`. Verify this before writing the unit, if a module-level
 `app` has since been added, prefer it and drop `--factory`.
 
 - [ ] **Step 1: Write `packaging/lib/common.sh`**
@@ -1168,30 +1168,30 @@ verify_release() {  # verify_release <workdir> <pubkey-pem>
   local dir="$1" pub="$2"
   openssl pkeyutl -verify -pubin -inkey "$pub" -rawin \
       -in "$dir/manifest.json" -sigfile "$dir/manifest.json.sig" >/dev/null \
-    || die "manifest signature is not valid — refusing to install"
+    || die "manifest signature is not valid, refusing to install"
   local want name
   name=$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$dir/manifest.json" | head -1)
   want=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$dir/manifest.json" | head -1)
   echo "$want  $dir/$name" | sha256sum -c - >/dev/null \
-    || die "$name: sha256 mismatch — refusing to install"
+    || die "$name: sha256 mismatch, refusing to install"
 }
 ```
 
 **Check `openssl pkeyutl -rawin` works on Debian 12's OpenSSL 3** before
 relying on it (`openssl pkeyutl -help 2>&1 | grep rawin`). If it is
 unavailable, fall back to calling the release release-verification through
-Python — but the installer runs *before* any venv exists, so prefer a pure
+Python, but the installer runs *before* any venv exists, so prefer a pure
 `openssl` path and only fall back to the system `python3` with `cryptography`
 if `openssl` cannot do it. Whichever you pick, say so in a comment.
 
 Also write `install_release()` here: unpack the tarball to
 `$PP_RELEASES/$version`, `python3 -m venv` inside it, `pip install -e backend/`
-(or `pip install backend/` — read what the tarball actually contains after
+(or `pip install backend/`, read what the tarball actually contains after
 Task 11 and match it).
 
 - [ ] **Step 2: Write `install.sh`'s in-container half**
 
-Structure — flags `--shape`, `--channel`, `--version`, `--pubkey`:
+Structure, flags `--shape`, `--channel`, `--version`, `--pubkey`:
 
 1. `need_root`
 2. install OS deps: `python3`, `python3-venv`, `curl`, `openssl`, `ca-certificates`, `sqlite3`
@@ -1225,7 +1225,7 @@ must not wipe the database, and must leave exactly one enabled unit.
 
 Run: `shellcheck install.sh packaging/lib/common.sh`
 Expected: no output. If `shellcheck` is not installed, install it
-(`apt-get install -y shellcheck`) — it is a required gate, not optional.
+(`apt-get install -y shellcheck`); it is a required gate, not optional.
 
 - [ ] **Step 4: Commit**
 
@@ -1307,11 +1307,11 @@ echo "OK: pve half sends the expected create"
 - [ ] **Step 2: Run to verify failure**
 
 Run: `bash packaging/tests/test_pve_half.sh`
-Expected: FAIL — `install.sh` does not accept `--pve-only`/`--dry-run` yet.
+Expected: FAIL, `install.sh` does not accept `--pve-only`/`--dry-run` yet.
 
 - [ ] **Step 3: Implement the PVE half in `install.sh`**
 
-Add near the top, after flag parsing: if `--shape` was not given, detect —
+Add near the top, after flag parsing: if `--shape` was not given, detect; 
 `command -v pct >/dev/null && [ -d /etc/pve ]` means PVE host. Then:
 
 1. resolve CTID (`--ctid`, else `pvesh get /cluster/nextid`, else scan)
@@ -1342,12 +1342,12 @@ Expected: `OK: pve half sends the expected create`
 ```bash
 shellcheck install.sh packaging/tests/test_pve_half.sh packaging/tests/fake-pct
 git add install.sh packaging/tests/
-git commit -m "feat(install): PVE-host half — CT create, push, exec, self-ctid"
+git commit -m "feat(install): PVE-host half, CT create, push, exec, self-ctid"
 ```
 
 ---
 
-## Task 8: TLS — Caddy, arm's-length, self-signed fallback
+## Task 8: TLS: Caddy, arm's-length, self-signed fallback
 
 **Files:**
 - Create: `packaging/caddy/Caddyfile.tmpl`
@@ -1393,11 +1393,11 @@ Add a `configure_tls()` function:
   `PROXPLOY_TLS_DIRECTIVE=internal`
 - render the template to `/etc/caddy/Caddyfile`, `systemctl enable --now caddy`
 - set `PROXPLOY_COOKIE_SECURE=true` in `$PP_ENV` (already in Task 6's env
-  block — verify it is there rather than writing it twice)
+  block, verify it is there rather than writing it twice)
 
 - [ ] **Step 2: Verify by hand in the Task 12 harness**
 
-There is no separate test here — TLS is asserted by the container harness
+There is no separate test here, TLS is asserted by the container harness
 (Task 12), which curls `https://localhost/api/v1/meta/health` and requires a
 2xx. Do not write a mock-Caddy test; it would prove nothing the harness does
 not prove for real.
@@ -1412,7 +1412,7 @@ git commit -m "feat(install): Caddy TLS front with tls-internal fallback"
 
 ---
 
-## Task 9: `proxploy-update` — the whole update, in one boring script
+## Task 9: `proxploy-update`: the whole update, in one boring script
 
 **Files:**
 - Create: `packaging/proxploy-update`
@@ -1474,7 +1474,7 @@ rollback() {
 [ "$TO" != "$FROM" ] || die "already running $TO"
 [ -d "$PP_RELEASES/$TO" ] && [ "$FORCE" -eq 0 ] && die "$TO is already unpacked; use --force"
 avail=$(df -Pk "$PP_ROOT" | awk 'NR==2 {print $4}')
-[ "$avail" -gt 2097152 ] || die "less than 2 GiB free on $PP_ROOT — refusing to update"
+[ "$avail" -gt 2097152 ] || die "less than 2 GiB free on $PP_ROOT, refusing to update"
 
 # --- backup ----------------------------------------------------------------
 log "backing up $FROM"
@@ -1517,7 +1517,7 @@ log "update to $TO complete"
 ```
 
 **Note on the migration failure path:** it exits 1 *without* rolling back,
-because nothing was switched — the old version is still running and its
+because nothing was switched, the old version is still running and its
 database is untouched by a migration that failed to apply. Rolling back here
 would restore a backup over a database that was never changed.
 
@@ -1530,13 +1530,13 @@ acceptable with a comment saying why.
 - [ ] **Step 3: Verify `sqlite3 .backup` exists in the install image**
 
 Task 6's dependency list must include `sqlite3`. Confirm it is there; if not,
-add it in this task — the backup step is the one thing that must not fail.
+add it in this task, the backup step is the one thing that must not fail.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add packaging/proxploy-update
-git commit -m "feat(update): the updater — backup, verify, migrate, switch, roll back"
+git commit -m "feat(update): the updater, backup, verify, migrate, switch, roll back"
 ```
 
 ---
@@ -1553,7 +1553,7 @@ git commit -m "feat(update): the updater — backup, verify, migrate, switch, ro
 
 Multi-stage: build the frontend with Node, install the backend into a venv,
 copy both into a slim runtime image. The runtime image must place the tree so
-`main.py:167`'s `parents[2]/frontend/dist` still resolves — i.e. the same
+`main.py:167`'s `parents[2]/frontend/dist` still resolves, i.e. the same
 `backend/` + `frontend/dist/` shape as a release tarball.
 
 ```dockerfile
@@ -1572,7 +1572,7 @@ WORKDIR /opt/proxploy/current
 COPY backend/ backend/
 COPY --from=web /src/dist/ frontend/dist/
 RUN python -m venv backend/venv && backend/venv/bin/pip install --no-cache-dir ./backend
-# The app never self-applies an update in this shape (spec D3) — the UI shows
+# The app never self-applies an update in this shape (spec D3): the UI shows
 # the compose command instead. This is the flag that makes that true.
 ENV PROXPLOY_IN_DOCKER=1 \
     PROXPLOY_DATA_DIR=/var/lib/proxploy \
@@ -1589,7 +1589,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 (`--factory proxploy.main:create_app --host 0.0.0.0 --port 8000`). Binding
 `0.0.0.0` is correct **inside** a container; the compose file is what maps it.
 
-`compose.yml` — this exact file is what the docs and the UI's copy button
+`compose.yml`: this exact file is what the docs and the UI's copy button
 reference, so keep it short and readable:
 
 ```yaml
@@ -1649,7 +1649,7 @@ Steps it performs, in order:
 - [ ] **Step 2: Write `channel_fixture.sh`**
 
 Generates a throwaway Ed25519 keypair (if absent), then calls
-`build_release.sh` twice — once as `1.0.0`, once as `1.0.1` — into
+`build_release.sh` twice, once as `1.0.0`, once as `1.0.1`; into
 `<dir>/1.0.0/` and `<dir>/1.0.1/`, and writes the matching public key to
 `<dir>/release.pem`. Tasks 12 and 13 point `--channel file://<dir>/<version>`
 at these.
@@ -1678,7 +1678,7 @@ PY
 ```
 
 Expected: `OK 1.0.1`. **This is the proof that the shell signer and the Python
-verifier agree** — two implementations of the same format, which is exactly
+verifier agree**, two implementations of the same format, which is exactly
 where a format drifts.
 
 - [ ] **Step 4: shellcheck and commit**
@@ -1701,7 +1701,7 @@ git commit -m "feat(release): release builder and signed local channel fixture"
 
 A Proxmox LXC is a Debian userspace with systemd. Docker can give us exactly
 that with `systemd` as PID 1, so the in-container half of the installer runs
-**for real** — same script, same systemd, same Caddy, same TLS.
+**for real**: same script, same systemd, same Caddy, same TLS.
 
 - [ ] **Step 1: Write the harness**
 
@@ -1770,14 +1770,14 @@ echo "PASS: install harness"
 ```
 
 **Check the settings table's real column names** (`backend/proxploy/models/`)
-before writing the canary insert — if it is not `(key, value)`, use whatever
+before writing the canary insert, if it is not `(key, value)`, use whatever
 it is.
 
 - [ ] **Step 2: Run it**
 
 Run: `bash packaging/tests/test_install.sh`
 Expected: four `OK:` lines then `PASS: install harness`. Expect to iterate on
-`install.sh` here — this is the first time it runs for real. Fix the
+`install.sh` here; this is the first time it runs for real. Fix the
 installer, never the harness's assertions.
 
 - [ ] **Step 3: Commit**
@@ -1804,7 +1804,7 @@ a bad update undoes itself.
 
 Same container setup as Task 12 (extract the `docker run` + systemd-wait block
 into `packaging/tests/lib.sh` and source it from both, rather than
-copy-pasting — the second copy is where they drift). Then:
+copy-pasting, the second copy is where they drift). Then:
 
 ```bash
 # 1. install 1.0.0 and seed a row we can look for afterwards
@@ -1827,7 +1827,7 @@ docker exec "$name" test -f /var/lib/proxploy/pre-update/1.0.0/proxploy.db \
   || { echo "FAIL: no pre-update backup was taken"; exit 1; }
 echo "OK: 1.0.0 -> 1.0.1 upgrade, data intact, backup present"
 
-# 3. try the poisoned 1.0.2 — it must fail AND put us back on 1.0.1
+# 3. try the poisoned 1.0.2: it must fail AND put us back on 1.0.1
 if docker exec "$name" /opt/proxploy/bin/proxploy-update --to 1.0.2 \
      --channel file:///channel/1.0.2; then
   echo "FAIL: poisoned release reported success"; exit 1
@@ -1835,7 +1835,7 @@ fi
 docker exec "$name" readlink /opt/proxploy/current | grep -q '1\.0\.1' \
   || { echo "FAIL: did not roll back to 1.0.1"; exit 1; }
 docker exec "$name" curl -fsS http://127.0.0.1:8000/api/v1/meta/health | grep -q ok \
-  || { echo "FAIL: app is down after rollback — the worst outcome"; exit 1; }
+  || { echo "FAIL: app is down after rollback, the worst outcome"; exit 1; }
 docker exec "$name" bash -c "sqlite3 /var/lib/proxploy/proxploy.db \
   \"select value from settings where key='harness.canary'\"" | grep -q keep-me \
   || { echo "FAIL: rollback lost data"; exit 1; }
@@ -1850,7 +1850,7 @@ Build the poisoned 1.0.2 in step 0:
 
 Run: `bash packaging/tests/test_upgrade_rollback.sh`
 Expected: both `OK:` lines then `PASS`. The rollback assertion is the one that
-matters most — if the app is down at the end, the phase's core promise is
+matters most, if the app is down at the end, the phase's core promise is
 false and the updater needs fixing.
 
 - [ ] **Step 3: Commit**
@@ -1880,11 +1880,11 @@ helper for chrome. Behaviour:
 - `update_available && can_self_apply` → "Update to X" button + release-notes
   link. Clicking POSTs `{version: latest}`, then polls `GET /meta/version`
   every 3s. Version changes → success. `update_timeout_s` elapses → "lost
-  contact with the server while updating — check the host" (**not** a success
+  contact with the server while updating, check the host" (**not** a success
   claim; the client genuinely cannot know).
 - `update_available && !can_self_apply` (docker) → render `compose_hint` in a
   monospace block with a copy button and the sentence "Proxploy does not
-  update its own container — run this on the Docker host."
+  update its own container, run this on the Docker host."
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1906,7 +1906,7 @@ helper for chrome. Behaviour:
 ```bash
 git add frontend/src/components/UpdateCard.tsx frontend/src/tests/update.test.tsx \
         frontend/src/api/account.ts frontend/src/routes/settings.tsx
-git commit -m "feat(ui): update card — apply, poll, and the honest docker boundary"
+git commit -m "feat(ui): update card, apply, poll, and the honest docker boundary"
 ```
 
 ---
@@ -1928,7 +1928,7 @@ git commit -m "feat(ui): update card — apply, poll, and the honest docker boun
       # -x follows sourced files; -P SCRIPTDIR lets it resolve the dynamic
       # `$(dirname "$0")/../lib/common.sh` sourcing both install.sh and
       # proxploy-update use. A bare `shellcheck <path>` SC1091s on every one
-      # of them — established while implementing Tasks 7 and 9.
+      # of them: established while implementing Tasks 7 and 9.
       - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
 
   install-harness:
@@ -1942,9 +1942,9 @@ git commit -m "feat(ui): update card — apply, poll, and the honest docker boun
       - run: bash packaging/tests/test_upgrade_rollback.sh
       - run: bash packaging/tests/test_pve_half.sh
 
-  # Task 12 lowered requires-python to >=3.11, because Debian 12 — which is
+  # Task 12 lowered requires-python to >=3.11, because Debian 12: which is
   # what a Proxmox VE 8 CT template is, and therefore the actual LXC install
-  # target — ships 3.11 and pip refused to install at all. A supported-version
+  # target: ships 3.11 and pip refused to install at all. A supported-version
   # claim nothing tests is not a claim; the `backend` job above runs 3.12, so
   # this leg holds the floor honest.
   backend-py311:
@@ -1966,14 +1966,14 @@ human runs, once, when ready. It must state, in order:
 1. **Generate the release keypair offline.** `openssl genpkey -algorithm ed25519`.
    The private key goes in a password manager, never in the repo, never in CI
    secrets during 9a. Replace `backend/proxploy/release_pubkey.pem` with the
-   real public key and commit that — **the public key ships in the artifact, so
+   real public key and commit that, **the public key ships in the artifact, so
    rotating it requires publishing a release** (same bootstrap property doc
    09:153 records for the entitlement key).
-2. `gh repo edit aspyrelabs/proxploy-app --visibility public` — irreversible in
+2. `gh repo edit aspyrelabs/proxploy-app --visibility public`: irreversible in
    practice; the whole history becomes public. Check the history for secrets
    first (`git log -p | grep -iE 'BEGIN .*PRIVATE KEY|password|token'`).
 3. `bash packaging/build_release.sh --version 1.0.0 --key <key> --out dist/`
-4. `gh release create v1.0.0 dist/* --notes-file <notes>` — prereleases are the
+4. `gh release create v1.0.0 dist/* --notes-file <notes>`: prereleases are the
    **edge** channel, `latest` is **stable** (spec D1).
 5. Verify from a clean box: `curl -fsSL <raw install.sh URL> | bash`.
 
@@ -1989,21 +1989,21 @@ git commit -m "ci(9a): shellcheck and install/upgrade harness gates; publication
 ## Task 16: DoD verification, notes, buildlog
 
 **Files:**
-- Create: `backend/dod_verify_phase9a.py` (throwaway, gitignored by the existing `dod_verify*` pattern — confirm), `docs/notes/phase-9a-install-update.md`
+- Create: `backend/dod_verify_phase9a.py` (throwaway, gitignored by the existing `dod_verify*` pattern; confirm), `docs/notes/phase-9a-install-update.md`
 - Modify: `buildlog.md`
 
-- [ ] **Step 1: Write `dod_verify_phase9a.py`** — four checks, each printing `OK`/`FAIL`, exit non-zero on any failure, following `dod_verify_phase8.py`'s pattern:
-  1. **Signed-release verification** — build a channel, verify it, then assert a tampered manifest, a wrong key, and a downgrade are each refused. Print the count of refusals.
-  2. **Install** — shell out to `packaging/tests/test_install.sh`, print its `OK:` lines. Output line must read `OK (real Debian container with systemd — no Proxmox node on this machine; the pct half is proven separately against a fake pct)`.
-  3. **Upgrade + rollback** — shell out to `test_upgrade_rollback.sh`; print the version transitions.
-  4. **Docker boundary** — start the app with `install_shape="docker"` via `tests.support.make_app` and assert `POST /meta/update` 409s with the compose hint, proving the container never self-applies.
+- [ ] **Step 1: Write `dod_verify_phase9a.py`**, four checks, each printing `OK`/`FAIL`, exit non-zero on any failure, following `dod_verify_phase8.py`'s pattern:
+  1. **Signed-release verification**: build a channel, verify it, then assert a tampered manifest, a wrong key, and a downgrade are each refused. Print the count of refusals.
+  2. **Install**: shell out to `packaging/tests/test_install.sh`, print its `OK:` lines. Output line must read `OK (real Debian container with systemd, no Proxmox node on this machine; the pct half is proven separately against a fake pct)`.
+  3. **Upgrade + rollback**: shell out to `test_upgrade_rollback.sh`; print the version transitions.
+  4. **Docker boundary**: start the app with `install_shape="docker"` via `tests.support.make_app` and assert `POST /meta/update` 409s with the compose hint, proving the container never self-applies.
   Run it twice; output identical apart from container names and timings.
 
-- [ ] **Step 2: Write `docs/notes/phase-9a-install-update.md`** — same skeleton as `docs/notes/phase-8-scale.md`: what shipped per subsystem; findings that contradicted the docs; residual limitations (**at minimum**: no real Proxmox node — the PVE half is fake-`pct` only; no real GitHub release channel — everything ran against a local file-served channel with a throwaway key; the release private key does not exist yet and the shipped `release_pubkey.pem` is a placeholder that the runbook replaces; Docker installs cannot self-apply **by design**, not by omission); gate numbers table with the real counts; commit range.
+- [ ] **Step 2: Write `docs/notes/phase-9a-install-update.md`**, same skeleton as `docs/notes/phase-8-scale.md`: what shipped per subsystem; findings that contradicted the docs; residual limitations (**at minimum**: no real Proxmox node, the PVE half is fake-`pct` only; no real GitHub release channel, everything ran against a local file-served channel with a throwaway key; the release private key does not exist yet and the shipped `release_pubkey.pem` is a placeholder that the runbook replaces; Docker installs cannot self-apply **by design**, not by omission); gate numbers table with the real counts; commit range.
 
-- [ ] **Step 3: `buildlog.md`** — the phase entry in the established format (see the Phase 8 entry), including the "Known gaps, stated plainly" section.
+- [ ] **Step 3: `buildlog.md`**, the phase entry in the established format (see the Phase 8 entry), including the "Known gaps, stated plainly" section.
 
-- [ ] **Step 4: Run everything and record real numbers** — DoD script ×2, full backend suite, frontend suite (`--no-file-parallelism`) + build + lint, all four shell harnesses, `shellcheck`, `alembic heads`. Never write a projected number.
+- [ ] **Step 4: Run everything and record real numbers**, DoD script ×2, full backend suite, frontend suite (`--no-file-parallelism`) + build + lint, all four shell harnesses, `shellcheck`, `alembic heads`. Never write a projected number.
 
 - [ ] **Step 5: Commit**
 
@@ -2018,7 +2018,7 @@ git commit -m "docs(phase-9a): DoD verification, notes, buildlog"
 
 Checked after writing, against the spec and the shaping constraints:
 
-1. **Spec coverage** — D1 release channel: Tasks 3, 11, 15. D2 separate
+1. **Spec coverage**: D1 release channel: Tasks 3, 11, 15. D2 separate
    Ed25519 release key: Tasks 2, 3 (placeholder), 15 (real key, runbook). D3
    per-shape update behaviour: Tasks 3, 5, 10, 14. D4 build-and-prove without
    publishing: every test uses a local channel; publication is Task 15's
@@ -2029,19 +2029,19 @@ Checked after writing, against the spec and the shaping constraints:
    (signature enforcement), 5 + 16 (docker boundary), 15 (shellcheck).
    `self.ctid`, which the spec mentions only in passing via `selfguard.py`,
    has its own task (4) because the hook has been inert since Phase 4.
-2. **Placeholder scan** — no "TBD"/"handle errors appropriately". The three
+2. **Placeholder scan**: no "TBD"/"handle errors appropriately". The three
    places an implementer must check a fact before coding say exactly what to
    check and what to do with each answer: `openssl pkeyutl -rawin`
    availability (Task 6), the `settings` table's real column names (Task 12),
    and whether `main.py` still exposes only a factory (Task 6). Task 8 has no
    unit test *by intent*, stated in the task.
-3. **Type consistency** — `verify_manifest(raw, sig, pubkey_pem) -> dict`,
+3. **Type consistency**: `verify_manifest(raw, sig, pubkey_pem) -> dict`,
    `verify_artifact(path, entry)`, `is_upgrade(current, candidate)`,
    `ReleaseError` are used identically in Tasks 2, 3, 9, 11, 16.
    `detect_shape`/`CAN_SELF_APPLY`/`check`/`launch` identical in 3, 5, 16. The
    manifest JSON shape in Task 2 is what Tasks 3, 9 and 11 read and write. The
    layout constants from Task 6 are used verbatim in 7, 9, 12, 13.
-4. **Honesty** — the two things this machine cannot prove (a real Proxmox node,
+4. **Honesty**: the two things this machine cannot prove (a real Proxmox node,
    a real published release channel) are declared in Global Constraints, in
    the DoD script's own printed output (Task 16 Step 1.2), and in the notes'
    residual-limitations list. The Docker no-self-update boundary is recorded as

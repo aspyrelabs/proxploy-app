@@ -1,6 +1,6 @@
 """Single-use, short-TTL console websocket tickets (doc 05 §Streaming "Auth
 model for streams"). Same hash-at-rest shape as services/authn.py's
-create_session/resolve_session — a new table because these bind to a Proxmox
+create_session/resolve_session, a new table because these bind to a Proxmox
 target + upstream ticket, which sessions don't carry."""
 import hashlib
 import secrets

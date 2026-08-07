@@ -25,7 +25,7 @@ def test_poller_populates_degrades_recovers(tmp_path, csrf_header, bootstrap_adm
     # here: TestClient starts the ASGI app on its own background "portal"
     # event loop (a real loop, in a real thread), and the Poller task +
     # EventBus live there. Spinning up a *second* uvicorn server on the same
-    # `app` object — even with lifespan="off" to dodge re-running startup —
+    # `app` object: even with lifespan="off" to dodge re-running startup, 
     # would serve the SSE request on uvicorn's own event loop while the
     # poller keeps publishing from TestClient's portal loop. EventBus.publish
     # does a bare `Queue.put_nowait()` with no cross-loop marshalling (see
@@ -33,7 +33,7 @@ def test_poller_populates_degrades_recovers(tmp_path, csrf_header, bootstrap_adm
     # written to from a different loop/thread is a real race, not just a
     # style nit. Task 4's own SSE test sidesteps this by using exactly one
     # real server for the whole test and httpx.Client throughout (see
-    # tests/test_events_sse.py::test_sse_streams_published_events) — so this
+    # tests/test_events_sse.py::test_sse_streams_published_events): so this
     # test does the same: one uvicorn server, one event loop, from host
     # creation through the SSE assertion to the degrade/recover checks.
     import socket

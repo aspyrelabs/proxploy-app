@@ -1,5 +1,5 @@
 """Append-only audit writer (docs 04/08 §7). There is deliberately no update or
-delete function in this module — archival is a Phase-8+ export job, never mutation."""
+delete function in this module, archival is a Phase-8+ export job, never mutation."""
 from proxploy.models import AuditEvent
 
 REDACT_KEYS = {"password", "secret", "token_secret", "token", "key",
@@ -10,8 +10,8 @@ REDACT_KEYS = {"password", "secret", "token_secret", "token", "key",
 # `dsn` / `secret_key` would all have sailed past `k.lower() in REDACT_KEYS`
 # into the unencrypted `audit_events.params` column and out of GET /audit.
 # These substrings redact the whole family in one rule. Deliberately NOT "key":
-# `settings.update` audits `{"keys": [...]}` — the *names* of the settings
-# changed, never their values — and that is worth keeping legible.
+# `settings.update` audits `{"keys": [...]}`: the *names* of the settings
+# changed, never their values: and that is worth keeping legible.
 REDACT_SUBSTRINGS = ("secret", "password", "passwd", "token", "credential",
                      "url", "dsn", "private")
 

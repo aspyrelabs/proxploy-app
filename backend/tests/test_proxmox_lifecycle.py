@@ -1,7 +1,7 @@
 """Per-guest lifecycle + task reads (doc 05 lifecycle rows, doc 02 §4).
 
 These are user-triggered calls and deliberately live OUTSIDE the poller's
-O(nodes) budget (doc 02 §3) — nothing here may be called from pollers/.
+O(nodes) budget (doc 02 §3), nothing here may be called from pollers/.
 """
 import pytest
 

@@ -1,6 +1,6 @@
 """Lifecycle job handlers (doc 10 Phase 3, doc 01 §2/§4, doc 05 Apps/VMs rows).
 
-Proxploy's verbs are not Proxmox's verbs — `restart` is Proxmox's `reboot`,
+Proxploy's verbs are not Proxmox's verbs, `restart` is Proxmox's `reboot`,
 `pause` is `suspend`. The mapping is stated once, here, and nowhere else.
 `stop` is the hard kill; `shutdown` is the graceful ACPI/init one, matching
 Proxmox's own distinction.
@@ -8,7 +8,7 @@ Proxmox's own distinction.
 Every action is: one status POST (which returns a UPID), then poll the node's
 task status and stream its task log into `job_events` until the task stops.
 These are per-guest calls, deliberately outside the poller's O(nodes) budget
-(doc 02 §3) — they are triggered by a human, not by a clock.
+(doc 02 §3); they are triggered by a human, not by a clock.
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _resolve(app, target_type: str, target_id: int):
         try:
             client = client_for_host(app, db, host)
         except ProxmoxError as e:
-            # Same sentence as before the extraction — a job reports a missing
+            # Same sentence as before the extraction: a job reports a missing
             # credential as a failed job, never as a 502.
             raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
@@ -71,11 +71,11 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
         upid = await asyncio.to_thread(client.guest_action, kind, node, vmid,
                                        PVE_VERB[action])
     except asyncio.CancelledError:
-        # to_thread cannot interrupt the thread once it has started — the POST
+        # to_thread cannot interrupt the thread once it has started: the POST
         # may already have reached proxmox, but the UPID it would return is
         # discarded here, so there is no task to point at. Leave a breadcrumb
         # even without one, rather than pretending the job vanished cleanly.
-        ctx.log(f"canceled while issuing {action} on {kind} {vmid} at {node} — "
+        ctx.log(f"canceled while issuing {action} on {kind} {vmid} at {node}, "
                 f"the request may have already reached proxmox; no task id was "
                 f"captured to track it", stream="stderr")
         raise
@@ -83,7 +83,7 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
     # Nudge every open tab to refetch rather than assert a status we have not
-    # polled yet — the poller owns cached state (doc 04: Proxmox is the truth).
+    # polled yet: the poller owns cached state (doc 04: Proxmox is the truth).
     app.state.bus.publish("resource", {"type": target_type, "id": target_id,
                                        "change": "lifecycle"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),

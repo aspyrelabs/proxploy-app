@@ -3,7 +3,7 @@ import { fmtBytes, fmtPct } from '../lib/format'
 import { DANGER_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 // doc 06 §a row 43 / §c: violet is storage's reserved accent, red takes over
-// past 80% — the one place on this page the palette is a warning and not a
+// past 80%, the one place on this page the palette is a warning and not a
 // decoration.
 const DANGER_PCT = 80
 

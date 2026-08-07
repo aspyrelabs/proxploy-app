@@ -40,7 +40,7 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
       setName(''); setUrl(''); setEvents(['job.failed']); setError(null)
       onSaved()
     },
-    onError: () => setError('Could not add that channel — check the Apprise URL.'),
+    onError: () => setError('Could not add that channel, check the Apprise URL.'),
   })
 
   const toggle = (e: string) =>
@@ -65,7 +65,7 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
       </div>
       <fieldset disabled={!routingAllowed}>
         <legend className="text-[12px] text-text-3">
-          Send on {!routingAllowed && '(Pro — event routing)'}
+          Send on {!routingAllowed && '(Pro: event routing)'}
         </legend>
         <div className="mt-1 flex flex-wrap gap-3">
           {EVENT_CHOICES.map((e) => (

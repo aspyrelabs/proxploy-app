@@ -6,7 +6,7 @@ vi.mock('../api/client', () => ({ api: vi.fn() }))
 import { api } from '../api/client'
 
 // NodeDetailPage is the route's own component and calls useParams() itself
-// (see AppDetail/AppOverview in routes/apps.tsx for the same shape) — it
+// (see AppDetail/AppOverview in routes/apps.tsx for the same shape), it
 // needs a route match to read $hostId from, which a bare QueryClientProvider
 // doesn't provide. Stub just that hook, same technique cluster.test.tsx uses
 // for Link/useNavigate/useSearch.
@@ -30,7 +30,7 @@ describe('node shell section', () => {
       </QueryClientProvider>,
     )
     // /node shell/i alone would match both the "Node shell" heading and the
-    // "Open node shell" button text — scope to the heading to disambiguate.
+    // "Open node shell" button text, scope to the heading to disambiguate.
     await waitFor(() => expect(screen.getByRole('heading', { name: /node shell/i })).toBeInTheDocument())
     const btn = screen.getByRole('button', { name: /open node shell/i })
     expect(btn).toBeDisabled()
@@ -55,6 +55,6 @@ describe('node shell section', () => {
     )
     const btn = await screen.findByRole('button', { name: /open node shell/i })
     await waitFor(() => expect(btn).toBeDisabled())
-    await waitFor(() => expect(btn).toHaveAttribute('title', 'Pro — Node shells'))
+    await waitFor(() => expect(btn).toHaveAttribute('title', 'Pro: Node shells'))
   })
 })

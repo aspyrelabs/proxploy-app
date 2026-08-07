@@ -43,7 +43,7 @@ describe('applyResource', () => {
   })
 })
 
-describe('applyResource — Phase 6 resource types', () => {
+describe('applyResource, Phase 6 resource types', () => {
   it('routes storage/backup/network events to their own keys, never to vms', () => {
     const qc = client()
     const spy = vi.spyOn(qc, 'invalidateQueries')
@@ -66,7 +66,7 @@ describe('applyResource — Phase 6 resource types', () => {
 
   it('never runs the id-keyed status patch for a non-guest type', () => {
     // A storage event's `id` is a HOST id, and ['storage'] rows have no `id`
-    // at all — patching by id there would silently corrupt whichever row
+    // at all, patching by id there would silently corrupt whichever row
     // happened to collide.
     const qc = client()
     qc.setQueryData(['storage'], [{ host_id: 7, storage: 'local', status: 'available' }])
@@ -75,7 +75,7 @@ describe('applyResource — Phase 6 resource types', () => {
   })
 })
 
-describe('applyJob — Phase 6 target types', () => {
+describe('applyJob, Phase 6 target types', () => {
   const terminal = (target_type: string) =>
     ({ id: 1, kind: `${target_type}.thing`, status: 'succeeded', target_type })
 

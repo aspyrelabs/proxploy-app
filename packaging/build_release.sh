@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Builds a signed Proxploy release: proxploy-<version>.tar.gz, manifest.json,
-# manifest.json.sig — the artifact set packaging/tests/channel_fixture.sh
+# manifest.json.sig: the artifact set packaging/tests/channel_fixture.sh
 # serves and packaging/lib/common.sh's install_release() consumes.
 #
 # The tarball's top-level entries are backend/ and frontend/dist/ as
-# siblings, no wrapping directory — that is what install_release() unpacks
+# siblings, no wrapping directory: that is what install_release() unpacks
 # in place, and what backend/proxploy/main.py:24's
 # `Path(__file__).resolve().parents[2] / "frontend" / "dist"` resolves once
 # main.py sits at <release>/backend/proxploy/main.py.
@@ -23,7 +23,7 @@ usage: $0 --version <semver> --key <ed25519-private-key.pem> --out <dir>
                and manifest.json.sig into
   --channel    manifest "channel" field (default: stable)
   --notes-url  manifest "notes_url" field (default: none)
-  --poison     insert a startup-raising line into the staged main.py —
+  --poison     insert a startup-raising line into the staged main.py, 
                packaging/tests/channel_fixture.sh's rollback fixture, never
                for a real release
 EOF
@@ -85,7 +85,7 @@ printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
 
 if [ "$poison" -eq 1 ]; then
   log "poisoning staged main.py (rollback fixture only)..."
-  sed -i '/^) -> FastAPI:$/a\    # POISONED BY channel_fixture.sh — intentional startup failure for the rollback harness (Task 13). Never in a real release.\n    raise RuntimeError("POISONED BY channel_fixture.sh")' \
+  sed -i '/^) -> FastAPI:$/a\    # POISONED BY channel_fixture.sh, intentional startup failure for the rollback harness (Task 13). Never in a real release.\n    raise RuntimeError("POISONED BY channel_fixture.sh")' \
     "$stage/backend/proxploy/main.py"
 fi
 

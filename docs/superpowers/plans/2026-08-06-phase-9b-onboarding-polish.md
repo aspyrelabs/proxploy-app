@@ -1,8 +1,8 @@
-# Phase 9b — Onboarding, empty states, error states, light theme
+# Phase 9b: Onboarding, empty states, error states, light theme
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a stranger's first hour work — onboarding that survives a reload, failures that say what actually failed, lists that never lie about being empty — and prove the four Phase 9 DoD clauses by executing them in a real browser.
+**Goal:** Make a stranger's first hour work, onboarding that survives a reload, failures that say what actually failed, lists that never lie about being empty; and prove the four Phase 9 DoD clauses by executing them in a real browser.
 
 **Architecture:** Three backend changes (a Proxmox error taxonomy, an SSH verification endpoint, one new `/meta/onboarding` field) unblock a wizard rebuilt on server-derived state. On the frontend, one shared four-state query component replaces 40 hand-rolled `?? []` fallbacks, a themed route `errorComponent` closes finding F1, and two hardcoded colours become tokens. A test-only launcher lets Playwright drive the real UI against `FakePVE` + `FakeSSHConnection`, so onboarding → app install → VM create → backup schedule runs end to end, in both themes, gated in CI.
 
@@ -16,16 +16,16 @@
 
 Every task's requirements implicitly include this section.
 
-- **Python floor is 3.11**, not 3.12 — Debian 12 is the real LXC target. CI runs both (`backend` = 3.12, `backend-py311` = 3.11).
+- **Python floor is 3.11**, not 3.12; Debian 12 is the real LXC target. CI runs both (`backend` = 3.12, `backend-py311` = 3.11).
 - **Backend tests:** `cd backend && .venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"`. Baseline entering this phase: **810 passed, 2 skipped, 4 deselected**. Never let this go down.
-- **Frontend tests:** `cd frontend && npx vitest run --no-file-parallelism`. Baseline: **205 passed across 37 files**. The `--no-file-parallelism` flag is required — unrelated suites flake under vitest's default parallelism on this box and pass in isolation.
+- **Frontend tests:** `cd frontend && npx vitest run --no-file-parallelism`. Baseline: **205 passed across 37 files**. The `--no-file-parallelism` flag is required, unrelated suites flake under vitest's default parallelism on this box and pass in isolation.
 - **Frontend lint:** `npm run lint` (oxlint) must stay exit 0. It currently emits 30 warnings, 0 errors; do not add new warning classes.
 - **Commit directly to `main`.** No branches. Every task ends in a commit.
 - **Never use a literal colour in frontend code.** Every colour comes from `styles/tokens.css` via a Tailwind utility (`bg-elev`, `text-text-2`, …) or `var(--token)`. Task 11 adds a test that enforces this.
 - **`EmptyState` is for "nothing here", never for "loading" and never for "failed".** After Task 5 those are three different renderings.
-- **No test-only branches in shipped code.** Fakes are injected through `create_app(proxmox_factory=…, ssh_factory=…)`. An env var honoured by `main.py` that swaps a core client is a backdoor and is rejected — see spec §6.
+- **No test-only branches in shipped code.** Fakes are injected through `create_app(proxmox_factory=…, ssh_factory=…)`. An env var honoured by `main.py` that swaps a core client is a backdoor and is rejected, see spec §6.
 - **Backend route shape** (established by `api/hosts.py:1-2`): auth → RBAC → entitlement → work → audit. Every new mutating route follows it and calls `write_audit`.
-- **Auth deps are module-level singletons** (`_read = authorize("meta", "read")`), reused across routes in a file — FastAPI's dependency cache is keyed on the callable, so this collapses repeated checks into one per request.
+- **Auth deps are module-level singletons** (`_read = authorize("meta", "read")`), reused across routes in a file; FastAPI's dependency cache is keyed on the callable, so this collapses repeated checks into one per request.
 
 ---
 
@@ -75,7 +75,7 @@ Tasks 1–2, 4, 5, 9, 11 can run in parallel. Tasks 6, 7, 8 can run in parallel 
 **Interfaces:**
 - Produces, for Task 13: `ProxmoxError.kind: str`, one of `"unreachable"`, `"auth"`, `"tls_fingerprint"`, `"refused"`, `"unknown"`. Both `POST /hosts/probe` and `POST /hosts` return `502` with body `{"error": "<kind>", "detail": "<scrubbed message>"}`.
 
-Today every probe failure — a wrong token, an unreachable box, a changed TLS fingerprint, an SSRF refusal — arrives as the same `ProxmoxError` and becomes `HTTPException(502, str(e))`. A stranger with a typo'd token and a stranger whose firewall is closed get identical copy and take different actions. `_wrap` is documented as "the ONE place a proxmoxer/requests exception becomes our own", so it is the one place to classify.
+Today every probe failure, a wrong token, an unreachable box, a changed TLS fingerprint, an SSRF refusal; arrives as the same `ProxmoxError` and becomes `HTTPException(502, str(e))`. A stranger with a typo'd token and a stranger whose firewall is closed get identical copy and take different actions. `_wrap` is documented as "the ONE place a proxmoxer/requests exception becomes our own", so it is the one place to classify.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -145,7 +145,7 @@ def test_error_kind_never_leaks_the_token_secret(tmp_path, csrf_header, bootstra
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_hosts.py -q -k "kind or leak"`
-Expected: FAIL — `detail` is currently a plain string, so `r.json()["detail"]["error"]` raises `TypeError: string indices must be integers`.
+Expected: FAIL, `detail` is currently a plain string, so `r.json()["detail"]["error"]` raises `TypeError: string indices must be integers`.
 
 - [ ] **Step 3: Give `ProxmoxError` a kind**
 
@@ -163,7 +163,7 @@ class ProxmoxError(RuntimeError):
         self.kind = kind
 ```
 
-In `_wrap` (around `proxmox.py:199-217`), classify before raising. **Read the existing body first** — it already scrubs the token secret and token id out of the message, and that scrubbing must run unchanged on the message you pass through:
+In `_wrap` (around `proxmox.py:199-217`), classify before raising. **Read the existing body first**: it already scrubs the token secret and token id out of the message, and that scrubbing must run unchanged on the message you pass through:
 
 ```python
 def _classify(exc: BaseException) -> str:
@@ -188,7 +188,7 @@ def _classify(exc: BaseException) -> str:
 
 `resolve_target`'s SSRF refusals currently raise plain `ProxmoxError` with messages like *"refusing to connect to … it resolves to …, which is a link-local address"*. **Check whether a distinct exception type exists**; if it does not, match on the literal prefix `"refusing to connect"` instead of inventing an `SSRFRefused` class, and delete that first branch. Do not add a new exception type just to satisfy the snippet above.
 
-Then in `_wrap`, raise `ProxmoxError(scrubbed_message, kind=_classify(exc))`. Any existing `raise ProxmoxError(...)` sites elsewhere in the file keep working — `kind` defaults to `"unknown"`.
+Then in `_wrap`, raise `ProxmoxError(scrubbed_message, kind=_classify(exc))`. Any existing `raise ProxmoxError(...)` sites elsewhere in the file keep working, `kind` defaults to `"unknown"`.
 
 - [ ] **Step 4: Return the kind from both routes**
 
@@ -206,7 +206,7 @@ Then `grep -rn "except ProxmoxError" backend/proxploy/` and check every other ca
 - [ ] **Step 5: Run the tests**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_hosts.py -q`
-Expected: PASS, including the pre-existing host tests. If an existing test asserted `detail` was a string, update it — it was pinning the shape this task deliberately changes.
+Expected: PASS, including the pre-existing host tests. If an existing test asserted `detail` was a string, update it; it was pinning the shape this task deliberately changes.
 
 - [ ] **Step 6: Full backend suite, then commit**
 
@@ -232,14 +232,14 @@ git commit -m "feat(hosts): classify probe failures so the wizard can say what b
 - Consumes: `SSHExecutor.run_for_host(sessionmaker, secretstore, host_id, host, command, *, pinned_fingerprint, on_new_fingerprint, env=None, on_line=None, timeout_s=1800.0) -> int` from `backend/proxploy/executor/ssh.py:134`.
 - Produces, for Tasks 3 and 14: `POST /hosts/{host_id}/ssh/verify` → `200 {"verified": true, "verified_at": "<iso8601>"}` or `502 {"error": "<kind>", "detail": "<message>"}` where kind is one of `"no_key"`, `"host_key_mismatch"`, `"unreachable"`, `"timeout"`, `"command_failed"`. Also `HostCredential.ssh_verified_at: datetime | None`.
 
-The wizard's authorize step is an honor-system button today. A mis-pasted `authorized_keys` line fails much later, at the first app install, far from its cause. This task makes the step provable — and the stored result is what Task 3 reads.
+The wizard's authorize step is an honor-system button today. A mis-pasted `authorized_keys` line fails much later, at the first app install, far from its cause. This task makes the step provable, and the stored result is what Task 3 reads.
 
 - [ ] **Step 1: Write the failing tests**
 
 Create `backend/tests/test_hosts_ssh_verify.py`:
 
 ```python
-"""POST /hosts/{id}/ssh/verify — the wizard's authorize step, made honest."""
+"""POST /hosts/{id}/ssh/verify, the wizard's authorize step, made honest."""
 import pytest
 
 from tests.fakes.pve import FakePVE
@@ -278,7 +278,7 @@ def test_verify_marks_the_credential_verified(tmp_path, csrf_header, bootstrap_a
 
 
 def test_verify_reports_a_nonzero_exit_as_command_failed(tmp_path, csrf_header, bootstrap_admin):
-    """The key authenticated but the command did not run — a real, different
+    """The key authenticated but the command did not run, a real, different
     failure from 'the key is not authorized', and the copy must differ."""
     from fastapi.testclient import TestClient
     from proxploy.config import Settings
@@ -320,12 +320,12 @@ def test_verify_on_a_host_without_ssh_enrolment_is_no_key(tmp_path, csrf_header,
     assert r.json()["error"] == "no_key"
 ```
 
-**Read `backend/tests/fakes/ssh.py` first** and match `FakeSSHConnection`'s real constructor signature — the arguments above come from `tests/test_app_update_job.py:52-66` but confirm them rather than trusting this plan.
+**Read `backend/tests/fakes/ssh.py` first** and match `FakeSSHConnection`'s real constructor signature, the arguments above come from `tests/test_app_update_job.py:52-66` but confirm them rather than trusting this plan.
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_hosts_ssh_verify.py -q`
-Expected: FAIL — 404, the route does not exist.
+Expected: FAIL, 404, the route does not exist.
 
 - [ ] **Step 3: Add the column and generate the migration**
 
@@ -333,7 +333,7 @@ In `backend/proxploy/models.py`, add to `HostCredential`:
 
 ```python
     # Set by POST /hosts/{id}/ssh/verify. NULL means "never confirmed working"
-    # — which is exactly what the onboarding wizard's authorize step reads to
+    #, which is exactly what the onboarding wizard's authorize step reads to
     # know whether it still has something to ask the operator for.
     ssh_verified_at = Column(DateTime, nullable=True)
 ```
@@ -353,7 +353,7 @@ Expected: one head, and it is the new revision.
 
 - [ ] **Step 4: Implement the route**
 
-In `backend/proxploy/api/hosts.py`. Note `SSHExecutor.run_for_host` is **async** and this router's handlers are sync — declare this one `async def`.
+In `backend/proxploy/api/hosts.py`. Note `SSHExecutor.run_for_host` is **async** and this router's handlers are sync, declare this one `async def`.
 
 ```python
 @router.post("/{host_id}/ssh/verify")
@@ -364,7 +364,7 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
     The wizard used to take the operator's word for it, so a mis-pasted
     authorized_keys line surfaced at the first app install instead of here,
     far from its cause. `true` is the whole command: this asks one question
-    — does the key authenticate and can we run anything — and nothing else.
+    does the key authenticate and can we run anything, and nothing else.
     """
     host = db.query(Host).filter_by(id=host_id).one_or_none()
     if host is None:
@@ -407,11 +407,11 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
     return {"verified": True, "verified_at": cred.ssh_verified_at.isoformat()}
 ```
 
-Three things this snippet assumes that you **must verify against the real code before writing it**, and correct in place if they differ — do not force the code to match the plan:
+Three things this snippet assumes that you **must verify against the real code before writing it**, and correct in place if they differ; do not force the code to match the plan:
 
-1. `host.ssh_host_fingerprint` — the field name where a node's pinned SSH host key lives. Grep `models.py` for the real one; app-install code already reads it, so `grep -rn "pinned_fingerprint=" backend/proxploy/` shows the canonical accessor.
-2. `request.app.state.sessionmaker` and `request.app.state.secretstore` — confirm both names in `backend/proxploy/main.py`.
-3. `_ssh_target(host.address)` — `run_for_host` wants a hostname, not a URL. Find how the existing app-install path derives it (`grep -rn "run_for_host" backend/proxploy/`) and reuse that helper rather than writing a second one.
+1. `host.ssh_host_fingerprint`: the field name where a node's pinned SSH host key lives. Grep `models.py` for the real one; app-install code already reads it, so `grep -rn "pinned_fingerprint=" backend/proxploy/` shows the canonical accessor.
+2. `request.app.state.sessionmaker` and `request.app.state.secretstore`, confirm both names in `backend/proxploy/main.py`.
+3. `_ssh_target(host.address)`: `run_for_host` wants a hostname, not a URL. Find how the existing app-install path derives it (`grep -rn "run_for_host" backend/proxploy/`) and reuse that helper rather than writing a second one.
 
 - [ ] **Step 5: Run the tests**
 
@@ -454,7 +454,7 @@ def test_onboarding_reports_ssh_pending_until_verified(tmp_path, csrf_header, bo
     assert client.get("/api/v1/meta/onboarding").json()["ssh_pending"] is False
 ```
 
-Write this out fully against the real fixtures — the sketch above marks the two assertions that matter, not the whole test. Model the setup on `test_hosts_ssh_verify.py` from Task 2.
+Write this out fully against the real fixtures, the sketch above marks the two assertions that matter, not the whole test. Model the setup on `test_hosts_ssh_verify.py` from Task 2.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -462,7 +462,7 @@ Expected: `KeyError: 'ssh_pending'`.
 
 - [ ] **Step 3: Implement**
 
-`onboarding()` takes no auth dependency by design — it is the pre-session gate, probed before any admin exists. Keep it that way; `ssh_pending` is a boolean about configuration state, not a secret.
+`onboarding()` takes no auth dependency by design; it is the pre-session gate, probed before any admin exists. Keep it that way; `ssh_pending` is a boolean about configuration state, not a secret.
 
 ```python
 @router.get("/onboarding")
@@ -528,7 +528,7 @@ describe('EmptyState', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/empty-state.test.tsx`
-Expected: FAIL — TypeScript rejects the `action` prop.
+Expected: FAIL, TypeScript rejects the `action` prop.
 
 - [ ] **Step 3: Implement**
 
@@ -641,7 +641,7 @@ describe('QueryState', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/query-state.test.tsx`
-Expected: FAIL — module does not exist.
+Expected: FAIL, module does not exist.
 
 - [ ] **Step 3: Implement**
 
@@ -655,7 +655,7 @@ import { EmptyState } from './EmptyState'
  * like four different things.
  *
  * Before this component the codebase spelled every list as `(data ?? []).map`,
- * which renders a failed fetch as "No VMs discovered" — the UI stating
+ * which renders a failed fetch as "No VMs discovered", the UI stating
  * confidently that you have nothing when the truth is that it has no idea.
  * `isPending` is likewise not `isError`: react-query flips isPending false on
  * failure too, so a `!data` guard shows "Loading…" forever after a hard error.
@@ -728,14 +728,14 @@ it('says the alerts could not be read rather than showing "nothing is firing"', 
 })
 ```
 
-**Follow `frontend/src/tests/storage.test.tsx:26-57` for the established mocking pattern** — `vi.mock('../api/client', …)` with a path-keyed `vi.fn`, `vi.mock('@tanstack/react-router', …)` spreading the real module, and a `withQuery` helper using `retry: false`. Import the component *after* the mocks.
+**Follow `frontend/src/tests/storage.test.tsx:26-57` for the established mocking pattern**: `vi.mock('../api/client', …)` with a path-keyed `vi.fn`, `vi.mock('@tanstack/react-router', …)` spreading the real module, and a `withQuery` helper using `retry: false`. Import the component *after* the mocks.
 
 Not every one of the 25 sites has an existing test file. Where one exists, extend it. Where none exists, add the error assertion to whichever suite covers that page, and if there is genuinely none, note it in the commit rather than creating a new suite per site.
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run --no-file-parallelism`
-Expected: the new cases FAIL — the empty-state copy is still what renders on error.
+Expected: the new cases FAIL, the empty-state copy is still what renders on error.
 
 - [ ] **Step 3: Convert, one file at a time**
 
@@ -766,7 +766,7 @@ After:
 Rules for the sweep:
 
 - **Never delete an existing empty-state message.** Move its wording into `emptyTitle`/`emptyNote`. The copy was written deliberately; this task changes when it shows, not what it says.
-- **Where a page has an `isError` branch already** (the 6 exemplary sites), leave them for a later pass or convert them too — but if you convert, the rendered copy must stay identical.
+- **Where a page has an `isError` branch already** (the 6 exemplary sites), leave them for a later pass or convert them too; but if you convert, the rendered copy must stay identical.
 - **`api/*.ts` sites are hooks, not components.** The hook stays as-is; the `QueryState` goes at the *consuming component's* render site. Follow the hook's import to find it.
 - Commit per file or per small group, not one giant commit.
 
@@ -777,7 +777,7 @@ Expected: ≥ 205 passed plus the new cases; zero failures.
 
 - [ ] **Step 5: Lint and commit**
 
-Run: `cd frontend && npm run lint` — must stay exit 0.
+Run: `cd frontend && npm run lint`, must stay exit 0.
 
 ```bash
 git add frontend/src
@@ -796,11 +796,11 @@ git commit -m "fix(ui): a failed list no longer claims you have nothing"
 
 - [ ] **Step 1: Delete the dead hook**
 
-`api/jobs.ts:45`'s `useJob` has no callers anywhere in `frontend/src`. Confirm with `grep -rn "useJob\b" frontend/src` (note the word boundary — `useJobs` and `useJobEvents` are both live and must survive), then delete it.
+`api/jobs.ts:45`'s `useJob` has no callers anywhere in `frontend/src`. Confirm with `grep -rn "useJob\b" frontend/src` (note the word boundary, `useJobs` and `useJobEvents` are both live and must survive), then delete it.
 
 - [ ] **Step 2: Fix the two loading-as-empty sites**
 
-`routes/vms.tsx:125` and `routes/apps.tsx:159` both render `<EmptyState title="Loading…" note="" />` when their detail query has no data yet. This masks a hard error as eternal loading — `isPending` goes false on failure, so a permanently failed fetch shows "Loading…" forever. Replace each with `QueryState`, using `empty={() => false}` since a single record is never a collection:
+`routes/vms.tsx:125` and `routes/apps.tsx:159` both render `<EmptyState title="Loading…" note="" />` when their detail query has no data yet. This masks a hard error as eternal loading, `isPending` goes false on failure, so a permanently failed fetch shows "Loading…" forever. Replace each with `QueryState`, using `empty={() => false}` since a single record is never a collection:
 
 ```tsx
 <QueryState query={vmQuery} emptyTitle="" emptyNote="" empty={() => false}
@@ -810,7 +810,7 @@ git commit -m "fix(ui): a failed list no longer claims you have nothing"
 </QueryState>
 ```
 
-Leave `routes/vms.tsx:229` and `routes/apps.tsx:367` (`title="Opening console…"`) alone — those guard a console ticket, not a `useQuery`, and "opening" is a genuinely transient state with its own semantics. Note them in the commit as deliberately untouched.
+Leave `routes/vms.tsx:229` and `routes/apps.tsx:367` (`title="Opening console…"`) alone, those guard a console ticket, not a `useQuery`, and "opening" is a genuinely transient state with its own semantics. Note them in the commit as deliberately untouched.
 
 - [ ] **Step 3: Convert the 15 select-option lists**
 
@@ -861,7 +861,7 @@ it('does not silently hide every gated feature when entitlements fail to load', 
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — there is no `unknown` on the hook's return.
+Expected: FAIL; there is no `unknown` on the hook's return.
 
 - [ ] **Step 3: Implement**
 
@@ -871,7 +871,7 @@ Expected: FAIL — there is no `unknown` on the hook's return.
 export function useEntitlements() {
   const q = useQuery({ queryKey: ['entitlements'], queryFn: () => api<Ents>('/entitlements') })
   return {
-    // `has` stays fail-closed — a feature must never unlock because a fetch
+    // `has` stays fail-closed, a feature must never unlock because a fetch
     // failed. But `unknown` lets a consumer say "could not check" instead of
     // rendering the UI of a tenant who simply is not entitled.
     has: (k: string) => q.data?.features[k] ?? false,
@@ -881,9 +881,9 @@ export function useEntitlements() {
 }
 ```
 
-`has()` deliberately keeps returning `false` on error — failing open would be a security bug. What changes is that callers *can* now tell the difference. Apply `unknown` where a whole panel or page-level capability is gated; do not thread it through every individual button.
+`has()` deliberately keeps returning `false` on error, failing open would be a security bug. What changes is that callers *can* now tell the difference. Apply `unknown` where a whole panel or page-level capability is gated; do not thread it through every individual button.
 
-For `useTotpStatus`, the `TotpCard` must not offer "Enable two-factor" when the status is unknown — render the error instead. For `useSummary`, the rings must show an unknown state rather than a calm 0%.
+For `useTotpStatus`, the `TotpCard` must not offer "Enable two-factor" when the status is unknown; render the error instead. For `useSummary`, the rings must show an unknown state rather than a calm 0%.
 
 - [ ] **Step 4: Run, lint, commit**
 
@@ -932,11 +932,11 @@ describe('RouteError', () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — module does not exist.
+Expected: FAIL, module does not exist.
 
 - [ ] **Step 3: Implement `RouteError`**
 
-An unreachable backend and a bug in the app want different things from the user — one wants a retry, the other wants a way out and (in dev) a stack. Collapsing them into "Something went wrong" is exactly what the built-in fallback already does badly.
+An unreachable backend and a bug in the app want different things from the user, one wants a retry, the other wants a way out and (in dev) a stack. Collapsing them into "Something went wrong" is exactly what the built-in fallback already does badly.
 
 ```tsx
 export function RouteError({ error, reset }: { error: unknown; reset?: () => void }) {
@@ -981,11 +981,11 @@ And on `shellRoute` in `frontend/src/routes/shell.tsx`, add `errorComponent: Rou
 
 - [ ] **Step 5: Handle the unwrapped call that causes F1**
 
-`shell.tsx:38-42`'s `beforeLoad` calls `/meta/onboarding` unguarded — a 500 or an unreachable backend there throws straight into the router. That is the live path into F1, and `errorComponent` alone would only make it *pretty*. Wrap it so a reachable-but-broken backend is distinguishable from "not onboarded":
+`shell.tsx:38-42`'s `beforeLoad` calls `/meta/onboarding` unguarded, a 500 or an unreachable backend there throws straight into the router. That is the live path into F1, and `errorComponent` alone would only make it *pretty*. Wrap it so a reachable-but-broken backend is distinguishable from "not onboarded":
 
 ```tsx
   beforeLoad: async () => {
-    // An unreachable backend must not read as "you have not onboarded" — that
+    // An unreachable backend must not read as "you have not onboarded", that
     // would bounce a fully set-up user back into the wizard.
     const ob = await api<Onboarding>('/meta/onboarding')
     if (!ob.complete) throw redirect({ to: '/onboarding' })
@@ -993,7 +993,7 @@ And on `shellRoute` in `frontend/src/routes/shell.tsx`, add `errorComponent: Rou
   },
 ```
 
-Leave the throw *uncaught* here on purpose — `errorComponent` is now what renders it, which is the correct outcome and the thing F1 was missing. What must change is the `/auth/me` catch below it: it currently redirects to `/login` on *any* failure, so a 500 is indistinguishable from "not signed in". Re-throw when the failure is not a 401:
+Leave the throw *uncaught* here on purpose, `errorComponent` is now what renders it, which is the correct outcome and the thing F1 was missing. What must change is the `/auth/me` catch below it: it currently redirects to `/login` on *any* failure, so a 500 is indistinguishable from "not signed in". Re-throw when the failure is not a 401:
 
 ```tsx
     try { await api('/auth/me') } catch (e) {
@@ -1002,14 +1002,14 @@ Leave the throw *uncaught* here on purpose — `errorComponent` is now what rend
     }
 ```
 
-`redirect()` throws, so the `instanceof ApiError` check must come first — confirm the redirect object is not itself an `ApiError` before shipping this.
+`redirect()` throws, so the `instanceof ApiError` check must come first; confirm the redirect object is not itself an `ApiError` before shipping this.
 
 - [ ] **Step 6: Run, lint, commit**
 
 ```bash
 git add frontend/src/components/RouteError.tsx frontend/src/router.tsx \
         frontend/src/routes/shell.tsx frontend/src/tests/route-error.test.tsx
-git commit -m "fix(ui): F1 — a route failure renders in the app, in the theme, and says which failure"
+git commit -m "fix(ui): F1, a route failure renders in the app, in the theme, and says which failure"
 ```
 
 ---
@@ -1023,7 +1023,7 @@ git commit -m "fix(ui): F1 — a route failure renders in the app, in the theme,
 **Interfaces:**
 - Consumes: `QueryState` (Task 5), `EmptyState` with `action` (Task 4).
 
-Cluster's node grid renders `(nodes ?? []).map(...)` into a bare `<div>` — with zero hosts a fresh install shows *nothing at all*, no heading, no message, no action. Task 13 makes the wizard's host step skippable, which turns this into the literal first screen a stranger sees.
+Cluster's node grid renders `(nodes ?? []).map(...)` into a bare `<div>`, with zero hosts a fresh install shows *nothing at all*, no heading, no message, no action. Task 13 makes the wizard's host step skippable, which turns this into the literal first screen a stranger sees.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1039,11 +1039,11 @@ it('tells a fresh install what to do when there are no hosts', async () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — nothing renders for an empty node list.
+Expected: FAIL, nothing renders for an empty node list.
 
 - [ ] **Step 3: Implement**
 
-Cluster's node grid, wrapped with an action pointing at wherever hosts are added (`/settings` — confirm the real route and any deep link before writing the `to`):
+Cluster's node grid, wrapped with an action pointing at wherever hosts are added (`/settings`; confirm the real route and any deep link before writing the `to`):
 
 ```tsx
 <QueryState query={nodesQuery}
@@ -1056,7 +1056,7 @@ Cluster's node grid, wrapped with an action pointing at wherever hosts are added
 </QueryState>
 ```
 
-Then move Alerts' and Settings' ad-hoc inline `<p>` messages onto `EmptyState`, keeping their existing wording verbatim. If Task 6 already converted a given site, this step is a no-op there — check before editing.
+Then move Alerts' and Settings' ad-hoc inline `<p>` messages onto `EmptyState`, keeping their existing wording verbatim. If Task 6 already converted a given site, this step is a no-op there; check before editing.
 
 - [ ] **Step 4: Run, lint, commit**
 
@@ -1073,9 +1073,9 @@ git commit -m "feat(ui): a fresh install says what to do next instead of nothing
 - Modify: `frontend/src/components/UsageBar.tsx:12`, `frontend/src/components/StatRings.tsx:19`
 - Test: `frontend/src/tests/no-hardcoded-colors.test.ts` (new)
 
-**Interfaces:** none — this task is self-contained.
+**Interfaces:** none, this task is self-contained.
 
-The theme system is already disciplined: a scan for hardcoded Tailwind gray-scale classes across `frontend/src` returns **zero** matches. Exactly two literals bypass it, both `#1d2733`, and together they account for ~11 rendered instances — every usage bar and dashboard ring keeps a dark trough on a light card.
+The theme system is already disciplined: a scan for hardcoded Tailwind gray-scale classes across `frontend/src` returns **zero** matches. Exactly two literals bypass it, both `#1d2733`, and together they account for ~11 rendered instances, every usage bar and dashboard ring keeps a dark trough on a light card.
 
 - [ ] **Step 1: Write the failing guard test**
 
@@ -1084,7 +1084,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-// Terminal and console surfaces are dark in BOTH themes on purpose — a
+// Terminal and console surfaces are dark in BOTH themes on purpose, a
 // terminal that follows a light theme stops looking like a terminal. That
 // intent was previously unrecorded anywhere; this list is where it lives now.
 const INTENTIONALLY_DARK = [
@@ -1131,7 +1131,7 @@ describe('no hardcoded colours', () => {
 Run: `cd frontend && npx vitest run src/tests/no-hardcoded-colors.test.ts`
 Expected: FAIL, listing `components/UsageBar.tsx:12` and `components/StatRings.tsx:19`.
 
-If it lists more than those two, **do not widen the allowlist to make it pass.** Report what else it found — the earlier survey said there were only two, and a third is a finding.
+If it lists more than those two, **do not widen the allowlist to make it pass.** Report what else it found; the earlier survey said there were only two, and a third is a finding.
 
 - [ ] **Step 3: Replace both literals**
 
@@ -1143,7 +1143,7 @@ If it lists more than those two, **do not widen the allowlist to make it pass.**
     <div className="h-1.5 overflow-hidden rounded-full bg-elev">
 ```
 
-(dropping the `style` prop entirely — a Tailwind utility reads better here and the guard test never has to reason about it).
+(dropping the `style` prop entirely, a Tailwind utility reads better here and the guard test never has to reason about it).
 
 `StatRings.tsx:19` is an SVG `stroke`, which cannot take a Tailwind background utility. Use the CSS variable directly:
 
@@ -1151,7 +1151,7 @@ If it lists more than those two, **do not widen the allowlist to make it pass.**
         <circle cx="60" cy="60" r="52" fill="none" stroke="var(--elev)" strokeWidth="10" />
 ```
 
-Note the guard regex above matches `stroke=` followed by a literal hex — `var(--elev)` passes it, which is the intended distinction.
+Note the guard regex above matches `stroke=` followed by a literal hex, `var(--elev)` passes it, which is the intended distinction.
 
 - [ ] **Step 4: Run, lint, commit**
 
@@ -1169,12 +1169,12 @@ git commit -m "fix(ui): the last two hardcoded colours, and a test that keeps th
 
 **Files:**
 - Modify: `frontend/src/routes/onboarding.tsx`
-- Test: `frontend/src/tests/onboarding.test.tsx` (currently only tests `HostForm` in isolation, 15 lines — this grows it into a real wizard suite)
+- Test: `frontend/src/tests/onboarding.test.tsx` (currently only tests `HostForm` in isolation, 15 lines; this grows it into a real wizard suite)
 
 **Interfaces:**
 - Consumes: `GET /meta/onboarding` → `{admin_exists, host_added, ssh_pending, complete, oidc}` from Task 3.
 
-Today `step` is `useState(0)`. Reload mid-wizard and `beforeLoad` still sees `complete: false`, so it remounts at step 0 — but the admin now exists and a session cookie is already set, so resubmitting hits `create_user`'s non-first-run path and 409s, surfaced as *"Could not create the admin account (password: 12+ characters)"*. The user is told they typed a bad password when what actually happened is that they already succeeded.
+Today `step` is `useState(0)`. Reload mid-wizard and `beforeLoad` still sees `complete: false`, so it remounts at step 0; but the admin now exists and a session cookie is already set, so resubmitting hits `create_user`'s non-first-run path and 409s, surfaced as *"Could not create the admin account (password: 12+ characters)"*. The user is told they typed a bad password when what actually happened is that they already succeeded.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1206,7 +1206,7 @@ describe('onboarding wizard', () => {
 - [ ] **Step 2: Run to verify failure**
 
 Run: `cd frontend && npx vitest run src/tests/onboarding.test.tsx`
-Expected: FAIL — the wizard always renders step 0.
+Expected: FAIL, the wizard always renders step 0.
 
 - [ ] **Step 3: Implement**
 
@@ -1255,7 +1255,7 @@ git commit -m "fix(onboarding): a reload resumes where you were, not at step one
 **Interfaces:**
 - Consumes: `502 {"error": "unreachable"|"auth"|"tls_fingerprint"|"refused"|"unknown", "detail": str}` from Task 1; `ApiError` with `.status` and `.body` from `frontend/src/api/client.ts:1-9`.
 
-`HostForm.errText` (`HostForm.tsx:22-23`) reads `.detail`/`.title`/`.message` and throws the status away, so every failure renders as one flat red line. The client already carries everything needed — this is a display fix on top of Task 1's taxonomy.
+`HostForm.errText` (`HostForm.tsx:22-23`) reads `.detail`/`.title`/`.message` and throws the status away, so every failure renders as one flat red line. The client already carries everything needed; this is a display fix on top of Task 1's taxonomy.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1284,7 +1284,7 @@ it('lets a stranger skip the host step entirely', async () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — no skip button, and every error renders the same text.
+Expected: FAIL, no skip button, and every error renders the same text.
 
 - [ ] **Step 3: Map the kinds to copy people can act on**
 
@@ -1314,7 +1314,7 @@ const errText = (e: unknown) => {
 
 **The body is flat, not nested.** Plain FastAPI would nest a dict `detail` one
 level deep, but `main.py::problem_handler` flattens it into the top-level
-RFC7807 body — so a kind arrives as `body.error`, and `body.detail` is the
+RFC7807 body, so a kind arrives as `body.error`, and `body.detail` is the
 human string. Established by Task 1 against a real response (commit `3763b7a`),
 not assumed.
 
@@ -1329,7 +1329,7 @@ In the wizard's step 1, alongside `<HostForm>`:
 </p>
 ```
 
-The shell's guard already permits a host-less app — it checks `onboarding.complete` and never `host_added` (`shell.tsx:38-42`) — so no backend change is needed. Task 10's Cluster empty state is what a skipping user lands on.
+The shell's guard already permits a host-less app, it checks `onboarding.complete` and never `host_added` (`shell.tsx:38-42`), so no backend change is needed. Task 10's Cluster empty state is what a skipping user lands on.
 
 - [ ] **Step 5: Run, lint, commit**
 
@@ -1363,7 +1363,7 @@ it('will not advance until the key actually works', async () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — the button unconditionally advances.
+Expected: FAIL, the button unconditionally advances.
 
 - [ ] **Step 3: Implement**
 
@@ -1380,7 +1380,7 @@ Replace the `I have authorized it` button:
     // here, far from its cause.
     setVerifyError(e instanceof ApiError && (e.body as any)?.error === 'host_key_mismatch'
       ? "The node's SSH host key changed since Proxploy first saw it. Stop and investigate."
-      : 'Not authorized yet — Proxploy still cannot open a root shell on the node. '
+      : 'Not authorized yet, Proxploy still cannot open a root shell on the node. '
         + 'Check the line was added to /root/.ssh/authorized_keys and saved.')
   }
 }}>Verify access</Button>
@@ -1406,7 +1406,7 @@ git commit -m "feat(onboarding): verify the SSH key rather than trusting a click
 **Interfaces:**
 - Produces, for Tasks 16–17: a uvicorn factory target `tests.e2e_server:create_e2e_app` that serves the real app with `FakePVE` and `FakeSSHConnection` installed, so `POST /hosts` succeeds without a live Proxmox node.
 
-`POST /hosts` unconditionally probes the real Proxmox API (`hosts.py:101`) — which is why `smoke.spec.ts:18-27` bypasses the wizard's host step with direct API calls. Without this task the stranger journey cannot start.
+`POST /hosts` unconditionally probes the real Proxmox API (`hosts.py:101`), which is why `smoke.spec.ts:18-27` bypasses the wizard's host step with direct API calls. Without this task the stranger journey cannot start.
 
 `backend/tests/` is already excluded from the release tarball by 9a's `build_release.sh`, so a launcher living there satisfies the spec's "test code only" constraint through an existing mechanism rather than a new convention. **Verify that exclusion still holds** (`grep -n "tests" packaging/build_release.sh`) before relying on it, and say so in the commit.
 
@@ -1415,7 +1415,7 @@ git commit -m "feat(onboarding): verify the SSH key rather than trusting a click
 ```python
 """Serve the REAL app to Playwright with fake PVE and SSH behind it.
 
-This exists so the e2e suite can drive the actual onboarding wizard —
+This exists so the e2e suite can drive the actual onboarding wizard, 
 including POST /hosts, which probes a live Proxmox API and therefore could
 never run here. It lives in tests/ deliberately: packaging/build_release.sh
 excludes tests/ from the release tarball, so none of this ships. An env var
@@ -1456,9 +1456,9 @@ def create_e2e_app():
                       ssh_factory=make_fake_connect_factory(ssh))
 ```
 
-`FakePVE` covers the whole journey — `version` for the probe, `cluster.resources` for node/guest listing, `nodes(n).qemu.post` for VM create, `nodes(n).vzdump.post` and `storage(s).content` for backups, and task-status polling via `running_ticks`/`task_exit`. Confirm the constructor arguments against `backend/tests/fakes/pve.py:525-528` and `backend/tests/fakes/ssh.py` before writing.
+`FakePVE` covers the whole journey, `version` for the probe, `cluster.resources` for node/guest listing, `nodes(n).qemu.post` for VM create, `nodes(n).vzdump.post` and `storage(s).content` for backups, and task-status polling via `running_ticks`/`task_exit`. Confirm the constructor arguments against `backend/tests/fakes/pve.py:525-528` and `backend/tests/fakes/ssh.py` before writing.
 
-Seed whatever additional `FakePVE` state Task 16's journey needs (a node row in `cluster.resources`, a storage with ISO content for VM create) — add it here rather than from the spec file, so the fixture has one home.
+Seed whatever additional `FakePVE` state Task 16's journey needs (a node row in `cluster.resources`, a storage with ISO content for VM create); add it here rather than from the spec file, so the fixture has one home.
 
 - [ ] **Step 2: Point Playwright at it**
 
@@ -1469,7 +1469,7 @@ In `frontend/playwright.config.ts`, the backend `webServer.command` currently en
 + `--factory --host 127.0.0.1 --port ${BACKEND_PORT}`,
 ```
 
-`cwd` is already `backendDir`, so `tests.e2e_server` is importable. The `env` block already sets the three `PROXPLOY_*` variables the launcher reads. Leave the `rm -rf`/`mkdir` prefix and the comment above it exactly as they are — that comment records why the wipe lives in the command string and not at module scope, and it is still true.
+`cwd` is already `backendDir`, so `tests.e2e_server` is importable. The `env` block already sets the three `PROXPLOY_*` variables the launcher reads. Leave the `rm -rf`/`mkdir` prefix and the comment above it exactly as they are, that comment records why the wipe lives in the command string and not at module scope, and it is still true.
 
 - [ ] **Step 3: Prove the fake is actually behind it**
 
@@ -1503,7 +1503,7 @@ git commit -m "test(e2e): serve the real app with fake PVE and SSH behind it"
 **Interfaces:**
 - Consumes: the fake-backed backend from Task 15; the rebuilt wizard from Tasks 12–14.
 
-This is the phase's reason for existing. Doc 10's Phase 9 DoD says a stranger *"completes onboarding, installs an app, creates a VM, schedules a backup"* — four clauses that no test has ever executed through the UI.
+This is the phase's reason for existing. Doc 10's Phase 9 DoD says a stranger *"completes onboarding, installs an app, creates a VM, schedules a backup"*; four clauses that no test has ever executed through the UI.
 
 - [ ] **Step 1: Write the journey**
 
@@ -1511,7 +1511,7 @@ This is the phase's reason for existing. Doc 10's Phase 9 DoD says a stranger *"
 /**
  * The four Phase 9 DoD clauses nothing had ever executed: a stranger
  * completes onboarding, installs an app, creates a VM, and schedules a
- * backup — through the real UI, in a real browser.
+ * backup, through the real UI, in a real browser.
  *
  * What this proves: the product's own logic, routing and UI, end to end.
  * What it does NOT prove: behaviour against real Proxmox hardware. There is
@@ -1530,7 +1530,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
   })
 
   await test.step('onboarding: first host', async () => {
-    // Impossible before Task 15 — POST /hosts probes a live Proxmox API.
+    // Impossible before Task 15, POST /hosts probes a live Proxmox API.
     await page.getByLabel('Name').fill('pve-01')
     await page.getByLabel('Address').fill('https://10.0.0.5:8006')
     await page.getByLabel('API token id').fill('proxploy@pve!e2e')
@@ -1544,7 +1544,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
   })
 
-  // The remaining three clauses. Fill these in against the real UI — read
+  // The remaining three clauses. Fill these in against the real UI, read
   // routes/store.tsx, components/VmCreateWizard.tsx and components/
   // ScheduleForm.tsx for the actual labels and button names rather than
   // guessing them here.
@@ -1554,12 +1554,12 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
 })
 ```
 
-The three unfilled steps are marked because their selectors must come from reading the real components, not from this plan — writing guessed labels here would produce a test that fails for the wrong reason. **Each step must end in a visible assertion that the thing exists afterwards** (the app appears on Apps, the VM appears on Virtual Machines, the schedule appears in Settings), not merely that a button was clickable.
+The three unfilled steps are marked because their selectors must come from reading the real components, not from this plan; writing guessed labels here would produce a test that fails for the wrong reason. **Each step must end in a visible assertion that the thing exists afterwards** (the app appears on Apps, the VM appears on Virtual Machines, the schedule appears in Settings), not merely that a button was clickable.
 
 - [ ] **Step 2: Run it**
 
 Run: `cd frontend && npx playwright test e2e/journey.spec.ts`
-Expected: all steps pass. Expect this to take several iterations — this is the first time the wizard's host step has ever run in a browser, and Tasks 12–14 changed it substantially.
+Expected: all steps pass. Expect this to take several iterations; this is the first time the wizard's host step has ever run in a browser, and Tasks 12–14 changed it substantially.
 
 If a step fails because the *product* is wrong rather than the test, fix the product and say so in the commit. That is the harness doing its job, exactly as 9a's install harness did.
 
@@ -1567,7 +1567,7 @@ If a step fails because the *product* is wrong rather than the test, fix the pro
 
 ```bash
 git add frontend/e2e/journey.spec.ts
-git commit -m "test(e2e): the stranger journey — onboard, install, create, schedule"
+git commit -m "test(e2e): the stranger journey, onboard, install, create, schedule"
 ```
 
 ---
@@ -1580,7 +1580,7 @@ git commit -m "test(e2e): the stranger journey — onboard, install, create, sch
 **Interfaces:**
 - Consumes: the fake-backed backend (Task 15); the token fixes (Task 11).
 
-There are no human eyes here, so "light-theme QA pass" has to mean something a machine can check. It checks the real bug class — a colour that bypasses the tokens — and nothing more.
+There are no human eyes here, so "light-theme QA pass" has to mean something a machine can check. It checks the real bug class, a colour that bypasses the tokens, and nothing more.
 
 - [ ] **Step 1: Write the spec**
 
@@ -1622,14 +1622,14 @@ test.describe('light theme', () => {
 })
 ```
 
-`ThemeToggle.tsx:6` persists to `localStorage['pp_theme']` and sets `document.documentElement.dataset.theme` — confirm both key and values before writing the init script.
+`ThemeToggle.tsx:6` persists to `localStorage['pp_theme']` and sets `document.documentElement.dataset.theme`, confirm both key and values before writing the init script.
 
 The sign-in and navigation steps are shared with `smoke.spec.ts`; extract them into `frontend/e2e/helpers.ts` and use them from all three specs rather than a third copy. The second copy is where they drift.
 
 - [ ] **Step 2: Run it**
 
 Run: `cd frontend && npx playwright test e2e/light-theme.spec.ts`
-Expected: 9 passed. If any page reports offenders, that is a real bypass Task 11's static guard missed (e.g. a colour computed at runtime) — fix the component, do not relax the assertion.
+Expected: 9 passed. If any page reports offenders, that is a real bypass Task 11's static guard missed (e.g. a colour computed at runtime), fix the component, do not relax the assertion.
 
 - [ ] **Step 3: Commit**
 
@@ -1659,8 +1659,8 @@ There is no e2e job today and no `playwright install` step anywhere. Phase 8 clo
       - uses: actions/setup-node@v4
         with: {node-version: 22}
       # The harness launches the backend itself (frontend/playwright.config.ts
-      # webServer), so it needs a real venv at backend/.venv — the path that
-      # config hardcodes — not just a pip install on the runner python.
+      # webServer), so it needs a real venv at backend/.venv: the path that
+      # config hardcodes: not just a pip install on the runner python.
       - run: python -m venv .venv && .venv/bin/pip install -e '.[dev]'
         working-directory: backend
       - run: npm ci
@@ -1671,7 +1671,7 @@ There is no e2e job today and no `playwright install` step anywhere. Phase 8 clo
         working-directory: frontend
 ```
 
-Match the file's existing conventions (it uses `defaults: {run: {working-directory: …}}` on some jobs and inline `{}` map style for `with`) — read it and follow whichever fits.
+Match the file's existing conventions (it uses `defaults: {run: {working-directory: …}}` on some jobs and inline `{}` map style for `with`), read it and follow whichever fits.
 
 - [ ] **Step 2: Verify the YAML parses**
 
@@ -1694,7 +1694,7 @@ git commit -m "ci(9b): gate the e2e suite so the DoD journey cannot rot"
 ## Task 19: DoD verification, notes, buildlog
 
 **Files:**
-- Create: `backend/dod_verify_phase9b.py` (throwaway; `backend/.gitignore` carries `dod_verify_phase*.py` — confirm, the repo-root `.gitignore` does **not**)
+- Create: `backend/dod_verify_phase9b.py` (throwaway; `backend/.gitignore` carries `dod_verify_phase*.py`, confirm, the repo-root `.gitignore` does **not**)
 - Create: `docs/notes/phase-9b-onboarding-polish.md`
 - Modify: `buildlog.md`
 
@@ -1702,22 +1702,22 @@ git commit -m "ci(9b): gate the e2e suite so the DoD journey cannot rot"
 
 Follow `backend/dod_verify_phase9a.py`'s structure exactly. Four checks, each printing `OK`/`FAIL`, exit non-zero on any failure:
 
-1. **The stranger journey** — shell out to `npx playwright test e2e/journey.spec.ts`, print its step names. The output line must state the substitution plainly: `OK (real Chromium against fake PVE and SSH — no Proxmox node on this machine)`.
-2. **Error is never empty** — start the app with `make_app`, force a query failure, and assert via the frontend unit suite that the error and empty renderings differ. Simplest honest form: shell out to `npx vitest run src/tests/query-state.test.tsx` and print the four state names it proves.
-3. **Light theme** — shell out to `npx playwright test e2e/light-theme.spec.ts`, print the page count asserted.
-4. **Onboarding resumes** — drive `GET /meta/onboarding` through four states via `make_app` and assert `stepFrom`'s contract holds at the API level (admin-only, host-added, ssh-pending, complete).
+1. **The stranger journey**: shell out to `npx playwright test e2e/journey.spec.ts`, print its step names. The output line must state the substitution plainly: `OK (real Chromium against fake PVE and SSH, no Proxmox node on this machine)`.
+2. **Error is never empty**: start the app with `make_app`, force a query failure, and assert via the frontend unit suite that the error and empty renderings differ. Simplest honest form: shell out to `npx vitest run src/tests/query-state.test.tsx` and print the four state names it proves.
+3. **Light theme**: shell out to `npx playwright test e2e/light-theme.spec.ts`, print the page count asserted.
+4. **Onboarding resumes**: drive `GET /meta/onboarding` through four states via `make_app` and assert `stepFrom`'s contract holds at the API level (admin-only, host-added, ssh-pending, complete).
 
 Run it twice; output identical apart from timings.
 
 - [ ] **Step 2: Write `docs/notes/phase-9b-onboarding-polish.md`**
 
-Same skeleton as `docs/notes/phase-9a-install-update.md`: what shipped per subsystem; findings that contradicted the docs; residual limitations (**at minimum**: no real Proxmox node — the journey runs against `FakePVE`; computed-style assertions are not visual review and "ugly but correct" passes them; the light theme has never been seen by a human on this branch); a gate-numbers table with real counts; commit range.
+Same skeleton as `docs/notes/phase-9a-install-update.md`: what shipped per subsystem; findings that contradicted the docs; residual limitations (**at minimum**: no real Proxmox node, the journey runs against `FakePVE`; computed-style assertions are not visual review and "ugly but correct" passes them; the light theme has never been seen by a human on this branch); a gate-numbers table with real counts; commit range.
 
-- [ ] **Step 3: `buildlog.md`** — the phase entry in the established format, including "Known gaps, stated plainly".
+- [ ] **Step 3: `buildlog.md`**, the phase entry in the established format, including "Known gaps, stated plainly".
 
 - [ ] **Step 4: Run everything and record real numbers**
 
-DoD script ×2; full backend suite; frontend suite (`--no-file-parallelism`) + build + lint; the full Playwright suite; `alembic heads`. **Never write a projected number.** Note that unlike 9a this phase adds one migration (Task 2), so `alembic heads` will report a new revision — record it.
+DoD script ×2; full backend suite; frontend suite (`--no-file-parallelism`) + build + lint; the full Playwright suite; `alembic heads`. **Never write a projected number.** Note that unlike 9a this phase adds one migration (Task 2), so `alembic heads` will report a new revision; record it.
 
 - [ ] **Step 5: Commit**
 
@@ -1734,8 +1734,8 @@ Checked after writing, against the spec:
 
 1. **Spec coverage.** §1 wizard → Tasks 12 (resume), 13 (skip + honest copy), 14 (verified SSH), backed by 1 (error kinds), 2 (verify endpoint), 3 (`ssh_pending`). §2 F1 → Task 9, including the unwrapped `shell.tsx:39` call and the `/auth/me`-catches-everything bug found while planning. §3 four-state wrapper → Tasks 5 (component), 6 (25 page lists), 7 (15 selects + dead code + loading-as-empty), 8 (the three false-negative singles the spec named). §4 empty states → Tasks 4 (action slot) and 10. §5 light theme → Task 11 (both literals + the guard, with the terminal-surface exemption recorded in the allowlist). §6 the journey → Tasks 15 (launcher), 16 (journey), 17 (light leg), 18 (CI gate, which the spec added after the survey found no e2e job). Verification → Task 19.
 
-2. **Placeholder scan.** No "TBD" or "handle errors appropriately". Four places tell the implementer to check a fact before coding and say what to do with each answer, rather than guessing on their behalf: the SSRF exception type in Task 1, the three `app.state`/model field names in Task 2, the FastAPI nested-`detail` shape in Task 13, and the real component labels in Task 16's three unfilled steps. Task 16's steps are deliberately unfilled with a stated reason — guessed selectors would produce tests that fail for the wrong reason.
+2. **Placeholder scan.** No "TBD" or "handle errors appropriately". Four places tell the implementer to check a fact before coding and say what to do with each answer, rather than guessing on their behalf: the SSRF exception type in Task 1, the three `app.state`/model field names in Task 2, the FastAPI nested-`detail` shape in Task 13, and the real component labels in Task 16's three unfilled steps. Task 16's steps are deliberately unfilled with a stated reason, guessed selectors would produce tests that fail for the wrong reason.
 
 3. **Type consistency.** `ProxmoxError.kind` values are the same five strings in Tasks 1 and 13. The `POST /hosts/{id}/ssh/verify` error kinds are the same in Tasks 2 and 14. `GET /meta/onboarding`'s five fields are identical in Tasks 3 and 12. `QueryState`'s props are used identically in Tasks 5, 6, 7 and 10. `EmptyState`'s `action` prop is defined in Task 4 and consumed in 5 and 10.
 
-4. **Honesty.** The two things this machine cannot prove — a real Proxmox node, and whether the light theme actually looks right — are stated in the spec, in Tasks 16 and 17's file docstrings, in the DoD script's own printed output, and in the notes' residual-limitations list. `has()` staying fail-closed in Task 8 is called out as deliberate, since failing open would be a security bug.
+4. **Honesty.** The two things this machine cannot prove, a real Proxmox node, and whether the light theme actually looks right; are stated in the spec, in Tasks 16 and 17's file docstrings, in the DoD script's own printed output, and in the notes' residual-limitations list. `has()` staying fail-closed in Task 8 is called out as deliberate, since failing open would be a security bug.

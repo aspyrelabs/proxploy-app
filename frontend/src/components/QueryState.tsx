@@ -7,7 +7,7 @@ import { EmptyState } from './EmptyState'
  * like four different things.
  *
  * Before this component the codebase spelled every list as `(data ?? []).map`,
- * which renders a failed fetch as "No VMs discovered" — the UI stating
+ * which renders a failed fetch as "No VMs discovered", the UI stating
  * confidently that you have nothing when the truth is that it has no idea.
  * `isPending` is likewise not `isError`: react-query flips isPending false on
  * failure too, so a `!data` guard shows "Loading…" forever after a hard error.

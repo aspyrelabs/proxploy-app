@@ -1,4 +1,4 @@
-# Phase 9c — proxploy-docs and proxploy-web
+# Phase 9c: proxploy-docs and proxploy-web
 
 **Status:** design approved 2026-08-06, plan not yet written.
 **Predecessors:** [9a](2026-08-05-phase-9a-install-update-design.md) (install + self-update), [9b](2026-08-06-phase-9b-onboarding-polish-design.md) (onboarding, empty/error states, light theme). Both complete.
@@ -13,7 +13,7 @@ owner judges the project ready. No release is cut, no repository visibility
 changes, no site is deployed. This phase **builds** two sites and leaves both
 one command from live.
 
-That constraint is not a limitation to work around — it decides the shape of
+That constraint is not a limitation to work around, it decides the shape of
 the work, and two consequences follow that the plan must respect:
 
 1. **The docs describe an install path that is not yet reachable.** 9a's
@@ -27,20 +27,20 @@ the work, and two consequences follow that the plan must respect:
    `docs/11-risks-open-decisions.md:165-167` reads: *"Proxploy is self-hosted
    **source-available** code; anyone can patch `Entitlements.enabled()` to
    return true and unlock armed Pro features. This is **accepted, not
-   mitigated away**."* — with the reasoning at :170-180 that paying customers
+   mitigated away**."*, with the reasoning at :170-180 that paying customers
    *"are buying support, updates, and honesty, not un-patchable bits"*. A
    private repository is the opposite stance, and it also makes that whole
    risk analysis moot: nobody can patch what nobody can read.
 
    **This phase does not resolve that.** It records the contradiction in doc
    11 as an open decision with both positions stated, and the trust-model page
-   (§2) describes what is true today — closed source — rather than repeating a
+   (§2) describes what is true today, closed source, rather than repeating a
    source-available claim the repository does not honour. Rewriting doc 11 to
    match, or reverting the private decision, is the owner's call and is
    explicitly deferred.
 
 **Distribution is deferred, not decided.** When publication does happen, the
-artifacts need a host, and it need not be GitHub — `fetch_to` in
+artifacts need a host, and it need not be GitHub; `fetch_to` in
 `packaging/lib/common.sh` handles `file://` and plain `curl`, and `--channel`
 takes an arbitrary URL, so object storage behind a `releases.` subdomain would
 need no installer change. That decision belongs to whoever runs
@@ -64,23 +64,23 @@ labels (`Core`/`Free`/`Pro`) are marked **provisional and INERT** at
 design, not deviating from it.
 
 Mechanically: `backend/proxploy/entitlements/registry.py` defines
-`DEFAULT_FEATURES = {k: True for k in FLAG_KEYS}` — all 81 flags on — and
+`DEFAULT_FEATURES = {k: True for k in FLAG_KEYS}`: all 81 flags on, and
 `proxploy-api`'s `tiers.py::resolve_features` short-circuits on
 `tiers.yaml`'s `all_entitled: true`, whose own comment reads
 *"filled in the day Aspyre decides to sell"*. Note also that `tier` is a
 display string only: `client.py` carries it through from the token, but
-nothing branches on it — **only `features[key]` gates anything**. So "arming
+nothing branches on it, **only `features[key]` gates anything**. So "arming
 tiers" is a `tiers.yaml` edit plus app-side gating, not a refactor.
 
 **Selling tiers the code hands out for free is the one sequencing mistake
 worth refusing.** Billing lands after enforcement, as its own phase, in this
 order:
 
-- **9d** — `proxploy-api` hardening and entitlement resolution that stops
+- **9d**: `proxploy-api` hardening and entitlement resolution that stops
   returning all-entitled.
-- **9e** — tier enforcement in `proxploy-app`. The flags exist; nothing gates
+- **9e**: tier enforcement in `proxploy-app`. The flags exist; nothing gates
   on them.
-- **9f** — Paddle products, checkout, webhooks, license delivery.
+- **9f**: Paddle products, checkout, webhooks, license delivery.
 
 No pricing page, no tier comparison, and no Paddle SDK ships in 9c.
 
@@ -101,7 +101,7 @@ Established by direct survey on 2026-08-06, not assumed:
   TypeScript, `wouter` routing, Tailwind v4 via `@tailwindcss/vite`,
   shadcn/ui on Radix, with prerender and sitemap scripts for SEO.
 - **The sibling marketing sites are pnpm workspace monorepos** with an
-  `artifacts/<name>/` layout — but that structure exists to share generated
+  `artifacts/<name>/` layout, but that structure exists to share generated
   API clients (`lib/api-zod`, `lib/api-spec`, `lib/api-client-react`). A
   marketing site with nothing to share gains only ceremony from it.
 - **`main.py:142` constructs `FastAPI(title="Proxploy", docs_url="/api/docs",
@@ -123,37 +123,37 @@ Established by direct survey on 2026-08-06, not assumed:
 
 ## Design
 
-### §1 — `proxploy-docs`: Astro 6 + Starlight
+### §1: `proxploy-docs`: Astro 6 + Starlight
 
-Match `layerr-docs`'s stack and structure, including **its test suite** —
+Match `layerr-docs`'s stack and structure, including **its test suite**; 
 frontmatter validity, internal-link integrity, content consistency, and a
 build check. A docs site whose links rot silently is worse than none, and the
 precedent already solves this; re-deriving it would be wasted work.
 
 Sidebar groups, each mapping to a `src/content/docs/` subfolder:
 
-- **`install/`** — the LXC one-liner, the Docker/Compose shape, what the
+- **`install/`**: the LXC one-liner, the Docker/Compose shape, what the
   installer does to a node, and updating. Sourced from
   `docs/notes/phase-9a-install-update.md` and `packaging/`.
-- **`getting-started/`** — onboarding walkthrough, and the **minimal-privilege
+- **`getting-started/`**: onboarding walkthrough, and the **minimal-privilege
   Proxmox API token guide** doc 10 calls for: exactly which privileges
   Proxploy needs and how to create a scoped token rather than handing over
   root credentials.
-- **`trust/`** — see §2.
-- **`guides/`** — per-feature, assembled from `docs/notes/phase-4-store.md`
+- **`trust/`**: see §2.
+- **`guides/`**: per-feature, assembled from `docs/notes/phase-4-store.md`
   through `phase-8-scale.md`: apps and the App Store, VMs and snapshots,
   storage, network, backups and schedules, consoles, updates and alerting,
   teams and RBAC, OIDC, TOTP and sessions, API tokens, cross-host migration.
-- **`reference/`** — the API reference, generated (§4).
+- **`reference/`**: the API reference, generated (§4).
 
-### §2 — The trust model page, written plainly
+### §2: The trust model page, written plainly
 
 Doc 10 requires the trust model with "root-on-node stated plainly". This page
 is the one a sceptical self-hoster reads before piping a script into `bash`,
 and hedging it would be the wrong instinct. It states:
 
 - Proxploy takes a **root shell on your node** via a dedicated SSH key, used
-  for App Store install/update/migration scripts — exactly as if you ran them
+  for App Store install/update/migration scripts, exactly as if you ran them
   yourself as root. The consent copy already in `api/hosts.py`'s
   `CONSENT_NOTE` is the source of truth for the wording.
 - Every use is audit-logged and its full output archived.
@@ -162,17 +162,17 @@ and hedging it would be the wrong instinct. It states:
 - The Proxmox API token should be minimally privileged, and the guide in
   `getting-started/` shows how.
 - Updates verify an **Ed25519 signature over the raw manifest bytes before any
-  parsing**, then a sha256 checksum, then unpack — and refuse downgrades.
+  parsing**, then a sha256 checksum, then unpack; and refuse downgrades.
 - The release public key ships **inside** the artifact, so rotating it
   requires publishing a release signed by the old key.
 - The repository is private; the product is not source-available today.
 - The `test-fixture-1` key noted above: what it is, why it cannot grant
   anything, and the two changes that would make it dangerous.
 
-### §3 — `proxploy-web`: Vite + React, single package
+### §3: `proxploy-web`: Vite + React, single package
 
-Stack per the sibling sites — Vite, React, TypeScript, `wouter`, Tailwind v4
-via `@tailwindcss/vite`, shadcn/ui on Radix — but a **single package, not a
+Stack per the sibling sites, Vite, React, TypeScript, `wouter`, Tailwind v4
+via `@tailwindcss/vite`, shadcn/ui on Radix; but a **single package, not a
 pnpm workspace**. The monorepo layout exists next door to share generated API
 clients; here it would be structure for its own sake. Prerender and sitemap
 scripts carry over, since they are what makes the site indexable.
@@ -180,15 +180,15 @@ scripts carry over, since they are what makes the site indexable.
 Routes follow the inventory already specified at
 `docs/09-repository-structure.md:161-164`, minus the two it marks as not-yet:
 landing, features, screenshots/tour, install (pointing at the docs),
-about/Aspyre Labs, and legal — terms, privacy, refund — naming **Aspyre Labs
+about/Aspyre Labs, and legal; terms, privacy, refund; naming **Aspyre Labs
 LLC, 30 N Gould St #Ste R, Sheridan, WY 82801, USA**. Pricing is omitted per
 the section above (doc 09 itself marks it "dormant until tiers arm"), and
-blog/changelog is deferred — there is nothing to put in it and an empty blog
+blog/changelog is deferred; there is nothing to put in it and an empty blog
 reads worse than none.
 
 Legal pages follow the sibling implementation exactly: **component-based TSX
 wrapped in a shared `LegalLayout`**, with `Section`/`Clause` sub-components and
-a `LAST_UPDATED` constant — not MDX. Both `layerr-web` and `folderr-web` do it
+a `LAST_UPDATED` constant, not MDX. Both `layerr-web` and `folderr-web` do it
 this way and both statically prerender the output.
 
 **All links use real paths** (`/install`, `/privacy-policy`), never
@@ -199,7 +199,7 @@ The site must not claim the product is downloadable while it is not. The
 install route presents the command and states that the release is not yet
 published.
 
-### §4 — OpenAPI export, and the version it reports
+### §4: OpenAPI export, and the version it reports
 
 Two pieces:
 
@@ -219,7 +219,7 @@ so it cannot drift by omission; a hand-written reference across ~150 routes
 would be stale within a phase.
 
 The plan must confirm the plugin supports the installed Starlight major
-version before committing to it — `layerr-docs` pins Starlight `^0.39.2` on
+version before committing to it, `layerr-docs` pins Starlight `^0.39.2` on
 Astro `^6.4.2`, and plugin compatibility tracks Starlight's major closely. If
 it does not support that version, the fallback is generating markdown pages
 from `openapi.json` in a script and checking the output in, which keeps the
@@ -227,10 +227,10 @@ from `openapi.json` in a script and checking the output in, which keeps the
 fallback and is ruled out here.
 
 Either way generation is repeatable and checked in CI, so the reference cannot
-silently drift from the API — the same failure mode §1's link tests guard
+silently drift from the API, the same failure mode §1's link tests guard
 against.
 
-### §5 — The one-liner has to work before it can be documented
+### §5: The one-liner has to work before it can be documented
 
 Found while planning, and it changes 9c's scope: **the advertised one-liner
 does not work.** `install.sh:21-23` initialises `CHANNEL=""`, `VERSION=""`,
@@ -241,8 +241,8 @@ three on both the PVE-host and in-container paths. So
 curl -fsSL https://proxploy.com/install.sh | bash
 ```
 
-— the command in `install.sh`'s own header comment, and the one doc 10's
-Phase 9 DoD is phrased around (*"a stranger installs via the one-liner"*) —
+the command in `install.sh`'s own header comment, and the one doc 10's
+Phase 9 DoD is phrased around (*"a stranger installs via the one-liner"*), 
 dies immediately with `--channel is required`.
 
 Nothing caught this because every 9a harness invoked the script with explicit
@@ -252,7 +252,7 @@ failure mode 9b hit twice: the tested path and the advertised path were
 different paths.
 
 It cannot be fixed with defaults alone. `--pubkey` has no sane default *by
-design* — 9a's own usage text says *"There is no bundled default: nothing is
+design*, 9a's own usage text says *"There is no bundled default: nothing is
 unpacked yet for this script to read a key out of."* The fix is to **embed the
 release public key in `install.sh`**, which is sound precisely because the
 script arrives over TLS from a domain the user already chose to trust, and to
@@ -263,11 +263,11 @@ The install page's whole job is printing that command, so 9c fixes it rather
 than documenting around it. Documenting a command that fails would be worse
 than documenting nothing.
 
-**This does not publish anything** — it makes the script correct for the day a
+**This does not publish anything**: it makes the script correct for the day a
 channel exists, and the fix is verifiable now against the local channel fixture
 `packaging/tests/channel_fixture.sh` builds.
 
-### §6 — Deployment configs, deployed nowhere
+### §6: Deployment configs, deployed nowhere
 
 Both sites get their Dockerfiles and build setup so each is one command from
 live: `proxploy-docs` follows `layerr-docs`'s pinned-node-build →
@@ -289,7 +289,7 @@ phase's call to make.
   here proves the public URLs the docs print, because those URLs do not exist.
 - **The feature guides are assembled from phase notes, not from using the
   product against real hardware.** The standing "no live Proxmox node" gap
-  applies, and 9b is evidence it hides real defects — two shipped features
+  applies, and 9b is evidence it hides real defects; two shipped features
   turned out to be non-functional on real hardware.
 
 ## Open item for the plan, not for implementation

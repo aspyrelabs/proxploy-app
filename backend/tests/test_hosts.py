@@ -114,7 +114,7 @@ def test_host_test_endpoint_updates_status(pve_client, csrf_header):
 def test_probe_is_auth_and_rbac_gated_before_it_touches_the_network(pve_client,
                                                                     csrf_header):
     """The SSRF guard is the second line; the first is that only an admin can
-    reach the probe at all. Anonymous must be 401 (not 403 — a session-less
+    reach the probe at all. Anonymous must be 401 (not 403, a session-less
     caller has no role state to leak), an authenticated viewer must be 403.
     """
     from fastapi.testclient import TestClient
@@ -234,7 +234,7 @@ def test_patch_host_requires_admin_role(pve_client, csrf_header):
 
 
 def test_an_unparseable_token_id_is_a_422_not_a_502(pve_client, csrf_header):
-    """Rejected at the door as bad input, not surfaced as an upstream failure —
+    """Rejected at the door as bad input, not surfaced as an upstream failure; 
     and nothing derived from the raw string is stored on the way."""
     c, _ = pve_client
     r = c.post("/api/v1/hosts", json=HOST | {"token_id": "root@pam!tok=deadbeef"},
@@ -248,7 +248,7 @@ def test_host_reads_expose_team_id_so_the_ui_can_show_current_assignment(
         client, csrf_header, bootstrap_admin):
     """PATCH /hosts/{id} accepted team_id from the start but neither GET
     returned it, so the Settings team picker could only ever be a write-only
-    control — it could reassign a host but never show what it was already
+    control; it could reassign a host but never show what it was already
     assigned to. Found while wiring the Teams admin UI (Task 20)."""
     bootstrap_admin(client)
     from proxploy.models import Host, Team

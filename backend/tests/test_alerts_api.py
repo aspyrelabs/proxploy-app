@@ -109,7 +109,7 @@ def test_ack_404s_an_unknown_alert(client, csrf_header, bootstrap_admin):
 
 def test_alerts_are_readable_without_any_entitlement(tmp_path, csrf_header,
                                                      bootstrap_admin):
-    """Doc 05 leaves the entitlement column blank for GET /alerts — the sidebar
+    """Doc 05 leaves the entitlement column blank for GET /alerts, the sidebar
     health footer must work on every tier, including the free one."""
     from fastapi.testclient import TestClient
     from tests.support import make_app

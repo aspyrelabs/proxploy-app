@@ -1,4 +1,4 @@
-# Proxploy — Build Sequence
+# Proxploy: Build Sequence
 
 Doc 10. Expands brief §10. Subordinate to `00-decision-brief.md`.
 
@@ -17,7 +17,7 @@ not archaeology).
 
 ---
 
-## Phase 1 — Foundation
+## Phase 1: Foundation
 
 **Builds**
 
@@ -50,7 +50,7 @@ not archaeology).
 - Settings service + page skeleton; onboarding wizard v1 (admin account →
   first host); app shell UI: sidebar with the fixed nav, topbar, theme tokens,
   dark/light switch.
-- proxploy-api `licenses` + `issued_tokens` tables (Alembic, doc 07) —
+- proxploy-api `licenses` + `issued_tokens` tables (Alembic, doc 07); 
   created now even though nothing is sold yet; not deferred.
 - **Test infrastructure (Phase 1 deliverable, not deferred to "later"):**
   (a) a proxmoxer fake/fixture layer (recorded fixtures + a lightweight fake
@@ -60,9 +60,9 @@ not archaeology).
   **app-to-api entitlement contract test**, wired into both proxploy-app and
   proxploy-api CI from day one, asserting each repo's token
   (de)serialization matches the shared fixture in doc 09's contract
-  section — fails loudly on drift instead of silently at runtime.
+  section, fails loudly on drift instead of silently at runtime.
 
-**Depends on** — nothing. **Unblocks** — everything.
+**Depends on**: nothing. **Unblocks**: everything.
 
 **Definition of done**
 
@@ -77,11 +77,11 @@ not archaeology).
   test both run in CI; the disposable-PVE integration path is wired (the
   PVE 9 leg can be added incrementally through Phase 2 if needed).
 
-## Phase 2 — Observe
+## Phase 2: Observe
 
 **Builds**
 
-- Poller subsystem: per-host asyncio poll loops (30s) via proxmoxer —
+- Poller subsystem: per-host asyncio poll loops (30s) via proxmoxer, 
   nodes, CT/VM status, storage capacity, network counters.
 - MetricsStore: `metric_samples` writes, 5m/1h rollup jobs, retention
   pruning; query API for range charts.
@@ -96,15 +96,15 @@ not archaeology).
   `GET /api/v1/apps`, `GET /api/v1/vms`, `GET /api/v1/metrics/query`,
   `GET /api/v1/events/stream` (SSE).
 
-**Depends on** — Phase 1 (hosts, secrets, auth). **Unblocks** — every page
+**Depends on**: Phase 1 (hosts, secrets, auth). **Unblocks**: every page
 that shows state; alerting; graphs.
 
-**Definition of done** — dashboard reflects a real multi-host lab live
+**Definition of done**: dashboard reflects a real multi-host lab live
 (≤35s staleness); apps and VMs discovered and rendered; charts show 24h of
 history from rollups; a killed host degrades to "unreachable" without
 breaking the UI.
 
-## Phase 3 — Act
+## Phase 3: Act
 
 **Builds**
 
@@ -119,22 +119,22 @@ breaking the UI.
 - Notifications: Apprise-backed Notifier, `notification_channels` CRUD +
   test-send, in-app toast/bell surface, job-result events routed.
 
-**Depends on** — Phase 2 (caches to act on, SSE plumbing). **Unblocks** —
+**Depends on**: Phase 2 (caches to act on, SSE plumbing). **Unblocks**, 
 installs (Phase 4), backups/schedules (6–7), migration (8): everything
 state-changing rides JobBackend.
 
-**Definition of done** — start/stop/restart from Apps and VMs pages works
+**Definition of done**: start/stop/restart from Apps and VMs pages works
 end-to-end with optimistic UI + reconciliation; a cancelled job stops
 cleanly; every action appears in audit and the feed; a Telegram/ntfy channel
 receives a job-failure notification.
 
-## Phase 4 — Store
+## Phase 4: Store
 
-**Entry gate** — before install-executor work begins, the non-root/
+**Entry gate**: before install-executor work begins, the non-root/
 API-first install spike (doc 08 §4, doc 11 §1) is resolved and its finding
 written down: either community-scripts tooling exposes an API-drivable
-install path that reduces or removes the need for root SSH, or — the
-expected outcome — raw SSH-root is confirmed necessary and `SSHExecutor`
+install path that reduces or removes the need for root SSH, or; the
+expected outcome, raw SSH-root is confirmed necessary and `SSHExecutor`
 below proceeds as designed. This is a documented finding, not a
 research-project blocker, but Phase 4 does not start executor work without it.
 
@@ -151,7 +151,7 @@ research-project blocker, but Phase 4 does not start executor work without it.
   content pinned into `app_scripts`, diff-vs-upstream shown pre-run;
   explicit root-consent step in the install flow; full output streamed via
   job SSE and archived in `job_events`. `POST /api/v1/catalog/{slug}/install`.
-  Highest test-coverage bar in the repo applies here (doc 08 §4, doc 09) —
+  Highest test-coverage bar in the repo applies here (doc 08 §4, doc 09); 
   unit tests plus integration tests against a throwaway PVE, backed by the
   CI import-graph check that blocks any non-`executor/` module from
   touching the SSH client.
@@ -161,20 +161,20 @@ research-project blocker, but Phase 4 does not start executor work without it.
   (doc 06).
 - Install-script view/edit on app detail (versioned local variants).
 
-**Depends on** — Phase 3 (JobBackend + streaming), Phase 1 (SSH enrolment,
-audit). **Unblocks** — updates and auto-updates (Phase 7); app config tab
+**Depends on**: Phase 3 (JobBackend + streaming), Phase 1 (SSH enrolment,
+audit). **Unblocks**: updates and auto-updates (Phase 7); app config tab
 (Phase 5 polish).
 
-**Definition of done** — a real app (e.g. Immich) installs from the store
+**Definition of done**: a real app (e.g. Immich) installs from the store
 onto a chosen host as exactly one CT, with live log, archived log, audit
 row, and consent step; catalog survives upstream being unreachable (serves
 cache with staleness banner); an edited script shows its diff against
 upstream before every run; the store reports the **true installable count**
-from the classifier — no "300+ scripts" placeholder — with unsupported
+from the classifier, no "300+ scripts" placeholder, with unsupported
 entries counted and shown separately; a host with pre-existing CTs shows
 them in the discovered panel and bulk-adopts cleanly.
 
-## Phase 5 — Console
+## Phase 5: Console
 
 **Builds**
 
@@ -187,15 +187,15 @@ them in the discovered panel and bulk-adopts cleanly.
 - Logs tabs finalized: live-follow CT logs and archived job logs share one
   log-viewer component.
 
-**Depends on** — Phase 2 (detail pages), Phase 1 (auth on websockets).
-**Unblocks** — nothing hard-blocks on it; sequenced here because install
+**Depends on**: Phase 2 (detail pages), Phase 1 (auth on websockets).
+**Unblocks**: nothing hard-blocks on it; sequenced here because install
 debugging (Phase 4 output) makes consoles immediately valuable.
 
-**Definition of done** — CT terminal, node shell, and VM noVNC session all
+**Definition of done**: CT terminal, node shell, and VM noVNC session all
 work through the Proxploy origin only (no direct-to-PVE browser
 connections), survive reconnect, and write audit rows on open.
 
-## Phase 6 — Infra pages
+## Phase 6: Infra pages
 
 **Builds**
 
@@ -209,19 +209,19 @@ connections), survive reconnect, and write audit rows on open.
   retention/prune view.
 - VM snapshots (list/create/rollback/delete), VM create wizard, VM clone.
 
-**Depends on** — Phase 3 (jobs for uploads/backups/restores/creates),
-Phase 2 (storage/network caches). **Unblocks** — scheduled backups
+**Depends on**: Phase 3 (jobs for uploads/backups/restores/creates),
+Phase 2 (storage/network caches). **Unblocks**: scheduled backups
 (Phase 7), non-clustered migration (Phase 8, which is restore + transfer).
 
-**Definition of done** — every nav page now renders real content; a VM can
+**Definition of done**: every nav page now renders real content; a VM can
 be created, snapshotted, rolled back, and cloned from the UI; a CT backs up
 to PBS and restores as a new CTID; an ISO uploads through Proxploy.
 
-## Phase 7 — Operate
+## Phase 7: Operate
 
 **Builds**
 
-- Update pipeline: per-app update, update-all queue with per-app results —
+- Update pipeline: per-app update, update-all queue with per-app results; 
   same pin/diff/consent/stream/archive path as install.
 - Scheduler (APScheduler 4) in production: `schedules` CRUD + UI for
   auto-update windows, scheduled backup jobs, catalog refresh, metric/audit
@@ -230,15 +230,15 @@ to PBS and restores as a new CTID; an ISO uploads through Proxploy.
   resolved/acknowledge lifecycle, alert history, routing through Notifier;
   event-class → channel routing UI.
 
-**Depends on** — Phase 4 (update executor), Phase 6 (backup jobs),
-Phase 3 (Notifier), Phase 2 (metrics for rules). **Unblocks** — nothing
+**Depends on**: Phase 4 (update executor), Phase 6 (backup jobs),
+Phase 3 (Notifier), Phase 2 (metrics for rules). **Unblocks**: nothing
 downstream; this is the "runs itself" layer.
 
-**Definition of done** — an unattended weekend: scheduled backups and an
+**Definition of done**: an unattended weekend: scheduled backups and an
 auto-update window run, an induced CPU alert fires and resolves with
 notifications both ways, and Monday's job history tells the whole story.
 
-## Phase 8 — Scale
+## Phase 8: Scale
 
 **Builds**
 
@@ -252,16 +252,16 @@ notifications both ways, and Monday's job history tells the whole story.
   cluster; PBS backup/restore or vzdump+transfer path when they don't, with
   explicit downtime messaging (doc 11 §2).
 
-**Depends on** — Phase 1 (auth seams), Phase 6 (backup/restore machinery
-that migration reuses), Phase 3 (jobs). **Unblocks** — Deliver.
+**Depends on**: Phase 1 (auth seams), Phase 6 (backup/restore machinery
+that migration reuses), Phase 3 (jobs). **Unblocks**: Deliver.
 
-**Definition of done** — a viewer cannot mutate anything (verified by
+**Definition of done**: a viewer cannot mutate anything (verified by
 test-suite against every route); OIDC round-trips against a real Authelia;
 an app migrates between two *non-clustered* hosts via the backup/restore
 path with accurate downtime shown; a CI script drives the product entirely
 through token-authed REST.
 
-## Phase 9 — Deliver
+## Phase 9: Deliver
 
 **Builds**
 
@@ -273,18 +273,18 @@ through token-authed REST.
 - Onboarding wizard polish to the full flow (admin → host → TLS → land on
   Cluster), empty states, error states, light-theme QA pass.
 - proxploy-api production hardening: rate limiting, key rotation runbook,
-  monitoring — still resolving "all entitled."
+  monitoring, still resolving "all entitled."
 - **proxploy-web**: marketing/landing/download site. **proxploy-docs**:
   install, host onboarding + minimal-privilege token guide, trust model
   (root-on-node stated plainly), API reference from OpenAPI, per-feature
   guides assembled from Phases 4–8 notes.
 - Opt-in error reporting (off by default, never on the entitlement path).
 
-**Depends on** — everything. **Unblocks** — launch.
+**Depends on**: everything. **Unblocks**: launch.
 
-**Definition of done** — a stranger installs via the one-liner on a clean
+**Definition of done**: a stranger installs via the one-liner on a clean
 PVE box, completes onboarding, installs an app, creates a VM, schedules a
-backup, and self-updates to the next tagged release — without reading
+backup, and self-updates to the next tagged release; without reading
 source code. All four properties are live. Every doc-01 feature is
 reachable, flagged, and ON.
 
@@ -294,7 +294,7 @@ reachable, flagged, and ON.
 
 | # | Phase | Hard dependencies | Headline deliverable |
 |---|---|---|---|
-| 1 | Foundation | — | Auth, secrets, entitlements (dormant), host onboarding, audit |
+| 1 | Foundation | n/a | Auth, secrets, entitlements (dormant), host onboarding, audit |
 | 2 | Observe | 1 | Live read-only Cluster/Apps/VMs + metrics |
 | 3 | Act | 2 | JobBackend, lifecycle, notifications |
 | 4 | Store | 3 | Catalog + consented root installs with streamed logs |

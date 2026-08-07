@@ -87,7 +87,7 @@ describe('UpdateCard', () => {
     }
     wrap()
     expect(await screen.findByText('docker compose pull && docker compose up -d')).toBeInTheDocument()
-    expect(screen.getByText(/Proxploy does not update its own container — run this on the Docker host\./))
+    expect(screen.getByText(/Proxploy does not update its own container, run this on the Docker host\./))
       .toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Update to/ })).toBeNull()
   })

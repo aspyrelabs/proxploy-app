@@ -7,7 +7,7 @@ export function Ring({ label, pct, sub, stops, unknown }: {
   stops: [string, string]
   // True when the query behind `pct` failed. `pct` still defaults to 0 from
   // `?? 0` at the call site (harmless, since the arc is not drawn), but the
-  // gauge must not read as "0% used" — that is a different, false claim.
+  // gauge must not read as "0% used"; that is a different, false claim.
   unknown?: boolean
 }) {
   const id = `ring-${label.toLowerCase().replace(/\W/g, '')}`

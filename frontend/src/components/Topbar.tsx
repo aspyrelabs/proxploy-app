@@ -15,7 +15,7 @@ export function Topbar() {
   // 20 most-recently-created jobs would silently drop out of that feed while
   // still running. The bell's count needs to be unbounded, so it runs its own
   // one-shot query against /jobs?status=running instead of riding useActivity
-  // or useJobs({status}) — the latter couples fetch-at-all to the drawer's
+  // or useJobs({status}), the latter couples fetch-at-all to the drawer's
   // 10s-while-open poll (doc 06 §d), which this always-mounted bell must not
   // trigger unconditionally.
   const { data: running } = useQuery({

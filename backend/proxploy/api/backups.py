@@ -1,7 +1,7 @@
 # backend/proxploy/api/backups.py
 """Backups page endpoints (doc 05 §Backups, doc 01 §7).
 
-The list is served from the `backups` cache table, never live from Proxmox —
+The list is served from the `backups` cache table, never live from Proxmox; 
 listing storage content is a per-storage call and this page is polled. The
 `backup.sync` job is what fills it, and the GET below fires one when the cache
 has gone stale so a fresh install is never permanently blank.
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/backups", tags=["backups"])
 # FastAPI collapses them and auth runs before the entitlement check
 # (test_route_auth_invariant.py). host_id/backup_id arrive as a body field or
 # a query param on every route below except restore/delete, which carry
-# {backup_id} in the path — scope_backup()'s default param matches it.
+# {backup_id} in the path: scope_backup()'s default param matches it.
 _read = authorize("backup", "read")
 _run = authorize("backup", "run")                 # host_id is body-carried
 _restore = authorize("backup", "restore", scope_of=scope_backup())
@@ -122,11 +122,11 @@ def list_backups(request: Request, db=Depends(get_db),
 
 # --- mutations (Phase 6 Task 9) ---------------------------------------------
 # Literal-segment routes (/run, /prune-preview, /prune) are declared BEFORE any
-# /{backup_id} route — Starlette matches path operations in registration order,
+# /{backup_id} route: Starlette matches path operations in registration order,
 # so a numeric-looking literal segment must never land after a param route.
 
 class GuestRef(BaseModel):
-    type: str  # "app" | "vm" — Proxploy row ids, never raw vmids
+    type: str  # "app" | "vm", Proxploy row ids, never raw vmids
     id: int
 
 
@@ -225,7 +225,7 @@ def restore_backup_route(request: Request, backup_id: int,
             raise HTTPException(409, {
                 "error": "guest_missing",
                 "detail": (f"{b.guest_type} {b.guest_vmid} no longer exists on this "
-                           f"host — restore as new instead.")})
+                           f"host, restore as new instead.")})
         if isinstance(guest, App) and is_self(db, "app", guest.id):
             # Unlike enqueue_lifecycle's confirmable stop, this one is refused
             # outright: an in-place restore over Proxploy's own CT destroys the
@@ -259,7 +259,7 @@ def restore_backup_route(request: Request, backup_id: int,
 
 # services/selfguard.py is deliberately untouched by this task: DESTRUCTIVE
 # holds guest *lifecycle verbs* and its only consumer is enqueue_lifecycle,
-# which backup routes never call — see this task's brief header note.
+# which backup routes never call: see this task's brief header note.
 # test_selfguard_destructive_set_is_unchanged locks it.
 
 KEEP_FIELDS = ("keep_last", "keep_daily", "keep_weekly", "keep_monthly", "keep_yearly")
@@ -296,7 +296,7 @@ def prune_preview_route(request: Request, host_id: int, storage: str,
                         keep_monthly: int | None = None, keep_yearly: int | None = None,
                         guest_type: str | None = None, vmid: int | None = None,
                         db=Depends(get_db), user: User = Depends(_manage)):
-    """Dry run. Calls the GET verb only — this endpoint cannot delete anything;
+    """Dry run. Calls the GET verb only, this endpoint cannot delete anything;
     POST /backups/prune is the one that does."""
     host = db.get(Host, host_id)
     if host is None:

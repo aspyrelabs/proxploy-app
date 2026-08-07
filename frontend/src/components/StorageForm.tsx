@@ -52,7 +52,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   const [name, setName] = useState(existing?.storage ?? '')
   // `defaultType` lets the Backups page open this same form pre-set to `pbs`
   // for its "Connect PBS datastore" affordance (doc 10's Phase 6 Backups
-  // deliverable) — connecting PBS *is* attaching a storage of type pbs, so it
+  // deliverable), connecting PBS *is* attaching a storage of type pbs, so it
   // reuses this form rather than growing a second, near-identical one.
   const [type, setType] = useState<string>(existing?.type ?? defaultType)
   const [cfg, setCfg] = useState<Record<string, string>>({
@@ -63,7 +63,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   const fields: [string, string, string][] = [
     ...(FIELDS[type] ?? []), ['content', 'Content', 'text'],
   ]
-  // Blank means "not supplied" — on edit that is how a password stays
+  // Blank means "not supplied", on edit that is how a password stays
   // unchanged, and on attach it is how an optional plugin key is omitted.
   const filled = Object.fromEntries(
     fields.map(([k]) => [k, (cfg[k] ?? '').trim()]).filter(([, v]) => v !== ''),
@@ -110,7 +110,7 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
           {editing ? `Edit ${existing?.storage}` : 'Add storage'}
         </h2>
 
-        {/* doc 06 §e rule 1: never hide a gated feature — veil it. The Close
+        {/* doc 06 §e rule 1: never hide a gated feature, veil it. The Close
             button below sits OUTSIDE the veil, because LockVeil sets
             pointer-events:none on its children and a dialog you cannot dismiss
             is a worse bug than the one being gated. */}

@@ -1,8 +1,8 @@
-# Proxploy — Security and Secrets Design
+# Proxploy: Security and Secrets Design
 
 Status: planning. Governed by `00-decision-brief.md` §2 rule 6 and §8. Doc 02
 summarizes; this doc is the detail. Standing rule restated up front: **no
-hand-rolled cryptography anywhere** — every crypto operation below names the
+hand-rolled cryptography anywhere**, every crypto operation below names the
 library that performs it.
 
 ## 1. Principles
@@ -17,14 +17,14 @@ library that performs it.
 - Locked-down defaults: safe out of the box, opt into exposure, never the
   reverse.
 - Honesty over theater: the residual risks in §9 are documented, not hidden.
-- Self-preservation: Proxploy refuses — or requires typed confirmation with
-  an explicit warning for — destructive actions (stop, delete, migrate)
+- Self-preservation: Proxploy refuses, or requires typed confirmation with
+  an explicit warning for, destructive actions (stop, delete, migrate)
   against the CT or host it is itself running on, when detectable. A tool
   that can stop its own CT can brick its own recovery path.
 
 ## 2. Proxmox API token scoping
 
-Per-host, per-capability API tokens — never root@pam password auth. Tokens
+Per-host, per-capability API tokens; never root@pam password auth. Tokens
 use Proxmox's privilege-separated mode (`--privsep 1`), so each token's
 effective permissions are the intersection of its own ACLs, independent of
 the backing user. One dedicated PVE user (`proxploy@pve`), one custom role
@@ -54,12 +54,12 @@ privileges (as it did with `VM.Config.*`).
    chosen capabilities: create `proxploy@pve`, create the custom roles,
    grant ACLs to user *and* token (privsep tokens need their own ACLs),
    create one privsep token per capability. The user runs it in a node shell
-   they already own — Proxploy never asks for root credentials, even
+   they already own, Proxploy never asks for root credentials, even
    transiently.
 3. User pastes the resulting token id(s) + secret(s) into the wizard.
 4. **Verification:** the app calls `GET /version` (connectivity + TLS), then
    `GET /access/permissions` per token and diffs the granted privilege set
-   against the expected set for each capability — reporting both missing
+   against the expected set for each capability, reporting both missing
    privileges (feature will fail) and surplus ones (user granted too much;
    we say so). Verification results are stored and re-checkable from
    Settings.
@@ -76,10 +76,10 @@ every connection) rather than globally disabling verification.
 
 ## 3. Encryption at rest
 
-- **Library:** `cryptography` — Fernet (AES-128-CBC + HMAC-SHA256,
+- **Library:** `cryptography`, Fernet (AES-128-CBC + HMAC-SHA256,
   authenticated) via `MultiFernet` for rotation. No other symmetric crypto
   in the codebase.
-- **Master key file:** created at install by the installer —
+- **Master key file:** created at install by the installer, 
   `/etc/proxploy/master.key` (or the container-volume equivalent), owner
   `root:root` (or the service user where root isn't available), mode `0400`.
   The key never enters the database, environment variables, or logs. Losing
@@ -97,7 +97,7 @@ every connection) rather than globally disabling verification.
   old key from the file. Documented, scriptable, no downtime.
 - **SecretStore seam:** `get / put / rotate` (brief §5). The Fernet-file
   implementation is the default and only day-one backend. **OpenBao** is the
-  arm's-length swap-in (separate process, spoken to over its HTTP API —
+  arm's-length swap-in (separate process, spoken to over its HTTP API; 
   MPL-2.0 stays outside our process) for teams that want an external KMS;
   nothing outside the SecretStore module may know which backend is active.
 
@@ -109,20 +109,20 @@ at `docs/notes/phase-4-spike.md`: every community-scripts LXC install
 creates its container with the host-local `pct create` CLI, never the
 Proxmox REST API, and `root_check()` hard-exits anything that isn't root;
 independently, Proxmox's REST API has no LXC equivalent of the QEMU
-guest-agent `exec` endpoint at all — `pct exec`/`pct push` are host-CLI-only.
+guest-agent `exec` endpoint at all, `pct exec`/`pct push` are host-CLI-only.
 So there is no non-interactive or API-drivable path that removes the need
 for a root shell, at either the container-creation step or the
 install-script-execution step. The design below ships as originally
 planned.
 
 - One **dedicated ed25519 keypair per Proxploy install** (generated with
-  `cryptography`'s Ed25519 primitives or `asyncssh.generate_private_key` —
+  `cryptography`'s Ed25519 primitives or `asyncssh.generate_private_key`, 
   library-generated either way, never shelling out to ssh-keygen), created at
   first host onboarding. Private key lives only as a SecretStore-encrypted
   blob; it is never written to disk in plaintext and never leaves the app
   process (asyncssh loads it from memory).
 - During host onboarding the wizard displays the **public** key and the
-  exact `authorized_keys` line to add for root on the node — ideally
+  exact `authorized_keys` line to add for root on the node, ideally
   restricted (`from="<proxploy-ip>"`). The user authorizes it themselves;
   Proxploy never self-installs its key.
 - The key is used **only** by the `SSHExecutor` for install/update/migration
@@ -131,10 +131,10 @@ planned.
   key is retrievable only through the executor's own SecretStore handle)
   **and mechanically in CI**: an import-graph lint fails the build if any
   module outside `executor/` imports the SSH client or calls the SecretStore
-  accessor that returns the SSH key (doc 09) — a hard structural rule, not a
+  accessor that returns the SSH key (doc 09), a hard structural rule, not a
   convention. `executor/` also carries the repo's highest test-coverage bar
-  and tightest review requirement — unit tests plus integration tests
-  against a throwaway PVE (doc 10 Phase 1/4) — because it is the one
+  and tightest review requirement, unit tests plus integration tests
+  against a throwaway PVE (doc 10 Phase 1/4), because it is the one
   component holding root-on-node power.
 - **Every use is audit-logged:** one `audit_events` row per SSH invocation
   (actor, host, job id, script hash, result), and the full session output is
@@ -157,24 +157,24 @@ planned.
 | Rate limiting | Per-IP on `/api/auth/*` (login, TOTP verify, password reset) | `slowapi` |
 | Lockout/backoff | Per-account exponential backoff after repeated failures (temporary lock with honest UI messaging, not silent failure), independent of the per-IP limit so a distributed guess still hits the account wall | app logic over the same counters table |
 | TOTP | Standard TOTP enrollment (QR + manual secret), secret stored via SecretStore, recovery codes generated with `secrets` and stored argon2-hashed, one-time use | `pyotp` |
-| OIDC | Authorization-code flow with PKCE against any standard IdP (Authelia, Keycloak, Entra, …) — supported *through* OIDC, never bundled; JIT user provisioning mappable to roles | `Authlib` |
-| Login auditing | Every success/failure/lockout/TOTP event is an `audit_events` row | — |
+| OIDC | Authorization-code flow with PKCE against any standard IdP (Authelia, Keycloak, Entra, …); supported *through* OIDC, never bundled; JIT user provisioning mappable to roles | `Authlib` |
+| Login auditing | Every success/failure/lockout/TOTP event is an `audit_events` row | n/a |
 
 All authenticated randomness comes from `secrets`; all secret comparisons use
 `hmac.compare_digest`. Nothing rolls its own.
 
 ## 6. RBAC via pycasbin
 
-- Model: RBAC **with domains** — teams are casbin domains, so a user can be
+- Model: RBAC **with domains**, teams are casbin domains, so a user can be
   `admin` of team A and `viewer` of team B.
 - Roles (brief §5): **owner** (everything, incl. billing/license, destructive
   host removal, role grants), **admin** (everything operational incl. host
   onboarding, installs, node shells, user management within the team),
-  **operator** (lifecycle, installs, consoles, backups — no user/host/
+  **operator** (lifecycle, installs, consoles, backups; no user/host/
   credential management), **viewer** (read-only, no consoles).
-- Enforcement point: one FastAPI dependency —
+- Enforcement point: one FastAPI dependency, 
   `authorize(resource, action)` → `enforcer.enforce(user, team, resource,
-  action)` — stacked with the session and entitlement dependencies on every
+  action)`, stacked with the session and entitlement dependencies on every
   route (doc 07 §2). Resources are typed object references
   (`host:3`, `app:12`), actions are verbs (`read`, `lifecycle`, `console`,
   `install`, `manage`).
@@ -182,27 +182,27 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
   policy mutations are themselves audited state changes, permitted only to
   owner/admin.
 - Console note: node-shell access requires admin+ **and** the opt-in
-  `Sys.Console` token from §2 — RBAC and token scoping fail independently.
+  `Sys.Console` token from §2, RBAC and token scoping fail independently.
 
 ## 7. Append-only audit log
 
 - Table: `audit_events(id, ts, actor_type[user|api_key|system], actor_id,
   action, target_type, target_id, params, result[ok|error|denied], ip,
-  request_id, job_id)` — full schema in doc 04. Written for every state-changing operation,
+  request_id, job_id)`; full schema in doc 04. Written for every state-changing operation,
   every auth event, every SSH invocation, every policy change, every denied
   attempt (denials are evidence too).
-- **No delete path in the API or UI.** No endpoint, no admin button — the
+- **No delete path in the API or UI.** No endpoint, no admin button; the
   only deletion the app ever performs on this table is the verified
   post-archive prune below. `params` is written through a redaction filter so
   secrets never enter the log in the first place (nothing sensitive to purge
   later).
-- Retention **by archival, not deletion** — and off by default (doc 04:
+- Retention **by archival, not deletion**; and off by default (doc 04:
   operator-initiated `proxploy audit export`). When the operator opts into a
   retention window (`audit.retention`), a scheduled job exports rows older
   than the window to compressed JSONL files in an archive directory, then
-  prunes only rows that verifiably made it into a completed archive — never
+  prunes only rows that verifiably made it into a completed archive, never
   below a floor. Archives are kept until the operator removes them at the
-  filesystem level — outside the app, deliberately.
+  filesystem level, outside the app, deliberately.
 - Honest limit: with app-DB-level access an attacker can touch the table;
   the DB file permissions (§8) are the boundary, and shipping archives off-
   box is the recommended hardening for anyone who needs tamper evidence.
@@ -213,7 +213,7 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
   confirms), never `0.0.0.0` silently.
 - **TLS by default:** Caddy in front (arm's-length, installer-managed) or,
   if declined, the app serves TLS itself with a self-signed cert generated
-  via `cryptography` (x509 builder) — plain HTTP only ever behind a
+  via `cryptography` (x509 builder), plain HTTP only ever behind a
   localhost reverse-proxy hop.
 - **No telemetry.** The only outbound calls the app can make: Proxmox nodes,
   the catalog upstream (+optional mirror), Apprise notification targets the
@@ -232,8 +232,8 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
 
 | # | Threat | Mitigations | Honest residual risk |
 |---|---|---|---|
-| 1 | Malicious/compromised community install script runs as root on a node | Server-side catalog cache; script content pinned + diffed against upstream before every run with confirmation on drift; full output archived; per-run audit row with script hash; provenance visible in UI | **Root is root.** A malicious script owns the node. Identical to running it yourself — Proxploy adds provenance and evidence, not sandboxing. Review before you run remains the real control. |
-| 2 | Proxploy host itself compromised | Encrypted secrets (DB alone insufficient); root-only key file; LAN-bind + TLS defaults; minimal attack surface (one process); audit trail of what the attacker did with our channels | **A compromised Proxploy host equals compromised credentials to every connected node.** Blast radius limiters: per-capability tokens (a monitoring-only install leaks only read access), SSH key restricted to script exec and revocable per node in `authorized_keys`, OpenBao seam moves keys off-box. It cannot be eliminated — the product's job is holding these credentials. |
+| 1 | Malicious/compromised community install script runs as root on a node | Server-side catalog cache; script content pinned + diffed against upstream before every run with confirmation on drift; full output archived; per-run audit row with script hash; provenance visible in UI | **Root is root.** A malicious script owns the node. Identical to running it yourself, Proxploy adds provenance and evidence, not sandboxing. Review before you run remains the real control. |
+| 2 | Proxploy host itself compromised | Encrypted secrets (DB alone insufficient); root-only key file; LAN-bind + TLS defaults; minimal attack surface (one process); audit trail of what the attacker did with our channels | **A compromised Proxploy host equals compromised credentials to every connected node.** Blast radius limiters: per-capability tokens (a monitoring-only install leaks only read access), SSH key restricted to script exec and revocable per node in `authorized_keys`, OpenBao seam moves keys off-box. It cannot be eliminated, the product's job is holding these credentials. |
 | 3 | Stolen DB file / backup | Fernet-encrypted credential blobs (`cryptography`); master key stored outside the DB; session ids hashed at rest | Metadata (hostnames, app inventory, audit history) is readable. Encrypt backups. |
 | 4 | Stolen master key file alone | Useless without the DB; root-only 0400 perms | Key + DB together = full credential compromise (= threat 2). |
 | 5 | Credential theft in transit to nodes | TLS to Proxmox with verification/pinned fingerprints; SSH host key pinned (TOFU + hard-fail on change) | First-use pinning trusts the first connection; onboarding shows fingerprints for manual verification. |
@@ -241,8 +241,8 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
 | 7 | Session theft / XSS / CSRF | HttpOnly+Secure+SameSite cookies, server-side revocable sessions, CSRF tokens, React's default escaping, no third-party script tags, Origin-checked websockets | A future XSS bug can still act with the victim's session (cookies unreadable, requests forgeable in-page); short idle expiry + audit limit the window. |
 | 8 | Privilege escalation inside Proxploy (operator → admin actions) | pycasbin checks on every route; policy changes audited and owner/admin-only; consoles double-gated (RBAC + token scope) | Casbin policy misconfiguration by an owner is possible; the audit log records who changed policy. |
 | 9 | Console misuse (a console is a root shell in the CT; node shell is root on the node) | Separate `Sys.Console` opt-in token; admin+ RBAC for node shells; every console open audited; idle timeout; single-use short-TTL bridge handles | Console I/O contents are not recorded (a deliberate privacy call); the audit log shows who had a shell where and when, not what they typed. |
-| 10 | Catalog upstream compromise (poisoned metadata/scripts) | Server-side fetch over TLS from the pinned upstream repo; cached copies mean a compromised upstream doesn't instantly propagate; pin+diff surfaces unexpected changes before any run | We do not cryptographically verify upstream authorship (upstream doesn't sign); a compromised upstream repo plus a user clicking through the diff runs attacker code as root — see threat 1. |
-| 11 | Entitlement forgery / tampering | Ed25519-signed tokens (PyJWT), public-key-only in the app, offline verification, `kid` rotation | Self-hosted code can be patched to bypass gates entirely. Accepted per brief §11 — the moat is signed tokens + honesty, not DRM. |
+| 10 | Catalog upstream compromise (poisoned metadata/scripts) | Server-side fetch over TLS from the pinned upstream repo; cached copies mean a compromised upstream doesn't instantly propagate; pin+diff surfaces unexpected changes before any run | We do not cryptographically verify upstream authorship (upstream doesn't sign); a compromised upstream repo plus a user clicking through the diff runs attacker code as root, see threat 1. |
+| 11 | Entitlement forgery / tampering | Ed25519-signed tokens (PyJWT), public-key-only in the app, offline verification, `kid` rotation | Self-hosted code can be patched to bypass gates entirely. Accepted per brief §11, the moat is signed tokens + honesty, not DRM. |
 | 12 | Malicious insider with a legitimate role | Least-privilege roles, append-only audit (denials included), archival off-box recommended | An owner is trusted by definition; the log is evidence, not prevention. |
 | 13 | Supply chain (our own dependencies) | Pinned + hash-locked dependency versions, small curated set (doc 03), license/provenance review per brief §3, no post-install script execution from deps | Same residual every Python app has; pinning narrows the window, doesn't close it. |
 | 14 | Proxploy stops/deletes/migrates its own CT or host | Self-detection recorded at install (CT id + hostname, doc 02 §9); destructive actions against a detected match are refused, or gated behind a typed-confirmation dialog with an explicit warning | Detection can miss edge cases (Proxploy relocated without re-detection, ambiguous hostname); the typed-confirmation prompt is the backstop even when automatic detection fails. |

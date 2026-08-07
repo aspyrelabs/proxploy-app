@@ -32,7 +32,7 @@ export function VmsPage() {
   })
   const vms = vmsQuery.data
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
-  // ent.has() is false until /entitlements resolves — gate on ent.data != null
+  // ent.has() is false until /entitlements resolves, gate on ent.data != null
   // too, or every plan sees a dead "New VM" button for the whole first fetch.
   const createDenied = ent.data != null && !ent.has('vms.create')
   const cloneDenied = ent.data != null && !ent.has('vms.clone')
@@ -79,7 +79,7 @@ export function VmsPage() {
                     <td className="py-2.5 font-mono">{v.name}</td>
                     <td className="py-2.5 text-text-2">{v.host_name}</td>
                     <td className="py-2.5 font-mono text-text-2">
-                      {v.cpu_cores ?? '—'} / {fmtBytes(v.mem_bytes)}
+                      {v.cpu_cores ?? ', '} / {fmtBytes(v.mem_bytes)}
                     </td>
                     <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                     <td className="py-2.5"><StatusPill status={v.status} /></td>
@@ -91,7 +91,7 @@ export function VmsPage() {
                       </Button>
                       {/* doc 06 §e rule 2: a table-cell button is a "small inline
                           action", so the Pro treatment here is disabled+tooltip,
-                          not LockVeil — veiling a 60px cell blurs nothing legible,
+                          not LockVeil, veiling a 60px cell blurs nothing legible,
                           and a disabled trigger makes a veil inside the dialog
                           unreachable dead code. */}
                       <Button variant="ghost" className="px-2 py-1 text-[11px]"
@@ -187,7 +187,7 @@ export function VmOverview() {
         <div className={card}>
           <h2 className="mb-2 text-[13px] uppercase text-text-3">Resources</h2>
           <div className="font-mono text-[12px] text-text-2">
-            {vm.cpu_cores ?? '—'} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
+            {vm.cpu_cores ?? ', '} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
           </div>
         </div>
       </div>
@@ -197,14 +197,14 @@ export function VmOverview() {
           ['Node', vm.host_name],
           ['Disk', fmtBytes(vm.disk_bytes)],
           ['OS type', vm.os_type ?? 'unknown'],
-          ['Synced', vm.synced_at ?? '—'],
+          ['Synced', vm.synced_at ?? ', '],
         ]} />
       </div>
     </div>
   )
 }
 
-// Route objects — imported by router.tsx (cluster.tsx precedent). shellRoute
+// Route objects, imported by router.tsx (cluster.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
 // entry point (e.g. in tests), before vmsRoute/vmDetailRoute exist.
@@ -237,11 +237,11 @@ function VmConsole() {
       note="Gave up after repeated attempts. Reload the page to try again." />
   }
   if (!ticket.data) return <EmptyState title="Opening console…" note="" />
-  // VncConsole has no onDrop today (Task 9 doesn't add one — noVNC's RFB
+  // VncConsole has no onDrop today (Task 9 doesn't add one, noVNC's RFB
   // class exposes its own 'disconnect' event for this instead of a generic
   // prop); wire the same reconnect-with-cap behavior via that event. VNC has
   // no JSON control-frame channel (unlike Terminal), so there is no "fatal"
-  // signal to short-circuit on here — every drop just counts against the cap.
+  // signal to short-circuit on here, every drop just counts against the cap.
   return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={reconnect} />
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 export type TermLine = { stream: string; message: string }
 
-// Doc 06 §c: terminal panels stay #0a0e14 in BOTH themes — consoles are dark,
+// Doc 06 §c: terminal panels stay #0a0e14 in BOTH themes, consoles are dark,
 // full stop. Do not swap these for theme tokens.
 const STREAM_CLASS: Record<string, string> = {
   stdout: 'text-text-2',

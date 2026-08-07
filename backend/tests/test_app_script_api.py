@@ -89,7 +89,7 @@ def test_edited_script_shows_a_real_diff_against_current_upstream(client, csrf_h
 
 
 def test_upstream_moving_on_after_pin_also_surfaces_a_diff(client, csrf_header, bootstrap_admin):
-    """Not just locally-edited scripts drift from upstream — a catalog refresh
+    """Not just locally-edited scripts drift from upstream, a catalog refresh
     that picks up a new upstream version must surface that too, even though
     this app's own pinned content never changed (doc 10 DoD: "diffed against
     upstream before every run", not just "diffed against local edits")."""
@@ -105,7 +105,7 @@ def test_upstream_moving_on_after_pin_also_surfaces_a_diff(client, csrf_header, 
     r = client.get(f"/api/v1/apps/{app_id}/script")
     diff = r.json()["diff_vs_upstream"]
     # _diff_vs_upstream diffs FROM upstream TO pinned (fromfile=upstream,
-    # tofile=pinned) — the same fixed order the sibling
+    # tofile=pinned): the same fixed order the sibling
     # test_edited_script_shows_a_real_diff_against_current_upstream relies on
     # ("-msg_ok done"/"+msg_ok edited"). That order is a structural constant:
     # content unique to upstream always renders "-", never "+", regardless of
@@ -139,7 +139,7 @@ def test_put_script_for_an_unknown_app_is_a_404_not_a_500(client, csrf_header, b
 #
 # Task 5's review found a dead end: put_app_script above always writes
 # source="edited", and nothing else ever writes source="upstream" except the
-# install/update job handlers — so once a script is edited, services/
+# install/update job handlers: so once a script is edited, services/
 # appstore.py::_resolve_update's edited-script guard blocks app.update
 # FOREVER. This route is the way back.
 
@@ -198,7 +198,7 @@ def test_revert_clears_the_edited_guard_that_blocks_app_update(client, csrf_head
 
     # The revert pins the app to the catalog's CURRENT commit exactly, so
     # _resolve_update now takes the "already up to date" branch rather than
-    # the "was edited locally" one — proof the edited-script guard cleared.
+    # the "was edited locally" one: proof the edited-script guard cleared.
     from proxploy.jobs import JobFailed
     from proxploy.services.appstore import _resolve_update
     try:
@@ -313,7 +313,7 @@ def test_an_operator_may_read_the_script_but_not_write_it(client, csrf_header,
                                                           bootstrap_admin):
     """Doc 05 L115/117 put GET /script and GET /script/versions at operator,
     while PUT and revert are admin. Converting all four onto the single
-    ("app","script")=admin entry would have silently tightened read access —
+    ("app","script")=admin entry would have silently tightened read access, 
     no test covered an operator actor here, so nothing would have caught it.
     Hence ("app","script_read")="operator" in the matrix, and hence this test.
     """

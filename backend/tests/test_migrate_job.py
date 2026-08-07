@@ -1,7 +1,7 @@
 # backend/tests/test_migrate_job.py
 """`migrate.app` job handler (Phase 8 Task 15, services/migrate.py).
 
-FAKES vs HARDWARE — read this before trusting a green run: there is no live
+FAKES vs HARDWARE, read this before trusting a green run: there is no live
 Proxmox host in this repo and never will be. Every assertion here is proven
 against `tests/fakes/pve.py`'s `FakePVE`, a hand-maintained mimic of the
 proxmoxer attribute surface fed rows this file writes itself. What that
@@ -14,7 +14,7 @@ its JobFailed/rollback-messaging on the way real proxmoxer calls fail. What
 it does NOT prove: that a real PVE 8.x/9.x vzdump/restore/migrate cycle
 actually behaves this way on real disks over a real network, or that
 `cluster_resources()` transitions a guest to "running" the way FakePVE's
-static snapshot does (FakePVE does not simulate state transitions — a test
+static snapshot does (FakePVE does not simulate state transitions, a test
 that wants the target to "be seen running" seeds that row itself, exactly
 like tests/test_app_update_job.py's `add_ct(..., status="running")`
 precedent). That needs live hardware.
@@ -236,7 +236,7 @@ def test_restore_failure_leaves_source_intact_and_app_row_untouched(tmp_path):
 
 def test_health_check_timeout_leaves_source_intact_and_app_row_untouched(tmp_path, monkeypatch):
     """Target restore + start both succeed, but the target CT never shows up
-    running in /cluster/resources — the one failure mode that happens AFTER
+    running in /cluster/resources, the one failure mode that happens AFTER
     the target guest was started but BEFORE repoint (doc 11 §2's hardest
     case: neither host has settled yet)."""
     monkeypatch.setattr(migrate_mod, "HEALTH_CHECK_DEADLINE_S", 0.05)
@@ -263,7 +263,7 @@ def test_health_check_timeout_leaves_source_intact_and_app_row_untouched(tmp_pat
         assert "did not report running" in str(e.value)
         assert "not repointed" in str(e.value).lower()
 
-        # restore and start DID happen this time — the target guest exists
+        # restore and start DID happen this time: the target guest exists
         assert fake_tgt.creates and fake_tgt.creates[0][2]["vmid"] == 500
         assert ("lxc", 500, "start") in fake_tgt.actions
         assert fake_src.guest_deletes == fake_tgt.guest_deletes == []  # never deleted
@@ -306,6 +306,6 @@ def test_stopped_source_skips_stop_but_downtime_is_still_measured(tmp_path):
 
 
 # The vzdump+SFTP transfer strategy (Task 16, no shared storage/cluster) is
-# implemented and tested in test_migrate_transfer.py — this file previously
+# implemented and tested in test_migrate_transfer.py: this file previously
 # asserted the strategy was refused, which stopped being true once Task 16
 # landed.

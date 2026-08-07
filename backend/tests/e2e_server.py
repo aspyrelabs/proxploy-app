@@ -1,6 +1,6 @@
 """Serve the REAL app to Playwright with fake PVE and SSH behind it.
 
-This exists so the e2e suite can drive the actual onboarding wizard —
+This exists so the e2e suite can drive the actual onboarding wizard, 
 including POST /hosts, which probes a live Proxmox API and therefore could
 never run here. It lives in tests/ deliberately: packaging/build_release.sh
 excludes tests/ from the release tarball, so none of this ships. An env var
@@ -23,10 +23,10 @@ DEMO_CATALOG_SLUG = "e2e-demo"
 
 def _seed_catalog(settings) -> None:
     """CatalogEntry rows normally arrive via CatalogSource hitting the real
-    community-scripts/ProxmoxVE repo on GitHub (services/catalog.py) — no
+    community-scripts/ProxmoxVE repo on GitHub (services/catalog.py), no
     network here, and there never will be. Seeded directly against the DB
     file, once, before create_app()'s own lifespan runs (which re-runs
-    migrations idempotently and opens its own engine on the same file) — the
+    migrations idempotently and opens its own engine on the same file), the
     Store page needs something installable from the very first load, and
     there is no API that creates a catalog entry without that network call.
     """
@@ -35,7 +35,7 @@ def _seed_catalog(settings) -> None:
     from proxploy.secretstore import SecretStore
 
     # SecretStore.ensure_key_file refuses to mint a key once a DB file already
-    # exists (doc 11 §9 — never silently regenerate a key over stored
+    # exists (doc 11 §9: never silently regenerate a key over stored
     # ciphertext), and run_migrations() below is what creates the sqlite file.
     # Idempotent: create_app()'s own lifespan calls this again with
     # db_file_exists=True and just finds the key already there.
@@ -49,7 +49,7 @@ def _seed_catalog(settings) -> None:
                 return
             db.add(CatalogEntry(
                 slug=DEMO_CATALOG_SLUG, name="E2E Demo", category="Productivity",
-                description="Fixture catalog entry for the e2e journey — a real "
+                description="Fixture catalog entry for the e2e journey, a real "
                             "install comes from community-scripts/ProxmoxVE.",
                 default_cpu=1, default_ram_mb=512, default_disk_gb=4,
                 default_os="debian", default_os_version="12",
@@ -71,7 +71,7 @@ def _mirror_guest_creates(fake) -> None:
     (tests/fakes/pve.py::_GuestFactory.post) only records the call. GET /vms
     exists solely as the poller's mirror of that listing (services/
     guestjobs.py::create_vm: "no Vm row is written here ... the next poll
-    cycle either confirms or deletes") — so without this, a VM created
+    cycle either confirms or deletes"), so without this, a VM created
     through the wizard would never appear on the Virtual Machines page here.
 
     Patched on this one FakePVE instance, not in the shared fixture: every
@@ -142,7 +142,7 @@ def create_e2e_app():
         # PROXPLOY_* env (which leaves it off): Host.node_name, the VM-create
         # wizard's node/storage pickers and the Virtual Machines page are all
         # either populated by, or read straight out of, a poll cycle against
-        # FakePVE (api/vms.py::_pick_node's own comment says as much) — never
+        # FakePVE (api/vms.py::_pick_node's own comment says as much): never
         # by host creation itself. A short interval keeps Task 16's journey
         # from waiting out a production 30 s cycle; there is no real Proxmox
         # host here to spare from being hammered.

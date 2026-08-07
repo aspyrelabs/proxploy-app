@@ -1,4 +1,4 @@
-// api/storage.ts — read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
+// api/storage.ts, read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
 // Same shape as api/catalog.ts: plain useQuery wrappers, no client-side state.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from './client'
@@ -41,7 +41,7 @@ export function useStorage() {
   })
 }
 
-/** One datastore, live from Proxmox — the only source of `avail_bytes` and the
+/** One datastore, live from Proxmox; the only source of `avail_bytes` and the
  *  full `nodes` list.
  *
  *  ponytail: keyed on (host, name) with no node, matching the interface
@@ -83,9 +83,9 @@ export type JobResponse = { job: { id: number; kind: string } }
  * `multipart/form-data; boundary=…` itself; overwriting it strips the boundary
  * and FastAPI's UploadFile parse 422s before a byte of the ISO is read.
  *
- * Everything else `api()` does is reproduced here verbatim — the /api/v1
+ * Everything else `api()` does is reproduced here verbatim, the /api/v1
  * prefix, credentials: 'include', the X-CSRF-Token header read from the
- * pp_csrf cookie, ApiError(status, body) on non-ok — so this stays an
+ * pp_csrf cookie, ApiError(status, body) on non-ok; so this stays an
  * exemption exactly one header wide. DO NOT "fix" it back to api().
  *
  * ponytail: fetch fires no upload-progress events, so the dialog shows an
@@ -122,7 +122,7 @@ export function useUploadContent() {
       form.append('node', v.node)
       return postForm<JobResponse>(`/storage/${v.hostId}/${v.storage}/content`, form)
     },
-    // Same rule as api/jobs.ts::useLifecycle — the resource key is NOT
+    // Same rule as api/jobs.ts::useLifecycle, the resource key is NOT
     // invalidated here. The volume does not exist until the job succeeds, and
     // the SSE `resource` event applyResource now routes to ['storage'] is what
     // refreshes the browser at exactly the right moment (Task 12).
@@ -178,7 +178,7 @@ export function useDeleteVolume() {
       qc.invalidateQueries({ queryKey: ['jobs'] })
       qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
       // The content listing is a live passthrough, not a poll-stomped resource
-      // cache, so re-reading it after the job is enqueued is correct here —
+      // cache, so re-reading it after the job is enqueued is correct here; 
       // the opposite of useLifecycle's rule for ['vms'].
       qc.invalidateQueries({ queryKey: ['storage', v.hostId, v.storage, 'content'] })
     },

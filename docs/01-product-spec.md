@@ -1,4 +1,4 @@
-# Proxploy — Product Specification (feature catalogue)
+# Proxploy: Product Specification (feature catalogue)
 
 Doc 01. Subordinate to `00-decision-brief.md`; if anything here conflicts with the
 brief, the brief wins (and must be changed first).
@@ -6,11 +6,11 @@ brief, the brief wins (and must be changed first).
 ## 0. Scope rules restated
 
 - **Apps-only model.** The primary workload view is Apps. One app = exactly one
-  LXC container, always — Immich is one CT and one tile, regardless of how many
+  LXC container, always; Immich is one CT and one tile, regardless of how many
   services run inside it. There is no raw CT list page in the shipped nav.
 - **Fixed navigation:** Cluster · Apps · App Store · Virtual Machines · Storage ·
   Network · Backups · Settings. Nothing is added to or removed from this list by
-  tier, config, or entitlement — gated features veil or disable, they never
+  tier, config, or entitlement; gated features veil or disable, they never
   reshape the nav.
 - **This is the whole product.** Every feature below ships. The build sequence
   (doc 10) orders them; it never cuts them.
@@ -19,19 +19,19 @@ brief, the brief wins (and must be changed first).
 
 Each feature has:
 
-- **Flag key** — the entitlement key (brief §7): dotted, namespaced by domain.
+- **Flag key**: the entitlement key (brief §7): dotted, namespaced by domain.
   One flag per feature. Backend enforces via dependency/decorator; frontend
   reads the resolved map from `GET /api/v1/entitlements` and veils, but the server
   always re-enforces.
-- **Tier** — a **provisional, INERT** label. Every flag defaults **ON**
+- **Tier**: a **provisional, INERT** label. Every flag defaults **ON**
   (unarmed) in both the built-in default map and the dormant proxploy-api
   resolver. Nothing in the codebase branches on tier; arming Pro later is a
   config change on proxploy-api only. Values:
-  - `Core` — never gated, even after arming. Security and safety surfaces
+  - `Core`: never gated, even after arming. Security and safety surfaces
     (local auth, secrets, audit, the entitlement client itself) are not
     sellable and must not be toggleable.
-  - `Free` — provisionally in the free tier when armed.
-  - `Pro` — provisionally in the paid tier when armed. A guess to be priced
+  - `Free`: provisionally in the free tier when armed.
+  - `Pro`: provisionally in the paid tier when armed. A guess to be priced
     later; changing it costs nothing.
 
 ---
@@ -55,7 +55,7 @@ Each feature has:
 | Feature | Description | Flag key | Tier (inert) |
 |---|---|---|---|
 | Apps grid | Card grid of installed apps: icon, host, status, CPU/RAM bars, quick actions; filter by host/status, text filter; a discovered-but-unadopted panel above the grid surfaces pre-existing CTs found by the poller with catalog-match suggestions and a bulk Adopt affordance, so a fresh install against existing infra never shows an empty grid | `apps.list` | Free |
-| App detail — overview | Resource usage, CT identity (host, CTID, IP), assigned storage, uptime, update badge | `apps.detail` | Free |
+| App detail, overview | Resource usage, CT identity (host, CTID, IP), assigned storage, uptime, update badge | `apps.detail` | Free |
 | Lifecycle | Start / stop / restart / shutdown an app (its CT) with job tracking | `apps.lifecycle` | Free |
 | Open web UI | One-click open of the app's own web interface (detected/declared port) | `apps.open_ui` | Free |
 | Logs | Live-following log view (CT console output + service journal), tabbed on app detail | `apps.logs` | Free |
@@ -68,16 +68,16 @@ Each feature has:
 
 ## 3. App Store
 
-Source: community-scripts/ProxmoxVE — parsed **server-side only** directly
+Source: community-scripts/ProxmoxVE, parsed **server-side only** directly
 from the public `ct/*.sh` + `install/*.sh` script pairs in that GitHub repo,
 cached in DB with ETag-based change detection (brief §5). **Correction to an
 earlier assumption in this doc:** there is no public bulk catalog metadata
-API to fetch instead — the community-scripts website's catalog is
+API to fetch instead, the community-scripts website's catalog is
 PocketBase-backed behind its own Next.js frontend with no open read
 endpoint (confirmed while grounding the Phase 4 plan in real code; see
 `docs/superpowers/plans/2026-07-30-phase-4-store.md`'s header note, and
 `docs/notes/phase-4-store.md` once Phase 4 lands). Installs run the script
-as root on the node over the SSH executor — stated plainly in the consent
+as root on the node over the SSH executor, stated plainly in the consent
 UX (brief §8).
 
 Catalog ingest classifies every entry as **installable** (drivable
@@ -87,18 +87,18 @@ render with an honest note and an upstream link (doc 04 `catalog_entries`,
 doc 11 §8). The classifier rule is mechanical, not a guess: single
 `build_container` call in the paired `ct/` script, and no unguarded
 interactive prompt (`read`/`whiptail`/`dialog` not preceded by an env-var
-short-circuit) in the paired `install/` script — every community-scripts
+short-circuit) in the paired `install/` script, every community-scripts
 install runs under a `set -e` + ERR-trap wrapper, so an unguarded prompt
 hard-aborts rather than defaulting, making "unguarded prompt present" a
 reliable unsupported signal (`docs/notes/phase-4-spike.md`). Applied to the
-current upstream corpus this rule seats installable ≈ **493/559 (88.2%)** —
+current upstream corpus this rule seats installable ≈ **493/559 (88.2%)**, 
 the number Phase 4's definition of done reports (doc 10), replacing any
 "300+ scripts" framing with the real figure.
 
 **Known v1 gap, tracked rather than silently absorbed:** `ct/*.sh` reliably
 yields `name`, resource defaults (`var_cpu`/`var_ram`/`var_disk`/`var_os`/
 `var_version`), and a `website` link (the script's `# Source:` header
-comment) — but not `category`, `description`, `icon_url`, or `popularity`,
+comment), but not `category`, `description`, `icon_url`, or `popularity`,
 none of which are derivable from script content alone. Phase 4 ships a
 small hand-maintained slug→category map (`proxploy/services/catalog_categories.py`)
 as a v1 stopgap, defaulting unmapped entries to "Uncategorized";
@@ -207,7 +207,7 @@ incrementally as real gaps surface in the store UI.
 | Local auth | argon2 password hashing, server-side DB sessions, CSRF, per-IP rate limiting on auth endpoints | `auth.local` | Core |
 | TOTP 2FA | pyotp-based TOTP enrolment with recovery codes | `auth.totp` | Free |
 | OIDC SSO | Authlib OIDC login against any external IdP (Authelia, Keycloak, …); never bundled | `auth.oidc` | Pro |
-| RBAC | pycasbin roles — owner, admin, operator, viewer — enforced on every API route | `rbac.roles` | Free |
+| RBAC | pycasbin roles, owner, admin, operator, viewer; enforced on every API route | `rbac.roles` | Free |
 | Teams | Casbin domains: group users into teams with scoped access to hosts/apps/VMs | `teams.rbac` | Pro |
 | API tokens | Scoped, revocable personal/service tokens for the REST API, hashed at rest | `api.tokens` | Pro |
 

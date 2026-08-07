@@ -14,7 +14,7 @@ export type SnapshotRow = {
   parent: string | null
   // PVE does not report a per-snapshot size for every storage plugin (LVM-thin
   // and ZFS internal snapshots have no standalone size), so this is optional on
-  // purpose: doc 06 row 48's Size column renders "—" rather than a fake number.
+  // purpose: doc 06 row 48's Size column renders ", " rather than a fake number.
   size_bytes?: number | null
 }
 
@@ -57,13 +57,13 @@ function request(v: SnapshotVars) {
  * onSettled rule: invalidate ['jobs'] and ['cluster','activity'].
  *
  * They ALSO invalidate ['vms', id, 'snapshots'], which useLifecycle deliberately
- * does not do for ['vms'] — and the difference is real, not an inconsistency.
+ * does not do for ['vms'], and the difference is real, not an inconsistency.
  * ['vms'] is the poller's 30s resource cache holding an optimistic `pending`
  * patch that a refetch would stomp with stale data. ['vms', id, 'snapshots'] is
  * a live read straight off Proxmox with no optimistic patch to protect, so a
  * refetch can only move it closer to the truth. It is best-effort at enqueue
  * time (the job has only been accepted); the terminal `job` SSE delta
- * invalidates the ['vms'] prefix — which matches this key too — and is the
+ * invalidates the ['vms'] prefix, which matches this key too, and is the
  * backstop that actually shows the finished result.
  */
 export function useSnapshotAction() {

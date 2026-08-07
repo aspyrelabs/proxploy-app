@@ -1,9 +1,9 @@
-# 06 — Frontend Spec
+# 06: Frontend Spec
 
 Derived from `proxploy-prototype.html`, which is the source of truth for
 pages, routes, interactions, and design tokens (brief §1). The job of the
 production frontend (React 19 + TypeScript + Vite, Tailwind v4 + shadcn/ui,
-TanStack Query + Router — brief §4) is to **reproduce the prototype**, wired
+TanStack Query + Router, brief §4) is to **reproduce the prototype**, wired
 to the real API (doc 05), not to invent a new look.
 
 Prototype notes that shape this spec:
@@ -16,7 +16,7 @@ Prototype notes that shape this spec:
   (apps-only, never a raw CT list) we treat it as dead prototype code and do
   not build it.
 - Detail tabs: apps = Overview / Logs / Console / Config; VMs = Overview /
-  Console / Snapshots — exactly the prototype's `tabs` arrays.
+  Console / Snapshots, exactly the prototype's `tabs` arrays.
 - The prototype's Settings "Free/Pro" toggle is a demo device for the
   lock-veil; production replaces it with real license state from
   `GET /api/v1/entitlements` (plus a dev-only preview toggle behind a build
@@ -25,7 +25,7 @@ Prototype notes that shape this spec:
   Proxploy is itself running on route through a stronger typed-confirmation
   dialog (type the host/CT name to confirm) instead of the normal one-click
   action, with an explicit warning that stopping it can strand its own
-  recovery path (doc 02 §9, doc 08 §1/§9) — applies uniformly to the Apps
+  recovery path (doc 02 §9, doc 08 §1/§9); applies uniformly to the Apps
   detail action row, Apps-grid quick actions, and the migrate flow.
 
 ---
@@ -48,20 +48,20 @@ Prototype notes that shape this spec:
 | `#/detail/vms/{id}` | `/vms/$vmId` with tab children: index (overview), `/console`, `/snapshots` | VM detail | Same head pattern with VMID subline `VMID · host · vCPU/RAM`. Overview: same three cards + KV grid (VMID, Node, Disk, OS type). Console: terminal panel (noVNC canvas in production). Snapshots: table (Name/Created/Size) with Rollback + Delete row actions and "Take snapshot" |
 
 Tabs are child routes (not search params) so logs/console links from app
-cards (`data-tab="logs"` in the prototype) are directly linkable — matching
+cards (`data-tab="logs"` in the prototype) are directly linkable, matching
 prototype behavior where card buttons deep-link into a specific tab.
 
-### Flows implied but not shown — designed in the same language
+### Flows implied but not shown: designed in the same language
 
 | Route | Flow | Design (reusing prototype vocabulary) |
 |---|---|---|
 | `/login` | Login | Centered `.card` on the `--ink` radial-gradient body background; brand mark + wordmark (Prox**ploy**, amber `b`); email/password inputs styled like `.finput`; primary amber gradient button; TOTP step swaps in a 6-digit input in the same card; "Sign in with SSO" ghost button appears only when `auth.oidc` is configured. Errors as red toasts. |
-| `/onboarding` | First-run wizard | Same centered-card stage, stepper of small `.badge` pills across the top. Steps: 1) Create admin account, 2) Add first Proxmox host (address + API token, "Test connection" ghost button showing scope check results in a mini `.term` panel), 3) Authorize install key (shows the generated ed25519 **public** key with copy button + the one command to authorize it on the node, honest copy about what SSH root means — brief §8), 4) Sync — live progress reusing the job-log terminal panel. Routing guard: `GET /api/v1/meta/onboarding` redirects here until complete. |
+| `/onboarding` | First-run wizard | Same centered-card stage, stepper of small `.badge` pills across the top. Steps: 1) Create admin account, 2) Add first Proxmox host (address + API token, "Test connection" ghost button showing scope check results in a mini `.term` panel), 3) Authorize install key (shows the generated ed25519 **public** key with copy button + the one command to authorize it on the node, honest copy about what SSH root means; brief §8), 4) Sync; live progress reusing the job-log terminal panel. Routing guard: `GET /api/v1/meta/onboarding` redirects here until complete. |
 | `/settings/hosts/new` (modal route over Settings) | Add host | Radix Dialog styled as `.card` (`--panel`, `--r` radius): name, address, API token, TLS verify toggle row, optional SSH-key step identical to onboarding step 3. Gated: attempting a 2nd host without `hosts.multi` shows the lock-veil inside the dialog body (exactly the Settings hosts-card treatment). |
 | (global) `/…?drawer=activity` | Job / activity drawer | Right-side sheet (Radix Dialog, 400px, `--panel-2`, border-left `--line`) listing jobs newest-first using the `.fitem` feed row pattern + progress bars for running jobs; clicking a job expands its live SSE log in an embedded `.term` panel. Opened from the topbar and from any "job started" toast. Search-param state so it overlays any page. |
 | (global) ⌘K | Command palette | cmdk dialog styled like `.search` grown into a panel: fuzzy across apps, VMs, hosts, store entries, and nav actions; rows reuse icon + mono-subtext layout of `.vn`. |
 | `/store/$slug/install` (modal route) | Install flow | Dialog: target-host select (segmented control), resource overrides (cores/RAM/disk, prefilled from catalog defaults), script preview in a `.code` panel with upstream-diff notice, explicit "runs as root on <node>" confirmation line (brief §8 honesty), then Install → toast + activity drawer opens on the new job's live stream. The prototype's instant install-toast pair ("Deploying X to host-01…" → "X installed and running") becomes the real job lifecycle. |
-| `/apps` (bulk adopt dialog) | Discover & adopt | Radix Dialog reusing the install-flow's card language: one row per discovered CT (CT name/id, host, suggested catalog match or "No match — adopt as generic"), checkbox select-all/individual, confirm → `POST /api/v1/apps/adopt` (bulk) → toast + Apps grid refresh, discovered panel shrinks by the adopted count |
+| `/apps` (bulk adopt dialog) | Discover & adopt | Radix Dialog reusing the install-flow's card language: one row per discovered CT (CT name/id, host, suggested catalog match or "No match; adopt as generic"), checkbox select-all/individual, confirm → `POST /api/v1/apps/adopt` (bulk) → toast + Apps grid refresh, discovered panel shrinks by the adopted count |
 
 Auth guard: all routes except `/login` and `/onboarding` require a session
 (`GET /api/v1/auth/me` in the root route loader; 401 redirects to `/login`).
@@ -73,7 +73,7 @@ Auth guard: all routes except `/login` and `/onboarding` require a session
 Extracted from the prototype's CSS/JS; mapped to shadcn/Radix where a
 primitive genuinely fits, custom where the prototype's look *is* the
 component. shadcn components are copied in and restyled with our tokens
-(brief §4) — no default shadcn theme survives.
+(brief §4), no default shadcn theme survives.
 
 | Component | Prototype source | Implementation | Notes |
 |---|---|---|---|
@@ -88,25 +88,25 @@ component. shadcn components are copied in and restyled with our tokens
 | `Button` | `.btn` variants: `primary` (amber gradient, dark text `#20160a`), `ghost`, `danger`, `go` (amber-dim), `green`, `sm` | shadcn Button, variants rewritten | Prototype's exact gradient `linear-gradient(150deg,#F5B544,#E79126)` + shadow |
 | `IconButton` | `.iconbtn` (+ `wide`, `go`, `green`) | custom | App-card action row |
 | `Avatar` | `.avatar` (initials, gradient tile) | custom | Menu: profile, sessions, sign out |
-| `StatRings` | `.rings`/`.ring` — 96px SVG rings, `r=52`, stroke 10, gradient stroke, mono % center, label + mono subtotal | custom SVG | Keep the prototype's dasharray math (`circ=326.7`, offset `circ*(1-pct/100)`), animate offset on data change |
-| `NodeCard` | `.node` — status dot, mono name, role tag, VMs/Apps/Uptime meta, CPU (amber gradient) + RAM (cyan→blue gradient) bars | custom | Click → `/apps?host=…` |
+| `StatRings` | `.rings`/`.ring`, 96px SVG rings, `r=52`, stroke 10, gradient stroke, mono % center, label + mono subtotal | custom SVG | Keep the prototype's dasharray math (`circ=326.7`, offset `circ*(1-pct/100)`), animate offset on data change |
+| `NodeCard` | `.node`, status dot, mono name, role tag, VMs/Apps/Uptime meta, CPU (amber gradient) + RAM (cyan→blue gradient) bars | custom | Click → `/apps?host=…` |
 | `UsageBar` | `.bar` / `.brow` (6px rounded track `#1d2733`) | custom | Shared by nodes, app cards, storage, backups |
-| `AppCard` | `.app-c` — gradient `.ico` initials tile, name, mono host, status pill, `UPDATE` corner tag, CPU/RAM usage bars, action row (Open/Start wide + Restart + Logs), hover `translateY(-3px)`, stopped = `opacity:.72` | custom | The signature component; card click → detail, actions stopPropagation |
+| `AppCard` | `.app-c`, gradient `.ico` initials tile, name, mono host, status pill, `UPDATE` corner tag, CPU/RAM usage bars, action row (Open/Start wide + Restart + Logs), hover `translateY(-3px)`, stopped = `opacity:.72` | custom | The signature component; card click → detail, actions stopPropagation |
 | `StatusPill` | `.st` run/stop/warn (dot + label, glow via box-shadow dim ring) | custom | |
-| `StoreCard` | `.store-c` — icon, name, category, description (min-height 34px), `★ pop` + `LXC` tags, Install / disabled Installed / (unsupported: honest "Not installable — \<reason\>" note + upstream-link button, no Install control) | custom | Ingest-classified `installable` flag (doc 01 §3, doc 04 `catalog_entries`) drives which action renders |
-| `DiscoveredPanel` | (implied — no prototype source, new for the discovery-and-adopt flow) | custom | Dismissible panel above the Apps grid; lists CTs found by the poller not yet mapped to an app, catalog-match suggestion chips, checkbox multi-select, "Adopt N" bulk action opening the bulk-adopt dialog; hidden when nothing is discovered |
+| `StoreCard` | `.store-c`, icon, name, category, description (min-height 34px), `★ pop` + `LXC` tags, Install / disabled Installed / (unsupported: honest "Not installable, \<reason\>" note + upstream-link button, no Install control) | custom | Ingest-classified `installable` flag (doc 01 §3, doc 04 `catalog_entries`) drives which action renders |
+| `DiscoveredPanel` | (implied, no prototype source, new for the discovery-and-adopt flow) | custom | Dismissible panel above the Apps grid; lists CTs found by the poller not yet mapped to an app, catalog-match suggestion chips, checkbox multi-select, "Adopt N" bulk action opening the bulk-adopt dialog; hidden when nothing is discovered |
 | `CategoryChips` | `.cats`/`.chip` with amber `.on` state | custom (Radix ToggleGroup semantics) | |
 | `SegmentedControl` | `.seg` (host filter; `.on` = `--elev`) | Radix ToggleGroup styled | |
 | `FilterInput` | `.finput` | custom | Debounced; updates URL search param |
-| `DataTable` | `.tbl` — uppercase 11px headers, row hover `--panel-2`, `.vn` name cell (icon tile + mono), `.spec` mono cells, `.rowact` hover actions | shadcn Table + TanStack Table (sorting) | VMs, hosts, backups, bridges, snapshots |
-| `Tabs` | `.tabs` — 2px amber underline on active | Radix Tabs, styled; tab = route link | |
+| `DataTable` | `.tbl`, uppercase 11px headers, row hover `--panel-2`, `.vn` name cell (icon tile + mono), `.spec` mono cells, `.rowact` hover actions | shadcn Table + TanStack Table (sorting) | VMs, hosts, backups, bridges, snapshots |
+| `Tabs` | `.tabs`, 2px amber underline on active | Radix Tabs, styled; tab = route link | |
 | `KVGrid` | `.kv` (auto-fit minmax(150px,1fr), uppercase keys, mono values) | custom | Detail overview |
-| `TerminalPanel` | `.term` — `#0a0e14`, JetBrains Mono 12.5px, line-height 1.7, colored level spans | custom, two modes | *Static mode*: rendered log/SSE lines (Logs tab, job streams). *Live mode*: xterm.js mount themed with the same palette (Console tabs) |
-| `CodePanel` / script editor | `.code` — `#0a0e14`, syntax colors: comments `--text-3`, keywords `--violet`, strings `--green`, vars `--blue` | CodeMirror 6 (MIT) with a token-matched bash highlight theme | Config tab; read-only mode for store script preview |
+| `TerminalPanel` | `.term`, `#0a0e14`, JetBrains Mono 12.5px, line-height 1.7, colored level spans | custom, two modes | *Static mode*: rendered log/SSE lines (Logs tab, job streams). *Live mode*: xterm.js mount themed with the same palette (Console tabs) |
+| `CodePanel` / script editor | `.code`, `#0a0e14`, syntax colors: comments `--text-3`, keywords `--violet`, strings `--green`, vars `--blue` | CodeMirror 6 (MIT) with a token-matched bash highlight theme | Config tab; read-only mode for store script preview |
 | `ToggleRow` | `.setrow` + `.toggle` (42×24, amber-dim on-state, amber knob) | Radix Switch restyled + custom row | Settings |
-| `LockVeil` | `.locked`/`.lockveil` — blurred `pointer-events:none` content behind `rgba(11,15,22,.72)` + `blur(3px)` veil, amber lock icon, title, subtext, "Unlock Pro" `go` button | custom wrapper | See §(e) |
-| `Toast` | `.toast` — `--panel-2` card, colored icon (ok=green check, warn=amber update, err=red alert, info=blue arrow), slide-up `tin` animation, 2.6s auto-dismiss | sonner, fully restyled with tokens | Job-started toasts link to the activity drawer |
-| `ActivityFeed` | `.feed`/`.fitem` — tinted icon tile (`color-mix` 13% of the accent), text with mono `<b>`, mono meta line | custom | Dashboard + activity drawer |
+| `LockVeil` | `.locked`/`.lockveil`, blurred `pointer-events:none` content behind `rgba(11,15,22,.72)` + `blur(3px)` veil, amber lock icon, title, subtext, "Unlock Pro" `go` button | custom wrapper | See §(e) |
+| `Toast` | `.toast`, `--panel-2` card, colored icon (ok=green check, warn=amber update, err=red alert, info=blue arrow), slide-up `tin` animation, 2.6s auto-dismiss | sonner, fully restyled with tokens | Job-started toasts link to the activity drawer |
+| `ActivityFeed` | `.feed`/`.fitem`, tinted icon tile (`color-mix` 13% of the accent), text with mono `<b>`, mono meta line | custom | Dashboard + activity drawer |
 | `Sparkline` | `.spark` SVG (300×52, gradient area fill fading to 0, 2px line) | uPlot (area+line preset) at prototype dimensions | Network, detail CPU, dashboard |
 | `EmptyState` | `.empty` | custom | |
 | `LivePulse` | `.live` + `.pulse` keyframe glow | custom | "Live · updated Ns ago" bound to last SSE message time |
@@ -115,12 +115,12 @@ component. shadcn components are copied in and restyled with our tokens
 | `SectionHeader` | `.sec-h` (+ pill `.badge`) | custom | |
 
 Motion: `fade`/`rise` entry animation (0.45s cubic-bezier(.2,.7,.3,1)) on
-page content, toast `tin` slide, ring/bar transitions — all disabled under
+page content, toast `tin` slide, ring/bar transitions, all disabled under
 `prefers-reduced-motion`, exactly as the prototype does.
 
 Accessibility beyond the prototype: all interactive `div`s become real
 buttons/links, focus-visible rings in `--amber`, status pills carry text (not
-color alone — the prototype already does this), tables get proper `scope`,
+color alone, the prototype already does this), tables get proper `scope`,
 dialogs/veils get correct ARIA from Radix.
 
 ---
@@ -128,7 +128,7 @@ dialogs/veils get correct ARIA from Radix.
 ## (c) Design tokens
 
 The prototype's `:root` values verbatim, mapped into a Tailwind v4 `@theme`
-block. Dark is canonical. These are the actual shipped values — not
+block. Dark is canonical. These are the actual shipped values, not
 approximations.
 
 ### Surfaces & lines
@@ -158,8 +158,8 @@ approximations.
 | `--green` | `#3FCF8E` | `rgba(63,207,142,.13)` | Running, success, healthy |
 | `--red` | `#F26D6D` | `rgba(242,109,109,.13)` | Errors, danger, >80% storage |
 | `--blue` | `#5B9DF9` | `rgba(91,157,249,.12)` | Info, network-in, links/debug |
-| `--violet` | `#A78BFA` | — | Storage ring/bars, code keywords |
-| `--cyan` | `#34D3C6` | — | Memory (gradient partner to blue) |
+| `--violet` | `#A78BFA` | n/a | Storage ring/bars, code keywords |
+| `--cyan` | `#34D3C6` | n/a | Memory (gradient partner to blue) |
 
 Recurring gradients (component-level constants, not free choices):
 brand/primary `linear-gradient(150deg,#F5B544,#E0862B)` (buttons use
@@ -180,7 +180,7 @@ storage `linear-gradient(90deg,#A78BFA,#6D5AE6)`, danger storage
 | (unnamed but consistent) | `10px` | Buttons, inputs, terminal panels |
 
 Fonts are self-hosted via `@fontsource` (no Google Fonts request from a
-self-hosted, possibly air-gapped app — judgment call; weights per the
+self-hosted, possibly air-gapped app; judgment call; weights per the
 prototype: Space Grotesk 400–700, Inter 400–600, JetBrains Mono 400–600).
 
 ### Tailwind v4 wiring
@@ -232,7 +232,7 @@ inherit the look without per-component overrides.
 ### Light theme (derived, later)
 
 **Dark is canonical.** Light is a variable swap on
-`[data-theme="light"]` only — no component changes:
+`[data-theme="light"]` only, no component changes:
 
 - Surface ramp inverts around neutral paper: `--ink → #F5F7FA`,
   `--panel → #FFFFFF`, `--panel-2 → #F0F3F7`, `--elev → #E7ECF2`,
@@ -243,7 +243,7 @@ inherit the look without per-component overrides.
   (amber → `#C77E14`-range, green → `#1F9D63`, red → `#D9463F`,
   blue → `#2F6FE0`) with `-dim` fills re-derived at the same alphas; every
   pair re-checked against WCAG AA before shipping.
-- Terminal/code panels stay dark (`#0a0e14`) in both themes — consoles are
+- Terminal/code panels stay dark (`#0a0e14`) in both themes, consoles are
   dark, full stop.
 
 The prototype ships no light values, so exact light hexes are tuned at
@@ -255,7 +255,7 @@ variable block) is fixed now.
 ## (d) State & streaming binding
 
 Server state lives exclusively in TanStack Query; no client store duplicates
-it (small UI state — drawer open, active filters — lives in URL search
+it (small UI state, drawer open, active filters; lives in URL search
 params, matching the prototype's re-render-from-state approach).
 
 ### Query resources & polling
@@ -286,11 +286,11 @@ honest until reconnect.
 
 One `EventSource('/api/v1/events/stream')` per tab, wrapped in a
 `LiveProvider`. Handlers translate events (doc 05 message shapes) into cache
-operations — **patch when the delta is complete, invalidate when it isn't**:
+operations, **patch when the delta is complete, invalidate when it isn't**:
 
 - `metrics` → `queryClient.setQueryData` patches: node cards, app-card
   cpu/ram bars, rings, and appends points to active uPlot series (no
-  refetch; this is the "Live · updated 4s ago" path — the pulse timestamp is
+  refetch; this is the "Live · updated 4s ago" path, the pulse timestamp is
   the last event's arrival time).
 - `resource` → patch `status` on the matching `['apps'|'vms', id]` and list
   caches; anything beyond status → `invalidateQueries` on that resource.
@@ -320,7 +320,7 @@ query (`/jobs/{id}/events`) becomes the source for re-opens.
 - VM console: noVNC `RFB` instance pointed at `/vms/{id}/vnc/ws?ticket=…`
   inside the Console tab; toolbar (Ctrl-Alt-Del, fullscreen) styled as
   `.btn ghost sm`.
-- Consoles connect on tab **activation**, disconnect on route leave — never
+- Consoles connect on tab **activation**, disconnect on route leave; never
   in the background.
 
 ### Charts
@@ -344,31 +344,31 @@ const { has, tier } = useEntitlements();       // reads ['entitlements'] cache
 has("hosts.multi")  // boolean
 ```
 
-Rules — everything **visible but unarmed** by default:
+Rules, everything **visible but unarmed** by default:
 
 1. **Never hide gated features.** Unentitled features render fully (real
-   layout, blurred real or representative content) behind the `LockVeil` —
+   layout, blurred real or representative content) behind the `LockVeil`; 
    the prototype's `.locked` pattern is normative: content wrapper gets
    `blur(1px)` + `pointer-events:none`, veil is `rgba(11,15,22,.72)` +
    `backdrop-filter: blur(3px)`, amber lock icon, bold title
    ("Multi-host is a Pro feature"), one-sentence explanation, and a
    `go`-variant CTA. CTA routes to `/settings` plan card (production: license
-   entry / upgrade link — not the prototype's demo toggle).
-2. **Granularities.** Card/section veil (Settings hosts table — the
+   entry / upgrade link, not the prototype's demo toggle).
+2. **Granularities.** Card/section veil (Settings hosts table, the
    prototype's exact case); full-page veil for gated pages; **disabled
-   control + tooltip** ("Pro — Node shells", lock glyph in the button) for
+   control + tooltip** ("Pro, Node shells", lock glyph in the button) for
    small inline actions (console button on an app card) where a veil is
    physically too large. All three read from the same flag map.
 3. **Server always re-enforces** (brief §7). The UI treats a `403
    entitlement_required` problem+json as a signal to invalidate
-   `['entitlements']` and show the veil state — never as an error toast. UI
+   `['entitlements']` and show the veil state, never as an error toast. UI
    gating is presentation, not security.
 4. **TierPill** in the topbar reflects `tier` (`PRO · MULTI-HOST` amber /
    `FREE · 1 HOST` muted, prototype classes `.pro` / `.pro.free`), plus a
    grace-period variant (amber outline, "PRO · GRACE") when the token is
    past `exp` but before `grace_until`.
 5. **Dormant phase**: the built-in default map is all-on, so no veil ever
-   renders today — but every gated surface is wrapped from day 0, so arming
+   renders today, but every gated surface is wrapped from day 0, so arming
    tiers later changes proxploy-api config, not frontend code (brief §2
    rule 5).
 6. Flag keys used by the frontend are exactly the API's keys (doc 05

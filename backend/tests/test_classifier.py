@@ -69,7 +69,7 @@ def test_a_guard_naming_the_reads_own_variable_still_counts():
 
 def test_a_while_read_stream_loop_is_not_treated_as_a_prompt():
     """The probe-bare-read fixture's `while read -r pkg; do ... done < file`
-    loop must not be what flags it — strip the real prompt and it's clean."""
+    loop must not be what flags it, strip the real prompt and it's clean."""
     ct, install = _load("probe-bare-read")
     without_the_prompt = install.replace("read ANSWER", ": ")
     installable, reason = classify_install_feasibility(ct, without_the_prompt)

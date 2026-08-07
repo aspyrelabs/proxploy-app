@@ -1,18 +1,18 @@
 """Doc 10 Phase 8 DoD: "a CI script drives the product entirely through
-token-authed REST." This module runs in CI with the normal suite — so it IS
+token-authed REST." This module runs in CI with the normal suite, so it IS
 that CI script. After a one-time cookie bootstrap (owner signup + API key
-creation are the documented cookie-first steps, doc 04/08 — there is no
+creation are the documented cookie-first steps, doc 04/08; there is no
 token yet to make a token), every remaining step below is driven by a
 SECOND `TestClient` that never logs in and carries `Authorization: Bearer`
 only. Cookies are asserted empty immediately before every call on that
-client, proving the header alone authenticates — not a stray session or
+client, proving the header alone authenticates; not a stray session or
 CSRF cookie left over from somewhere else.
 
 Task 12 landed `Authorization: Bearer ppk_...` resolution in
 `api/deps.py::get_current_user` and the CSRF-middleware exemption for any
 request carrying an Authorization header (`middleware.py:20`). This test is
-the end-to-end proof that the whole product — hosts, apps, jobs, schedules,
-alert rules, audit, and self-revocation — actually stands on that seam, not
+the end-to-end proof that the whole product, hosts, apps, jobs, schedules,
+alert rules, audit, and self-revocation; actually stands on that seam, not
 just the api-keys router itself (which `test_apikeys.py` already covers in
 isolation).
 """
@@ -55,7 +55,7 @@ def test_ci_drives_the_product_end_to_end_over_bearer_only(
         raw, key_id = created["key"], created["id"]
         h = {"Authorization": f"Bearer {raw}"}
 
-        # Never logged in on `bearer` — no cookie has ever been set on it.
+        # Never logged in on `bearer`: no cookie has ever been set on it.
         assert not bearer.cookies
 
         # 1. POST /hosts -> 201; GET /hosts shows it connected.
@@ -80,7 +80,7 @@ def test_ci_drives_the_product_end_to_end_over_bearer_only(
         app_id = r.json()["adopted"][0]
 
         # 3. POST /apps/{id}/start -> 202; poll GET /jobs/{id} to terminal,
-        # staying strictly REST (no app.state.jobs.wait — that would reach
+        # staying strictly REST (no app.state.jobs.wait: that would reach
         # behind the API, which is exactly what this test is proving is
         # unnecessary).
         r = _bearer(bearer, "post", f"/api/v1/apps/{app_id}/start", h)

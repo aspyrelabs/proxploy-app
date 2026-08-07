@@ -44,7 +44,7 @@ vi.mock('../api/client', () => ({
 
 describe("shell.tsx's beforeLoad", () => {
   it('does not swallow the redirect thrown for incomplete onboarding', async () => {
-    // The onboarding check's redirect must reach the router unchanged — it
+    // The onboarding check's redirect must reach the router unchanged, it
     // must not be reinterpreted by the /auth/me catch below it, since that
     // catch never even runs in this path.
     const { isRedirect } = await import('@tanstack/react-router')
@@ -79,7 +79,7 @@ describe("shell.tsx's beforeLoad", () => {
   })
 
   it('re-throws a non-401 failure from /auth/me instead of bouncing to /login', async () => {
-    // A 500 is not "please sign in" — the regression this task closes.
+    // A 500 is not "please sign in", the regression this task closes.
     const { isRedirect } = await import('@tanstack/react-router')
     const { shellRoute } = await import('../routes/shell')
     const { ApiError } = await import('../api/client')

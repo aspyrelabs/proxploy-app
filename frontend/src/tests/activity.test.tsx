@@ -19,7 +19,7 @@ vi.mock('../api/client', () => ({
       if (jobsResult === 'error') return Promise.reject(new Error('boom'))
       if (jobsResult === 'empty') return Promise.resolve([])
       // Realistic GET /jobs order: newest-first, exactly as the server
-      // returns it — the drawer must not need to re-sort this itself.
+      // returns it, the drawer must not need to re-sort this itself.
       return Promise.resolve([
         { id: 13, kind: 'vm.stop', status: 'running', target_type: 'vm',
           target_id: 2, progress_pct: 40, error: null, created_at: '2026-07-29T09:01:00Z' },
@@ -140,7 +140,7 @@ describe('JobLog', () => {
 
   it('says the transcript could not be loaded rather than showing "no output yet"', async () => {
     // TerminalPanel stays dark by design (doc 06 §c) so this isn't a
-    // QueryState card — it's a distinct line inside the same terminal box,
+    // QueryState card, it's a distinct line inside the same terminal box,
     // but it still must not look like a job that legitimately produced
     // nothing.
     jobEventsError = true

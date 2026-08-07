@@ -2,16 +2,16 @@
 """Migration preflight (Phase 8 Task 14, services/migrate.py + POST
 /apps/{id}/migrate/preflight).
 
-FAKES vs HARDWARE — read this before trusting a green run: there is no live
+FAKES vs HARDWARE, read this before trusting a green run: there is no live
 Proxmox host in this repo and never will be. Every assertion here is proven
-against `tests/fakes/pve.py`'s `FakePVE` — a hand-maintained mimic of the
+against `tests/fakes/pve.py`'s `FakePVE`, a hand-maintained mimic of the
 proxmoxer attribute surface, fed rows this test writes itself. What that
 proves: `services/migrate.py`'s strategy-selection logic, estimate math, and
 the route's auth/entitlement/404/409/502 wiring are all correct GIVEN the PVE
 API shapes this file encodes (`/cluster/status`, `/storage`, `/cluster/
 resources`, `/nodes/{n}/storage`). What it does NOT prove: that a real PVE 8.x
 or 9.x server actually returns those exact shapes for a real cluster/PBS/dir
-storage setup — that needs a live node and is out of reach here (see doc 11
+storage setup, that needs a live node and is out of reach here (see doc 11
 §7). The `_MigrateLeaf`/`make_addressed_factory` additions in `tests/fakes/
 pve.py` exist for Task 15's `migrate.app` handler; this file only exercises
 the preflight half.
@@ -192,7 +192,7 @@ def test_transfer_strategy_no_dir_storage_on_target_blocks(tmp_path, csrf_header
 
 def test_no_size_available_reports_unknown_not_a_guess(tmp_path, csrf_header,
                                                         bootstrap_admin):
-    """No Backup row and the guest isn't in /cluster/resources either — the
+    """No Backup row and the guest isn't in /cluster/resources either, the
     honesty requirement: transfer_bytes/est_downtime_s must be None, never a
     fabricated number, and the statement must say why."""
     fake_src, fake_tgt = _fake_pair(dir_storage=(True, True))
@@ -329,7 +329,7 @@ def test_route_does_not_get_shadowed_by_the_lifecycle_wildcard(tmp_path, csrf_he
     """apps.py:522's WARNING: /{app_id}/{action} is registered last and would
     swallow a two-segment sibling. /migrate/preflight is three segments so it
     cannot structurally collide, but this proves the regression the WARNING
-    warns about doesn't happen in practice — a 422 'action must be one of
+    warns about doesn't happen in practice, a 422 'action must be one of
     start, stop, restart, shutdown' would mean the wildcard ate this route."""
     fake_src, fake_tgt = _fake_pair(shared_storage="pbs-ds")
     app = _make_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})

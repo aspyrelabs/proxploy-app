@@ -3,7 +3,7 @@
 The `schedules` table is authoritative (doc 04) and `jobs/scheduler.py` reads
 it every tick, so there is nothing to register or de-register here: a write
 that lands is live within one tick. The only obligation is that a row this
-router accepts must be one the tick can actually fire — hence `_validated()`
+router accepts must be one the tick can actually fire, hence `_validated()`
 (the same checks as Task 1's `validate()`, split out so a 422 can name which
 of cron/timezone/job_kind actually failed) on every write, rather than
 discovering a bad cron when the schedule silently disables itself hours later.
@@ -31,7 +31,7 @@ _manage = authorize("schedule", "manage")
 
 # Doc 05: "`sched.windows`; `store.auto_update` when `job_kind=app.update`".
 # Enforced in the body rather than as a route dependency because it depends on
-# the payload — a dependency cannot see `job_kind`.
+# the payload: a dependency cannot see `job_kind`.
 AUTO_UPDATE_KIND = "app.update"
 
 
@@ -84,7 +84,7 @@ def _check_auto_update(request: Request, job_kind: str) -> None:
 
 def _validated(cron: str, tz: str, job_kind: str) -> None:
     """Same checks as `validate()` (Task 1), but discriminating which of the
-    three axes failed — a flat `str(BadSchedule)` doesn't always name the
+    three axes failed, a flat `str(BadSchedule)` doesn't always name the
     axis (e.g. a bad cron's message never contains the word "cron"), and a
     human (or a test) needs to know whether to fix the trigger or the kind."""
     if job_kind not in HANDLERS:
@@ -97,7 +97,7 @@ def _validated(cron: str, tz: str, job_kind: str) -> None:
 
 @router.get("", dependencies=[Depends(_read)])
 def list_schedules(db=Depends(get_db), user: User = Depends(_read)):
-    # Ascending, same convention as notifications.py::list_channels — this is
+    # Ascending, same convention as notifications.py::list_channels: this is
     # a small, admin-curated config list (unlike GET /jobs' append-only
     # execution log, where newest-first is the right read), and stable
     # ordering matters more here than surfacing new rows first.
@@ -173,7 +173,7 @@ def delete_schedule(request: Request, schedule_id: int, db=Depends(get_db),
                     user: User = Depends(_manage)):
     row = _get(db, schedule_id)
     name, kind = row.name, row.job_kind
-    # jobs.schedule_id is a plain nullable FK with no ON DELETE — historical
+    # jobs.schedule_id is a plain nullable FK with no ON DELETE: historical
     # job rows must survive their schedule, so unlink rather than cascade.
     (db.query(Job).filter(Job.schedule_id == schedule_id)
      .update({"schedule_id": None}, synchronize_session=False))
@@ -191,7 +191,7 @@ def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
                      user: User = Depends(_run)):
     """An extra run, not a reschedule: `next_run_at` deliberately does not move.
 
-    Unlike a tick-fired run this one carries `requested_by` — a human asked for
+    Unlike a tick-fired run this one carries `requested_by`, a human asked for
     it, and the audit trail should say so.
     """
     row = _get(db, schedule_id)

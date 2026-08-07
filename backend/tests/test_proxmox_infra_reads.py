@@ -140,7 +140,7 @@ def test_cluster_nextid_returns_an_int():
 
 def test_a_failing_infra_read_wraps_and_redacts_the_secret():
     """fail=True on a brand-new client fails inside _connect() itself (the
-    factory call raises before any leaf is reached) — same as every other
+    factory call raises before any leaf is reached), same as every other
     ProxmoxClient method's `fail=True` test in this repo (see
     test_proxmox_console_calls.py::test_termproxy_wraps_and_redacts_secret_on_failure),
     and that path's message never carries the node name, only the address.

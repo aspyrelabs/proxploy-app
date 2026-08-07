@@ -40,7 +40,7 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
     if (comments.trim()) config.comments = comments.trim()
     const done = {
       onSuccess: () => {
-        toast(`${name} staged on ${node} — nothing changes until you Apply.`)
+        toast(`${name} staged on ${node}, nothing changes until you Apply.`)
         onClose()
       },
       onError: (err: unknown) =>

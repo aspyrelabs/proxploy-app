@@ -68,7 +68,7 @@ export function useInstall() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
       // An install creates an App row; it does not touch catalog_entries.
-      // ['apps'] is what goes stale here — including the Store page's own
+      // ['apps'] is what goes stale here, including the Store page's own
       // installed-slug lookup.
       qc.invalidateQueries({ queryKey: ['apps'] })
     },

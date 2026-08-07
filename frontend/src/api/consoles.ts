@@ -30,7 +30,7 @@ export function consoleWsUrl(kind: ConsoleKind, id: number, ticket: string): str
 
 // A console drop with no visible cause (upstream flaked, PVE's own
 // termproxy/vncproxy hiccuped) is worth a few automatic retries; a drop we
-// already know is fatal (Terminal.tsx surfacing a PtyBridge error frame —
+// already know is fatal (Terminal.tsx surfacing a PtyBridge error frame, 
 // e.g. the PVE-version-vs-API-token limitation the plan documents) is not,
 // and retrying it just spins real ticket/audit rows against Proxmox forever.
 // Shared by all three console call sites (apps.tsx, vms.tsx, cluster.tsx)
@@ -64,7 +64,7 @@ export function useReconnectingTicket(kind: ConsoleKind, id: number) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // A drop we already know is terminal (Terminal.tsx saw an error frame) —
+  // A drop we already know is terminal (Terminal.tsx saw an error frame), 
   // skip straight to the cap-reached message instead of burning attempts.
   const giveUp = useCallback(() => setFailed(true), [])
 

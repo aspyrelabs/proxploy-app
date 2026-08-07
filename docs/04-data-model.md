@@ -1,14 +1,14 @@
-# 04 — Data Model
+# 04: Data Model
 
 Owner doc for the full schema. Conforms to the decision brief §9: every entity
 listed there appears here, integer PKs everywhere, `created_at`/`updated_at`
 UTC timestamps, and the schema stays inside the portable SQLite/Postgres
-subset (SQLAlchemy 2.x models, Alembic migrations — brief §4).
+subset (SQLAlchemy 2.x models, Alembic migrations; brief §4).
 
 ## Conventions
 
 - **Types** (portable subset): `int` (INTEGER / BIGINT where flagged), `text`,
-  `real`, `bool` (INTEGER 0/1 on SQLite, BOOLEAN on PG — SQLAlchemy handles
+  `real`, `bool` (INTEGER 0/1 on SQLite, BOOLEAN on PG; SQLAlchemy handles
   it), `datetime` (UTC, timezone-naive stored as UTC; SQLAlchemy `DateTime`),
   `json` (TEXT on SQLite, JSONB on PG via SQLAlchemy `JSON`), `blob` (BLOB /
   BYTEA).
@@ -17,19 +17,19 @@ subset (SQLAlchemy 2.x models, Alembic migrations — brief §4).
 - **Timestamps**: `created_at datetime NOT NULL`, `updated_at datetime NOT
   NULL` on every table except the three append-only/high-volume tables
   (`audit_events`, `job_events`, `metric_samples`), which carry only their
-  event timestamp — they are never updated.
+  event timestamp; they are never updated.
 - **Caches**: tables holding Proxmox-owned state are explicitly marked
   **CACHE**. Proxmox is the source of truth for infra state; a cache row can
   always be dropped and re-synced. Proxploy is the source of truth for **app
   identity**: the `apps` table's `(host_id, ctid)` mapping plus the saved
-  script in `app_scripts` — that data cannot be reconstructed from Proxmox.
+  script in `app_scripts`, that data cannot be reconstructed from Proxmox.
   All cache tables (`apps`.*_cached columns, `vms`, `backups`,
   `metric_samples`) are populated from Proxmox's **bulk** endpoints
   (`/cluster/resources`, per-node `rrddata`) on the 30s poll cycle, never
-  per-guest calls — doc 02 §3 defines the per-cycle API-call budget this
+  per-guest calls, doc 02 §3 defines the per-cycle API-call budget this
   keeps flat regardless of guest count.
 - **Secrets**: `host_credentials` and `notification_channels` store
-  Fernet-encrypted blobs (MultiFernet, `key_version` for rotation — brief §5
+  Fernet-encrypted blobs (MultiFernet, `key_version` for rotation; brief §5
   SecretStore). Plaintext secrets never touch the database.
 - **Soft deletes**: none. Deleting an app deletes its script versions
   (cascade); `audit_events` is the permanent record of what existed.
@@ -47,7 +47,7 @@ Local and OIDC-federated accounts. Authorization lives in `casbin_rules`, not he
 | email | text | NOT NULL, unique index |
 | display_name | text | |
 | password_hash | text | argon2id (argon2-cffi); NULL for OIDC-only accounts |
-| totp_secret_enc | blob | Fernet-encrypted TOTP seed, and nothing else; NULL = TOTP not enrolled. One-time recovery codes (doc 08 §5) had no column anywhere in this doc — Phase 8 gave them their own table, `totp_recovery_codes` below, rather than packing them in here |
+| totp_secret_enc | blob | Fernet-encrypted TOTP seed, and nothing else; NULL = TOTP not enrolled. One-time recovery codes (doc 08 §5) had no column anywhere in this doc, Phase 8 gave them their own table, `totp_recovery_codes` below, rather than packing them in here |
 | totp_enabled | bool | default false; enforced at login only when true |
 | oidc_issuer | text | NULL for local accounts |
 | oidc_sub | text | unique index with `oidc_issuer` when set |
@@ -59,12 +59,12 @@ Indexes: `ux_users_email(email)`, `ux_users_oidc(oidc_issuer, oidc_sub)`.
 
 ### totp_recovery_codes
 **Added Phase 8, 2026-08-05** (migration `6cf6a0722d23`, the phase's only
-migration — see `docs/notes/phase-8-scale.md`). Doc 08 §5 requires one-time
+migration, see `docs/notes/phase-8-scale.md`). Doc 08 §5 requires one-time
 recovery codes "stored argon2-hashed"; no table in this doc held them. The
 Phase 8 plan proposed a zero-migration design packing the hashes as JSON
 inside `users.totp_secret_enc`; that was **rejected during implementation**,
 because burning one code would then mean decrypt-mutate-re-encrypt of a blob
-a concurrent TOTP verify is also reading — racy by construction — and a
+a concurrent TOTP verify is also reading, racy by construction, and a
 column named for one secret would quietly hold two. One row per code makes
 burning an ordinary atomic `UPDATE … WHERE used_at IS NULL`, the same
 redeem pattern `console_tickets` uses.
@@ -80,7 +80,7 @@ redeem pattern `console_tickets` uses.
 Indexes: `ix_totp_recovery_codes_user_id(user_id)`.
 
 ### sessions
-Server-side DB sessions (brief §5 AuthN — no JWT sessions). Cookie carries an opaque token; only its hash is stored.
+Server-side DB sessions (brief §5 AuthN, no JWT sessions). Cookie carries an opaque token; only its hash is stored.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -106,7 +106,7 @@ Automation credentials for the public REST API (entitlement `api.tokens`). Shown
 | name | text | user label |
 | prefix | text | first 8 chars, for list display (`ppk_a1b2…`) |
 | key_hash | text | SHA-256, unique index |
-| scopes | json | list of scope strings (`["read","app:write"]`); empty = full user rights. **Amendment, Phase 8:** this example read `"apps:write"` — plural; the grammar is `read` or `<matrix-resource-name>:write`, and the matrix resource name is singular (`app`, `vm`, `backup`). `POST /api-keys` 422s anything not in the matrix, so the plural form was never accepted |
+| scopes | json | list of scope strings (`["read","app:write"]`); empty = full user rights. **Amendment, Phase 8:** this example read `"apps:write"`; plural; the grammar is `read` or `<matrix-resource-name>:write`, and the matrix resource name is singular (`app`, `vm`, `backup`). `POST /api-keys` 422s anything not in the matrix, so the plural form was never accepted |
 | expires_at | datetime | NULL = no expiry |
 | last_used_at | datetime | |
 | revoked_at | datetime | NULL = active |
@@ -132,13 +132,13 @@ Casbin domains (brief §5 AuthZ: RBAC with domains = teams). Entitlement `teams.
 | id | int PK | |
 | team_id | int FK → teams | ON DELETE CASCADE |
 | user_id | int FK → users | ON DELETE CASCADE |
-| role | text | `owner` \| `admin` \| `operator` \| `viewer` — **authoritative**; the enforcer's `g`-lines are derived from this column, not mirrored into `casbin_rules` (amendment, Phase 8 — see the `casbin_rules` section below) |
+| role | text | `owner` \| `admin` \| `operator` \| `viewer`, **authoritative**; the enforcer's `g`-lines are derived from this column, not mirrored into `casbin_rules` (amendment, Phase 8; see the `casbin_rules` section below) |
 | created_at / updated_at | datetime | |
 
 Indexes: `ux_team_members(team_id, user_id)`.
 
 ### casbin_rules
-pycasbin's standard storage table (sqlalchemy-adapter shape). Managed only through the `Authorizer` seam — never written directly.
+pycasbin's standard storage table (sqlalchemy-adapter shape). Managed only through the `Authorizer` seam, never written directly.
 
 > **Amendment, Phase 8, 2026-08-05 (see `docs/notes/phase-8-scale.md`).** This
 > table ships and stays **empty**. The enforcer built by
@@ -148,7 +148,7 @@ pycasbin's standard storage table (sqlalchemy-adapter shape). Managed only throu
 > membership write. There is no `casbin-sqlalchemy-adapter` in the dependency
 > tree, and doc 05 exposes no endpoint that edits policy at runtime, so
 > persisting the rules here would duplicate `team_members` rather than
-> record anything new — the `role` column below says "mirrored into
+> record anything new, the `role` column below says "mirrored into
 > casbin_rules by the service layer", and a mirror is exactly the thing that
 > drifts. `team_members` is the single source of truth. The table is retained
 > for forward compatibility with a future adapter-backed enforcer.
@@ -193,7 +193,7 @@ One row per connected Proxmox node/endpoint. Multi-row gated by `hosts.multi`.
 | kind | text | `api_token` \| `ssh_key` |
 | encrypted_blob | blob | Fernet ciphertext: token-id+secret, or PEM private key |
 | key_version | int | MultiFernet key index for rotation |
-| public_meta | text | non-secret half: token id (`proxploy@pve!ro`), or SSH public key line — safe to display |
+| public_meta | text | non-secret half: token id (`proxploy@pve!ro`), or SSH public key line; safe to display |
 | last_used_at | datetime | |
 | created_at / updated_at | datetime | |
 
@@ -249,7 +249,7 @@ Versioned saved/edited community script per app (brief §9). Append-only version
 
 Indexes: `ux_app_scripts(app_id, version)`. Current script = max(version).
 
-### vms — **CACHE**
+### vms: **CACHE**
 Mirror of Proxmox QEMU guests for the VMs table/detail views. Droppable; re-synced by the poller.
 
 | Column | Type | Notes |
@@ -269,7 +269,7 @@ Mirror of Proxmox QEMU guests for the VMs table/detail views. Droppable; re-sync
 
 Indexes: `ux_vms(host_id, vmid)`.
 
-### catalog_entries — **CACHE**
+### catalog_entries: **CACHE**
 community-scripts/ProxmoxVE metadata, fetched server-side with ETag refresh (brief §5 CatalogSource). Never fetched from the browser.
 
 | Column | Type | Notes |
@@ -277,27 +277,27 @@ community-scripts/ProxmoxVE metadata, fetched server-side with ETag refresh (bri
 | id | int PK | |
 | slug | text | upstream script slug, unique index |
 | name | text | |
-| description | text | null in v1 — not derivable from `ct/*.sh` content; see gap note below |
-| category | text | store chip categories; v1 sourced from a hand-maintained slug→category map, not upstream metadata — see gap note below |
+| description | text | null in v1, not derivable from `ct/*.sh` content; see gap note below |
+| category | text | store chip categories; v1 sourced from a hand-maintained slug→category map, not upstream metadata; see gap note below |
 | script_path | text | upstream repo path of the install entrypoint |
 | website / docs_url | text | `website` comes from the `ct/*.sh` header's `# Source:` line; `docs_url` null in v1 |
 | default_cpu | int | upstream resource defaults, parsed from `ct/*.sh`'s `var_cpu`/etc. |
 | default_ram_mb | int | |
 | default_disk_gb | int | |
 | default_os / default_os_version | text | e.g. `debian` / `12` |
-| icon_url | text | null in v1 — not derivable from `ct/*.sh` content; see gap note below |
-| popularity | int | null in v1 — no public source found; see gap note below |
+| icon_url | text | null in v1, not derivable from `ct/*.sh` content; see gap note below |
+| popularity | int | null in v1, no public source found; see gap note below |
 | upstream_sha | text | commit the metadata was read at |
 | raw | json | full upstream JSON record, forward-compat |
 | deprecated | bool | upstream removed/renamed; kept so installed apps still resolve |
-| installable | bool | set by ingest's install-feasibility classifier: true when the paired `ct/` script has exactly one `build_container` call AND the paired `install/` script has no unguarded interactive prompt (`read`/`whiptail`/`dialog` not preceded by an env-var short-circuit) — mechanical, not a guess (doc 01 §3, doc 11 §8, `docs/notes/phase-4-spike.md`); the store only ever offers `install` on true rows |
-| unsupported_reason | text | NULL when `installable`; short honest reason set by ingest otherwise (e.g. "multi-CT / docker-compose pattern", "install script requires interactive input, no non-interactive entrypoint") — shown in the store UI next to the upstream link |
+| installable | bool | set by ingest's install-feasibility classifier: true when the paired `ct/` script has exactly one `build_container` call AND the paired `install/` script has no unguarded interactive prompt (`read`/`whiptail`/`dialog` not preceded by an env-var short-circuit), mechanical, not a guess (doc 01 §3, doc 11 §8, `docs/notes/phase-4-spike.md`); the store only ever offers `install` on true rows |
+| unsupported_reason | text | NULL when `installable`; short honest reason set by ingest otherwise (e.g. "multi-CT / docker-compose pattern", "install script requires interactive input, no non-interactive entrypoint"); shown in the store UI next to the upstream link |
 | synced_at | datetime | |
 | created_at / updated_at | datetime | |
 
 Catalog-level ETag + last-sync live in `settings` (`catalog.etag`, `catalog.synced_at`).
 The true count of `installable = true` rows is the number reported in Phase
-4's definition of done (doc 10), replacing any "300+ scripts" placeholder —
+4's definition of done (doc 10), replacing any "300+ scripts" placeholder; 
 the classifier rule above measured ≈88.2% (493/559) against the current
 upstream corpus (`docs/notes/phase-4-spike.md`); ingest will report the
 live figure at Phase 4 completion.
@@ -305,7 +305,7 @@ live figure at Phase 4 completion.
 **Tracked v1 gap:** `description`, `icon_url`, and `popularity` are null,
 and `category` comes from a small hand-maintained slug→category map
 (`proxploy/services/catalog_categories.py`, unmapped slugs default to
-"Uncategorized") rather than upstream metadata — there is no public bulk
+"Uncategorized") rather than upstream metadata; there is no public bulk
 read API for the community-scripts catalog to source these from instead
 (doc 01 §3 has the full correction and rationale). Follow-up, not blocking
 Phase 4: find a stable read path into the community-scripts content, or
@@ -322,7 +322,7 @@ Persisted units of work for the in-process asyncio JobBackend (brief §5). Every
 |---|---|---|
 | id | int PK | |
 | kind | text | dotted verb: `app.install`, `app.update`, `app.start`, `vm.stop`, `backup.run`, `host.sync`, `catalog.refresh`, `migrate.app`, … |
-| status | text | `queued` \| `running` \| `succeeded` \| `failed` \| `canceled` \| `interrupted` (orphaned `running` jobs marked on boot — doc 02 §3; never resumed) |
+| status | text | `queued` \| `running` \| `succeeded` \| `failed` \| `canceled` \| `interrupted` (orphaned `running` jobs marked on boot, doc 02 §3; never resumed) |
 | target_type | text | `host` \| `app` \| `vm` \| `system` |
 | target_id | int | id in the target table; NULL for `system` |
 | params | json | job input (redacted of secrets before persist) |
@@ -337,7 +337,7 @@ Persisted units of work for the in-process asyncio JobBackend (brief §5). Every
 Indexes: `ix_jobs_status(status, created_at)`, `ix_jobs_target(target_type, target_id, created_at)`.
 
 ### job_events
-Append-only log lines / progress ticks per job — the backing store for the live install stream and the archived transcript (brief §8: full output streamed **and archived**). BIGINT PK.
+Append-only log lines / progress ticks per job, the backing store for the live install stream and the archived transcript (brief §8: full output streamed **and archived**). BIGINT PK.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -348,10 +348,10 @@ Append-only log lines / progress ticks per job — the backing store for the liv
 | stream | text | `stdout` \| `stderr` \| `progress` \| `status` |
 | message | text | one line / one tick |
 
-Indexes: `ux_job_events(job_id, seq)`. No `updated_at` — rows are never mutated.
+Indexes: `ux_job_events(job_id, seq)`. No `updated_at`, rows are never mutated.
 
 ### schedules
-APScheduler 3.11 `CronTrigger` math feeding the JobBackend (brief §5); this table is authoritative. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:** the previous wording — "APScheduler's own state is reconstructed from these rows at boot" — implied a second, APScheduler-owned registry synced from this table. There is no such registry: `jobs/scheduler.py`'s tick loop reads this table directly on every tick (`prime()`/`due()`/`fire_one()`), and APScheduler contributes only `CronTrigger`'s cron-parsing and DST-correct next-fire arithmetic, nothing stateful.
+APScheduler 3.11 `CronTrigger` math feeding the JobBackend (brief §5); this table is authoritative. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:** the previous wording; "APScheduler's own state is reconstructed from these rows at boot", implied a second, APScheduler-owned registry synced from this table. There is no such registry: `jobs/scheduler.py`'s tick loop reads this table directly on every tick (`prime()`/`due()`/`fire_one()`), and APScheduler contributes only `CronTrigger`'s cron-parsing and DST-correct next-fire arithmetic, nothing stateful.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -437,7 +437,7 @@ Raw 30 s poll samples (brief §5 MetricsStore). BIGINT PK, hottest table in the 
 | value | real | |
 | ts | datetime | sample time |
 
-Indexes: `ix_samples(target_type, target_id, metric, ts)`. No timestamps beyond `ts` — append-only, pruned by retention job.
+Indexes: `ix_samples(target_type, target_id, metric, ts)`. No timestamps beyond `ts`, append-only, pruned by retention job.
 
 ### metric_rollups
 5-minute and 1-hour aggregates, written by a rollup job, read by all charts older than the raw window.
@@ -458,7 +458,7 @@ Indexes: `ux_rollups(target_type, target_id, metric, resolution, bucket_ts)`.
 
 ## Backups
 
-### backups — **CACHE**
+### backups: **CACHE**
 Mirror of PBS datastore / vzdump archives per host (entitlement `backups.pbs`). Restore/delete operate through the Proxmox API; this table only feeds the Backups page.
 
 | Column | Type | Notes |
@@ -466,7 +466,7 @@ Mirror of PBS datastore / vzdump archives per host (entitlement `backups.pbs`). 
 | id | int PK | |
 | host_id | int FK → hosts | ON DELETE CASCADE |
 | storage | text | datastore name (`pbs-datastore`, `local`) |
-| volid | text | Proxmox volume id — the real identifier upstream |
+| volid | text | Proxmox volume id, the real identifier upstream |
 | guest_type | text | `ct` \| `vm` |
 | guest_vmid | int | CTID/VMID at backup time |
 | guest_name | text | resolved display name at sync time |
@@ -483,8 +483,8 @@ Indexes: `ux_backups(host_id, volid)`, `ix_backups_guest(guest_type, guest_vmid)
 
 ## Audit, entitlements, settings
 
-### audit_events — **append-only**
-Every state-changing action (brief §8). The application exposes **no UPDATE or DELETE path** for this table — no ORM model method, no endpoint, no admin tool. Archival is export-then-truncate, operator-initiated or via the opt-in `audit.retention` policy (see retention). BIGINT PK.
+### audit_events: **append-only**
+Every state-changing action (brief §8). The application exposes **no UPDATE or DELETE path** for this table, no ORM model method, no endpoint, no admin tool. Archival is export-then-truncate, operator-initiated or via the opt-in `audit.retention` policy (see retention). BIGINT PK.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -510,7 +510,7 @@ Single-row (id = 1) cache of the last signed entitlement token + its resolved cl
 | id | int PK | always 1 |
 | token | text | EdDSA-signed JWT from proxploy-api, Fernet-encrypted at rest (doc 08 §3); NULL when unlicensed |
 | tier | text | `free` \| `pro` \| … ; `builtin` when unlicensed |
-| features | json | resolved flag map `{"hosts.multi": true, …}` — what `GET /api/v1/entitlements` serves |
+| features | json | resolved flag map `{"hosts.multi": true, …}`; what `GET /api/v1/entitlements` serves |
 | issued_at / expires_at | datetime | token claims (~72 h expiry) |
 | grace_until | datetime | offline validity horizon (~30 d) |
 | fetched_at | datetime | last successful refresh |
@@ -560,7 +560,7 @@ erDiagram
 ```
 
 (`metric_*` and `audit_events` reference targets polymorphically via
-`target_type`/`target_id`, so no hard FKs there by design — cache rows and
+`target_type`/`target_id`, so no hard FKs there by design; cache rows and
 targets may outlive each other.)
 
 ---
@@ -579,8 +579,8 @@ any other job), intervals adjustable via `settings`:
 | `jobs` | terminal jobs pruned with their events | 90 d |
 | `sessions` | delete expired + revoked rows | 7 d after expiry |
 | `alerts` | resolved alerts pruned | 180 d |
-| `audit_events` | **no automatic pruning by default.** Operator-initiated archival: `proxploy audit export` writes JSONL to a file, then (optionally, explicit flag) truncates exported rows. Opt-in configurable policy (`audit.retention`, doc 08 §7) schedules the same export-then-prune, deleting only rows verifiably landed in a completed archive — never below a floor. No other delete path exists. | manual |
+| `audit_events` | **no automatic pruning by default.** Operator-initiated archival: `proxploy audit export` writes JSONL to a file, then (optionally, explicit flag) truncates exported rows. Opt-in configurable policy (`audit.retention`, doc 08 §7) schedules the same export-then-prune, deleting only rows verifiably landed in a completed archive; never below a floor. No other delete path exists. | manual |
 
 SQLite runs in WAL mode (brief §4); the sample writer batches inserts per
-poll cycle to keep write contention down (risk noted in brief §11 — the seam
+poll cycle to keep write contention down (risk noted in brief §11, the seam
 to Postgres/VictoriaMetrics exists if an install outgrows this).

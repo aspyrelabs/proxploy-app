@@ -98,14 +98,14 @@ describe('StoragePage', () => {
     // UsageBar paints its fill with an inline `background: <gradient>`; the
     // codebase has no test ids, so read the style the same way a human would.
     // StorageCard's icon tile is *always* violet regardless of danger state,
-    // so `div[style*="linear-gradient"]` alone also matches it — narrow to
+    // so `div[style*="linear-gradient"]` alone also matches it, narrow to
     // the fill divs, which are the only ones that also carry `width`.
     const bars = [...container.querySelectorAll('div[style*="linear-gradient"]')]
       .map((el) => el.getAttribute('style') ?? '')
       .filter((s) => s.includes('width'))
     // jsdom v30 (@asamuzakjp/css-color) normalizes hex colors to rgb() when it
     // serializes an inline style, so #A78BFA / #F26D6D never appear literally
-    // here even though StorageCard sets them verbatim — assert the equivalent
+    // here even though StorageCard sets them verbatim, assert the equivalent
     // rgb() triplet instead.
     expect(bars[0]).toContain('rgb(167, 139, 250)')  // local, 25% → STORAGE_GRADIENT (#A78BFA)
     expect(bars[1]).toContain('rgb(242, 109, 109)')  // pbs-main, 92% → DANGER_GRADIENT (#F26D6D)

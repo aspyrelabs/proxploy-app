@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-// Terminal and console surfaces are dark in BOTH themes on purpose — a
+// Terminal and console surfaces are dark in BOTH themes on purpose, a
 // terminal that follows a light theme stops looking like a terminal. That
 // intent was previously unrecorded anywhere; this list is where it lives now.
 const INTENTIONALLY_DARK = [

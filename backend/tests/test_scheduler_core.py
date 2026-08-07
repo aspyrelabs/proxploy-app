@@ -1,6 +1,6 @@
 """Scheduler core (doc 10 Phase 7, doc 04 `schedules`).
 
-These are the pure pieces — cron math, due selection, one firing pass. The
+These are the pure pieces, cron math, due selection, one firing pass. The
 loop that calls `tick` lives in Task 2 and is tested separately.
 """
 import asyncio
@@ -11,7 +11,7 @@ import pytest
 # Registers HANDLERS entries this file relies on (`catalog.refresh`,
 # `backup.run`, `app.*`/`vm.*` lifecycle kinds) as an import side effect.
 # Without these, this file only passes when some other test module that
-# imports them (e.g. via `create_app`) runs first in the same session —
+# imports them (e.g. via `create_app`) runs first in the same session, 
 # these imports make it pass standalone too.
 import proxploy.services.catalog  # noqa: F401
 import proxploy.services.backupjobs  # noqa: F401
@@ -67,7 +67,7 @@ def test_next_fire_rejects_malformed_cron(cron):
 
 def test_next_fire_rejects_an_unknown_timezone():
     # zoneinfo raises ZoneInfoNotFoundError, which subclasses KeyError, not
-    # ValueError — both have to be caught or this escapes as a 500.
+    # ValueError: both have to be caught or this escapes as a 500.
     with pytest.raises(BadSchedule):
         next_fire("0 3 * * *", "Not/AZone", datetime(2026, 8, 1, 12, 0))
 
@@ -83,7 +83,7 @@ def test_validate_rejects_an_unregistered_job_kind():
 
 @pytest.mark.parametrize("job_kind, params, expected", [
     # Lifecycle kinds carry a bare `target_id` (api/apps.py enqueues
-    # `{"target_id": ..., "action": ...}`) — the prefix, not the param key,
+    # `{"target_id": ..., "action": ...}`): the prefix, not the param key,
     # must decide the type.
     ("vm.restart", {"target_id": 12}, ("vm", 12)),
     ("app.start", {"target_id": 3}, ("app", 3)),
@@ -157,7 +157,7 @@ def test_fire_one_enqueues_stamps_and_advances(tmp_path):
 
             db.refresh(s)
             assert s.last_run_at == now
-            # advanced from `now`, NOT from the stale next_run_at — a week of
+            # advanced from `now`, NOT from the stale next_run_at: a week of
             # downtime must produce one catch-up run, not one per missed day.
             assert s.next_run_at == datetime(2026, 8, 2, 3, 0)
 
@@ -188,7 +188,7 @@ def test_fire_one_derives_the_job_target_from_params(tmp_path):
 
 
 def test_fire_one_derives_a_lifecycle_target_from_the_kind_prefix(tmp_path):
-    """`vm.restart` carries a bare `target_id` (api/apps.py), not `vm_id` — the
+    """`vm.restart` carries a bare `target_id` (api/apps.py), not `vm_id`; the
     param-key-sniffing bug this regression-tests for derived ("system", None)
     here, which would have pointed the SSE `job` delta's cache invalidation
     (api/live.ts) at nothing."""
@@ -211,7 +211,7 @@ def test_fire_one_still_returns_the_dict_if_the_row_breaks_right_after_firing(
         tmp_path, monkeypatch):
     """A job really was enqueued here, so the caller still needs its id even
     though the schedule's OWN next_fire() call (advancing past `now`) then
-    raises and disables the row. None means "no job was enqueued" — it must
+    raises and disables the row. None means "no job was enqueued"; it must
     not also mean "the row got disabled", or a caller can't tell these apart."""
     async def go():
         app = make_job_app(tmp_path)
@@ -279,12 +279,12 @@ def test_tick_primes_then_fires_and_is_idempotent_within_the_minute(tmp_path):
         with app.state.sessionmaker() as db:
             _sched(db, name="hourly", cron="0 * * * *")
 
-        # 11:59 — primed to 12:00, nothing due yet.
+        # 11:59: primed to 12:00, nothing due yet.
         assert tick(app, datetime(2026, 8, 1, 11, 59)) == []
-        # 12:00 — fires once.
+        # 12:00: fires once.
         first = tick(app, datetime(2026, 8, 1, 12, 0))
         assert len(first) == 1
-        # 12:00:30 — the row now points at 13:00, so the same tick does not
+        # 12:00:30: the row now points at 13:00, so the same tick does not
         # re-fire it. This is the regression the boundary rule above prevents.
         assert tick(app, datetime(2026, 8, 1, 12, 0, 30)) == []
 

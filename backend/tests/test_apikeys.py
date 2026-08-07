@@ -119,7 +119,7 @@ def test_bearer_post_needs_no_csrf_header(app_client, csrf_header):
     app, c = app_client
     raw = _create_key(c, csrf_header).json()["key"]
     c.cookies.clear()
-    # no X-CSRF-Token at all — middleware.py exempts any Authorization header
+    # no X-CSRF-Token at all: middleware.py exempts any Authorization header
     r = c.post("/api/v1/api-keys", json={"name": "second"},
               headers={"Authorization": f"Bearer {raw}"})
     assert r.status_code == 201

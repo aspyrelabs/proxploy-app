@@ -17,14 +17,14 @@ from proxploy.models import KIND_FROM_SCHEME, NotificationChannel, utcnow
 logger = logging.getLogger(__name__)
 
 # Apprise's logger propagates to the root logger by default, which would defeat
-# "never logged" (see module docstring) the moment any handler is configured —
+# "never logged" (see module docstring) the moment any handler is configured, 
 # set once at import; this doesn't require apprise itself to be imported yet.
 #
 # This alone is NOT sufficient: Apprise's plugins send over `requests`, whose
-# connection pooling logs the request line (method + full path/query — for
+# connection pooling logs the request line (method + full path/query: for
 # schemes where the token lives in the path, e.g. json/form/xml webhooks, that
 # IS the token) via a separate "urllib3" logger tree that never touches
-# "apprise" at all. Silencing "apprise" alone leaves that tree fully live —
+# "apprise" at all. Silencing "apprise" alone leaves that tree fully live, 
 # confirmed by capturing a real failed send at DEBUG with propagation on
 # before this line existed: the token showed up under "urllib3.connectionpool".
 logging.getLogger("apprise").propagate = False
@@ -38,7 +38,7 @@ def kind_for(url: str) -> str:
     column, so any fallback that echoes part of the input (the scheme, or
     even a length/shape-filtered version of it) is a plaintext-secret leak
     the moment a channel URL is malformed or a bare credential is pasted
-    without a scheme at all — a URL-shaped guard can always be walked around
+    without a scheme at all, a URL-shaped guard can always be walked around
     by appending "://" or picking a short lowercase-and-dashes token. An
     unrecognised-but-legitimate scheme showing as "webhook" is a fine
     outcome; there is no other fallback.
@@ -48,7 +48,7 @@ def kind_for(url: str) -> str:
 
 
 def redact_url(url: str) -> str:
-    """Safe-to-log/safe-to-show stand-in for an Apprise URL — use this
+    """Safe-to-log/safe-to-show stand-in for an Apprise URL, use this
     anywhere a channel URL would otherwise reach a log line or a human-visible
     string. Same allowlist discipline as `kind_for`: the visible scheme label
     is never echoed input, only a fixed label from `KIND_FROM_SCHEME` (or
@@ -77,7 +77,7 @@ def channels_for(db, event: str, only_ids: list[int] | None = None
     `only_ids` is an OVERRIDE, not a filter on top of the subscription: an
     alert rule that names its channels (doc 04 `alert_rules.channel_ids`)
     means exactly those, whatever they happen to be subscribed to. A disabled
-    channel is still never used — "off" beats "named".
+    channel is still never used, "off" beats "named".
     """
     rows = db.query(NotificationChannel).filter_by(enabled=True)
     if only_ids is not None:
@@ -92,7 +92,7 @@ def notify(app, event: str, title: str, body: str,
     """Fan a single event out to every subscribed channel. Returns channels reached.
 
     A channel that is misconfigured, unreachable or slow must never fail the
-    job that triggered it — each send is isolated. Decryption happens inside
+    job that triggered it, each send is isolated. Decryption happens inside
     the session (cheap); the blocking Apprise sends happen outside it, so a
     slow/hanging channel doesn't hold a DB connection checked out for
     ~8s-per-channel (Apprise's default connect+read timeout) while every
@@ -103,7 +103,7 @@ def notify(app, event: str, title: str, body: str,
         for channel in channels_for(db, event, only_ids):
             try:
                 url = app.state.secretstore.decrypt(channel.url_enc).decode()
-            except Exception:  # noqa: BLE001 — never let one channel poison the rest
+            except Exception:  # noqa: BLE001  (never let one channel poison the rest)
                 continue
             targets.append((channel.id, url))
 
@@ -111,10 +111,10 @@ def notify(app, event: str, title: str, body: str,
     for channel_id, url in targets:
         try:
             ok = send_one(url, title, body)
-        except Exception:  # noqa: BLE001 — never let one channel poison the rest
+        except Exception:  # noqa: BLE001  (never let one channel poison the rest)
             # Log the redacted URL, never the exception object: a channel is
             # free to raise with the raw URL interpolated into its message
-            # (send_one's own caller — the HTTP test endpoint — sees exactly
+            # (send_one's own caller: the HTTP test endpoint, sees exactly
             # that from real Apprise plugin errors), and `str(exc)`/`repr(exc)`
             # would carry it straight into this log line otherwise.
             logger.debug("channel %s raised during send: %s",

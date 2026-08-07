@@ -24,7 +24,7 @@ class SecretStore:
         if path.exists():
             return
         if db_file_exists:
-            # Doc 11 §9: never silently regenerate a key over an existing DB —
+            # Doc 11 §9: never silently regenerate a key over an existing DB, 
             # that would strand every stored credential as ambiguous ciphertext.
             raise MasterKeyMissing(
                 f"master key {path} is missing but a database already exists. "

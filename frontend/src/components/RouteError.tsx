@@ -5,7 +5,7 @@ import { Button } from './ui/button'
  * with inline `style={}` and so ignores the theme entirely.
  *
  * An unreachable backend and a bug in the app want different things from the
- * user — one wants a retry, the other wants a way out and (in dev) a stack.
+ * user, one wants a retry, the other wants a way out and (in dev) a stack.
  * Collapsing them into "Something went wrong" is exactly what the built-in
  * fallback already does badly.
  */

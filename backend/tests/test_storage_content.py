@@ -25,7 +25,7 @@ def _seed(app):
 def _api(tmp_path, fake=None, **overrides):
     # ponytail: app.state.sessionmaker only exists inside the FastAPI lifespan
     # (proxploy/main.py), so seeding must happen inside a `with client:` block
-    # rather than before it — same precedent as test_storage_api.py::_seed.
+    # rather than before it: same precedent as test_storage_api.py::_seed.
     # TestClient tolerates re-entry (each entry reruns lifespan startup/shutdown
     # against the same sqlite file), so we seed here and hand back an unentered
     # client for the test body to enter itself.
@@ -103,7 +103,7 @@ def test_upload_job_posts_to_proxmox_and_always_deletes_the_temp_file(tmp_path):
     async def run():
         fake = FakePVE()
         app = make_job_app(tmp_path, fake=fake)
-        import proxploy.services.storagejobs  # noqa: F401 — registers handlers
+        import proxploy.services.storagejobs  # noqa: F401  (registers handlers)
         backend = JobBackend(app)
         hid = _seed(app)
         spool = tmp_path / "ubuntu.iso"
@@ -180,7 +180,7 @@ def test_delete_volume_route_enqueues_and_audits_the_volid(tmp_path, csrf_header
 
 
 def test_startup_clears_stale_spool_files_left_by_a_crash(tmp_path):
-    """The in-process job runner never resumes a job across a restart —
+    """The in-process job runner never resumes a job across a restart, 
     sweep_orphans (proxploy/jobs/backend.py) only ever marks a queued/running
     job `interrupted`, full stop. So a spool file left in `data_dir/uploads`
     at boot provably belongs to a job that can never run again; leaving it
@@ -205,14 +205,14 @@ def test_proxmoxer_streams_large_uploads_via_requests_toolbelt(monkeypatch):
     """Covers the leg the fakes cannot see: FakePVE.upload replaces
     `self._connect()` entirely, so the browser->spool leg (chunked, proven
     above) is real but the spool->PVE leg goes through proxmoxer's actual
-    `requests` backend even in tests — and that backend silently buffers (or
+    `requests` backend even in tests, and that backend silently buffers (or
     outright refuses, `OverflowError`, above ~2 GiB) any upload over 10 MiB
     unless `requests_toolbelt` is importable. This asserts the dependency is
     present AND that proxmoxer picks the true streaming branch (a
     `MultipartEncoder` body, never a bare dict) for a file above that
     threshold, by intercepting `requests.Session.request` before it would hit
     the network. What remains unproven without a real PVE: actual bytes
-    reaching the wire and PVE accepting them — that is exercised by the
+    reaching the wire and PVE accepting them; that is exercised by the
     `pve_integration`-marked tests, not this one.
     """
     import requests_toolbelt

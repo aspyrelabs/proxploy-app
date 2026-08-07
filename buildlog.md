@@ -7,65 +7,65 @@ Driven by `bin/build-cycle.sh` on the `proxploy-build.timer` systemd user timer.
 
 <!-- STATE: phase=6 step=plan -->
 
-### 2026-07-29T01:22:23+05:30 — Phase 1 — write-plan FAILED (exit 1)
+### 2026-07-29T01:22:23+05:30: Phase 1, write-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run.
 
-### 2026-07-29T01:30:04+05:30 — Phase 1 — write-plan FAILED (exit 1)
+### 2026-07-29T01:30:04+05:30: Phase 1, write-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run.
 
-### 2026-07-29T02:00:03+05:30 — Phase 1 — write-plan FAILED (exit 1)
+### 2026-07-29T02:00:03+05:30: Phase 1, write-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run.
 
-### 2026-07-29T02:30:08+05:30 — Phase 1 — write-plan FAILED (exit 1)
+### 2026-07-29T02:30:08+05:30: Phase 1, write-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run.
 
-### 2026-07-29T03:34:09+05:30 — Phase 1 — write-plan completed (fable-5)
+### 2026-07-29T03:34:09+05:30: Phase 1, write-plan completed (fable-5)
 
 Plan: /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/docs/superpowers/plans/2026-07-29-phase-1-foundation.md
 
-### 2026-07-29T04:29:46+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T04:29:46+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T04:29:49+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T04:29:49+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T04:30:03+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T04:30:03+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T05:00:05+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T05:00:05+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T05:30:08+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T05:30:08+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T06:00:05+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T06:00:05+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T06:30:08+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T06:30:08+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T07:00:05+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T07:00:05+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T07:30:04+05:30 — Phase 1 — execute-plan FAILED (exit 1)
+### 2026-07-29T07:30:04+05:30: Phase 1, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T08:20:58+05:30 — Phase 1 — execute-plan completed (sonnet-5)
+### 2026-07-29T08:20:58+05:30: Phase 1, execute-plan completed (sonnet-5)
 
-All 16 Phase 1 tasks are now complete and committed, one commit per task, directly to `main` across all four repos (matching this project's established no-branch convention, confirmed by every prior commit in the history) — so I skipped the `finishing-a-development-branch` skill, since there's no feature branch to merge here; work streamed straight to `main` as it was built.
+All 16 Phase 1 tasks are now complete and committed, one commit per task, directly to `main` across all four repos (matching this project's established no-branch convention, confirmed by every prior commit in the history); so I skipped the `finishing-a-development-branch` skill, since there's no feature branch to merge here; work streamed straight to `main` as it was built.
 
 ## What was built
 
@@ -77,7 +77,7 @@ All 16 Phase 1 tasks are now complete and committed, one commit per task, direct
 - Entitlement registry (all 81 flags ON), Ed25519 verification client with grace window, `/entitlements`
 - Dormant license activate/refresh/remove flow against proxploy-api, with background refresh and an e2e roundtrip test
 - Proxmox client layer (`ProxmoxClient`, single PVE-8/9 branch point) + fake PVE fixture infra + a gated live-PVE integration test
-- Host onboarding — probe/create/list/detail/test, encrypted credential storage, consented SSH key enrolment — the audited route template every later route copies
+- Host onboarding, probe/create/list/detail/test, encrypted credential storage, consented SSH key enrolment; the audited route template every later route copies
 - Settings service (`.enc` hygiene) + `/meta/version`, `/meta/onboarding`
 
 **proxploy-app (frontend, Vite + React 19 + Tailwind v4):**
@@ -90,39 +90,39 @@ All 16 Phase 1 tasks are now complete and committed, one commit per task, direct
 **proxploy-api, proxploy-web, proxploy-docs:** licensing resolver (from earlier in this build) plus its own CI; web/docs remain intentional empty scaffolds per the plan.
 
 ## Verification
-- `backend`: 39 passed, 2 skipped (env-gated live-PVE + one other) — `pytest -q`
+- `backend`: 39 passed, 2 skipped (env-gated live-PVE + one other); `pytest -q`
 - `backend`: `check_executor_isolation.py` → OK
-- `frontend`: 5 passed (3 files) — `npm test`; `npm run build` clean; SPA-serving confirmed via `TestClient`
-- `proxploy-api`: 4 passed — `pytest -q`
+- `frontend`: 5 passed (3 files), `npm test`; `npm run build` clean; SPA-serving confirmed via `TestClient`
+- `proxploy-api`: 4 passed, `pytest -q`
 - All three DoD quality gates hold; the Phase-1 DoD verification map's proof artifacts all exist and pass
 
 Noted deviations (documented in the relevant commit messages): a few TS `as never` casts for routes/circular imports that resolve themselves as later tasks register those routes; `psycopg` (LGPL) split into its own extras group so it doesn't taint the license audit; license-audit commands needed `--ignore-packages`/`OFL-1.1` additions to correctly exclude our own unpublished packages and allow the SIL font license. No live PVE or Docker was available on this box, so those legs stayed env/secret-gated as designed, and the dev-server manual walkthrough was skipped (sandbox blocks background servers) in favor of the equivalent `TestClient`-based checks the plan itself sanctions for the no-PVE case.
 
-### 2026-07-29T08:58:52+05:30 — Phase 2 — write-plan completed (fable-5)
+### 2026-07-29T08:58:52+05:30: Phase 2, write-plan completed (fable-5)
 
 Plan: /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/docs/superpowers/plans/2026-07-29-phase-2-observe.md
 
-### 2026-07-29T10:24:02+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+### 2026-07-29T10:24:02+05:30: Phase 2, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T10:24:06+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+### 2026-07-29T10:24:06+05:30: Phase 2, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T10:30:08+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+### 2026-07-29T10:30:08+05:30: Phase 2, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T11:00:05+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+### 2026-07-29T11:00:05+05:30: Phase 2, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T11:30:04+05:30 — Phase 2 — execute-plan FAILED (exit 1)
+### 2026-07-29T11:30:04+05:30: Phase 2, execute-plan FAILED (exit 1)
 
 See /home/aasim/workspace/aspyrelabs/proxploy/proxploy-app/logs/build-2026-07-29.log for details. Will retry next run (plan step is not re-run).
 
-### 2026-07-29T11:45:00+05:30 — Phase 2 — execute-plan completed (Friday)
+### 2026-07-29T11:45:00+05:30: Phase 2, execute-plan completed (Friday)
 
 Phase 2 was built by Claude Code during a single 84-minute run (9:00–10:24 AM)
 that hit the session limit mid-verification. All code was written; only Task 14
@@ -143,7 +143,7 @@ verification notes.
 - 6 Phase 2 REST endpoints: cluster/summary, cluster/nodes, apps, apps/discovered, vms, metrics/query
 - Frontend: Cluster page (rings + node cards), node detail, Apps grid + discovered panel, VMs table + detail overview, uPlot charts via Sparkline component, LiveProvider for SSE-to-QueryCache invalidation
 
-### 2026-07-29T15:00:00+05:30 — Phase 3 — execute-plan completed
+### 2026-07-29T15:00:00+05:30: Phase 3, execute-plan completed
 
 Plan: `docs/superpowers/plans/2026-07-29-phase-3-act.md`. All 14 tasks
 implemented and committed directly to `main`, tasks 1-8 backend/1-10
@@ -166,12 +166,12 @@ whole-branch pass. Full details, DoD proof and deviations in
   channels card
 
 **Verification:**
-- Backend: 190 passed, 1 skipped, 2 deselected — `pytest -q -m "not pve_integration and not e2e"`
+- Backend: 190 passed, 1 skipped, 2 deselected; `pytest -q -m "not pve_integration and not e2e"`
 - Backend: executor isolation OK; license audit OK
 - Frontend: 33 passed (11 files); build clean; license audit OK
 - `docs/notes/phase-3-act.md`'s `dod_verify.py` run: all 4 doc-10 DoD clauses
   proved against `tests.support.make_app` + `FakePVE` (no live PVE, no
-  Docker, no browser on this box — clause 1's UI half is covered by
+  Docker, no browser on this box; clause 1's UI half is covered by
   `frontend/src/tests/lifecycle.test.tsx` under jsdom, not a visual run)
 
 **Deviations** (full list + rationale in the notes doc): lifecycle verbs are
@@ -181,7 +181,7 @@ amended to add `target_type` to the `job` SSE event; job-row writes are
 inline on the event loop by design; `hosts/{id}/tasks` and `hosts/{id}/sync`
 were deliberately not built (no Phase 3 dependency).
 
-### 2026-07-30T16:28:38+05:30 — Phase 4 — execute-plan completed
+### 2026-07-30T16:28:38+05:30: Phase 4, execute-plan completed
 
 Plan: `docs/superpowers/plans/2026-07-30-phase-4-store.md`. All 14 feature
 tasks implemented and committed directly to `main`, each individually
@@ -211,9 +211,9 @@ this buildlog entry. Full details, DoD proof, and deviations in
   Config tab (script view/edit + diff)
 
 **Verification:**
-- Backend: 290 passed, 2 skipped, 2 deselected — `pytest tests/ -q -m "not pve_integration and not e2e"`
+- Backend: 290 passed, 2 skipped, 2 deselected; `pytest tests/ -q -m "not pve_integration and not e2e"`
 - Backend: executor isolation OK (`scripts/check_executor_isolation.py`)
-- Frontend: 49 passed (16 files) — `npx vitest run`; build clean
+- Frontend: 49 passed (16 files), `npx vitest run`; build clean
 - `docs/notes/phase-4-store.md`'s `dod_verify_phase4.py` run: the "one real
   app installs as exactly one CT, with live log, archived log, audit row,
   consent step" DoD clause proved against `tests.support.make_app` + a real
@@ -222,7 +222,7 @@ this buildlog entry. Full details, DoD proof, and deviations in
 - Real 24-slug live classifier measurement (this task, real network, real
   `classify_install_feasibility`, no mocks): **15/24 installable (62.5%)**,
   9/24 unsupported (all "install script requires interactive input, no
-  non-interactive entrypoint"), 0 fetch failures — the true number for this
+  non-interactive entrypoint"), 0 fetch failures; the true number for this
   v1 catalog, not the phase-4 spike's 493/559 full-corpus estimate
 
 **Deviations** (full list + rationale in the notes doc): Task 1's TOFU
@@ -241,7 +241,7 @@ Store page (cache-survival itself works; the UI indicator does not exist),
 and the `category`/`description`/`icon_url`/`popularity` v1 gap documented
 before implementation began (no public community-scripts bulk metadata API).
 
-### 2026-07-31T00:15:00+05:30 — Phase 5 — execute-plan completed
+### 2026-07-31T00:15:00+05:30: Phase 5, execute-plan completed
 
 Plan: `docs/superpowers/plans/2026-07-30-phase-5-console.md`. All 12 tasks
 implemented and committed directly to `main`, each individually reviewed (fix
@@ -256,7 +256,7 @@ proof, and deviations in `docs/notes/phase-5-console.md`.
 - `ProxmoxClient.termproxy`/`.node_termproxy`/`.vncproxy` (backend/proxploy/
   services/proxmox.py) + matching `FakePVE` support
 - `console_tickets` schema + `mint_ticket`/`redeem_ticket`
-  (backend/proxploy/services/consoletickets.py) — single-use, short-TTL,
+  (backend/proxploy/services/consoletickets.py), single-use, short-TTL,
   bound to a specific Proxmox target and its upstream ticket
 - PtyBridge (backend/proxploy/services/ptybridge.py): translates doc 05's
   simple browser JSON framing to/from Proxmox's own `termproxy`/xtermjs wire
@@ -266,7 +266,7 @@ proof, and deviations in `docs/notes/phase-5-console.md`.
 - `POST /apps/{id}/console/tickets` + `WS /apps/{id}/console/ws` (CT
   terminal), `POST /hosts/{id}/shell/tickets` + `WS /hosts/{id}/shell/ws`
   (node shell, three-way gated: role + entitlement + per-host opt-in),
-  `POST /vms/{id}/console/tickets` + `WS /vms/{id}/vnc/ws` (VM noVNC) — every
+  `POST /vms/{id}/console/tickets` + `WS /vms/{id}/vnc/ws` (VM noVNC), every
   ticket-mint route audits `console.open`, every WS route is ticket-only
   (no session cookie)
 - Frontend: `Terminal.tsx` (xterm.js + fit addon), `VncConsole.tsx`
@@ -276,12 +276,12 @@ proof, and deviations in `docs/notes/phase-5-console.md`.
   archived job logs
 
 **Verification:**
-- Backend: 333 passed, 2 skipped, 3 deselected — `pytest tests/ -q -m "not
+- Backend: 333 passed, 2 skipped, 3 deselected; `pytest tests/ -q -m "not
   pve_integration and not e2e"` (the extra deselected test is this task's new
   gated live-PVE test, see below)
 - Backend: executor isolation OK (`scripts/check_executor_isolation.py`,
   unaffected by this phase)
-- Frontend: 65 passed (20 files) — `npx vitest run`; build clean
+- Frontend: 65 passed (20 files), `npx vitest run`; build clean
 - `docs/notes/phase-5-console.md`'s `dod_verify_phase5.py` run: all three
   doc-10 DoD sub-clauses ("through the Proxploy origin only", "survive
   reconnect", "write audit rows on open") proved against
@@ -289,16 +289,16 @@ proof, and deviations in `docs/notes/phase-5-console.md`.
   real websocket to Proxmox, no browser on this box)
 - `backend/tests/test_console_pve_integration.py` added (Task 12): a
   `pve_integration`-marked, disposable-live-PVE-gated test proving-or-
-  disproving the plan's own "Spike correction" finding — whether this PVE
+  disproving the plan's own "Spike correction" finding, whether this PVE
   host's `termproxy` accepts API-token auth for the LXC/node-shell path
   (Proxmox bugzilla #6079, fixed for VMs in `qemu-server` 9.1.7+, unconfirmed
   for LXC/node-shell). Skips here, same standing no-live-PVE limitation every
-  prior phase has stated — the single biggest open item this phase carries
+  prior phase has stated, the single biggest open item this phase carries
   forward
 
 **Deviations** (full list + rationale in the notes doc): Tasks 3 and 4 each
 independently found and fixed the same real bug in the plan's own example
-code — `asyncio.wait()` never propagates a done task's exception to the
+code, `asyncio.wait()` never propagates a done task's exception to the
 `await` point, so an idle timeout or abnormal close would stop the bridge but
 silently misreport `exit_code=0`; both fixes now walk the `done` set and
 re-raise, both reviewer-verified via live repros. Task 7 deliberately skipped
@@ -314,19 +314,19 @@ regression test for `redeem_ticket`'s single-use atomicity (proven live by a
 mismatched-ticket-kind test on `app_console_ws` specifically, no
 operator-rejected-on-node-shell test, a cosmetic entitlement-loading tooltip
 flash on the node-shell button, and no visibility-based pause on log
-polling — none block this phase's DoD. The token/termproxy open question
+polling, none block this phase's DoD. The token/termproxy open question
 above is the one item that needs a real PVE host to close out.
 
-### 2026-07-31T00:45:00+05:30 — Phase 5 — final whole-branch review + fix wave
+### 2026-07-31T00:45:00+05:30: Phase 5, final whole-branch review + fix wave
 
 Per-task reviews above cover Tasks 1-12 individually; the final whole-branch
 review (opus) covering the full `433ce46..fb01529` range found 1 Critical +
 11 Important cross-task integration gaps that no single task's reviewer was
-scoped to see — each sat precisely at a seam between two individually-correct
+scoped to see, each sat precisely at a seam between two individually-correct
 tasks. Fixed in one consolidated wave (`5c974d9`, `432e22a`):
 
 - **Critical**: the Logs tab (Task 11) polled `GET /apps/{id}/logs`, which
-  never existed — confirmed 404, silently empty terminal. No CT-log-tailing
+  never existed, confirmed 404, silently empty terminal. No CT-log-tailing
   subsystem exists anywhere in the codebase (`ProxmoxClient` has no `pct
   exec`; the executor only runs host-side install scripts), so the honest
   fix is a real `501` route plus a frontend `EmptyState` saying so, not a
@@ -356,7 +356,7 @@ Backend rose to 340 passed / 2 skipped / 3 deselected, frontend to 71 passed
 / 20 files, clean build. A scoped re-review of the fix wave (opus)
 independently re-ran both suites, confirmed 16 of 18 findings cleanly fixed
 with real regression tests, and found the fix wave itself introduced two
-narrow new issues — both adjudicated (not a second fix wave, per the
+narrow new issues, both adjudicated (not a second fix wave, per the
 process) as real but deferred, nothing later in this phase depends on
 either: the new keepalive teardown can, on a narrow timing window, skip the
 just-fixed close-ordering cleanup; and the reconnect give-up screen can
@@ -369,7 +369,7 @@ fast-follow.
 15 commits total (`433ce46..432e22a`) plus this buildlog/notes bookkeeping,
 all committed directly to `main`. Ready to merge, with two parked findings.
 
-### 2026-07-31T22:18:00+05:30 — Phase 6 — execute-plan completed
+### 2026-07-31T22:18:00+05:30: Phase 6, execute-plan completed
 
 Plan: `docs/superpowers/plans/2026-07-31-phase-6-infra.md`. All 17 tasks
 implemented and committed directly to `main` (`2182940..5ad5579`), each
@@ -393,7 +393,7 @@ details, DoD proof, and deviations in `docs/notes/phase-6-infra.md`.
   `ProxmoxClient` methods; `GET /network/bridges|throughput`,
   `GET/PUT /{apps|vms}/{id}/network[/{iface}]`, host bridge stage/apply/
   revert (`POST/PUT/DELETE /network/bridges/...`, `POST /network/{h}/{n}/
-  apply|revert` — typed node-name confirmation on apply); frontend Network
+  apply|revert`, typed node-name confirmation on apply); frontend Network
   page + NIC/bridge forms
 - **Backups**: `backupjobs.py` sync (droppable `backups` mirror, anti-
   stampede lock, auto-sync-on-stale), run/restore/prune `ProxmoxClient`
@@ -403,24 +403,24 @@ details, DoD proof, and deviations in `docs/notes/phase-6-infra.md`.
 - **VM lifecycle**: snapshot list/create/rollback/delete, create, clone,
   delete `ProxmoxClient` methods + job handlers + routes (`GET/POST /vms/
   {id}/snapshots`, rollback with typed confirm, `POST /vms`, `POST /vms/
-  {id}/clone`, `DELETE /vms/{id}` — owner-role 3-gate refusal chain);
+  {id}/clone`, `DELETE /vms/{id}`; owner-role 3-gate refusal chain);
   frontend snapshots tab, VM create wizard, clone dialog
 - **Shared**: `pvetask.py::await_task`, `api/jobs.py::enqueue_and_audit`,
   both extracted from the existing lifecycle-job pattern and reused by every
   route above
 
 **Verification:**
-- Backend: 491 passed, 2 skipped, 4 deselected (178.01s) — `pytest tests/ -q
+- Backend: 491 passed, 2 skipped, 4 deselected (178.01s); `pytest tests/ -q
   -m "not pve_integration and not e2e"` (deselected rose from 3 to 4: this
   task's new gated live-PVE test)
 - Backend: executor isolation OK, unaffected by this phase
-- Backend license audit: fails locally on `psycopg` (LGPL) — pre-existing,
+- Backend license audit: fails locally on `psycopg` (LGPL), pre-existing,
   documented since Phase 1/4, `postgres` extras never installed in CI's
   actual gate; this phase's own two new dependencies are both cleanly
   allowlisted (see Deviations)
 - Migrations: 7 passed, 2 skipped; `alembic heads` = `2330a95b98d2`,
-  unchanged — zero migrations this phase
-- Frontend: 118 passed (26 files) — `npx vitest run`; build clean; lint
+  unchanged, zero migrations this phase
+- Frontend: 118 passed (26 files), `npx vitest run`; build clean; lint
   exit 0 (pre-existing warning classes only, no errors)
 - `docs/notes/phase-6-infra.md`'s `dod_verify_phase6.py` run: all four
   doc-10 DoD clauses ("every nav page renders real content", "VM created/
@@ -436,30 +436,30 @@ details, DoD proof, and deviations in `docs/notes/phase-6-infra.md`.
 
 **Deviations** (full list + rationale in the notes doc): Phase 6 shipped
 **two** new backend dependencies, not one as both the plan's header and this
-task's own brief claimed — `python-multipart` (Apache-2.0, Task 4, FastAPI
+task's own brief claimed, `python-multipart` (Apache-2.0, Task 4, FastAPI
 requires it to define an `UploadFile` route at all) and `requests-toolbelt`
 (Apache Software License, added in Task 4's fix round after discovering
 proxmoxer silently falls back to buffering an entire upload in RAM without
-it, and hard-fails with `OverflowError` above ~2 GiB — the exact failure
+it, and hard-fails with `OverflowError` above ~2 GiB; the exact failure
 mode `storage_upload_max_bytes: 16 GiB` was supposed to make safe). Zero
-Alembic migrations, as planned — the `backups` table and every column this
+Alembic migrations, as planned; the `backups` table and every column this
 phase populates existed unused since migration 0001. Doc 05 was amended
 (Task 18) for three real omissions this phase surfaced: a missing §Network
 section for guest/host config endpoints, six read endpoints with a blank
 entitlement column that should have read `storage.view`/`storage.content`/
 `network.view`/`vms.snapshots`, and a missing `GET /backups/prune-preview` +
-`POST /backups/prune` pair — plus a fourth, unrequested fix found in the
+`POST /backups/prune` pair, plus a fourth, unrequested fix found in the
 same table: `POST /backups/run`/`POST /backups/{id}/restore` were both
 listed under `backups.pbs`, but the code gates them on the distinct
 `backups.run`/`backups.restore` keys doc 01 already defines. A docstring
 defect in `api/vms.py`'s snapshot
 rollback (claiming it reuses `enqueue_lifecycle`'s `self_target` 409 shape,
-when it actually emits `confirm_required` — the frontend keys on the exact
+when it actually emits `confirm_required`, the frontend keys on the exact
 string) was corrected in the same pass. The staged-network-changes indicator
 was deliberately not built: proxmoxer's `.get()` unwraps only the `data` key
 and drops the sibling `changes` property PVE uses to report pending state,
 so Apply/Revert are always offered rather than guessing at pending state.
-Linked-clone validity is not pre-checked — Proxploy does not track
+Linked-clone validity is not pre-checked, Proxploy does not track
 template-ness, so PVE's rejection is surfaced verbatim. `POST /backups/
 prune` ships unconsumed by any UI control (retention-by-policy belongs to
 Phase 7's scheduler). `sync_host_backups` reads only `Host.node_name`, so
@@ -470,19 +470,19 @@ refusal writes an audit row (`guest_missing`/`confirm_required`/
 `guest_running` are ordinary retryable rejections, not incidents). Known,
 carried-forward test-hygiene item: `test_concurrent_stale_reads_enqueue_
 only_one_sync` is slow and timing-variable (62s/62s/2s across three runs,
-passing every time) — deliberately left as-is. Three frontend
+passing every time), deliberately left as-is. Three frontend
 `window.confirm`-dismissed tests (`backups.test.tsx`'s archive-delete, and
 two in `storage-mutations.test.tsx`) were suspected false negatives via the
 same microtask-timing gap Task 16 found and fixed on a sibling test; the
 final whole-branch review below individually neutralised each production
 guard to check. Only `storage-mutations.test.tsx`'s detach test was
-genuinely broken, fixed with the same macrotask-flush idiom. The other two —
+genuinely broken, fixed with the same macrotask-flush idiom. The other two, 
 `backups.test.tsx`'s archive-delete and `storage-mutations.test.tsx`'s
-volume-delete — do fail when their guards are removed, via a `waitFor`
+volume-delete, do fail when their guards are removed, via a `waitFor`
 already present, so they were verified load-bearing and correctly left
 untouched.
 
-### 2026-07-31T22:45:00+05:30 — Phase 6 — final whole-branch review + fix wave
+### 2026-07-31T22:45:00+05:30: Phase 6, final whole-branch review + fix wave
 
 Per-task reviews above cover Tasks 1-18 individually; the final whole-branch
 review (opus) covering the full `ce590bd..13a0737` range (25 commits, 68
@@ -495,12 +495,12 @@ findings plus same-wave items, fixed in `172167d` and `b36846c`:
   caller-supplied `config` key named `iface`/`type` (or `storage`/`type`)
   silently overrode the route's own. Demonstrated: a request naming `vmbr9`
   returned 201 saying `vmbr9`, wrote an audit row saying `vmbr9`, and staged
-  a redefinition of **`vmbr0`** — the management bridge — as a VLAN
+  a redefinition of **`vmbr0`**, the management bridge, as a VLAN
   interface, which a subsequent apply would have `ifreload`ed. Fixed by
   reordering so route-controlled keys win, with regression tests asserting
   against what the PVE fake actually recorded rather than the response body.
   Worth stating honestly: a per-task review had checked this pattern and
-  reported it absent — it had checked `vms.py`, not `storage.py`, which is
+  reported it absent; it had checked `vms.py`, not `storage.py`, which is
   exactly the kind of seam only a whole-branch view catches.
 - **`api/network.py` never caught `ProxmoxError`**, unlike every sibling
   router, so seven call sites plus `api/backups.py::prune_preview_route`
@@ -514,14 +514,14 @@ findings plus same-wave items, fixed in `172167d` and `b36846c`:
   `await_task`; none of the 13 call sites passed it, so every job silently
   used the 300s default. A `vm.clone`, `backup.restore` or vzdump exceeding
   five minutes would report FAILED while the PVE task continued
-  successfully — inviting a destructive retry on a mid-flight restore. The
+  successfully, inviting a destructive retry on a mid-flight restore. The
   existing test only asserted the setting *parsed*. Now threaded through all
   13 sites with the default raised to 3600s (these handlers are
   disk-copy-bound, unlike lifecycle's start/stop which still uses its own
   shorter constant), and the new test proves the configured value actually
   reaches `await_task`.
-- **`DELETE /backups/{id}` was gated on `backups.pbs`** — the same key as
-  the backup list — so view rights implied permanent-delete rights on
+- **`DELETE /backups/{id}` was gated on `backups.pbs`**: the same key as
+  the backup list, so view rights implied permanent-delete rights on
   archives. Moved to `backups.retention`.
 - `ProxmoxError` → `JobFailed` translation added to the seven Phase 6 job
   resolvers, matching `lifecycle.py`'s long-standing behaviour so a missing
@@ -532,7 +532,7 @@ The scoped re-review of that wave then found the wave had introduced two
 regressions of its own, both fixed in `b36846c`: the per-host network
 degrade was invisible in the UI (the frontend type lacked `errors` and
 nothing rendered it, so an unreachable host silently vanished from the page
-— trading a loud failure for a quiet one), and the backup delete button was
+trading a loud failure for a quiet one), and the backup delete button was
 left ungated after the entitlement change, so a `backups.pbs`-only tenant
 saw a button that 403s.
 
@@ -544,7 +544,7 @@ migrations, as planned). Phase 6 spans `ce590bd..b36846c`.
 commits total (`2182940..b36846c`) plus this buildlog/notes/doc-05
 bookkeeping, all committed directly to `main`. Ready to merge.
 
-### 2026-08-05T06:46:38+05:30 — Phase 7 — execute-plan completed
+### 2026-08-05T06:46:38+05:30: Phase 7, execute-plan completed
 
 Doc 10 §Phase 7 DoD, verbatim: *"an unattended weekend: scheduled backups and
 an auto-update window run, an induced CPU alert fires and resolves with
@@ -552,7 +552,7 @@ notifications both ways, and Monday's job history tells the whole story."*
 19 tasks, full details in `docs/notes/phase-7-operate.md`.
 
 **What shipped, per subsystem:**
-- **Scheduler**: `jobs/scheduler.py` — `next_fire`/`validate`/`prime`/`due`/
+- **Scheduler**: `jobs/scheduler.py`, `next_fire`/`validate`/`prime`/`due`/
   `fire_one`/`tick(app, now=None)`, `_target()` deriving a fired job's
   target from the job kind's dotted prefix rather than sniffing param key
   names, `SYSTEM_SCHEDULES` seeding "Catalog refresh" (nightly) and "Metrics
@@ -561,7 +561,7 @@ notifications both ways, and Monday's job history tells the whole story."*
   lifespan. `api/schedules.py`: `GET`/`POST /schedules`, `PATCH`/
   `DELETE /schedules/{id}`, `POST /schedules/{id}/run`; frontend Schedules
   card in Settings + "Next scheduled" on Backups
-- **App updates**: `services/appstore.py` — `pinned_ref`, `mark_updates_
+- **App updates**: `services/appstore.py`, `pinned_ref`, `mark_updates_
   available` (derived, recomputed wholesale so a rollback un-advertises an
   update), the `app.update` job (re-runs the catalog script pinned to the
   CURRENT upstream commit over the install path, bracketed by CT-must-
@@ -571,11 +571,11 @@ notifications both ways, and Monday's job history tells the whole story."*
   consent/stream/archive gate as install), `POST /apps/update-all` (one job
   per stale app, per-app skip reasons); frontend update-available badge,
   "Update to `<sha>`" diff+consent dialog, Cluster "Update all"
-- **Alerting**: `services/alerts.py` — `evaluate()` (continuous-breach
+- **Alerting**: `services/alerts.py`, `evaluate()` (continuous-breach
   `duration_s` semantics, at most one open alert per rule×target, automatic
   recovery, no-samples-is-never-a-breach), `render_message`, `sse_frame`,
   `notify_transitions`. The poll supervisor now evaluates every cycle,
-  publishes the `alert` SSE frame, THEN notifies — that order means a
+  publishes the `alert` SSE frame, THEN notifies; that order means a
   notifier failure never loses the SSE event. `api/alerts.py`: `GET`/
   `POST /alert-rules`, `PATCH`/`DELETE /alert-rules/{id}`,
   `GET /alert-rules/metrics`, `GET /alerts`, `POST /alerts/{id}/ack`.
@@ -598,16 +598,16 @@ notifications both ways, and Monday's job history tells the whole story."*
   all named "APScheduler 4". Shipped on the stable 3.11 line; only
   `CronTrigger` is used, and `jobs/scheduler.py`'s tick loop reads
   `schedules` directly on every pass rather than running APScheduler's own
-  scheduler/jobstores — doc 04 already makes that table authoritative, and a
+  scheduler/jobstores, doc 04 already makes that table authoritative, and a
   second in-memory registry synced from it would be two sources of truth to
   reconcile on every CRUD write. Docs 02, 03 and 04 amended this task
   (Step 5); four docs still say "APScheduler 4" and were out of this task's
-  amendment scope — `docs/00-decision-brief.md:79`, `docs/01-product-spec.
+  amendment scope, `docs/00-decision-brief.md:79`, `docs/01-product-spec.
   md:193`, `docs/09-repository-structure.md:69`,
   `docs/10-build-sequence.md:226`.
 - **The poller never wrote `mem_pct` or `disk_pct`.** Doc 04's `alert_
   rules.metric` enum named both; any memory/disk rule created before this
-  phase would have sat enabled and never fired — silent, not a crash.
+  phase would have sat enabled and never fired, silent, not a crash.
   Fixed in Task 8. `disk_pct` stays host-only: `/cluster/resources`'s
   guest disk figures are either allocated-not-used or routinely zero for
   QEMU, so Task 12 rejects a guest `disk_pct` rule at write time rather
@@ -623,11 +623,11 @@ notifications both ways, and Monday's job history tells the whole story."*
   so `app.update` brackets the SSH run with existence guards instead and
   fails loudly, naming any stray container, rather than silently trusting
   the script picked the right branch. `services/classifier.py` classifies
-  install feasibility only — classifying update-path safety is separate,
+  install feasibility only, classifying update-path safety is separate,
   larger work.
 - **No browser on this box.** Every frontend claim rests on Vitest +
   jsdom. `/alerts`, the health footer, the Schedules card and the update
-  controls have never been rendered in a real browser here — the same gap
+  controls have never been rendered in a real browser here, the same gap
   Phases 5 and 6 recorded.
 - **`backup.prune` scheduling is backend-only.** The `HANDLERS` entry and
   `POST /schedules` both accept it via the direct API; it was dropped from
@@ -635,37 +635,37 @@ notifications both ways, and Monday's job history tells the whole story."*
   `ScheduleForm` has no field that can collect the storage+retention spec
   the handler actually needs, and shipping a schedule row with empty
   `params` would fire and no-op forever rather than prune anything. A
-  plan defect caught during Task 17, not an oversight — full detail in the
+  plan defect caught during Task 17, not an oversight; full detail in the
   notes doc.
 
 **Verification:**
 - `dod_verify_phase7.py` (task-19 brief, throwaway, not committed): all
   four doc-10 Phase 7 DoD clauses print OK, exit 0, run twice with
-  identical output — proved through `tests.support.make_app` + `FakePVE` +
+  identical output, proved through `tests.support.make_app` + `FakePVE` +
   a fake SSH connect factory driving the real routes, the real
   `JobBackend`, the real `Scheduler.tick` and the real evaluator (no live
   PVE, no browser on this box, the same standing limitation every phase
   has stated)
-- Backend: **661 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+- Backend: **661 passed, 2 skipped, 4 deselected**; `pytest tests/ -q -m
   "not pve_integration and not e2e"` (baseline going into this phase was
   499 passed, 2 skipped)
 - Frontend: **154 passed across 30 files** (baseline going into this phase
   was 121 across 26 files); build clean (same pre-existing chunk-size
   warning, nothing new); lint exit 0 (pre-existing warning classes only,
   no errors)
-- Migrations: `alembic heads` = `2330a95b98d2`, unchanged — zero
+- Migrations: `alembic heads` = `2330a95b98d2`, unchanged; zero
   migrations this phase, confirmed against the current HEAD
 
 **Phase 7 final state**: `git log --oneline b36846c..HEAD | tail -1`
 returns `def0526` (Phase 6's own closing docs commit, landed one commit
-after the `b36846c` boundary) — the first substantive Phase 7 commit is the
+after the `b36846c` boundary), the first substantive Phase 7 commit is the
 next one, `ec5ccb9` ("feat(scheduler): cron math, due selection and
 one-pass firing over the schedules table"), running 26 commits through
 `ff73dd4` ("fix(ui): gate Update all on store.update_all entitlement")
 before this task's own documentation commit. All 19 planned tasks
 committed directly to `main`.
 
-### 2026-08-05T18:55:00+05:30 — Phase 8 — execute-plan completed
+### 2026-08-05T18:55:00+05:30: Phase 8, execute-plan completed
 
 Doc 10 §Phase 8 DoD, verbatim: *"a second admin logs in through SSO with 2FA,
 a viewer cannot mutate anything, an API token drives the product, and an app
@@ -673,7 +673,7 @@ migrates between two non-clustered hosts with accurate downtime shown."*
 22 tasks, full details in `docs/notes/phase-8-scale.md`.
 
 **What shipped, per subsystem:**
-- **Authorization**: `services/authz.py` — casbin RBAC-with-domains, a static
+- **Authorization**: `services/authz.py`, casbin RBAC-with-domains, a static
   `PERMISSIONS` matrix over (resource, action) → minimum role, and
   `sync_user` rebuilding a user's `g`-lines from `team_members`.
   `api/deps.py::authorize(resource, action, scope_of=…)` is now the single
@@ -681,12 +681,12 @@ migrates between two non-clustered hosts with accurate downtime shown."*
   deleted. Scope resolvers (`scope_host`/`scope_app`/`scope_vm`/
   `scope_backup`) evaluate a role inside a team domain rather than globally.
   The enforcer is built **in memory** from code + `team_members`, not from
-  `casbin_rules` via a sqlalchemy adapter — amendment, doc 03/04 updated
+  `casbin_rules` via a sqlalchemy adapter, amendment, doc 03/04 updated
 - **Teams**: `api/teams.py` teams/members CRUD, `GET /users`,
   `hosts.team_id` assignment; every membership write re-syncs the enforcer so
   a permission change takes effect in the same request sequence, not at the
   next restart. Frontend `TeamsCard` + per-host team select
-- **OIDC**: `services/oidc.py` — discovery, S256 PKCE, RS256 ID-token
+- **OIDC**: `services/oidc.py`, discovery, S256 PKCE, RS256 ID-token
   validation via `joserfc` (`authlib.jose` is deprecated in Authlib 1.7.x),
   and just-in-time provisioning that is deny-by-default: without an
   explicitly configured role a first-time SSO user is created inactive and
@@ -694,11 +694,11 @@ migrates between two non-clustered hosts with accurate downtime shown."*
   matching email. Routes in `api/auth.py`, SSO entry on the login page
 - **TOTP + sessions**: enrollment issuing a seed plus ten one-time recovery
   codes in their own table (`totp_recovery_codes`, migration `6cf6a0722d23`
-  — the plan's zero-migration blob design was rejected mid-implementation as
+  the plan's zero-migration blob design was rejected mid-implementation as
   racy on burn); two-step login where the password check alone never sets a
   cookie, gated by a single-use, TTL-bounded, 5-attempt-capped pending token
   usable at exactly one route; `GET`/`DELETE /auth/sessions`. Frontend TOTP
-  login step + Security card (secret and `otpauth://` URI as text — no QR
+  login step + Security card (secret and `otpauth://` URI as text, no QR
   dependency added)
 - **API tokens**: `ppk_…` bearer keys, hashed at rest, optionally scoped and
   optionally expiring; `authorize()` folds a key's scopes in ahead of the
@@ -712,7 +712,7 @@ migrates between two non-clustered hosts with accurate downtime shown."*
   verbatim downtime statement; the job records the *measured* `downtime_s`
   so estimate and outcome sit side by side. The source CT is left stopped
   and intact, never deleted. Frontend `MigrateDialog`
-- **Invariants**: two suites walk every registered route — one asserting each
+- **Invariants**: two suites walk every registered route, one asserting each
   carries an `authorize()` marker or a reasoned allowlist entry, the other
   driving a viewer at every mutating route twice, once by cookie and once by
   bearer token
@@ -721,7 +721,7 @@ migrates between two non-clustered hosts with accurate downtime shown."*
 - **No real IdP here.** Doc 10 says "round-trips against a real Authelia";
   there is none on this box. The substitute is a local mock provider with a
   real discovery document, real S256 PKCE exchange and real RS256 tokens
-  verified against a real JWKS endpoint — protocol-complete, but not a
+  verified against a real JWKS endpoint, protocol-complete, but not a
   third-party implementation on the wire. The DoD script prints this
   substitution in its own output rather than hiding it in a notes file
 - **No live Proxmox host.** Migration is proven against two `FakePVE`s plus a
@@ -730,35 +730,35 @@ migrates between two non-clustered hosts with accurate downtime shown."*
   `write_audit` call sites exactly one writes `actor_type="api_key"` (the
   scope-denial path); the rest predate API keys. `request.state.api_key` is
   populated and the upgrade path is an `actor_of(request)` helper threaded
-  through the call sites — mechanical, deliberately not bundled here
-- **The frontend suite is reliable only run sequentially on this box** —
+  through the call sites, mechanical, deliberately not bundled here
+- **The frontend suite is reliable only run sequentially on this box**, 
   unrelated suites flake under vitest's default file parallelism and pass in
   isolation; `--no-file-parallelism` passes every time
-- **F1 (no route-level `errorComponent`)** remains open — a 5xx during route
+- **F1 (no route-level `errorComponent`)** remains open, a 5xx during route
   load white-screens the app. Phase 9 work per doc 10
 
 **Verification:**
 - `dod_verify_phase8.py` (throwaway, not committed): all four doc-10 Phase 8
-  DoD clauses print OK, exit 0, run twice — identical output except the
+  DoD clauses print OK, exit 0, run twice; identical output except the
   measured `downtime_s` (0.043819 s vs 0.040807 s), left unrounded because it
   is a real measurement
-- Backend: **784 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+- Backend: **784 passed, 2 skipped, 4 deselected**; `pytest tests/ -q -m
   "not pve_integration and not e2e"`, run twice, identical (baseline entering
   the phase: 663)
-- Frontend: **199 passed across 36 files** — `npx vitest run
+- Frontend: **199 passed across 36 files**, `npx vitest run
   --no-file-parallelism` (baseline 154 across 30); build clean; lint exit 0,
   pre-existing warning classes only
-- Frontend e2e: **1 passed** — real Chromium, login plus every nav page, clean
+- Frontend e2e: **1 passed**, real Chromium, login plus every nav page, clean
   console
 - CI gates: executor isolation OK; backend and frontend license audits clean
   against the exact CI allow-lists
-- Migrations: `alembic heads` = **`6cf6a0722d23`** — one migration this phase.
+- Migrations: `alembic heads` = **`6cf6a0722d23`**, one migration this phase.
   The plan predicted zero; the recovery-code burn race is why that changed
 
-### 2026-08-06T12:55:00+05:30 — Phase 9a — execute-plan completed
+### 2026-08-06T12:55:00+05:30: Phase 9a, execute-plan completed
 
 Doc 10 §Phase 9's slice carried by 9a, verbatim: *"a stranger installs via the
-one-liner on a clean PVE box … and self-updates to the next tagged release —
+one-liner on a clean PVE box … and self-updates to the next tagged release, 
 without reading source code."* Doc 10's Phase 9 was one undifferentiated
 "Deliver" block; the design spec split it into 9a–9d and this is the first.
 16 tasks, full details in `docs/notes/phase-9a-install-update.md`.
@@ -767,7 +767,7 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
 - **Version**: `proxploy.__version__` is the single source of truth at
   `1.0.0`; `build_release.sh` overwrites the staged copy from `--version` so
   artifact, manifest and tag cannot disagree
-- **Release format**: `services/release.py` — Ed25519 `verify_manifest` over
+- **Release format**: `services/release.py`, Ed25519 `verify_manifest` over
   the **raw manifest bytes before any parsing**, `verify_artifact` on sha256
   and size, `is_upgrade` refusing downgrades. Signature → checksum → unpack,
   and the shell side uses the same order deliberately: a format with two
@@ -775,7 +775,7 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
 - **Channel client**: `services/updater.py::check` plus `detect_shape()` →
   `systemd` | `docker` | `dev` and a `CAN_SELF_APPLY` table
 - **Self-identity**: the lifespan persists `self.ctid`, closing a
-  `selfguard.py` hook that had been inert since Phase 4 — the app could not
+  `selfguard.py` hook that had been inert since Phase 4, the app could not
   previously recognise its own container, so "don't destroy the CT you are
   talking to" was a rule with no subject
 - **Update API**: `GET /meta/update` reports current/available/can-self-apply;
@@ -786,14 +786,14 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
 - **Layout + installer**: immutable `/opt/proxploy/releases/<version>/` each
   with its own venv, `current` as the symlink a switch or rollback moves, data
   and secrets outside the release tree. `install.sh` is both halves of the
-  one-liner — CT create and self-push on the PVE host, then packages, service
+  one-liner, CT create and self-push on the PVE host, then packages, service
   user, verified unpack, unit, and Caddy in front with `tls internal` fallback
-- **Updater**: `packaging/proxploy-update` — backup *before* download, verify
+- **Updater**: `packaging/proxploy-update`, backup *before* download, verify
   *before* unpack, migrate *before* switch, health *after* switch, roll back
   on any failure from the switch onward. The ordering is the design
 - **Docker shape**: image + compose file that detect they are a container and
   instruct rather than self-apply
-- **Frontend**: Settings update card — check, apply, poll, and a docker branch
+- **Frontend**: Settings update card, check, apply, poll, and a docker branch
   that states the boundary instead of hiding the button
 
 **Known gaps, stated plainly:**
@@ -801,18 +801,18 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
   that asserts the expected create call; `pct create` on real hardware is
   unproven. Same gap every phase since 4 has recorded
 - **No real release channel.** Everything ran against a local `file://`
-  channel signed with a throwaway key — spec D4 keeps publication out of
+  channel signed with a throwaway key, spec D4 keeps publication out of
   implementation on purpose
 - **The release private key does not exist yet** and
   `backend/proxploy/release_pubkey.pem` ships a **placeholder**. Replacing it
   is Step 1 of `docs/runbooks/publishing-a-release.md`. The public key ships
-  *inside* the artifact, so rotating it requires publishing a release — the
+  *inside* the artifact, so rotating it requires publishing a release; the
   same bootstrap property doc 09 records for the entitlement key
-- **Docker installs cannot self-apply, by design, not by omission** — 409 with
+- **Docker installs cannot self-apply, by design, not by omission**: 409 with
   the `docker compose pull` instruction
 - **Task 8 (Caddy TLS) has no unit test**, by intent; the container harness
   serving real HTTPS is the only assertion that means anything about a TLS front
-- **F1 (no route-level `errorComponent`)** carried forward from Phase 8 — 9b
+- **F1 (no route-level `errorComponent`)** carried forward from Phase 8, 9b
 
 **The two bugs worth recording:**
 - The installer had **never executed** before its harness; the first real run
@@ -825,7 +825,7 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
 - **Rollback restored the database as `root:root`.** `cp -a` from a backup
   written by `sqlite3 .backup` running as root, against a unit running as
   `User=proxploy` → crash-loop on `attempt to write a readonly database`. Data
-  restored perfectly, box still down — the exact outcome the rollback path
+  restored perfectly, box still down; the exact outcome the rollback path
   exists to prevent, reached by way of a rollback that "worked". Now: stop the
   unit before restoring (the poisoned version crash-loops on `RestartSec=3`
   and races it), `reset-failed` to clear systemd's start-limit, plain `cp` +
@@ -833,35 +833,35 @@ without reading source code."* Doc 10's Phase 9 was one undifferentiated
   being replaced rather than let sqlite replay them over a different file
 
 **Verification:**
-- `dod_verify_phase9a.py` (throwaway, not committed — `backend/.gitignore`
+- `dod_verify_phase9a.py` (throwaway, not committed; `backend/.gitignore`
   carries `dod_verify_phase*.py`): all four checks OK, exit 0, run **three
   times** (twice by the implementer, once independently), byte-identical every
   time. It surfaces only the harnesses' `OK:` lines, so the runs are identical
   outright rather than "modulo timings"
-- Backend: **810 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m "not
+- Backend: **810 passed, 2 skipped, 4 deselected**; `pytest tests/ -q -m "not
   pve_integration and not e2e"` (baseline entering the phase: 784)
-- Frontend: **205 passed across 37 files** — `npx vitest run
+- Frontend: **205 passed across 37 files**, `npx vitest run
   --no-file-parallelism` (baseline 199 across 36); build clean; lint exit 0,
   30 warnings, 0 errors, pre-existing warning classes only
 - Shell harnesses, all PASS: `test_install.sh` (unit active, app answers, TLS
   serves, SPA serves, re-run idempotent), `test_upgrade_rollback.sh` (1.0.0 →
   1.0.1 with data intact and a backup taken; poisoned 1.0.2 refused and rolled
   back to 1.0.1, healthy), `test_pve_half.sh` (expected `pct create`). Three
-  harnesses, not the four the plan counted — `channel_fixture.sh` is a fixture
+  harnesses, not the four the plan counted; `channel_fixture.sh` is a fixture
   builder they all consume, not a harness
 - `shellcheck -x -P SCRIPTDIR` clean, exit 0, over `install.sh`,
   `proxploy-update`, `packaging/lib/*.sh`, `packaging/tests/*.sh`,
   `build_release.sh`
-- CI grew three jobs: `scripts`, `install-harness`, `backend-py311` — the last
+- CI grew three jobs: `scripts`, `install-harness`, `backend-py311`; the last
   because Task 12 lowered `requires-python` to 3.11 for the real Debian 12 LXC
   target, and a supported-version claim nothing tests is not a claim
-- Migrations: `alembic heads` = **`6cf6a0722d23`**, unchanged — **zero
+- Migrations: `alembic heads` = **`6cf6a0722d23`**, unchanged; **zero
   migrations this phase**, as planned
 
-### 2026-08-06T18:06:20+05:30 — Phase 9b — execute-plan completed
+### 2026-08-06T18:06:20+05:30: Phase 9b, execute-plan completed
 
 Doc 10's Phase 9 DoD: a stranger *"completes onboarding, installs an app,
-creates a VM, schedules a backup"* — four clauses no test had ever executed
+creates a VM, schedules a backup"*; four clauses no test had ever executed
 through the UI. 9a shipped how the product gets onto a box; 9b is what a
 stranger sees once it's there. 19 tasks, full details in
 `docs/notes/phase-9b-onboarding-polish.md`.
@@ -897,18 +897,18 @@ fixtures supplying what the product itself never wrote:**
   `Host.address` (`https://10.0.0.5:8006`) went straight to asyncssh as the
   `host` argument. App install, app update, SSH verify, and both legs of
   cross-host migration **could never have worked against a real Proxmox
-  node** — shipped across Phases 4, 7, 8 with passing DoDs every time.
+  node**, shipped across Phases 4, 7, 8 with passing DoDs every time.
   Invisible because every SSH test's fake ignores or dict-keys on whatever
   `host` string it's given; two `test_migrate_transfer.py` cases even keyed
   by the full URL and passed for the wrong reason. Fixed once at the two
-  chokepoints every caller funnels through — `SSHExecutor.run()`,
-  `sftp_copy()` — with a new `normalize_ssh_host()` helper
+  chokepoints every caller funnels through, `SSHExecutor.run()`,
+  `sftp_copy()`: with a new `normalize_ssh_host()` helper
 - **`Host.node_name` was write-never** (`fa4c795`). `POST /hosts` cannot
   learn it (PVE's `/version` carries none) and `ingest_cycle()` never
-  persisted it either — only `tests/support.py`'s `seed_host_row` test
+  persisted it either, only `tests/support.py`'s `seed_host_row` test
   helper ever set it. `GET /cluster/nodes` and the VM-create node picker
   both read that column directly, so a host created through the real
-  onboarding flow offered no node — **a real user could not create a VM.**
+  onboarding flow offered no node, **a real user could not create a VM.**
   Found by the journey harness's first real run. Fixed in
   `pollers/__init__.py`: the first poll cycle that sees a node writes it
   once, mirroring `main.py`'s own self-`ctid` write-once pattern
@@ -918,7 +918,7 @@ fixtures supplying what the product itself never wrote:**
 error too); `SessionsCard`'s `Array.isArray` guard existed only to paper
 over an incomplete test mock; the hardcoded-colour guard's first run found
 a third offender (`StoreCard.tsx`) the manual survey missed; Task 17 found
-two real e2e races — `beforeAll` runs per *worker* not per *file*
+two real e2e races, `beforeAll` runs per *worker* not per *file*
 (fullyParallel let concurrent `seedAdmin()` calls double-post), and
 `POST /login` is rate-limited 10/min per source IP (nine independent UI
 sign-ins blew through it; fixed by signing in once and sharing the session
@@ -927,7 +927,7 @@ cookie).
 **Known gaps, stated plainly:**
 - **No real Proxmox node.** The journey runs against `FakePVE` +
   `FakeSSHConnection`, proving the product's own logic and UI, not hardware
-  behaviour — and this phase is itself the evidence for why that gap
+  behaviour, and this phase is itself the evidence for why that gap
   matters: the journey's first real run found both production bugs above,
   each of which three prior phases' fake-backed DoDs had passed straight
   through
@@ -944,27 +944,27 @@ cookie).
   502/409, now inconsistent with the `kind` taxonomy Task 1 gave
   `hosts.py`. Out of this phase's scope; counted directly (the plan's own
   survey estimated 24)
-- **F1 was the last item Phase 8 recorded as open** — now closed by Task 9
+- **F1 was the last item Phase 8 recorded as open**: now closed by Task 9
 
 **Verification:**
-- `dod_verify_phase9b.py` (throwaway, not committed — `backend/.gitignore`
+- `dod_verify_phase9b.py` (throwaway, not committed; `backend/.gitignore`
   carries `dod_verify_phase*.py`; the repo-root `.gitignore` does not, the
   pattern is backend-local): all four checks OK, exit 0, run twice,
   byte-identical both times
-- Backend: **827 passed, 2 skipped, 4 deselected** — `pytest tests/ -q -m
+- Backend: **827 passed, 2 skipped, 4 deselected**; `pytest tests/ -q -m
   "not pve_integration and not e2e"` (baseline entering the phase: 810)
-- Frontend: **268 passed across 43 files** — `npx vitest run
+- Frontend: **268 passed across 43 files**, `npx vitest run
   --no-file-parallelism` (baseline 205 across 37); build clean; lint exit 0,
   30 warnings, 0 errors, pre-existing warning classes only
-- Frontend e2e: **11 passed** (baseline 1) — `npx playwright test`: smoke +
+- Frontend e2e: **11 passed** (baseline 1), `npx playwright test`: smoke +
   the stranger journey + 9 light-theme pages, all real Chromium
-- Migrations: `alembic heads` = **`01f962e7a491`** — **one migration this
+- Migrations: `alembic heads` = **`01f962e7a491`**, **one migration this
   phase** (`ssh_verified_at` on `host_credentials`, Task 2), unlike 9a which
   shipped zero
 - Commit range: `a7bbf3d..fa4c795` (design spec through the last
   implementation commit)
 
-### 2026-08-06T20:20:00+05:30 — Phase 9c — execute-plan completed
+### 2026-08-06T20:20:00+05:30: Phase 9c, execute-plan completed
 
 Goal, verbatim from the plan: *"Build a documentation site and a marketing
 site for Proxploy from the material the project already has, fix the three
@@ -980,14 +980,14 @@ tasks across three repos, full details in
   app (inlines `make_app`'s body rather than importing `tests.support`,
   because `packaging/build_release.sh` excludes `tests/` from the release
   tarball but not `scripts/`); `install.sh` fixed so the bare `curl -fsSL
-  https://proxploy.com/install.sh | bash` actually works — release public
+  https://proxploy.com/install.sh | bash` actually works, release public
   key compiled in, `--channel`/`--version` defaulted (the latter read off
   the fetched `manifest.json`), `--dry-parse` added so the defaulting is
   testable without root or network
 - **`proxploy-docs`** (new repo, no remote): Astro 6 + Starlight, `layerr-
   docs`' content test suite (frontmatter/links/build, plus a rewritten
   content-consistency check), install/getting-started/trust/15 feature
-  guides, and an OpenAPI-generated API reference — 49 pages, 199 tests
+  guides, and an OpenAPI-generated API reference; 49 pages, 199 tests
 - **`proxploy-web`** (new repo, no remote): single-package Vite + React +
   Tailwind, Proxploy's own tokens, no Replit scaffolding, real paths only
   (no hash anchors), prerendered to 6 static routes, folderr-web-style
@@ -996,13 +996,13 @@ tasks across three repos, full details in
 **Findings that mattered:**
 - **The advertised one-liner did not work.** `install.sh` hard-required
   `--channel`/`--version`/`--pubkey` with no defaults, so the exact command
-  in its own header — and the one doc 10's DoD is phrased around — died on
+  in its own header, and the one doc 10's DoD is phrased around, died on
   `--channel is required`. Every 9a harness passed explicit flags, so the
   form every real user would run was the one form never executed. **Third
-  instance this phase-group of tested path ≠ advertised path** — the other
+  instance this phase-group of tested path ≠ advertised path**, the other
   two, both from 9b, were SSH handed a URL where asyncssh needs a hostname,
   and `Host.node_name` never being written by the real onboarding path.
-- **The OpenAPI schema reported `0.1.0`** while `__version__` was `1.0.0` —
+- **The OpenAPI schema reported `0.1.0`** while `__version__` was `1.0.0`, 
   would have contradicted the product on the reference's first page. Now
   confirmed `1.0.0` end to end.
 - **`starlight-openapi` was evaluated and rejected on evidence.** The
@@ -1012,14 +1012,14 @@ tasks across three repos, full details in
   reference section, plus pulls a high-severity dependency chain. Fell back
   to a real-`.md`-file generator instead, covered by the same tests as
   every other page. `layerr-docs`, the template for the whole site, has no
-  OpenAPI plugin at all — new ground, not a copied pattern.
+  OpenAPI plugin at all, new ground, not a copied pattern.
 - **A `# ponytail:` code comment leaks into the public API docs** via a
   route docstring (`backend/proxploy/api/network.py:159`,
-  `GET /network/bridges`) — visible today at `/api/docs`. The reference
+  `GET /network/bridges`), visible today at `/api/docs`. The reference
   generator now escapes it so it doesn't render as a markdown heading, but
-  the comment itself is still in the docstring — recorded as an open
+  the comment itself is still in the docstring, recorded as an open
   follow-up, not fixed here.
-- **99 unique paths, not 127 routes** — `openapi()["paths"]` is keyed by
+- **99 unique paths, not 127 routes**: `openapi()["paths"]` is keyed by
   path, so multiple methods on one path collapse to one key. The real
   count: 99 paths, 129 operations, measured directly.
 - Two judgement calls, both stated in their commits: **`/screenshots`
@@ -1030,60 +1030,60 @@ tasks across three repos, full details in
 **Known gaps, stated plainly:**
 - **Nothing is deployed and no page has been seen by a human.** No browser
   in this environment; passing builds and link tests are not visual review.
-- **The documented install path is unreachable end to end** — the release
+- **The documented install path is unreachable end to end**: the release
   channel is unpublished and the repo is private, so nothing exists at the
   advertised URL yet.
 - **The feature guides are assembled from phase notes, not from using the
-  product against real hardware** — and 9b is direct evidence that gap
+  product against real hardware**, and 9b is direct evidence that gap
   hides real defects (its journey harness's first real run found two
   production bugs three prior phases' fake-backed DoDs had missed).
-- **`proxploy-web` and `proxploy-docs` have no git remote** — both exist
+- **`proxploy-web` and `proxploy-docs` have no git remote**: both exist
   only on this machine.
 - **Doc 11's §6 amendment records a contradiction, not a resolution.** The
   repository went private 2026-08-06, an owner decision outside this
   phase's scope; §6's source-available framing was left as originally
   written (per the doc's own rule against silently rewriting history), and
   the amendment records that its premise no longer matches the product.
-  Which side resolves it — amend §6, or make the repo public — is owned by
+  Which side resolves it, amend §6, or make the repo public; is owned by
   Aspyre Labs.
 
 **Verification:**
-- Backend: **829 passed, 1 failed, 2 skipped, 4 deselected** —
+- Backend: **829 passed, 1 failed, 2 skipped, 4 deselected**; 
   `pytest tests/ -q -m "not pve_integration and not e2e"` (baseline
   entering the phase: 827); the one failure,
   `test_backups_sync.py::test_concurrent_stale_reads_enqueue_only_one_sync`,
   is a known timing/thread-race flake under concurrent full-suite load
-  (also seen in Phase 6/9b) — passed 3/3 in isolation, re-run directly in
+  (also seen in Phase 6/9b), passed 3/3 in isolation, re-run directly in
   this session
-- `proxploy-docs`: **199 passed** (4 test files) — `npm test`; **49 pages**
-  built, Pagefind index built — `npm run build`
+- `proxploy-docs`: **199 passed** (4 test files), `npm test`; **49 pages**
+  built, Pagefind index built; `npm run build`
 - `proxploy-web`: **6 routes prerendered** (`/`, `/features`, `/install`,
-  `/about`, `/privacy-policy`, `/terms-of-service`) — `npm run build`;
-  typecheck clean — `npm run typecheck`
-- Migrations: `alembic heads` = **`01f962e7a491`**, unchanged — zero
+  `/about`, `/privacy-policy`, `/terms-of-service`); `npm run build`;
+  typecheck clean, `npm run typecheck`
+- Migrations: `alembic heads` = **`01f962e7a491`**, unchanged; zero
   migrations this phase
 - Commit ranges: `proxploy-app` `8e67985..94a4326` (5 commits: `7ddde31`,
   `f8679f2`, `92d86db`, `064a5b2`, `94a4326`; this task's own doc/buildlog
   commit follows); `proxploy-docs` `a2af925..987a6c7` (full history, 10
   commits); `proxploy-web` `6b3608c..3b987cd` (full history, 5 commits)
 
-### 2026-08-06T23:47:23+05:30 — Phase 9d — execute-plan completed
+### 2026-08-06T23:47:23+05:30: Phase 9d, execute-plan completed
 
 Goal, verbatim from the plan: *"Make the licensing service ready to deploy
-— Postgres, rate limits, a real license-key format, install binding that
+Postgres, rate limits, a real license-key format, install binding that
 survives a reinstall, a health check that checks something, structured
-logs, and a rotation runbook — without deploying it."* 9 tasks, 8 in
+logs, and a rotation runbook; without deploying it."* 9 tasks, 8 in
 `proxploy-api`, 1 (Task 8) in `proxploy-app`, full details in
 `docs/notes/phase-9d-api-hardening.md`.
 
-**This closes Phase 9 in full** — 9a (install/update), 9b (onboarding
+**This closes Phase 9 in full**: 9a (install/update), 9b (onboarding
 polish), 9c (docs + marketing sites), 9d (this). All four sub-phases are
 now shipped and committed to `main` in their respective repos.
 
 **What shipped, per subsystem (all in `proxploy-api` unless noted):**
 - **Postgres replaces SQLite.** `db_url`/`make_engine` point at Postgres
   unconditionally; `tests/conftest.py` starts a throwaway `postgres:16`
-  container per session (or reuses `PROXPLOY_API_TEST_DSN` in CI) — this
+  container per session (or reuses `PROXPLOY_API_TEST_DSN` in CI), this
   box has no Postgres binaries at all, so skip-when-absent would have
   proven nothing
 - **A real license-key format.** `PPL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`,
@@ -1094,48 +1094,48 @@ now shipped and committed to `main` in their respective repos.
   `activate`: a mismatched install gets 403 without any mutation; a
   reactivation from a *new* `install_id` now rebinds cleanly (200, fresh
   credential) instead of the old 409
-- **Rate limiting** — `proxploy-app`'s `slowapi` idiom, `activate` at
+- **Rate limiting**: `proxploy-app`'s `slowapi` idiom, `activate` at
   10/minute (the only guessable surface), `refresh`/`revoke` at 20/minute,
   `/v1/health` unlimited
-- **Structured JSON logging**, from a zero-logging baseline — secrets never
+- **Structured JSON logging**, from a zero-logging baseline; secrets never
   appear, a SHA-256 prefix (`handle()`) is used where correlation is
   genuinely needed
-- **A health check that checks something** — `/v1/health` now runs
+- **A health check that checks something**: `/v1/health` now runs
   `SELECT 1` and checks the signing key independently, 503s on either
   failure; the startup path that used to crash on a missing signing key
   now catches it and reports through health instead
-- **Key rotation code + runbook** — `gen_signing_key.py` refuses to clobber
+- **Key rotation code + runbook**: `gen_signing_key.py` refuses to clobber
   an existing key without `--force`; `docs/runbooks/
   rotating-the-signing-key.md` documents the two-step sequence the
   bundled-trust-set design requires, plus the inverted emergency case
-- **Two `proxploy-app` gaps (Task 8)** — `LicenseClient.revoke()` added,
+- **Two `proxploy-app` gaps (Task 8)**: `LicenseClient.revoke()` added,
   `refresh()` now sends `install_id` (using an install identity
-  `proxploy-app` already had — `entitlements.py::set_license`'s persisted
+  `proxploy-app` already had, `entitlements.py::set_license`'s persisted
   `AppSetting("license.install_id")`); the never-imported
   `signing.py::load_private_pem` helper deleted
 
 **Findings that mattered:**
 - **All four endpoints had zero authentication when this phase started,
-  and still do — by design.** A shared secret would have to live in
+  and still do, by design.** A shared secret would have to live in
   `proxploy-app`, the repo that goes public, so it would be extractable
   with one `grep`; rate limits, key entropy and install binding are the
   actual defence
 - **License keys were ~64 bits with unlimited guesses**, no rate limiting
-  anywhere — now 120 bits, checked before any lookup touches the database
-- **`refresh`/`revoke` had no install binding at all** — possession of a
+  anywhere, now 120 bits, checked before any lookup touches the database
+- **`refresh`/`revoke` had no install binding at all**: possession of a
   credential was the whole check
 - **`revoke` had no status filter**, so a revoked licence could be revoked
-  again — inconsistent with `refresh`, now fixed to match
-- **There was no logging whatsoever** — zero hits for `logging` in the
+  again, inconsistent with `refresh`, now fixed to match
+- **There was no logging whatsoever**: zero hits for `logging` in the
   package before this phase
 - **`/v1/health` could only ever detect a dead process**, and **a missing
-  signing key crashed startup** with an uncaught `FileNotFoundError` —
+  signing key crashed startup** with an uncaught `FileNotFoundError`, 
   both fixed together, since the health check is what makes the crash fix
   debuggable rather than just quieter
-- **Re-activating from a new `install_id` returned 409** — every reinstall,
+- **Re-activating from a new `install_id` returned 409**: every reinstall,
   CT rebuild or restore was a support ticket
 - **`test_unknown_license_404` was testing a malformed key**, not an
-  unknown one — the 404 path was never actually exercised until this phase
+  unknown one, the 404 path was never actually exercised until this phase
   split the test in two
 - **Found during execution:** `slowapi`'s `Limiter` is a module-level
   singleton, so its counters leaked across tests until `limiter.reset()`
@@ -1149,26 +1149,26 @@ now shipped and committed to `main` in their respective repos.
 
 **Known gaps, stated plainly:**
 - **The service has still never run outside tests.** No Dockerfile, no
-  host, no deployment — rate limits, health checks and logs are verified
+  host, no deployment; rate limits, health checks and logs are verified
   by tests and this phase's DoD script, not by a deployed instance under
   real traffic
-- **Rotation is proven mechanically, never operationally** — the runbook's
+- **Rotation is proven mechanically, never operationally**: the runbook's
   two-step sequence has never been executed against a real install,
   because there are no real installs yet
 - **Everything here protects a system whose protections are currently
-  moot** — `tiers.yaml` keeps `all_entitled: true`, so a stolen token
+  moot**, `tiers.yaml` keeps `all_entitled: true`, so a stolen token
   grants exactly what `DEFAULT_FEATURES` already grants unconditionally.
   It all becomes live the day tiers arm
-- **No deployment, Dockerfile, monitoring backend, or error reporting** —
+- **No deployment, Dockerfile, monitoring backend, or error reporting**; 
   deliberately out of scope, same as every phase before it
 
 **Verification:**
-- `proxploy-api`: **35 passed, 0 skipped** — `.venv/bin/python -m pytest
+- `proxploy-api`: **35 passed, 0 skipped**; `.venv/bin/python -m pytest
   tests/ -q` (baseline entering the phase: 4)
-- `proxploy-app` backend: **831 passed, 2 skipped, 4 deselected** —
+- `proxploy-app` backend: **831 passed, 2 skipped, 4 deselected**; 
   `.venv/bin/python -m pytest tests/ -q -m "not pve_integration and not
   e2e"`
-- `dod_verify_phase9d.py` (throwaway, not committed — `proxploy-api/
+- `dod_verify_phase9d.py` (throwaway, not committed; `proxploy-api/
   .gitignore` gained a `dod_verify_*` line this phase, it had none before):
   all four checks OK (key format, install binding, rate limiting,
   Postgres-not-SQLite), exit 0, run twice, identical output both times

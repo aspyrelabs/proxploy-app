@@ -19,7 +19,7 @@ def test_install_requires_consent(client, csrf_header, bootstrap_admin):
 
 def test_install_422s_on_an_override_key_with_a_shell_metacharacter(client, csrf_header,
                                                                     bootstrap_admin):
-    """Rejected at the door as bad input, not surfaced as a deep JobFailed —
+    """Rejected at the door as bad input, not surfaced as a deep JobFailed; 
     overrides keys are inlined into the SSH command as `var_{key}=...` shell
     syntax (services/appstore.py, executor/ssh.py), so an unvalidated key is
     an untrusted-JSON -> root-shell trust boundary."""

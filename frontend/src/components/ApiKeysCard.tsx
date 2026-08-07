@@ -21,7 +21,7 @@ const SCOPE_OPTIONS = ['read', ...SCOPE_RESOURCES.map((r) => `${r}:write`)]
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed — try again.'
+    ? (e.body as any).detail : 'Request failed, try again.'
 
 export function ApiKeysCard() {
   const ent = useEntitlements()
@@ -97,11 +97,11 @@ export function ApiKeysCard() {
           {justCreated && (
             <div className="mb-4 rounded-ctl border border-amber/40 bg-amber-dim p-3">
               <p className="text-[12.5px] font-semibold text-amber">
-                Copy this key now — it will never be shown again.
+                Copy this key now; it will never be shown again.
               </p>
               <p className="mt-1 text-[11.5px] text-text-3">
                 Proxploy stores only a hash of it, not the key itself. If you lose it, revoke
-                "{justCreated.name}" below and create a new one — there is no way to recover this one.
+                "{justCreated.name}" below and create a new one; there is no way to recover this one.
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-ctl border border-line
@@ -186,7 +186,7 @@ export function ApiKeysCard() {
               </div>
               <fieldset className="mt-3">
                 <legend className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
-                  Scopes (empty = full rights of your role — a key can only narrow that, never widen it)
+                  Scopes (empty = full rights of your role, a key can only narrow that, never widen it)
                 </legend>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
                   {SCOPE_OPTIONS.map((s) => (
@@ -205,7 +205,7 @@ export function ApiKeysCard() {
             <a href="/api/docs" target="_blank" rel="noreferrer" className="text-amber hover:underline">
               full REST API
             </a>
-            {' '}— everything this UI does.
+            {' '}, everything this UI does.
           </p>
         </>
       )}

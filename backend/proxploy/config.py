@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     storage_upload_max_bytes: int = 16 * 1024 ** 3
     # Wall-clock ceiling every Phase 6 job handler passes to
     # services/pvetask.py::await_task. services/lifecycle.py keeps its own
-    # module constant instead — a start/stop that needs five minutes is a
+    # module constant instead: a start/stop that needs five minutes is a
     # different animal from a restore that needs fifty, and lifecycle's
     # timeout is already exercised by tests that monkeypatch it.
     # 3600s (1h), not lifecycle's 300s: every Phase 6 handler that reaches
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # storage.upload) rather than a status flip, and a multi-hundred-GB clone
     # or vzdump routinely needs far longer than five minutes. 300s was
     # inherited from TASK_TIMEOUT_S's start/stop-shaped default and never
-    # revisited for these — see BLOCKING 4 in the Phase 6 final review.
+    # revisited for these: see BLOCKING 4 in the Phase 6 final review.
     pve_task_timeout_s: float = 3600.0
     backup_sync_stale_s: float = 900.0
     # Scheduler (doc 10 Phase 7). The tick is the resolution floor: a cron
@@ -55,12 +55,12 @@ class Settings(BaseSettings):
     alerts_enabled: bool = True
     # OIDC JIT provisioning policy (doc 10 Task 10 + gap review). An IdP's user
     # population is not automatically the application's authorized population
-    # — auto-admitting every directory identity is the accidental-access
+    #, auto-admitting every directory identity is the accidental-access
     # failure mode. None (default) means a first-time OIDC sign-in provisions
     # the user but mints NO team_members row and leaves is_active=False: since
     # services/authz.py derives every permission from team_members and is
     # fail-closed, that account can do nothing until an admin activates it and
-    # assigns a role through the existing users/teams API — deny-with-an-
+    # assigns a role through the existing users/teams API: deny-with-an-
     # explanation, not a silent lockout. Set this to opt into auto-provisioning
     # a real role instead; validated against ROLE_ORDER at first use
     # (services/oidc.py) and raises loudly (never silently falls back) on an
@@ -70,10 +70,10 @@ class Settings(BaseSettings):
     # Task 9: how long a pending-2FA token (issued by password-correct login
     # for a totp_enabled user) stays redeemable at POST /auth/totp before it
     # must be discarded and the user re-logs in with their password. Kept
-    # short — this is a live login in progress, not a remember-me window.
+    # short: this is a live login in progress, not a remember-me window.
     totp_pending_ttl_s: float = 300.0
     # Migration preflight (doc 08 §14, doc 11 §2): the only number honesty lets
-    # us assume rather than measure — everything else in the estimate (transfer
+    # us assume rather than measure: everything else in the estimate (transfer
     # size, strategy) comes from a live PVE call. 80 MB/s is a conservative LAN
     # sustained-transfer figure; the job itself reports MEASURED downtime once
     # it runs (services/migrate.py's est_note says so explicitly).

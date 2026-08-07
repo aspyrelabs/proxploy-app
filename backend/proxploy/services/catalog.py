@@ -1,5 +1,5 @@
 """CatalogSource: fetch community-scripts/ProxmoxVE ct/+install script pairs
-directly from GitHub raw content (see this plan's header note on why —
+directly from GitHub raw content (see this plan's header note on why, 
 there is no public bulk metadata API), parse resource defaults, classify
 feasibility, upsert into `catalog_entries`."""
 from __future__ import annotations
@@ -45,7 +45,7 @@ def raw_url(sha: str, path: str) -> str:
 
 
 def head_sha() -> str:
-    """The repo's current HEAD commit SHA — one unauthenticated GitHub API
+    """The repo's current HEAD commit SHA, one unauthenticated GitHub API
     call per refresh job (not per slug; the rate limit is 60/hr/IP)."""
     resp = _fetch(HEAD_COMMIT_API)
     if resp.status_code != 200:
@@ -107,14 +107,14 @@ def _ingest_one(db, slug: str, sha: str) -> None:
 
 def run_ingest(db, slugs: list[str]) -> dict:
     """One HEAD-commit lookup, then one slug at a time. A single bad slug
-    (404, network hiccup) is recorded and skipped — it must not abort the
+    (404, network hiccup) is recorded and skipped; it must not abort the
     other 23, which is what an escaping JobFailed used to do."""
     sha = head_sha()
     synced, failed = 0, []
     for slug in slugs:
         try:
             _ingest_one(db, slug, sha)
-        except Exception as e:  # noqa: BLE001 — one bad slug can't kill the batch
+        except Exception as e:  # noqa: BLE001  (one bad slug can't kill the batch)
             db.rollback()
             failed.append({"slug": slug, "reason": str(e)})
             continue
@@ -138,7 +138,7 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"synced {result['synced']}, failed {len(result['failed'])}")
 
     # A refresh is the ONLY moment `update_available` can change, so it is the
-    # only place this has to run — no separate sweep, no separate schedule.
+    # only place this has to run: no separate sweep, no separate schedule.
     def _mark():
         with app.state.sessionmaker() as db:
             return mark_updates_available(db)

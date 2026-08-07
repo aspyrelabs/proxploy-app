@@ -1,8 +1,8 @@
-# Phase 9d — proxploy-api production hardening
+# Phase 9d: proxploy-api production hardening
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the licensing service ready to deploy — Postgres, rate limits, a real license-key format, install binding that survives a reinstall, a health check that checks something, structured logs, and a rotation runbook — without deploying it.
+**Goal:** Make the licensing service ready to deploy, Postgres, rate limits, a real license-key format, install binding that survives a reinstall, a health check that checks something, structured logs, and a rotation runbook; without deploying it.
 
 **Architecture:** Postgres replaces SQLite first, because every later task's tests run against whatever `conftest.py` builds. Then a new `licensekey` module owns key generation and validation, applied before any database lookup. Then `install_id` binding on `refresh`/`revoke` plus the rebind path through `activate`. Rate limiting copies `proxploy-app`'s `slowapi` idiom verbatim. Logging, health and rotation are additive.
 
@@ -20,7 +20,7 @@ Every task's requirements implicitly include this section.
 - **`proxploy-api` stays private permanently.** It is distributed as a running service, never as source. Do not add public-facing readme copy, and do not assume a reader of this repo is a customer.
 - **Nothing deploys.** No Dockerfile for the service, no hosting, no DNS, no monitoring backend. `docker` is used only to run Postgres for tests.
 - **`tiers.yaml` keeps `all_entitled: true`.** Do not arm tiers, do not populate the `tiers:` map, do not gate any feature.
-- **No shared API secret.** Any credential the app presents lives in `proxploy-app`, which becomes public — it would be extractable. Rate limits, key entropy and install binding are the defence; caller authentication is not.
+- **No shared API secret.** Any credential the app presents lives in `proxploy-app`, which becomes public; it would be extractable. Rate limits, key entropy and install binding are the defence; caller authentication is not.
 - **Python floor is 3.12** (`requires-python = ">=3.12"`).
 - **Test floor: the suite currently has 4 tests and they all pass.** Never let the count drop; every task adds tests.
 - **Secrets are never logged.** License keys, refresh credentials and signing-key material must not appear in logs in full or in part. A SHA-256 prefix is acceptable as a correlation handle.
@@ -32,13 +32,13 @@ Every task's requirements implicitly include this section.
 
 ```
 Task 1  Postgres            -> MUST land first; every other task's tests run on it
-Task 2  License key format  (needs 1 — regenerates fixtures)
-Task 3  install_id binding  (needs 1, 2 — its tests use generated keys)
+Task 2  License key format  (needs 1, regenerates fixtures)
+Task 3  install_id binding  (needs 1, 2; its tests use generated keys)
 Task 4  Rate limiting       (needs 1)
 Task 5  Structured logging  (needs 1)
 Task 6  Health check        (needs 1)
 Task 7  Rotation + runbook  (needs 1)
-Task 8  proxploy-app gaps   independent — different repo, can run any time
+Task 8  proxploy-app gaps   independent, different repo, can run any time
 Task 9  DoD, notes, buildlog (last)
 ```
 
@@ -55,30 +55,30 @@ Task 1 is a hard barrier. Tasks 4–7 are mutually independent once it lands but
 **Interfaces:**
 - Produces, for every later task: `conftest.py`'s `client` fixture yields a `TestClient` backed by a **real Postgres**, and `pg_dsn` is a session-scoped fixture returning a `postgresql+psycopg://…` DSN.
 
-`proxploy-app`'s pattern skips Postgres tests when a DSN is unset, because SQLite is its primary. **That is not available here** — Postgres becomes the only database, so a skip means the suite proves nothing. The fixture must guarantee a database exists.
+`proxploy-app`'s pattern skips Postgres tests when a DSN is unset, because SQLite is its primary. **That is not available here**: Postgres becomes the only database, so a skip means the suite proves nothing. The fixture must guarantee a database exists.
 
 This box has **no Postgres binaries at all** (`pg_isready`, `psql`, `initdb`, `pg_ctl` all absent; nothing listening on 5432) but **Docker 29.1.3 works**. So: use an existing DSN if one is provided, otherwise start a throwaway container.
 
 - [ ] **Step 1: Add the dependency**
 
-In `pyproject.toml`, add `"psycopg[binary]>=3.2"` to `dependencies` and `"pytest-asyncio>=0.24"` is **not** needed — do not add it. The dev extra stays `["pytest>=8", "httpx>=0.27"]`.
+In `pyproject.toml`, add `"psycopg[binary]>=3.2"` to `dependencies` and `"pytest-asyncio>=0.24"` is **not** needed; do not add it. The dev extra stays `["pytest>=8", "httpx>=0.27"]`.
 
 - [ ] **Step 2: Point settings and engine at Postgres**
 
-`proxploy_api/config.py` — change the default only:
+`proxploy_api/config.py`: change the default only:
 
 ```python
     db_url: str = "postgresql+psycopg://proxploy:proxploy@localhost:5432/proxploy_api"
 ```
 
-`proxploy_api/db.py` — delete the sqlite branch entirely. `make_engine` becomes:
+`proxploy_api/db.py`: delete the sqlite branch entirely. `make_engine` becomes:
 
 ```python
 def make_engine(settings: Settings):
     return create_engine(settings.db_url, pool_pre_ping=True)
 ```
 
-Drop the now-unused `event` import. `pool_pre_ping=True` matters for a long-lived service against a network database — a stale pooled connection otherwise surfaces as a request failure.
+Drop the now-unused `event` import. `pool_pre_ping=True` matters for a long-lived service against a network database, a stale pooled connection otherwise surfaces as a request failure.
 
 Leave `models/__init__.py`'s `BigPK = BigInteger().with_variant(Integer, "sqlite")` alone. It is harmless on Postgres (the variant simply never applies) and removing it is churn in a file this task has no other reason to touch.
 
@@ -113,7 +113,7 @@ def _free_port() -> int:
 def pg_dsn():
     """A real Postgres for the whole run.
 
-    PROXPLOY_API_TEST_DSN wins when set — that is how CI hands us its
+    PROXPLOY_API_TEST_DSN wins when set; that is how CI hands us its
     `services:` container. With nothing set we start a throwaway container,
     because this box has no Postgres binaries at all (no initdb, no pg_ctl,
     nothing on 5432) and Postgres is now the only database this service
@@ -223,7 +223,7 @@ In `.github/workflows/ci.yml`'s `test` job, add a Postgres service and the DSN, 
       PROXPLOY_API_TEST_DSN: postgresql+psycopg://proxploy:proxploy@localhost:5432/proxploy_api
 ```
 
-With `PROXPLOY_API_TEST_DSN` set, the fixture never invokes Docker — which matters because Docker-in-Docker on a runner is not something to rely on.
+With `PROXPLOY_API_TEST_DSN` set, the fixture never invokes Docker; which matters because Docker-in-Docker on a runner is not something to rely on.
 
 - [ ] **Step 6: Run**
 
@@ -234,7 +234,7 @@ python -m pytest tests/ -q
 ```
 Expected: **4 passed**. The first run pulls `postgres:16`, so allow time.
 
-Also confirm the migration actually applies on Postgres — it was only ever run against SQLite. If `sa.BigInteger().with_variant(sa.Integer(), 'sqlite')` or anything else errors, fix the migration and say so.
+Also confirm the migration actually applies on Postgres; it was only ever run against SQLite. If `sa.BigInteger().with_variant(sa.Integer(), 'sqlite')` or anything else errors, fix the migration and say so.
 
 - [ ] **Step 7: Commit**
 
@@ -255,7 +255,7 @@ git commit -m "feat(db): Postgres replaces SQLite, and the suite runs against a 
 **Interfaces:**
 - Produces, for Task 3: `generate() -> str`, `canonical(raw: str) -> str`, `LicenseKeyError`. `canonical` normalises and validates, raising `LicenseKeyError` on anything malformed; its return value is what gets stored and looked up.
 
-Current keys are `"PPL-" + "-".join(secrets.token_hex(2).upper() for _ in range(4))` — 16 hex chars, **64 bits**. New format: `PPL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`, Crockford Base32, **24 payload characters = 120 bits**, plus a mod-37 check symbol.
+Current keys are `"PPL-" + "-".join(secrets.token_hex(2).upper() for _ in range(4))`, 16 hex chars, **64 bits**. New format: `PPL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`, Crockford Base32, **24 payload characters = 120 bits**, plus a mod-37 check symbol.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -336,7 +336,7 @@ def test_malformed_keys_raise(bad):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_licensekey.py -q`
-Expected: FAIL — the module does not exist.
+Expected: FAIL, the module does not exist.
 
 - [ ] **Step 3: Implement**
 
@@ -350,7 +350,7 @@ symbol. Crockford because it drops I, L, O and U and normalises the
 confusable pairs on decode, so a key survives being read down a phone or
 retyped out of a support ticket.
 
-The check symbol is a TYPO detector, not a security control — an attacker
+The check symbol is a TYPO detector, not a security control; an attacker
 computes valid checksums trivially. Its value is that a mistyped key fails
 here, locally, instead of consuming a database lookup and a slice of the
 rate-limit budget that exists to catch real guessing.
@@ -367,7 +367,7 @@ _CONFUSABLE = str.maketrans({"I": "1", "L": "1", "O": "0"})
 
 class LicenseKeyError(ValueError):
     """A key that is malformed, mistyped, or not ours. Never raised for a
-    well-formed key that simply is not in the database — that is a lookup
+    well-formed key that simply is not in the database; that is a lookup
     miss, and the caller distinguishes them."""
 
 
@@ -408,7 +408,7 @@ def canonical(raw: str) -> str:
     if not s.startswith(PREFIX):
         raise LicenseKeyError("license key does not start with PPL-")
     # Normalise ONLY the body. The prefix contains an L, which the
-    # confusable table would rewrite to "PP1-" — a trap worth naming.
+    # confusable table would rewrite to "PP1-": a trap worth naming.
     body = s[len(PREFIX):].replace("-", "").translate(_CONFUSABLE)
     if len(body) != BODY_LEN:
         raise LicenseKeyError(f"license key body must be {BODY_LEN} characters")
@@ -418,7 +418,7 @@ def canonical(raw: str) -> str:
     if check not in CHECK_ALPHABET:
         raise LicenseKeyError("license key check symbol is not valid")
     if CHECK_ALPHABET[_decode(payload) % 37] != check:
-        raise LicenseKeyError("license key failed its checksum — likely a typo")
+        raise LicenseKeyError("license key failed its checksum, likely a typo")
     return _grouped(payload + check)
 ```
 
@@ -429,7 +429,7 @@ Expected: all pass.
 
 - [ ] **Step 5: Use it in the generator and the route**
 
-`scripts/create_license.py` — replace the key line:
+`scripts/create_license.py`: replace the key line:
 
 ```python
 from proxploy_api.licensekey import generate
@@ -438,7 +438,7 @@ key = generate()
 ```
 Delete the now-unused `import secrets`.
 
-`proxploy_api/api/licenses.py` — validate **before** the query in `activate`:
+`proxploy_api/api/licenses.py`: validate **before** the query in `activate`:
 
 ```python
 from proxploy_api.licensekey import LicenseKeyError, canonical
@@ -449,7 +449,7 @@ def activate(request: Request, body: ActivateIn, db=Depends(get_db)):
         key = canonical(body.license_key)
     except LicenseKeyError as e:
         # 422, not 404: this is a malformed request, not a missing resource,
-        # and it never reaches the database — which is what keeps the rate
+        # and it never reaches the database: which is what keeps the rate
         # limit meaningful for real guessing.
         raise HTTPException(422, str(e))
     lic = db.query(License).filter_by(license_key=key, status="active").one_or_none()
@@ -470,7 +470,7 @@ def test_unknown_license_404(client):
 
 
 def test_malformed_license_422(client):
-    """Rejected on format before any lookup — see licensekey.canonical."""
+    """Rejected on format before any lookup, see licensekey.canonical."""
     assert client.post("/v1/licenses/activate", json={
         "license_key": "PPL-NOPE", "install_id": "i"}).status_code == 422
 ```
@@ -551,7 +551,7 @@ def test_revoke_from_another_install_is_rejected(client, license_key):
 
 def test_reinstall_rebinds_and_issues_a_fresh_credential(client, license_key):
     """A user who rebuilds their CT gets a new install_id. Re-activating
-    must work — this returned 409 before 9d and generated a support ticket
+    must work, this returned 409 before 9d and generated a support ticket
     for every reinstall."""
     first = _activate(client, license_key, "inst-1").json()["refresh_credential"]
     r = _activate(client, license_key, "inst-2")
@@ -564,7 +564,7 @@ def test_reinstall_rebinds_and_issues_a_fresh_credential(client, license_key):
 
 
 def test_the_old_credential_stops_working_after_a_rebind(client, license_key):
-    """It ages out through the app's grace window rather than dying — the
+    """It ages out through the app's grace window rather than dying, the
     app honours its cached token to grace_until on a 403. See doc 07 §8."""
     first = _activate(client, license_key, "inst-1").json()["refresh_credential"]
     _activate(client, license_key, "inst-2")
@@ -582,7 +582,7 @@ def test_reactivating_the_same_install_is_still_idempotent(client, license_key):
 - [ ] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_install_binding.py -q`
-Expected: FAIL — `install_id` is not a field on `CredentialIn`, and the rebind returns 409.
+Expected: FAIL, `install_id` is not a field on `CredentialIn`, and the rebind returns 409.
 
 - [ ] **Step 3: Implement**
 
@@ -597,8 +597,8 @@ class CredentialIn(BaseModel):
 def bound_license(db, body: CredentialIn, *, active_only: bool) -> License:
     """Resolve a credential to its license, enforcing the install binding.
 
-    A mismatch is reported exactly as an unknown credential — same 403,
-    same shape — so proxploy-app's existing failure path takes over: it
+    A mismatch is reported exactly as an unknown credential, same 403,
+    same shape, so proxploy-app's existing failure path takes over: it
     honours its cached token to `exp`, then through `grace_until`, then
     falls back to the built-in map (doc 07 §8). The install ages down to
     the floor instead of being cut off.
@@ -616,14 +616,14 @@ def bound_license(db, body: CredentialIn, *, active_only: bool) -> License:
     return lic
 ```
 
-`activate` — replace the 409 branch with a rebind:
+`activate`: replace the 409 branch with a rebind:
 
 ```python
     rebound_from = None
     if lic.install_id and lic.install_id != body.install_id:
         # A reinstall, a rebuilt CT, or a restore. The license key IS the
         # owner's credential, so anyone presenting it already owns this
-        # license — refusing bought nothing and cost a support ticket per
+        # license: refusing bought nothing and cost a support ticket per
         # reinstall. Rebind, and invalidate the old credential.
         rebound_from = lic.install_id
         lic.refresh_credential_hash = None
@@ -637,9 +637,9 @@ def bound_license(db, body: CredentialIn, *, active_only: bool) -> License:
     db.commit()
 ```
 
-Keep `rebound_from` — Task 5 logs it. Until then, leave it assigned with a comment saying Task 5 consumes it, rather than deleting and re-adding.
+Keep `rebound_from`, Task 5 logs it. Until then, leave it assigned with a comment saying Task 5 consumes it, rather than deleting and re-adding.
 
-`revoke` — use the helper. Note it previously had **no** status filter, so a revoked license could be revoked again; `active_only=True` fixes that inconsistency with `refresh`:
+`revoke`: use the helper. Note it previously had **no** status filter, so a revoked license could be revoked again; `active_only=True` fixes that inconsistency with `refresh`:
 
 ```python
 @router.post("/revoke")
@@ -663,11 +663,11 @@ def refresh(request: Request, body: CredentialIn, db=Depends(get_db)):
     return {"token": mint(request, db, lic)}
 ```
 
-`_h` is no longer imported there — drop it from the import line.
+`_h` is no longer imported there, drop it from the import line.
 
 - [ ] **Step 4: Fix the existing cycle test**
 
-`tests/test_licensing.py::test_activate_refresh_revoke_cycle` asserts `409` for `inst-2` and calls refresh/revoke without an `install_id`. Update it: the 409 assertion becomes a rebind, and both credential calls pass `install_id`. Do not delete the test — it is the end-to-end happy path.
+`tests/test_licensing.py::test_activate_refresh_revoke_cycle` asserts `409` for `inst-2` and calls refresh/revoke without an `install_id`. Update it: the 409 assertion becomes a rebind, and both credential calls pass `install_id`. Do not delete the test; it is the end-to-end happy path.
 
 - [ ] **Step 5: Run everything and commit**
 
@@ -687,7 +687,7 @@ git commit -m "feat(licensing): bind credentials to their install, and let a rei
 - Modify: `pyproject.toml`, `proxploy_api/api/licenses.py`, `proxploy_api/api/entitlements.py`, `proxploy_api/main.py`
 - Test: `tests/test_rate_limit.py` (new)
 
-Copy `proxploy-app`'s idiom exactly — module-level `Limiter(key_func=get_remote_address)`, `@limiter.limit(...)` decorators, `app.state.limiter` set once. Do not invent a second pattern.
+Copy `proxploy-app`'s idiom exactly, module-level `Limiter(key_func=get_remote_address)`, `@limiter.limit(...)` decorators, `app.state.limiter` set once. Do not invent a second pattern.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -712,7 +712,7 @@ def test_health_is_not_rate_limited(client):
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — no 429 appears.
+Expected: FAIL, no 429 appears.
 
 - [ ] **Step 3: Implement**
 
@@ -727,7 +727,7 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address)
 ```
 
-Decorate. `slowapi` requires the route to take `request: Request` — `activate` already does; `revoke` does **not** and must gain one:
+Decorate. `slowapi` requires the route to take `request: Request`, `activate` already does; `revoke` does **not** and must gain one:
 
 ```python
 @router.post("/activate")
@@ -739,7 +739,7 @@ def activate(request: Request, body: ActivateIn, db=Depends(get_db)):
 def revoke(request: Request, body: CredentialIn, db=Depends(get_db)):
 ```
 
-`entitlements.py` imports the same limiter — one limiter for the app, not one per module:
+`entitlements.py` imports the same limiter, one limiter for the app, not one per module:
 
 ```python
 from proxploy_api.api.licenses import CredentialIn, bound_license, get_db, limiter, mint
@@ -758,7 +758,7 @@ In `main.py`, after creating the app:
     app.state.limiter = limiter
 ```
 
-**Check whether a 429 handler is needed here.** `proxploy-app` relies on its own RFC 9457 problem handler and needs none. This service has no such handler, so `RateLimitExceeded` may propagate as a 500 instead of a 429 — if the test shows that, add `app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)` from `slowapi`. Report which you found.
+**Check whether a 429 handler is needed here.** `proxploy-app` relies on its own RFC 9457 problem handler and needs none. This service has no such handler, so `RateLimitExceeded` may propagate as a 500 instead of a 429; if the test shows that, add `app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)` from `slowapi`. Report which you found.
 
 - [ ] **Step 4: Run and commit**
 
@@ -778,7 +778,7 @@ git commit -m "feat(api): rate-limit the credential endpoints"
 - Create: `proxploy_api/logging.py`, `tests/test_logging.py`
 - Modify: `proxploy_api/main.py`, `proxploy_api/api/licenses.py`
 
-The service currently emits **nothing** — no `logging.basicConfig`, no logger anywhere.
+The service currently emits **nothing**, no `logging.basicConfig`, no logger anywhere.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -818,7 +818,7 @@ def test_the_refresh_credential_never_appears(client, license_key, caplog):
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — nothing is logged, so `"activate" in text` is false.
+Expected: FAIL, nothing is logged, so `"activate" in text` is false.
 
 - [ ] **Step 3: Implement**
 
@@ -829,7 +829,7 @@ Expected: FAIL — nothing is logged, so `"activate" in text` is false.
 
 The rule this module exists to enforce: license keys, refresh credentials
 and signing-key material NEVER reach a log, in full or in part. Where a
-correlation handle is genuinely needed, use `handle()` — a short SHA-256
+correlation handle is genuinely needed, use `handle()`; a short SHA-256
 prefix, which is enough to correlate two events without being enough to
 replay anything.
 """
@@ -868,7 +868,7 @@ def log(logger: logging.Logger, level: int, msg: str, **fields) -> None:
 
 Call `configure()` in `create_app()` before the routers are included.
 
-In `licenses.py`, log the outcomes — never the inputs:
+In `licenses.py`, log the outcomes; never the inputs:
 
 ```python
 import logging
@@ -883,7 +883,7 @@ _log = logging.getLogger("proxploy_api.licenses")
         install_id=body.install_id, key=handle(key), rebound=bool(rebound_from))
 ```
 
-`license_id` and `install_id` are safe — they are identifiers, not secrets. `key=handle(key)` gives correlation without the key.
+`license_id` and `install_id` are safe; they are identifiers, not secrets. `key=handle(key)` gives correlation without the key.
 
 - [ ] **Step 4: Run and commit**
 
@@ -903,7 +903,7 @@ git commit -m "feat(obs): structured logging that never logs a credential"
 - Modify: `proxploy_api/main.py`
 - Test: `tests/test_health.py` (new)
 
-`/v1/health` currently returns `{"status": "ok"}` whenever the process is up — so it can only ever detect "the process died", never "the process is up and cannot do its job".
+`/v1/health` currently returns `{"status": "ok"}` whenever the process is up, so it can only ever detect "the process died", never "the process is up and cannot do its job".
 
 - [ ] **Step 1: Write the failing test**
 
@@ -927,11 +927,11 @@ def test_health_reports_unhealthy_when_the_database_is_gone(client):
     assert r.json()["database"] != "ok"
 ```
 
-If mutating the engine URL proves awkward against SQLAlchemy 2.0's immutable `URL`, substitute `monkeypatch`ing `app.state.sessionmaker` with one whose connection raises. **The assertion that matters is that an unreachable database yields 503 and a non-`ok` `database` field**, not the mechanism used to break it — adapt and say so.
+If mutating the engine URL proves awkward against SQLAlchemy 2.0's immutable `URL`, substitute `monkeypatch`ing `app.state.sessionmaker` with one whose connection raises. **The assertion that matters is that an unreachable database yields 503 and a non-`ok` `database` field**, not the mechanism used to break it; adapt and say so.
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: FAIL — the response has only `status`.
+Expected: FAIL, the response has only `status`.
 
 - [ ] **Step 3: Implement**
 
@@ -956,7 +956,7 @@ Expected: FAIL — the response has only `status`.
 
 Import `Response` from `fastapi` and `version` from `importlib.metadata`.
 
-**Also fix the startup crash.** `main.py`'s lifespan calls `settings.signing_key_file.read_text()`, which raises an uncaught `FileNotFoundError` and kills the process with a stack trace. Catch it, log a clear message via Task 5's logger, and leave `app.state.private_pem` unset so this health check reports it — a service that starts and reports "I cannot sign" is more debuggable than one that refuses to start with a traceback.
+**Also fix the startup crash.** `main.py`'s lifespan calls `settings.signing_key_file.read_text()`, which raises an uncaught `FileNotFoundError` and kills the process with a stack trace. Catch it, log a clear message via Task 5's logger, and leave `app.state.private_pem` unset so this health check reports it; a service that starts and reports "I cannot sign" is more debuggable than one that refuses to start with a traceback.
 
 - [ ] **Step 4: Run and commit**
 
@@ -993,7 +993,7 @@ def test_tokens_carry_the_configured_kid(client):
 
 
 def test_a_second_key_can_be_generated_without_disturbing_the_first(tmp_path):
-    """gen_signing_key.py must refuse to clobber an existing key file — a
+    """gen_signing_key.py must refuse to clobber an existing key file, a
     silent overwrite destroys the only copy of a key that installs still
     trust."""
     import subprocess, sys
@@ -1011,13 +1011,13 @@ def test_a_second_key_can_be_generated_without_disturbing_the_first(tmp_path):
 
 - [ ] **Step 2: Run to verify failure**
 
-Expected: the overwrite test FAILs — the script currently clobbers (and `chmod(0o400)` then `write_bytes` on a second run may even raise a confusing `PermissionError` rather than a clear refusal).
+Expected: the overwrite test FAILs, the script currently clobbers (and `chmod(0o400)` then `write_bytes` on a second run may even raise a confusing `PermissionError` rather than a clear refusal).
 
 - [ ] **Step 3: Implement**
 
 `scripts/gen_signing_key.py`: refuse to overwrite an existing file with a clear message, unless `--force` is passed. Keep the 0400 mode and the public-PEM-to-stdout behaviour.
 
-`proxploy_api/config.py`: no new fields are strictly required — rotation is `PROXPLOY_API_SIGNING_KEY_FILE` plus `PROXPLOY_API_KID` — but document that pair as the rotation interface in the runbook, and make sure both are read fresh (they are: `get_settings` is `lru_cache`d per process, so a restart picks them up).
+`proxploy_api/config.py`: no new fields are strictly required, rotation is `PROXPLOY_API_SIGNING_KEY_FILE` plus `PROXPLOY_API_KID`, but document that pair as the rotation interface in the runbook, and make sure both are read fresh (they are: `get_settings` is `lru_cache`d per process, so a restart picks them up).
 
 - [ ] **Step 4: Write the runbook**
 
@@ -1028,11 +1028,11 @@ Expected: the overwrite test FAILs — the script currently clobbers (and `chmod
 Sequence:
 1. Generate the new key (`gen_signing_key.py --kid <new>`), private key to the password manager, public PEM captured.
 2. Add the public key to `proxploy-app`'s `BUNDLED_PUBLIC_KEYS` **alongside** the current one. Both are now trusted.
-3. Publish a `proxploy-app` release carrying it, and wait for installs to update. **Do not proceed until they have** — installs still on the old release will reject tokens signed by the new key.
+3. Publish a `proxploy-app` release carrying it, and wait for installs to update. **Do not proceed until they have**: installs still on the old release will reject tokens signed by the new key.
 4. Switch the API: `PROXPLOY_API_SIGNING_KEY_FILE` and `PROXPLOY_API_KID` to the new key, restart. Tokens now carry the new `kid`.
 5. After the old key's tokens have all expired (`token_ttl_hours`, default 72h) **and** their grace windows closed (`grace_days`, default 30d), remove the old public key from `BUNDLED_PUBLIC_KEYS` in a later release.
 
-State the emergency case separately: if the private key is compromised, steps 3–4 invert — you must switch signing immediately and accept that installs which have not updated will fall back through grace to the built-in map, which is a degradation rather than an outage. Say that plainly so nobody discovers it mid-incident.
+State the emergency case separately: if the private key is compromised, steps 3–4 invert; you must switch signing immediately and accept that installs which have not updated will fall back through grace to the built-in map, which is a degradation rather than an outage. Say that plainly so nobody discovers it mid-incident.
 
 Note the runbook should read consistently with `proxploy-app`'s `docs/runbooks/publishing-a-release.md`, which records the identical bootstrap property for the *release-signing* key.
 
@@ -1052,7 +1052,7 @@ git commit -m "feat(signing): refuse to clobber a live key, and document the two
 
 **Files:**
 - Modify: `backend/proxploy/services/license_client.py`, `proxploy_api/signing.py` (in `proxploy-api`)
-- Test: `backend/tests/` — find the existing licence-client test and extend it
+- Test: `backend/tests/`, find the existing licence-client test and extend it
 
 - [ ] **Step 1: Add `LicenseClient.revoke()`**
 
@@ -1065,15 +1065,15 @@ The API exposes `POST /v1/licenses/revoke` and the client cannot call it. Add th
                            "install_id": install_id})
 ```
 
-Task 3 also made `install_id` required on `refresh` — **update `LicenseClient.refresh()` to send it too**, or the app's refresh breaks against the hardened API. Find where the app knows its own install id (grep for `install_id` in `backend/proxploy/`) and thread it through; if the app has no install id concept yet, report that rather than inventing one, because it changes the size of this task considerably.
+Task 3 also made `install_id` required on `refresh`, **update `LicenseClient.refresh()` to send it too**, or the app's refresh breaks against the hardened API. Find where the app knows its own install id (grep for `install_id` in `backend/proxploy/`) and thread it through; if the app has no install id concept yet, report that rather than inventing one, because it changes the size of this task considerably.
 
 - [ ] **Step 2: Delete the dead loader**
 
-`proxploy_api/signing.py::load_private_pem` is never imported — `main.py` inlines the same `read_text()`. Two ways to load a signing key is one too many. Either route `main.py` through the helper or delete it; pick one and say which.
+`proxploy_api/signing.py::load_private_pem` is never imported, `main.py` inlines the same `read_text()`. Two ways to load a signing key is one too many. Either route `main.py` through the helper or delete it; pick one and say which.
 
 - [ ] **Step 3: Run and commit**
 
-Run the backend suite: `cd backend && .venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"` — floor **830 passed, 2 skipped**.
+Run the backend suite: `cd backend && .venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"`, floor **830 passed, 2 skipped**.
 
 Commit in each repo separately, staging explicit paths.
 
@@ -1087,21 +1087,21 @@ Commit in each repo separately, staging explicit paths.
 - Create: `proxploy-api/dod_verify_phase9d.py` (add `dod_verify_*` to `proxploy-api/.gitignore`), `proxploy-app/docs/notes/phase-9d-api-hardening.md`
 - Modify: `proxploy-app/buildlog.md`
 
-- [ ] **Step 1: The DoD script** — four checks, each printing OK/FAIL, exit non-zero on failure, run twice with identical output:
-  1. **Key format** — generate 1000 keys, assert all validate, all distinct, and that a single-character mutation and an adjacent transposition are both rejected. Print the bit count.
-  2. **Install binding** — drive activate → refresh → mismatch → rebind through the real app, asserting the mismatch does not mutate the binding and the rebind issues a fresh credential.
-  3. **Rate limiting** — hammer `activate` and assert a 429 appears; assert `/v1/health` does not throttle.
-  4. **Postgres** — assert the suite's database is genuinely Postgres (`SELECT version()`), not SQLite. This is the check that would have caught a silent fallback.
+- [ ] **Step 1: The DoD script**, four checks, each printing OK/FAIL, exit non-zero on failure, run twice with identical output:
+  1. **Key format**: generate 1000 keys, assert all validate, all distinct, and that a single-character mutation and an adjacent transposition are both rejected. Print the bit count.
+  2. **Install binding**: drive activate → refresh → mismatch → rebind through the real app, asserting the mismatch does not mutate the binding and the rebind issues a fresh credential.
+  3. **Rate limiting**: hammer `activate` and assert a 429 appears; assert `/v1/health` does not throttle.
+  4. **Postgres**: assert the suite's database is genuinely Postgres (`SELECT version()`), not SQLite. This is the check that would have caught a silent fallback.
 
-- [ ] **Step 2: Notes** — `docs/notes/phase-9d-api-hardening.md`, same skeleton as `phase-9c-web-and-docs.md`.
+- [ ] **Step 2: Notes**, `docs/notes/phase-9d-api-hardening.md`, same skeleton as `phase-9c-web-and-docs.md`.
 
 **Findings that must appear:** all four endpoints had zero authentication and still do by design (a shared secret would live in the public app); license keys were 64 bits with unlimited guesses; `refresh`/`revoke` had no install binding at all; `revoke` had no status filter so a revoked licence could be revoked again; there was no logging whatsoever; `/v1/health` could only detect a dead process; a missing signing key crashed startup with an uncaught `FileNotFoundError`; re-activating from a new install returned **409**, meaning every reinstall was a support ticket; and `test_unknown_license_404` was testing a malformed key rather than an unknown one, so the 404 path was never actually exercised.
 
 **Residual limitations, at minimum:** the service has still never run outside tests; rotation is proven mechanically but has never been executed against real installs because there are none; everything here protects a system whose protections are moot while `all_entitled: true`; and no deployment, Dockerfile, monitoring backend or error reporting exists.
 
-- [ ] **Step 3: Buildlog** — the phase entry in the established format, including "Known gaps, stated plainly".
+- [ ] **Step 3: Buildlog**, the phase entry in the established format, including "Known gaps, stated plainly".
 
-- [ ] **Step 4: Real numbers** — the `proxploy-api` suite count, the `proxploy-app` backend count, both DoD runs. **Never write a projected number.**
+- [ ] **Step 4: Real numbers**, the `proxploy-api` suite count, the `proxploy-app` backend count, both DoD runs. **Never write a projected number.**
 
 - [ ] **Step 5: Commit** in both repos.
 
@@ -1111,8 +1111,8 @@ Commit in each repo separately, staging explicit paths.
 
 1. **Spec coverage.** §1 Postgres → Task 1. §2 rate limiting → Task 4. §3.1 key format → Task 2. §3.2 no dual-accept → Task 2 Step 6. §3.3 install binding both directions → Task 3. §4 health → Task 6. §5 logging → Task 5. §6 rotation code and runbook → Task 7. §7 `revoke()` and dead code → Task 8. Verification → Task 9.
 
-2. **Placeholder scan.** No "TBD" or "handle appropriately". Four places direct the implementer to check a fact and state both branches: whether `slowapi` needs an explicit 429 handler here (Task 4), how to break the database in a test if URL mutation is awkward (Task 6), whether to route through or delete the dead loader (Task 8), and whether the app has an install-id concept to thread into `refresh` (Task 8) — that last one explicitly says to report rather than invent, because it changes the task's size.
+2. **Placeholder scan.** No "TBD" or "handle appropriately". Four places direct the implementer to check a fact and state both branches: whether `slowapi` needs an explicit 429 handler here (Task 4), how to break the database in a test if URL mutation is awkward (Task 6), whether to route through or delete the dead loader (Task 8), and whether the app has an install-id concept to thread into `refresh` (Task 8); that last one explicitly says to report rather than invent, because it changes the task's size.
 
 3. **Type consistency.** `generate()`, `canonical()`, `LicenseKeyError` are defined in Task 2 and used by name in Tasks 3, 4 and 9. `bound_license(db, body, *, active_only)` is defined in Task 3 and used in both routers. `CredentialIn` gains `install_id` in Task 3 and Task 8 sends it. `handle()` and `log()` are defined in Task 5 and used in `licenses.py` in the same task. `pg_dsn`/`clean_db`/`client`/`license_key` fixtures are defined in Task 1 and used by every later test.
 
-4. **Honesty.** The three things this phase cannot prove — a running service, rotation against real installs, and any of it mattering while `all_entitled` — are in the spec, in Task 9's residual limitations, and in the DoD script's own output.
+4. **Honesty.** The three things this phase cannot prove, a running service, rotation against real installs, and any of it mattering while `all_entitled`; are in the spec, in Task 9's residual limitations, and in the DoD script's own output.

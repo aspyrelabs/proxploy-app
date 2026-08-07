@@ -1,5 +1,5 @@
 """Transparent binary VNC bridge (doc 05 §3): no protocol translation, unlike
-PtyBridge — the ticket is validated by Proxmox at websocket-upgrade time via
+PtyBridge, the ticket is validated by Proxmox at websocket-upgrade time via
 the URL query params, so there's no client-sent auth line; the first upstream
 frame is the RFB greeting itself, which noVNC's own RFB class consumes."""
 import asyncio

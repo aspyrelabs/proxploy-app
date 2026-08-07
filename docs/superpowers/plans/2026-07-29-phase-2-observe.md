@@ -1,18 +1,18 @@
-# Phase 2 — Observe Implementation Plan
+# Phase 2: Observe Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is an unattended run: no human checkpoints — on ambiguity make the best spec-supported call, note it in the commit message, and keep going.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is an unattended run: no human checkpoints, on ambiguity make the best spec-supported call, note it in the commit message, and keep going.
 
 **Goal:** Land Phase 2 of `docs/10-build-sequence.md`: the per-host 30s poller (bulk `/cluster/resources` + per-node `rrddata`, O(nodes) call budget), MetricsStore (batched `metric_samples`, 5m/1h rollups, retention pruning, range query), read-only caches (`apps` cached columns, `vms` upsert, storage/network snapshots, discovered-CT list with adoption heuristics), the SSE event stream, the six Phase-2 endpoints, and the read-only Cluster / node-detail / Apps / VMs pages with uPlot charts and SSE-driven TanStack Query invalidation.
 
 **Architecture:** The poller is a supervisor asyncio task (started in `create_app`'s lifespan, like the entitlement refresh loop) that keeps one long-lived task per host; each cycle runs the blocking proxmoxer + SQLAlchemy work in `asyncio.to_thread` with a per-host timeout, writes one batched transaction, refreshes the in-memory `HostSnapshot`, and publishes deltas on an in-process `EventBus` (plain asyncio queues) that the SSE endpoint fans out. REST endpoints read DB caches + snapshots; history comes from `metric_samples`/`metric_rollups` via `services/metrics.py`. Everything follows the Phase 1 shapes: sync SQLAlchemy, `app.state` as DI container, hand-built response dicts, `require_role("viewer")` on reads, no audit rows for reads.
 
-**Tech Stack:** Existing Phase 1 stack (FastAPI, sync SQLAlchemy 2, proxmoxer, TanStack Query/Router, Tailwind v4 tokens) plus exactly one new frontend dependency: **uPlot (MIT)**. No new backend dependencies — SSE is a hand-rolled `StreamingResponse` (no sse-starlette), the bus is stdlib asyncio.
+**Tech Stack:** Existing Phase 1 stack (FastAPI, sync SQLAlchemy 2, proxmoxer, TanStack Query/Router, Tailwind v4 tokens) plus exactly one new frontend dependency: **uPlot (MIT)**. No new backend dependencies, SSE is a hand-rolled `StreamingResponse` (no sse-starlette), the bus is stdlib asyncio.
 
 ## Global Constraints
 
 - Specs: docs/00–11 in this repo are the approved source of truth; doc numbers cited per task. Phase 2 scope is doc 10 lines 80–105 only.
 - **Poll budget is O(nodes), never O(guests)** (doc 02 §3): per cycle per host, exactly one `cluster/resources` call plus one `rrddata` call per node. **No per-guest calls in the poll loop, ever.**
-- Every proxmoxer call lives in `backend/proxploy/services/proxmox.py` (`ProxmoxClient`) — never in pollers, routers, or services (doc 02 §4, enforced convention from `proxmox.py:1-4`).
+- Every proxmoxer call lives in `backend/proxploy/services/proxmox.py` (`ProxmoxClient`), never in pollers, routers, or services (doc 02 §4, enforced convention from `proxmox.py:1-4`).
 - All datetimes are **naive UTC** via `proxploy.models.utcnow()` (Phase 1 convention). Metric `ts` included.
 - One DB transaction per poll cycle (doc 11 §4: batched sample writes); SQLite stays in WAL mode (already set in `db.py`).
 - Phase 2 routes are read-only: `require_role("viewer")`, **no audit rows** (Phase 1 precedent: reads don't audit). The only entitlement gate is `metrics.history` beyond 48 h (doc 05), checked inline like the `hosts.multi` precedent in `hosts.py:55`.
@@ -21,24 +21,24 @@
 - The fixed nav (8 items) never changes; `tests/nav.test.tsx` enforces it and must keep passing.
 - Design tokens are frozen (`styles/tokens.css`, asserted by `login.test.tsx`); components use existing utilities (`bg-panel`, `border-line-soft`, `font-mono`, `rounded-card`, …). Terminal/code panels stay dark in both themes.
 - Frontend: paths passed to `api()` are relative to `/api/v1`. `import type` for type-only imports (`verbatimModuleSyntax`). New route files export their routes and are imported mid-file in `router.tsx` (settings.tsx precedent); `as never` casts on `to:` props are the accepted workaround, with comment.
-- No module outside `backend/proxploy/executor/` imports asyncssh or SSH-key accessors — `scripts/check_executor_isolation.py` must stay green (trivially: Phase 2 never touches SSH).
-- Licenses: uPlot is MIT — passes the frontend `license-checker-rseidelsohn` allowlist. Nothing else is added.
+- No module outside `backend/proxploy/executor/` imports asyncssh or SSH-key accessors, `scripts/check_executor_isolation.py` must stay green (trivially: Phase 2 never touches SSH).
+- Licenses: uPlot is MIT, passes the frontend `license-checker-rseidelsohn` allowlist. Nothing else is added.
 - Git: commit directly to `main` after each task (standing rule; no branches, no PRs). Conventional-commit messages as given per task.
 - Working dir: `~/workspace/aspyrelabs/proxploy/proxploy-app`. Backend commands run from `backend/` with `.venv` active (`source .venv/bin/activate` or `./.venv/bin/python`); frontend commands from `frontend/`.
 - Test invocations: `python -m pytest tests/ -q -m "not pve_integration and not e2e"` (backend), `npm test` + `npm run build` (frontend; `tsc -b` inside build is the typecheck gate). No live PVE on this box: everything runs against the FakePVE layer.
-- **No new Alembic migration expected**: `metric_samples`, `metric_rollups`, `apps` cached columns, `vms` all exist in migration 0001. If any column turns out missing, add migration `0002_<slug>` following the 0001 naming pattern — but verify against `models/__init__.py` first.
+- **No new Alembic migration expected**: `metric_samples`, `metric_rollups`, `apps` cached columns, `vms` all exist in migration 0001. If any column turns out missing, add migration `0002_<slug>` following the 0001 naming pattern; but verify against `models/__init__.py` first.
 
 ## Decisions made for the spec's open points (best-supported calls, unattended run)
 
 1. **Discovered CTs are NOT auto-adopted.** Doc 10 Phase 4 owns explicit adoption (`apps.adopt`); if Phase 2 auto-adopted, Phase 4's discovered-panel would be dead on arrival. Phase 2 ships `GET /api/v1/apps/discovered` (already specified in doc 05) fed from poller snapshots + heuristics, and the Apps page renders the DiscoveredPanel **read-only** (list + catalog-match suggestions, with an honest "Adoption arrives with the App Store phase" note instead of an Adopt button). This satisfies the Phase 2 DoD "apps and VMs discovered and rendered".
-2. **Storage/network snapshots live in memory** (`HostSnapshot` on `app.state.poller`), not new tables — doc 04 defines no table for them, caches are droppable by definition, and a restart repopulates within one 30s cycle. History-quality series live in `metric_samples` as specced.
+2. **Storage/network snapshots live in memory** (`HostSnapshot` on `app.state.poller`), not new tables; doc 04 defines no table for them, caches are droppable by definition, and a restart repopulates within one 30s cycle. History-quality series live in `metric_samples` as specced.
 3. **Node detail route is `/cluster/$hostId`.** Doc 10 lists a node-detail page; doc 06's route table predates it (prototype had none). NodeCard body click still goes to `/apps?host=…` per doc 06; the mono hostname link inside the card goes to node detail.
-4. **`GET /api/v1/metrics/latest` and `/cluster/activity` are NOT built** — doc 10 Phase 2 names exactly six endpoints; latest values ride on `/apps`, `/vms`, `/cluster/*` responses (cached columns + snapshots), and the activity feed is Phase 3 (jobs). The dashboard renders an honest empty state for activity.
+4. **`GET /api/v1/metrics/latest` and `/cluster/activity` are NOT built**: doc 10 Phase 2 names exactly six endpoints; latest values ride on `/apps`, `/vms`, `/cluster/*` responses (cached columns + snapshots), and the activity feed is Phase 3 (jobs). The dashboard renders an honest empty state for activity.
 5. **`vms.os_type` stays NULL in Phase 2** (generic icon): `cluster/resources` doesn't carry ostype and fetching it would need per-guest calls the poll budget forbids. Doc 05's "detail (cache + live status refresh)" per-guest enrichment is user-triggered work that lands with Phase 3's per-VM actions.
-6. **Rollup/prune run on a plain asyncio loop** (`metrics_loop`) in lifespan — APScheduler arrives Phase 7 ("Scheduler … in production"); doc 10 Phase 2 only requires the jobs to run. Retention windows are constants (48h/14d/400d per doc 04) with a `ponytail:` note; the settings knob ships with Phase 7's schedule UI.
-7. **Both rollup resolutions aggregate from raw samples** with a short recompute lookback (idempotent delete+insert per bucket window) — valid because raw retention (48h) far exceeds the lookback; simpler than chaining 1h-from-5m.
-8. **VM table has no sort/TanStack Table yet** — the prototype's VM table spec (doc 06) shows hover actions, not sorting; TanStack Table arrives when a page actually sorts (Phase 6 tables). Plain styled `<table>` now.
-9. **SSE `metrics` events invalidate `['metrics']` queries rather than appending points** to live uPlot series — visually identical at 30s cadence, far less code; doc 06's append optimization is noted as the upgrade path.
+6. **Rollup/prune run on a plain asyncio loop** (`metrics_loop`) in lifespan, APScheduler arrives Phase 7 ("Scheduler … in production"); doc 10 Phase 2 only requires the jobs to run. Retention windows are constants (48h/14d/400d per doc 04) with a `ponytail:` note; the settings knob ships with Phase 7's schedule UI.
+7. **Both rollup resolutions aggregate from raw samples** with a short recompute lookback (idempotent delete+insert per bucket window), valid because raw retention (48h) far exceeds the lookback; simpler than chaining 1h-from-5m.
+8. **VM table has no sort/TanStack Table yet**: the prototype's VM table spec (doc 06) shows hover actions, not sorting; TanStack Table arrives when a page actually sorts (Phase 6 tables). Plain styled `<table>` now.
+9. **SSE `metrics` events invalidate `['metrics']` queries rather than appending points** to live uPlot series, visually identical at 30s cadence, far less code; doc 06's append optimization is noted as the upgrade path.
 
 ## File structure (what Phase 2 creates/modifies)
 
@@ -51,7 +51,7 @@ backend/
 │   ├── pollers/__init__.py           # NEW: HostSnapshot, CycleResult, ingest_cycle, Poller
 │   ├── services/
 │   │   ├── proxmox.py                # MODIFY: + cluster_resources(), node_rrddata()
-│   │   └── metrics.py                # NEW: MetricsStore — write/rollup/prune/query + metrics_loop
+│   │   └── metrics.py                # NEW: MetricsStore, write/rollup/prune/query + metrics_loop
 │   └── api/
 │       ├── __init__.py               # MODIFY: register cluster, apps, vms, metrics, events routers
 │       ├── cluster.py                # NEW: GET /cluster/summary, /cluster/nodes
@@ -104,9 +104,9 @@ Doc refs: 02 §3 (poll budget, bulk endpoints), 02 §4 / 03 (one client layer), 
 **Interfaces:**
 - Consumes: `ProxmoxClient` (Phase 1: `_connect()`, `ProxmoxError`, exception-wrap idiom at `proxmox.py:74-88`), `FakePVE`/`make_fake_factory` (Phase 1).
 - Produces:
-  - `ProxmoxClient.cluster_resources() -> list[dict]` — raw `/cluster/resources` rows (types `node`/`lxc`/`qemu`/`storage`).
-  - `ProxmoxClient.node_rrddata(node: str, timeframe: str = "hour") -> list[dict]` — raw rrd rows, oldest→newest.
-  - `FakePVE(version=None, permissions=None, fail=False, resources=None, rrddata=None)` — `resources` is the `/cluster/resources` list, `rrddata` is `dict[node_name, list[rrd_row]]`. Failure toggles used by later tasks: `fake.cluster.resources._fail = True`, and the existing `fake.version._fail` (which also makes the factory itself raise).
+  - `ProxmoxClient.cluster_resources() -> list[dict]`: raw `/cluster/resources` rows (types `node`/`lxc`/`qemu`/`storage`).
+  - `ProxmoxClient.node_rrddata(node: str, timeframe: str = "hour") -> list[dict]`: raw rrd rows, oldest→newest.
+  - `FakePVE(version=None, permissions=None, fail=False, resources=None, rrddata=None)`: `resources` is the `/cluster/resources` list, `rrddata` is `dict[node_name, list[rrd_row]]`. Failure toggles used by later tasks: `fake.cluster.resources._fail = True`, and the existing `fake.version._fail` (which also makes the factory itself raise).
   - Fixture `cluster_resources_basic.json`: one node `pve1` (host-01), CTs 150 (`immich`, running) and 200 (`plex`, running, unadopted), VM 100 (`win11`, running), storages `local` + `pbs-datastore`.
 
 - [ ] **Step 1: Write the fixtures**
@@ -146,7 +146,7 @@ Doc refs: 02 §3 (poll budget, bulk endpoints), 02 §4 / 03 (one client layer), 
 ]
 ```
 
-- [ ] **Step 2: Extend the fake** — `backend/tests/fakes/pve.py`. Keep `_Leaf` untouched; add kwargs-tolerant leaves and callable node namespace (proxmoxer path segments are callable: `api.nodes("pve1").rrddata.get(timeframe="hour")`):
+- [ ] **Step 2: Extend the fake**, `backend/tests/fakes/pve.py`. Keep `_Leaf` untouched; add kwargs-tolerant leaves and callable node namespace (proxmoxer path segments are callable: `api.nodes("pve1").rrddata.get(timeframe="hour")`):
 
 ```python
 class _KwLeaf:
@@ -191,9 +191,9 @@ and in `FakePVE.__init__`, extend the signature and body:
         self.kwargs = {}
 ```
 
-(`make_fake_factory` is unchanged — it already raises when `fake.version._fail` is set.)
+(`make_fake_factory` is unchanged, it already raises when `fake.version._fail` is set.)
 
-- [ ] **Step 3: Write the failing test** — `backend/tests/test_proxmox_poll.py`:
+- [ ] **Step 3: Write the failing test**, `backend/tests/test_proxmox_poll.py`:
 
 ```python
 """ProxmoxClient bulk-poll reads (doc 02 §3: cluster/resources + per-node rrddata)."""
@@ -249,22 +249,22 @@ def test_poll_reads_wrap_errors_as_proxmox_error():
 - [ ] **Step 4: Run it to make sure it fails**
 
 Run (from `backend/`): `python -m pytest tests/test_proxmox_poll.py -q`
-Expected: FAIL — `AttributeError: 'ProxmoxClient' object has no attribute 'cluster_resources'`.
+Expected: FAIL, `AttributeError: 'ProxmoxClient' object has no attribute 'cluster_resources'`.
 
-- [ ] **Step 5: Implement** — append to `ProxmoxClient` in `backend/proxploy/services/proxmox.py`, following the existing wrap idiom exactly:
+- [ ] **Step 5: Implement**, append to `ProxmoxClient` in `backend/proxploy/services/proxmox.py`, following the existing wrap idiom exactly:
 
 ```python
     def cluster_resources(self) -> list[dict]:
         """One bulk call: every node/CT/VM/storage row for this endpoint.
 
-        The poll loop's only guest-state source — per-guest calls are
+        The poll loop's only guest-state source, per-guest calls are
         forbidden in the poller (doc 02 §3 O(nodes) budget).
         """
         try:
             return self._connect().cluster.resources.get()
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001, one wrap point, like version()
             raise ProxmoxError(f"cluster/resources failed: {e}") from e
 
     def node_rrddata(self, node: str, timeframe: str = "hour") -> list[dict]:
@@ -293,7 +293,7 @@ git commit -m "feat(backend): ProxmoxClient bulk poll reads + fake PVE poll surf
 
 ---
 
-### Task 2: MetricsStore — batched writes, 5m/1h rollups, retention pruning, range query
+### Task 2: MetricsStore: batched writes, 5m/1h rollups, retention pruning, range query
 
 Doc refs: 04 (`metric_samples`/`metric_rollups`, retention table), 11 §4 (batching), 05 (`/metrics/query` semantics), 02 §11.1 (raw-vs-rollup pick).
 
@@ -302,17 +302,17 @@ Doc refs: 04 (`metric_samples`/`metric_rollups`, retention table), 11 §4 (batch
 - Test: `backend/tests/test_metrics_store.py`
 
 **Interfaces:**
-- Consumes: `MetricSample`, `MetricRollup`, `utcnow` from `proxploy.models` (tables exist in migration 0001 — no new migration).
+- Consumes: `MetricSample`, `MetricRollup`, `utcnow` from `proxploy.models` (tables exist in migration 0001; no new migration).
 - Produces (all consumed by Tasks 3, 5, 8, 14):
-  - `METRICS: tuple[str, ...]` — the doc-04 metric names.
-  - `write_samples(db, samples: list[MetricSample]) -> None` — `add_all`, **no commit** (caller owns the one-transaction-per-cycle rule).
-  - `rollup(db, resolution: str, now: datetime, lookback: int = 3) -> int` — recompute the last `lookback` fully-elapsed buckets (`"5m"`|`"1h"`) from raw samples; idempotent (delete+insert); commits; returns bucket count.
-  - `prune(db, now: datetime) -> dict[str, int]` — retention deletes (raw 48h, 5m 14d, 1h 400d); commits.
-  - `pick_resolution(frm: datetime, to: datetime) -> str` — ≤6h → `raw`, ≤3d → `5m`, else `1h`.
-  - `query_series(db, target_type, target_id, metric, frm, to, resolution) -> dict` — columnar `{"resolution", "ts": [epoch...], "value": [...]}`, plus `"min"`/`"max"` arrays for rollups (value = avg).
-  - `metrics_loop(app) -> None` — async: every 5 min roll up 5m; every 12th tick roll up 1h + prune. Never dies on error.
+  - `METRICS: tuple[str, ...]`: the doc-04 metric names.
+  - `write_samples(db, samples: list[MetricSample]) -> None`: `add_all`, **no commit** (caller owns the one-transaction-per-cycle rule).
+  - `rollup(db, resolution: str, now: datetime, lookback: int = 3) -> int`: recompute the last `lookback` fully-elapsed buckets (`"5m"`|`"1h"`) from raw samples; idempotent (delete+insert); commits; returns bucket count.
+  - `prune(db, now: datetime) -> dict[str, int]`: retention deletes (raw 48h, 5m 14d, 1h 400d); commits.
+  - `pick_resolution(frm: datetime, to: datetime) -> str`: ≤6h → `raw`, ≤3d → `5m`, else `1h`.
+  - `query_series(db, target_type, target_id, metric, frm, to, resolution) -> dict`: columnar `{"resolution", "ts": [epoch...], "value": [...]}`, plus `"min"`/`"max"` arrays for rollups (value = avg).
+  - `metrics_loop(app) -> None`: async: every 5 min roll up 5m; every 12th tick roll up 1h + prune. Never dies on error.
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_metrics_store.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_metrics_store.py`:
 
 ```python
 """MetricsStore: batched writes, idempotent rollups, retention, columnar query."""
@@ -403,15 +403,15 @@ def test_query_series_raw_and_rollup_shapes(tmp_path):
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_metrics_store.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.services.metrics'`.
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.services.metrics'`.
 
-- [ ] **Step 3: Implement** — `backend/proxploy/services/metrics.py`:
+- [ ] **Step 3: Implement**, `backend/proxploy/services/metrics.py`:
 
 ```python
 """MetricsStore (doc 04, doc 11 §4): raw 30s samples, 5m/1h rollups, retention.
 
 The seam VictoriaMetrics swaps in behind for big fleets (doc 03). Writers
-batch: write_samples() never commits — the poll cycle owns its one
+batch: write_samples() never commits, the poll cycle owns its one
 transaction. Rollups recompute a short lookback window idempotently
 (delete+insert), so a missed tick self-heals on the next one.
 """
@@ -444,13 +444,13 @@ def _bucket(ts: datetime, seconds: int) -> datetime:
 
 
 def write_samples(db, samples: list[MetricSample]) -> None:
-    db.add_all(samples)  # caller commits — one txn per poll cycle (doc 11 §4)
+    db.add_all(samples)  # caller commits, one txn per poll cycle (doc 11 §4)
 
 
 def rollup(db, resolution: str, now: datetime, lookback: int = 3) -> int:
     """Recompute the last `lookback` fully-elapsed buckets from raw samples."""
     secs = _RES_SECONDS[resolution]
-    end = _bucket(now, secs)  # current, still-filling bucket — excluded
+    end = _bucket(now, secs)  # current, still-filling bucket; excluded
     start = end - timedelta(seconds=secs * lookback)
     rows = (db.query(MetricSample)
             .filter(MetricSample.ts >= start, MetricSample.ts < end).all())
@@ -523,7 +523,7 @@ def query_series(db, target_type: str, target_id: int, metric: str,
 async def metrics_loop(app) -> None:
     """5m rollup every 5 min; 1h rollup + prune hourly.
 
-    Plain lifespan task for now — Phase 7 moves these onto APScheduler so
+    Plain lifespan task for now, Phase 7 moves these onto APScheduler so
     they appear in the activity feed like any other job (doc 10 Phase 7).
     """
     tick = 0
@@ -538,7 +538,7 @@ async def metrics_loop(app) -> None:
                         rollup(db, "1h", utcnow())
                         prune(db, utcnow())
             await asyncio.to_thread(work)
-        except Exception:  # noqa: BLE001 — a failed tick never kills the loop
+        except Exception:  # noqa: BLE001, a failed tick never kills the loop
             continue
 ```
 
@@ -551,12 +551,12 @@ Expected: 4 passed.
 
 ```bash
 git add backend/proxploy/services/metrics.py backend/tests/test_metrics_store.py
-git commit -m "feat(backend): MetricsStore — batched samples, 5m/1h rollups, retention, query"
+git commit -m "feat(backend): MetricsStore, batched samples, 5m/1h rollups, retention, query"
 ```
 
 ---
 
-### Task 3: Poller ingest — caches, samples, discovery heuristics, snapshot, events
+### Task 3: Poller ingest: caches, samples, discovery heuristics, snapshot, events
 
 Doc refs: 10 Phase 2 (caches), 04 (`apps` cached cols, `vms` CACHE), 02 §3/§11.1 (what a cycle writes), 05 §Streaming 4 (event payloads), plan decision 1 (no auto-adopt).
 
@@ -570,8 +570,8 @@ Doc refs: 10 Phase 2 (caches), 04 (`apps` cached cols, `vms` CACHE), 02 §3/§11
 - Produces (consumed by Tasks 5–8):
   - `HostSnapshot` dataclass: `host_id: int`, `ts: datetime`, `nodes: list[dict]` (`{"node","status","cpu_pct","cpu_cores","mem_bytes","mem_total_bytes","uptime_s"}`), `storage: list[dict]` (`{"storage","node","used_bytes","total_bytes"}`), `net: dict` (`{"in_bps","out_bps"}`), `guests: dict[tuple[str,int], dict]` (key `("lxc"|"qemu", vmid)`; value `{"name","node","status","cpu_pct","cpu_cores","mem_bytes","mem_total_bytes","disk_bytes","uptime_s"}`), `discovered: list[dict]` (`{"ctid","name","node","status","suggestion"}`).
   - `CycleResult` dataclass: `snapshot: HostSnapshot`, `events: list[tuple[str, dict]]` (SSE `(event_name, payload)` pairs; first is always the `metrics` event).
-  - `ingest_cycle(db, host: Host, resources: list[dict], rrd_by_node: dict[str, list[dict]], now: datetime) -> CycleResult` — updates host status/last_seen, refreshes `apps.*_cached`, upserts/deletes `vms`, writes samples, **commits once**.
-  - `tests/support.py`: `make_app(tmp_path, fake=None, **overrides) -> FastAPI` (poller **off** by default via `poll_enabled=False` — Task 5 adds the setting; until then the kwarg is simply accepted by `Settings`... see Step 1 note), `seed_host(app, ...) -> int`, `seed_snapshot(app, host_id, **kw)`.
+  - `ingest_cycle(db, host: Host, resources: list[dict], rrd_by_node: dict[str, list[dict]], now: datetime) -> CycleResult`: updates host status/last_seen, refreshes `apps.*_cached`, upserts/deletes `vms`, writes samples, **commits once**.
+  - `tests/support.py`: `make_app(tmp_path, fake=None, **overrides) -> FastAPI` (poller **off** by default via `poll_enabled=False`; Task 5 adds the setting; until then the kwarg is simply accepted by `Settings`... see Step 1 note), `seed_host(app...) -> int`, `seed_snapshot(app, host_id, **kw)`.
   - Note: `make_app`/`seed_snapshot` reference `poll_enabled` and `app.state.poller`, which land in Task 5. **In this task**, `support.py` is created with `make_app`/`seed_host` only using a plain `Settings(...)` without `poll_enabled`; Task 5's steps add the kwarg and `seed_snapshot`. The ingest tests below use a bare sessionmaker, not the app.
 
 - [ ] **Step 1: Create `backend/tests/support.py`** (shared builders; extended in Task 5):
@@ -602,7 +602,7 @@ def seed_host_row(db, name="host-01", node="pve1", status="connected"):
     return h
 ```
 
-- [ ] **Step 2: Write the failing test** — `backend/tests/test_poller_ingest.py`:
+- [ ] **Step 2: Write the failing test**, `backend/tests/test_poller_ingest.py`:
 
 ```python
 """ingest_cycle: one bulk read -> caches + samples + snapshot + SSE events."""
@@ -712,11 +712,11 @@ def test_discovered_cts_with_catalog_suggestion(tmp_path):
 - [ ] **Step 3: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_poller_ingest.py -q`
-Expected: FAIL — `ImportError` (no `proxploy.pollers`).
+Expected: FAIL, `ImportError` (no `proxploy.pollers`).
 
-Note: if `CatalogEntry(...)` or `App(...)` raise on missing NOT-NULL columns, check `models/__init__.py` for required fields and add the minimal ones to the test seeds — the models are authoritative.
+Note: if `CatalogEntry(...)` or `App(...)` raise on missing NOT-NULL columns, check `models/__init__.py` for required fields and add the minimal ones to the test seeds; the models are authoritative.
 
-- [ ] **Step 4: Implement** — `backend/proxploy/pollers/__init__.py`:
+- [ ] **Step 4: Implement**, `backend/proxploy/pollers/__init__.py`:
 
 ```python
 """Poller subsystem (doc 10 Phase 2, doc 02 §3).
@@ -825,7 +825,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
             "uptime_s": int(r.get("uptime") or 0),
         }
 
-    # apps cache refresh (identity is ours; state is cached — doc 04) ----------
+    # apps cache refresh (identity is ours; state is cached: doc 04) ----------
     mapped_ctids: set[int] = set()
     for a in db.query(App).filter_by(host_id=host.id).all():
         mapped_ctids.add(a.ctid)
@@ -848,7 +848,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         targets.append({"t": "app", "id": a.id, "cpu_pct": g["cpu_pct"],
                         "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
 
-    # vms cache upsert (droppable mirror — doc 04) ------------------------------
+    # vms cache upsert (droppable mirror: doc 04) ------------------------------
     existing = {v.vmid: v for v in db.query(Vm).filter_by(host_id=host.id).all()}
     seen: set[int] = set()
     membership_changed = False
@@ -887,7 +887,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     if membership_changed:
         events.append(("resource", {"type": "vm", "change": "list"}))
 
-    # discovered CTs + adoption heuristic (NOT auto-adopted — Phase 4 owns that)
+    # discovered CTs + adoption heuristic (NOT auto-adopted: Phase 4 owns that)
     catalog = {_norm(c.slug): c.slug for c in db.query(CatalogEntry).all()}
     discovered = [
         {"ctid": vmid, "name": g["name"], "node": g["node"],
@@ -924,7 +924,7 @@ Expected: 4 passed.
 ```bash
 git add backend/proxploy/pollers/__init__.py backend/tests/support.py \
         backend/tests/test_poller_ingest.py
-git commit -m "feat(backend): poller ingest — caches, samples, discovery heuristics"
+git commit -m "feat(backend): poller ingest, caches, samples, discovery heuristics"
 ```
 
 ---
@@ -941,12 +941,12 @@ Doc refs: 05 §Streaming 4 (protocol, auth, payloads), 02 §11.1 (invalidation b
 - Test: `backend/tests/test_events_sse.py`
 
 **Interfaces:**
-- Consumes: `resolve_session` (the same import `api/deps.py` uses — `from proxploy.services.authn import resolve_session`; verify against `deps.py` and match it), `app.state.sessionmaker`, settings `session_cookie`.
+- Consumes: `resolve_session` (the same import `api/deps.py` uses, `from proxploy.services.authn import resolve_session`; verify against `deps.py` and match it), `app.state.sessionmaker`, settings `session_cookie`.
 - Produces:
   - `EventBus`: `subscribe() -> asyncio.Queue`, `unsubscribe(q)`, `publish(event: str, data: dict)` (non-blocking; drops to slow consumers).
-  - Route `GET /api/v1/events/stream` — `text/event-stream`; frames `event: <name>\ndata: <json>\n\n`; `: ping` comment every 15 s idle; 401 without a session. **Auth is resolved with a short-lived DB session before streaming starts** (never hold `get_db` open for the stream's lifetime).
+  - Route `GET /api/v1/events/stream`, `text/event-stream`; frames `event: <name>\ndata: <json>\n\n`; `: ping` comment every 15 s idle; 401 without a session. **Auth is resolved with a short-lived DB session before streaming starts** (never hold `get_db` open for the stream's lifetime).
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_events_sse.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_events_sse.py`:
 
 ```python
 """In-process event bus + SSE fanout endpoint (doc 05 §Streaming 4)."""
@@ -1009,7 +1009,7 @@ def test_sse_streams_published_events(tmp_path, csrf_header, bootstrap_admin):
                        for ln in lines if ln.startswith("data:"))
 ```
 
-Note for the implementer: the test needs the app's running loop to schedule the publish — expose it as `app.state.loop` in lifespan (one line, set before `yield`). Drop the unused `anyio` import if the linter/typecheck complains; it's not needed.
+Note for the implementer: the test needs the app's running loop to schedule the publish, expose it as `app.state.loop` in lifespan (one line, set before `yield`). Drop the unused `anyio` import if the linter/typecheck complains; it's not needed.
 
 Also extend `backend/tests/support.py` with the app builder used above:
 
@@ -1031,7 +1031,7 @@ def make_app(tmp_path, fake=None, **overrides):
     return create_app(s, **kwargs)
 ```
 
-`poll_enabled` doesn't exist on `Settings` until Task 5 — **add it now** in `backend/proxploy/config.py` alongside the other fields (Task 5 wires the behavior):
+`poll_enabled` doesn't exist on `Settings` until Task 5, **add it now** in `backend/proxploy/config.py` alongside the other fields (Task 5 wires the behavior):
 
 ```python
     poll_enabled: bool = True
@@ -1042,7 +1042,7 @@ def make_app(tmp_path, fake=None, **overrides):
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_events_sse.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.events'`.
+Expected: FAIL, `ModuleNotFoundError: No module named 'proxploy.events'`.
 
 - [ ] **Step 3: Implement `backend/proxploy/events.py`**:
 
@@ -1050,7 +1050,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'proxploy.events'`.
 """In-process pub/sub bus (doc 02 §11.1): plain asyncio queues, no broker.
 
 Zero subscribers costs nothing; a slow consumer loses deltas, and the UI's
-interval refetch heals it (doc 06 §d — SSE is a hint channel, never the
+interval refetch heals it (doc 06 §d, SSE is a hint channel, never the
 source of truth).
 """
 from __future__ import annotations
@@ -1099,7 +1099,7 @@ PING_S = 15
 
 @router.get("/stream")
 async def events_stream(request: Request):
-    # Resolve auth with a short-lived session — never hold a DB connection
+    # Resolve auth with a short-lived session: never hold a DB connection
     # open for the lifetime of the stream.
     raw = request.cookies.get(request.app.state.settings.session_cookie)
 
@@ -1143,7 +1143,7 @@ async def events_stream(request: Request):
 - [ ] **Step 6: Run the tests and make sure they pass**
 
 Run: `python -m pytest tests/test_events_sse.py -q`
-Expected: 3 passed. If the stream test hangs, the publish never reached the loop — check `app.state.loop` is set and the `call_soon_threadsafe` line matches.
+Expected: 3 passed. If the stream test hangs, the publish never reached the loop; check `app.state.loop` is set and the `call_soon_threadsafe` line matches.
 
 - [ ] **Step 7: Commit**
 
@@ -1156,7 +1156,7 @@ git commit -m "feat(backend): in-process event bus + SSE /events/stream"
 
 ---
 
-### Task 5: Poller supervisor — per-host loops, backoff, degradation, lifespan wiring
+### Task 5: Poller supervisor: per-host loops, backoff, degradation, lifespan wiring
 
 Doc refs: 02 §3 (per-host loops, timeout + backoff, degrade only its own loop), 10 Phase 2 DoD (≤35 s staleness; killed host → `unreachable` without breaking the UI).
 
@@ -1169,11 +1169,11 @@ Doc refs: 02 §3 (per-host loops, timeout + backoff, degrade only its own loop),
 **Interfaces:**
 - Consumes: `ingest_cycle`/`HostSnapshot` (Task 3), `EventBus` (Task 4), `metrics_loop` (Task 2), `ProxmoxClient.cluster_resources/node_rrddata` (Task 1), credential-fetch idiom from `hosts.py:137-142`, `Settings.poll_enabled/poll_interval_s/poll_timeout_s` (added in Task 4).
 - Produces (consumed by Tasks 6–8 endpoints and their tests):
-  - `Poller(app)` with `snapshots: dict[int, HostSnapshot]`, `async run()` (supervisor: sync per-host tasks with the hosts table every interval), `stop()` (cancel all host tasks). Always constructed in lifespan (`app.state.poller`), even when `poll_enabled=False` — endpoints read `snapshots` unconditionally.
+  - `Poller(app)` with `snapshots: dict[int, HostSnapshot]`, `async run()` (supervisor: sync per-host tasks with the hosts table every interval), `stop()` (cancel all host tasks). Always constructed in lifespan (`app.state.poller`), even when `poll_enabled=False`; endpoints read `snapshots` unconditionally.
   - Failure behavior: a failing/hanging host marks only itself `unreachable` (commit + `resource` event `{"type":"host",...}`), backs off `interval * 2**fails` capped at 300 s, and recovers to `connected` on the next good cycle (event emitted by `ingest_cycle`).
-  - `tests/support.py`: `seed_snapshot(app, host_id, **kw)` — stuffs a `HostSnapshot` into `app.state.poller.snapshots` for endpoint tests that don't run loops.
+  - `tests/support.py`: `seed_snapshot(app, host_id, **kw)`; stuffs a `HostSnapshot` into `app.state.poller.snapshots` for endpoint tests that don't run loops.
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_poller_loop.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_poller_loop.py`:
 
 ```python
 """Poller loops end-to-end against FakePVE: populate, stream, degrade, recover."""
@@ -1241,9 +1241,9 @@ def test_poller_populates_degrades_recovers(tmp_path, csrf_header, bootstrap_adm
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_poller_loop.py -q`
-Expected: FAIL — snapshot never populates (`Poller` doesn't exist / isn't started).
+Expected: FAIL, snapshot never populates (`Poller` doesn't exist / isn't started).
 
-- [ ] **Step 3: Implement `Poller`** — append to `backend/proxploy/pollers/__init__.py`:
+- [ ] **Step 3: Implement `Poller`**, append to `backend/proxploy/pollers/__init__.py`:
 
 ```python
 import asyncio
@@ -1280,7 +1280,7 @@ class Poller:
                     if hid not in ids:
                         self._tasks.pop(hid).cancel()
                         self.snapshots.pop(hid, None)
-            except Exception:  # noqa: BLE001 — supervisor never dies
+            except Exception:  # noqa: BLE001, supervisor never dies
                 pass
             await asyncio.sleep(interval)
 
@@ -1306,7 +1306,7 @@ class Poller:
                     self.app.state.bus.publish(name, data)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 — degrade this host only
+            except Exception:  # noqa: BLE001, degrade this host only
                 fails += 1
                 evt = await asyncio.to_thread(self._mark_unreachable, host_id)
                 if evt:
@@ -1355,9 +1355,9 @@ class Poller:
                                  "change": "status", "status": "unreachable"})
 ```
 
-(Adjust the imports at the top of the file into one block — `asyncio`, `json as jsonlib`, `re`, dataclasses, models, `ProxmoxClient`, `write_samples` — rather than a second import section mid-file.)
+(Adjust the imports at the top of the file into one block, `asyncio`, `json as jsonlib`, `re`, dataclasses, models, `ProxmoxClient`, `write_samples`; rather than a second import section mid-file.)
 
-- [ ] **Step 4: Wire lifespan** — in `backend/proxploy/main.py`, after the bus/entitlement setup and before `yield` (mirroring the entitlement-refresh pattern):
+- [ ] **Step 4: Wire lifespan**, in `backend/proxploy/main.py`, after the bus/entitlement setup and before `yield` (mirroring the entitlement-refresh pattern):
 
 ```python
         from proxploy.pollers import Poller
@@ -1397,7 +1397,7 @@ def seed_snapshot(app, host_id, **kw):
 
 Run: `python -m pytest tests/test_poller_loop.py -q` then the full suite
 `python -m pytest tests/ -q -m "not pve_integration and not e2e"`
-Expected: new test passes; **no regressions** (existing tests build apps via `create_app` with default `poll_enabled=True` but no hosts — the supervisor idles harmlessly; if any Phase 1 test flakes from the background task, that test's Settings gains `poll_enabled=False` via its fixture — prefer fixing the fixture over weakening the poller).
+Expected: new test passes; **no regressions** (existing tests build apps via `create_app` with default `poll_enabled=True` but no hosts, the supervisor idles harmlessly; if any Phase 1 test flakes from the background task, that test's Settings gains `poll_enabled=False` via its fixture; prefer fixing the fixture over weakening the poller).
 
 - [ ] **Step 7: Commit**
 
@@ -1409,7 +1409,7 @@ git commit -m "feat(backend): per-host poll loops with backoff, degradation, lif
 
 ---
 
-### Task 6: Cluster endpoints — `GET /cluster/summary`, `GET /cluster/nodes`
+### Task 6: Cluster endpoints: `GET /cluster/summary`, `GET /cluster/nodes`
 
 Doc refs: 05 (Cluster & nodes table), 06 §(a) Cluster page (rings `x / y` subtotals, node cards), 10 Phase 2.
 
@@ -1441,7 +1441,7 @@ Doc refs: 05 (Cluster & nodes table), 06 §(a) Cluster page (rings `x / y` subto
     ```
     (`cpu_pct`/`mem_pct`/`uptime_s` are `null` when no snapshot exists yet, e.g. host unreachable since boot.)
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_cluster_api.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_cluster_api.py`:
 
 ```python
 """Cluster summary + node cards from DB caches and poller snapshots."""
@@ -1523,9 +1523,9 @@ def test_cluster_requires_auth(tmp_path):
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_cluster_api.py -q`
-Expected: FAIL — 404 on `/api/v1/cluster/*` (router missing).
+Expected: FAIL, 404 on `/api/v1/cluster/*` (router missing).
 
-- [ ] **Step 3: Implement** — `backend/proxploy/api/cluster.py`:
+- [ ] **Step 3: Implement**, `backend/proxploy/api/cluster.py`:
 
 ```python
 """Cluster overview endpoints (doc 05): read-only, snapshots + caches."""
@@ -1561,7 +1561,7 @@ def cluster_summary(request: Request, db=Depends(get_db),
             # dedupe by node name: two Host rows on one cluster count each node once
             nodes[n["node"]] = n
         for st in snap.storage:
-            # ponytail: shared storage repeats per node — dedupe by name, keep
+            # ponytail: shared storage repeats per node: dedupe by name, keep
             # first; per-datastore truth arrives with the Phase 6 Storage page
             storage.setdefault(st["storage"], st)
         net_in += snap.net["in_bps"]
@@ -1649,7 +1649,7 @@ git commit -m "feat(backend): cluster summary + node card endpoints"
 
 ### Task 7: Apps + VMs read endpoints (`/apps`, `/apps/discovered`, `/apps/{id}`, `/vms`, `/vms/{id}`)
 
-Doc refs: 05 (Apps/VMs tables — Phase 2 rows only), 04 (`apps` cached cols, `vms` CACHE), 06 §(a) Apps grid + VM table fields, plan decisions 1 & 5.
+Doc refs: 05 (Apps/VMs tables, Phase 2 rows only), 04 (`apps` cached cols, `vms` CACHE), 06 §(a) Apps grid + VM table fields, plan decisions 1 & 5.
 
 **Files:**
 - Create: `backend/proxploy/api/apps.py`, `backend/proxploy/api/vms.py`
@@ -1670,7 +1670,7 @@ Doc refs: 05 (Apps/VMs tables — Phase 2 rows only), 04 (`apps` cached cols, `v
      "uptime_s": 86400, "update_available": null, "adopted": false}
     ```
     (`status` serves `status_cached` with `"unknown"` fallback; `mem_total_bytes` is snapshot-enriched, `null` without a snapshot. `q` matches name/slug case-insensitively.)
-  - `GET /api/v1/apps/discovered` → list of `{"host_id", "host_name", "ctid", "name", "node", "status", "suggestion"}` — **declared before** `/apps/{app_id}` so the path literal wins.
+  - `GET /api/v1/apps/discovered` → list of `{"host_id", "host_name", "ctid", "name", "node", "status", "suggestion"}`; **declared before** `/apps/{app_id}` so the path literal wins.
   - `GET /api/v1/apps/{app_id}` → the list shape (404 problem+json when missing).
   - `GET /api/v1/vms?host=` → list of
     ```json
@@ -1682,7 +1682,7 @@ Doc refs: 05 (Apps/VMs tables — Phase 2 rows only), 04 (`apps` cached cols, `v
     (`cpu_pct` snapshot-enriched, else `null`.)
   - `GET /api/v1/vms/{vm_id}` → same shape.
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_apps_vms_api.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_apps_vms_api.py`:
 
 ```python
 """Read-only Apps/VMs endpoints: cached rows + snapshot enrichment + filters."""
@@ -1780,7 +1780,7 @@ def test_vms_list_and_detail(tmp_path, csrf_header, bootstrap_admin):
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_apps_vms_api.py -q`
-Expected: FAIL — 404 (routers missing).
+Expected: FAIL, 404 (routers missing).
 
 - [ ] **Step 3: Implement `backend/proxploy/api/apps.py`**:
 
@@ -1939,7 +1939,7 @@ Doc refs: 05 (Metrics table: `?target=host:2&metric=cpu_pct&from=&to=&resolution
 - Consumes: `query_series`/`pick_resolution`/`METRICS` (Task 2), entitlement inline-check idiom (`hosts.py:55` precedent), `utcnow`.
 - Produces: `GET /api/v1/metrics/query` → `{"target": "host:1", "metric": "cpu_pct", "resolution": "raw", "ts": [...], "value": [...]}` (+`min`/`max` for rollups). Defaults: `to`=now, `from`=to−1h, `resolution`=auto by range. 422 on malformed target/metric/range; 403 `entitlement_required`/`metrics.history` when `from` is older than 48 h and the flag is off.
 
-- [ ] **Step 1: Write the failing test** — `backend/tests/test_metrics_api.py`:
+- [ ] **Step 1: Write the failing test**, `backend/tests/test_metrics_api.py`:
 
 ```python
 """/metrics/query: shapes, defaults, validation, 48h entitlement gate."""
@@ -2008,14 +2008,14 @@ def test_history_gate_beyond_48h(tmp_path, csrf_header, bootstrap_admin):
         assert r.json()["feature"] == "metrics.history"
 ```
 
-(If `entitlements._features` is named differently, mirror whatever `tests/test_hosts.py` pokes — that test is the precedent.)
+(If `entitlements._features` is named differently, mirror whatever `tests/test_hosts.py` pokes; that test is the precedent.)
 
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `python -m pytest tests/test_metrics_api.py -q`
-Expected: FAIL — 404 (router missing).
+Expected: FAIL, 404 (router missing).
 
-- [ ] **Step 3: Implement** — `backend/proxploy/api/metrics.py`:
+- [ ] **Step 3: Implement**, `backend/proxploy/api/metrics.py`:
 
 ```python
 """Metrics range query (doc 05): series for uPlot, raw vs rollup by range."""
@@ -2068,7 +2068,7 @@ def metrics_query(request: Request, target: str, metric: str,
     if frm_dt >= to_dt:
         raise HTTPException(422, "from must be before to")
 
-    # metrics.history gates only the deep past (doc 05) — inline conditional
+    # metrics.history gates only the deep past (doc 05): inline conditional
     # check, hosts.multi precedent
     if (frm_dt < now - timedelta(hours=48)
             and not request.app.state.entitlements.enabled("metrics.history")):
@@ -2081,7 +2081,7 @@ def metrics_query(request: Request, target: str, metric: str,
 ```
 
 Register in `backend/proxploy/api/__init__.py`. Full backend suite check:
-`python -m pytest tests/ -q -m "not pve_integration and not e2e"` — everything green, `python scripts/check_executor_isolation.py` → OK.
+`python -m pytest tests/ -q -m "not pve_integration and not e2e"`: everything green, `python scripts/check_executor_isolation.py` → OK.
 
 - [ ] **Step 4: Run the tests and make sure they pass**
 
@@ -2098,7 +2098,7 @@ git commit -m "feat(backend): metrics query endpoint with 48h history gate"
 
 ---
 
-### Task 9: Frontend — uPlot, format helpers, shared observe components
+### Task 9: Frontend: uPlot, format helpers, shared observe components
 
 Doc refs: 06 §(b) component inventory (StatRings, NodeCard, UsageBar, AppCard, StatusPill, KVGrid, Sparkline), 06 §(c) tokens/gradients, 03 (uPlot MIT).
 
@@ -2113,15 +2113,15 @@ Doc refs: 06 §(b) component inventory (StatRings, NodeCard, UsageBar, AppCard, 
 - Consumes: `api<T>()` client, token utilities (`bg-panel`, `text-text-2`, `font-mono`, …), existing `Button`.
 - Produces (consumed by Tasks 11–13):
   - `fmtBytes(n?: number|null): string`, `fmtUptime(s?: number|null): string`, `fmtPct(n?: number|null): string`, `fmtBps(bytesPerSec?: number|null): string` (bytes/s → Mbps text).
-  - `Sparkline({ ts, values, color, width?, height? })` — uPlot area+line, prototype spark look (2px stroke, gradient fill 35%→0 alpha); renders an empty box when `ts` is empty (safe under jsdom).
+  - `Sparkline({ ts, values, color, width?, height? })`: uPlot area+line, prototype spark look (2px stroke, gradient fill 35%→0 alpha); renders an empty box when `ts` is empty (safe under jsdom).
   - `StatusPill({ status })`, `UsageBar({ pct, gradient? })` + exported gradient constants `CPU_GRADIENT`, `RAM_GRADIENT`, `STORAGE_GRADIENT`, `KVGrid({ items })`, `Ring({ label, pct, sub, stops })` (prototype dasharray math, `CIRC = 326.7`).
-  - `NodeCard({ node })` (a `/cluster/nodes` row: body click → `/apps?host=`, hostname link → `/cluster/$hostId` — plan decision 3), `AppCard({ app })` (an `/apps` row; card click → `/apps/$appId`; actions arrive Phase 3).
+  - `NodeCard({ node })` (a `/cluster/nodes` row: body click → `/apps?host=`, hostname link → `/cluster/$hostId`; plan decision 3), `AppCard({ app })` (an `/apps` row; card click → `/apps/$appId`; actions arrive Phase 3).
   - `useMetrics(target: string | null, metric: string, hours?: number)` → query on key `['metrics', target, metric, hours]`, `refetchInterval: false` (SSE-invalidated per doc 06); exported `Series`, `AppRow`, `VmRow`, `NodeRow`, `Summary` types in `hooks.ts` matching the Task 6/7 response shapes exactly.
 
 - [ ] **Step 1: Install uPlot** (from `frontend/`): `npm install uplot`
 Expected: `uplot` (^1.6.x) in `dependencies`.
 
-- [ ] **Step 2: Write the failing test** — `frontend/src/tests/format.test.ts`:
+- [ ] **Step 2: Write the failing test**, `frontend/src/tests/format.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -2131,17 +2131,17 @@ describe('format helpers', () => {
   it('formats bytes with binary units', () => {
     expect(fmtBytes(0)).toBe('0.0 B')
     expect(fmtBytes(4294967296)).toBe('4.0 GiB')
-    expect(fmtBytes(null)).toBe('—')
+    expect(fmtBytes(null)).toBe(', ')
   })
   it('formats uptime coarsely', () => {
     expect(fmtUptime(90)).toBe('1m')
     expect(fmtUptime(7260)).toBe('2h 1m')
     expect(fmtUptime(864000)).toBe('10d 0h')
-    expect(fmtUptime(null)).toBe('—')
+    expect(fmtUptime(null)).toBe(', ')
   })
   it('formats percents and throughput', () => {
     expect(fmtPct(41.6)).toBe('42%')
-    expect(fmtPct(null)).toBe('—')
+    expect(fmtPct(null)).toBe(', ')
     expect(fmtBps(1250000)).toBe('10.0 Mbps')
   })
 })
@@ -2150,13 +2150,13 @@ describe('format helpers', () => {
 - [ ] **Step 3: Run it to make sure it fails**
 
 Run (from `frontend/`): `npm test`
-Expected: FAIL — `../lib/format` not found.
+Expected: FAIL, `../lib/format` not found.
 
 - [ ] **Step 4: Implement `frontend/src/lib/format.ts`**:
 
 ```ts
 export function fmtBytes(n?: number | null): string {
-  if (n == null) return '—'
+  if (n == null) return ', '
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let v = n
   let i = 0
@@ -2165,7 +2165,7 @@ export function fmtBytes(n?: number | null): string {
 }
 
 export function fmtUptime(s?: number | null): string {
-  if (s == null || s <= 0) return '—'
+  if (s == null || s <= 0) return ', '
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
   const m = Math.floor((s % 3600) / 60)
@@ -2175,12 +2175,12 @@ export function fmtUptime(s?: number | null): string {
 }
 
 export function fmtPct(n?: number | null): string {
-  return n == null ? '—' : `${Math.round(n)}%`
+  return n == null ? ', ' : `${Math.round(n)}%`
 }
 
 /** bytes/s → Mbps display (network cards, doc 06 Network/throughput). */
 export function fmtBps(n?: number | null): string {
-  return n == null ? '—' : `${((n * 8) / 1e6).toFixed(1)} Mbps`
+  return n == null ? ', ' : `${((n * 8) / 1e6).toFixed(1)} Mbps`
 }
 ```
 
@@ -2456,7 +2456,7 @@ export function AppCard({ app }: { app: AppRow }) {
 - [ ] **Step 6: Add types + `useMetrics` to `frontend/src/api/hooks.ts`** (append; keep existing exports untouched):
 
 ```ts
-// ---- Phase 2 (Observe) row types — mirror the backend response shapes -------
+// ---- Phase 2 (Observe) row types, mirror the backend response shapes -------
 export type Summary = {
   updated_at: string | null
   cpu: { pct: number; used_cores: number; total_cores: number }
@@ -2523,7 +2523,7 @@ export function useMetrics(target: string | null, metric: string, hours = 24) {
 - [ ] **Step 7: Run the tests and the build**
 
 Run: `npm test && npm run build`
-Expected: all tests pass (new `format.test.ts` green, existing 5 untouched); `tsc -b` clean. Unused-symbol errors (`noUnusedLocals`) mean a component imports something it doesn't use — fix the import, don't disable the rule.
+Expected: all tests pass (new `format.test.ts` green, existing 5 untouched); `tsc -b` clean. Unused-symbol errors (`noUnusedLocals`) mean a component imports something it doesn't use, fix the import, don't disable the rule.
 
 - [ ] **Step 8: Commit**
 
@@ -2539,7 +2539,7 @@ git commit -m "feat(frontend): uPlot sparkline + shared observe components"
 
 ---
 
-### Task 10: Frontend — LiveProvider: SSE → TanStack Query cache binding
+### Task 10: Frontend: LiveProvider: SSE → TanStack Query cache binding
 
 Doc refs: 06 §(d) (one EventSource per tab, patch-vs-invalidate rules, LivePulse), 05 §Streaming 4 (event shapes), plan decision 9.
 
@@ -2551,12 +2551,12 @@ Doc refs: 06 §(d) (one EventSource per tab, patch-vs-invalidate rules, LivePuls
 **Interfaces:**
 - Consumes: `QueryClient`, Task 6/7 row shapes.
 - Produces (consumed by Tasks 11–13):
-  - `applyMetrics(qc, data)` — patches `cpu_pct`/`mem_pct` into `['cluster','nodes']` rows and `cpu_pct` into `['apps'…]`/`['vms'…]` list caches; invalidates `['cluster','summary']` and `['metrics']` (decision 9).
-  - `applyResource(qc, d)` — `change === 'status'` on app/vm → patch `status` in list + detail caches; `type === 'host'` → invalidate `['cluster']` + `['hosts']`; `change === 'discovered'` → invalidate `['apps','discovered']`; anything else → invalidate that resource family.
-  - `LiveProvider({ children })` — one `EventSource('/api/v1/events/stream')`; safe no-op when `EventSource` is undefined (jsdom); exposes `useLive() → { lastEventAt }`.
-  - `LivePulse` — "Live · updated Ns ago" (green pulse dot) or "Polling every 30s" fallback.
+  - `applyMetrics(qc, data)`: patches `cpu_pct`/`mem_pct` into `['cluster','nodes']` rows and `cpu_pct` into `['apps'…]`/`['vms'…]` list caches; invalidates `['cluster','summary']` and `['metrics']` (decision 9).
+  - `applyResource(qc, d)`: `change === 'status'` on app/vm → patch `status` in list + detail caches; `type === 'host'` → invalidate `['cluster']` + `['hosts']`; `change === 'discovered'` → invalidate `['apps','discovered']`; anything else → invalidate that resource family.
+  - `LiveProvider({ children })`: one `EventSource('/api/v1/events/stream')`; safe no-op when `EventSource` is undefined (jsdom); exposes `useLive() → { lastEventAt }`.
+  - `LivePulse`: "Live · updated Ns ago" (green pulse dot) or "Polling every 30s" fallback.
 
-- [ ] **Step 1: Write the failing test** — `frontend/src/tests/live.test.ts`:
+- [ ] **Step 1: Write the failing test**, `frontend/src/tests/live.test.ts`:
 
 ```ts
 import { QueryClient } from '@tanstack/react-query'
@@ -2608,7 +2608,7 @@ describe('applyResource', () => {
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `npm test`
-Expected: FAIL — `../api/live` not found.
+Expected: FAIL, `../api/live` not found.
 
 - [ ] **Step 3: Implement `frontend/src/api/live.ts`**:
 
@@ -2748,12 +2748,12 @@ Expected: all green.
 ```bash
 git add frontend/src/api/live.ts frontend/src/components/LiveProvider.tsx \
         frontend/src/router.tsx frontend/src/tests/live.test.ts
-git commit -m "feat(frontend): LiveProvider — SSE to query-cache binding + LivePulse"
+git commit -m "feat(frontend): LiveProvider, SSE to query-cache binding + LivePulse"
 ```
 
 ---
 
-### Task 11: Frontend — Cluster page + node detail
+### Task 11: Frontend: Cluster page + node detail
 
 Doc refs: 06 §(a) Cluster row (rings card, node cards, apps section, VM footer, throughput, activity), doc 01 §1 (`cluster.node_detail` contents), plan decisions 3 & 4.
 
@@ -2764,9 +2764,9 @@ Doc refs: 06 §(a) Cluster row (rings card, node cards, apps section, VM footer,
 
 **Interfaces:**
 - Consumes: `Summary`/`NodeRow`/`AppRow`/`VmRow`/`Series`/`useMetrics` (Task 9), `Ring`, `NodeCard`, `AppCard`, `StatusPill`, `KVGrid`, `Sparkline`, `LivePulse`, `EmptyState`, `api`, `fmt*`.
-- Produces: `clusterRoute` (`/cluster`), `nodeDetailRoute` (`/cluster/$hostId`) — both exported for `router.tsx`.
+- Produces: `clusterRoute` (`/cluster`), `nodeDetailRoute` (`/cluster/$hostId`), both exported for `router.tsx`.
 
-- [ ] **Step 1: Write the failing test** — `frontend/src/tests/cluster.test.tsx` (mock the api module; smoke-render the page):
+- [ ] **Step 1: Write the failing test**, `frontend/src/tests/cluster.test.tsx` (mock the api module; smoke-render the page):
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -2827,7 +2827,7 @@ describe('ClusterPage', () => {
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `npm test`
-Expected: FAIL — `../routes/cluster` has no `ClusterPage`.
+Expected: FAIL, `../routes/cluster` has no `ClusterPage`.
 
 - [ ] **Step 3: Implement `frontend/src/routes/cluster.tsx`**:
 
@@ -2911,13 +2911,13 @@ export function ClusterPage() {
 
       <div className={`${card} flex justify-around`}>
         <Ring label="CPU" pct={summary?.cpu.pct ?? 0}
-          sub={summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : '—'}
+          sub={summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : ', '}
           stops={['#F5B544', '#E0862B']} />
         <Ring label="Memory" pct={summary?.mem.pct ?? 0}
-          sub={summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : '—'}
+          sub={summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : ', '}
           stops={['#34D3C6', '#5B9DF9']} />
         <Ring label="Storage" pct={summary?.storage.pct ?? 0}
-          sub={summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : '—'}
+          sub={summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : ', '}
           stops={['#A78BFA', '#6D5AE6']} />
       </div>
 
@@ -3015,7 +3015,7 @@ export function NodeDetailPage() {
       <div className={card}>
         <KVGrid items={[
           ['Node', node.node],
-          ['PVE version', node.pve_version ?? '—'],
+          ['PVE version', node.pve_version ?? ', '],
           ['Uptime', fmtUptime(node.uptime_s)],
           ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
           ['Apps', `${node.apps_running}/${node.apps} running`],
@@ -3059,7 +3059,7 @@ export function NodeDetailPage() {
   )
 }
 
-// Route objects — imported by router.tsx (settings.tsx precedent; circular
+// Route objects, imported by router.tsx (settings.tsx precedent; circular
 // import breaks `to:` inference, hence `as never` at call sites).
 import { shellRoute } from '../router'
 
@@ -3092,20 +3092,20 @@ git commit -m "feat(frontend): Cluster page + node detail"
 
 ---
 
-### Task 12: Frontend — Apps grid + app detail (overview tab + tab shell)
+### Task 12: Frontend: Apps grid + app detail (overview tab + tab shell)
 
 Doc refs: 06 §(a) Apps row + app-detail row (tabs as child routes), 06 §(b) DiscoveredPanel/SegmentedControl/FilterInput, plan decision 1 (read-only panel).
 
 **Files:**
 - Create: `frontend/src/routes/apps.tsx`
 - Modify: `frontend/src/router.tsx`
-- Test: extend `frontend/src/tests/cluster.test.tsx` pattern — new file `frontend/src/tests/apps.test.tsx`
+- Test: extend `frontend/src/tests/cluster.test.tsx` pattern, new file `frontend/src/tests/apps.test.tsx`
 
 **Interfaces:**
 - Consumes: `AppRow`/`DiscoveredRow`/`useMetrics` (Task 9), `AppCard`, `StatusPill`, `KVGrid`, `UsageBar`+gradients, `Sparkline`, `EmptyState`, `api`, `fmt*`, existing `Button`.
-- Produces: `appsRoute` (`/apps`, search params `{host?, q?}`), `appDetailRoute` (`/apps/$appId`) with children `appOverviewRoute` (index), `appLogsRoute` (`logs`), `appConsoleRoute` (`console`), `appConfigRoute` (`config`) — the last three render honest phase notes (Logs/Console → Phase 5, Config → Phase 4) so deep links exist from day one (doc 06: tabs are child routes).
+- Produces: `appsRoute` (`/apps`, search params `{host?, q?}`), `appDetailRoute` (`/apps/$appId`) with children `appOverviewRoute` (index), `appLogsRoute` (`logs`), `appConsoleRoute` (`console`), `appConfigRoute` (`config`); the last three render honest phase notes (Logs/Console → Phase 5, Config → Phase 4) so deep links exist from day one (doc 06: tabs are child routes).
 
-- [ ] **Step 1: Write the failing test** — `frontend/src/tests/apps.test.tsx`:
+- [ ] **Step 1: Write the failing test**, `frontend/src/tests/apps.test.tsx`:
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -3158,7 +3158,7 @@ describe('AppsPage', () => {
 
 - [ ] **Step 2: Run it to make sure it fails**
 
-Run: `npm test` — Expected: FAIL (`AppsPage` missing).
+Run: `npm test`, Expected: FAIL (`AppsPage` missing).
 
 - [ ] **Step 3: Implement `frontend/src/routes/apps.tsx`**:
 
@@ -3235,7 +3235,7 @@ export function AppsPage() {
             {discovered.map((d) => (
               <div key={`${d.host_id}:${d.ctid}`} className="flex items-center gap-3 font-mono text-[12px] text-text-2">
                 <span>CT {d.ctid}</span>
-                <span className="text-text">{d.name ?? '—'}</span>
+                <span className="text-text">{d.name ?? ', '}</span>
                 <span className="text-text-3">{d.host_name}</span>
                 <StatusPill status={d.status} />
                 {d.suggestion && (
@@ -3247,7 +3247,7 @@ export function AppsPage() {
             ))}
           </div>
           <div className="mt-3 text-[12px] text-text-3">
-            Adoption arrives with the App Store phase (Phase 4) — these containers keep running untouched.
+            Adoption arrives with the App Store phase (Phase 4), these containers keep running untouched.
           </div>
         </div>
       )}
@@ -3383,9 +3383,9 @@ export function AppOverview() {
         <KVGrid items={[
           ['CTID', app.ctid],
           ['Node', app.node],
-          ['IP', app.ip ?? '—'],
-          ['Category', app.category ?? '—'],
-          ['Web port', app.web_port ?? '—'],
+          ['IP', app.ip ?? ', '],
+          ['Category', app.category ?? ', '],
+          ['Web port', app.web_port ?? ', '],
           ['Update', app.update_available ?? 'Up to date'],
         ]} />
       </div>
@@ -3436,7 +3436,7 @@ export const appConfigRoute = phaseTab('config', 'Phase 4 (Store)',
 
 - [ ] **Step 5: Run the tests and the build**
 
-Run: `npm test && npm run build` — Expected: green.
+Run: `npm test && npm run build`, Expected: green.
 
 - [ ] **Step 6: Commit**
 
@@ -3447,7 +3447,7 @@ git commit -m "feat(frontend): Apps grid + discovered panel + app detail overvie
 
 ---
 
-### Task 13: Frontend — VMs table + VM detail (overview tab + tab shell)
+### Task 13: Frontend: VMs table + VM detail (overview tab + tab shell)
 
 Doc refs: 06 §(a) VMs row + VM-detail row, plan decisions 5 & 8.
 
@@ -3513,7 +3513,7 @@ export function VmsPage() {
                   <td className="py-2.5 font-mono">{v.name}</td>
                   <td className="py-2.5 text-text-2">{v.host_name}</td>
                   <td className="py-2.5 font-mono text-text-2">
-                    {v.cpu_cores ?? '—'} / {fmtBytes(v.mem_bytes)}
+                    {v.cpu_cores ?? ', '} / {fmtBytes(v.mem_bytes)}
                   </td>
                   <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                   <td className="py-2.5"><StatusPill status={v.status} /></td>
@@ -3595,7 +3595,7 @@ export function VmOverview() {
         <div className={card}>
           <h2 className="mb-2 text-[13px] uppercase text-text-3">Resources</h2>
           <div className="font-mono text-[12px] text-text-2">
-            {vm.cpu_cores ?? '—'} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
+            {vm.cpu_cores ?? ', '} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
           </div>
         </div>
       </div>
@@ -3605,7 +3605,7 @@ export function VmOverview() {
           ['Node', vm.host_name],
           ['Disk', fmtBytes(vm.disk_bytes)],
           ['OS type', vm.os_type ?? 'unknown'],
-          ['Synced', vm.synced_at ?? '—'],
+          ['Synced', vm.synced_at ?? ', '],
         ]} />
       </div>
     </div>
@@ -3648,7 +3648,7 @@ export const vmSnapshotsRoute = phaseTab('snapshots', 'Phase 6 (Infra pages)',
 
 - [ ] **Step 3: Run the tests and the build**
 
-Run: `npm test && npm run build` — Expected: green (VMs page has no dedicated test; the route wiring is exercised by `nav.test.tsx` rendering and `tsc`).
+Run: `npm test && npm run build`, Expected: green (VMs page has no dedicated test; the route wiring is exercised by `nav.test.tsx` rendering and `tsc`).
 
 - [ ] **Step 4: Commit**
 
@@ -3661,7 +3661,7 @@ git commit -m "feat(frontend): VMs table + VM detail overview"
 
 ### Task 14: Synthetic-fleet benchmark + DoD verification sweep + phase notes
 
-Doc refs: 11 §4 ("synthetic fleet benchmark is part of Observe's DoD hardening" — produces the Postgres-recommendation numbers), 10 Phase 2 DoD.
+Doc refs: 11 §4 ("synthetic fleet benchmark is part of Observe's DoD hardening", produces the Postgres-recommendation numbers), 10 Phase 2 DoD.
 
 **Files:**
 - Create: `backend/scripts/bench_metrics.py`
@@ -3670,7 +3670,7 @@ Doc refs: 11 §4 ("synthetic fleet benchmark is part of Observe's DoD hardening"
 - [ ] **Step 1: Implement `backend/scripts/bench_metrics.py`**:
 
 ```python
-"""Synthetic-fleet MetricsStore benchmark (doc 11 §4 — Phase 2 DoD hardening).
+"""Synthetic-fleet MetricsStore benchmark (doc 11 §4, Phase 2 DoD hardening).
 
 Answers: at what fleet size does SQLite metric writing start to hurt?
 Usage: python scripts/bench_metrics.py [hosts] [guests_per_host] [cycles]
@@ -3760,23 +3760,23 @@ npm run build
 npm run lint
 ```
 
-Expected: backend all pass (39 Phase 1 tests + ~20 new, 2 skipped as before); isolation OK; frontend tests pass; build clean. `npm run lint` (oxlint) is advisory — fix what's trivial, note the rest.
+Expected: backend all pass (39 Phase 1 tests + ~20 new, 2 skipped as before); isolation OK; frontend tests pass; build clean. `npm run lint` (oxlint) is advisory, fix what's trivial, note the rest.
 
-- [ ] **Step 4: Write `docs/notes/phase-2-observe.md`** — the Phase 9 docs-assembly note (doc 10 preamble) plus the doc 11 §4 numbers. Contents, with the real measured values substituted:
+- [ ] **Step 4: Write `docs/notes/phase-2-observe.md`**, the Phase 9 docs-assembly note (doc 10 preamble) plus the doc 11 §4 numbers. Contents, with the real measured values substituted:
 
 ```markdown
-# Phase 2 (Observe) — verification notes
+# Phase 2 (Observe): verification notes
 
 ## DoD verification map (doc 10 Phase 2)
 
 | DoD clause | Proof |
 |---|---|
-| Dashboard reflects a multi-host lab live (≤35s staleness) | `tests/test_poller_loop.py` (FakePVE, 0.2s interval, populate within cycles); 30s interval + SSE push in production; live-PVE leg stays env-gated (`pve_integration`) — no PVE on this box |
+| Dashboard reflects a multi-host lab live (≤35s staleness) | `tests/test_poller_loop.py` (FakePVE, 0.2s interval, populate within cycles); 30s interval + SSE push in production; live-PVE leg stays env-gated (`pve_integration`), no PVE on this box |
 | Apps and VMs discovered and rendered | `tests/test_poller_ingest.py`, `tests/test_apps_vms_api.py`; Apps grid + discovered panel + VMs table pages |
 | Charts show 24h of history from rollups | `tests/test_metrics_store.py` (rollup + query), `useMetrics(…, 24)` on detail pages picks `5m` via `pick_resolution` |
 | Killed host degrades to "unreachable" without breaking the UI | `tests/test_poller_loop.py` degradation + recovery assertions |
 
-## Synthetic fleet benchmark (doc 11 §4 — Postgres recommendation data)
+## Synthetic fleet benchmark (doc 11 §4: Postgres recommendation data)
 
 | Fleet | rows/cycle | write p50 | write p95 | write max | 5m rollup | prune |
 |---|---|---|---|---|---|---|
@@ -3786,7 +3786,7 @@ Expected: backend all pass (39 Phase 1 tests + ~20 new, 2 skipped as before); is
 
 Reading: cycle writes stay well under the 30s budget at every tested size on
 SQLite-WAL. Recommend Postgres in docs at the point where p95 cycle write
-exceeds ~1s (extrapolated: >N hosts / >M guests — fill from the numbers above).
+exceeds ~1s (extrapolated: >N hosts / >M guests, fill from the numbers above).
 
 ## Deviations / deferred (all carried in the plan's decision log)
 

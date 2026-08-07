@@ -1,6 +1,6 @@
 """netN= round-tripping (doc 01 §6 guest network config).
 
-The MAC lives in the head token — `virtio=AA:BB:CC:DD:EE:FF` — so a parser
+The MAC lives in the head token, `virtio=AA:BB:CC:DD:EE:FF`, so a parser
 that keeps only the keys it understands and rebuilds from those loses it.
 These are the strings PVE actually emits; every one must survive
 build_net(parse_net(s)) == s exactly.

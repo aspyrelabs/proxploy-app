@@ -16,12 +16,12 @@ test.describe('light theme', () => {
   // Nine cheap assertions gain nothing from true parallelism, and running
   // them across separate worker processes multiplies seedAdmin() races
   // against the one dev backend instance webServer boots (see helpers.ts).
-  // Serial keeps all nine — and this describe's single beforeAll — on one
+  // Serial keeps all nine, and this describe's single beforeAll, on one
   // worker.
   test.describe.configure({ mode: 'serial' })
 
   // auth.py rate-limits POST /login to 10/minute per source IP, and every
-  // request in this run comes from the same local machine — one shared
+  // request in this run comes from the same local machine, one shared
   // bucket. Nine tests each doing their own UI sign-in blows straight
   // through it. Sign in through the real UI exactly once here and hand
   // every test the resulting session cookie instead.

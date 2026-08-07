@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 # `kind` (doc 04) is an unencrypted label parsed only from a fixed allowlist
 # of URL schemes (proxploy.models.KIND_FROM_SCHEME / ALLOWED_NOTIFICATION_KINDS)
-# — a prior fix made the Python-level parser (`notifier.kind_for`) an
+#, a prior fix made the Python-level parser (`notifier.kind_for`) an
 # allowlist so it can never echo a caller-supplied Apprise URL (which embeds
 # secrets) into this column. This migration makes that guarantee structural:
 # even a future writer that bypasses `kind_for` entirely (raw SQL, a stray
@@ -31,7 +31,7 @@ CONSTRAINT_NAME = "ck_notification_channels_kind_allowlist"
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # SQLite has no ALTER TABLE ADD CONSTRAINT — batch mode recreates the
+    # SQLite has no ALTER TABLE ADD CONSTRAINT: batch mode recreates the
     # table (reflecting existing columns/indexes/FKs) under the hood. On
     # Postgres, batch mode is a plain in-place ALTER TABLE ADD CONSTRAINT.
     with op.batch_alter_table('notification_channels') as batch_op:

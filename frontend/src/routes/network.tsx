@@ -32,7 +32,7 @@ function lastValue(s?: NetSeries): number | null {
 function zoneLabel(i: Iface): string {
   if (i.vlan_id != null) return `VLAN ${i.vlan_id}`
   if (i.vlan_aware) return 'VLAN-aware'
-  return i.type ?? '—'
+  return i.type ?? ', '
 }
 
 function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
@@ -43,7 +43,7 @@ function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
       <h2 className="mb-3 font-display text-[16px] font-semibold">Bridges</h2>
       {rows.length === 0 ? (
         <p className="text-[12.5px] text-text-3">
-          No bridges reported yet — Proxploy reads them live from each node on every load.
+          No bridges reported yet, Proxploy reads them live from each node on every load.
         </p>
       ) : (
         <table aria-label="Bridges" className="w-full text-left text-[13px]">
@@ -66,14 +66,14 @@ function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
                 </td>
                 <td className="py-2.5 text-text-2">{node.node}</td>
                 <td className="py-2.5 font-mono text-text-2">
-                  {iface.cidr ?? iface.address ?? '—'}
+                  {iface.cidr ?? iface.address ?? ', '}
                 </td>
                 <td className="py-2.5">
                   <span className="rounded-full border border-blue/30 bg-blue-dim px-2 py-0.5 text-[11px] text-blue">
                     {zoneLabel(iface)}
                   </span>
                 </td>
-                <td className="py-2.5 font-mono text-text-2">{iface.bridge_ports || '—'}</td>
+                <td className="py-2.5 font-mono text-text-2">{iface.bridge_ports || ', '}</td>
               </tr>
             ))}
           </tbody>
@@ -90,7 +90,7 @@ function ThroughputCard() {
   const total = (pick: (h: HostThroughput) => NetSeries) =>
     hosts.length ? hosts.reduce((a, h) => a + (lastValue(pick(h)) ?? 0), 0) : null
   // ponytail: the two sparklines chart the first host's series, the same
-  // simplification cluster.tsx made for its network card — the ↓/↑ figures above
+  // simplification cluster.tsx made for its network card, the ↓/↑ figures above
   // them are already fleet-wide. Summed series when a real fleet shows it matters.
   const first = hosts[0]
   return (
@@ -116,7 +116,7 @@ function AttachmentMap({ attachments, nodes }: {
   attachments: Attachment[]; nodes: NodeIfaces[]
 }) {
   const ent = useEntitlements()
-  // has() is false until the first fetch resolves — gating on !has() alone
+  // has() is false until the first fetch resolves, gating on !has() alone
   // greys the button out for every plan during load.
   const denied = ent.data != null && !ent.has('network.guest_config')
   const [editing, setEditing] = useState<Attachment | null>(null)
@@ -154,12 +154,12 @@ function AttachmentMap({ attachments, nodes }: {
                   </span>
                 </td>
                 <td className="py-2.5 font-mono text-text-2">{a.iface}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? '—'}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.tag ?? '—'}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? ', '}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.tag ?? ', '}</td>
                 <td className={`py-2.5 text-[12px] ${a.firewall ? 'text-green' : 'text-text-3'}`}>
                   {a.firewall ? 'on' : 'off'}
                 </td>
-                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? '—'}</td>
+                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? ', '}</td>
                 <td className="py-2.5 text-right">
                   <Button variant="ghost" className="px-2 py-1 text-[11px]"
                           disabled={denied}
@@ -197,14 +197,14 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
       onError: (e) => {
         const b = errBody(e)
         // The backend refuses an unconfirmed apply with the node name as the
-        // phrase, deliberately the same envelope selfguard uses — escalate to
+        // phrase, deliberately the same envelope selfguard uses; escalate to
         // the typed-confirmation dialog and re-fire with what was typed.
         if (b?.error === 'confirm_required') {
           setGuard({ hostId, node, phrase: String(b.confirm_phrase ?? node),
                      detail: String(b.detail ?? '') })
           return
         }
-        toast.error('Could not apply the staged config — the node was not changed.')
+        toast.error('Could not apply the staged config, the node was not changed.')
       },
     })
 
@@ -232,7 +232,7 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
           <p className="mt-2 rounded-ctl border border-red/30 bg-red-dim p-2 text-[12.5px] text-text-2">
             <span className="text-red">Applying reloads the node&apos;s interfaces.</span> If the
             staged config is wrong the node loses its network, and the only way back is its
-            physical console — there is no undo from here.
+            physical console; there is no undo from here.
           </p>
 
           {jobId != null && (
@@ -282,12 +282,12 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                   {n.interfaces.map((i) => (
                     <tr key={i.iface} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono">{i.iface}</td>
-                      <td className="py-2.5 text-text-2">{i.type ?? '—'}</td>
+                      <td className="py-2.5 text-text-2">{i.type ?? ', '}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.cidr ?? i.address ?? '—'}
+                        {i.cidr ?? i.address ?? ', '}
                       </td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.bridge_ports || i.slaves || '—'}
+                        {i.bridge_ports || i.slaves || ', '}
                       </td>
                       <td className={`py-2.5 text-[12px] ${i.active ? 'text-green' : 'text-text-3'}`}>
                         {i.active ? 'up' : 'down'}
@@ -345,12 +345,12 @@ export function NetworkPage() {
 
       {isError ? (
         <EmptyState title="Network not readable"
-          note="Proxploy reads bridges live from each node — check that the host is connected." />
+          note="Proxploy reads bridges live from each node, check that the host is connected." />
       ) : (
         <>
           {errors.length > 0 && (
             // list_bridges() degrades per host instead of 500ing the whole
-            // page (BLOCKING 3) — everything below is genuinely partial, so
+            // page (BLOCKING 3), everything below is genuinely partial, so
             // that must be visible, not just a smaller-than-expected count.
             // Same amber/warning vocabulary as RetentionSection's dry-run
             // banner, not a new one.
@@ -359,7 +359,7 @@ export function NetworkPage() {
               <span className="text-amber">
                 {errors.length === 1 ? '1 host' : `${errors.length} hosts`} could not be read.
               </span>{' '}
-              {errors.map((e) => e.host_name).join(', ')} — the page below is missing whatever
+              {errors.map((e) => e.host_name).join(', ')}; the page below is missing whatever
               those hosts would have shown.
             </p>
           )}
@@ -375,7 +375,7 @@ export function NetworkPage() {
   )
 }
 
-// shellRoute comes from ./shell, never ../router — importing router.tsx here
+// shellRoute comes from ./shell, never ../router; importing router.tsx here
 // would force its eager createRouter() to run mid-cycle (cluster.tsx:273-277).
 export const networkRoute = createRoute({
   getParentRoute: () => shellRoute,

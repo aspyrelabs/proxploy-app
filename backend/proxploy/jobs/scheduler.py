@@ -1,17 +1,17 @@
-"""Scheduler seam (brief §5, doc 02 §3, doc 04 `schedules`) — cron triggers
+"""Scheduler seam (brief §5, doc 02 §3, doc 04 `schedules`); cron triggers
 feeding the JobBackend.
 
 Doc 04, verbatim: "APScheduler's own state is reconstructed from these rows at
 boot; this table is authoritative." Taken literally there is no second registry
-to reconstruct — this module reads `schedules` on every tick and enqueues what
+to reconstruct, this module reads `schedules` on every tick and enqueues what
 is ripe. APScheduler contributes `CronTrigger` and nothing else: cron parsing
 and DST-correct next-fire arithmetic, the one part of scheduling that must
 never be hand-rolled. Its BaseScheduler/AsyncIOScheduler/jobstores would be a
 second source of truth to reconcile on every CRUD write, which is exactly what
 doc 04's sentence rules out.
 
-Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists — only
-4.0.0a1..a6 (verified against PyPI 2026-08-01) — and doc 03 marks Scheduling
+Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists, only
+4.0.0a1..a6 (verified against PyPI 2026-08-01), and doc 03 marks Scheduling
 "Provisional (seam: `Scheduler`)", so this ships on the stable 3.11 line. See
 docs/notes/phase-7-operate.md.
 
@@ -44,7 +44,7 @@ def next_fire(cron: str, tz: str, after: datetime) -> datetime:
     Both conversions happen here so no caller ever holds an aware datetime.
 
     Passing a firing instant as `after` yields the NEXT occurrence, not the
-    same one — that property is what stops a tick from re-firing the schedule
+    same one, that property is what stops a tick from re-firing the schedule
     it just fired.
     """
     try:
@@ -57,7 +57,7 @@ def next_fire(cron: str, tz: str, after: datetime) -> datetime:
     # Passing `after` as BOTH previous_fire_time and now forces "strictly
     # after": with previous_fire_time=None, CronTrigger treats `now` as a
     # candidate and returns it right back when it lands exactly on a firing
-    # instant — which is exactly the re-fire-every-tick bug this function
+    # instant: which is exactly the re-fire-every-tick bug this function
     # exists to prevent.
     aware_after = after.replace(tzinfo=timezone.utc)
     nxt = trigger.get_next_fire_time(aware_after, aware_after)
@@ -86,8 +86,8 @@ def _target(job_kind: str, params: dict | None) -> tuple[str, int | None]:
 
     The prefix, not a param key name, is authoritative: `job_kind` is what
     selects the handler (`HANDLERS[job_kind]`), so it cannot disagree with
-    itself. Param key names vary per handler — lifecycle's `run_lifecycle`
-    reads a bare `target_id` (api/apps.py), `backup.run` reads `host_id` — so
+    itself. Param key names vary per handler, lifecycle's `run_lifecycle`
+    reads a bare `target_id` (api/apps.py), `backup.run` reads `host_id`; so
     sniffing keys instead of the prefix silently mis-derives the type for
     whichever handler doesn't use the sniffed name (this broke every
     `app.*`/`vm.*` lifecycle kind before this fix).
@@ -117,7 +117,7 @@ def prime(db, now: datetime) -> int:
 
     Called at boot and at the top of every tick, so a row created directly in
     the DB (or one whose next_run_at was cleared) starts firing without a
-    restart. Rows that already have a next_run_at are never recomputed here —
+    restart. Rows that already have a next_run_at are never recomputed here, 
     that would move a schedule's firing time on every tick.
     """
     primed = 0
@@ -136,7 +136,7 @@ def prime(db, now: datetime) -> int:
 
 
 def due(db, now: datetime) -> list[Schedule]:
-    """Enabled, primed, and ripe — oldest first so a backlog fires in order."""
+    """Enabled, primed, and ripe; oldest first so a backlog fires in order."""
     return (db.query(Schedule)
             .filter(Schedule.enabled.is_(True),
                     Schedule.next_run_at.is_not(None),
@@ -148,7 +148,7 @@ def due(db, now: datetime) -> list[Schedule]:
 def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
     """Enqueue one schedule's job and advance the row.
 
-    Returns None ONLY when no job was enqueued at all — `s.job_kind` has no
+    Returns None ONLY when no job was enqueued at all, `s.job_kind` has no
     registered handler, `app.state.jobs.enqueue` raised, and the row is
     disabled with an audit trail. It does NOT mean "the row was disabled": if
     enqueue succeeds but the schedule's own cron/timezone then breaks on the
@@ -169,7 +169,7 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
             db, kind=s.job_kind, target_type=target_type, target_id=target_id,
             params=params, requested_by=None, schedule_id=s.id)
     except KeyError as e:
-        # JobBackend.enqueue raises this for an unregistered kind — a job kind
+        # JobBackend.enqueue raises this for an unregistered kind: a job kind
         # can genuinely disappear across an upgrade, and retrying it every tick
         # forever would be the wrong answer.
         _disable(db, s, f"no handler for job kind {s.job_kind!r}: {e}")
@@ -195,7 +195,7 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
 
 
 def tick(app, now: datetime | None = None) -> list[dict]:
-    """One full pass: prime, select, fire. Blocking — runs in a worker thread.
+    """One full pass: prime, select, fire. Blocking, runs in a worker thread.
 
     `JobBackend.enqueue` is explicitly safe from FastAPI's threadpool (it hops
     to the loop via `call_soon_threadsafe`), which is the same contract this
@@ -216,7 +216,7 @@ def tick(app, now: datetime | None = None) -> list[dict]:
 
 # Rows Proxploy owns. Seeded by name at boot if absent, never re-created or
 # re-enabled once the operator has touched them (see seed_system_schedules).
-# `catalog.refresh` is what keeps `apps.update_available` honest — without it
+# `catalog.refresh` is what keeps `apps.update_available` honest: without it
 # an auto-update window would never see a new upstream commit.
 SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Catalog refresh", "job_kind": "catalog.refresh",
@@ -250,7 +250,7 @@ def seed_system_schedules(db) -> int:
 class Scheduler:
     """One tick loop, shaped like pollers.Poller: the supervisor never dies.
 
-    All DB work runs in `asyncio.to_thread` — SQLAlchemy is blocking, and a
+    All DB work runs in `asyncio.to_thread`, SQLAlchemy is blocking, and a
     scheduler that stalls the event loop would stall the SSE fanout, the
     pollers and every in-flight job with it.
     """
@@ -270,7 +270,7 @@ class Scheduler:
                                 "schedule_id": entry["schedule_id"]})
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 — one bad tick must not end them all
+            except Exception:  # noqa: BLE001  (one bad tick must not end them all)
                 pass
             await asyncio.sleep(interval)
 

@@ -1,6 +1,6 @@
-// api/migrate.ts — Cross-host app migration: preflight + the migrate.app job
+// api/migrate.ts, Cross-host app migration: preflight + the migrate.app job
 // (doc 05 Tasks 14-16, doc 10 §Phase 8). Mirrors backend/proxploy/services/
-// migrate.py's `preflight()` return shape exactly — see that module's own
+// migrate.py's `preflight()` return shape exactly, see that module's own
 // docstring for why every number here is either a live read or an honest
 // `None`, never a guess.
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -15,11 +15,11 @@ export type Preflight = {
   source: { host_id: number; host_name: string; node: string; ctid: number }
   target: { host_id: number; host_name: string; node: string; ctid: number }
   shared_storage: string | null
-  /** null when neither a measured backup nor a live disk size exists — never fabricated. */
+  /** null when neither a measured backup nor a live disk size exists, never fabricated. */
   transfer_bytes: number | null
   estimate_basis: 'last_backup' | 'allocated_disk' | null
   /** ESTIMATE only, from an assumed transfer rate. The job's own
-   *  `result.downtime_s` is the MEASURED number — see MigrateDialog. */
+   *  `result.downtime_s` is the MEASURED number, see MigrateDialog. */
   est_downtime_s: number | null
   est_note: string
   capacity_ok: boolean | null

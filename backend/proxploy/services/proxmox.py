@@ -1,5 +1,5 @@
 """The ONE Proxmox client layer (docs 02 §4, 11 §7). Every proxmoxer call and every
-PVE-8-vs-9 behavioural branch lives here — never in routers, pollers, or jobs.
+PVE-8-vs-9 behavioural branch lives here, never in routers, pollers, or jobs.
 (No version branches exist yet; when PVE 9 diverges, branch on self.version()["release"]
 inside this module only.) Scoped API tokens, never root@pam passwords (doc 00 §8)."""
 import hashlib
@@ -26,22 +26,22 @@ class ProxmoxError(RuntimeError):
 
 
 # Proxmox's own status verbs. Proxploy's user-facing vocabulary maps onto these
-# in services/lifecycle.py — the gap is stated once, there.
+# in services/lifecycle.py: the gap is stated once, there.
 LXC_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend", "resume"})
 QEMU_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend",
                           "resume", "reset"})
 
 
-# The submitted token id is OPAQUE AND SECRET on ingest — Proxmox's own copy
+# The submitted token id is OPAQUE AND SECRET on ingest: Proxmox's own copy
 # button yields `PVEAPIToken=user@realm!name=<uuid-secret>`, so any caller
 # string may be carrying a credential. Nothing derived from it is stored in the
 # clear except what this regex names: user, realm and token name, re-joined by
-# token_public_meta() below. A previous fix banned "=" — a denylist, and
+# token_public_meta() below. A previous fix banned "=": a denylist, and
 # denylists in this codebase have failed twice already (notifier.kind_for).
 #
 # The user class is deliberately WIDE: LDAP/AD logins legitimately carry spaces
 # and non-ASCII, and rejecting them broke real onboarding. What keeps the secret
-# unrepresentable is structural, not a character blacklist — the three
+# unrepresentable is structural, not a character blacklist: the three
 # separators "=", "@" and "!" cannot appear inside any component, so a string
 # rebuilt as `user@realm!name` can never carry the `=<secret>` half no matter
 # how wide the user class gets. Control characters (\x00-\x1f, \x7f) stay out
@@ -58,7 +58,7 @@ def parse_token_id(token_id: str) -> tuple[str, str]:
         # Never echo the input: it is exactly the malformed case that may be a
         # pasted `PVEAPIToken=...=<secret>`, and this message reaches the caller
         # as an HTTP 422/502 detail (api/hosts.py -> main.py::problem_handler).
-        raise ProxmoxError("token id must look like user@realm!tokenname — the "
+        raise ProxmoxError("token id must look like user@realm!tokenname, the "
                            "realm and token name are letters, digits, dot, dash "
                            "and underscore, and none of the three parts may "
                            "contain '=' (if you pasted the whole "
@@ -70,7 +70,7 @@ def parse_token_id(token_id: str) -> tuple[str, str]:
 def token_public_meta(token_id: str) -> str:
     """The ONLY value allowed into the unencrypted `host_credentials.public_meta`.
 
-    Built by pulling the known-safe fields forward — user, realm, token name —
+    Built by pulling the known-safe fields forward, user, realm, token name; 
     and re-joining them; the caller's string never passes through, validated or
     not. Anything unparseable raises rather than falling back to a stripped or
     truncated form of the raw input.
@@ -83,7 +83,7 @@ def _header_safe(secret: str) -> bool:
     """A token secret must be encodable as an HTTP header value.
 
     urllib3 rejects anything else by raising InvalidHeader with the whole
-    header value — i.e. `PVEAPIToken=user!name=<secret>` — inline in its
+    header value, i.e. `PVEAPIToken=user!name=<secret>`, inline in its
     message, which `_wrap` below would otherwise carry into a 502 body and a
     persisted `jobs.error`. A trailing newline from a copy-paste is enough to
     trigger it, so this is checked before the value ever reaches urllib3.
@@ -101,15 +101,15 @@ def default_factory(**kwargs):
     return ProxmoxAPI(**kwargs)
 
 
-# Onboarding hands us an operator-supplied address and we open a socket to it —
-# with CERT_NONE, on the fingerprint path — and the outcome (success, failure,
+# Onboarding hands us an operator-supplied address and we open a socket to it, 
+# with CERT_NONE, on the fingerprint path: and the outcome (success, failure,
 # latency, the returned fingerprint) comes back to the caller. That is an SSRF
 # primitive unless the target class is constrained.
 #
 # RFC1918 and IPv6 unique-local are DELIBERATELY ALLOWED and always will be:
 # this is a self-hosted LAN product and a node on 192.168.x.x / 10.x.x.x is the
 # normal case, not the attack. Only classes that are never a Proxmox node and
-# are dangerous to reach are refused — chiefly link-local, which is where cloud
+# are dangerous to reach are refused: chiefly link-local, which is where cloud
 # instance metadata lives (169.254.169.254).
 #
 # Loopback is refused by default but is a legitimate target when Proxploy runs
@@ -129,7 +129,7 @@ _DENIED_CLASSES = (
 def resolve_target(host: str, port: int) -> str:
     """Resolve `host`, refuse the dangerous address classes, return one literal IP.
 
-    EVERY resolved address must pass, not just the first — a name with an A
+    EVERY resolved address must pass, not just the first; a name with an A
     record for a real node and a second for 169.254.169.254 is refused outright.
     The returned literal is what the caller must connect to, so the socket goes
     to an address we actually checked.
@@ -157,7 +157,7 @@ def resolve_target(host: str, port: int) -> str:
 def open_validated_tcp_socket(host: str, port: int, timeout: float = 10.0) -> socket.socket:
     """resolve_target + connect to the literal we validated (doc 02 §5's SSRF
     guard, shared by the TLS-fingerprint check and the new console websocket
-    connections — nothing here reaches Proxmox's own address string again)."""
+    connections, nothing here reaches Proxmox's own address string again)."""
     ip = resolve_target(host, port)
     return socket.create_connection((ip, port), timeout=timeout)
 
@@ -201,7 +201,7 @@ def _classify(exc: BaseException) -> str:
     Only reached from `_wrap`, i.e. for exceptions proxmoxer/requests raised
     that we did not construct ourselves. `resolve_target`'s SSRF refusals and
     `_connect`'s TLS-fingerprint mismatch are already `ProxmoxError`s raised
-    with an explicit `kind` at the point they are known — self-classifying,
+    with an explicit `kind` at the point they are known, self-classifying,
     so they never reach here and this function does not need to recognize
     them.
     """
@@ -233,9 +233,9 @@ class ProxmoxClient:
 
         `str(e)` is third-party text we do not control, and urllib3 in
         particular interpolates the whole `Authorization` header value into
-        `InvalidHeader`. Every wrapped message below flows outward — to a 502
+        `InvalidHeader`. Every wrapped message below flows outward, to a 502
         `detail` (api/hosts.py), to the unencrypted `jobs.error` column and its
-        SSE stream (jobs/backend.py::_finish), and to `job_events.message` — so
+        SSE stream (jobs/backend.py::_finish), and to `job_events.message`; so
         the credential is scrubbed here rather than at each of those sinks.
         """
         text = f"{prefix}: {e}"
@@ -296,14 +296,14 @@ class ProxmoxClient:
     def cluster_resources(self) -> list[dict]:
         """One bulk call: every node/CT/VM/storage row for this endpoint.
 
-        The poll loop's only guest-state source — per-guest calls are
+        The poll loop's only guest-state source, per-guest calls are
         forbidden in the poller (doc 02 §3 O(nodes) budget).
         """
         try:
             return self._connect().cluster.resources.get()
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001  (one wrap point, like version()
             raise self._wrap("cluster/resources failed", e) from e
 
     def node_rrddata(self, node: str, timeframe: str = "hour") -> list[dict]:
@@ -329,7 +329,7 @@ class ProxmoxClient:
             return getattr(status, action).post()
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001  (one wrap point, like version()
             raise self._wrap(f"{kind}/{vmid} {action} failed on {node}", e) from e
 
     def guest_config_update(self, kind: str, node: str, vmid: int,
@@ -337,7 +337,7 @@ class ProxmoxClient:
         """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> UPID or None.
 
         NOT long-running: PVE writes the config file synchronously. A RUNNING
-        qemu guest is the one case that returns a UPID — the change lands in
+        qemu guest is the one case that returns a UPID, the change lands in
         the guest's pending-config section and PVE spawns a tiny task to record
         it; the guest itself only picks it up at next boot. A stopped guest or
         an lxc guest returns None and the write is already effective. Callers
@@ -356,7 +356,7 @@ class ProxmoxClient:
     # promotes that file. network_revert deletes it.
 
     def network_create(self, node: str, config: dict) -> None:
-        """POST /nodes/{node}/network — stages a new iface. `config` carries
+        """POST /nodes/{node}/network, stages a new iface. `config` carries
         `iface` and `type` plus the PVE options (bridge_ports, cidr, ...)."""
         try:
             self._connect().nodes(node).network.post(**config)
@@ -366,7 +366,7 @@ class ProxmoxClient:
             raise self._wrap(f"staging network interface failed on {node}", e) from e
 
     def network_update(self, node: str, iface: str, config: dict) -> None:
-        """PUT /nodes/{node}/network/{iface} — stages an edit."""
+        """PUT /nodes/{node}/network/{iface}, stages an edit."""
         try:
             self._connect().nodes(node).network(iface).put(**config)
         except ProxmoxError:
@@ -375,7 +375,7 @@ class ProxmoxClient:
             raise self._wrap(f"staging {iface} failed on {node}", e) from e
 
     def network_delete(self, node: str, iface: str) -> None:
-        """DELETE /nodes/{node}/network/{iface} — stages a removal."""
+        """DELETE /nodes/{node}/network/{iface}, stages a removal."""
         try:
             self._connect().nodes(node).network(iface).delete()
         except ProxmoxError:
@@ -399,7 +399,7 @@ class ProxmoxClient:
             raise self._wrap(f"applying network config failed on {node}", e) from e
 
     def network_revert(self, node: str) -> None:
-        """DELETE /nodes/{node}/network — discards /etc/network/interfaces.new."""
+        """DELETE /nodes/{node}/network, discards /etc/network/interfaces.new."""
         try:
             self._connect().nodes(node).network.delete()
         except ProxmoxError:
@@ -408,7 +408,7 @@ class ProxmoxClient:
             raise self._wrap(f"reverting staged network config failed on {node}", e) from e
 
     def task_status(self, node: str, upid: str) -> dict:
-        """GET /nodes/{node}/tasks/{upid}/status — `stopped` + exitstatus == done."""
+        """GET /nodes/{node}/tasks/{upid}/status, `stopped` + exitstatus == done."""
         try:
             return self._connect().nodes(node).tasks(upid).status.get()
         except ProxmoxError:
@@ -418,7 +418,7 @@ class ProxmoxClient:
 
     def task_log(self, node: str, upid: str, start: int = 0,
                  limit: int = 500) -> list[dict]:
-        """GET /nodes/{node}/tasks/{upid}/log — rows of {"n": seq, "t": line}."""
+        """GET /nodes/{node}/tasks/{upid}/log, rows of {"n": seq, "t": line}."""
         try:
             return self._connect().nodes(node).tasks(upid).log.get(
                 start=start, limit=limit)
@@ -460,7 +460,7 @@ class ProxmoxClient:
             raise self._wrap(f"restore of {kind}/{vmid} failed on {node}", e) from e
 
     def prune_preview(self, node: str, storage: str, params: dict) -> list[dict]:
-        """GET /nodes/{node}/storage/{storage}/prunebackups — a DRY RUN.
+        """GET /nodes/{node}/storage/{storage}/prunebackups, a DRY RUN.
 
         Marks each volume keep|remove|protected and deletes nothing. The real
         deletion is the DELETE verb in prune_backups() below; the two must stay
@@ -541,7 +541,7 @@ class ProxmoxClient:
                         content: str | None = None) -> list[dict]:
         """GET /nodes/{node}/storage/{storage}/content -> volume listing.
 
-        `content=` is a FILTER, so it is omitted rather than sent as None —
+        `content=` is a FILTER, so it is omitted rather than sent as None; 
         PVE would otherwise filter on the literal string and return nothing.
         """
         try:
@@ -553,7 +553,7 @@ class ProxmoxClient:
             raise self._wrap(f"storage content failed for {storage!r} on {node}", e) from e
 
     def cluster_storage(self) -> list[dict]:
-        """GET /storage — the cluster-level storage.cfg, not a node's view."""
+        """GET /storage, the cluster-level storage.cfg, not a node's view."""
         try:
             return self._connect().storage.get()
         except ProxmoxError:
@@ -575,7 +575,7 @@ class ProxmoxClient:
             raise self._wrap(f"network list failed on {node}", e) from e
 
     def guest_config(self, kind: str, node: str, vmid: int) -> dict:
-        """GET /nodes/{node}/{lxc|qemu}/{vmid}/config — the full config dict,
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/config, the full config dict,
         including every netN= line the network page round-trips."""
         try:
             return getattr(self._connect().nodes(node), kind)(vmid).config.get()
@@ -586,7 +586,7 @@ class ProxmoxClient:
 
     def snapshots(self, kind: str, node: str, vmid: int) -> list[dict]:
         """GET /nodes/{node}/{lxc|qemu}/{vmid}/snapshot -> [{name, description,
-        snaptime, vmstate, parent}]. Includes PVE's synthetic `current` row —
+        snaptime, vmstate, parent}]. Includes PVE's synthetic `current` row, 
         callers decide whether to show it, this layer does not filter."""
         try:
             return getattr(self._connect().nodes(node), kind)(vmid).snapshot.get()
@@ -604,7 +604,7 @@ class ProxmoxClient:
 
         `vmstate` is doc 01 §4's "with-RAM option": PVE dumps the guest's memory
         into the snapshot so a rollback resumes mid-execution. It exists only on
-        the qemu endpoint — PVE's lxc snapshot API has no such parameter — so a
+        the qemu endpoint, PVE's lxc snapshot API has no such parameter, so a
         container request for it is refused here rather than silently dropped,
         which would produce a snapshot the caller believes has RAM in it.
         """
@@ -621,7 +621,7 @@ class ProxmoxClient:
             return guest.snapshot.post(**call)
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001  (one wrap point, like version()
             raise self._wrap(f"snapshot {name!r} of {kind}/{vmid} failed on {node}",
                              e) from e
 
@@ -652,7 +652,7 @@ class ProxmoxClient:
                              f"on {node}", e) from e
 
     def cluster_nextid(self) -> int:
-        """GET /cluster/nextid — PVE answers with a JSON string; cast once here
+        """GET /cluster/nextid, PVE answers with a JSON string; cast once here
         so no caller has to remember to."""
         try:
             return int(self._connect().cluster.nextid.get())
@@ -664,7 +664,7 @@ class ProxmoxClient:
     # --- migration (Phase 8 Task 14/15) --------------------------------------
 
     def cluster_status(self) -> list[dict]:
-        """GET /cluster/status — cluster membership + node list.
+        """GET /cluster/status, cluster membership + node list.
 
         A standalone node returns rows with no `{"type": "cluster"}` entry.
         This is the ONLY honest source of cluster membership: `hosts.cluster_name`
@@ -683,7 +683,7 @@ class ProxmoxClient:
         """POST /nodes/{node}/{lxc|qemu}/{vmid}/migrate -> UPID.
 
         Only meaningful when source and target share a PVE cluster (the
-        `cluster` strategy in services/migrate.py) — `params` carries `target`
+        `cluster` strategy in services/migrate.py), `params` carries `target`
         (the destination node name) plus optional migrate options.
         """
         if kind not in ("lxc", "qemu"):
@@ -702,14 +702,14 @@ class ProxmoxClient:
 
         The same endpoint restore_guest() posts an `archive` to; here it carries
         a full spec (vmid, name, cores, memory, scsi0, net0, …). Building that
-        spec is the caller's job — this method only posts it, so every PVE
+        spec is the caller's job, this method only posts it, so every PVE
         parameter name lives in exactly one place (services/guestjobs.py).
         """
         try:
             return self._connect().nodes(node).qemu.post(**params)
         except ProxmoxError:
             raise
-        except Exception as e:  # noqa: BLE001 — one wrap point, like version()
+        except Exception as e:  # noqa: BLE001  (one wrap point, like version()
             raise self._wrap(f"vm create failed on {node}", e) from e
 
     def vm_clone(self, node: str, vmid: int, params: dict) -> str:
@@ -745,13 +745,13 @@ class ProxmoxClient:
         """POST /nodes/{node}/storage/{storage}/upload -> UPID.
 
         `path` is a spooled temp file on the Proxploy host, opened here and
-        streamed by proxmoxer as the multipart part — the bytes are never held
+        streamed by proxmoxer as the multipart part, the bytes are never held
         in memory by us (see api/storage.py's upload route for the other half).
 
         proxmoxer/requests derive the multipart part's filename from the file
         object's `.name` (`requests.utils.guess_filename`), but a plain
         `open()` result exposes `.name` read-only as the spool path's own
-        basename — assigning to it raises `AttributeError`. `_NamedUpload`
+        basename, assigning to it raises `AttributeError`. `_NamedUpload`
         wraps the raw stream so `.name` reports the ISO's real filename
         instead, while still passing `isinstance(_, io.IOBase)` so proxmoxer's
         streaming-multipart path (large-file handling) still kicks in.
@@ -770,7 +770,7 @@ class ProxmoxClient:
         """DELETE /nodes/{node}/storage/{storage}/content/{volid}.
 
         Returns a UPID for the plugins that delete asynchronously (PBS, ZFS) and
-        None for the ones that do it inline (dir) — the caller must handle both.
+        None for the ones that do it inline (dir), the caller must handle both.
         """
         try:
             return self._connect().nodes(node).storage(storage).content(volid).delete()
@@ -783,17 +783,17 @@ class ProxmoxClient:
     # --- storage definition management (Phase 6) ----------------------------
     # These three hit the CLUSTER-level /storage endpoints, not /nodes/{n}/…:
     # a storage definition lives in /etc/pve/storage.cfg and is cluster-wide.
-    # They are SYNCHRONOUS — Proxmox returns no UPID, so there is nothing to
+    # They are SYNCHRONOUS: Proxmox returns no UPID, so there is nothing to
     # poll and these are plain route calls rather than jobs.
     #
     # `config` may carry a live credential (PBS `password`, CIFS `username`/
     # `password`). It is forwarded and forgotten: nothing here logs, stores or
-    # returns it, and _wrap below scrubs only OUR token — the caller's secret
+    # returns it, and _wrap below scrubs only OUR token: the caller's secret
     # never enters an exception message because it is a request body, not a
     # header, and proxmoxer does not echo request bodies in its errors.
 
     def storage_create(self, config: dict) -> None:
-        """POST /storage — `config` must include `storage` and `type`."""
+        """POST /storage, `config` must include `storage` and `type`."""
         try:
             self._connect().storage.post(**config)
         except ProxmoxError:
@@ -803,7 +803,7 @@ class ProxmoxClient:
                              e) from e
 
     def storage_update(self, storage: str, config: dict) -> None:
-        """PUT /storage/{storage} — only the keys given are changed."""
+        """PUT /storage/{storage}, only the keys given are changed."""
         try:
             self._connect().storage(storage).put(**config)
         except ProxmoxError:
@@ -812,7 +812,7 @@ class ProxmoxClient:
             raise self._wrap(f"updating storage {storage!r} failed", e) from e
 
     def storage_remove(self, storage: str) -> None:
-        """DELETE /storage/{storage} — drops the definition; upstream data stays."""
+        """DELETE /storage/{storage}, drops the definition; upstream data stays."""
         try:
             self._connect().storage(storage).delete()
         except ProxmoxError:

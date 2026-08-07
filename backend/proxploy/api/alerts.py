@@ -1,7 +1,7 @@
 """Alert rules and fired alerts (doc 05 §Alerts).
 
 The substance here is validation. The worst failure mode in alerting is a rule
-that looks configured, sits `enabled`, and can never fire — nobody discovers it
+that looks configured, sits `enabled`, and can never fire; nobody discovers it
 until the outage it was meant to catch. So every combination the evaluator
 cannot answer is a 422 at write time: unknown metric, a (metric, target_type)
 pair outside services/alerts.py::METRIC_TARGETS, a target id that names
@@ -79,7 +79,7 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
     allowed = METRIC_TARGETS[metric]
     if target_type != "any" and target_type not in allowed:
         raise HTTPException(422, f"{metric!r} can only target "
-                                 f"{', '.join(allowed)} — not {target_type!r}")
+                                 f"{', '.join(allowed)}; not {target_type!r}")
     if target_type == "any" and target_id is not None:
         raise HTTPException(422, "target_id must be null when target_type is 'any'")
     if target_type != "any":
@@ -110,7 +110,7 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
             dependencies=[Depends(_read),
                           Depends(require_entitlement("alerts.rules"))])
 def list_metrics(user: User = Depends(_read)):
-    """One source of truth for the metric enum — the rule form renders this."""
+    """One source of truth for the metric enum, the rule form renders this."""
     return {"metrics": [
         {"metric": m, "targets": list(targets),
          "needs_threshold": m not in STATUS_METRICS}
@@ -184,7 +184,7 @@ def delete_rule(request: Request, rule_id: int, db=Depends(get_db),
         raise HTTPException(404, "alert rule not found")
     name = row.name
     # alerts.rule_id is ON DELETE CASCADE (migration 0001), but SQLite only
-    # honours that with PRAGMA foreign_keys ON — delete the children explicitly
+    # honours that with PRAGMA foreign_keys ON: delete the children explicitly
     # so the behaviour is identical on both target databases.
     db.query(Alert).filter(Alert.rule_id == rule_id).delete(
         synchronize_session=False)
@@ -202,7 +202,7 @@ ALERTS_MAX = 200
 
 
 def alert_out(a: Alert, rules: dict, labels: dict, emails: dict) -> dict:
-    """One row, fully renderable — rule name, severity and target label are
+    """One row, fully renderable; rule name, severity and target label are
     joined here so the table and the health footer need exactly one fetch.
 
     `rules`/`labels`/`emails` are caller-built lookup dicts, so listing N
@@ -258,7 +258,7 @@ def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
 def ack_alert(request: Request, alert_id: int, db=Depends(get_db),
               user: User = Depends(_ack)):
     """Acknowledging silences; it never resolves. The evaluator still flips an
-    acked alert to `resolved` on recovery (services/alerts.py) — an operator
+    acked alert to `resolved` on recovery (services/alerts.py), an operator
     saying "I know" must not make the system stop tracking whether it is fixed.
     """
     row = db.get(Alert, alert_id)

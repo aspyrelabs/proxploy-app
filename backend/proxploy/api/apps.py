@@ -24,7 +24,7 @@ router = APIRouter(prefix="/apps", tags=["apps"])
 # Reused as BOTH the route-level dependency and the parameter-level one below
 # so FastAPI's dependency cache (keyed on the callable) collapses repeated
 # uses into one call per request, and so authorize() runs before
-# require_entitlement — an anonymous caller must get 401, never a leaky 403
+# require_entitlement: an anonymous caller must get 401, never a leaky 403
 # (test_route_auth_invariant.py). No-id routes (list/discovered/adopt/
 # update-all) use the global (no scope_of) singleton; id-carrying routes use
 # the scope_app()-scoped one.
@@ -152,7 +152,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
 
     No new queue machinery: JobBackend.MAX_CONCURRENT already runs four at a
     time and genuinely queues the rest, and each job carries its own status,
-    transcript and result — which is what "per-app results" means.
+    transcript and result, which is what "per-app results" means.
 
     `skipped` is not decoration. A bare "0 jobs started" is indistinguishable
     from a broken endpoint, so every app that did not get a job says why.
@@ -161,7 +161,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
     order exactly, so a bulk run and a single-app run never disagree about
     why a given app didn't get a job:
 
-    1. Edited script first — an edited row's `upstream_ref` is NULL, so
+    1. Edited script first, an edited row's `upstream_ref` is NULL, so
        checking "no pinned script" before "edited" would misreport an
        edited app as having no upstream at all. Enqueueing anyway would
        spray a guaranteed-`JobFailed` job (services/appstore.py::
@@ -224,13 +224,13 @@ def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)
     gap (see AppLogs) instead of silently polling a 404 forever."""
     if db.get(App, app_id) is None:
         raise HTTPException(404, "app not found")
-    raise HTTPException(501, "CT log tailing is not implemented yet — there is no "
+    raise HTTPException(501, "CT log tailing is not implemented yet; there is no "
                              "journal/exec channel to the guest in this backend")
 
 
 def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
     """Doc 05/10: diff the pinned app_scripts row against the *current*
-    catalog_entries.raw.install_script for this app's catalog_slug — not just
+    catalog_entries.raw.install_script for this app's catalog_slug, not just
     against this app's own prior version. A catalog refresh can move upstream
     forward with the app's pinned content untouched, and that drift has to
     surface too (see test_upstream_moving_on_after_pin_also_surfaces_a_diff)."""
@@ -248,8 +248,8 @@ def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
     return "".join(diff)
 
 
-# Literal two-segment/three-segment paths registered here — BEFORE the
-# lifecycle wildcard further down — per that route's own WARNING: Starlette
+# Literal two-segment/three-segment paths registered here: BEFORE the
+# lifecycle wildcard further down: per that route's own WARNING: Starlette
 # matches path templates in registration order, and `/{app_id}/{action}`
 # would otherwise swallow these (it's POST-only though, so GET/PUT here don't
 # actually collide on method; kept ahead of it anyway for the same reason
@@ -311,7 +311,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                       user: User = Depends(_script)):
     """Task 5 review found a dead end: put_app_script above always writes
     `source="edited"`, and nothing else ever writes `source="upstream"` except
-    the install/update job handlers — so once an app's script is edited,
+    the install/update job handlers, so once an app's script is edited,
     services/appstore.py::_resolve_update's edited-script guard blocks
     `app.update` FOREVER, even if the operator pastes the exact upstream text
     back (there was no way to re-mark a row "upstream"). This route is that
@@ -319,7 +319,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
     sourced "upstream", so pinned_ref reads the catalog sha again and the
     guard clears.
 
-    Never mutates or deletes the edited row being reverted from — the version
+    Never mutates or deletes the edited row being reverted from, the version
     history is the record, same rule put_app_script already follows.
     """
     a = db.get(App, app_id)
@@ -327,7 +327,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
         raise HTTPException(404, "app not found")
     if not a.catalog_slug:
         raise HTTPException(409, f"{a.name} was adopted, not installed from the "
-                                 f"catalog — there is no upstream script to revert to")
+                                 f"catalog; there is no upstream script to revert to")
     entry = db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
     if entry is None:
         raise HTTPException(409, f"catalog entry {a.catalog_slug} not found; "
@@ -348,7 +348,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                     created_by=user.id)
     db.add(row)
     # Pins to the catalog's CURRENT sha, so by definition there is nothing
-    # pending afterwards — mirrors run_update's own reset (services/appstore.py)
+    # pending afterwards: mirrors run_update's own reset (services/appstore.py)
     # rather than leaving GET /update reporting an update against a script that
     # was just reverted TO that exact commit. A single-row assignment, not
     # mark_updates_available(db): that recomputes the whole table and this
@@ -363,7 +363,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
 
 def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript | None]:
     """Returns the app, its catalog entry (if any), and its NEWEST AppScript
-    row — the single query both GET and POST /update need. Returning the row
+    row, the single query both GET and POST /update need. Returning the row
     itself, not just `.upstream_ref`, lets both callers see `.source` too:
     `put_app_script` leaves `upstream_ref` NULL on an edited row, and that
     NULL alone is not enough to tell "edited" apart from "no script pinned at
@@ -388,7 +388,7 @@ def get_app_update(app_id: int, db=Depends(get_db)):
     """What an update would do: which commit to which, and the script diff.
 
     Doc 10 Phase 7 requires the same diff/consent surface install has, so the
-    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders —
+    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders, 
     one implementation, one answer, no chance of the two disagreeing about
     what is about to run.
 
@@ -397,7 +397,7 @@ def get_app_update(app_id: int, db=Depends(get_db)):
     the pinned commit changing), this route only surfaces a diff when there is
     an update TO show. A caller here is asking "what would `POST .../update`
     do", and the honest answer when the app is already on the catalog's
-    commit is "nothing" — not a diff sourced from unrelated content drift.
+    commit is "nothing", not a diff sourced from unrelated content drift.
 
     An edited newest script (`script_source == "edited"`) is reported as no
     update available at all, never a diff: `upstream_ref` is NULL on that row,
@@ -431,7 +431,7 @@ def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db)
     """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry):
     this re-runs a community script as root on the node, and brief §8 says the
     honest thing is to make the operator say so out loud. Unlike install
-    (admin-only), doc 05 grants this to operator — a lower bar than the
+    (admin-only), doc 05 grants this to operator; a lower bar than the
     catalog table above intentionally accepts, not an oversight to fix here.
     """
     if not body.consent:
@@ -496,7 +496,7 @@ class MigratePreflightIn(BaseModel):
 # literal path (/{app_id}/migrate/preflight) so it does not actually collide
 # with the 2-segment /{app_id}/{action} template regardless of registration
 # order, but it lives here anyway for the same reason /script and /network
-# do — one place operators look for every non-lifecycle app route, and no
+# do: one place operators look for every non-lifecycle app route, and no
 # surprises if that wildcard's shape ever widens.
 @router.post("/{app_id}/migrate/preflight",
              dependencies=[Depends(_migrate),
@@ -526,7 +526,7 @@ class MigrateIn(BaseModel):
     confirm: str | None = None
 
 
-# Above the lifecycle wildcard, same reasoning as /migrate/preflight above —
+# Above the lifecycle wildcard, same reasoning as /migrate/preflight above; 
 # three literal segments so it cannot structurally collide with
 # /{app_id}/{action}, but registered here for the same "one place operators
 # look" reason.
@@ -537,7 +537,7 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
                       db=Depends(get_db), user: User = Depends(_migrate)):
     """Params handed to the job are ONLY app_id/target_host_id: strategy,
     target ctid and shared storage all come from a FRESH preflight the
-    handler itself runs, never from this route's own preflight call below —
+    handler itself runs, never from this route's own preflight call below; 
     state (host connectivity, storage, capacity) can change in the gap
     between this request and the job actually running (Task 15 interfaces
     note)."""
@@ -582,7 +582,7 @@ class LifecycleIn(BaseModel):
 
 def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
                       target, action: str, name: str, confirm: str | None):
-    """Shared by the apps and VMs routes — one guardrail, one audit shape.
+    """Shared by the apps and VMs routes, one guardrail, one audit shape.
 
     Doc 02 §9 / doc 08 §1: a destructive action against the CT Proxploy itself
     runs in is refused unless the caller types the name back.
@@ -613,7 +613,7 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
 
 # WARNING: this wildcard is registered last and Starlette matches routes in
 # registration order, so it will silently swallow any future two-segment
-# sibling under /apps/{id}/... — e.g. /apps/{id}/update (Phase 7 Task 6) and
+# sibling under /apps/{id}/...: e.g. /apps/{id}/update (Phase 7 Task 6) and
 # /apps/{id}/migrate (Phase 8 Task 15) above. Register those routes with
 # their literal action segments BEFORE this one, or they'll hit this handler
 # instead and 422 with "action must be one of start, stop, restart, shutdown"

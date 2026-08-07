@@ -44,7 +44,7 @@ async function loginWithPassword(onSuccess: () => void = () => {}) {
   await waitFor(() => expect(posted.some(p => p.path === '/auth/login')).toBe(true))
 }
 
-describe('LoginForm — TOTP step', () => {
+describe('LoginForm, TOTP step', () => {
   beforeEach(() => {
     oidcEnabled = false
     totpRequired = false
@@ -83,7 +83,7 @@ describe('LoginForm — TOTP step', () => {
     fireEvent.change(codeInput, { target: { value: '000000' } })
     fireEvent.click(screen.getByRole('button', { name: /verify/i }))
     expect(await screen.findByText(/code was not accepted.*recovery code/i)).toBeInTheDocument()
-    // still on the code screen — the pending token was not discarded, no re-login required
+    // still on the code screen, the pending token was not discarded, no re-login required
     expect(screen.getByLabelText(/authentication code/i)).toBeInTheDocument()
   })
 

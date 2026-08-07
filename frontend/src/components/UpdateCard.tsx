@@ -16,7 +16,7 @@ type PollState = 'idle' | 'polling' | 'success' | 'timeout'
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Could not start the update — try again.'
+    ? (e.body as any).detail : 'Could not start the update, try again.'
 
 export function UpdateCard() {
   const status = useUpdateStatus()
@@ -104,14 +104,14 @@ export function UpdateCard() {
             )}
             {poll === 'timeout' && (
               <p className="mt-2 text-[12.5px] text-red">
-                Lost contact with the server while updating — check the host.
+                Lost contact with the server while updating, check the host.
               </p>
             )}
           </div>
         ) : (
           <div className="mt-3">
             <p className="text-[12.5px] text-text-3">
-              Proxploy does not update its own container — run this on the Docker host.
+              Proxploy does not update its own container, run this on the Docker host.
             </p>
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 rounded-ctl border border-line bg-panel-2
@@ -128,7 +128,7 @@ export function UpdateCard() {
       )}
 
       {poll === 'success' && (
-        <p className="mt-2 text-[12.5px] text-green">Updated — now running {newVersion}.</p>
+        <p className="mt-2 text-[12.5px] text-green">Updated, now running {newVersion}.</p>
       )}
     </section>
   )

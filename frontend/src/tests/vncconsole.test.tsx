@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const rfbInstances: any[] = []
 // NOTE: the installed @novnc/novnc@1.7.0 package's package.json "exports"
-// field only maps the root specifier "." -> "./core/rfb.js" — there is no
+// field only maps the root specifier "." -> "./core/rfb.js"; there is no
 // "./core/rfb" subpath export, so `@novnc/novnc/core/rfb` fails to resolve
 // under Vite/Node's ESM resolver (verified: "is not exported under the
 // conditions" error). The real import is the bare `@novnc/novnc` specifier;
@@ -14,7 +14,7 @@ vi.mock('@novnc/novnc', () => ({
     url: string
     addEventListener = vi.fn()
     // Real noVNC fires its own 'disconnect' event when RFB.disconnect() is
-    // called (see node_modules/@novnc/novnc/docs/API.md ~L274-278) — replicate
+    // called (see node_modules/@novnc/novnc/docs/API.md ~L274-278), replicate
     // that here so tests can't pass by having a guard that's never exercised.
     disconnect = vi.fn(function (this: any) {
       const [, handler] = this.addEventListener.mock.calls.find((c: any[]) => c[0] === 'disconnect') ?? []
@@ -30,7 +30,7 @@ vi.mock('@novnc/novnc', () => ({
 }))
 
 // Tests share one module registry within this file (vitest isolates per
-// file, not per test) — reset the instances list so each test only sees
+// file, not per test); reset the instances list so each test only sees
 // the RFB it constructed, mirroring terminal.test.tsx's FakeWebSocket reset.
 beforeEach(() => { rfbInstances.length = 0 })
 
@@ -56,7 +56,7 @@ describe('VncConsole', () => {
     const { unmount } = render(<VncConsole wsUrl="wss://test/vnc" onDisconnect={onDisconnect} />)
     await waitFor(() => expect(rfbInstances).toHaveLength(1))
     const rfb = rfbInstances[0]
-    // addEventListener is a vi.fn() mock — grab the handler it was registered
+    // addEventListener is a vi.fn() mock, grab the handler it was registered
     // with and invoke it directly, exactly as the real RFB would on a drop.
     const [, handler] = rfb.addEventListener.mock.calls.find((c: any[]) => c[0] === 'disconnect')
     handler()

@@ -20,7 +20,7 @@ COPY --from=web /src/dist/ frontend/dist/
 # __file__ pointing at backend/proxploy/main.py so parents[2] still lands on
 # /opt/proxploy/current, the sibling of frontend/dist copied in above.
 RUN python -m venv backend/venv && backend/venv/bin/pip install --no-cache-dir -e ./backend
-# The app never self-applies an update in this shape (spec D3) — the UI shows
+# The app never self-applies an update in this shape (spec D3): the UI shows
 # the compose command instead. This is the flag that makes that true.
 ENV PROXPLOY_IN_DOCKER=1 \
     PROXPLOY_DATA_DIR=/var/lib/proxploy \

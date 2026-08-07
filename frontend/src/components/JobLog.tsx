@@ -34,7 +34,7 @@ export function JobLog({ jobId }: { jobId: number }) {
   // once it has anything; before that the archived rows are what we have.
   //
   // TerminalPanel stays dark in both themes by design (doc 06 §c) and is not
-  // a QueryState consumer for that reason — a failed archived-transcript
+  // a QueryState consumer for that reason, a failed archived-transcript
   // fetch gets its own line instead of the shared EmptyState card, so it
   // reads distinctly from "No output yet." (a job that legitimately has no
   // output) rather than looking identical to it.
