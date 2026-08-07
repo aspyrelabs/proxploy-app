@@ -1,8 +1,11 @@
 name: ci
+# Manual only. Removed the push trigger at the owner's request: run this
+# from the Actions tab, or `gh workflow run ci.yml`.
+# The weekly schedule went with it. Nothing now watches for upstream or
+# licensing drift on its own, so that check only happens when someone runs
+# this workflow by hand.
 on:
-  push: {branches: [main]}
   workflow_dispatch:
-  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
 
 jobs:
   backend:
