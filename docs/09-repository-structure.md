@@ -66,7 +66,7 @@ proxploy-app/
 │   │   │   └── runner.py       #   install/update/migrate runs: stream + archive output
 │   │   ├── jobs/               # JobBackend: in-process asyncio runner, DB-persisted
 │   │   │   ├── backend.py      #   enqueue / status / cancel / log-stream (the seam)
-│   │   │   └── scheduler.py    #   Scheduler → APScheduler 4, triggers feed JobBackend
+│   │   │   └── scheduler.py    #   Scheduler → APScheduler 3.11, triggers feed JobBackend
 │   │   ├── pollers/            # background Proxmox polling → caches + MetricsStore
 │   │   ├── entitlements/       # custom client (brief §7): PyJWT EdDSA verify, disk cache,
 │   │   │   │                   # grace window, built-in default map (air-gapped free tier)

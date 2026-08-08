@@ -190,7 +190,7 @@ incrementally as real gaps surface in the store UI.
 | Job engine | Custom asyncio JobBackend: enqueue, status, cancel, persisted `jobs` + `job_events`; powers every state-changing action | `jobs.engine` | Core |
 | Job log streaming | Live SSE stream of any running job's output; full archive after completion | `jobs.stream` | Free |
 | Job history | Filterable history of all jobs with actor, target, result, duration, archived logs | `jobs.history` | Free |
-| Scheduling | APScheduler 4 cron-like triggers feeding JobBackend: auto-updates, backups, catalog refresh, metric pruning | `sched.windows` | Free |
+| Scheduling | APScheduler 3.11 cron-like triggers feeding JobBackend: auto-updates, backups, catalog refresh, metric pruning. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:** this row named "APScheduler 4"; no 4.x release exists, PyPI's maximum stable is 3.11.3 (verified 2026-08-01). | `sched.windows` | Free |
 
 ## 12. Consoles & Terminal
 

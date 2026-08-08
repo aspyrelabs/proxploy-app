@@ -76,7 +76,7 @@ prototype's design tokens port identically to either.
 | Subsystem | Leading candidate | License | Seam (interface to code against) |
 |---|---|---|---|
 | Task/job engine | Custom in-process asyncio runner, jobs persisted in DB | n/a (ours) | `JobBackend`; enqueue/status/cancel/log-stream. Justification for custom: every mature Python queue (Celery, RQ, arq, Huey-redis) wants a broker; our default install is single-process + SQLite and needs live log streaming, which brokers don't give us anyway. Swap to Celery/Redis behind the seam if multi-worker ever matters. |
-| Scheduling | APScheduler 4 | MIT | `Scheduler`, cron-like triggers feeding JobBackend. |
+| Scheduling | APScheduler 3.11 | MIT | `Scheduler`, cron-like triggers feeding JobBackend. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:** this row named "APScheduler 4"; no 4.x release exists, PyPI's maximum stable is 3.11.3 (verified 2026-08-01). |
 | Notifications | Apprise | BSD-2 | `Notifier`, one `notify(event, targets)` call; Apprise covers ntfy, gotify, email, Telegram, Slack, webhooks in one dependency. Strongest single reuse win in the plan. |
 | Web terminal | xterm.js frontend; backend bridges Proxmox `termproxy` websockets (CT + node shell) | MIT | `PtyBridge`. No SSH needed for consoles, Proxmox's own API provides the PTY websocket; we proxy it with auth. |
 | VM console | noVNC via Proxmox `vncproxy` + `vncwebsocket` | MPL-2.0 (link, don't port) | Same `ConsoleProxy` seam; Guacamole (Apache-2.0) is the heavier swap-in if SPICE/RDP demand appears. |

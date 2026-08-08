@@ -223,9 +223,11 @@ to PBS and restores as a new CTID; an ISO uploads through Proxploy.
 
 - Update pipeline: per-app update, update-all queue with per-app results; 
   same pin/diff/consent/stream/archive path as install.
-- Scheduler (APScheduler 4) in production: `schedules` CRUD + UI for
+- Scheduler (APScheduler 3.11) in production: `schedules` CRUD + UI for
   auto-update windows, scheduled backup jobs, catalog refresh, metric/audit
-  pruning.
+  pruning. **Amendment, Phase 7, 2026-08-01, see `docs/notes/phase-7-operate.md`:**
+  this said "APScheduler 4"; no 4.x release exists, PyPI's maximum stable is
+  3.11.3 (verified 2026-08-01).
 - Alerting: `alert_rules` CRUD + evaluator riding the poll loop, firing/
   resolved/acknowledge lifecycle, alert history, routing through Notifier;
   event-class → channel routing UI.
