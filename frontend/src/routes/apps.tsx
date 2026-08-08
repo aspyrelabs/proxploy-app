@@ -90,7 +90,7 @@ export function AppsPage() {
             {discovered.map((d) => (
               <div key={`${d.host_id}:${d.ctid}`} className="flex items-center gap-3 font-mono text-[12px] text-text-2">
                 <span>CT {d.ctid}</span>
-                <span className="text-text">{d.name ?? ', '}</span>
+                <span className="text-text">{d.name ?? 'unknown'}</span>
                 <span className="text-text-3">{d.host_name}</span>
                 <StatusPill status={d.status} />
                 {d.suggestion && (
@@ -277,9 +277,9 @@ export function AppOverview() {
         <KVGrid items={[
           ['CTID', app.ctid],
           ['Node', app.node],
-          ['IP', app.ip ?? ', '],
-          ['Category', app.category ?? ', '],
-          ['Web port', app.web_port ?? ', '],
+          ['IP', app.ip ?? 'unknown'],
+          ['Category', app.category ?? 'unknown'],
+          ['Web port', app.web_port ?? 'unknown'],
           ['Update', app.update_available ?? 'Up to date'],
         ]} />
       </div>

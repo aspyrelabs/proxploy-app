@@ -18,6 +18,12 @@ const BRIDGES = {
         cidr: null, gateway: null, bridge_ports: null, slaves: 'enp1s0 enp2s0',
         vlan_aware: false, vlan_id: null, vlan_raw_device: null, active: true,
         autostart: true, comments: null },
+      // Every field PVE can legitimately omit, at once: pins that the Type,
+      // Subnet and Ports columns fall back to "unknown", never a bare ", ".
+      { iface: 'eth9', type: null, method: null, address: null, netmask: null,
+        cidr: null, gateway: null, bridge_ports: null, slaves: null,
+        vlan_aware: false, vlan_id: null, vlan_raw_device: null, active: false,
+        autostart: false, comments: null },
     ],
   }],
   attachments: [
@@ -28,6 +34,12 @@ const BRIDGES = {
     { host_id: 1, node: 'pve1', guest_type: 'app', guest_id: 5, name: 'Immich', vmid: 150,
       iface: 'net0', raw: 'name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,ip=dhcp,type=veth',
       model: 'veth', macaddr: 'BC:24:11:00:11:22', bridge: 'vmbr0', tag: null,
+      firewall: false, rate: null, mtu: null, link_down: false },
+    // Bridge, VLAN and MAC all missing: pins the Guest attachments row falls
+    // back to "unknown" too, not a bare ", ".
+    { host_id: 1, node: 'pve1', guest_type: 'vm', guest_id: 11, name: 'ghost', vmid: 202,
+      iface: 'net0', raw: 'bridge=,firewall=0',
+      model: null, macaddr: null, bridge: null, tag: null,
       firewall: false, rate: null, mtu: null, link_down: false },
   ],
   errors: [] as { host_id: number; host_name: string; error: string }[],
@@ -175,6 +187,15 @@ describe('NetworkPage reads', () => {
     expect(t.getByText('BC:24:11:00:11:22')).toBeInTheDocument()
   })
 
+  it('falls back to "unknown" for a missing bridge, VLAN or MAC, never a bare comma', async () => {
+    calls.length = 0
+    wrap()
+    await screen.findByRole('table', { name: 'Guest attachments' })
+    const t = table('Guest attachments')
+    expect(t.getAllByText('unknown').length).toBeGreaterThan(0)
+    expect(t.queryByText(',')).toBeNull()
+  })
+
   it('sends only the fields the NIC form edited, never the model or MAC', async () => {
     calls.length = 0
     wrap()
@@ -209,6 +230,16 @@ describe('NetworkPage host config', () => {
     const t = table('Interfaces on pve1')
     expect(t.getByText('enp1s0 enp2s0')).toBeInTheDocument()   // bond0's slaves
     expect(t.getByText('vmbr1')).toBeInTheDocument()
+  })
+
+  it('falls back to "unknown" for a missing Type, Subnet or Ports, never a bare comma', async () => {
+    calls.length = 0
+    wrap()
+    await screen.findByRole('table', { name: 'Interfaces on pve1' })
+    const t = table('Interfaces on pve1')
+    expect(t.getByText('eth9')).toBeInTheDocument()
+    expect(t.getAllByText('unknown').length).toBeGreaterThanOrEqual(3) // Type, Subnet, Ports
+    expect(t.queryByText(',')).toBeNull()
   })
 
   it('routes the apply 409 through the typed confirmation and retries with the phrase', async () => {

@@ -104,7 +104,7 @@ export function SchedulesCard() {
                   <td className="font-mono text-[12px] text-text-2">{s.job_kind}</td>
                   <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
                   <td className="font-mono text-[11.5px] text-text-3">
-                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : ', '}
+                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : 'unknown'}
                     <span className="ml-1">{s.timezone}</span>
                   </td>
                   <td className={s.enabled ? 'text-green' : 'text-text-3'}>
@@ -244,7 +244,7 @@ export function SettingsPage() {
                   <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
                     <td className="py-2 font-mono">{h.name}</td>
                     <td className="font-mono text-text-2">{h.address}</td>
-                    <td className="text-text-2">{h.pve_version ?? ', '}</td>
+                    <td className="text-text-2">{h.pve_version ?? 'unknown'}</td>
                     <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
                     <td>
                       <label className="inline-flex items-center gap-1.5">

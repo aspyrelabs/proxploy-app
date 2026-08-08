@@ -117,15 +117,15 @@ export function ClusterPage() {
             rather than "we could not check". */}
         <Ring label="CPU" pct={summary?.cpu.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : ', '}
+            : summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : 'unknown'}
           stops={['#F5B544', '#E0862B']} />
         <Ring label="Memory" pct={summary?.mem.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : ', '}
+            : summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : 'unknown'}
           stops={['#34D3C6', '#5B9DF9']} />
         <Ring label="Storage" pct={summary?.storage.pct ?? 0} unknown={summaryQuery.isError}
           sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : ', '}
+            : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : 'unknown'}
           stops={['#A78BFA', '#6D5AE6']} />
       </div>
 
@@ -291,7 +291,7 @@ export function NodeDetailPage() {
           <div className={card}>
             <KVGrid items={[
               ['Node', node.node],
-              ['PVE version', node.pve_version ?? ', '],
+              ['PVE version', node.pve_version ?? 'unknown'],
               ['Uptime', fmtUptime(node.uptime_s)],
               ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
               ['Apps', `${node.apps_running}/${node.apps} running`],

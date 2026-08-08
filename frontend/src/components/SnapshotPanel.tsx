@@ -19,7 +19,7 @@ const ROLLBACK_DETAIL =
 
 /** Unix seconds → "YYYY-MM-DD HH:MM" in UTC. Deterministic, unlike toLocaleString. */
 function fmtWhen(t: number | null | undefined): string {
-  if (!t) return ', '
+  if (!t) return 'unknown'
   return new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16)
 }
 
@@ -155,7 +155,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
                   <td className="py-2.5 font-mono text-text-2">{fmtWhen(s.snaptime)}</td>
                   <td className="py-2.5 font-mono text-text-2"
                     title={s.size_bytes == null ? 'Proxmox does not report a size for this storage plugin' : undefined}>
-                    {s.size_bytes == null ? ', ' : fmtBytes(s.size_bytes)}
+                    {s.size_bytes == null ? 'unknown' : fmtBytes(s.size_bytes)}
                   </td>
                   <td className="flex items-center gap-2 py-2.5">
                     <Button variant="go" className="px-2 py-1 text-[11px]"

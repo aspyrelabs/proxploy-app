@@ -52,11 +52,11 @@ export function SessionsCard() {
             <tbody>
               {list.map((r) => (
                 <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
-                  <td className="py-2 font-mono">{r.ip ?? ', '}</td>
-                  <td className="text-text-2">{r.user_agent ?? ', '}</td>
+                  <td className="py-2 font-mono">{r.ip ?? 'unknown'}</td>
+                  <td className="text-text-2">{r.user_agent ?? 'unknown'}</td>
                   <td className="text-text-3">{new Date(r.created_at).toLocaleString()}</td>
                   <td className="text-text-3">
-                    {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : ', '}
+                    {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : 'unknown'}
                   </td>
                   <td className="py-2 text-right">
                     {r.current ? (

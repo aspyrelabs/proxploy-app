@@ -79,7 +79,7 @@ export function VmsPage() {
                     <td className="py-2.5 font-mono">{v.name}</td>
                     <td className="py-2.5 text-text-2">{v.host_name}</td>
                     <td className="py-2.5 font-mono text-text-2">
-                      {v.cpu_cores ?? ', '} / {fmtBytes(v.mem_bytes)}
+                      {v.cpu_cores ?? 'unknown'} / {fmtBytes(v.mem_bytes)}
                     </td>
                     <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                     <td className="py-2.5"><StatusPill status={v.status} /></td>
@@ -187,7 +187,7 @@ export function VmOverview() {
         <div className={card}>
           <h2 className="mb-2 text-[13px] uppercase text-text-3">Resources</h2>
           <div className="font-mono text-[12px] text-text-2">
-            {vm.cpu_cores ?? ', '} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
+            {vm.cpu_cores ?? 'unknown'} vCPU · {fmtBytes(vm.mem_bytes)} RAM · {fmtBytes(vm.disk_bytes)} disk
           </div>
         </div>
       </div>
@@ -197,7 +197,7 @@ export function VmOverview() {
           ['Node', vm.host_name],
           ['Disk', fmtBytes(vm.disk_bytes)],
           ['OS type', vm.os_type ?? 'unknown'],
-          ['Synced', vm.synced_at ?? ', '],
+          ['Synced', vm.synced_at ?? 'unknown'],
         ]} />
       </div>
     </div>

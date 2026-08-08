@@ -28,7 +28,7 @@ const CONTENT_TABS = [
 ] as const
 
 function fmtCtime(ctime: number | null) {
-  return ctime == null ? ', ' : new Date(ctime * 1000).toLocaleString()
+  return ctime == null ? 'unknown' : new Date(ctime * 1000).toLocaleString()
 }
 
 function VolumeTable({ volumes, hostId, node, storage }:
@@ -53,9 +53,9 @@ function VolumeTable({ volumes, hostId, node, storage }:
         {volumes.map((v) => (
           <tr key={v.volid} className="border-t border-line-soft hover:bg-panel-2">
             <td className="py-2.5 font-mono">{v.volid}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.format ?? ', '}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.format ?? 'unknown'}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtBytes(v.size)}</td>
-            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? ', '}</td>
+            <td className="py-2.5 font-mono text-text-2">{v.vmid ?? 'unknown'}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtCtime(v.ctime)}</td>
             <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
               <Button

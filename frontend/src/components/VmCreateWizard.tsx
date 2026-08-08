@@ -258,7 +258,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
               <div className="rounded-ctl border border-line-soft bg-elev p-3">
                 <KVGrid items={[
                   ['Name', f.name],
-                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? ', '} / ${f.node}`],
+                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? 'unknown'} / ${f.node}`],
                   ['OS type', f.ostype],
                   ['ISO', f.iso],
                   ['Cores', f.cores],

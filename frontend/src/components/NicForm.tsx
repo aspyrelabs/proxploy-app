@@ -54,7 +54,7 @@ export function NicForm({ nic, bridges, onClose }: {
           {nic.name ?? `guest ${nic.vmid}`} · <span className="font-mono">{nic.iface}</span>
         </h2>
         <div className="mt-2 rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
-          <div>{nic.model ?? ', '} · {nic.macaddr ?? ', '}</div>
+          <div>{nic.model ?? 'unknown'} · {nic.macaddr ?? 'unknown'}</div>
           <div className="mt-1 break-all">{nic.raw}</div>
         </div>
         <p className="mt-2 text-[12px] text-text-3">

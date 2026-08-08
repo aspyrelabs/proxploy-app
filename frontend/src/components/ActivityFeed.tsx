@@ -37,12 +37,12 @@ function Item({ row, onOpen }: { row: ActivityRow; onOpen: () => void }) {
       className={`flex w-full items-start gap-3 py-2 text-left ${clickable ? 'hover:bg-panel-2' : ''}`}
     >
       <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-tile font-mono text-[10px] uppercase ${tint}`}>
-        {BADGE[row.kind] ?? ', '}
+        {BADGE[row.kind] ?? 'unknown'}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block font-mono text-[12.5px] text-text">{row.title}</span>
         <span className="block font-mono text-[11px] text-text-3">
-          {row.status ?? ', '}
+          {row.status ?? 'unknown'}
           {row.target_type ? ` · ${row.target_type}${row.target_id != null ? ` ${row.target_id}` : ''}` : ''}
           {row.actor ? ` · ${row.actor}` : ''} · {ago(row.at)}
         </span>

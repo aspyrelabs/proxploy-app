@@ -43,7 +43,7 @@ export function BulkAdoptDialog({ items, onClose }: {
             return (
               <label key={key} className="flex items-center gap-2 font-mono text-[12px] text-text-2">
                 <input type="checkbox" checked={checked.has(key)} onChange={() => toggle(key)} />
-                CT {i.ctid} · {i.name ?? ', '} · {i.host_name}
+                CT {i.ctid} · {i.name ?? 'unknown'} · {i.host_name}
                 {i.suggestion && <span className="text-amber">matches "{i.suggestion}"</span>}
               </label>
             )

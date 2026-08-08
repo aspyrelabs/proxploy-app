@@ -1,5 +1,8 @@
+/** Shared "no value" placeholder for every formatter below. Never a bare separator. */
+export const UNKNOWN = 'unknown'
+
 export function fmtBytes(n?: number | null): string {
-  if (n == null) return ', '
+  if (n == null) return UNKNOWN
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let v = n
   let i = 0
@@ -8,7 +11,7 @@ export function fmtBytes(n?: number | null): string {
 }
 
 export function fmtUptime(s?: number | null): string {
-  if (s == null || s <= 0) return ', '
+  if (s == null || s <= 0) return UNKNOWN
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
   const m = Math.floor((s % 3600) / 60)
@@ -18,10 +21,10 @@ export function fmtUptime(s?: number | null): string {
 }
 
 export function fmtPct(n?: number | null): string {
-  return n == null ? ', ' : `${Math.round(n)}%`
+  return n == null ? UNKNOWN : `${Math.round(n)}%`
 }
 
 /** bytes/s → Mbps display (network cards, doc 06 Network/throughput). */
 export function fmtBps(n?: number | null): string {
-  return n == null ? ', ' : `${((n * 8) / 1e6).toFixed(1)} Mbps`
+  return n == null ? UNKNOWN : `${((n * 8) / 1e6).toFixed(1)} Mbps`
 }

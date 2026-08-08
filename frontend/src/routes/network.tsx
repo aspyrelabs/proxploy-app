@@ -32,7 +32,17 @@ function lastValue(s?: NetSeries): number | null {
 function zoneLabel(i: Iface): string {
   if (i.vlan_id != null) return `VLAN ${i.vlan_id}`
   if (i.vlan_aware) return 'VLAN-aware'
-  return i.type ?? ', '
+  return i.type ?? 'unknown'
+}
+
+/** Subnet column for both the Bridges card and the per-node interfaces table. */
+function subnetLabel(i: Iface): string {
+  return i.cidr ?? i.address ?? 'unknown'
+}
+
+/** Ports column for both the Bridges card and the per-node interfaces table. */
+function portsLabel(i: Iface): string {
+  return i.bridge_ports || i.slaves || 'unknown'
 }
 
 function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
@@ -66,14 +76,14 @@ function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
                 </td>
                 <td className="py-2.5 text-text-2">{node.node}</td>
                 <td className="py-2.5 font-mono text-text-2">
-                  {iface.cidr ?? iface.address ?? ', '}
+                  {subnetLabel(iface)}
                 </td>
                 <td className="py-2.5">
                   <span className="rounded-full border border-blue/30 bg-blue-dim px-2 py-0.5 text-[11px] text-blue">
                     {zoneLabel(iface)}
                   </span>
                 </td>
-                <td className="py-2.5 font-mono text-text-2">{iface.bridge_ports || ', '}</td>
+                <td className="py-2.5 font-mono text-text-2">{portsLabel(iface)}</td>
               </tr>
             ))}
           </tbody>
@@ -154,12 +164,12 @@ function AttachmentMap({ attachments, nodes }: {
                   </span>
                 </td>
                 <td className="py-2.5 font-mono text-text-2">{a.iface}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? ', '}</td>
-                <td className="py-2.5 font-mono text-text-2">{a.tag ?? ', '}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.bridge ?? 'unknown'}</td>
+                <td className="py-2.5 font-mono text-text-2">{a.tag ?? 'unknown'}</td>
                 <td className={`py-2.5 text-[12px] ${a.firewall ? 'text-green' : 'text-text-3'}`}>
                   {a.firewall ? 'on' : 'off'}
                 </td>
-                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? ', '}</td>
+                <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? 'unknown'}</td>
                 <td className="py-2.5 text-right">
                   <Button variant="ghost" className="px-2 py-1 text-[11px]"
                           disabled={denied}
@@ -282,12 +292,12 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                   {n.interfaces.map((i) => (
                     <tr key={i.iface} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono">{i.iface}</td>
-                      <td className="py-2.5 text-text-2">{i.type ?? ', '}</td>
+                      <td className="py-2.5 text-text-2">{i.type ?? 'unknown'}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.cidr ?? i.address ?? ', '}
+                        {subnetLabel(i)}
                       </td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {i.bridge_ports || i.slaves || ', '}
+                        {portsLabel(i)}
                       </td>
                       <td className={`py-2.5 text-[12px] ${i.active ? 'text-green' : 'text-text-3'}`}>
                         {i.active ? 'up' : 'down'}

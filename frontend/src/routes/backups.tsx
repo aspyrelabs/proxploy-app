@@ -23,7 +23,7 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
 
 function fmtWhen(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : ', '
+  return iso ? new Date(iso).toLocaleString() : 'unknown'
 }
 
 function StatCard({ label, value, note }: { label: string; value: string; note: React.ReactNode }) {
@@ -208,10 +208,10 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
                     <tr key={r.volid} className="border-t border-line-soft hover:bg-panel-2">
                       <td className="py-2.5 font-mono text-[11.5px] text-text-2 break-all">{r.volid}</td>
                       <td className="py-2.5 font-mono text-text-2">
-                        {r.type ?? ', '} {r.vmid ?? ''}
+                        {r.type ?? 'unknown'} {r.vmid ?? ''}
                       </td>
                       <td className="py-2.5 text-text-2">
-                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : ', '}
+                        {r.ctime ? new Date(r.ctime * 1000).toLocaleDateString() : 'unknown'}
                       </td>
                       <td className="py-2.5">
                         <span className={`rounded-full border px-2 py-0.5 text-[11px] ${MARK_CLS[r.mark] ?? ''}`}>
@@ -300,7 +300,7 @@ export function BackupsPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Next scheduled"
-          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : ', '}
+          value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : 'unknown'}
           note={nextBackup
             ? `${nextBackup.name} · ${nextBackup.cron} ${nextBackup.timezone}`
             : 'No backup schedule yet, "New job" creates one.'} />
@@ -316,7 +316,7 @@ export function BackupsPage() {
             </>
           } />
         <StatCard label="Success rate · 30d"
-          value={stats?.success_rate_30d == null ? ', ' : fmtPct(stats.success_rate_30d)}
+          value={fmtPct(stats?.success_rate_30d)}
           note={stats?.success_rate_30d == null
             ? 'Nothing verified in the last 30 days, unverified archives are left out rather than counted as passes.'
             : `${stats.ok_count} verified · ${stats.failed_count} failed`} />
@@ -348,12 +348,12 @@ export function BackupsPage() {
               {(data?.backups ?? []).map((b) => (
                 <tr key={b.id} className="border-t border-line-soft hover:bg-panel-2">
                   <td className="py-2.5 font-mono">
-                    {b.guest_name ?? ', '}
+                    {b.guest_name ?? 'unknown'}
                     <span className="ml-2 text-[11px] text-text-3">
                       {b.guest_type?.toUpperCase()} {b.guest_vmid}
                     </span>
                   </td>
-                  <td className="py-2.5 text-text-2">{b.host_name ?? ', '}</td>
+                  <td className="py-2.5 text-text-2">{b.host_name ?? 'unknown'}</td>
                   <td className="py-2.5 text-text-2">{fmtWhen(b.taken_at)}</td>
                   <td className="py-2.5 font-mono text-text-2">{fmtBytes(b.size_bytes)}</td>
                   <td className={`py-2.5 text-[12px] ${

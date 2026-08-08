@@ -21,7 +21,7 @@ const SEV: Record<string, string> = {
 }
 
 function ago(iso: string | null): string {
-  if (!iso) return ', '
+  if (!iso) return 'unknown'
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (s < 60) return `${s}s ago`
   if (s < 3600) return `${Math.round(s / 60)}m ago`
@@ -39,7 +39,7 @@ function AlertRowView({ a, onAck, acking }:
         </span>
       </td>
       <td className="py-2 text-[13px] text-text">{a.message}</td>
-      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? ', '}</td>
+      <td className="font-mono text-[12px] text-text-2">{a.target_label ?? 'unknown'}</td>
       <td className="font-mono text-[12px] text-text-3">{ago(a.fired_at)}</td>
       <td className="py-2 text-right">
         {a.acked_at
