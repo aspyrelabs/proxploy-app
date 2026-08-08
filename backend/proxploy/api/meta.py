@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from proxploy import __version__
-from proxploy.api.deps import authorize, get_db
+from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import Host, HostCredential, User
 from proxploy.services import oidc, updater
 from proxploy.services.audit import write_audit
@@ -14,6 +14,11 @@ router = APIRouter(prefix="/meta", tags=["meta"])
 
 _read = authorize("meta", "read")
 _manage = authorize("settings", "manage")
+# doc 01 lists self-update as gated on `platform.self_update`; only RBAC was
+# enforced, so the documented gate did not exist. Always listed AFTER the auth
+# dependency, or an anonymous caller gets 403 instead of 401 and learns which
+# flags are armed (tests/test_route_auth_invariant.py).
+_self_update = require_entitlement("platform.self_update")
 
 COMPOSE_HINT = "docker compose pull && docker compose up -d"
 
@@ -55,8 +60,8 @@ def onboarding(request: Request, db=Depends(get_db)):
             "oidc": oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")}
 
 
-@router.get("/update")
-def update_status(request: Request, user=Depends(_read)):
+@router.get("/update", dependencies=[Depends(_read), Depends(_self_update)])
+def update_status(request: Request):
     settings = request.app.state.settings
     shape = updater.detect_shape(settings)
     body = updater.check(settings)
@@ -67,7 +72,8 @@ def update_status(request: Request, user=Depends(_read)):
     return body
 
 
-@router.post("/update", status_code=202)
+@router.post("/update", status_code=202,
+             dependencies=[Depends(_manage), Depends(_self_update)])
 def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Depends(get_db)):
     settings = request.app.state.settings
     shape = updater.detect_shape(settings)

@@ -1,5 +1,43 @@
 # 06: Frontend Spec
 
+> **Amendment, 2026-08-08 (audit follow-up, PXP-19): the component libraries
+> named in this document did not ship, and this doc is not normative about
+> them.**
+>
+> This spec maps nearly every component onto **shadcn/ui + Radix**, with
+> **cmdk** for the command palette, **CodeMirror 6** for the script editor and
+> **TanStack Table** for data tables. None of the four are in
+> `frontend/package.json`. The substitution was made during implementation and
+> never recorded anywhere, which left the docs describing a frontend that does
+> not exist.
+>
+> What actually shipped: React 19, TypeScript, Vite, Tailwind v4, TanStack
+> Query and TanStack Router (all as specified), plus `sonner` for toasts,
+> `uplot` for charts, `@xterm/xterm` and `@novnc/novnc` for consoles. Every
+> component in section (b) exists; each is hand-built against the design
+> tokens in section (c) instead of being a restyled library primitive.
+>
+> **This is being recorded as the decision, not reversed.** The prototype, not
+> the component library, is the source of truth for how the UI looks and
+> behaves, and section (b)'s "Prototype element" and styling columns are still
+> exactly right. Rebuilding working, token-matched components on top of Radix
+> now would be a large diff whose only benefit is agreeing with a sentence in
+> a document. There is also evidence against the original choice: a Radix
+> behaviour (`AccordionContent` unmounting while collapsed) later caused a
+> real SEO bug on proxploy-web, where the content was invisible to crawlers.
+>
+> Two real costs are accepted rather than hidden. **Accessibility**: line 124
+> below promises "dialogs/veils get correct ARIA from Radix", and nothing
+> provides that now, so keyboard traps and ARIA wiring are this codebase's own
+> responsibility and are not covered by any test today. **The command palette
+> was not reimplemented, it was dropped**: `ui.global_search` is a registered
+> entitlement flag with no implementation behind it (tracked in PXP-17), so
+> section (a)'s ⌘K row describes a feature that does not exist.
+>
+> Read every mention of shadcn, Radix, cmdk, CodeMirror or TanStack Table
+> below as "a component with this behaviour and these tokens", never as a
+> dependency to install.
+
 Derived from `proxploy-prototype.html`, which is the source of truth for
 pages, routes, interactions, and design tokens (brief §1). The job of the
 production frontend (React 19 + TypeScript + Vite, Tailwind v4 + shadcn/ui,

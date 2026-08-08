@@ -9,9 +9,21 @@ brief, the brief wins (and must be changed first).
   LXC container, always; Immich is one CT and one tile, regardless of how many
   services run inside it. There is no raw CT list page in the shipped nav.
 - **Fixed navigation:** Cluster · Apps · App Store · Virtual Machines · Storage ·
-  Network · Backups · Settings. Nothing is added to or removed from this list by
-  tier, config, or entitlement; gated features veil or disable, they never
+  Network · Backups · Alerts · Settings. Nothing is added to or removed from this
+  list by tier, config, or entitlement; gated features veil or disable, they never
   reshape the nav.
+
+  **Amendment, 2026-08-08 (audit follow-up, PXP-19):** this list omitted
+  **Alerts**, which has shipped in the nav since Phase 7. The freeze was broken
+  without the doc being amended, and the audit could not tell from the docs
+  alone whether that was an unplanned nav addition or a stale list. It is the
+  latter: alerting is a specified feature with its own routes, entitlement
+  (`alerts.rules`) and evaluation path, so the nav entry belongs and the list
+  here was simply never updated. The shipped nav is also **grouped** into
+  "Overview" (Cluster, Apps, App Store, Virtual Machines) and "Infrastructure"
+  (Storage, Network, Backups, Alerts, Settings), which this flat list never
+  described. Grouping is presentation, the freeze still holds: the same nine
+  destinations for every install regardless of tier.
 - **This is the whole product.** Every feature below ships. The build sequence
   (doc 10) orders them; it never cuts them.
 

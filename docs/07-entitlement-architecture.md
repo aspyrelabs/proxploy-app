@@ -116,7 +116,7 @@ key/id and nothing about the install's contents.
 | Endpoint | Purpose |
 |---|---|
 | `POST /v1/licenses/activate` | License key in → first entitlement token + a per-install refresh credential out. Called once, when the user enters a key. |
-| `POST /v1/entitlements/refresh` | Refresh credential in → fresh entitlement token out. Called in the background by APScheduler well before `exp`. |
+| `POST /v1/entitlements/refresh` | Refresh credential in → fresh entitlement token out. Called in the background well before `exp`; see the Lifecycle note below for what actually drives it. |
 | `POST /v1/licenses/revoke` | Deactivates this install's refresh credential (user moved the license, refund, etc.). Subsequent refreshes fail; the app falls back per the failure matrix. |
 | `GET /v1/health` | Operational liveness for Aspyre's own monitoring. The app never depends on it. |
 
@@ -196,14 +196,26 @@ bolted on at sale time.
 | `exp` | ~72 h after issue, forces regular background refresh |
 | `grace_until` | ~30 d after issue, offline validity horizon |
 
-- **Lifecycle:** the app refreshes in the background (APScheduler job,
-  starting at ~half of the `exp` window with jittered retry/backoff), caches
+- **Lifecycle:** the app refreshes in the background, caches
   the token **on disk** (the `entitlement_cache` row, encrypted at rest via
   SecretStore, docs 04, 08), and validates **offline**; signature via the bundled public key, then
   the time window. Between `exp` and `grace_until` the token is expired but
   still honored; past `grace_until` it is dead. A transient network failure
   therefore never locks a paying user out: they have ~30 days of fully
   offline operation from the last successful refresh.
+
+  **Amendment, 2026-08-08 (audit follow-up, PXP-19):** this said the refresh
+  was "an APScheduler job, starting at ~half of the `exp` window with jittered
+  retry/backoff". None of that is what shipped. `main.py`'s lifespan starts a
+  plain `asyncio` task (`_refresh_loop`) that sleeps ~24h plus up to 10
+  minutes of jitter and retries on the next tick; APScheduler is not involved
+  anywhere on this path, and the app's scheduler does not own it either. With
+  `exp` at 72h, ~24h is roughly a third of the window rather than half, which
+  is more headroom, not less: two refreshes can fail before a token expires.
+  There is no backoff, a failed attempt simply waits out the next full
+  interval, which is the right shape when the fallback is a 30-day grace
+  window rather than an outage. The task is only started when a licence is
+  actually present.
 - **Verification is local and pure:** no call to proxploy-api is ever needed
   to *check* a token, only to *obtain* one.
 

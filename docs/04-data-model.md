@@ -114,6 +114,33 @@ Automation credentials for the public REST API (entitlement `api.tokens`). Shown
 
 Indexes: `ux_api_keys_hash(key_hash)`, `ix_api_keys_user(user_id)`.
 
+### console_tickets
+**Amendment, Phase 5:** built with the console feature and never added to this
+document until the 2026-08-07 audit found it. Single-use, short TTL
+(`console_ticket_ttl_s`, default 30s). Follows `sessions` exactly: only the
+hash of the browser-facing ticket is stored, never the raw value.
+
+`upstream_ticket` is the deliberate exception and IS stored in the clear. It
+is Proxmox's own short-TTL ticket, it never reaches the browser (doc 02 §5),
+and it is useless without a live upstream socket to present it to inside its
+own few-second window. Encrypting it would protect nothing that its lifetime
+does not already.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | int PK | |
+| user_id | int FK → users | ON DELETE CASCADE |
+| kind | text | which console this ticket opens |
+| target_id | int | the app/vm/host row this console is for |
+| node | text | PVE node the socket lives on |
+| guest_kind | text | `qemu` \| `lxc`, NULL for a node shell |
+| vmid | int | PVE guest id, NULL for a node shell |
+| upstream_user / upstream_ticket / upstream_port | text | the PVE side of the proxied connection, see the note above on why the ticket is not encrypted |
+| token_hash | text | SHA-256 of the browser-facing ticket, unique index |
+| created_at | datetime | |
+| expires_at | datetime | |
+| redeemed_at | datetime | NULL = unused; set on first redemption, which is what makes it single-use |
+
 ### teams
 Casbin domains (brief §5 AuthZ: RBAC with domains = teams). Entitlement `teams.rbac`; a default team is created at first run so single-user installs never see this.
 
@@ -180,6 +207,8 @@ One row per connected Proxmox node/endpoint. Multi-row gated by `hosts.multi`.
 | status | text | `connected` \| `unreachable` \| `error` (cached poll result) |
 | pve_version | text | cached |
 | last_seen_at | datetime | last successful poll |
+| ssh_host_key_fingerprint | text | pinned SSH host key, NULL until enrolment verifies it; a changed fingerprint fails the connection rather than prompting |
+| node_shell_enabled | bool | per-host opt-in for the node shell, off by default: a root shell on the node is not something an install should offer without being asked |
 | team_id | int FK → teams | owning domain, NULL = default team |
 | created_at / updated_at | datetime | |
 
@@ -195,6 +224,7 @@ One row per connected Proxmox node/endpoint. Multi-row gated by `hosts.multi`.
 | key_version | int | MultiFernet key index for rotation |
 | public_meta | text | non-secret half: token id (`proxploy@pve!ro`), or SSH public key line; safe to display |
 | last_used_at | datetime | |
+| ssh_verified_at | datetime | when the operator authorized this key on the node; NULL on an `ssh_key` row means enrolment was started and never finished, which is what `/meta/onboarding` reports as `ssh_pending` |
 | created_at / updated_at | datetime | |
 
 Indexes: `ux_host_creds(host_id, kind)`. No SELECT path returns
