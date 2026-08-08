@@ -22,6 +22,11 @@ dependencies = [
   "websockets>=14",
   "python-multipart>=0.0.9",
   "requests-toolbelt>=1.0",
+  # Error reporting to GlitchTip, which speaks the Sentry ingest protocol.
+  # Installed always, active only when PROXPLOY_SENTRY_DSN is set: the code
+  # path is one `if` in main.py, so shipping the dep costs nothing an operator
+  # who never opts in can observe.
+  "sentry-sdk[fastapi]>=2.0",
   # Cron math ONLY (proxploy/jobs/scheduler.py): CronTrigger's parsing and
   # DST-correct next-fire arithmetic. Its BaseScheduler/jobstores are unused:
   # doc 04 makes the `schedules` table authoritative, so a second in-memory
@@ -59,6 +64,11 @@ version = {attr = "proxploy.__version__"}
 include = ["proxploy*"]
 
 [tool.pytest.ini_options]
+# Without this, a bare `pytest` dies during collection rather than running
+# anything: mutmut writes a full copy of the tree into the gitignored
+# `mutants/`, so pytest finds two files claiming to be `tests.conftest` and
+# raises ImportPathMismatchError. Only `tests/` was ever meant to be collected.
+testpaths = ["tests"]
 markers = [
   "pve_integration: needs a disposable live PVE (PROXPLOY_TEST_PVE_* env)",
   "e2e: cross-repo roundtrip against a local proxploy-api",

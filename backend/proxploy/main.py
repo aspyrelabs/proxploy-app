@@ -25,6 +25,21 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
 
+    # Opt-in only (see Settings.sentry_dsn). Before the app is built so a
+    # failure during lifespan startup is still reported.
+    if settings.sentry_dsn:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.env,
+            release=__version__,
+            # Non-negotiable on this side: an operator who opts into crash
+            # reports is not opting into shipping us their request bodies,
+            # headers or LAN addresses. Everything this app touches (PVE
+            # credentials, session cookies, host names) would ride along.
+            send_default_pii=False,
+        )
+
     from proxploy.entitlements.client import Entitlements
     from proxploy.entitlements.keys import load_public_keys
     from proxploy.services.license_client import LicenseClient

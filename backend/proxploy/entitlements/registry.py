@@ -27,5 +27,12 @@ FLAG_KEYS: tuple[str, ...] = (
     "platform.onboarding", "platform.self_update", "platform.install", "api.rest",
     "ui.theme", "platform.settings", "platform.error_report",
 )
+# platform.error_report is a NAME ONLY: do not wire it as a gate. Doc 01's
+# feature table lists it and says "never on the entitlement path" in the same
+# row, which reads like a contradiction until you see why. Crash reporting is
+# controlled by PROXPLOY_SENTRY_DSN in the operator's env file and by nothing
+# else (main.py). Gating it on an entitlement would mean an expired licence
+# silently changes what leaves the operator's network, which is not a decision
+# a billing state gets to make.
 
 DEFAULT_FEATURES: dict[str, bool] = {k: True for k in FLAG_KEYS}

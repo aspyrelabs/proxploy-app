@@ -177,6 +177,7 @@ none), this notes file, and the `buildlog.md` entry below.
 - **No deployment, Dockerfile, monitoring backend, or error reporting**; 
   all deliberately out of scope per the plan's global constraints. Docker
   is used only to run Postgres for tests.
+  *Superseded 2026-08-08: all four now exist. See the addendum below.*
 
 ## Real numbers: every one run directly in this session
 
@@ -197,3 +198,72 @@ none), this notes file, and the `buildlog.md` entry below.
   `bdc6ec1` key-format/binding spec addendum, `7d0a636` implementation
   plan, `4374251` Task 8's app-side change), plus this task's own
   notes/buildlog commit following.
+
+## Addendum, 2026-08-08: observability and error reporting
+
+The two items PXP-13 listed as "genuinely still to build" after the plan
+above closed. The plan had ruled both out by its own global constraints, so
+this is follow-up work against the tracker item, not a re-run of the plan.
+
+**Error reporting, both services.** `sentry-sdk[fastapi]` in each repo, one
+`sentry_sdk.init()` guarded by a DSN setting that is empty by default:
+`PROXPLOY_API_SENTRY_DSN` in `proxploy-api`, `PROXPLOY_SENTRY_DSN` in
+`proxploy-app`. Init runs before the app is constructed so a failure during
+lifespan startup, a bad DB URL or a failed migration, still reports.
+`environment` comes from `PROXPLOY_ENV` and `release` from the package
+version, so one project holds dev and prod without confusing them.
+
+`send_default_pii=False` on both, deliberately and not as a default we
+inherited. `proxploy-api` handles licence keys and waitlist email addresses;
+`proxploy-app` holds Proxmox tokens, SSH keys, session cookies and the
+operator's LAN topology. The stack trace is what makes a crash fixable; none
+of the rest of it needs to travel.
+
+The empty default is load-bearing in two different ways. In `proxploy-api`
+it keeps the test suite out of the tracker: with a DSN set, every
+deliberately-provoked 500 in the suite would file as a real crash. In
+`proxploy-app` it is a consent boundary, that app runs on someone else's
+hardware managing their infrastructure, so the installer does not set the
+DSN and never should. `platform.error_report` stays a flag name with nothing
+behind it; `entitlements/registry.py` now says so in a comment, because
+gating this on a licence would let a billing state change what leaves an
+operator's network.
+
+**Monitoring.** GlitchTip at `errors.aspyrelabs.com` covers uptime and
+alerting itself, so nothing new was deployed and no metrics endpoint was
+built. Org `lab-cluster-labs-llc`, team `lab-cluster`, projects `proxploy-api` (1) and
+`proxploy-app` (2). A GET monitor polls `https://api.proxploy.dev/v1/health`
+every 60s expecting 200; email alert rules fire on both projects, with
+downtime included on `proxploy-api`. Prometheus and a `/metrics` endpoint
+were skipped rather than deferred: one service with a health check and an
+uptime monitor has nothing to scrape that this does not already answer.
+
+Both DSNs were verified end to end, not just configured, a real exception
+raised through each service's actual `create_app()` reached GlitchTip and
+filed as `PROXPLOY-API-1` and `PROXPLOY-APP-1` (both resolved afterwards).
+
+**Also fixed here**, found while running the suites rather than planned:
+
+- `tests/test_e2e_entitlement.py`, the only test that runs a real
+  `proxploy-api` process and therefore the only guard on the cross-service
+  contract, had been failing since Task 1. It was stale three ways: it passed
+  a `--out` flag `gen_signing_key.py` no longer accepts, set the renamed
+  `PROXPLOY_API_SIGNING_KEY_FILE`, and handed the API a SQLite URL after
+  `f134e77` removed the fallback. It now generates the keypair in-process and
+  starts a throwaway `postgres:16` the way `proxploy-api`'s own conftest
+  does. A skip-when-absent fixture was again rejected for the same reason
+  Task 1 rejected one.
+- A bare `pytest` in `backend/` died during collection: mutmut writes a full
+  tree copy into the gitignored `mutants/`, so two files claimed to be
+  `tests.conftest`. `testpaths = ["tests"]` in `pyproject.toml`.
+- The audit's "proxploy-api CI license check is broken" item was already
+  fixed in `a32624d`; re-running the exact CI command exits 0, and
+  `sentry-sdk` (MIT) clears the allowlist too.
+
+| Gate | Result |
+|---|---|
+| `proxploy-api` suite | **66 passed** |
+| `proxploy-app` backend suite | **839 passed, 5 skipped, 0 failed** (was 838 passed + 1 failed) |
+| `proxploy-docs` suite | **199 passed** |
+| Live event, each service | filed in GlitchTip via the real `create_app()` path |
+| Uptime monitor | `isUp: true` on its first check |

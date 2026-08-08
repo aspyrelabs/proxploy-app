@@ -1184,3 +1184,62 @@ section, still hasn't happened. What Phase 9 has not done, cumulatively:
 run anything outside a test process, seen any page with a human eye, or
 exercised any of this against real Proxmox hardware. Those are the honest
 boundaries of what "9-phase SDD build, done" means here.
+
+### 2026-08-08T14:59:23+05:30: Phase 9d addendum, observability + error reporting
+
+Closes the last two open items on PXP-13, which the 9d plan had ruled out by
+its own global constraints and the tracker then listed as "genuinely still to
+build". Not a re-run of the plan; follow-up against the tracker item.
+
+**What shipped:**
+- **Error reporting, both services.** `sentry-sdk[fastapi]`, one guarded
+  `sentry_sdk.init()` each, DSN empty by default:
+  `PROXPLOY_API_SENTRY_DSN` / `PROXPLOY_SENTRY_DSN`. Init runs before the app
+  is built so lifespan startup failures still report. `environment` from
+  `PROXPLOY_ENV`, `release` from the package version. `send_default_pii=False`
+  on both, set in code rather than inherited: these processes hold licence
+  keys, Proxmox tokens, SSH keys and LAN topology, and none of that needs to
+  travel with a stack trace
+- **The empty default is load-bearing twice.** In `proxploy-api` it keeps the
+  suite's deliberate 500s out of the tracker. In `proxploy-app` it is a
+  consent boundary: that app runs on someone else's hardware, so the installer
+  does not set the DSN and never should
+- **`platform.error_report` stays decorative**, now with a comment saying so.
+  Gating crash reporting on an entitlement would let a billing state change
+  what leaves an operator's network
+- **Monitoring via GlitchTip** (`errors.aspyrelabs.com`), nothing new
+  deployed: projects `proxploy-api`/`proxploy-app`, a 60s GET monitor on
+  `https://api.proxploy.dev/v1/health` expecting 200, email alerts on both
+  projects with downtime on the API. Prometheus and a `/metrics` endpoint
+  skipped rather than deferred, one service with a health check and an uptime
+  monitor has nothing left to scrape
+- **`proxploy-docs` trust page** gained a "crash reporting is off, and stays
+  off unless you turn it on" section, naming exactly what is and isn't sent
+
+**Fixed while verifying, not planned:**
+- `test_e2e_entitlement.py`, the only test running a real `proxploy-api`
+  process and so the only guard on the cross-service contract, had been
+  failing since Task 1: a `--out` flag `gen_signing_key.py` no longer accepts,
+  the renamed `PROXPLOY_API_SIGNING_KEY_FILE`, and a SQLite URL after
+  `f134e77` removed the fallback. Now generates the keypair in-process and
+  starts a throwaway `postgres:16`, same reasoning as Task 1's fixture
+- Bare `pytest` in `backend/` died during collection on mutmut's gitignored
+  `mutants/` tree copy (two `tests.conftest`). `testpaths = ["tests"]`
+- The audit's "proxploy-api CI license check is broken" was already fixed in
+  `a32624d`; the exact CI command exits 0, and `sentry-sdk` (MIT) clears it
+
+**Verification:**
+- `proxploy-api`: **66 passed**
+- `proxploy-app` backend: **839 passed, 5 skipped, 0 failed** (from 838 passed
+  + 1 failed; the +1 is the repaired e2e test)
+- `proxploy-docs`: **199 passed**
+- Live events through each service's real `create_app()` reached GlitchTip and
+  filed as `PROXPLOY-API-1` / `PROXPLOY-APP-1`, both resolved after
+- Uptime monitor returned `isUp: true` on its first check
+
+**Correction to the Phase 9 closing note above:** it says nothing had run
+outside a test process. That is no longer true, `api.proxploy.dev` and
+`docs.proxploy.dev` are deployed and serving, and `/v1/health` returns 200,
+which means the database and signing key both loaded in a real container.
+Still true: no page has been checked against real Proxmox hardware, which
+remains the gate (PXP-18).

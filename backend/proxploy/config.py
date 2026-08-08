@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # "not explicitly set yet"; the validator below always resolves it.
     api_base_url: str | None = None
     ent_extra_keys_file: Path | None = None
+    # GlitchTip (Sentry protocol) DSN for the `proxploy-app` project on
+    # errors.aspyrelabs.com. Empty by default and it must STAY empty by
+    # default: this app runs on someone else's hardware managing their
+    # infrastructure, so crash reports leaving their network is their decision
+    # to make, not a shipped default. The installer does not set it; an
+    # operator who wants to send us crashes adds it to
+    # /etc/proxploy/proxploy.env deliberately.
+    sentry_dsn: str = ""
     catalog_slugs: list[str] = [
         "redis", "postgresql", "mysql", "mariadb", "mongodb",
         "jellyfin", "plex", "immich", "homeassistant", "homebridge", "zigbee2mqtt",
