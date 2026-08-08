@@ -437,6 +437,17 @@ class _TaskFactory:
     def __call__(self, upid):
         return _TaskNS(self._owner, upid)
 
+    def get(self, **kwargs):
+        """nodes(n).tasks.get() lists the node's recent tasks.
+
+        Records the call so a test can prove the limit was passed through
+        rather than the whole history being pulled.
+        """
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.task_list_calls.append(kwargs)
+        return self._owner.node_task_rows
+
 
 class _ClusterStorageLeaf:
     """root .storage(name), the cluster-level storage definition."""
@@ -605,6 +616,10 @@ class FakePVE:
         self.clone_error: str | None = None
         # migration (Phase 8 Task 14/15): (kind, node, vmid, params)
         self.migrations: list[tuple[str, str, int, dict]] = []
+        # node task-log passthrough (PXP-17): what nodes(n).tasks.get() returns,
+        # and the kwargs each call passed so a test can prove `limit` travels.
+        self.node_task_rows: list[dict] = []
+        self.task_list_calls: list[dict] = []
 
     def add_ct(self, vmid: int, *, node: str = "pve1", name: str = "ct",
               status: str = "running", **extra) -> dict:

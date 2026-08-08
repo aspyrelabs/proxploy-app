@@ -407,3 +407,153 @@ def oidc_config_delete(db=Depends(get_db), user: User = Depends(_oidc_manage)):
     oidc.clear_config(db)
     write_audit(db, actor_type="user", actor_id=user.id, action="oidc.config.clear")
     return {"ok": True}
+
+
+# --- user administration (PXP-17) -------------------------------------------
+# Create and list existed; deactivate, delete and admin password reset never
+# did, in either the API or the UI. ("user","manage") already covered them.
+
+_users_manage = authorize("user", "manage")
+
+
+class UserPatchIn(BaseModel):
+    is_active: bool | None = None
+    display_name: str | None = None
+
+
+class PasswordResetIn(BaseModel):
+    password: str = Field(min_length=12)
+
+
+def _owner_ids(db) -> set[int]:
+    return {m.user_id for m in db.query(TeamMember).filter_by(role="owner")}
+
+
+def _revoke_all_sessions(db, user_id: int) -> int:
+    """Every live session for a user, gone.
+
+    Deactivating or resetting a password that leaves existing cookies working
+    is not deactivating or resetting anything: `resolve_session` re-checks
+    `revoked_at` on every request, so this takes effect immediately.
+    """
+    rows = (db.query(SessionRow)
+            .filter(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
+            .all())
+    now = utcnow()
+    for r in rows:
+        r.revoked_at = now
+    return len(rows)
+
+
+@users_router.patch("/{user_id}")
+def patch_user(request: Request, user_id: int, body: UserPatchIn,
+               db=Depends(get_db), actor: User = Depends(_users_manage)):
+    """Deactivate or reactivate an account, or fix its display name.
+
+    Deactivation rather than deletion is the normal path: it keeps the user's
+    audit rows attributable, which deletion cannot.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "user not found")
+    ip = request.client.host if request.client else None
+    changed: dict = {}
+
+    if body.is_active is not None and body.is_active != target.is_active:
+        if not body.is_active:
+            if target.id == actor.id:
+                raise HTTPException(409, {
+                    "error": "self_deactivate",
+                    "detail": "you cannot deactivate your own account"})
+            owners = _owner_ids(db)
+            if target.id in owners and len({
+                    o for o in owners
+                    if (u := db.get(User, o)) is not None and u.is_active}) <= 1:
+                # The one lockout with no in-app recovery path: no active owner
+                # means nobody can grant owner back.
+                raise HTTPException(409, {
+                    "error": "last_owner",
+                    "detail": "this is the last active owner; promote another "
+                              "owner before deactivating this one"})
+        target.is_active = body.is_active
+        changed["is_active"] = body.is_active
+
+    if body.display_name is not None:
+        target.display_name = body.display_name
+        changed["display_name"] = body.display_name
+
+    if not changed:
+        raise HTTPException(422, "nothing to change")
+
+    revoked = 0
+    if changed.get("is_active") is False:
+        revoked = _revoke_all_sessions(db, target.id)
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=actor.id, action="user.update",
+                target_type="user", target_id=target.id,
+                params={"changed": changed, "sessions_revoked": revoked}, ip=ip)
+    return {**_user_out(db, target), "sessions_revoked": revoked}
+
+
+@users_router.post("/{user_id}/password")
+def reset_password(request: Request, user_id: int, body: PasswordResetIn,
+                   db=Depends(get_db), actor: User = Depends(_users_manage)):
+    """Set another user's password.
+
+    An admin-set password is a recovery mechanism, not a login: every existing
+    session is revoked so a stolen cookie cannot outlive the reset. The old
+    password is never required, which is precisely why this is
+    ("user","manage") and audited.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "user not found")
+    target.password_hash = authn.hash_password(body.password)
+    # A password reset does not clear TOTP: the second factor is the user's,
+    # not the admin's, and silently dropping it would weaken the account
+    # while looking like a routine recovery.
+    revoked = _revoke_all_sessions(db, target.id)
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=actor.id,
+                action="user.password_reset", target_type="user",
+                target_id=target.id, params={"sessions_revoked": revoked},
+                ip=request.client.host if request.client else None)
+    return {"ok": True, "sessions_revoked": revoked}
+
+
+@users_router.delete("/{user_id}")
+def delete_user(request: Request, user_id: int, db=Depends(get_db),
+                actor: User = Depends(_users_manage)):
+    """Delete an account outright.
+
+    Prefer PATCH is_active=false: audit rows carry actor_id, and deleting the
+    user makes every action they ever took unattributable. This exists for the
+    account that should never have been created.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "user not found")
+    if target.id == actor.id:
+        raise HTTPException(409, {"error": "self_delete",
+                                  "detail": "you cannot delete your own account"})
+    owners = _owner_ids(db)
+    if target.id in owners and len(owners) <= 1:
+        raise HTTPException(409, {
+            "error": "last_owner",
+            "detail": "this is the last owner; promote another owner first"})
+
+    email = target.email
+    _revoke_all_sessions(db, target.id)
+    for m in db.query(TeamMember).filter_by(user_id=target.id):
+        db.delete(m)
+    db.flush()
+    db.delete(target)
+    db.commit()
+    from proxploy.services.authz import build_enforcer
+    # Rebuild rather than sync_user: the user is gone, so there is nothing left
+    # to sync policies FOR, and a stale casbin row would keep granting.
+    request.app.state.authz = build_enforcer(db)
+    write_audit(db, actor_type="user", actor_id=actor.id, action="user.delete",
+                target_type="user", target_id=user_id, params={"email": email},
+                ip=request.client.host if request.client else None)
+    return {"deleted": True}

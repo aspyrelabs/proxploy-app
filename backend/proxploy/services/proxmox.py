@@ -416,6 +416,22 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"task status failed for {upid}", e) from e
 
+    def node_tasks(self, node: str, limit: int = 50) -> list[dict]:
+        """GET /nodes/{node}/tasks, newest first.
+
+        Every other task call here is scoped to a UPID Proxploy already knows
+        because it started the task. This one lists what the NODE has been
+        doing, including work started from the Proxmox UI or a cron job, which
+        is the point: an operator debugging "why did my container restart"
+        needs the tasks Proxploy did not cause.
+        """
+        try:
+            return self._connect().nodes(node).tasks.get(limit=limit)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"task list failed for node {node}", e) from e
+
     def task_log(self, node: str, upid: str, start: int = 0,
                  limit: int = 500) -> list[dict]:
         """GET /nodes/{node}/tasks/{upid}/log, rows of {"n": seq, "t": line}."""

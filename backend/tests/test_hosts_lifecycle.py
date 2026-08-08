@@ -1,0 +1,273 @@
+"""Host removal, credential rotation, forced sync, task passthrough (PXP-17).
+
+doc 05 listed all of these and the authz matrix has carried
+("host","sync"/"credentials"/"remove") since Phase 1. No phase ever added the
+routes; api/hosts.py's own header comment admitted it.
+"""
+import json
+
+from proxploy.models import App, Host, HostCredential, Vm
+
+
+def _seeded(tmp_path, fake=None, with_app=False):
+    from fastapi.testclient import TestClient
+    from tests.support import make_app, seed_host_row
+
+    app = make_app(tmp_path, fake=fake)
+    c = TestClient(app)
+
+    def seed():
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db)
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!old", "token_secret": "old"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="proxploy@pve!old"))
+            db.add(Vm(host_id=h.id, vmid=100, name="win11", status="running"))
+            if with_app:
+                db.add(App(host_id=h.id, ctid=150, name="Immich", slug="immich"))
+            db.commit()
+            return h.id
+    return app, c, seed
+
+
+# --- removal --------------------------------------------------------------
+
+def test_removal_refuses_while_apps_reference_the_host_and_names_them(
+        tmp_path, csrf_header, bootstrap_admin):
+    """apps.host_id is ON DELETE RESTRICT. The operator needs to know WHICH
+    apps stand in the way, not a bare constraint error."""
+    app, c, seed = _seeded(tmp_path, with_app=True)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                      json={"confirm": "host-01"}, headers=csrf_header(c))
+        assert r.status_code == 409
+        assert r.json()["error"] == "host_has_apps"
+        assert r.json()["apps"][0]["name"] == "Immich"
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, host_id) is not None
+
+
+def test_removal_needs_the_typed_name(tmp_path, csrf_header, bootstrap_admin):
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.request("DELETE", f"/api/v1/hosts/{host_id}", json={},
+                      headers=csrf_header(c))
+        assert r.status_code == 409
+        assert r.json()["error"] == "confirm_required"
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, host_id) is not None
+
+
+def test_removal_drops_the_host_its_cache_and_its_credentials(
+        tmp_path, csrf_header, bootstrap_admin):
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                      json={"confirm": "host-01"}, headers=csrf_header(c))
+        assert r.status_code == 200 and r.json()["removed"] is True
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, host_id) is None
+            assert db.query(Vm).filter_by(host_id=host_id).count() == 0
+            assert db.query(HostCredential).filter_by(host_id=host_id).count() == 0
+        audit = c.get("/api/v1/audit", params={"action": "host.remove"}).json()
+        assert audit and audit[0]["params"]["name"] == "host-01"
+
+
+def test_forget_apps_removes_the_records_and_leaves_the_containers(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Destroying a container is app uninstall's job, never a side effect of
+    removing a host."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake, with_app=True)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                      json={"confirm": "host-01", "forget_apps": True},
+                      headers=csrf_header(c))
+        assert r.status_code == 200 and r.json()["forgot_apps"] == 1
+        with app.state.sessionmaker() as db:
+            assert db.query(App).count() == 0
+        assert fake.guest_deletes == [], "no container may be destroyed here"
+
+
+# --- credential rotation --------------------------------------------------
+
+def test_a_rejected_new_token_leaves_the_old_one_in_place(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A rotation that stores an unusable credential would take the host
+    offline with no way back except editing the database."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!new", "token_secret": "new"},
+                   headers=csrf_header(c))
+        assert r.status_code == 502 and r.json()["error"] == "token_rejected"
+        with app.state.sessionmaker() as db:
+            cred = db.query(HostCredential).filter_by(host_id=host_id,
+                                                      kind="api_token").one()
+            assert cred.public_meta == "proxploy@pve!old"
+
+
+def test_rotating_the_api_token_replaces_it_after_verifying(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!new", "token_secret": "new"},
+                   headers=csrf_header(c))
+        assert r.status_code == 200 and r.json()["rotated"] == ["api_token"]
+        with app.state.sessionmaker() as db:
+            cred = db.query(HostCredential).filter_by(host_id=host_id,
+                                                      kind="api_token").one()
+            assert "new" in cred.public_meta
+            tok = json.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
+            assert tok["token_secret"] == "new"
+
+
+def test_rotating_ssh_clears_verification_and_returns_the_new_public_key(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The new key is not authorized on the node yet. Keeping the old
+    ssh_verified_at would claim a root shell Proxploy no longer has."""
+    from proxploy.models import utcnow
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        with app.state.sessionmaker() as db:
+            blob, ver = app.state.secretstore.encrypt(b"old-key")
+            db.add(HostCredential(host_id=host_id, kind="ssh_key",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="ssh-ed25519 OLD",
+                                  ssh_verified_at=utcnow()))
+            db.commit()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"rotate_ssh": True}, headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["public_key"].startswith("ssh-ed25519 ")
+        assert r.json()["consent_note"]
+        with app.state.sessionmaker() as db:
+            cred = db.query(HostCredential).filter_by(host_id=host_id,
+                                                      kind="ssh_key").one()
+            assert cred.ssh_verified_at is None
+            assert cred.public_meta != "ssh-ed25519 OLD"
+
+
+def test_half_a_token_pair_is_422(tmp_path, csrf_header, bootstrap_admin):
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!new"}, headers=csrf_header(c))
+        assert r.status_code == 422
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials", json={},
+                   headers=csrf_header(c))
+        assert r.status_code == 422
+
+
+# --- forced sync ----------------------------------------------------------
+
+def test_forced_sync_runs_the_pollers_own_cycle(tmp_path, csrf_header,
+                                                bootstrap_admin):
+    """Not a parallel implementation: a forced sync and a scheduled one must
+    not be able to disagree about what they ingest."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(resources=[{"type": "node", "node": "pve1", "status": "online",
+                               "maxcpu": 4, "maxmem": 8589934592}])
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        calls = []
+        original = app.state.poller._poll_once
+        app.state.poller._poll_once = lambda hid: calls.append(hid) or original(hid)
+        r = c.post(f"/api/v1/hosts/{host_id}/sync", headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        assert calls == [host_id]
+        assert r.json()["id"] == host_id
+        audit = c.get("/api/v1/audit", params={"action": "host.sync"}).json()
+        assert audit
+
+
+def test_forced_sync_of_a_missing_host_is_404(tmp_path, csrf_header,
+                                              bootstrap_admin):
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+        assert c.post("/api/v1/hosts/9999/sync",
+                      headers=csrf_header(c)).status_code == 404
+
+
+# --- task passthrough -----------------------------------------------------
+
+def test_task_list_passes_the_limit_through_and_projects_the_rows(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.node_task_rows = [
+        {"upid": "UPID:pve1:AAA::vzdump:", "type": "vzdump", "id": "150",
+         "node": "pve1", "user": "root@pam", "status": "OK",
+         "exitstatus": "OK", "starttime": 1, "endtime": 2, "extra": "dropped"},
+    ]
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.get(f"/api/v1/hosts/{host_id}/tasks", params={"limit": 10})
+        assert r.status_code == 200, r.text
+        row = r.json()[0]
+        assert row["type"] == "vzdump" and row["user"] == "root@pam"
+        assert "extra" not in row, "only the projected fields are returned"
+        assert fake.task_list_calls == [{"limit": 10}]
+
+
+def test_task_list_rejects_an_absurd_limit(tmp_path, csrf_header, bootstrap_admin):
+    from tests.fakes.pve import FakePVE
+    app, c, seed = _seeded(tmp_path, fake=FakePVE())
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        assert c.get(f"/api/v1/hosts/{host_id}/tasks",
+                     params={"limit": 100000}).status_code == 422
+        assert c.get(f"/api/v1/hosts/{host_id}/tasks",
+                     params={"limit": 0}).status_code == 422
+
+
+def test_task_log_returns_the_lines_for_a_task_proxploy_did_not_start(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    upid = "UPID:pve1:AAA::vzdump:"
+    fake.task_lines[upid] = ["starting backup", "finished"]
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.get(f"/api/v1/hosts/{host_id}/tasks/{upid}/log")
+        assert r.status_code == 200, r.text
+        assert r.json()["lines"] == ["starting backup", "finished"]

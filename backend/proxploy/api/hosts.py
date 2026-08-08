@@ -16,10 +16,12 @@ from proxploy.services.sshkeys import generate_ed25519
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
 # Singletons so FastAPI's dependency cache (keyed on the callable) collapses
-# repeated uses into one call per request. Only the actions this router's
-# routes actually gate get a singleton here: host.sync/credentials/remove/
-# console have no route in this file yet (doc 05 lists them; no task in the
-# Phase 8 plan adds them), so no dead singleton for them either.
+# repeated uses into one call per request.
+#
+# This comment used to say host.sync/credentials/remove had no route here yet
+# and that no plan added them. They exist now (see the bottom of this file,
+# PXP-17); host.console is elsewhere, on the node-shell ticket route in
+# api/consoles.py.
 _read = authorize("host", "read")
 _manage = authorize("host", "manage", scope_of=scope_host())
 _manage_global = authorize("host", "manage")          # no host id yet (probe, create)
@@ -253,3 +255,258 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
                 target_type="host", target_id=host_id,
                 ip=request.client.host if request.client else None)
     return {"verified": True, "verified_at": cred.ssh_verified_at.isoformat()}
+
+
+# --- removal, credential rotation, forced sync, task passthrough (PXP-17) ---
+# doc 05 lists host.sync / host.credentials / host.remove and the authz matrix
+# has carried all three since Phase 1; no phase ever added the routes. The
+# header comment above used to say so.
+
+_sync = authorize("host", "sync", scope_of=scope_host())
+_credentials = authorize("host", "credentials", scope_of=scope_host())
+_remove = authorize("host", "remove", scope_of=scope_host())
+
+
+class HostRemoveIn(BaseModel):
+    confirm: str | None = None
+    # apps.host_id is ON DELETE RESTRICT, so a host with apps cannot simply be
+    # dropped. This forgets those app rows (the containers keep running and are
+    # untouched); destroying a container is app uninstall's job, never a
+    # side effect of removing a host.
+    forget_apps: bool = False
+
+
+class CredentialRotateIn(BaseModel):
+    # Rotate the API token: supply the new one, Proxploy never mints PVE
+    # credentials for you.
+    token_id: str | None = None
+    token_secret: str | None = None
+    # Regenerate the SSH keypair in-process. The new public key has to be
+    # authorized on the node before installs work again, which is why the
+    # response hands it back with the same consent note onboarding uses.
+    rotate_ssh: bool = False
+
+
+@router.delete("/{host_id}")
+def remove_host(request: Request, host_id: int,
+                body: HostRemoveIn = None, db=Depends(get_db),
+                user: User = Depends(_remove)):
+    """Forget a host and everything Proxploy cached about it.
+
+    Owner-only (authz matrix), and gated on typing the host name back: this
+    drops every app row, VM cache row and stored credential for the host in one
+    call, and the SSH key it deletes cannot be recovered, only re-enrolled.
+    """
+    body = body or HostRemoveIn()
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    ip = request.client.host if request.client else None
+
+    from proxploy.models import App
+    from proxploy.services.settings import get_setting
+
+    apps = db.query(App).filter_by(host_id=h.id).all()
+    if apps and not body.forget_apps:
+        # Refuse with the list rather than a bare constraint error: the operator
+        # needs to know WHICH apps stand in the way, and whether they wanted to
+        # uninstall them first.
+        raise HTTPException(409, {
+            "error": "host_has_apps",
+            "apps": [{"id": a.id, "name": a.name, "ctid": a.ctid} for a in apps],
+            "detail": (f"{h.name} still has {len(apps)} app(s). Uninstall them "
+                       f"first, or pass forget_apps to drop Proxploy's records "
+                       f"and leave the containers running."),
+        })
+
+    if (body.confirm or "") != h.name:
+        write_audit(db, actor_type="user", actor_id=user.id, action="host.remove",
+                    target_type="host", target_id=h.id, result="denied", ip=ip)
+        raise HTTPException(409, {
+            "error": "confirm_required", "confirm_phrase": h.name,
+            "detail": (f"Removing {h.name} deletes its stored API token and SSH "
+                       f"key and everything Proxploy has cached about it. The "
+                       f"node itself is not touched. Type the name to confirm."),
+        })
+
+    self_host = get_setting(db, "self.host_id")
+    is_own_host = False
+    try:
+        is_own_host = self_host is not None and int(self_host) == h.id
+    except (TypeError, ValueError):
+        is_own_host = False  # malformed setting fails open, as in selfguard
+
+    write_audit(db, actor_type="user", actor_id=user.id, action="host.remove",
+                target_type="host", target_id=h.id,
+                params={"name": h.name, "forgot_apps": len(apps),
+                        "was_own_host": is_own_host}, ip=ip)
+    for a in apps:
+        db.delete(a)          # RESTRICT: must go before the host
+    db.flush()
+    db.delete(h)              # vms + host_credentials + metrics CASCADE
+    db.commit()
+    request.app.state.poller.snapshots.pop(host_id, None)
+    request.app.state.bus.publish("resource", {"type": "host", "id": host_id,
+                                               "change": "removed"})
+    return {"removed": True, "forgot_apps": len(apps),
+            "was_own_host": is_own_host}
+
+
+@router.post("/{host_id}/credentials")
+def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
+                       db=Depends(get_db), user: User = Depends(_credentials)):
+    """Replace a host's stored API token and/or SSH key.
+
+    Owner-only. The new API token is verified against the node BEFORE it
+    replaces the old one: a rotation that stores an unusable credential would
+    take the host offline with no way back except editing the database.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    ip = request.client.host if request.client else None
+    rotated = []
+    out: dict = {"id": h.id}
+
+    if bool(body.token_id) != bool(body.token_secret):
+        raise HTTPException(422, "token_id and token_secret must be given together")
+
+    if body.token_id and body.token_secret:
+        try:
+            ProxmoxClient(h.address, body.token_id, body.token_secret,
+                          verify_tls=h.verify_tls,
+                          tls_fingerprint=h.tls_fingerprint,
+                          factory=request.app.state.proxmox_factory).version()
+        except ProxmoxError as e:
+            raise HTTPException(502, {
+                "error": "token_rejected",
+                "detail": f"the new token did not work against {h.address}, "
+                          f"the old one is still in place: {e}"}) from e
+        blob, ver = request.app.state.secretstore.encrypt(jsonlib.dumps(
+            {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
+        cred = (db.query(HostCredential)
+                .filter_by(host_id=h.id, kind="api_token").one_or_none())
+        if cred is None:
+            cred = HostCredential(host_id=h.id, kind="api_token")
+            db.add(cred)
+        cred.encrypted_blob, cred.key_version = blob, ver
+        cred.public_meta = token_public_meta(body.token_id)
+        cred.last_used_at = utcnow()
+        h.status, h.last_seen_at = "connected", utcnow()
+        rotated.append("api_token")
+
+    if body.rotate_ssh:
+        # generate_ed25519 returns the private half as bytes already; the
+        # secretstore takes bytes, so there is nothing to encode here.
+        priv, pub = generate_ed25519(f"proxploy@{h.name}")
+        blob, ver = request.app.state.secretstore.encrypt(priv)
+        cred = (db.query(HostCredential)
+                .filter_by(host_id=h.id, kind="ssh_key").one_or_none())
+        if cred is None:
+            cred = HostCredential(host_id=h.id, kind="ssh_key")
+            db.add(cred)
+        cred.encrypted_blob, cred.key_version = blob, ver
+        cred.public_meta = pub
+        # The new key is NOT authorized on the node yet, so enrolment starts
+        # over: leaving the old verified_at would claim a working root shell
+        # Proxploy no longer has.
+        cred.ssh_verified_at = None
+        rotated.append("ssh_key")
+        out["public_key"] = pub
+        out["consent_note"] = CONSENT_NOTE
+
+    if not rotated:
+        raise HTTPException(422, "nothing to rotate")
+
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="host.credentials",
+                target_type="host", target_id=h.id,
+                params={"rotated": rotated}, ip=ip)
+    out["rotated"] = rotated
+    return out
+
+
+@router.post("/{host_id}/sync")
+async def sync_host(request: Request, host_id: int, db=Depends(get_db),
+                    user: User = Depends(_sync)):
+    """Poll this host now instead of waiting out the interval.
+
+    Runs the poller's own cycle rather than a parallel implementation, so a
+    forced sync and a scheduled one cannot disagree about what they ingest.
+    Operator-level: it changes no configuration, it only refreshes cache.
+    """
+    import asyncio
+
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    poller = request.app.state.poller
+    try:
+        events = await asyncio.wait_for(
+            asyncio.to_thread(poller._poll_once, host_id),
+            timeout=request.app.state.settings.poll_timeout_s)
+    except TimeoutError as e:
+        raise HTTPException(504, {"error": "timeout",
+                                  "detail": f"{h.name} did not answer in time"}) from e
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    for name, data in events:
+        request.app.state.bus.publish(name, data)
+
+    write_audit(db, actor_type="user", actor_id=user.id, action="host.sync",
+                target_type="host", target_id=host_id,
+                ip=request.client.host if request.client else None)
+    with request.app.state.sessionmaker() as fresh:
+        row = fresh.get(Host, host_id)
+        return {"id": host_id, "status": row.status if row else None,
+                "last_seen_at": row.last_seen_at.isoformat()
+                if row and row.last_seen_at else None,
+                "events": len(events)}
+
+
+@router.get("/{host_id}/tasks")
+def host_tasks(request: Request, host_id: int, limit: int = 50,
+               db=Depends(get_db), user: User = Depends(_read)):
+    """The node's own task list, including work Proxploy did not start.
+
+    Read-level on purpose: this is the same information the Proxmox UI shows
+    anyone who can log in, and an operator debugging "why did my container
+    restart at 3am" needs the tasks Proxploy did not cause.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    if limit < 1 or limit > 500:
+        raise HTTPException(422, "limit must be between 1 and 500")
+    from proxploy.services.hostclient import client_for_host
+    try:
+        client = client_for_host(request.app, db, h)
+        rows = client.node_tasks(h.node_name or "", limit=limit)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    return [{"upid": r.get("upid"), "type": r.get("type"), "id": r.get("id"),
+             "node": r.get("node"), "user": r.get("user"),
+             "status": r.get("status"), "exitstatus": r.get("exitstatus"),
+             "starttime": r.get("starttime"), "endtime": r.get("endtime")}
+            for r in rows]
+
+
+@router.get("/{host_id}/tasks/{upid}/log")
+def host_task_log(request: Request, host_id: int, upid: str, start: int = 0,
+                  limit: int = 500, db=Depends(get_db),
+                  user: User = Depends(_read)):
+    """Passthrough of one PVE task log, the missing half of the task feature.
+
+    Proxploy already archives the logs of tasks IT started, in job_events.
+    This is for the ones it did not.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    from proxploy.services.hostclient import client_for_host
+    try:
+        client = client_for_host(request.app, db, h)
+        rows = client.task_log(h.node_name or "", upid, start=start, limit=limit)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    return {"upid": upid, "lines": [r.get("t", "") for r in rows]}

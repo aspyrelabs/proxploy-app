@@ -42,6 +42,12 @@ dependencies = [
   "pyotp>=2.10,<3",
 ]
 
+[project.scripts]
+# doc 04 specifies a `proxploy audit export` CLI by name. It reads the database
+# directly so the audit trail can be recovered when nobody can log in, which is
+# when it is most often wanted.
+proxploy = "proxploy.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "pip-licenses>=5"]
 # LGPL-3.0 (doc 00 §3: never linked into the shipped app): installed only for
