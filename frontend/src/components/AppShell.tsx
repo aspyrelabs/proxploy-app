@@ -1,6 +1,7 @@
 import { Outlet } from '@tanstack/react-router'
 import { Toaster } from 'sonner'
 import { ActivityDrawer } from './ActivityDrawer'
+import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 
@@ -13,6 +14,7 @@ export function AppShell() {
         <main className="p-6"><Outlet /></main>
       </div>
       <ActivityDrawer />
+      <CommandPalette />
       <Toaster
         position="bottom-right"
         duration={2600}

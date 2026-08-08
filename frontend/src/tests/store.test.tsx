@@ -1,11 +1,21 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useCatalog, type CatalogRow } from '../api/catalog'
+import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
+import { api } from '../api/client'
 import { StoreCard } from '../components/StoreCard'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
+
+// StorePage now also fires /catalog/status and /entitlements (staleness
+// banner + refresh gating). Without a reset, a mockResolvedValue/
+// mockImplementation left behind by an earlier test in this file (several
+// describes above set one) leaks into a later test that never touches `api`
+// itself, e.g. handing useEntitlements' has() an object with no `.features`
+// and throwing. Every test that cares about a response sets it itself, so a
+// clean slate before each is a pure isolation fix, not a behavior change.
+beforeEach(() => { vi.mocked(api).mockReset() })
 
 // StorePage reads/writes category+q through router search params. Mock
 // useSearch/useNavigate with a tiny external store (same shape as apps.test.tsx's
@@ -139,9 +149,16 @@ describe('StorePage', () => {
       data: [REDIS, { ...REDIS, slug: 'gitea', name: 'Gitea' }],
     } as any)
     const { api } = await import('../api/client')
-    vi.mocked(api).mockResolvedValue([
-      { id: 1, name: 'Redis', catalog_slug: 'redis', ctid: 150, host_id: 1 },
-    ])
+    // Path-aware, not a blanket mockResolvedValue: the page now also fires
+    // /catalog/status and /entitlements (staleness banner + refresh gating),
+    // and a blanket app-array response for those would hand useEntitlements'
+    // has() a `.features`-less object and throw.
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/apps' || path.startsWith('/apps?')) {
+        return Promise.resolve([{ id: 1, name: 'Redis', catalog_slug: 'redis', ctid: 150, host_id: 1 }])
+      }
+      return Promise.resolve(null)
+    })
 
     withQuery(<StorePage />)
 
@@ -177,5 +194,59 @@ describe('StorePage', () => {
     withQuery(<StorePage />)
     fireEvent.click(screen.getByRole('button', { name: 'Databases' }))
     expect(mocked).toHaveBeenLastCalledWith('Databases', undefined)
+  })
+})
+
+describe('Store catalog staleness banner', () => {
+  beforeEach(async () => {
+    mockSearch = {}
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: [REDIS] } as any)
+  })
+
+  const mockStatus = async (status: CatalogStatus, features: Record<string, boolean> = { 'store.refresh': true }) => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/status') return Promise.resolve(status)
+      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+      return Promise.resolve(null)
+    })
+  }
+
+  it('shows the stale banner with a humanized age and a working Refresh button', async () => {
+    await mockStatus({
+      synced_at: '2026-07-01T00:00:00Z', age_s: 200_000, entries: 12,
+      stale_after_s: 172_800, stale: true,
+    })
+    withQuery(<StorePage />)
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent(/has not synced in/i)
+    expect(banner).toHaveTextContent('2d 7h')
+    expect(within(banner).getByRole('button', { name: 'Refresh' })).toBeEnabled()
+  })
+
+  it('renders "never synced" wording when synced_at is null', async () => {
+    await mockStatus({ synced_at: null, age_s: null, entries: 0, stale_after_s: 172_800, stale: true })
+    withQuery(<StorePage />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/never synced/i)
+  })
+
+  it('shows no banner when not stale, and shows the last-synced time instead', async () => {
+    await mockStatus({
+      synced_at: '2026-08-08T00:00:00Z', age_s: 500, entries: 12,
+      stale_after_s: 172_800, stale: false,
+    })
+    withQuery(<StorePage />)
+    expect(await screen.findByText(/catalog synced 8m ago/i)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('disables the banner Refresh button when store.refresh is not entitled', async () => {
+    await mockStatus({
+      synced_at: null, age_s: null, entries: 0, stale_after_s: 172_800, stale: true,
+    }, { 'store.refresh': false })
+    withQuery(<StorePage />)
+    const banner = await screen.findByRole('alert')
+    expect(within(banner).getByRole('button', { name: 'Refresh' })).toBeDisabled()
   })
 })

@@ -5,6 +5,7 @@ import { useEntitlements, useMe } from '../api/hooks'
 import { api } from '../api/client'
 import type { JobRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
+import { openCommandPalette } from './CommandPalette'
 
 export function Topbar() {
   const { data: me } = useMe()
@@ -26,6 +27,17 @@ export function Topbar() {
   const count = running?.length ?? 0
   return (
     <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 py-2.5 backdrop-blur-[10px]">
+      <button
+        aria-label="Search (Ctrl+K)"
+        onClick={openCommandPalette}
+        className="mr-auto flex h-8 items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
+      >
+        <span aria-hidden>🔎</span>
+        <span className="hidden text-[12px] sm:inline">Search</span>
+        <span className="hidden rounded-tile border border-line px-1 font-mono text-[10px] text-text-3 sm:inline">
+          Ctrl+K
+        </span>
+      </button>
       {has('notify.inapp') && (
         <button
           aria-label="Activity"

@@ -27,6 +27,22 @@ export function useCatalog(category?: string, q?: string) {
   })
 }
 
+export type CatalogStatus = {
+  synced_at: string | null; age_s: number | null
+  entries: number; stale_after_s: number; stale: boolean
+}
+
+export function useCatalogStatus() {
+  return useQuery({
+    queryKey: ['catalog', 'status'],
+    queryFn: () => api<CatalogStatus>('/catalog/status'),
+    // Same ['catalog'] prefix as the row list on purpose: useRefreshCatalog's
+    // qc.invalidateQueries({ queryKey: ['catalog'] }) fuzzy-matches by prefix,
+    // so a refresh drops this cache entry too without a second invalidation.
+    refetchInterval: 60_000,
+  })
+}
+
 export function useCatalogEntry(slug: string | null) {
   return useQuery({
     queryKey: ['catalog', slug],

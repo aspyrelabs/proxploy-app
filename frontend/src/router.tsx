@@ -21,6 +21,7 @@ import { storeRoute } from './routes/store'
 import { storageRoute } from './routes/storage'
 import { networkRoute } from './routes/network'
 import { backupsRoute } from './routes/backups'
+import { auditRoute } from './routes/audit'
 
 const appDetailTree = appDetailRoute.addChildren([appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute])
 const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute])
@@ -28,7 +29,7 @@ const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute,
 export const routeTree = rootRoute.addChildren([
   indexRoute, loginRoute, onboardingRoute,
   shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
-                          storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute]),
+                          storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute, auditRoute]),
 ])
 export const router = createRouter({ routeTree, defaultErrorComponent: RouteError })
 

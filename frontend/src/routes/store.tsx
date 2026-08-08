@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
-import { useCatalog, useRefreshCatalog } from '../api/catalog'
+import { useCatalog, useCatalogStatus, useRefreshCatalog } from '../api/catalog'
 import { api } from '../api/client'
+import { useEntitlements } from '../api/hooks'
 import type { AppRow } from '../api/hooks'
 import { InstallDialog } from '../components/InstallDialog'
 import { StoreCard } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { fmtUptime } from '../lib/format'
 import { shellRoute } from './shell'
 
 const CATEGORIES = ['All', 'Media', 'Home & Auto', 'Files', 'Network', 'Monitoring',
@@ -21,6 +23,12 @@ export function StorePage() {
   const catalogQuery = useCatalog(category, search.q)
   const entries = catalogQuery.data
   const refresh = useRefreshCatalog()
+  const status = useCatalogStatus()
+  const ent = useEntitlements()
+  // has() reads false until the first entitlements fetch resolves; gating on
+  // !has() alone would grey the button out for every plan during load (same
+  // guard AttachmentMap uses in routes/network.tsx).
+  const refreshDenied = ent.data != null && !ent.has('store.refresh')
   // Same query key as cluster.tsx's unfiltered /apps fetch, so this shares one
   // cache entry rather than adding a second request. Drives the real
   // `installed` prop below, it used to be hardcoded false, which made
@@ -51,6 +59,31 @@ export function StorePage() {
           Refresh
         </Button>
       </div>
+
+      {status.data?.stale && (
+        <p role="alert"
+           className="mb-4 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
+          <span className="text-amber">
+            {status.data.synced_at == null
+              ? 'The app catalog has never synced.'
+              : `The app catalog has not synced in ${fmtUptime(status.data.age_s)}.`}
+          </span>{' '}
+          Installable apps and their default sizing may be out of date.{' '}
+          <Button variant="ghost" className="ml-1 px-2 py-1 text-[11px]"
+                  disabled={refresh.isPending || refreshDenied}
+                  title={refreshDenied ? 'Not included in your plan' : undefined}
+                  onClick={() => refresh.mutate()}>
+            Refresh
+          </Button>
+        </p>
+      )}
+      {status.data && !status.data.stale && (
+        <div className="mb-3 text-[11px] text-text-3">
+          {status.data.age_s != null && status.data.age_s < 60
+            ? 'Catalog synced just now.'
+            : `Catalog synced ${fmtUptime(status.data.age_s)} ago.`}
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2">
         {CATEGORIES.map((c) => (

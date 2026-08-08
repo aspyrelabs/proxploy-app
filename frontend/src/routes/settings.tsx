@@ -1,19 +1,23 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { createRoute, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { shellRoute } from './shell'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useSchedules } from '../api/schedules'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostForm } from '../components/HostForm'
+import { HostRemoveDialog } from '../components/HostRemoveDialog'
+import { HostRotateDialog } from '../components/HostRotateDialog'
+import { HostTasksPanel } from '../components/HostTasksPanel'
 import { QueryState } from '../components/QueryState'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
+import { UsersCard } from '../components/UsersCard'
 import { TotpCard } from '../components/TotpCard'
 import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
@@ -159,6 +163,22 @@ export function SettingsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
+  // Host lifecycle ops (PXP-17): sync is synchronous despite the route name
+  // (it runs a poller cycle inline and can take a while), tracked per host by
+  // comparing the pending mutation's own variables rather than a separate
+  // "which host" state.
+  const [rotatingHost, setRotatingHost] = useState<HostRow | null>(null)
+  const [removingHost, setRemovingHost] = useState<HostRow | null>(null)
+  const [tasksHostId, setTasksHostId] = useState<number | null>(null)
+  const syncHost = useMutation({
+    mutationFn: (h: HostRow) => api<{ id: number; status: string; last_seen_at: string | null; events: number }>(
+      `/hosts/${h.id}/sync`, { method: 'POST' }),
+    onSuccess: (r) => toast.success(`Synced, ${r.events} event(s) applied.`),
+    onError: (e) => toast.error(e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
+      ? (e.body as any).detail : 'Sync failed, try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
+  })
+
   // Both host reads return team_id, so this select shows the host's CURRENT
   // team rather than being a write-only reassignment control. Same teams.rbac gate as
   // TeamsCard: every /teams route requires it, so fetching before the first
@@ -236,49 +256,86 @@ export function SettingsPage() {
                     errorTitle="Hosts not readable"
                     errorNote="Proxploy could not reach the backend to list your hosts.">
           {(rows) => (
-            <table className="w-full text-left text-[13px]">
-              <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-                <th className="pb-2">Host</th><th>Address</th><th>PVE</th><th>Status</th><th>Node shell</th><th>Team</th></tr></thead>
+            // Seven columns plus four action buttons overflow a narrow card, and a
+            // table that shrinks to fit collides its own headers. Scroll instead.
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] text-left text-[13px]">
+              <thead><tr className="whitespace-nowrap text-[10.5px] uppercase tracking-wide text-text-3">
+                <th className="pb-2 pr-4">Host</th><th className="pr-4">Address</th><th className="pr-4">PVE</th><th className="pr-4">Status</th><th className="pr-4">Node shell</th><th className="pr-4">Team</th><th /></tr></thead>
               <tbody>
                 {rows.map(h => (
-                  <tr key={h.id} className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2 font-mono">{h.name}</td>
-                    <td className="font-mono text-text-2">{h.address}</td>
-                    <td className="text-text-2">{h.pve_version ?? 'unknown'}</td>
-                    <td><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
-                    <td>
-                      <label className="inline-flex items-center gap-1.5">
-                        <input type="checkbox" checked={h.node_shell_enabled}
-                          disabled={toggleNodeShell.isPending}
-                          onChange={() => toggleNodeShell.mutate(h)} />
-                        <span className="text-[11px] text-text-3">
-                          {h.node_shell_enabled ? 'enabled' : 'disabled'}
-                        </span>
-                      </label>
-                    </td>
-                    <td>
-                      {teamsAllowed ? (
-                        <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
-                          disabled={assignTeam.isPending}
-                          onChange={(e) => {
-                            const v = e.target.value
-                            if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
-                          }}
-                          className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
-                          <option value="">Unassigned</option>
-                          {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                      ) : <span className="text-text-3">, </span>}
-                    </td>
-                  </tr>
+                  <Fragment key={h.id}>
+                    <tr className="border-t border-line-soft hover:bg-panel-2">
+                      <td className="py-2 pr-4 font-mono">{h.name}</td>
+                      <td className="pr-4 font-mono text-text-2">{h.address}</td>
+                      <td className="pr-4 text-text-2">{h.pve_version ?? 'unknown'}</td>
+                      <td className="pr-4"><span className={h.status === 'connected' ? 'text-green' : 'text-red'}>{h.status}</span></td>
+                      <td className="pr-4">
+                        <label className="inline-flex items-center gap-1.5">
+                          <input type="checkbox" checked={h.node_shell_enabled}
+                            disabled={toggleNodeShell.isPending}
+                            onChange={() => toggleNodeShell.mutate(h)} />
+                          <span className="text-[11px] text-text-3">
+                            {h.node_shell_enabled ? 'enabled' : 'disabled'}
+                          </span>
+                        </label>
+                      </td>
+                      <td className="pr-4">
+                        {teamsAllowed ? (
+                          <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
+                            disabled={assignTeam.isPending}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
+                            }}
+                            className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
+                            <option value="">Unassigned</option>
+                            {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        ) : <span className="text-text-3">n/a</span>}
+                      </td>
+                      <td className="py-2">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                            disabled={syncHost.isPending && syncHost.variables?.id === h.id}
+                            onClick={() => syncHost.mutate(h)}>
+                            {syncHost.isPending && syncHost.variables?.id === h.id ? 'Syncing…' : 'Sync'}
+                          </Button>
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                            onClick={() => setRotatingHost(h)}>Rotate</Button>
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                            onClick={() => setTasksHostId(id => id === h.id ? null : h.id)}>
+                            {tasksHostId === h.id ? 'Hide tasks' : 'Tasks'}
+                          </Button>
+                          <Button variant="danger" className="px-2 py-1 text-[11px]"
+                            onClick={() => setRemovingHost(h)}>Remove</Button>
+                        </div>
+                      </td>
+                    </tr>
+                    {tasksHostId === h.id && (
+                      <tr className="border-t border-line-soft bg-panel-2/40">
+                        <td colSpan={7}><HostTasksPanel hostId={h.id} /></td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </QueryState>
         {adding && <div className="mt-4 border-t border-line-soft pt-4">
           <HostForm onCreated={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['hosts'] }) }} />
         </div>}
+        {rotatingHost && (
+          <HostRotateDialog hostId={rotatingHost.id} hostName={rotatingHost.name}
+            onClose={() => setRotatingHost(null)} />
+        )}
+        {removingHost && (
+          <HostRemoveDialog hostId={removingHost.id} hostName={removingHost.name}
+            onClose={() => setRemovingHost(null)}
+            onRemoved={() => setRemovingHost(null)} />
+        )}
       </Card>
 
       <Card title="Notifications"
@@ -341,6 +398,8 @@ export function SettingsPage() {
       <SchedulesCard />
 
       <TeamsCard />
+
+      <UsersCard />
 
       <ApiKeysCard />
 

@@ -1,13 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
+import type { JobRow } from '../api/jobs'
 import { VncConsole } from '../components/console/VncConsole'
 import { CloneDialog } from '../components/CloneDialog'
+import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
 import { EmptyState } from '../components/EmptyState'
+import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { QueryState } from '../components/QueryState'
@@ -120,6 +124,90 @@ const TABS = [
   { path: 'snapshots', label: 'Snapshots' },
 ] as const
 
+/**
+ * DELETE /vms/{id}. The single most destructive route in the product: lives
+ * only on the VM's own detail page, never as a list-row action. Typed
+ * confirmation of the VM name is mandatory (ConfirmSelfDialog), a running
+ * guest is refused up front (the button is disabled with the reason
+ * visible) and the backend's own 409 detail is what shows if that state
+ * changed underneath us anyway, never a generic failure toast.
+ */
+function DestroyVmButton({ vm }: { vm: VmRow }) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const ent = useEntitlements()
+  const [destroying, setDestroying] = useState(false)
+  const [jobId, setJobId] = useState<number | null>(null)
+  const denied = ent.data != null && !ent.has('vms.create')
+  const running = vm.status === 'running'
+
+  const destroy = useMutation<{ job: JobRow }, ApiError, string>({
+    mutationFn: (confirm) => api<{ job: JobRow }>(`/vms/${vm.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm }),
+    }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
+      qc.invalidateQueries({ queryKey: ['vms'] })
+    },
+  })
+
+  const submit = (typed: string) => {
+    destroy.mutate(typed, {
+      onSuccess: (r) => { setDestroying(false); setJobId(r.job.id) },
+      onError: (e) => {
+        const body = e instanceof ApiError ? (e.body as Record<string, unknown>) : null
+        // guest_running/confirm_required races (the VM's state changed between
+        // opening the dialog and confirming) get the backend's own sentence
+        // verbatim; self_target is restated plainly rather than assuming its
+        // wording, is_self() is always false today so the real string is
+        // untested here.
+        const msg = body?.error === 'self_target'
+          ? 'Proxploy will not destroy the guest it is running inside.'
+          : String(body?.detail ?? 'Could not destroy that VM, try again.')
+        toast.error(msg)
+      },
+    })
+  }
+
+  return (
+    <>
+      <Button variant="danger" disabled={running || denied}
+              title={running ? `Stop ${vm.name} before destroying it`
+                     : denied ? 'Not included in your plan' : undefined}
+              onClick={() => setDestroying(true)}>
+        Destroy
+      </Button>
+      {destroying && (
+        <ConfirmSelfDialog
+          title="Destroy this VM"
+          phrase={vm.name}
+          detail={`Destroying ${vm.name} deletes the VM and every disk attached to it. ` +
+                  'There is no undo and no automatic backup. Type the VM name to confirm.'}
+          onCancel={() => setDestroying(false)}
+          onConfirm={submit}
+        />
+      )}
+      {jobId != null && (
+        <div role="dialog" aria-label="Destroying VM"
+             className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
+          <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
+            <h2 className="font-display text-[16px] font-semibold">
+              Destroying <span className="font-mono">{vm.name}</span>
+            </h2>
+            <div className="mt-4"><JobLog jobId={jobId} /></div>
+            <Button className="mt-3" variant="ghost"
+                    onClick={() => navigate({ to: '/vms' as never })}>
+              Close
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 export function VmDetail() {
   const { vmId } = useParams({ strict: false }) as { vmId: string }
   const vmQuery = useQuery({
@@ -143,6 +231,7 @@ export function VmDetail() {
             </div>
             <div className="ml-auto flex items-center gap-3">
               <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} />
+              <DestroyVmButton vm={vm} />
               <StatusPill status={vm.status} />
             </div>
           </div>

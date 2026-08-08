@@ -121,3 +121,25 @@ export function usePrunePreview(p: PruneParams | null) {
         `&keep_last=${p!.keepLast}&keep_daily=${p!.keepDaily}`),
   })
 }
+
+/**
+ * POST /backups/prune. Always fired with the exact PruneParams the preview
+ * above was computed from, never a second, independently-typed form. The
+ * backend drops a 0/absent keep-* value from the retention spec itself and
+ * 422s if that leaves none at all, so the caller (RetentionSection) gates
+ * the button on at least one of these being >= 1 before this ever fires.
+ */
+export function usePrune() {
+  const qc = useQueryClient()
+  return useMutation<{ job: JobRow }, ApiError, PruneParams>({
+    mutationFn: (p) =>
+      api<{ job: JobRow }>('/backups/prune', {
+        method: 'POST',
+        body: JSON.stringify({
+          host_id: p.hostId, storage: p.storage,
+          keep_last: p.keepLast, keep_daily: p.keepDaily,
+        }),
+      }),
+    onSettled: jobSettled(qc),
+  })
+}

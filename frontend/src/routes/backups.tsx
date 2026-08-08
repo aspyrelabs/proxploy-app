@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
-import { useBackups, useDeleteBackup, usePrunePreview, useRunBackup } from '../api/backups'
+import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useSchedules } from '../api/schedules'
 import { EmptyState } from '../components/EmptyState'
@@ -114,15 +114,11 @@ const MARK_CLS: Record<string, string> = {
 }
 
 /**
- * Retention preview (Pro). A dry run and nothing else.
- *
- * ponytail: POST /backups/prune is deliberately not wired. A one-shot "prune
- * now" button whose keep-* rules cannot be saved anywhere is the wrong half of
- * retention to ship first; this view is what proves the spec does what the
- * operator meant before a scheduled `backup.prune` is worth building. That
- * job kind isn't offered under Settings → Schedules yet, its handler needs
- * a datastore + keep-rule payload this preview doesn't collect, so there is
- * nowhere to wire it up to today.
+ * Retention preview (Pro), plus the execution that acts on exactly what it
+ * showed. Preview stays a dry run through and through: "Prune now" only
+ * appears once a preview has actually run, and it fires POST /backups/prune
+ * with the very same PruneParams the preview was computed from, not a
+ * second, separately-typed form.
  */
 function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
   const ent = useEntitlements()
@@ -133,11 +129,29 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
   const [keepDaily, setKeepDaily] = useState('7')
   const [params, setParams] = useState<PruneParams | null>(null)
   const preview = usePrunePreview(params)
+  const prune = usePrune()
+  const [pruneJobId, setPruneJobId] = useState<number | null>(null)
 
   const chosen = storage || stores[0]?.storage || ''
   const hostId = data?.backups.find((b) => b.storage === chosen)?.host_id ?? null
   const rows = preview.data ?? []
   const count = (m: string) => rows.filter((r) => r.mark === m).length
+  // The 422 ("at least one keep-* value is required") is a discovery
+  // mechanism of last resort, not the first line of defense: catch it here,
+  // against the params the preview itself ran with, not the (possibly since
+  // edited) live input fields.
+  const canPrune = params != null && (params.keepLast >= 1 || params.keepDaily >= 1)
+
+  const runPrune = () => {
+    if (!params || !canPrune) return
+    if (!window.confirm(
+      `Remove ${count('remove')} archive(s) from ${params.storage}? This cannot be undone.`)) return
+    setPruneJobId(null)
+    prune.mutate(params, {
+      onSuccess: (r) => setPruneJobId(r.job.id),
+      onError: () => toast.error('Could not start the prune, try again.'),
+    })
+  }
 
   return (
     <div className="mt-4">
@@ -148,8 +162,8 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
           <h2 className="font-display text-[16px] font-semibold">Retention preview</h2>
           <p className="mt-1 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
             <span className="text-amber">Dry run.</span> This preview only asks Proxmox what a
-            retention rule <em>would</em> do, it deletes nothing, and there is no button here
-            that does.
+            retention rule <em>would</em> do, it deletes nothing on its own. Prune now, below,
+            only appears once you have reviewed exactly what a rule would remove.
           </p>
 
           <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -222,6 +236,19 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
                   ))}
                 </tbody>
               </table>
+              <div className="mt-4 flex items-center justify-end gap-3">
+                {!canPrune && (
+                  <span className="text-[12px] text-text-3">
+                    At least one keep value must be 1 or more to prune.
+                  </span>
+                )}
+                <Button variant="danger" disabled={!canPrune || prune.isPending}
+                        title={!canPrune ? 'At least one keep value must be 1 or more' : undefined}
+                        onClick={runPrune}>
+                  {prune.isPending ? 'Pruning…' : `Prune now (${count('remove')} to remove)`}
+                </Button>
+              </div>
+              {pruneJobId != null && <div className="mt-3"><JobLog jobId={pruneJobId} /></div>}
             </>
           )}
         </section>

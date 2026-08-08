@@ -14,6 +14,8 @@ import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
+import { ReconfigureDialog } from '../components/ReconfigureDialog'
+import { UninstallDialog } from '../components/UninstallDialog'
 import { Terminal } from '../components/terminal/Terminal'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
@@ -169,6 +171,8 @@ export function AppDetail() {
   const { appId } = useParams({ strict: false }) as { appId: string }
   const ent = useEntitlements()
   const [migrating, setMigrating] = useState(false)
+  const [uninstalling, setUninstalling] = useState(false)
+  const [reconfiguring, setReconfiguring] = useState(false)
   const appQuery = useQuery({
     queryKey: ['apps', Number(appId)],
     queryFn: () => api<AppRow>(`/apps/${appId}`),
@@ -182,6 +186,8 @@ export function AppDetail() {
         // Same wait-for-first-fetch gate as vms.tsx's cloneDenied, otherwise every
         // plan sees a dead Migrate button for the whole first entitlements fetch.
         const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
+        const reconfigureDenied = ent.data != null && !ent.has('apps.reconfigure')
+        const uninstallDenied = ent.data != null && !ent.has('apps.uninstall')
         return (
           <div>
             <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
@@ -217,6 +223,16 @@ export function AppDetail() {
                   onClick={() => setMigrating(true)}>
                   Migrate
                 </Button>
+                <Button variant="ghost" disabled={reconfigureDenied}
+                  title={reconfigureDenied ? 'Not included in your plan' : undefined}
+                  onClick={() => setReconfiguring(true)}>
+                  Reconfigure
+                </Button>
+                <Button variant="danger" disabled={uninstallDenied}
+                  title={uninstallDenied ? 'Not included in your plan' : undefined}
+                  onClick={() => setUninstalling(true)}>
+                  Uninstall
+                </Button>
                 <StatusPill status={app.status} />
               </div>
             </div>
@@ -235,6 +251,8 @@ export function AppDetail() {
             </div>
             <Outlet />
             {migrating && <MigrateDialog app={app} onClose={() => setMigrating(false)} />}
+            {reconfiguring && <ReconfigureDialog app={app} onClose={() => setReconfiguring(false)} />}
+            {uninstalling && <UninstallDialog app={app} onClose={() => setUninstalling(false)} />}
           </div>
         )
       }}

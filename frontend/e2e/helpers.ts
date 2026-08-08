@@ -54,7 +54,7 @@ async function withSeedLock<T>(fn: () => Promise<T>): Promise<T> {
 // click and the heading assertion.
 export const NAV_PAGES = [
   'Cluster', 'Apps', 'App Store', 'Virtual Machines',
-  'Storage', 'Network', 'Backups', 'Alerts', 'Settings',
+  'Storage', 'Network', 'Backups', 'Alerts', 'Audit', 'Settings',
 ] as const
 
 /**
