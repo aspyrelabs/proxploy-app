@@ -10,7 +10,7 @@ export function LockVeil({ locked, title, subtitle, children }:
   return (
     <div className="relative overflow-hidden rounded-card">
       <div className="pointer-events-none blur-[1px]">{children}</div>
-      <div className="absolute inset-0 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+      <div className="absolute inset-0 grid place-items-center bg-scrim backdrop-blur-[3px]">
         <div className="text-center">
           <div className="mb-2 text-[22px] text-amber">🔒</div>
           <div className="font-display text-[15px] font-semibold">{title}</div>

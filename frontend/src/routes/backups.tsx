@@ -50,7 +50,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div role="dialog" aria-label="Run backup"
-         className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
       <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
         <h2 className="font-display text-[16px] font-semibold">Run a backup now</h2>
         {jobId != null ? (
@@ -93,7 +93,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
 function ScheduleDialog({ onClose }: { onClose: () => void }) {
   return (
     <div role="dialog" aria-label="New scheduled job"
-         className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
       <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
         <h2 className="font-display text-[16px] font-semibold">New scheduled backup job</h2>
         <div className="mt-4">

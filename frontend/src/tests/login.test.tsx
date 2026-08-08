@@ -18,7 +18,11 @@ describe('tokens', () => {
 describe('LoginForm', () => {
   it('renders brand + email/password fields', () => {
     render(<LoginForm onSuccess={() => {}} />)
-    expect(screen.getByText(/Prox/)).toBeDefined()
+    // The wordmark is an inline SVG, not text, so it is findable by its
+    // accessible name and not by getByText. Asserting on the role also keeps
+    // this honest about the thing that actually matters: a screen reader can
+    // still tell you which product's login page this is.
+    expect(screen.getByRole('img', { name: 'Proxploy' })).toBeDefined()
     expect(screen.getByLabelText(/email/i)).toBeDefined()
     expect(screen.getByLabelText(/password/i)).toBeDefined()
   })

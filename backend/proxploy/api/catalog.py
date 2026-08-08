@@ -9,7 +9,7 @@ from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
-from proxploy.models import App, CatalogEntry, HostCredential, User
+from proxploy.models import App, CatalogEntry, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -54,6 +54,41 @@ def list_catalog(category: str | None = None, q: str | None = None,
     if q:
         query = query.filter(CatalogEntry.name.ilike(f"%{q}%"))
     return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
+
+
+@router.get("/status", dependencies=[Depends(_read),
+                                     Depends(require_entitlement("store.catalog"))])
+def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_read)):
+    """How old the catalog cache is, for doc 01's staleness indicator.
+
+    MUST stay registered above `/{slug}`: Starlette matches in registration
+    order, so declaring it after would make this a lookup for a catalog entry
+    named "status" and 404 forever (same trap api/apps.py documents around its
+    lifecycle wildcard).
+
+    A separate route rather than a field on `GET /catalog` because that route
+    returns a bare list and wrapping it now would break every existing caller
+    for a banner.
+
+    Staleness is a real signal, not decoration: the catalog is refreshed by a
+    system schedule, so a stale cache means that schedule is off or has been
+    failing, and every install decision the operator makes is being taken
+    against pinned scripts that upstream may have moved past.
+    """
+    from sqlalchemy import func
+
+    newest = db.query(func.max(CatalogEntry.synced_at)).scalar()
+    total = db.query(func.count(CatalogEntry.id)).scalar() or 0
+    stale_after_s = request.app.state.settings.catalog_stale_after_s
+    age_s = (utcnow() - newest).total_seconds() if newest else None
+    return {
+        "synced_at": newest.isoformat() if newest else None,
+        "age_s": age_s,
+        "entries": total,
+        "stale_after_s": stale_after_s,
+        # Never refreshed counts as stale: an empty catalog is not a fresh one.
+        "stale": True if newest is None else age_s > stale_after_s,
+    }
 
 
 @router.get("/{slug}", dependencies=[Depends(_read),

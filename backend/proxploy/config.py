@@ -47,6 +47,11 @@ class Settings(BaseSettings):
         "pihole", "adguard", "nginxproxymanager", "wireguard",
         "docker", "paperless-ngx", "vaultwarden", "proxmox-backup-server",
     ]
+    # How old the App Store cache may get before the UI calls it stale (doc 01
+    # "staleness indicator"). The catalog.refresh system schedule runs daily at
+    # 04:00 UTC, so 48h means "two consecutive refreshes have not landed",
+    # which is a real fault rather than one unlucky night.
+    catalog_stale_after_s: float = 172800.0
     poll_enabled: bool = True
     poll_interval_s: float = 30.0
     poll_timeout_s: float = 20.0

@@ -48,7 +48,7 @@ export function RestoreDialog({ backup, onClose }: {
   return (
     <>
       <div role="dialog" aria-label="Restore backup"
-           className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+           className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
         <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
           <h2 className="font-display text-[16px] font-semibold">Restore {name}</h2>
           <div className="mt-2 rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">

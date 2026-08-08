@@ -20,7 +20,7 @@ export function ConfirmSelfDialog({ phrase, detail, title, onConfirm, onCancel }
   const [typed, setTyped] = useState('')
   return (
     <div role="dialog" aria-label="Confirm destructive action"
-         className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
       <div className="w-[420px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
         <h2 className="font-display text-[16px] font-semibold text-amber">
           {title ?? "This is Proxploy's own container"}

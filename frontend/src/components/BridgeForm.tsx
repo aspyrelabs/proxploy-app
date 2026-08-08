@@ -54,7 +54,7 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
 
   return (
     <div role="dialog" aria-label="Edit host bridge"
-         className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
       <div className="w-[460px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
         <h2 className="font-display text-[16px] font-semibold">
           {editing ? `Edit ${name} on ${node}` : `New bridge on ${node}`}

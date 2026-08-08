@@ -9,6 +9,16 @@
   --red:#F26D6D;   --red-dim:rgba(242,109,109,.13);
   --blue:#5B9DF9;  --blue-dim:rgba(91,157,249,.12);
   --violet:#A78BFA; --cyan:#34D3C6;
+  /* The sticky topbar sits over scrolling content, so it needs `--ink` WITH
+     alpha for the backdrop-blur to read. This was a hardcoded
+     rgba(11,15,22,.82) in Topbar.tsx, which is the only reason the bar stayed
+     dark in light mode while every tokenised surface switched. */
+  --topbar:rgba(11,15,22,.82);
+  /* Dialog scrim. Deliberately the SAME in both themes: a scrim's job is to
+     dim what is behind it, and a light scrim over a light page dims nothing.
+     Tokenised anyway so it stops being a magic literal repeated in eight
+     components. */
+  --scrim:rgba(11,15,22,.72);
 }
 
 [data-theme="light"] {
@@ -20,6 +30,10 @@
   --red:#D9463F;   --red-dim:rgba(217,70,63,.13);
   --blue:#2F6FE0;  --blue-dim:rgba(47,111,224,.12);
   --violet:#7C5CFB; --cyan:#0FA8A0;
+  /* Light mode's topbar: `--ink` with the same alpha, so the whole page goes
+     light together (PXP-16). */
+  --topbar:rgba(245,247,250,.82);
+  /* --scrim is intentionally NOT redefined here; see the dark block. */
 }
 
 @theme inline {
@@ -38,6 +52,8 @@
   --color-blue: var(--blue);     --color-blue-dim: var(--blue-dim);
   --color-violet: var(--violet);
   --color-cyan: var(--cyan);
+  --color-topbar: var(--topbar);
+  --color-scrim: var(--scrim);
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-ui: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;

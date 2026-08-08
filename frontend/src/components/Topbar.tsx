@@ -25,7 +25,7 @@ export function Topbar() {
   })
   const count = running?.length ?? 0
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-[rgba(11,15,22,.82)] px-5 py-2.5 backdrop-blur-[10px]">
+    <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 py-2.5 backdrop-blur-[10px]">
       {has('notify.inapp') && (
         <button
           aria-label="Activity"

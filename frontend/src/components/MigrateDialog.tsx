@@ -99,7 +99,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
   return (
     <>
       <div role="dialog" aria-label="Migrate app"
-           className="fixed inset-0 z-30 grid place-items-center bg-[rgba(11,15,22,.72)] backdrop-blur-[3px]">
+           className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
         <div className="w-[560px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
           <h2 className="font-display text-[16px] font-semibold text-text">
             Migrate <span className="font-mono">{app.name}</span>

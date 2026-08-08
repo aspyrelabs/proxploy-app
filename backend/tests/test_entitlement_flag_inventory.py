@@ -28,7 +28,7 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "proxploy"
 #   structural                cannot be enforced as written
 UNENFORCED = {
     # feature does not exist yet
-    "ui.global_search", "platform.install",
+    "platform.install",
     "store.install_log", "apps.logs", "apps.graphs", "vms.graphs",
     "backups.schedule", "backups.notify", "notify.routing", "notify.inapp",
     "audit.retention", "store.search", "alerts.manage", "metrics.collect",

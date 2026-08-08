@@ -66,3 +66,64 @@ test.describe('light theme', () => {
     })
   }
 })
+
+/**
+ * PXP-16. The existing suite above could not have caught either half of the
+ * bug it was written for:
+ *
+ *  - it never visits /login, so the login page ignoring the stored theme went
+ *    unnoticed until a human looked;
+ *  - it only looks for ONE dark literal (#1d2733), and the topbar was a
+ *    different hardcoded colour, so a surface that never converted still
+ *    passed every assertion.
+ *
+ * These two close both gaps by asserting on the theme's own tokens rather than
+ * hunting a specific bad value: any surface that fails to switch fails here,
+ * whatever colour it happens to be.
+ */
+test.describe('light theme, the surfaces the literal-hunt missed', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  test.beforeAll(async () => {
+    await seedAdmin()
+  })
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('pp_theme', 'light'))
+  })
+
+  test('the login page honours the stored theme without a session', async ({ page }) => {
+    await page.goto('/login')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    // The chosen theme has to be applied before first paint, not after a
+    // toggle mounts somewhere behind auth.
+    const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    expect(bodyBg).not.toBe('rgb(11, 15, 22)')  // --ink, dark
+  })
+
+  test('the topbar goes light with the rest of the page', async ({ page, browser }) => {
+    const context = await browser.newContext()
+    const helper = await context.newPage()
+    await helper.addInitScript(() => localStorage.setItem('pp_theme', 'light'))
+    await signIn(helper)
+    const cookies = (await context.storageState()).cookies
+    await context.close()
+    await page.context().addCookies(cookies)
+
+    await page.goto('/cluster')
+    await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+    // The bar is translucent over scrolling content, so compare its own
+    // channels rather than an exact string: light means a bright background,
+    // whatever the alpha resolves to.
+    const rgb = await page.evaluate(() => {
+      const el = document.querySelector('header')
+      return el ? getComputedStyle(el).backgroundColor : null
+    })
+    expect(rgb, 'no <header> found; did the Topbar markup change?').not.toBeNull()
+    const [r, g, b] = rgb!.match(/\d+(\.\d+)?/g)!.slice(0, 3).map(Number)
+    expect(r + g + b, `topbar background was ${rgb}, which is not a light surface`)
+      .toBeGreaterThan(3 * 128)
+  })
+})
