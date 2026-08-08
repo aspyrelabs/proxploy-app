@@ -38,6 +38,7 @@ _script_read = authorize("app", "script_read", scope_of=scope_app())
 _script = authorize("app", "script", scope_of=scope_app())
 _adopt = authorize("app", "adopt")
 _migrate = authorize("app", "migrate", scope_of=scope_app())
+_remove = authorize("app", "remove", scope_of=scope_app())
 
 
 def _app_out(a: App, host: Host, snapshots) -> dict:
@@ -574,6 +575,140 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
                                        "target_host_id": body.target_host_id},
                                action="app.migrate")
     return {**result, "preflight": pf}
+
+
+class UninstallIn(BaseModel):
+    # The app's own name, typed back. Required for every uninstall that
+    # destroys a container, not only for Proxploy's own CT the way the
+    # lifecycle verbs are: stop is reversible and destroy is not, so the
+    # guard belongs on the operation rather than on the target.
+    confirm: str | None = None
+    # Forget the app without touching PVE. The inverse of adopt: the CT keeps
+    # running and Proxploy stops tracking it. No confirmation needed because
+    # nothing is destroyed and re-adopting restores the row.
+    keep_ct: bool = False
+
+
+class ReconfigureIn(BaseModel):
+    # PVE-side resources. None means "leave alone"; this is a PATCH.
+    cores: int | None = None
+    memory_mb: int | None = None
+    swap_mb: int | None = None
+    # Proxploy-side presentation, no PVE call involved.
+    name: str | None = None
+    web_port: int | None = None
+    web_protocol: str | None = None
+    web_path: str | None = None
+
+
+@router.delete("/{app_id}", dependencies=[Depends(_remove),
+                                          Depends(require_entitlement("apps.uninstall"))])
+def uninstall_app(request: Request, app_id: int, body: UninstallIn = Body(default=UninstallIn()),
+                  db=Depends(get_db), user: User = Depends(_remove)):
+    """Remove an app, either by destroying its CT or by forgetting it.
+
+    Doc 01's apps-only model means one app is exactly one LXC container, so
+    "uninstall" is "destroy that container". `keep_ct` is the escape hatch for
+    the operator who wants Proxploy out of the way without losing the
+    workload, and it is the inverse of adopt rather than a softer delete.
+    """
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    ip = request.client.host if request.client else None
+
+    if body.keep_ct:
+        write_audit(db, actor_type="user", actor_id=user.id, action="app.forget",
+                    target_type="app", target_id=a.id,
+                    params={"ctid": a.ctid, "host_id": a.host_id}, ip=ip)
+        db.delete(a)
+        db.commit()
+        request.app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                                   "change": "removed"})
+        return {"removed": True, "ct_kept": True}
+
+    if (body.confirm or "") != a.name:
+        # Deliberately the same 409 shape the self-target guard uses, so one
+        # frontend confirmation dialog serves both.
+        write_audit(db, actor_type="user", actor_id=user.id, action="app.uninstall",
+                    target_type="app", target_id=a.id, result="denied", ip=ip)
+        raise HTTPException(409, {
+            "error": "confirm_required", "confirm_phrase": a.name,
+            "detail": (f"Uninstalling {a.name} destroys CT {a.ctid} and its disk. "
+                       f"This cannot be undone. Type the name to confirm, or "
+                       f"pass keep_ct to forget the app and leave the container "
+                       f"running."),
+        })
+
+    result = enqueue_and_audit(request, db, user, kind="app.uninstall",
+                              target_type="app", target_id=app_id,
+                              params={"target_id": app_id},
+                              action="app.uninstall")
+    return result
+
+
+@router.patch("/{app_id}", dependencies=[Depends(_configure),
+                                         Depends(require_entitlement("apps.reconfigure"))])
+def reconfigure_app(request: Request, app_id: int,
+                    body: ReconfigureIn = Body(default=ReconfigureIn()),
+                    db=Depends(get_db), user: User = Depends(_configure)):
+    """Resize a CT and/or edit how Proxploy presents the app.
+
+    Resource changes go straight to PVE rather than through a job: an lxc
+    config write is synchronous there (see `guest_config_update`), so there is
+    no task to track and reporting one would be theatre.
+
+    Disk size is deliberately not here. Growing a CT's root volume is a
+    different PVE endpoint and is one-way (PVE cannot shrink), which makes it
+    its own feature with its own confirmation rather than a field on a PATCH.
+    """
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+
+    pve_config = {}
+    if body.cores is not None:
+        if body.cores < 1:
+            raise HTTPException(422, "cores must be at least 1")
+        pve_config["cores"] = body.cores
+    if body.memory_mb is not None:
+        if body.memory_mb < 16:
+            raise HTTPException(422, "memory_mb must be at least 16")
+        pve_config["memory"] = body.memory_mb
+    if body.swap_mb is not None:
+        if body.swap_mb < 0:
+            raise HTTPException(422, "swap_mb cannot be negative")
+        pve_config["swap"] = body.swap_mb
+
+    if pve_config:
+        host = db.get(Host, a.host_id)
+        if host is None:
+            raise HTTPException(409, "app has no host")
+        from proxploy.services.hostclient import client_for_host
+        try:
+            client = client_for_host(request.app, db, host)
+            client.guest_config_update("lxc", host.node_name or "", a.ctid, pve_config)
+        except ProxmoxError as e:
+            raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+
+    changed = dict(pve_config)
+    for field in ("name", "web_port", "web_protocol", "web_path"):
+        value = getattr(body, field)
+        if value is not None:
+            setattr(a, field, value)
+            changed[field] = value
+
+    if not changed:
+        raise HTTPException(422, "nothing to change")
+
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="app.reconfigure", target_type="app", target_id=a.id,
+                params={"changed": sorted(changed)},
+                ip=request.client.host if request.client else None)
+    db.commit()
+    request.app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                               "change": "reconfigured"})
+    return {"id": a.id, "changed": changed}
 
 
 class LifecycleIn(BaseModel):

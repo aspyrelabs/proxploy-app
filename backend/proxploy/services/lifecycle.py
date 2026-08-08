@@ -102,3 +102,56 @@ for _verb in APP_ACTIONS:
     _register("app", _verb)
 for _verb in VM_ACTIONS:
     _register("vm", _verb)
+
+
+async def run_app_uninstall(ctx: JobContext, params: dict) -> dict:
+    """Destroy an app's CT on PVE, then forget the app row.
+
+    Ordering is deliberate. PVE refuses to destroy a running container, so the
+    stop comes first; and the row is deleted only AFTER PVE confirms the
+    destroy, because a row deleted first with a failed destroy leaves an
+    orphaned CT that Proxploy no longer knows about, which is the one outcome
+    with no recovery path through the UI. The reverse (CT gone, row lingering)
+    is self-correcting: the poller marks it missing and the operator can forget
+    it.
+
+    A stop failure is logged and the destroy is attempted anyway: an already-
+    stopped container reports one, and so does a container PVE considers
+    wedged, which is exactly when someone reaches for uninstall.
+    """
+    app = ctx.backend.app
+    target_id = int(params["target_id"])
+    client, kind, node, vmid, name = await asyncio.to_thread(
+        _resolve, app, "app", target_id)
+
+    ctx.log(f"stopping {name} ({kind} {vmid}) on node {node} before removal")
+    try:
+        upid = await asyncio.to_thread(client.guest_action, kind, node, vmid, "stop")
+        await await_task(ctx, client, node, upid,
+                         timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
+    except (ProxmoxError, JobFailed) as e:
+        ctx.log(f"stop did not succeed ({e}); attempting removal anyway",
+                stream="stderr")
+
+    ctx.log(f"destroying {kind} {vmid} on node {node}")
+    upid = await asyncio.to_thread(client.guest_delete, kind, node, vmid)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
+
+    def _forget() -> None:
+        with app.state.sessionmaker() as db:
+            row = db.get(App, target_id)
+            if row is not None:
+                # app_scripts cascades on the FK; nothing else references apps.
+                db.delete(row)
+                db.commit()
+
+    await asyncio.to_thread(_forget)
+    ctx.log(f"{name} removed")
+    app.state.bus.publish("resource", {"type": "app", "id": target_id,
+                                       "change": "removed"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"),
+            "node": node, "vmid": vmid, "removed": True}
+
+
+HANDLERS["app.uninstall"] = run_app_uninstall
