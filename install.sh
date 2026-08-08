@@ -32,7 +32,19 @@ DRY_PARSE=0
 # Default channel for the bare one-liner (`curl -fsSL https://proxploy.com/
 # install.sh | bash`, no flags). --channel overrides this for a private
 # channel, a staging build, or the test harnesses' file:// fixtures.
-DEFAULT_CHANNEL="https://proxploy.com/releases/latest"
+# Matches config.py's release_channel_url default: releases ship from
+# GitHub Releases in both dev and prod, that is not part of the
+# PROXPLOY_ENV switch below.
+DEFAULT_CHANNEL="https://github.com/aspyrelabs/proxploy-app/releases/latest/download"
+
+# PROXPLOY_ENV: dev|prod, default dev, same contract as config.py's `env`
+# setting. Honour it if already exported by the caller; the installed app
+# gets it from the env file written in step 5 below.
+: "${PROXPLOY_ENV:=dev}"
+case "$PROXPLOY_ENV" in
+  dev|prod) ;;
+  *) die "PROXPLOY_ENV must be dev or prod, got: $PROXPLOY_ENV" ;;
+esac
 
 # The release public key, compiled in rather than fetched. This is what
 # makes the no-argument one-liner possible: there is nothing unpacked yet
@@ -335,6 +347,7 @@ PROXPLOY_DATA_DIR=/var/lib/proxploy
 PROXPLOY_MASTER_KEY_FILE=/var/lib/proxploy/master.key
 PROXPLOY_INSTALL_SHAPE=$SHAPE
 PROXPLOY_COOKIE_SECURE=true
+PROXPLOY_ENV=$PROXPLOY_ENV
 PROXPLOY_UPDATE_SCRIPT=/opt/proxploy/bin/proxploy-update
 EOF
   chown root:"$PP_USER" "$PP_ENV"

@@ -1,12 +1,25 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# PROXPLOY_ENV picks the default API base URL below (dev is the default when
+# unset or empty); an explicit PROXPLOY_API_BASE_URL always wins over this
+# map, so the map only decides what happens when nobody said otherwise.
+API_BASE_URL_BY_ENV: dict[str, str] = {
+    "dev": "https://api.proxploy.dev",
+    "prod": "https://api.proxploy.com",
+}
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PROXPLOY_")
 
+    # Invalid values must raise at startup, not fall back: this is config at
+    # a trust boundary, and a typo here must not silently point prod at dev.
+    env: Literal["dev", "prod"] = "dev"
     db_url: str = "sqlite:///./data/proxploy.db"
     data_dir: Path = Path("./data")
     master_key_file: Path = Path("./data/master.key")
@@ -14,7 +27,10 @@ class Settings(BaseSettings):
     csrf_cookie: str = "pp_csrf"
     session_ttl_hours: int = 168
     cookie_secure: bool = False  # installer flips on when TLS terminates at the app
-    api_base_url: str = "https://api.proxploy.com"
+    # Default derives from `env` (see API_BASE_URL_BY_ENV below); an explicit
+    # PROXPLOY_API_BASE_URL keeps winning over that map. None here just means
+    # "not explicitly set yet"; the validator below always resolves it.
+    api_base_url: str | None = None
     ent_extra_keys_file: Path | None = None
     catalog_slugs: list[str] = [
         "redis", "postgresql", "mysql", "mariadb", "mongodb",
@@ -93,6 +109,19 @@ class Settings(BaseSettings):
     # Written by the installer from inside the CT it creates, so
     # services/selfguard.py can recognise Proxploy's own container.
     self_ctid: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_api_base_url(cls, data: Any) -> Any:
+        # Runs on the merged-but-unvalidated settings sources: if the caller
+        # (init kwarg or PROXPLOY_API_BASE_URL) already supplied a value it
+        # is left untouched. `env`'s own Literal validation still runs after
+        # this and raises on an invalid value, regardless of what default we
+        # pick here.
+        if isinstance(data, dict) and data.get("api_base_url") is None:
+            env = data.get("env", "dev")
+            data = {**data, "api_base_url": API_BASE_URL_BY_ENV.get(env, API_BASE_URL_BY_ENV["dev"])}
+        return data
 
 
 @lru_cache

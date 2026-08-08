@@ -140,7 +140,8 @@ gets; the installer and Docker image override the relevant ones.
 | `PROXPLOY_CSRF_COOKIE` | `pp_csrf` | CSRF cookie name. |
 | `PROXPLOY_SESSION_TTL_HOURS` | `168` | Session lifetime. |
 | `PROXPLOY_COOKIE_SECURE` | `false` | Set by the installer once TLS terminates in front of the app. |
-| `PROXPLOY_API_BASE_URL` | `https://api.proxploy.com` | Aspyre entitlements/licensing API base URL. |
+| `PROXPLOY_ENV` | `dev` | `dev` or `prod`; picks the default `PROXPLOY_API_BASE_URL` below (see that row). Any other value fails loudly at startup instead of silently falling back, since this is config at a trust boundary. |
+| `PROXPLOY_API_BASE_URL` | `https://api.proxploy.dev` in `dev`, `https://api.proxploy.com` in `prod` | Aspyre entitlements/licensing API base URL. Set explicitly to override the `PROXPLOY_ENV`-derived default; an explicit value always wins. |
 | `PROXPLOY_ENT_EXTRA_KEYS_FILE` | unset | Extra entitlement verification keys, if any. |
 | `PROXPLOY_CATALOG_SLUGS` | built-in app-store list | App Store catalog slugs. |
 | `PROXPLOY_POLL_ENABLED` | `true` | Background Proxmox poller on/off. |
