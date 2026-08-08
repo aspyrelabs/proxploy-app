@@ -15,19 +15,22 @@ from proxploy.db import make_engine, make_sessionmaker, run_migrations
 from proxploy.models import AppSetting, utcnow
 
 
-def create_app(
-    settings: Settings | None = None,
-    *,
-    public_keys: dict[str, str] | None = None,
-    proxmox_factory=None,
-    ssh_factory=None,
-    license_client=None,
-) -> FastAPI:
-    settings = settings or get_settings()
+def _init_reporting(settings: Settings) -> str:
+    """Start crash reporting if the operator opted in; say what happened.
 
-    # Opt-in only (see Settings.sentry_dsn). Before the app is built so a
-    # failure during lifespan startup is still reported.
-    if settings.sentry_dsn:
+    Opt-in only (see `Settings.sentry_dsn`), and called before the app is
+    built so a failure during lifespan startup is still reported.
+
+    A malformed DSN is caught rather than raised. This runs on someone else's
+    hardware, often headless, and refusing to boot the whole management plane
+    over a typo in an optional setting would be a far worse failure than not
+    collecting crashes. The returned string surfaces on `GET /meta/version`,
+    so an operator who set the DSN can confirm it actually took effect instead
+    of assuming.
+    """
+    if not settings.sentry_dsn:
+        return "off"
+    try:
         import sentry_sdk
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
@@ -39,6 +42,22 @@ def create_app(
             # credentials, session cookies, host names) would ride along.
             send_default_pii=False,
         )
+    except Exception as e:
+        return f"error: {type(e).__name__}"
+    return "on"
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    public_keys: dict[str, str] | None = None,
+    proxmox_factory=None,
+    ssh_factory=None,
+    license_client=None,
+) -> FastAPI:
+    settings = settings or get_settings()
+
+    reporting = _init_reporting(settings)
 
     from proxploy.entitlements.client import Entitlements
     from proxploy.entitlements.keys import load_public_keys
@@ -161,6 +180,7 @@ def create_app(
     app = FastAPI(title="Proxploy", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
+    app.state.reporting = reporting
     app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
     app.state.license_client = license_client or LicenseClient(settings.api_base_url)
     app.state.proxmox_factory = proxmox_factory

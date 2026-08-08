@@ -67,3 +67,21 @@ def test_meta_version(client, csrf_header, bootstrap_admin):
     bootstrap_admin(client)
     body = client.get("/api/v1/meta/version").json()
     assert body["version"] and body["db_backend"] == "sqlite"
+    # Crash reporting ships off and stays off unless an operator sets a DSN.
+    assert body["reporting"] == "off"
+
+
+def test_a_malformed_dsn_does_not_stop_the_app_from_starting(tmp_path):
+    """This runs on someone else's hardware, often headless.
+
+    Refusing to boot the whole management plane over a typo in an optional
+    setting would be a far worse failure than not collecting crashes, so the
+    bad DSN is reported through /meta/version instead of raised.
+    """
+    from proxploy.config import Settings
+    from proxploy.main import create_app
+
+    app = create_app(Settings(db_url=f"sqlite:///{tmp_path}/x.db", data_dir=tmp_path,
+                              master_key_file=tmp_path / "master.key",
+                              sentry_dsn="not-a-dsn"))
+    assert app.state.reporting.startswith("error:")

@@ -29,8 +29,15 @@ def health():
 
 @router.get("/version")
 def version(request: Request, user=Depends(_read)):
+    # "reporting" is "off" (the shipped default), "on", or "error: <type>".
+    # An operator who put PROXPLOY_SENTRY_DSN in proxploy.env has no other way
+    # to tell whether it took: a DSN that arrived blank or mangled behaves
+    # exactly like one that was never set. Behind `_read` rather than on the
+    # unauthenticated /meta/health, since nothing about this install's
+    # configuration is a stranger's business.
     return {"version": __version__,
-            "db_backend": request.app.state.engine.dialect.name}
+            "db_backend": request.app.state.engine.dialect.name,
+            "reporting": request.app.state.reporting}
 
 
 @router.get("/onboarding")
