@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
+import { applyStoredTheme, setStoredTheme } from '../lib/theme'
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState(() => localStorage.getItem('pp_theme') ?? 'dark')
+  const [theme, setTheme] = useState(applyStoredTheme)
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem('pp_theme', theme)
+    setStoredTheme(theme)
   }, [theme])
   return (
     <button aria-label="Toggle theme" title="Toggle theme"
