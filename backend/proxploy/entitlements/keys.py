@@ -24,10 +24,23 @@ from proxploy.pubkey import load_public_key, to_pem
 logger = logging.getLogger(__name__)
 
 BUNDLED_ROOT_KEYS: dict[str, str] = {
-    # PLACEHOLDER, not a production root: ships so the chain has something to
-    # verify against in dev/CI. A human generates the real offline root key
-    # in a later phase and replaces this entry (docs/07 §4).
-    "root-placeholder-2026-08": "MCowBQYDK2VwAyEAurBzDvib5NysbwvfTbH03wWhhadmH3xgPQ11TdEE5DQ=",
+    # THROWAWAY DEV ROOT, NOT the production root. Its private half was
+    # generated on the build box on 2026-08-09 and lives there; it is
+    # disposable and guards nothing, which is only acceptable while
+    # proxploy-api's tiers.yaml has all_entitled: true and no entitlement is
+    # actually sold or gated.
+    #
+    # It MUST NOT become the production root by inertia. Before v1 a human
+    # performs the real ceremony: an Ed25519 keypair generated air-gapped,
+    # the private half into a password manager or hardware key and never onto
+    # a networked machine, the public half replacing this entry. See
+    # proxploy-api/docs/runbooks/rotating-the-signing-key.md, which carries
+    # the full procedure next to the release-signing ceremony.
+    #
+    # Replaced the unusable "root-placeholder-2026-08": nobody ever held that
+    # entry's private key, so nothing could be minted under it and the dev
+    # API could not produce a certificate at all.
+    "dev-root-2026-08": "MCowBQYDK2VwAyEA3NOMW8kyo7nHgNnqglZiqEjDI68uy/ZTMdbOQhiC9U0=",
 }
 
 

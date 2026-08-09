@@ -56,7 +56,7 @@ def test_a_broken_overlay_key_is_dropped_not_fatal(tmp_path, keypair, caplog):
     import json
     from types import SimpleNamespace
 
-    from proxploy.entitlements.keys import load_root_keys
+    from proxploy.entitlements.keys import BUNDLED_ROOT_KEYS, load_root_keys
 
     _, _, body = keypair
     f = tmp_path / "extra.json"
@@ -65,5 +65,10 @@ def test_a_broken_overlay_key_is_dropped_not_fatal(tmp_path, keypair, caplog):
 
     assert "good-kid" in keys
     assert "bad-kid" not in keys
-    assert "root-placeholder-2026-08" in keys, "a bad overlay entry must not drop bundled keys"
+    # By set, not by a hardcoded kid: the bundled root is a throwaway dev key
+    # today and a human replaces it at the pre-v1 offline ceremony, which
+    # would otherwise break this on a rename rather than on the behaviour it
+    # is checking.
+    assert set(BUNDLED_ROOT_KEYS) <= set(keys), \
+        "a bad overlay entry must not drop bundled keys"
     assert "bad-kid" in caplog.text
