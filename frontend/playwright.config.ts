@@ -74,15 +74,21 @@ export default defineConfig({
     },
     {
       // Same proxy setup as `vite dev` (vite.config.ts: /api -> :8000).
-      command: `npx vite --port ${FRONTEND_PORT} --strictPort`,
+      // `--host 127.0.0.1`: bind the address this config actually polls.
+      // Vite's default is `localhost`, which Node resolves verbatim, so on a
+      // host that answers localhost with ::1 the server binds v6-only and the
+      // v4 probe below never gets a reply. That is how this failed in CI while
+      // passing on every dev box: not a slow start (raising the budget from
+      // 30s to 120s changed nothing), just a probe aimed at an address nobody
+      // was listening on.
+      command: `npx vite --host 127.0.0.1 --port ${FRONTEND_PORT} --strictPort`,
       cwd: root,
       url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: false,
-      // 30s was enough on a warm dev box and not on a cold CI runner, where
-      // vite's first start also pays for dependency optimisation against an
-      // empty cache. It failed as "Timed out waiting 30000ms from
-      // config.webServer" with the backend already up and healthy, which
-      // reads like a product fault and is not one.
+      // Vite logs readiness to stdout, which Playwright ignores by default,
+      // so a webServer that never comes up looks identical to one that
+      // crashed on boot. Pipe it: the next failure should say which.
+      stdout: 'pipe',
       timeout: 120_000,
     },
   ],
