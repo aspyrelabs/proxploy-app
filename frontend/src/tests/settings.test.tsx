@@ -8,6 +8,7 @@ let teamsRbac = false
 let hostRows: unknown[] = []
 let hostsError = false
 let channelsError = false
+let clockSkew = false
 const teamRows = [{ id: 1, name: 'Default', slug: 'default', description: null,
                     member_count: 1, host_count: 1 },
                    { id: 2, name: 'Ops', slug: 'ops', description: null,
@@ -20,7 +21,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({
         tier: 'builtin',
         features: { 'notify.channels': notifyChannels, 'teams.rbac': teamsRbac },
-        grace: null,
+        grace: null, clock_skew: clockSkew,
       })
     }
     if (path === '/hosts') {
@@ -186,6 +187,29 @@ describe('SettingsPage, hosts and channels error vs empty', () => {
     wrap()
     expect(await screen.findByText(/channels not readable/i)).toBeInTheDocument()
     expect(screen.queryByText('No channels yet')).not.toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage, clock skew', () => {
+  beforeEach(() => {
+    calls.length = 0
+    notifyChannels = true
+    teamsRbac = false
+    hostRows = []
+  })
+
+  it('renders the clock message, not the grace/license-refresh message, when clock_skew is true', async () => {
+    clockSkew = true
+    wrap()
+    expect(await screen.findByText(/clock looks wrong/i)).toBeInTheDocument()
+    expect(screen.queryByText(/license refresh failing/i)).toBeNull()
+  })
+
+  it('renders no clock message when clock_skew is false', async () => {
+    clockSkew = false
+    wrap()
+    await screen.findByText('Plan')
+    expect(screen.queryByText(/clock looks wrong/i)).toBeNull()
   })
 })
 

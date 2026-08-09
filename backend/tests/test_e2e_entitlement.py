@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 import httpx
+import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -91,6 +92,35 @@ def _keypair() -> tuple[str, str]:
     return base64.b64encode(der).decode(), pub
 
 
+def _root_keypair() -> tuple[str, str]:
+    """Both halves as PEM: the private one signs the certificate below, the
+    public one is what the app is told to trust as a root."""
+    priv = Ed25519PrivateKey.generate()
+    return (priv.private_bytes(serialization.Encoding.PEM,
+                               serialization.PrivateFormat.PKCS8,
+                               serialization.NoEncryption()).decode(),
+            priv.public_key().public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo).decode())
+
+
+def _mint_cert(root_private_pem: str, root_kid: str, leaf_kid: str,
+               leaf_public_pem: str) -> str:
+    """Stand in for scripts/mint_leaf_cert.py, which reads the root key from
+    stdin on an offline box and is not callable from a test. The claim shape
+    is proxploy-api's sign_cert output, pinned by both repos' contract tests.
+    """
+    pub = base64.b64encode(
+        serialization.load_pem_public_key(leaf_public_pem.encode()).public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo)).decode()
+    now = int(time.time())
+    return jwt.encode({"kid": leaf_kid, "pub": pub, "iat": now, "nbf": now,
+                       "exp": now + 180 * 86400},
+                      root_private_pem, algorithm="EdDSA",
+                      headers={"kid": root_kid})
+
+
 @pytest.mark.skipif(not API_REPO.exists(), reason="proxploy-api checkout not found")
 def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
                                             bootstrap_admin):
@@ -99,6 +129,7 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
         pytest.skip(f"no proxploy-api venv at {py}")
 
     signing_key, pub_pem = _keypair()
+    root_private_pem, root_public_pem = _root_keypair()
     env = os.environ | {
         "PROXPLOY_API_DB_URL": api_dsn,
         # The key material itself, not a path: renamed from
@@ -106,7 +137,13 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
         # a file. The old name is not an error, it is invisible, so a stale
         # spelling here would leave the service up and unable to sign.
         "PROXPLOY_API_SIGNING_KEY": signing_key,
-        "PROXPLOY_API_KID": "e2e-kid",
+        # PXP-14 Option C: there is no PROXPLOY_API_KID any more. The kid comes
+        # from the certificate, which is the only thing that binds this leaf
+        # key to a root the app trusts. Without it the API starts and reports
+        # health "degraded: no signing certificate configured", so this is
+        # also the assertion that the two repos still agree on the env name.
+        "PROXPLOY_API_SIGNING_CERT": _mint_cert(root_private_pem, "e2e-root",
+                                                "e2e-kid", pub_pem),
     }
     license_key = subprocess.run(
         [py, str(API_REPO / "scripts/create_license.py"), "--tier", "pro",
@@ -134,8 +171,8 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
         else:
             pytest.fail("proxploy-api did not start")
 
-        keys_file = tmp_path / "keys.json"
-        keys_file.write_text(json.dumps({"e2e-kid": pub_pem}))
+        roots_file = tmp_path / "roots.json"
+        roots_file.write_text(json.dumps({"e2e-root": root_public_pem}))
 
         from fastapi.testclient import TestClient
 
@@ -147,7 +184,7 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
         s = Settings(db_url=f"sqlite:///{tmp_path}/app.db", data_dir=tmp_path,
                      master_key_file=tmp_path / "master.key",
                      api_base_url=f"http://127.0.0.1:{port}",
-                     ent_extra_keys_file=keys_file)
+                     ent_extra_roots_file=roots_file)
         with TestClient(create_app(s)) as client:
             bootstrap_admin(client)
             r = client.post("/api/v1/entitlements/license",

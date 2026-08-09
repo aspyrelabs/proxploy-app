@@ -50,7 +50,7 @@ def _init_reporting(settings: Settings) -> str:
 def create_app(
     settings: Settings | None = None,
     *,
-    public_keys: dict[str, str] | None = None,
+    roots: dict[str, str] | None = None,
     proxmox_factory=None,
     ssh_factory=None,
     license_client=None,
@@ -60,7 +60,7 @@ def create_app(
     reporting = _init_reporting(settings)
 
     from proxploy.entitlements.client import Entitlements
-    from proxploy.entitlements.keys import load_public_keys
+    from proxploy.entitlements.keys import load_root_keys
     from proxploy.services.license_client import LicenseClient
 
     @asynccontextmanager
@@ -107,7 +107,7 @@ def create_app(
                         class _Req:  # noqa: N801  (minimal shim)
                             pass
                         req = _Req(); req.app = app
-                        apply_new_token(req, db, out["token"])
+                        apply_new_token(req, db, out["token"], out.get("cert"))
                 except Exception:
                     continue  # doc 07 §8: transient failure = keep serving, retry later
 
@@ -181,7 +181,7 @@ def create_app(
                   openapi_url="/api/openapi.json", lifespan=lifespan)
     app.state.settings = settings
     app.state.reporting = reporting
-    app.state.entitlements = Entitlements(public_keys or load_public_keys(settings))
+    app.state.entitlements = Entitlements(roots or load_root_keys(settings))
     app.state.license_client = license_client or LicenseClient(settings.api_base_url)
     app.state.proxmox_factory = proxmox_factory
     # OIDC single-use state store (services/oidc.py): {state: (verifier, nonce,

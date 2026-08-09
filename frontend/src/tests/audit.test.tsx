@@ -7,7 +7,7 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
   api: vi.fn((path: string) => {
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'pro', features: { 'audit.log': true }, grace: null })
+      return Promise.resolve({ tier: 'pro', features: { 'audit.log': true }, grace: null, clock_skew: false })
     }
     if (path.startsWith('/audit')) return Promise.resolve([])
     return Promise.resolve(null)

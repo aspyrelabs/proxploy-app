@@ -22,7 +22,7 @@ vi.mock('../api/client', () => ({
     getPaths.push(path)
     if (path.endsWith('/update')) return Promise.resolve(updateInfo)
     if (path.startsWith('/apps/')) return Promise.resolve(app)
-    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
     return Promise.resolve([])
   }),
 }))

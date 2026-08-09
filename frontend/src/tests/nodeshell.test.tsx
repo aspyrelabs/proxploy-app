@@ -18,7 +18,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 describe('node shell section', () => {
   it('shows a disabled button with a tooltip when node_shell_enabled is false', async () => {
     vi.mocked(api).mockImplementation((path: string) => {
-      if (path.includes('/entitlements')) return Promise.resolve({ tier: 'pro', features: { 'terminal.node': true }, grace: null })
+      if (path.includes('/entitlements')) return Promise.resolve({ tier: 'pro', features: { 'terminal.node': true }, grace: null, clock_skew: false })
       if (path.startsWith('/hosts/')) return Promise.resolve({ id: 7, name: 'pve1', node_shell_enabled: false })
       return Promise.resolve([])
     })
@@ -42,7 +42,7 @@ describe('node shell section', () => {
 
   it('shows the entitlement tooltip when terminal.node is off, even if the host opted in', async () => {
     vi.mocked(api).mockImplementation((path: string) => {
-      if (path.includes('/entitlements')) return Promise.resolve({ tier: 'builtin', features: { 'terminal.node': false }, grace: null })
+      if (path.includes('/entitlements')) return Promise.resolve({ tier: 'builtin', features: { 'terminal.node': false }, grace: null, clock_skew: false })
       if (path.startsWith('/hosts/')) return Promise.resolve({ id: 7, name: 'pve1', node_shell_enabled: true })
       return Promise.resolve([])
     })

@@ -38,7 +38,7 @@ vi.mock('../api/client', () => {
         return Promise.resolve(schedules)
       }
       if (path === '/hosts') return Promise.resolve(hosts)
-      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       return Promise.resolve([])
     }),
   }

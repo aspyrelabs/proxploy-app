@@ -49,7 +49,7 @@ vi.mock('../api/client', () => {
         return Promise.resolve({
           tier: 'pro',
           features: { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true, 'backups.retention': true },
-          grace: null,
+          grace: null, clock_skew: false,
         })
       }
       if (method !== 'GET') calls.push({ path, method, body })

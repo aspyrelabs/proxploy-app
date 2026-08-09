@@ -39,7 +39,7 @@ vi.mock('../api/client', () => ({
     }
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'pro', features: { 'storage.manage': true }, grace: null })
+      return Promise.resolve({ tier: 'pro', features: { 'storage.manage': true }, grace: null, clock_skew: false })
     }
     return Promise.resolve(null)
   }),

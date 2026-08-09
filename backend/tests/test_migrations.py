@@ -31,6 +31,22 @@ def test_migration_0001_sqlite(tmp_path):
     assert EXPECTED <= tables
 
 
+def test_entitlement_cache_has_cert_column(tmp_path):
+    """PXP-14 Option C: the cert that verifies a cached token's leaf key
+    rides alongside it, un-encrypted (see EntitlementCache.cert)."""
+    from proxploy.config import Settings
+    from proxploy.db import run_migrations
+
+    db_url = f"sqlite:///{tmp_path}/m.db"
+    run_migrations(Settings(db_url=db_url))
+    eng = create_engine(db_url)
+    try:
+        cols = {c["name"] for c in inspect(eng).get_columns("entitlement_cache")}
+        assert "cert" in cols
+    finally:
+        eng.dispose()
+
+
 def test_sqlite_wal(tmp_path):
     from proxploy.config import Settings
     from proxploy.db import make_engine, run_migrations

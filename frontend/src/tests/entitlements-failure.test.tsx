@@ -24,7 +24,7 @@ describe('useEntitlements', () => {
 
   it('unknown is false and has() reflects the real flags once entitlements load', async () => {
     vi.mocked(api).mockResolvedValue({
-      tier: 'pro', features: { 'storage.manage': true }, grace: null,
+      tier: 'pro', features: { 'storage.manage': true }, grace: null, clock_skew: false,
     })
     const { result } = renderHook(() => useEntitlements(), { wrapper })
     await waitFor(() => expect(result.current.data).toBeDefined())

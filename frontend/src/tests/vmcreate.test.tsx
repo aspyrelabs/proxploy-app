@@ -25,7 +25,7 @@ vi.mock('../api/client', () => {
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method === 'GET') {
-        if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+        if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
         if (path === '/vms') {
           if (vmsListResult === 'error') return Promise.reject(new ApiError(502, { detail: 'boom' }))
           return Promise.resolve(vmsListResult === 'empty' ? [] : [VM])

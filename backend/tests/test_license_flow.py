@@ -2,49 +2,78 @@ import json
 
 
 class StubLicenseClient:
-    def __init__(self, fixture_path):
+    """Mints a token + a cert from the shared contract fixture's TEST-ONLY
+    root, mirroring what proxploy-api's dormant license service will hand
+    back (docs/09)."""
+    def __init__(self, fixture_path, *, refresh_returns_cert=True):
         fx = json.loads(fixture_path.read_text())
         self._fx = fx
+        self._refresh_returns_cert = refresh_returns_cert
         self.activations = []
         self.refreshes = []
 
-    def _mint(self):
+    def _mint_cert(self):
+        import jwt
+
+        from proxploy.models import utcnow
+
+        now = utcnow()
+        claims = {"kid": self._fx["leaf_kid"], "pub": self._fx["leaf_public_body"],
+                  "iat": int(now.timestamp()),
+                  "nbf": int(now.timestamp()) - 3600,
+                  "exp": int(now.timestamp()) + 180 * 86400}
+        return jwt.encode(claims, self._fx["root_private_key_pem"], algorithm="EdDSA",
+                          headers={"kid": self._fx["root_kid"]})
+
+    def _mint_token(self):
         import jwt
 
         from proxploy.models import utcnow
         claims = dict(self._fx["claims"])
         now = int(utcnow().timestamp())
         claims.update(iat=now, exp=now + 72 * 3600, grace_until=now + 30 * 86400)
-        return jwt.encode(claims, self._fx["private_key_pem"], algorithm="EdDSA",
-                          headers={"kid": self._fx["kid"]})
+        return jwt.encode(claims, self._fx["leaf_private_key_pem"], algorithm="EdDSA",
+                          headers={"kid": self._fx["leaf_kid"]})
 
     def activate(self, license_key, install_id):
         self.activations.append((license_key, install_id))
-        return {"token": self._mint(), "refresh_credential": "cred-123"}
+        return {"token": self._mint_token(), "cert": self._mint_cert(),
+                "refresh_credential": "cred-123"}
 
     def refresh(self, refresh_credential, install_id):
         assert refresh_credential == "cred-123"
         self.refreshes.append(install_id)
-        return {"token": self._mint()}
+        out = {"token": self._mint_token()}
+        if self._refresh_returns_cert:
+            out["cert"] = self._mint_cert()
+        return out
 
 
-def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
-    from pathlib import Path
-
-    from fastapi.testclient import TestClient
-
+def _fixture_app(tmp_path, stub, db_name="lic.db"):
     from proxploy.api.auth import limiter
     from proxploy.config import Settings
     from proxploy.main import create_app
 
-    fx_path = Path(__file__).parent / "contract" / "entitlement_token.fixture.json"
+    fx_path = _fx_path()
     fx = json.loads(fx_path.read_text())
-    stub = StubLicenseClient(fx_path)
     limiter.reset()
-    s = Settings(db_url=f"sqlite:///{tmp_path}/lic.db", data_dir=tmp_path,
+    s = Settings(db_url=f"sqlite:///{tmp_path}/{db_name}", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key")
-    app = create_app(s, public_keys={fx["kid"]: fx["public_key_pem"]},
-                     license_client=stub)
+    return create_app(s, roots={fx["root_kid"]: fx["root_public_key_pem"]},
+                      license_client=stub)
+
+
+def _fx_path():
+    from pathlib import Path
+
+    return Path(__file__).parent / "contract" / "entitlement_token.fixture.json"
+
+
+def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
+    from fastapi.testclient import TestClient
+
+    stub = StubLicenseClient(_fx_path())
+    app = _fixture_app(tmp_path, stub)
     with TestClient(app) as client:
         bootstrap_admin(client)
 
@@ -67,6 +96,31 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
                              headers=csrf_header(client)).status_code == 200
         ent = client.get("/api/v1/entitlements").json()
         assert ent["tier"] == "builtin" and len(ent["features"]) == 81
+
+
+def test_a_token_the_install_cannot_verify_does_not_destroy_the_cached_one(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Pins the ladder (PXP-14 Option C): a refresh that comes back with a
+    token this install cannot verify (here, no cert at all) must 502 rather
+    than silently landing, and the previously-applied tier must survive it."""
+    from fastapi.testclient import TestClient
+
+    stub = StubLicenseClient(_fx_path(), refresh_returns_cert=False)
+    app = _fixture_app(tmp_path, stub)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+
+        r = client.post("/api/v1/entitlements/license",
+                        json={"license_key": "PPL-TEST"}, headers=csrf_header(client))
+        assert r.status_code == 200
+        assert r.json()["tier"] == "pro"
+
+        r = client.post("/api/v1/entitlements/refresh", headers=csrf_header(client))
+        assert r.status_code == 502
+        assert "cannot verify" in r.json()["detail"]
+
+        ent = client.get("/api/v1/entitlements").json()
+        assert ent["tier"] == "pro"  # the good cached token is still in effect
 
 
 def test_client_revoke_sends_credential_and_install_id(monkeypatch):

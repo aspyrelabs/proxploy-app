@@ -1,6 +1,7 @@
 {
-  "_comment": "Shared app<->api entitlement-token contract fixture (doc 09). TEST-ONLY keypair - never used outside contract tests. Do not edit without amending docs/09 in proxploy-app and updating BOTH repos in the same change.",
-  "kid": "test-fixture-1",
+  "_comment": "Shared app<->api entitlement-token contract fixture (doc 09). TEST-ONLY keypairs - never used outside contract tests. Do not edit without amending docs/09 in proxploy-app and updating BOTH repos in the same change. Certificates are minted at test time from root_private_key_pem and are deliberately never checked in here, because a fixed exp would rot the suite.",
+  "leaf_kid": "test-fixture-leaf-1",
+  "root_kid": "test-fixture-root-1",
   "claims": {
     "sub": "lic_01HTESTFIXTURE",
     "tier": "pro",
@@ -9,6 +10,9 @@
     "exp": 1690259200,
     "grace_until": 1692592000
   },
-  "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIFneR1tFGj+1+w3hwJLWPU6e01fJVoQtS/qszF4UPjK5\n-----END PRIVATE KEY-----\n",
-  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwGxpY83XmGduLOnfz/4EG3SrK2leHuTQ0c6z8nDT/tM=\n-----END PUBLIC KEY-----\n"
+  "leaf_private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIFneR1tFGj+1+w3hwJLWPU6e01fJVoQtS/qszF4UPjK5\n-----END PRIVATE KEY-----\n",
+  "leaf_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAwGxpY83XmGduLOnfz/4EG3SrK2leHuTQ0c6z8nDT/tM=\n-----END PUBLIC KEY-----\n",
+  "leaf_public_body": "MCowBQYDK2VwAyEAwGxpY83XmGduLOnfz/4EG3SrK2leHuTQ0c6z8nDT/tM=",
+  "root_private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP8D/oXsX7UFZNLv/mrnquUH9f7oxU3SuE0n8qUie1G7\n-----END PRIVATE KEY-----\n",
+  "root_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMuoNxfvjrxQJNmEbLQMd2Q9ofLwG2Rfa1zAm77I+zfA=\n-----END PUBLIC KEY-----\n"
 }

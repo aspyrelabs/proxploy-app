@@ -7,7 +7,7 @@ let searchResults: { query: string; results: unknown[] } = { query: '', results:
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
-    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
     if (path.startsWith('/search')) return Promise.resolve(searchResults)
     return Promise.resolve(null)
   }),

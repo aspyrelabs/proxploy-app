@@ -40,7 +40,7 @@ vi.mock('../api/client', () => ({
       ])
     }
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'builtin', features: {}, grace: null })
+      return Promise.resolve({ tier: 'builtin', features: {}, grace: null, clock_skew: false })
     }
     return Promise.resolve(null)
   }),

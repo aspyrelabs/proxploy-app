@@ -37,15 +37,15 @@ def test_junk_is_rejected(junk):
 
 
 def test_bundled_keys_normalise_to_pem(tmp_path):
-    """The bundled set is stored bare; PyJWT needs PEM, so load_public_keys
+    """The bundled set is stored bare; PyJWT needs PEM, so load_root_keys
     is what bridges that. Also covers the operator overlay."""
     from types import SimpleNamespace
 
-    from proxploy.entitlements.keys import BUNDLED_PUBLIC_KEYS, load_public_keys
+    from proxploy.entitlements.keys import BUNDLED_ROOT_KEYS, load_root_keys
 
-    assert not any(v.startswith("-----") for v in BUNDLED_PUBLIC_KEYS.values()), \
+    assert not any(v.startswith("-----") for v in BUNDLED_ROOT_KEYS.values()), \
         "bundled keys are stored as bare bodies"
-    keys = load_public_keys(SimpleNamespace(ent_extra_keys_file=None))
+    keys = load_root_keys(SimpleNamespace(ent_extra_roots_file=None))
     assert keys and all(v.startswith("-----BEGIN PUBLIC KEY-----")
                         for v in keys.values())
 
@@ -56,14 +56,14 @@ def test_a_broken_overlay_key_is_dropped_not_fatal(tmp_path, keypair, caplog):
     import json
     from types import SimpleNamespace
 
-    from proxploy.entitlements.keys import load_public_keys
+    from proxploy.entitlements.keys import load_root_keys
 
     _, _, body = keypair
     f = tmp_path / "extra.json"
     f.write_text(json.dumps({"good-kid": body, "bad-kid": "garbage"}))
-    keys = load_public_keys(SimpleNamespace(ent_extra_keys_file=f))
+    keys = load_root_keys(SimpleNamespace(ent_extra_roots_file=f))
 
     assert "good-kid" in keys
     assert "bad-kid" not in keys
-    assert "dev-2026-07" in keys, "a bad overlay entry must not drop bundled keys"
+    assert "root-placeholder-2026-08" in keys, "a bad overlay entry must not drop bundled keys"
     assert "bad-kid" in caplog.text

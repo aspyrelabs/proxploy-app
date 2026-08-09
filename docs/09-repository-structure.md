@@ -183,10 +183,13 @@ both repos.
 
 ### Entitlement token (JWT, EdDSA/Ed25519: brief §7)
 
-Signed with Aspyre's private key on proxploy-api; verified offline in
-proxploy-app against the bundled public key. The JWT header carries a `kid`;
-the app bundles a small **set** of valid public keys so rotation is an
-overlap window, not a flag day (doc 07 §8).
+Signed with a short-lived leaf private key on proxploy-api; verified offline
+in proxploy-app as a chain: entitlement token to leaf key, leaf key to
+certificate, certificate to the bundled root public key (doc 07 §5). The
+token's JWT header carries a `kid` identifying the leaf key; the app bundles
+only the root public key(s), never trusts a leaf key directly, and the
+overlap-window rotation that used to apply to the app's key set now applies
+to which leaf certificates the root has signed (doc 07 §8).
 
 | Claim | Type | Meaning |
 |---|---|---|
@@ -197,19 +200,45 @@ overlap window, not a flag day (doc 07 §8).
 | `exp` | int (unix) | ~72 h after `iat`. App refreshes in the background well before this. |
 | `grace_until` | int (unix) | ~30 d after `iat`. Past `exp` but before `grace_until`, the cached token remains valid offline; transient network failure never locks a paying user out. |
 
-App-side behavior (restating brief §7 as contract): token cached on disk;
-refresh is background-only; **no license configured → built-in default map,
-zero network calls, forever**; during the dormant phase the default map and
-proxploy-api both resolve "all entitled."
+### Leaf certificate (JWT, EdDSA/Ed25519, signed by the offline root key)
+
+The certificate is itself a JWT. Its header `kid` identifies the **root**
+key that signed it (the app's bundled key); its claims identify and bound
+the **leaf** key that signs entitlement tokens.
+
+| Location | Field | Type | Meaning |
+|---|---|---|---|
+| header | `kid` | string | Root key id, looked up in the app's bundled root public keys. |
+| claims | `kid` | string | Leaf key id; must match the entitlement token's own header `kid`. |
+| claims | `pub` | string | Bare base64 SPKI body of the leaf public key. |
+| claims | `iat` | int (unix) | Issued at. |
+| claims | `nbf` | int (unix) | Not valid before this instant. |
+| claims | `exp` | int (unix) | Not valid after this instant; a leaf key past this point is implicitly revoked (doc 07 §5, §8). |
+
+`nbf`/`exp` (not custom `not_before`/`not_after` names) so PyJWT validates
+them natively with a `leeway=` argument, raising distinct
+`ImmatureSignatureError` / `ExpiredSignatureError`. `pub` is the bare base64
+SPKI body, the same convention `BUNDLED_PUBLIC_KEYS` and
+`proxploy/pubkey.py::load_public_key` already use for entitlement signing
+keys.
+
+App-side behavior (restating brief §7 as contract): token and cert cached on
+disk together; refresh is background-only; **no license configured →
+built-in default map, zero network calls, forever**; during the dormant
+phase the default map and proxploy-api both resolve "all entitled."
 
 ### app ↔ api endpoints
 
 | Method + path (on proxploy-api) | Request | Response | Notes |
 |---|---|---|---|
-| `POST /v1/licenses/activate` | `{ "license_key": str, "install_id": str }` | `{ "token": jwt, "refresh_credential": str }` | First contact: exchanges a purchased key for the first entitlement token; binds an install-generated `install_id` to the license and issues a per-install refresh credential (doc 07 §4). |
-| `POST /v1/entitlements/refresh` | `{ "refresh_credential": str }` | `{ "token": jwt }` | Background refresh, authenticated by the per-install refresh credential. |
+| `POST /v1/licenses/activate` | `{ "license_key": str, "install_id": str }` | `{ "token": jwt, "cert": jwt, "refresh_credential": str }` | First contact: exchanges a purchased key for the first entitlement token and its leaf certificate; binds an install-generated `install_id` to the license and issues a per-install refresh credential (doc 07 §4). |
+| `POST /v1/entitlements/refresh` | `{ "refresh_credential": str }` | `{ "token": jwt, "cert": jwt }` | Background refresh, authenticated by the per-install refresh credential. |
 | `POST /v1/licenses/revoke` | `{ "refresh_credential": str }` | `{ "revoked": true }` | Deactivates this install's refresh credential; the app ages through grace to the free-tier floor (doc 07 §8). |
 | `GET /v1/health` | n/a | `{ "status": "ok" }` | Operational only; the app never depends on it. |
+
+`cert` is required in both responses and is never null: every entitlement
+token is issued alongside the certificate for the leaf key that signed it,
+so the app always has what it needs to verify the chain offline.
 
 That is the entire surface. The app calls nothing else on proxploy-api
 (brief §6: entitlement refresh only, no analytics, no telemetry).

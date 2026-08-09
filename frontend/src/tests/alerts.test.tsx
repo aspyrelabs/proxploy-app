@@ -18,7 +18,7 @@ vi.mock('../api/client', () => ({
       posted.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
       return Promise.resolve({ id: 99 })
     }
-    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+    if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
     if (path === '/alerts?state=firing') {
       if (firingErrors) return Promise.reject(new Error('boom'))
       return Promise.resolve(firing)

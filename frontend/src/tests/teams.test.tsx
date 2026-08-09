@@ -47,7 +47,7 @@ vi.mock('../api/client', () => ({
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'builtin', features: { 'teams.rbac': teamsRbac }, grace: null })
+      return Promise.resolve({ tier: 'builtin', features: { 'teams.rbac': teamsRbac }, grace: null, clock_skew: false })
     }
     if (path === '/teams' && !method) {
       if (teamsError) return Promise.reject(new ApiError(502, { detail: 'boom' }))

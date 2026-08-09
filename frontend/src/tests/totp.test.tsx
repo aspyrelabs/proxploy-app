@@ -28,7 +28,7 @@ vi.mock('../api/client', () => ({
     const method = opts?.method
     if (path === '/entitlements') {
       if (entitlementsFail) return Promise.reject(new Error('boom'))
-      return Promise.resolve({ tier: 'builtin', features: { 'auth.totp': totpAllowed }, grace: null })
+      return Promise.resolve({ tier: 'builtin', features: { 'auth.totp': totpAllowed }, grace: null, clock_skew: false })
     }
     if (path === '/auth/me' && !method) {
       if (meFail) return Promise.reject(new Error('boom'))

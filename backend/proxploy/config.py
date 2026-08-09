@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     # PROXPLOY_API_BASE_URL keeps winning over that map. None here just means
     # "not explicitly set yet"; the validator below always resolves it.
     api_base_url: str | None = None
-    ent_extra_keys_file: Path | None = None
+    # Trusts one more ROOT that can bless any signer, not one more signer
+    # directly: a materially stronger grant than the old ent_extra_keys_file
+    # name implied, hence the rename rather than a back-compat alias.
+    ent_extra_roots_file: Path | None = None
     # GlitchTip (Sentry protocol) DSN for the `proxploy-app` project on
     # errors.aspyrelabs.com. Empty by default and it must STAY empty by
     # default: this app runs on someone else's hardware managing their

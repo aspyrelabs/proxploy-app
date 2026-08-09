@@ -11,7 +11,7 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({
         tier: 'builtin',
         features: { 'notify.channels': true, 'notify.routing': true },
-        grace: null,
+        grace: null, clock_skew: false,
       })
     }
     if (path === '/notifications/channels' && !opts?.method) {

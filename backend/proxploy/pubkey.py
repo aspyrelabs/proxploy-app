@@ -5,8 +5,8 @@ labels say what the bytes are; they do not contribute any. So accept the
 body on its own as well: one line pastes into a config field or a JSON
 value without the armor getting mangled on the way.
 
-Both key inputs on this side go through here: the entitlement signing keys
-(entitlements/keys.py, including the ent_extra_keys_file overlay) and the
+Both key inputs on this side go through here: the entitlement root keys
+(entitlements/keys.py, including the ent_extra_roots_file overlay) and the
 release-signing key (services/release.py). Neither is secret, so the only
 thing at stake is whether the bytes parse.
 """

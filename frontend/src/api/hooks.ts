@@ -6,6 +6,7 @@ export type Entitlements = {
   tier: string
   features: Record<string, boolean>
   grace: { expires_at: string; grace_until: string; in_grace: boolean } | null
+  clock_skew: boolean
 }
 
 export function useMe() {
@@ -22,6 +23,7 @@ export function useEntitlements() {
     ...q,
     tier: q.data?.tier ?? 'builtin',
     grace: q.data?.grace ?? null,
+    clockSkew: q.data?.clock_skew ?? false,
     // `has` stays fail-closed: a feature must never unlock because a fetch
     // failed, that would be a security bug. `unknown` is what lets a
     // consumer tell "not entitled" apart from "could not check" and render

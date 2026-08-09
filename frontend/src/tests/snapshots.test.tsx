@@ -24,7 +24,7 @@ vi.mock('../api/client', () => {
   return {
     ApiError,
     api: vi.fn((path: string, opts?: RequestInit) => {
-      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
       if (method === 'GET' && path === '/vms/9/snapshots') return Promise.resolve(SNAPS)

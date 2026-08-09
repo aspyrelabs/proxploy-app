@@ -16,7 +16,7 @@ vi.mock('../api/client', () => {
     ApiError,
     api: vi.fn((path: string, opts?: RequestInit) => {
       if (path === '/entitlements') {
-        return Promise.resolve({ tier: 'builtin', features: { 'apps.lifecycle': true, 'vms.lifecycle': true }, grace: null })
+        return Promise.resolve({ tier: 'builtin', features: { 'apps.lifecycle': true, 'vms.lifecycle': true }, grace: null, clock_skew: false })
       }
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
       calls.push({ path, body })

@@ -208,7 +208,7 @@ describe('Store catalog staleness banner', () => {
     const { api } = await import('../api/client')
     vi.mocked(api).mockImplementation((path: string) => {
       if (path === '/catalog/status') return Promise.resolve(status)
-      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null })
+      if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       return Promise.resolve(null)
     })
   }

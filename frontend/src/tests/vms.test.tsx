@@ -28,7 +28,7 @@ vi.mock('../api/client', () => {
         return Promise.resolve({
           tier: 'builtin',
           features: { 'vms.create': true, 'vms.lifecycle': true },
-          grace: null,
+          grace: null, clock_skew: false,
         })
       }
       if (method === 'GET' && path === '/vms/9') {

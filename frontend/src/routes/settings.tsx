@@ -147,7 +147,7 @@ export function SchedulesCard() {
 
 export function SettingsPage() {
   const ent = useEntitlements()
-  const { tier, grace } = ent
+  const { tier, grace, clockSkew } = ent
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
@@ -247,6 +247,11 @@ export function SettingsPage() {
           activates against the Proxploy licensing service.
           {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
         </p>
+        {clockSkew && (
+          <p className="mt-2 text-[13.5px] text-amber">
+            This machine&apos;s clock looks wrong. Fix the system time; entitlement checks depend on it.
+          </p>
+        )}
       </Card>
 
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>

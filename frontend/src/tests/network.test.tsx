@@ -72,7 +72,7 @@ vi.mock('../api/client', () => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
       if (path === '/entitlements') {
-        return Promise.resolve({ tier: 'builtin', features, grace: null })
+        return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       }
       if (method !== 'GET') calls.push({ path, method, body })
       if (path.startsWith('/network/bridges') && method === 'GET') {

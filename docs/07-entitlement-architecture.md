@@ -143,6 +143,25 @@ always **survives** an app release by construction, which is exactly why
 the multi-`kid` set is built into the app from **Phase 1** (doc 10), not
 bolted on the day rotation is first needed.
 
+**Amendment, 2026-08-08 (PXP-14, root-signed leaf certificates):** the
+single hosted signing key described above is superseded by a two-key,
+root-signed-leaf model (§5 below, doc 09 SHARED CONTRACT). proxploy-api now
+holds a short-lived **leaf** Ed25519 signing key, the key that actually
+signs entitlement tokens, plus a certificate for that leaf key signed by an
+offline **root** Ed25519 key. The root private key never touches the API
+host: it lives offline, is used only to sign new leaf certificates, and
+signs nothing else, it is not part of the API's runtime attack surface at
+all. The leaf private key lives on proxploy-api infrastructure the way the
+old single key did (KMS preferred, root-only file fallback, offline
+encrypted backup), but rotates far more often, since a leaked leaf key
+costs only that key's certificate validity window, not a full app release.
+The app no longer bundles a `kid`-keyed set of entitlement signing public
+keys at all; it bundles root public key(s) only, and trusts a leaf key
+solely because a certificate signed by a bundled root vouches for it.
+Rotation and revocation both move from "ship a new app release" to "mint,
+or let expire, a certificate," which is the point: certificate `exp` is
+what makes revocation work on installs that never update again (§5, §8).
+
 ### License and issued-token data model (defined now, not deferred)
 
 Two tables live in proxploy-api's own schema (SQLAlchemy + Alembic, doc 09
@@ -219,6 +238,49 @@ bolted on at sale time.
 - **Verification is local and pure:** no call to proxploy-api is ever needed
   to *check* a token, only to *obtain* one.
 
+  **Amendment, 2026-08-08 (PXP-14, root-signed leaf certificates):** "the
+  public key bundled in the app package" above described direct trust: the
+  app held a `kid`-keyed dict of valid entitlement-signing public keys and
+  checked a token's signature against one of them. That model is
+  superseded. Verification is now a **chain**, entitlement token → leaf key
+  → certificate → bundled root public key:
+
+  1. Read the entitlement token's header `kid` (a leaf key id).
+  2. Read the certificate issued alongside the token (a separate JWT; doc 09
+     SHARED CONTRACT, cert claims table). Its header `kid` names a **root**
+     key id; look that up in the app's small bundled set of root public
+     keys. An unrecognized root `kid` fails closed.
+  3. Verify the certificate's own EdDSA signature against that root public
+     key, and its `nbf`/`exp` claims. `nbf`/`exp`, not custom
+     `not_before`/`not_after` names, so PyJWT validates them natively with a
+     bounded `leeway`, raising distinct `ImmatureSignatureError` /
+     `ExpiredSignatureError`.
+  4. Confirm the certificate's claims `kid` equals the entitlement token's
+     header `kid`. A valid certificate for a different leaf key does not
+     vouch for this token.
+  5. Take the leaf public key from the certificate's `pub` claim (bare
+     base64 SPKI body, the same convention as `BUNDLED_PUBLIC_KEYS` and
+     `proxploy/pubkey.py::load_public_key`) and verify the entitlement
+     token's signature against it.
+  6. Only then apply the token's own `exp`/`grace_until` handling, as
+     before.
+
+  The app's bundled key set shrinks to root public keys only; it never
+  bundles or directly trusts a leaf key. This is what makes both rotation
+  (mint a new leaf key and certificate, no app release) and revocation (let
+  a certificate lapse, or simply stop minting new ones for a compromised
+  leaf) possible without shipping a release, closing the gap the day-0
+  design in §4 left open.
+
+  **Offline horizon, amended:** because the certificate itself carries an
+  `exp`, the cached-token offline horizon described above is no longer
+  `grace_until` alone. A cached token is honored offline only until
+  `min(grace_until, cert.exp + leeway)`. This is deliberate, not a bug: it
+  is the mechanism that makes a leaf certificate's expiry work as
+  revocation, one that holds even on installs that never come back online
+  to learn they were revoked, because the bound already lives in what they
+  cached (§8).
+
 ## 6. The no-license path (free tier, air-gapped)
 
 No license configured → the Entitlements service resolves purely from the
@@ -258,12 +320,18 @@ Grace-window behavior means "keep working, tell the truth in the UI."
 | Failure | App behavior |
 |---|---|
 | proxploy-api unreachable, cached token inside `exp` | Nothing changes. Background refresh retries with backoff. No UI noise. |
-| Token past `exp` but before `grace_until` | All features stay enabled from the cached token. Non-blocking banner: "License couldn't be refreshed, working offline until <grace date>." Refresh keeps retrying. |
-| Past `grace_until` | Token no longer honored → resolution falls back to the built-in default map (i.e., the free tier; which during dormancy is still everything). Clear banner with a re-activate action. Never a bricked install: the free tier floor always holds. |
+| Token past `exp` but before `min(grace_until, cert.exp + leeway)` | All features stay enabled from the cached token, its certificate still holds. Non-blocking banner: "License couldn't be refreshed, working offline until <the earlier of grace date and certificate expiry>." Refresh keeps retrying. |
+| Past `min(grace_until, cert.exp + leeway)` | Token no longer honored → resolution falls back to the built-in default map (i.e., the free tier; which during dormancy is still everything). Clear banner with a re-activate action. Never a bricked install: the free tier floor always holds. |
 | No license ever configured | §6 path. No network, no banners, full free tier. |
-| Clock skew | Verification applies a bounded leeway (PyJWT `leeway`, on the order of minutes) to `exp`/`iat`. A wildly wrong clock (days) can push a token past `grace_until` early, the UI surfaces "system clock appears incorrect" when `iat` is in the future beyond leeway, rather than a misleading license error. |
-| Signing key rotation | Tokens carry a `kid` header; the app bundles a small **set** of valid public keys. Rotation = proxploy-api signs with the new key while the app release carries both; old key retired after `grace_until` horizon passes. Mirrors the MultiFernet pattern used for secrets at rest (doc 08). |
-| `revoke` called | Refresh credential dead → refreshes fail → token ages through `exp` → grace → free-tier floor. Revocation is eventually consistent by design (offline validation is the point); the bound is `grace_until`. |
+| Clock skew | Verification applies a bounded leeway (PyJWT `leeway`, on the order of minutes) to `exp`/`iat`, and to the certificate's `nbf`/`exp` the same way. A wildly wrong clock (days) can push a token past its offline horizon early, the UI surfaces "system clock appears incorrect" when `iat` is in the future beyond leeway, rather than a misleading license error. |
+| Signing key rotation | Tokens carry a `kid` header naming a leaf key; the app bundles a small **set** of valid root public keys, never leaf keys directly (§5). Rotation = proxploy-api mints a new leaf key and a fresh certificate for it, signed by the same offline root; no app release needed unless the root itself rotates. Mirrors the MultiFernet pattern used for secrets at rest (doc 08). |
+| `revoke` called | Refresh credential dead → refreshes fail → token ages through `exp` → offline horizon → free-tier floor. Revocation is eventually consistent by design (offline validation is the point); the bound is `min(grace_until, cert.exp + leeway)`. |
+| Certificate missing (activate/refresh response has no `cert`, or the on-disk cache holds a token with no matching certificate) | Falls down the existing ladder: unusable as a live token → cached token, if its own offline horizon still holds → past that, the built-in default map. A response missing `cert` is a proxploy-api bug (doc 09: `cert` is required, never null), not something the app works around. |
+| Certificate malformed (not a valid JWT, wrong `alg`, etc.) | Same ladder: live token unusable → cached token → default map. Logged distinctly from "missing" for support triage. |
+| Unknown root `kid` (certificate header names a root key the app doesn't bundle) | Same ladder: fails closed, exactly like an unrecognized `kid` on the entitlement token today. A genuinely rotated root key ships in the next app release (§4's custody amendment). |
+| Certificate not yet valid (`nbf` in the future, beyond leeway) | Same ladder. PyJWT raises `ImmatureSignatureError`, treated as a verification failure rather than a lookup miss. |
+| Certificate expired (`exp` passed, beyond leeway) | Same ladder, and this is the deliberate revocation path (§5's offline-horizon amendment): once `cert.exp` passes, the entitlement token it vouches for stops being honored even if the token's own `grace_until` has not, so letting one leaf certificate lapse revokes every token it signed, offline, with no server round trip required. |
+| Token `kid` does not match certificate claims `kid` | Same ladder: the certificate does not vouch for this particular leaf key, treated as a verification failure. Guards against pairing a valid token with an unrelated, otherwise-valid certificate. |
 
 ## 9. Shared app↔api contract (referenced by doc 09)
 
@@ -297,3 +365,41 @@ renaming either requires a `/v2` and a deprecation window at least as long as
 `grace_until`. The app must ignore claims it doesn't know. Nothing beyond
 these endpoints may ever be added to the app→api call path without
 amending the brief (§6's "no analytics, no telemetry" rule).
+
+**Amendment, 2026-08-08 (PXP-14, root-signed leaf certificates):** the token
+schema above is unchanged, but it no longer travels alone, and the endpoint
+responses above are superseded. Every entitlement token is now issued
+together with a certificate for the leaf key that signed it (§4, §5); doc 09
+carries the same update.
+
+**Certificate schema** (JWT, EdDSA/Ed25519, header `{"alg": "EdDSA", "typ":
+"JWT", "kid": "<root key id>"}`):
+
+```json
+{
+  "kid": "<leaf key id>",
+  "pub": "<bare base64 SPKI body of the leaf public key>",
+  "iat": 1690000000,
+  "nbf": 1690000000,
+  "exp": 1690259200
+}
+```
+
+`nbf`/`exp`, not custom `not_before`/`not_after` names, so PyJWT validates
+them natively with a `leeway=` argument and raises distinct
+`ImmatureSignatureError` / `ExpiredSignatureError`. `pub` is the bare base64
+SPKI body, the same convention `BUNDLED_PUBLIC_KEYS` and
+`proxploy/pubkey.py::load_public_key` already use.
+
+**Endpoints, superseded** (proxploy-api, versioned under `/v1`):
+
+| Method + path | Request | Response |
+|---|---|---|
+| `POST /v1/licenses/activate` | `{license_key, install_id}` | `{token, cert, refresh_credential}` |
+| `POST /v1/entitlements/refresh` | `{refresh_credential}` | `{token, cert}` |
+| `POST /v1/licenses/revoke` | `{refresh_credential}` | `{revoked: true}` |
+| `GET /v1/health` | n/a | `{status: "ok"}` (operational only; the app never depends on it) |
+
+`cert` is required in both responses and is never null: every entitlement
+token is issued alongside the certificate for the leaf key that signed it,
+so the app always has what it needs to verify the chain offline (§5).

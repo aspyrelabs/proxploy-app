@@ -27,7 +27,7 @@ vi.mock('../api/client', () => ({
   api: vi.fn((path: string, opts?: any) => {
     calls.push({ path, opts })
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'pro', features, grace: null })
+      return Promise.resolve({ tier: 'pro', features, grace: null, clock_skew: false })
     }
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
     if (path.endsWith('/events')) return Promise.resolve([])

@@ -488,6 +488,10 @@ class EntitlementCache(TimestampMixin, Base):
     __tablename__ = "entitlement_cache"
     id: Mapped[int] = mapped_column(primary_key=True)  # always 1
     token: Mapped[str | None] = mapped_column(Text)  # Fernet ciphertext, base64 str
+    # NOT encrypted, unlike token: a cert is a signed public key, public by
+    # construction (handed to every install), so encrypting it buys nothing
+    # and adds a way for a master-key problem to take out verification.
+    cert: Mapped[str | None] = mapped_column(Text)
     tier: Mapped[str] = mapped_column(Text, default="builtin", nullable=False)
     features: Mapped[dict | None] = mapped_column(JSON)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime)
