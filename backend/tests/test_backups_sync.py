@@ -307,28 +307,89 @@ def test_backups_list_requires_auth(tmp_path):
 
 
 def test_concurrent_stale_reads_enqueue_only_one_sync(tmp_path, bootstrap_admin):
-    """The anti-stampede guard (api/backups.py's module-level lock) must hold
-    under REAL concurrency, not just sequential calls from one client; the
-    page is polled every 60s and may be open in several tabs at once, each
-    hitting GET /backups from a different FastAPI threadpool thread at
-    roughly the same time. A bare check-then-enqueue (no lock) races: N
-    threads can all see "no sync in flight" before any of them commits its
-    Job row, producing N jobs instead of one."""
+    """The anti-stampede guard (api/backups.py's module-level lock, plus
+    sync_in_flight's db.rollback()) must hold under REAL concurrency, not just
+    sequential calls from one client; the page is polled every 60s and may be
+    open in several tabs at once, each hitting GET /backups from a different
+    FastAPI threadpool thread at roughly the same time. A bare
+    check-then-enqueue (no lock) races: N threads can all see "no sync in
+    flight" before any of them commits its Job row, producing N jobs instead
+    of one.
+
+    The handler is PINNED for the duration, and that is the whole point rather
+    than a convenience. What the guard promises is "no second sync while one
+    is in flight", and `sync_in_flight` counts exactly the queued/running
+    rows. Nothing here configures a host, so the real handler finishes almost
+    immediately, and a thread that looks after it finished is then CORRECT to
+    enqueue a second job. Asserting a bare total of 1 without pinning was
+    therefore asserting something the guard never promised: it passed on a
+    fast machine, and failed on a loaded CI runner, while the code under test
+    was behaving exactly as designed.
+    """
+    import threading
     from concurrent.futures import ThreadPoolExecutor
+
     from fastapi.testclient import TestClient
+
+    from proxploy.jobs import HANDLERS
     from tests.support import make_app
 
+    WORKERS = 8
+    release = threading.Event()
+    started = threading.Event()
+
+    async def _pinned(ctx, params):
+        started.set()
+        # Bounded so a regression fails as an assertion rather than hanging
+        # the suite; the finally below normally releases it long before.
+        await asyncio.to_thread(release.wait, 30)
+        return {}
+
+    # make_app first: "backup.sync" lands in HANDLERS as an import side effect
+    # of services/backupjobs, so the key does not exist until something pulls
+    # that module in. The backend looks the handler up at enqueue time, so
+    # swapping it after the app is built is still in time.
     app = make_app(tmp_path)
-    c = TestClient(app)
-    with c:
-        bootstrap_admin(c)
+    real = HANDLERS["backup.sync"]
+    HANDLERS["backup.sync"] = _pinned
+    try:
+        c = TestClient(app)
+        with c:
+            bootstrap_admin(c)
 
-        def hit(_):
-            return c.get("/api/v1/backups").status_code
+            # The barrier is what makes this a race test rather than a
+            # coin flip. Without it the threads trickle into the handler as
+            # the pool starts them, the window between check and enqueue is
+            # tens of microseconds wide, and an unguarded build slips through
+            # most runs: removing the lock was caught only once in three
+            # tries. Releasing all N at one instant puts them in that window
+            # together, which is the situation several open browser tabs
+            # actually produce.
+            gate = threading.Barrier(WORKERS)
 
-        with ThreadPoolExecutor(max_workers=16) as pool:
-            statuses = list(pool.map(hit, range(16)))
-        assert all(s == 200 for s in statuses)
+            def hit(_):
+                gate.wait(timeout=10)
+                return c.get("/api/v1/backups").status_code
 
-        with app.state.sessionmaker() as db:
-            assert db.query(Job).filter_by(kind="backup.sync").count() == 1
+            # WORKERS stays under the engine pool ceiling (5 + 10 overflow):
+            # every in-flight request holds a session for its whole duration,
+            # so a wider burst makes the surplus wait out the 30s checkout
+            # timeout and fail as QueuePool TimeoutError. That is bench
+            # pressure on the connection pool, not the race under test.
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                statuses = list(pool.map(hit, range(WORKERS)))
+            assert all(s == 200 for s in statuses)
+            assert started.wait(10), "the first sync job never started"
+
+            # Still pinned, so every one of those reads saw a sync in flight.
+            # Exactly one row is the guard doing its job.
+            with app.state.sessionmaker() as db:
+                assert db.query(Job).filter_by(kind="backup.sync").count() == 1
+
+            # Unpin INSIDE the client context: TestClient's exit runs app
+            # shutdown, which waits on in-flight jobs, so releasing in the
+            # finally below would make every run pay the pin's full timeout.
+            release.set()
+    finally:
+        release.set()
+        HANDLERS["backup.sync"] = real

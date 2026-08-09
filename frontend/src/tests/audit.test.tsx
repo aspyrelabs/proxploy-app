@@ -78,3 +78,67 @@ describe('AuditPage export buttons', () => {
     expect(url.searchParams.get('from_')).toBe('2026-08-01T00:00')
   })
 })
+
+describe('AuditPage pagination boundary', () => {
+  const qc = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrap = () => render(<QueryClientProvider client={qc()}><AuditPage /></QueryClientProvider>)
+
+  const row = (id: number) => ({
+    id, ts: '2026-08-09T00:00:00Z', actor_id: 1, actor_label: 'admin',
+    action: 'host.sync', target: null, result: 'ok', ip: '127.0.0.1',
+  })
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const serve = async (count: number) => {
+    const { api } = await import('../api/client')
+    ;(api as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path === '/entitlements') {
+        return Promise.resolve({ tier: 'pro', features: { 'audit.log': true }, grace: null, clock_skew: false })
+      }
+      if (path.startsWith('/audit')) {
+        return Promise.resolve(Array.from({ length: count }, (_, i) => row(i + 1)))
+      }
+      return Promise.resolve(null)
+    })
+  }
+
+  it('asks for one row beyond the page so "more" is a fact, not a guess', async () => {
+    // One row, not zero: an empty result renders the empty state instead of
+    // the table, and this assertion is about the request, not the table.
+    await serve(1)
+    wrap()
+    const { api } = await import('../api/client')
+    await screen.findByRole('button', { name: 'Next' })
+    const call = (api as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0])).find((p) => p.startsWith('/audit'))!
+    // 51, not 50: the extra row is the whole mechanism.
+    expect(new URL(call, 'http://x').searchParams.get('per_page')).toBe('51')
+  })
+
+  it('disables Next on an exactly-full last page, the case the old heuristic got wrong', async () => {
+    // Exactly AUDIT_PER_PAGE rows come back, meaning the total was an exact
+    // multiple and there is nothing after this page. The old check
+    // (rows.length < AUDIT_PER_PAGE) left Next enabled here and walked the
+    // user into an empty table.
+    await serve(50)
+    wrap()
+    expect((await screen.findByRole('button', { name: 'Next' })) as HTMLButtonElement)
+      .toBeDisabled()
+  })
+
+  it('enables Next when the extra row shows another page exists', async () => {
+    await serve(51)
+    wrap()
+    expect((await screen.findByRole('button', { name: 'Next' })) as HTMLButtonElement)
+      .not.toBeDisabled()
+  })
+
+  it('never renders the probe row', async () => {
+    await serve(51)
+    wrap()
+    await screen.findByRole('button', { name: 'Next' })
+    // 51 fetched, 50 rendered, plus the header row.
+    expect(screen.getAllByRole('row')).toHaveLength(51)
+  })
+})

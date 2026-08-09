@@ -31,7 +31,15 @@ export function useAuditLog(filters: AuditFilters, page: number, enabled = true)
     queryFn: () => {
       const p = new URLSearchParams(filterEntries(filters))
       p.set('page', String(page))
-      p.set('per_page', String(AUDIT_PER_PAGE))
+      // One more row than the page renders. Its presence is an exact answer
+      // to "is there another page", which the old "did this page come back
+      // full" heuristic got wrong on every exact multiple of the page size:
+      // the last full page kept Next enabled and walked the user into a blank
+      // table. The true total does come back in X-Total-Count, but api()
+      // surfaces only the JSON body by design, and widening that shared
+      // signature for one screen costs more than fetching one extra row.
+      // The route slices back to AUDIT_PER_PAGE for display.
+      p.set('per_page', String(AUDIT_PER_PAGE + 1))
       return api<AuditRow[]>(`/audit?${p.toString()}`)
     },
     enabled,

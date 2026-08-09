@@ -80,7 +80,13 @@ export function AuditPage() {
                       emptyNote="Try widening the filters."
                       errorTitle="Audit log not readable"
                       errorNote="Proxploy could not reach the backend to list audit events.">
-            {(rows) => (
+            {(fetched) => {
+              // The hook asks for one row past the page so "is there more"
+              // is a fact rather than an inference; that extra row is never
+              // rendered.
+              const rows = fetched.slice(0, AUDIT_PER_PAGE)
+              const hasMore = fetched.length > AUDIT_PER_PAGE
+              return (
               <>
                 <table className="w-full text-left text-[13px]">
                   <thead><tr className={th}>
@@ -109,13 +115,14 @@ export function AuditPage() {
                   <Button variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                     Previous
                   </Button>
-                  <Button variant="ghost" disabled={rows.length < AUDIT_PER_PAGE}
+                  <Button variant="ghost" disabled={!hasMore}
                     onClick={() => setPage((p) => p + 1)}>
                     Next
                   </Button>
                 </div>
               </>
-            )}
+              )
+            }}
           </QueryState>
         </section>
       </LockVeil>
