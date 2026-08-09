@@ -49,7 +49,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$version" ] && [ -n "$key" ] && [ -n "$out" ] || usage
+if [ -z "$version" ] || [ -z "$key" ] || [ -z "$out" ]; then usage; fi
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: --version must be semver (x.y.z), got '$version'" >&2; exit 1; }
 [ -f "$key" ] || { echo "error: --key '$key' not found" >&2; exit 1; }
 
@@ -82,6 +82,17 @@ cp -r "$frontend_dir/dist" "$stage/frontend/dist"
 
 log "overriding staged version to $version..."
 printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
+
+# An installed release verifies the NEXT release's manifest against the pubkey
+# it shipped with (proxploy-update reads release_pubkey.pem out of
+# $PP_CURRENT), so that file has to be the public half of whatever key signed
+# the release carrying it. Deriving it here guarantees that. Maintaining it as
+# a hand-committed file did not: the checked-in placeholder matched only
+# packaging/tests/DEV_ONLY_release_key.pem, which is gitignored, so the
+# upgrade harness verified fine on the one box holding that key and failed
+# everywhere else with "manifest signature is not valid".
+log "baking the public half of --key into the release..."
+openssl pkey -in "$key" -pubout -out "$stage/backend/proxploy/release_pubkey.pem"
 
 if [ "$poison" -eq 1 ]; then
   log "poisoning staged main.py (rollback fixture only)..."

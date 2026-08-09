@@ -78,7 +78,12 @@ export default defineConfig({
       cwd: root,
       url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: false,
-      timeout: 30_000,
+      // 30s was enough on a warm dev box and not on a cold CI runner, where
+      // vite's first start also pays for dependency optimisation against an
+      // empty cache. It failed as "Timed out waiting 30000ms from
+      // config.webServer" with the backend already up and healthy, which
+      // reads like a product fault and is not one.
+      timeout: 120_000,
     },
   ],
 })
