@@ -63,7 +63,17 @@ async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: st
         raise
 
     exitstatus = status.get("exitstatus")
-    if exitstatus != "OK":
+    # Proxmox reports three shapes here: "OK", "WARNINGS: <n>" for a task that
+    # COMPLETED but logged warnings, and an error string for a real failure.
+    # Only the third is a failure; PVE's own UI shows the second as finished.
+    # Treating it as failure marked successful work red, and for the handlers
+    # that clean up after a JobFailed it undid work that had actually landed.
+    # Caught on PVE 9.2.6 (2026-08-10) by a `pct reboot` that returned
+    # "WARNINGS: 1" and rebooted the container perfectly well.
+    if exitstatus and exitstatus.startswith("WARNINGS:"):
+        ctx.log(f"proxmox task {upid} finished with {exitstatus.lower()}; "
+                f"see the task log above", stream="stderr")
+    elif exitstatus != "OK":
         # Fail closed: a stopped task with a missing/None exitstatus is an
         # unknown outcome, not a success, contra proxmox.py's own contract.
         reason = exitstatus if exitstatus else "no exitstatus reported"

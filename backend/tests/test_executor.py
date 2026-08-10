@@ -263,3 +263,39 @@ def test_run_for_host_strips_scheme_and_port_from_the_stored_address(tmp_path):
         pinned_fingerprint=None, on_new_fingerprint=lambda fp: None))
 
     assert status == 0
+
+
+def test_an_unreachable_host_fails_with_a_sentence_not_an_empty_string():
+    """asyncssh's connect timeout raises a bare TimeoutError whose str() is "",
+    and jobs/backend.py stores str(exc) as `jobs.error`. An unreachable node
+    therefore produced a failed job with a completely blank reason: the
+    operator saw "failed" and nothing else. Confirmed 2026-08-10 by pointing a
+    real job at an unroutable address."""
+    from proxploy.executor.ssh import SSHUnreachable
+
+    async def boom(*_a, **_k):
+        raise TimeoutError()          # str() == ""
+
+    with pytest.raises(SSHUnreachable) as ei:
+        asyncio.run(SSHExecutor(connect_factory=boom).run(
+            "https://192.0.2.99:8006", b"pem", "hostname",
+            pinned_fingerprint=None, on_new_fingerprint=lambda fp: None))
+
+    msg = str(ei.value)
+    assert msg.strip(), "still blank"
+    assert "192.0.2.99" in msg          # names the host it could not reach
+    assert "TimeoutError" in msg        # and what went wrong
+
+
+def test_a_host_key_mismatch_is_not_reworded_as_unreachable():
+    """SSHHostKeyMismatch already says exactly what happened, and it is a
+    security signal: it must not be swallowed into a generic connect error."""
+    from proxploy.executor.ssh import SSHHostKeyMismatch
+
+    async def boom(*_a, **_k):
+        raise SSHHostKeyMismatch("host key changed: pinned X, saw Y")
+
+    with pytest.raises(SSHHostKeyMismatch):
+        asyncio.run(SSHExecutor(connect_factory=boom).run(
+            "10.0.0.9", b"pem", "hostname",
+            pinned_fingerprint="SHA256:X", on_new_fingerprint=lambda fp: None))

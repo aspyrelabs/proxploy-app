@@ -79,6 +79,26 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
                 f"the request may have already reached proxmox; no task id was "
                 f"captured to track it", stream="stderr")
         raise
+    except ProxmoxError as e:
+        # Stopping something already stopped is the outcome the caller wanted,
+        # not a failure. PVE answers "CT 502 not running" / "VM 600 not
+        # running" with a 500, which surfaced in the UI as a red failed job for
+        # a no-op (PVE 9.2.6, 2026-08-10). run_app_uninstall already tolerated
+        # exactly this case; the same reasoning belongs here.
+        #
+        # ponytail: matched on PVE's message text, since there is no status
+        # read on the client and adding a /cluster/resources round trip before
+        # every stop costs more than this string comparison. If PVE ever
+        # rephrases it, the job goes back to failing loudly rather than
+        # silently doing the wrong thing.
+        if action in ("stop", "shutdown") and "not running" in str(e):
+            ctx.log(f"{name} ({kind} {vmid}) is already stopped; nothing to do")
+            app.state.bus.publish("resource", {"type": target_type,
+                                               "id": target_id,
+                                               "change": "lifecycle"})
+            return {"upid": None, "exitstatus": "OK", "node": node,
+                    "vmid": vmid, "noop": "already stopped"}
+        raise
     status = await await_task(ctx, client, node, upid,
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 

@@ -295,6 +295,12 @@ class _ActionLeaf:
     def post(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
+        # `action_error` makes the guest action itself fail the way PVE does
+        # (a 500 with a sentence), as opposed to `task_exit`, which fails the
+        # task AFTER it was accepted. Stop-on-a-stopped-guest is the first case
+        # that needed the distinction.
+        if self._owner.action_error:
+            raise RuntimeError(f"500 Internal Server Error: {self._owner.action_error}")
         return self._owner._record_action(self._kind, self._vmid, self._action)
 
 
@@ -545,6 +551,10 @@ class FakePVE:
         self.access = _Access(permissions or {}, fail)
         # infra reads (Phase 6): set before the namespaces below, which read
         # them lazily so a test can reassign any of these post-construction
+        # Set to a PVE error sentence to make a guest ACTION (start/stop/...)
+        # fail at the POST, as distinct from task_exit, which fails the task
+        # after PVE accepted it.
+        self.action_error: str | None = None
         self.storages_by_node: dict[str, list[dict]] = {}
         self.storage_status_response: dict = {}
         self.content_by_storage: dict[str, list[dict]] = {}

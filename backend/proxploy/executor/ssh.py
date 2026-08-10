@@ -52,6 +52,16 @@ class SSHHostKeyMismatch(Exception):
     connect (doc 08 §4: hard-fail, never auto-accept)."""
 
 
+class SSHUnreachable(Exception):
+    """Could not open an SSH connection at all.
+
+    asyncssh's connect timeout raises a bare `TimeoutError()` whose str() is
+    the EMPTY STRING, and jobs/backend.py stores str(exc) as `jobs.error`. An
+    unreachable node therefore produced a failed job with a completely blank
+    reason (confirmed 2026-08-10 against an unroutable address). Every connect
+    failure gets a sentence here instead."""
+
+
 async def default_connect_factory(host: str, private_key_pem: bytes, *,
                                   pinned_fingerprint: str | None,
                                   on_new_fingerprint: Callable[[str], None],
@@ -125,9 +135,18 @@ class SSHExecutor:
         for k in (env or {}):
             if not _ENV_KEY_RE.match(k):
                 raise ValueError(f"invalid env var name: {k!r}")
-        conn = await self._connect_factory(
-            normalize_ssh_host(host), private_key_pem, pinned_fingerprint=pinned_fingerprint,
-            on_new_fingerprint=on_new_fingerprint)
+        target = normalize_ssh_host(host)
+        try:
+            conn = await self._connect_factory(
+                target, private_key_pem, pinned_fingerprint=pinned_fingerprint,
+                on_new_fingerprint=on_new_fingerprint)
+        except (SSHHostKeyMismatch, asyncio.CancelledError):
+            raise            # both already say exactly what happened
+        except Exception as e:  # noqa: BLE001
+            # TimeoutError in particular stringifies to "", see SSHUnreachable.
+            detail = str(e) or f"{type(e).__name__} after {CONNECT_TIMEOUT_S:.0f}s"
+            raise SSHUnreachable(
+                f"could not open an SSH connection to {target}: {detail}") from e
         async with conn:
             env_prefix = " ".join(f"{k}={shlex.quote(str(v))}"
                                   for k, v in (env or {}).items())

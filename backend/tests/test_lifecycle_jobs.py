@@ -445,3 +445,49 @@ def test_missing_credential_fails_the_job(tmp_path):
             assert "no API token credential" in job.error
 
     asyncio.run(run())
+
+
+def _run_stop(tmp_path, action_error):
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        fake.action_error = action_error
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id,
+                                     params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            msgs = [e.message for e in db.query(JobEvent)
+                    .filter_by(job_id=job_id).order_by(JobEvent.seq)]
+            return job.status, job.error, job.result, msgs
+
+    return asyncio.run(run())
+
+
+def test_stopping_an_already_stopped_guest_is_a_no_op_not_a_failure(tmp_path):
+    """PVE answers `stop` on a stopped guest with a 500 "CT 150 not running",
+    which surfaced as a red failed job for a no-op (PVE 9.2.6, 2026-08-10).
+    Stop is idempotent: asking for stopped and getting stopped is success,
+    whoever did the stopping. run_app_uninstall already tolerated this case."""
+    status, error, result, msgs = _run_stop(tmp_path, "CT 150 not running")
+    assert status == "succeeded", error
+    assert result["noop"] == "already stopped"
+    assert result["upid"] is None
+    assert any("already stopped" in m for m in msgs)
+
+
+def test_a_stop_that_fails_for_any_other_reason_still_fails(tmp_path):
+    """The idempotency above must not swallow a real error."""
+    status, error, _result, _msgs = _run_stop(tmp_path, "CT 150 is locked (backup)")
+    assert status == "failed"
+    assert "locked" in error

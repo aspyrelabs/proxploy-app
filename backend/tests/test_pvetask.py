@@ -233,3 +233,26 @@ def test_enqueue_and_audit_writes_the_job_the_audit_row_and_the_202_body(tmp_pat
                 assert row.ip == "10.9.9.9" and row.actor_id == u.id
     finally:
         HANDLERS.pop("test.enqueue", None)
+
+
+def test_await_task_treats_warnings_as_a_completed_task(tmp_path):
+    """Proxmox reports "WARNINGS: <n>" for a task that COMPLETED but logged
+    warnings; its own UI shows that as finished, not failed. Failing the job
+    on it marked successful work red, and in handlers that clean up after a
+    JobFailed it undid work that had actually landed.
+
+    Real case, PVE 9.2.6 on 2026-08-10: `pct reboot` returned "WARNINGS: 1",
+    the container rebooted perfectly, and the job was reported failed.
+    """
+    fake = FakePVE(task_exit="WARNINGS: 1")
+
+    async def body(ctx, client, upid):
+        return await await_task(ctx, client, "pve1", upid, poll_s=0.01)
+
+    out = _run_probe(tmp_path, fake, body=body)
+    assert out.status == "succeeded", out.error
+    assert out.result["exitstatus"] == "WARNINGS: 1"
+    # ...but it must not pass silently: the operator still gets told.
+    warned = [m for m, stream in out.events
+              if "warnings: 1" in m.lower() and stream == "stderr"]
+    assert warned, f"no warning surfaced to the job log: {out.events}"
