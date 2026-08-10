@@ -39,6 +39,7 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
     host = db.get(Host, a.host_id)
     if host is None:
         raise HTTPException(404, "host not found")
+    _refuse_if_not_running(a.status_cached, a.name)
     try:
         client = client_for_host(request.app, db, host)
     except ProxmoxError as e:
@@ -54,6 +55,41 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
                target_type="app", target_id=a.id,
                ip=request.client.host if request.client else None)
     return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
+
+
+# PVE happily mints a termproxy ticket for a guest that is not running, and the
+# websocket then connects to a PTY that never emits a byte: the operator gets a
+# blank terminal with no error and no hint (seen on PVE 9.2.6, 2026-08-10).
+# Refuse up front instead.
+#
+# Only a KNOWN stopped state refuses. An unknown/None status (poller has not run
+# yet, or the row predates it) falls through and opens the console, because
+# blocking a console on a missing cache entry would be a worse failure than the
+# blank terminal this prevents.
+_NOT_RUNNING = frozenset({"stopped", "paused", "suspended"})
+
+
+def _refuse_if_not_running(status: str | None, name: str) -> None:
+    if (status or "").lower() in _NOT_RUNNING:
+        raise HTTPException(409, {
+            "error": "guest_not_running",
+            "detail": f"{name} is {status}; start it before opening a console."})
+
+
+def _auth_header_for(app, db, host: Host | None) -> str | None:
+    """The `Authorization` value the two WS handlers must forward upstream.
+
+    Returns None rather than raising when the host has no usable token: the
+    connect below then fails with Proxmox's own 401, which both handlers
+    already surface as a clean close. A missing credential is not worth a
+    second, differently-shaped error path here.
+    """
+    if host is None:
+        return None
+    try:
+        return client_for_host(app, db, host).pve_auth_header
+    except ProxmoxError:
+        return None
 
 
 # row.kind -> callable resolving the Host.id the ticket's node/guest lives on,
@@ -94,6 +130,9 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *, expected_kind
             return
         host_id = _HOST_ID_RESOLVERS[row.kind](db, row)
         host = db.get(Host, host_id) if host_id is not None else None
+        # Built here, while the session is still open: PVE authenticates the
+        # websocket upgrade itself, and the credential lives behind the db.
+        auth_header = _auth_header_for(websocket.app, db, host)
     finally:
         db.close()
     if host is None:
@@ -114,7 +153,7 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *, expected_kind
             address=host.address, node=row.node, guest_kind=row.guest_kind, vmid=row.vmid,
             upstream_user=row.upstream_user, upstream_ticket=row.upstream_ticket,
             upstream_port=row.upstream_port, verify_tls=host.verify_tls,
-            tls_fingerprint=host.tls_fingerprint)
+            tls_fingerprint=host.tls_fingerprint, auth_header=auth_header)
     except PtyBridgeError as e:
         await websocket.send_text(jsonlib.dumps({"type": "exit", "code": 1, "error": str(e)}))
         await websocket.close()
@@ -179,6 +218,7 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
     host = db.get(Host, v.host_id)
     if host is None:
         raise HTTPException(404, "host not found")
+    _refuse_if_not_running(v.status, v.name or f"vm {v.vmid}")
     try:
         client = client_for_host(request.app, db, host)
     except ProxmoxError as e:
@@ -209,6 +249,7 @@ async def vm_vnc_ws(websocket: WebSocket, vm_id: int, ticket: str | None = None)
             return
         v = db.get(Vm, row.target_id)
         host = db.get(Host, v.host_id) if v is not None else None
+        auth_header = _auth_header_for(websocket.app, db, host)
     finally:
         db.close()
     if host is None:
@@ -222,7 +263,8 @@ async def vm_vnc_ws(websocket: WebSocket, vm_id: int, ticket: str | None = None)
         upstream = await connect_upstream_vnc(
             address=host.address, node=row.node, vmid=row.vmid,
             upstream_ticket=row.upstream_ticket, upstream_port=row.upstream_port,
-            verify_tls=host.verify_tls, tls_fingerprint=host.tls_fingerprint)
+            verify_tls=host.verify_tls, tls_fingerprint=host.tls_fingerprint,
+            auth_header=auth_header)
     except ConsoleProxyError as e:
         # VNC has no JSON control-frame channel like PtyBridge's exit frame --
         # the close code/reason is the only signal available to the browser.

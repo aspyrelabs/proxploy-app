@@ -289,3 +289,60 @@ def test_bridge_pty_ignores_malformed_resize_instead_of_crashing():
         finally:
             await fake.stop()
     asyncio.run(run())
+
+
+def test_upstream_url_and_headers_are_what_a_real_pve_requires(monkeypatch):
+    """The three defects a live PVE 9.2.6 found on 2026-08-10, none of which
+    any other test in this file can see.
+
+    Every other test here injects `ws_connect`, which skips URL construction
+    and header assembly entirely -- so the real path went five phases without
+    once being exercised. Against genuine Proxmox all three are fatal:
+
+    - no Authorization header: PVE authenticates the websocket UPGRADE, not
+      just the termproxy POST, and answers `401 No ticket`;
+    - unquoted vncticket: a PVEVNC ticket is base64, so a "+" arrives as a
+      space and PVE rejects it, again with a bare 401;
+    - bytes frames: the `binary` subprotocol means a real node's frames are
+      bytes, and the browser half of the bridge sends text.
+    """
+    captured = {}
+
+    class _FakeWS:
+        async def send(self, _):
+            return None
+
+        async def recv(self):
+            return b"OKprompt$ "        # bytes, exactly as a real node sends
+
+        async def close(self):
+            return None
+
+    def fake_connect(uri, **kw):
+        captured["uri"] = uri
+        captured["headers"] = kw.get("additional_headers")
+
+        class _Ctx:
+            def __await__(self):
+                async def _go():
+                    return _FakeWS()
+                return _go().__await__()
+        return _Ctx()
+
+    monkeypatch.setattr(ptybridge_mod.websockets, "connect", fake_connect)
+    monkeypatch.setattr(ptybridge_mod, "open_validated_tcp_socket", lambda h, p: None)
+
+    async def run():
+        return await connect_upstream_pty(
+            address="https://10.0.0.5:8006", node="pve1", guest_kind="lxc", vmid=150,
+            upstream_user="root@pam!testing", upstream_ticket="PVEVNC:a+b/c=",
+            upstream_port="5900", verify_tls=True, tls_fingerprint=None,
+            auth_header="PVEAPIToken=root@pam!testing=secret")
+
+    _upstream, buffered = asyncio.run(run())
+
+    assert captured["headers"] == {"Authorization": "PVEAPIToken=root@pam!testing=secret"}
+    assert "vncticket=PVEVNC%3Aa%2Bb%2Fc%3D" in captured["uri"], captured["uri"]
+    assert "+" not in captured["uri"].split("vncticket=")[1]
+    # bytes in, str out, with Proxmox's "OK" prefix stripped
+    assert buffered == "prompt$ "

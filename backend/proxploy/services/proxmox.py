@@ -228,6 +228,20 @@ class ProxmoxClient:
         self._factory = factory or default_factory
         self._api = None
 
+    @property
+    def pve_auth_header(self) -> str:
+        """`Authorization` value for the two console websocket endpoints, the
+        only PVE calls that do not go through proxmoxer (which sets this
+        header itself on every REST request).
+
+        PVE authenticates the vncwebsocket UPGRADE, not just the termproxy POST
+        that precedes it. Without this header the upgrade is rejected
+        `401 No ticket` on every real node, whatever the ticket says. Verified
+        working for lxc on PVE 9.2.6 (2026-08-10), which also settles doc 11's
+        open question about bugzilla #6079 for the LXC path.
+        """
+        return f"PVEAPIToken={self.token_id}={self.token_secret}"
+
     def _wrap(self, prefix: str, e: Exception) -> ProxmoxError:
         """The ONE place a proxmoxer/requests exception becomes our own.
 

@@ -291,3 +291,58 @@ def test_vm_vnc_ws_closes_with_reason_on_connect_upstream_vnc_error(tmp_path, cs
                 ws.receive_bytes()
         assert exc_info.value.code == 1011
         assert "mismatch" in exc_info.value.reason
+
+
+def _seed_app_with_status(db, host, status, ctid=160, name="redis"):
+    from proxploy.models import App
+
+    a = App(host_id=host.id, ctid=ctid, name=name, status_cached=status,
+            slug=f"{name}-{ctid}")
+    db.add(a)
+    db.commit()
+    return a
+
+
+def test_console_ticket_refuses_a_stopped_guest(tmp_path, csrf_header, bootstrap_admin):
+    """A stopped guest still gets a termproxy ticket from PVE, and the socket
+    then attaches to a PTY that never emits a byte: the operator sees a blank
+    terminal with no error at all. Confirmed on PVE 9.2.6, 2026-08-10, where
+    connecting to a stopped CT succeeded and returned nothing, forever.
+    """
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            app_id = _seed_app_with_status(db, host, "stopped").id
+        _seed_credential(app, host)
+
+        r = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 409, r.text
+        # main.py's RFC7807 handler merges a dict detail into the top level,
+        # so `error` sits beside `detail`, it is not nested under it.
+        body = r.json()
+        assert body["error"] == "guest_not_running"
+        assert "start it" in body["detail"].lower()
+
+
+def test_console_ticket_allows_a_guest_whose_status_is_unknown(tmp_path, csrf_header,
+                                                               bootstrap_admin):
+    """Fail OPEN on an unknown status. Blocking a console because the poller
+    has not filled the cache yet would be a worse failure than the blank
+    terminal the stopped-guest check exists to prevent."""
+    fake = FakePVE()
+    fake.termproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:abc",
+                               "port": "5900", "upid": "UPID:pve1:...:termproxy::x:"}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            app_id = _seed_app_with_status(db, host, None, ctid=161, name="fresh").id
+        _seed_credential(app, host)
+
+        r = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 200, r.text

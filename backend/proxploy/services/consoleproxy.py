@@ -4,7 +4,7 @@ the URL query params, so there's no client-sent auth line; the first upstream
 frame is the RFB greeting itself, which noVNC's own RFB class consumes."""
 import asyncio
 import ssl
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import websockets
 
@@ -21,13 +21,18 @@ class ConsoleProxyError(RuntimeError):
 async def connect_upstream_vnc(*, address: str, node: str, vmid: int,
                                 upstream_ticket: str, upstream_port: str,
                                 verify_tls: bool, tls_fingerprint: str | None,
+                                auth_header: str | None = None,
                                 ws_connect=None):
     if ws_connect is None:
         url = urlparse(address)
         host = url.hostname
         port = url.port or 8006  # match ProxmoxClient._connect's own fallback
+        # Same two requirements as ptybridge.connect_upstream_pty, for the same
+        # reasons: PVE authenticates the upgrade itself, and an unquoted base64
+        # ticket loses its "+" and "/". See ProxmoxClient.pve_auth_header.
         uri = (f"wss://{host}:{port}/api2/json/nodes/{node}/qemu/{vmid}"
-               f"/vncwebsocket?port={upstream_port}&vncticket={upstream_ticket}")
+               f"/vncwebsocket?port={quote(str(upstream_port), safe='')}"
+               f"&vncticket={quote(upstream_ticket, safe='')}")
         if not verify_tls and tls_fingerprint:
             # Blocking socket/TLS I/O -- must not run directly on the event
             # loop (a slow/unreachable PVE host would otherwise stall every
@@ -39,8 +44,16 @@ async def connect_upstream_vnc(*, address: str, node: str, vmid: int,
         ctx = ssl.create_default_context() if verify_tls else ssl._create_unverified_context()
         sock = await asyncio.to_thread(open_validated_tcp_socket, host, port)
         ws_connect = lambda: websockets.connect(
-            uri, subprotocols=["binary"], sock=sock, ssl=ctx, server_hostname=host)
-    return await ws_connect()
+            uri, subprotocols=["binary"], sock=sock, ssl=ctx, server_hostname=host,
+            additional_headers={"Authorization": auth_header} if auth_header else None)
+    # Same reasoning as ptybridge.connect_upstream_pty: a 401/403 on the
+    # upgrade must reach the caller as this module's own error, which
+    # _run_vnc_ws already turns into a close frame, not as an escaped
+    # InvalidStatus on an already-accepted socket.
+    try:
+        return await ws_connect()
+    except (OSError, websockets.WebSocketException) as e:
+        raise ConsoleProxyError(f"console upgrade rejected by Proxmox: {e}") from e
 
 
 async def _best_effort(coro) -> None:

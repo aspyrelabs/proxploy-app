@@ -6,7 +6,7 @@ module's PtyBridgeError surfaces rather than hides."""
 import asyncio
 import json
 import ssl
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import websockets
 
@@ -42,10 +42,25 @@ async def _best_effort(coro) -> None:
         pass
 
 
+def _as_text(frame) -> str:
+    """PVE's termproxy negotiates the `binary` subprotocol, so a real node
+    sends every frame as bytes while the browser half of this bridge is text.
+    The in-process fakes send str, which is why nothing below caught this
+    until a live PVE 9.2 handed back b"OK" (2026-08-10).
+
+    ponytail: errors="replace" decodes each frame independently, so a
+    multi-byte character split across two frames shows one replacement
+    char. Buffer the trailing partial sequence here if that ever shows up in
+    a real terminal session.
+    """
+    return frame.decode("utf-8", "replace") if isinstance(frame, (bytes, bytearray)) else frame
+
+
 async def connect_upstream_pty(*, address: str, node: str, guest_kind: str | None,
                                 vmid: int | None, upstream_user: str,
                                 upstream_ticket: str, upstream_port: str,
                                 verify_tls: bool, tls_fingerprint: str | None,
+                                auth_header: str | None = None,
                                 ws_connect=None) -> tuple:
     """ws_connect is an injection seam for tests (skips the real TLS/SSRF path
     against a plain ws:// loopback fake); production callers omit it and get
@@ -61,8 +76,13 @@ async def connect_upstream_pty(*, address: str, node: str, guest_kind: str | Non
         url = urlparse(address)
         host = url.hostname
         port = url.port or 8006  # match ProxmoxClient._connect's own fallback
+        # quote(safe="") is load-bearing: a PVEVNC ticket is base64 and
+        # routinely contains "+" and "/", which arrive at PVE as a space and a
+        # path separator unquoted, and it answers 401 with no hint that the
+        # ticket was the thing it could not read.
         uri = (f"wss://{host}:{port}/api2/json{_guest_path(node, guest_kind, vmid)}"
-               f"/vncwebsocket?port={upstream_port}&vncticket={upstream_ticket}")
+               f"/vncwebsocket?port={quote(str(upstream_port), safe='')}"
+               f"&vncticket={quote(upstream_ticket, safe='')}")
         if not verify_tls and tls_fingerprint:
             # Blocking socket/TLS I/O -- must not run directly on the event
             # loop (a slow/unreachable PVE host would otherwise stall every
@@ -74,14 +94,21 @@ async def connect_upstream_pty(*, address: str, node: str, guest_kind: str | Non
         ctx = ssl.create_default_context() if verify_tls else ssl._create_unverified_context()
         sock = await asyncio.to_thread(open_validated_tcp_socket, host, port)
         ws_connect = lambda: websockets.connect(
-            uri, subprotocols=["binary"], sock=sock, ssl=ctx, server_hostname=host)
+            uri, subprotocols=["binary"], sock=sock, ssl=ctx, server_hostname=host,
+            additional_headers={"Authorization": auth_header} if auth_header else None)
+    # One call site for both branches so the rejected-upgrade path is handled
+    # identically. websockets raises InvalidStatus (a WebSocketException) when
+    # PVE answers the upgrade with 401/403; uncaught, that escapes _run_pty_ws
+    # as a 500 with the socket already accepted, so the browser sees a dead
+    # terminal instead of the documented exit frame.
+    try:
         upstream = await ws_connect()
-    else:
-        upstream = await ws_connect()
+    except (OSError, websockets.WebSocketException) as e:
+        raise PtyBridgeError(f"console upgrade rejected by Proxmox: {e}") from e
 
     await upstream.send(f"{upstream_user}:{upstream_ticket}\n")
     try:
-        first = await asyncio.wait_for(upstream.recv(), timeout=10.0)
+        first = _as_text(await asyncio.wait_for(upstream.recv(), timeout=10.0))
     except (TimeoutError, websockets.ConnectionClosed) as e:
         raise PtyBridgeError(f"termproxy handshake failed: {e}") from e
     if not first.startswith("OK"):
@@ -134,7 +161,7 @@ async def bridge_pty(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None:
 
     async def from_upstream():
         async for frame in upstream_ws:
-            await browser_ws.send_text(frame)
+            await browser_ws.send_text(_as_text(frame))
 
     keepalive_task = asyncio.create_task(_keepalive(upstream_ws))
     try:
