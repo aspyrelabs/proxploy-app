@@ -271,3 +271,85 @@ def test_task_log_returns_the_lines_for_a_task_proxploy_did_not_start(
         r = c.get(f"/api/v1/hosts/{host_id}/tasks/{upid}/log")
         assert r.status_code == 200, r.text
         assert r.json()["lines"] == ["starting backup", "finished"]
+
+
+def test_enrolment_records_the_node_name_immediately(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    """`node_name` used to stay NULL until the poller's first cycle, and every
+    job handler reads `host.node_name or ""`, so anything started in that
+    window sent an EMPTY node name to PVE. Enrol-then-install is the obvious
+    first thing an operator does, not an exotic sequence.
+
+    Confirmed against real hardware on 2026-08-10: POST /hosts returned
+    `node_name: null` while the node was plainly `pve-lab-host-02`.
+    """
+    from fastapi.testclient import TestClient
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    fake = FakePVE()
+    fake.cluster_status_rows = [{"type": "node", "name": "pve1", "local": 1,
+                                 "online": 1}]
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = client.post("/api/v1/hosts", json={
+            "name": "host-01", "address": "https://10.0.0.9:8006",
+            "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+            "verify_tls": False}, headers=csrf_header(client))
+        assert r.status_code == 201, r.text
+        assert r.json()["node_name"] == "pve1"
+
+
+def test_enrolment_picks_the_local_node_out_of_a_cluster(tmp_path, csrf_header,
+                                                         bootstrap_admin):
+    """On a cluster, `/nodes` cannot say which node this address IS. Only
+    `local: 1` in /cluster/status can."""
+    from fastapi.testclient import TestClient
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    fake = FakePVE()
+    fake.cluster_status_rows = [
+        {"type": "cluster", "name": "prod"},
+        {"type": "node", "name": "pve1", "local": 0, "online": 1},
+        {"type": "node", "name": "pve2", "local": 1, "online": 1},
+        {"type": "node", "name": "pve3", "local": 0, "online": 1},
+    ]
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = client.post("/api/v1/hosts", json={
+            "name": "host-02", "address": "https://10.0.0.10:8006",
+            "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+            "verify_tls": False}, headers=csrf_header(client))
+        assert r.status_code == 201, r.text
+        assert r.json()["node_name"] == "pve2"
+
+
+def test_enrolment_survives_a_cluster_status_failure(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    """A surprising cluster shape must never block enrolment: leave it NULL and
+    let the poller fill it in, exactly as before."""
+    from fastapi.testclient import TestClient
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    class _Boom(FakePVE):
+        @property
+        def cluster_status_rows(self):
+            raise ConnectionError("no /cluster/status here")
+
+        @cluster_status_rows.setter
+        def cluster_status_rows(self, v):
+            pass
+
+    app = make_app(tmp_path, fake=_Boom())
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = client.post("/api/v1/hosts", json={
+            "name": "host-03", "address": "https://10.0.0.11:8006",
+            "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+            "verify_tls": False}, headers=csrf_header(client))
+        assert r.status_code == 201, r.text
+        assert r.json()["node_name"] is None

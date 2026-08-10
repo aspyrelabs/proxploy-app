@@ -86,6 +86,33 @@ def probe(request: Request, body: ProbeIn,
     return {"ok": True, "version": v.get("version"), "release": v.get("release")}
 
 
+def _local_node_name(client) -> str | None:
+    """Which node this address actually is, asked at enrolment time.
+
+    Without this the column stayed NULL until the poller's first cycle landed,
+    and every job handler reads `host.node_name or ""`, so anything started in
+    that window sent an EMPTY node name to PVE and failed for a reason the
+    operator could not act on. Enrolling a host and immediately installing
+    something is not an exotic sequence; it is the obvious one.
+
+    `/cluster/status` is the only honest answer: on a cluster it marks the node
+    you are talking to with `local: 1`, which a `/nodes` listing cannot tell
+    you. A standalone node returns exactly one node row. Anything unexpected
+    leaves it NULL and the poller fills it in as before, so a surprising
+    cluster shape can never block enrolment.
+    """
+    try:
+        rows = [r for r in client.cluster_status() if r.get("type") == "node"]
+    except Exception:  # noqa: BLE001  (enrolment must survive a probe hiccup)
+        return None
+    if len(rows) == 1:
+        return rows[0].get("name")
+    for r in rows:
+        if r.get("local"):
+            return r.get("name")
+    return None
+
+
 @router.post("", status_code=201)
 def create_host(request: Request, body: HostIn, db=Depends(get_db),
                 user: User = Depends(_manage_global)):
@@ -100,8 +127,9 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
         raise HTTPException(409, "host name already exists")
 
     audit_params = body.model_dump()  # write_audit redacts token_secret
+    client = _client(request, body)
     try:
-        v = _client(request, body).version()
+        v = client.version()
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="host.create",
                     params=audit_params, result="error",
@@ -110,6 +138,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
+                node_name=_local_node_name(client),
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
     db.commit()
