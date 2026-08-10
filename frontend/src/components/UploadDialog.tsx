@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError } from '../api/client'
-import { useUploadContent } from '../api/storage'
+import { useUploadContent, type VolumeExists } from '../api/storage'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 
@@ -21,13 +21,24 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   const [content, setContent] = useState<string>(uploadable[0] ?? 'iso')
   const [file, setFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
+  // Set when the server says the name is already taken. Replacing is a click,
+  // not a typed phrase: the typed confirmation is reserved for deletions,
+  // which cannot be undone.
+  const [collision, setCollision] = useState<VolumeExists | null>(null)
 
-  const submit = () => {
+  const submit = (overwrite = false) => {
     if (!file) return
-    upload.mutate({ hostId, storage, node, content, file }, {
+    setCollision(null)
+    upload.mutate({ hostId, storage, node, content, file, overwrite }, {
       onSuccess: (r) => setJobId(r.job.id),
-      onError: (e) => toast.error(
-        e instanceof ApiError ? String((e.body as any)?.detail ?? 'Upload rejected') : 'Upload failed'),
+      onError: (e) => {
+        const body = e instanceof ApiError ? (e.body as any) : null
+        if (e instanceof ApiError && e.status === 409 && body?.error === 'volume_exists') {
+          setCollision(body as VolumeExists)
+          return
+        }
+        toast.error(body ? String(body.detail ?? 'Upload rejected') : 'Upload failed')
+      },
     })
   }
 
@@ -37,7 +48,24 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
         <h2 className="text-[16px] font-semibold text-text">Upload to {storage}</h2>
         <div className="font-mono text-[11px] text-text-3">{node}</div>
 
-        {jobId ? (
+        {collision ? (
+          <div className="mt-4">
+            <div className="rounded-ctl border border-warn/40 bg-warn/10 p-3">
+              <div className="text-[13px] font-semibold text-text">
+                {`${collision.filename} already exists`}
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-text-3">{collision.volid}</div>
+              <div className="mt-2 text-[12px] text-text-2">{collision.detail}</div>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCollision(null)}>Cancel</Button>
+              <Button variant="primary" disabled={upload.isPending}
+                onClick={() => submit(true)}>
+                Replace
+              </Button>
+            </div>
+          </div>
+        ) : jobId ? (
           // Exactly InstallDialog's pattern: the mutation returned {job:{id}},
           // so the dialog becomes the job's live transcript.
           <div className="mt-4">
@@ -74,7 +102,8 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
                 <span className="mr-auto font-mono text-[11px] text-text-3">Uploading…</span>
               )}
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button variant="primary" disabled={!file || upload.isPending} onClick={submit}>
+              <Button variant="primary" disabled={!file || upload.isPending}
+                onClick={() => submit()}>
                 Upload
               </Button>
             </div>

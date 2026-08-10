@@ -110,6 +110,15 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
 
 export type UploadVars = {
   hostId: number; storage: string; node: string; content: string; file: File
+  // Set only after the operator answered the "replace it?" prompt. Absent on
+  // the first attempt so the server is the one that detects the collision.
+  overwrite?: boolean
+}
+
+/** The 409 body the upload route returns when the name is already taken. */
+export type VolumeExists = {
+  error: 'volume_exists'; volid: string; filename: string
+  size_bytes: number | null; detail: string
 }
 
 export function useUploadContent() {
@@ -120,6 +129,7 @@ export function useUploadContent() {
       form.append('file', v.file)
       form.append('content', v.content)
       form.append('node', v.node)
+      if (v.overwrite) form.append('overwrite', 'true')
       return postForm<JobResponse>(`/storage/${v.hostId}/${v.storage}/content`, form)
     },
     // Same rule as api/jobs.ts::useLifecycle, the resource key is NOT

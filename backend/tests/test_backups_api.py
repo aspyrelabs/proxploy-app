@@ -20,8 +20,14 @@ def _fake():
     from tests.fakes.pve import FakePVE
 
     fake = FakePVE()
+    # A stock Proxmox shape: `local` is a directory store that takes backups
+    # but no rootfs, `local-lvm` is where guest disks actually live. Restores
+    # that name no storage must land on the latter; PVE's own default is the
+    # former, which is why every real restore failed before that was fixed.
     fake.storages_by_node = {"pve1": [{"storage": "local", "type": "dir",
-                                       "content": "backup"}]}
+                                       "content": "backup,iso", "active": 1},
+                                      {"storage": "local-lvm", "type": "lvmthin",
+                                       "content": "rootdir,images", "active": 1}]}
     fake.content_by_storage = {"local": [
         {"volid": VOLID_CT, "ctime": 1753840800, "size": 1,
          "verification": {"state": "ok"}}]}
@@ -100,12 +106,14 @@ def test_restore_guest_posts_to_the_guest_create_endpoint(tmp_path):
 
 # --- job handlers ----------------------------------------------------------
 
-def _run_job(tmp_path, kind, params, seed_status="stopped"):
+def _run_job(tmp_path, kind, params, seed_status="stopped", storages=None):
     from proxploy.jobs import JobBackend
     from tests.support import make_job_app
 
     async def go():
         fake = _fake()
+        if storages is not None:
+            fake.storages_by_node = storages
         app = make_job_app(tmp_path, fake=fake)
         import proxploy.services.backupjobs  # noqa: F401  (registers backup.*)
 
@@ -153,6 +161,29 @@ def test_restore_as_new_takes_a_fresh_vmid_and_never_forces(tmp_path):
     assert kwargs["ostemplate"] == VOLID_CT and kwargs["restore"] == 1
     assert "force" not in kwargs
     assert result["vmid"] == 999 and result["mode"] == "new"
+
+
+def test_restore_with_no_storage_picks_one_that_holds_the_guest(tmp_path):
+    """Found on PVE 9.2.6, 2026-08-10: the UI sends no storage on restore
+    (api/backups.ts), the route defaults it to None, and PVE then falls back to
+    `local`, a directory store, which answers "storage 'local' does not support
+    container directories". Restore-as-new was broken for every container on a
+    default storage layout."""
+    fake, status, _result, error = _run_job(tmp_path, "backup.restore",
+                                            {"backup_id": "ct_backup", "mode": "new"})
+    assert status == "succeeded", error
+    _kind, _node, kwargs = fake.creates[0]
+    assert kwargs["storage"] == "local-lvm", "picked a store that cannot hold a rootfs"
+
+
+def test_restore_fails_clearly_when_nothing_can_hold_the_guest(tmp_path):
+    fake, status, _result, error = _run_job(
+        tmp_path, "backup.restore", {"backup_id": "ct_backup", "mode": "new"},
+        storages={"pve1": [{"storage": "local", "type": "dir",
+                            "content": "backup", "active": 1}]})
+    assert status == "failed"
+    assert "accepts rootdir" in (error or "")
+    assert fake.creates == [], "asked PVE to restore anyway"
 
 
 def test_restore_in_place_reuses_the_vmid_and_forces(tmp_path):

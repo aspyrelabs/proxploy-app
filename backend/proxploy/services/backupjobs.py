@@ -259,6 +259,23 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
 HANDLERS["backup.run"] = run_backup
 
 
+def _storage_for_content(client, node: str, want: str) -> str | None:
+    """Blocking: first active storage on `node` whose `content` list includes
+    `want` ("rootdir" for a CT, "images" for a VM).
+
+    ponytail: first match wins, in whatever order PVE lists them. A host with
+    several eligible pools gets an arbitrary one of them, which is still
+    strictly better than the `local` PVE would otherwise pick and always fail
+    on. Let the caller pass `storage` to choose deliberately.
+    """
+    for s in client.storages(node):
+        if not s.get("active", 1):
+            continue
+        if want in (s.get("content") or "").split(","):
+            return s.get("storage")
+    return None
+
+
 async def restore_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.restore`, in place (same vmid, force=1) or as new (fresh vmid).
 
@@ -280,6 +297,21 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
             else {"archive": info["volid"]})
     if params.get("storage"):
         call["storage"] = params["storage"]
+    else:
+        # Nothing chosen: PVE falls back to `local`, which on a stock layout is
+        # a directory store that holds no rootfs or disk image, so every
+        # restore died on "storage 'local' does not support container
+        # directories". The UI sends no storage at all (api/backups.ts), so
+        # that was every restore-as-new. Pick a store on this node that can
+        # actually hold the guest instead of letting PVE guess wrong.
+        want = "rootdir" if kind == "lxc" else "images"
+        picked = await asyncio.to_thread(_storage_for_content, client, node, want)
+        if picked is None:
+            raise JobFailed(
+                f"no active storage on {node} accepts {want} content; "
+                f"choose a target storage for this restore")
+        ctx.log(f"no storage given, restoring onto {picked!r} (accepts {want})")
+        call["storage"] = picked
     if in_place:
         call["force"] = 1  # overwrite the existing guest; PVE requires it stopped
     ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "

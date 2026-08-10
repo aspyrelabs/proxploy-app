@@ -270,3 +270,67 @@ def test_delete_volume_job_calls_delete_and_awaits_the_task(tmp_path):
             assert job.result["volid"] == "local:iso/old.iso"
 
     asyncio.run(run())
+
+
+def _fake_with_volume(volid, size=4242):
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.content_by_storage = {"local": [{"volid": volid, "size": size,
+                                          "content": "iso", "ctime": 1}]}
+    return fake
+
+
+def test_upload_onto_an_existing_name_stops_and_asks_for_confirmation(
+        tmp_path, csrf_header, bootstrap_admin):
+    """An upload whose name already exists REPLACES the volume and PVE does it
+    silently: the second of two uploads under one name simply wins (seen on PVE
+    9.2.6, 2026-08-10). An ISO a VM is booting from can be swapped underneath
+    it. A collision now stops and asks, naming what would be replaced."""
+    app, c, hid = _api(tmp_path, fake=_fake_with_volume("local:iso/ubuntu.iso"))
+    with c:
+        bootstrap_admin(c)
+        r = c.post(f"/api/v1/storage/{hid}/local/content",
+                   files={"file": ("ubuntu.iso", b"x" * 16)},
+                   data={"content": "iso", "node": "pve1"},
+                   headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        body = r.json()
+        assert body["error"] == "volume_exists"
+        # Named parts, so a Replace/Skip/Cancel dialog can show the file
+        # without parsing the sentence.
+        assert body["volid"] == "local:iso/ubuntu.iso"
+        assert body["filename"] == "ubuntu.iso"
+        assert body["size_bytes"] == 4242
+        assert "local:iso/ubuntu.iso" in body["detail"]
+        # nothing spooled: the check runs before the body is read to disk
+        uploads = app.state.settings.data_dir / "uploads"
+        assert not list(uploads.glob("*.upload")) if uploads.exists() else True
+
+
+def test_upload_onto_an_existing_name_proceeds_when_replace_is_chosen(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A plain boolean, not a typed phrase. Typed confirmation is reserved for
+    deletions, which cannot be undone; replacing a file the operator is already
+    uploading does not warrant that weight."""
+    app, c, hid = _api(tmp_path, fake=_fake_with_volume("local:iso/ubuntu.iso"))
+    with c:
+        bootstrap_admin(c)
+        r = c.post(f"/api/v1/storage/{hid}/local/content",
+                   files={"file": ("ubuntu.iso", b"x" * 16)},
+                   data={"content": "iso", "node": "pve1", "overwrite": "true"},
+                   headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+
+
+def test_a_brand_new_upload_name_needs_no_confirmation(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    """No collision means nothing is destroyed, so it stays frictionless."""
+    app, c, hid = _api(tmp_path, fake=_fake_with_volume("local:iso/something-else.iso"))
+    with c:
+        bootstrap_admin(c)
+        r = c.post(f"/api/v1/storage/{hid}/local/content",
+                   files={"file": ("ubuntu.iso", b"x" * 16)},
+                   data={"content": "iso", "node": "pve1"},
+                   headers=csrf_header(c))
+        assert r.status_code == 202, r.text

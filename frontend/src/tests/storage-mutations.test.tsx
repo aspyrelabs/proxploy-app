@@ -47,7 +47,18 @@ vi.mock('../api/client', () => ({
     // unhandled rejection once the mutation resolves after the assertions run.
     return Promise.resolve({ host_id: 1, storage: 'local', updated: ['content'] })
   }),
-  ApiError: class extends Error {},
+  // Must carry status/body like the real one in api/client.ts: a bare
+  // `class extends Error {}` silently drops both, so any component branch that
+  // reads an error body could never be exercised from this file.
+  ApiError: class extends Error {
+    status: number
+    body: unknown
+    constructor(status: number, body: unknown) {
+      super(`API ${status}`)
+      this.status = status
+      this.body = body
+    }
+  },
 }))
 
 vi.mock('@tanstack/react-router', async (orig) => ({
@@ -195,5 +206,61 @@ describe('StorageForm', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Delete' }).length).toBeGreaterThan(0))
     expect(calls.some(c => c.opts?.method === 'DELETE')).toBe(false)
     spy.mockRestore()
+  })
+})
+
+describe('UploadDialog name collision', () => {
+  const collision = {
+    error: 'volume_exists', volid: 'local:iso/ubuntu.iso', filename: 'ubuntu.iso',
+    size_bytes: 4242,
+    detail: 'local:iso/ubuntu.iso already exists on local (4242 bytes). Replacing it keeps the name and swaps the contents, so anything already using it gets the new file.',
+  }
+
+  const pick = () => {
+    const input = screen.getByLabelText('File') as HTMLInputElement
+    const file = new File(['iso-bytes'], 'ubuntu.iso', { type: 'application/octet-stream' })
+    fireEvent.change(input, { target: { files: [file] } })
+  }
+
+  it('offers Replace or Cancel instead of a typed phrase, and does not upload until asked', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 409, json: () => Promise.resolve(collision) })
+      .mockResolvedValueOnce({
+        ok: true, status: 202, json: () => Promise.resolve({ job: { id: 12, kind: 'storage.upload' } }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
+      contentTypes={['iso']} onClose={vi.fn()} />)
+    pick()
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+
+    // The prompt names the file and the volid, and asks for a click.
+    await screen.findByText('ubuntu.iso already exists')
+    expect(screen.getByText('local:iso/ubuntu.iso')).toBeTruthy()
+    expect(screen.queryByLabelText(/type/i)).toBeNull()   // no typed confirmation
+
+    // First attempt carried no overwrite flag: the SERVER detects the clash.
+    expect((fetchMock.mock.calls[0][1].body as FormData).get('overwrite')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect((fetchMock.mock.calls[1][1].body as FormData).get('overwrite')).toBe('true')
+  })
+
+  it('Cancel backs out and uploads nothing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 409, json: () => Promise.resolve(collision) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
+      contentTypes={['iso']} onClose={vi.fn()} />)
+    pick()
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await screen.findByText('ubuntu.iso already exists')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByText('ubuntu.iso already exists')).toBeNull())
+    expect(fetchMock).toHaveBeenCalledTimes(1)   // nothing was replaced
   })
 })

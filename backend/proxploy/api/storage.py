@@ -189,13 +189,58 @@ def storage_content(request: Request, host_id: int, name: str,
             for r in rows if not content or r.get("content") == content]
 
 
+def _refuse_silent_overwrite(request, db, host, node: str, storage: str,
+                             content: str, filename: str,
+                             overwrite: bool) -> None:
+    """An upload whose name already exists REPLACES the existing volume, and
+    PVE does it without a word: the second of two uploads under one name simply
+    wins (observed on PVE 9.2.6, 2026-08-10). An ISO a VM is booting from can be
+    swapped out from under it that way.
+
+    A brand-new name stays frictionless, nothing is being destroyed there. A
+    collision stops and asks once, and `overwrite=true` is the whole answer:
+    deliberately a plain boolean the UI drives from a Replace/Skip/Cancel
+    dialog, NOT the typed confirm_phrase that backups.py and vms.py use. Those
+    guard deletions, which are unrecoverable; replacing a file the operator is
+    in the middle of uploading is not in that class.
+
+    Checked BEFORE the body is spooled, so a multi-GB upload is not read to
+    disk only to be rejected.
+    """
+    if overwrite:
+        return
+    volid = f"{storage}:{content}/{filename}"
+    try:
+        client = client_for_host(request.app, db, host)
+        existing = {r.get("volid"): r for r in
+                    client.storage_content(node, storage, content=content)}
+    except ProxmoxError as e:
+        # Cannot read the storage: the upload itself would fail next anyway,
+        # and a 409 naming the real reason beats a confusing overwrite prompt.
+        raise HTTPException(409, str(e)) from e
+    row = existing.get(volid)
+    if row is None:
+        return
+    raise HTTPException(409, {
+        "error": "volume_exists",
+        # Named parts so the dialog can render the file without parsing prose.
+        "volid": volid,
+        "filename": filename,
+        "size_bytes": row.get("size"),
+        "detail": (f"{volid} already exists on {storage}"
+                   + (f" ({row.get('size')} bytes)" if row.get("size") else "")
+                   + ". Replacing it keeps the name and swaps the contents, so "
+                     "anything already using it gets the new file."),
+    })
+
+
 @router.post("/{host_id}/{name}/content", status_code=202,
              dependencies=[Depends(_content),
                            Depends(require_entitlement("storage.content"))])
 def upload_content(request: Request, host_id: int, name: str,
                    file: UploadFile = File(...), content: str = Form("iso"),
-                   node: str | None = Form(None), db=Depends(get_db),
-                   user: User = Depends(_content)):
+                   node: str | None = Form(None), overwrite: bool = Form(False),
+                   db=Depends(get_db), user: User = Depends(_content)):
     """Spool the body to disk, then hand the PATH to a job (doc 05 §Storage).
 
     Never slurp the whole upload in one call: FastAPI's UploadFile already
@@ -208,6 +253,8 @@ def upload_content(request: Request, host_id: int, name: str,
     """
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
+    _refuse_silent_overwrite(request, db, host, node, name, content,
+                             file.filename or "upload", overwrite)
     max_bytes = request.app.state.settings.storage_upload_max_bytes
     updir = request.app.state.settings.data_dir / "uploads"
     updir.mkdir(parents=True, exist_ok=True)
