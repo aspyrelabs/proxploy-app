@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import shlex
 
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
@@ -108,7 +109,27 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         _resolve, app, catalog_slug, host_id)
 
     ctx.log(f"installing {catalog_slug} on {host.name} as CT {ctid}")
-    env = {"MODE": "default", "PHS_SILENT": "1"}
+    # Refuse to "install" onto a container that already exists: the catalog
+    # script would reconfigure or clobber somebody else's CT and this handler
+    # would then file an App row claiming to own it.
+    before = await asyncio.to_thread(_lxc_ids, app, host_id)
+    if ctid in before:
+        raise JobFailed(f"CT {ctid} already exists on {host.name}; "
+                        f"refusing to install over it")
+
+    # Two corrections a real node forced, both invisible to the fakes (PVE
+    # 9.2.6, 2026-08-10):
+    #
+    # `mode` is lowercase. build.func reads `CHOICE="${mode:-${1:-}}"` and
+    # never looks at MODE, which this handler exported for five phases: the
+    # menu was therefore always shown, whiptail read EOF from the DEVNULL
+    # stdin, and the script took its `|| exit_script` branch and exited 0
+    # having installed nothing.
+    #
+    # TERM must be a real terminal type. A non-PTY ssh session lands on
+    # TERM=dumb, where build.func's early `clear` exits 1 and its error trap
+    # aborts the run ("in line 1018: exit code 1").
+    env = {"TERM": "xterm", "mode": "default", "PHS_SILENT": "1"}
     for key, val in overrides.items():
         env[f"var_{key}"] = str(val)
     # Set last so it always wins over an `overrides` entry: the App row below
@@ -153,6 +174,17 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         raise JobFailed(str(e)) from e
     if status != 0:
         raise JobFailed(f"install script exited {status}")
+
+    # Exit status 0 is NOT proof the container was built. build.func's own
+    # cancel path (`|| exit_script`) exits 0, so a script that showed a menu
+    # and gave up looks identical here to one that installed cleanly. Without
+    # this check the handler filed an App row for a CT that does not exist,
+    # which is exactly what happened on the first real-hardware run.
+    after = await asyncio.to_thread(_lxc_ids, app, host_id)
+    if ctid not in after:
+        raise JobFailed(
+            f"install script exited 0 but CT {ctid} does not exist on "
+            f"{host.name}: nothing was installed")
     ctx.progress(80)
 
     # host_id is part of the slug, not just catalog_slug+ctid: App.slug has a
@@ -368,8 +400,27 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     # and it carries the same one-level-down residual: the pinned script's own
     # `source <(curl ... /main/misc/build.func)` line is frozen text but still
     # fetches live. See docs/notes/phase-4-store.md.
-    command = f"bash -c \"$(curl -fsSL {raw_url(entry['sha'], entry['script_path'])})\""
-    env = {"MODE": "default", "PHS_SILENT": "1"}
+    #
+    # Run it INSIDE the container, not on the host. build.func's start() picks
+    # install-vs-update by where it is running, nothing else:
+    #
+    #     if command -v pveversion; then install_script        # on the PVE host
+    #     elif [ "$PHS_SILENT" == 1 ]; then update_script      # in the CT
+    #
+    # `pveversion` exists on the host, so running this over plain host SSH took
+    # the install branch every time and built a SECOND container instead of
+    # updating this one. Verified on PVE 9.2.6, 2026-08-10: host-side produced
+    # a stray CT 100 with a duplicate AdGuard; `pct exec` into the CT reached
+    # the real update path and created nothing. No env var changes that choice.
+    #
+    # The env goes INSIDE the pct exec: the executor's own `env=` is a prefix
+    # on the outer host command and does not cross into the container.
+    inner = (f"curl -fsSL {raw_url(entry['sha'], entry['script_path'])} "
+             f"-o /tmp/proxploy-update.sh && "
+             f"TERM=xterm PHS_SILENT=1 bash /tmp/proxploy-update.sh; "
+             f"rc=$?; rm -f /tmp/proxploy-update.sh; exit $rc")
+    command = f"pct exec {int(a['ctid'])} -- bash -c {shlex.quote(inner)}"
+    env: dict[str, str] = {}
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, a["host_id"],

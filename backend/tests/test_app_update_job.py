@@ -329,3 +329,39 @@ def test_update_refuses_an_app_whose_script_was_edited_locally(tmp_path):
         assert cmds == []                             # never reached the SSH executor
 
     asyncio.run(go())
+
+
+def test_update_runs_the_script_inside_the_container_not_on_the_host(tmp_path):
+    """The bug a real node exposed on 2026-08-10: `app.update` installed a
+    duplicate container instead of updating anything.
+
+    build.func's start() chooses install-vs-update purely by where it runs:
+
+        if command -v pveversion; then install_script     # on the PVE host
+        elif [ "$PHS_SILENT" == 1 ]; then update_script   # inside the CT
+
+    `pveversion` exists on the host, so running the catalog script over plain
+    host SSH always took the install branch and built a SECOND container. No
+    env var changes that. The command must therefore enter the container.
+    """
+    async def go():
+        fake = FakePVE()
+        fake.add_ct(101, node="pve1", name="redis", status="running")
+        cmds: list[str] = []
+        app = make_job_app(tmp_path, fake=fake, ssh_factory=_ssh(cmds))
+        app.state.jobs = JobBackend(app)
+        _host_id, app_id = _seed(app)
+
+        ctx = JobContext(app.state.jobs, _job(app, app_id))
+        await HANDLERS["app.update"](ctx, {"app_id": app_id})
+
+        cmd = cmds[0]
+        assert cmd.startswith("pct exec 101 -- "), f"ran on the host: {cmd}"
+        # PHS_SILENT has to be inside the container, not a host-side prefix:
+        # the executor's env= never crosses the pct exec boundary.
+        inner = cmd.split("pct exec 101 -- ", 1)[1]
+        assert "PHS_SILENT=1" in inner
+        assert "TERM=xterm" in inner
+        assert not cmd.startswith("TERM="), "env set outside the container"
+
+    asyncio.run(go())
