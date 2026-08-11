@@ -6,7 +6,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 // mid-cycle (cluster.tsx and storage.tsx carry the same note).
 import { rootRoute } from './shell'
 import { api, ApiError } from '../api/client'
-import { Brand, inputCls } from '../components/LoginForm'
+import { Brand } from '../components/LoginForm'
+import { AdminAccountStep } from '../components/AdminAccountStep'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { Button } from '../components/ui/button'
 import { OnboardingRail, type RailStep } from '../components/OnboardingRail'
@@ -54,8 +55,6 @@ export function Wizard() {
   const step = view ?? serverStep
   const [dir, setDir] = useState<1 | -1>(1)
   const [host, setHost] = useState<HostCreated | null>(null)
-  const [admin, setAdmin] = useState({ email: '', password: '', display_name: '' })
-  const [error, setError] = useState('')
   const [verifyError, setVerifyError] = useState('')
 
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<MeOut>('/auth/me'),
@@ -137,16 +136,6 @@ export function Wizard() {
     }
   }
 
-  async function createAdmin(e: React.FormEvent) {
-    e.preventDefault(); setError('')
-    try {
-      await api('/users', { method: 'POST', body: JSON.stringify(admin) })
-      await api('/auth/login', { method: 'POST',
-        body: JSON.stringify({ email: admin.email, password: admin.password }) })
-      advance(1)
-    } catch { setError('Could not create the admin account (password: 12+ characters).') }
-  }
-
   async function finish() {
     await api('/settings', { method: 'PATCH',
       body: JSON.stringify({ 'onboarding.complete': true }) })
@@ -174,18 +163,10 @@ export function Wizard() {
           )}
 
         {step === 0 && (
-          <form onSubmit={createAdmin} className="space-y-4">
-            {([['email', 'Email', 'email'], ['display_name', 'Display name', 'text'],
-               ['password', 'Password (12+ chars)', 'password']] as const).map(([k, label, type]) => (
-              <div key={k}>
-                <label htmlFor={k} className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
-                <input id={k} type={type} required={k !== 'display_name'} className={inputCls}
-                  value={admin[k]} onChange={e => setAdmin(a => ({ ...a, [k]: e.target.value }))} />
-              </div>
-            ))}
-            {error && <p className="text-[12.5px] text-red">{error}</p>}
-            <Button type="submit" className="w-full">Create admin account</Button>
-          </form>
+          <AdminAccountStep
+            existing={ob.data?.admin_exists && me.data ? me.data : null}
+            onCreated={() => advance(1)}
+          />
         )}
 
         {step === 1 && (

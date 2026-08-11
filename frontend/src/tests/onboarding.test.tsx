@@ -149,14 +149,33 @@ describe('onboarding wizard', () => {
     expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 
-  // unskipped in Task 3, when the edit panel that carries this copy exists
-  it.skip('lets you go back to a completed step', async () => {
+  it('lets you go back to a completed step', async () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     // Lands on the host step, per the resume behaviour above.
     expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /admin account/i }))
     expect(await screen.findByText(/cannot be changed/i)).toBeInTheDocument()
+  })
+
+  it('re-logs in after a password reset so the wizard is not logged out', async () => {
+    const { api } = await import('../api/client')
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    await screen.findByLabelText('API token id')
+    fireEvent.click(screen.getByRole('button', { name: /admin account/i }))
+
+    fireEvent.change(await screen.findByLabelText('New password'),
+      { target: { value: 'correct-horse-battery' } })
+    fireEvent.click(screen.getByRole('button', { name: /set new password/i }))
+
+    expect(await screen.findByText(/password updated/i)).toBeInTheDocument()
+    const paths = (api as unknown as { mock: { calls: [string, RequestInit?][] } })
+      .mock.calls.map(c => c[0])
+    // The reset revokes every session including this one, so the login that
+    // follows it is what keeps the wizard usable.
+    expect(paths).toContain('/users/1/password')
+    expect(paths.indexOf('/auth/login')).toBeGreaterThan(paths.indexOf('/users/1/password'))
   })
 
   it('does not let you jump forward past the step the server is on', async () => {
