@@ -82,6 +82,42 @@ describe('buildOptions', () => {
   const base = { width: 600, height: 160, label: 'CPU', accent: 'rgb(1,2,3)',
                  axis: 'rgb(4,5,6)', grid: 'rgb(7,8,9)', span: 86400, max: 50 }
 
+  // The bug that made every chart blank in a real browser while every test
+  // here stayed green: uPlot evaluates series.fill during construction, before
+  // it has sized its bbox, so u.bbox.height is NaN. Canvas rejects a
+  // non-finite gradient coordinate with a TypeError, the chart never drew, and
+  // jsdom never reached the call at all.
+  function fillOf(o: ReturnType<typeof buildOptions>) {
+    return (o.series![1] as { fill: (u: unknown) => unknown }).fill
+  }
+  const ctxStub = {
+    createLinearGradient: (..._a: number[]) => {
+      for (const n of _a) {
+        if (!Number.isFinite(n)) {
+          throw new TypeError("The provided double value is non-finite.")
+        }
+      }
+      return { addColorStop: () => {} }
+    },
+  }
+
+  it('does not hand a non-finite height to createLinearGradient', () => {
+    const fill = fillOf(buildOptions({ ...base, unit: 'percent' }))
+    // uPlot's own state at construction time.
+    expect(() => fill({ ctx: ctxStub, bbox: {} })).not.toThrow()
+    expect(() => fill({ ctx: ctxStub, bbox: { height: NaN } })).not.toThrow()
+    expect(() => fill({ ctx: ctxStub, bbox: { height: 0 } })).not.toThrow()
+  })
+
+  it('still builds a real gradient once uPlot has a usable bbox', () => {
+    const seen: number[] = []
+    const ctx = {
+      createLinearGradient: (...a: number[]) => { seen.push(...a); return { addColorStop: () => {} } },
+    }
+    fillOf(buildOptions({ ...base, unit: 'percent' }))({ ctx, bbox: { height: 120 } })
+    expect(seen).toEqual([0, 0, 0, 120])
+  })
+
   it('turns both axes on, unlike the Sparkline it replaces', () => {
     const o = buildOptions({ ...base, unit: 'percent' })
     expect(o.axes).toHaveLength(2)

@@ -134,8 +134,21 @@ export function buildOptions(a: BuildOptionsArgs): uPlot.Options {
         value: (_u: uPlot, v: number | null) => fmt(v),
         fill: (u: uPlot) => {
           const ctx = u.ctx
-          if (!ctx?.createLinearGradient) return withAlpha(a.accent, 0.2)
-          const g = ctx.createLinearGradient(0, 0, 0, u.bbox.height)
+          // uPlot evaluates this during construction, BEFORE it has sized its
+          // bbox, so u.bbox.height is NaN on the first call. Canvas rejects a
+          // non-finite gradient coordinate with a TypeError, which killed the
+          // whole plot: every chart on the host page rendered blank in a real
+          // browser while every test here passed, because jsdom has no canvas
+          // and never reached the call.
+          //
+          // a.height is the height uPlot was asked for, so it is always finite
+          // and is the right answer whenever bbox is not ready yet.
+          const h = Number.isFinite(u.bbox?.height) && u.bbox.height > 0
+            ? u.bbox.height : a.height
+          if (!ctx?.createLinearGradient || !Number.isFinite(h) || h <= 0) {
+            return withAlpha(a.accent, 0.2)
+          }
+          const g = ctx.createLinearGradient(0, 0, 0, h)
           g.addColorStop(0, withAlpha(a.accent, 0.32))
           g.addColorStop(1, withAlpha(a.accent, 0))
           return g
