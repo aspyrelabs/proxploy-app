@@ -6,23 +6,30 @@ import { useEffect, useState } from 'react'
  *  components, which is what React fast refresh needs to work.
  */
 
-/**
- * Widths are a closed set on purpose. Four dialogs shipped a raw w-[520px]
- * with no viewport cap and overflowed a phone by 130px; a prop that always
- * carries its own max-width makes that defect impossible to write again.
- */
-export const WIDTHS = {
-  sm: 'w-[420px] max-w-[92vw]',
-  md: 'w-[480px] max-w-[92vw]',
-  lg: 'w-[520px] max-w-[92vw]',
-} as const
-
-export type DialogWidth = keyof typeof WIDTHS
-
 export const dialogOverlayClass =
   'fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]'
 
-export const dialogPanelClass = 'rounded-card border border-line bg-panel p-5'
+/**
+ * max-w-[92vw] lives in the shared panel class, not at the call sites. Four
+ * dialogs shipped a raw w-[520px] with no cap and overflowed a phone by 130px;
+ * baking the cap in here means a call site cannot forget it, whatever width it
+ * asks for. The widths themselves range 380 to 560, so they stay a number
+ * rather than a name that would fit none of them.
+ */
+export const dialogPanelClass = 'max-w-[92vw] rounded-card border border-line bg-panel p-5'
+
+/** The command palette sits high on the screen rather than centred, so it does
+ *  not jump as results appear under it. */
+export const paletteOverlayClass =
+  'fixed inset-0 z-30 grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[3px]'
+
+export const palettePanelClass = 'max-w-[92vw] rounded-card border border-line bg-panel p-3'
+
+/** The activity drawer: same modal behaviour, docked to the right edge. */
+export const sheetOverlayClass = 'fixed inset-0 z-20 bg-scrim'
+
+export const sheetPanelClass =
+  'fixed inset-y-0 right-0 z-20 flex max-w-full flex-col border-l border-line bg-panel-2'
 
 /**
  * Every call site renders its dialog conditionally and unmounts it to close,

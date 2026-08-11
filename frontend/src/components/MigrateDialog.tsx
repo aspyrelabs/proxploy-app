@@ -13,6 +13,7 @@ import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 type HostRow = { id: number; name: string; status: string }
 
@@ -98,94 +99,88 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
 
   return (
     <>
-      <div role="dialog" aria-label="Migrate app"
-           className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-        <div className="w-[560px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-          <h2 className="font-display text-[16px] font-semibold text-text">
-            Migrate <span className="font-mono">{app.name}</span>
-          </h2>
+      <Dialog title={<>Migrate <span className="font-mono">{app.name}</span></>} width={560} onClose={onClose}>
 
-          {jobId != null ? (
-            <div className="mt-4">
-              <div className="mb-3 rounded-ctl border border-line-soft bg-elev p-2 text-[12.5px] text-text-2">
-                <div>
-                  est. downtime: {pf?.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
-                </div>
-                <div>
-                  actual downtime: {measuredDowntime != null
-                    ? `${measuredDowntime.toFixed(1)}s (measured)`
-                    : 'not finished yet'}
-                </div>
-              </div>
-              <JobLog jobId={jobId} />
-              <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
+      {jobId != null ? (
+        <div className="mt-4">
+          <div className="mb-3 rounded-ctl border border-line-soft bg-elev p-2 text-[12.5px] text-text-2">
+            <div>
+              est. downtime: {pf?.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
             </div>
-          ) : (
-            <>
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label htmlFor="migrate-target"
-                         className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-                    Target host
-                  </label>
-                  <select id="migrate-target" className={inputCls} value={targetHostId ?? ''}
-                          disabled={hosts.isError}
-                          onChange={(e) => { const v = e.target.value; if (v) runPreflight(Number(v)) }}>
-                    {hosts.isError
-                      ? <option value="">Could not load hosts</option>
-                      : <option value="">Select a host…</option>}
-                    {targets.map((h) => (
-                      <option key={h.id} value={h.id} disabled={h.status !== 'connected'}>
-                        {h.name}{h.status !== 'connected' ? ` (${h.status})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {preflight.isPending && <p className="text-[12.5px] text-text-3">Checking…</p>}
-
-                {pf && (
-                  <div className="space-y-2 rounded-ctl border border-line-soft bg-elev p-3 text-[12.5px] text-text-2">
-                    <div className="text-text">{STRATEGY_LABEL[pf.strategy](pf)}</div>
-                    <div>
-                      transfer size:{' '}
-                      {pf.transfer_bytes != null
-                        ? `${fmtBytes(pf.transfer_bytes)} (${pf.estimate_basis === 'last_backup' ? 'from last backup' : 'live disk size'})`
-                        : 'unknown, no measured backup and no live disk size were available'}
-                    </div>
-                    <div>
-                      est. downtime: {pf.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
-                    </div>
-                    <div className="text-text-3">{pf.downtime_statement}</div>
-                    <div>
-                      target capacity:{' '}
-                      {pf.capacity_ok == null ? 'unknown' : pf.capacity_ok ? 'OK' : 'insufficient'}
-                    </div>
-                    {pf.warnings.length > 0 && (
-                      <ul className="list-disc space-y-0.5 pl-4 text-amber">
-                        {pf.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                      </ul>
-                    )}
-                    {pf.blockers.length > 0 && (
-                      <ul className="list-disc space-y-0.5 pl-4 text-red">
-                        {pf.blockers.map((b, i) => <li key={i}>{b}</li>)}
-                      </ul>
-                    )}
-                  </div>
-                )}
-
-                {error && <p className="text-[12.5px] text-red">{error}</p>}
-              </div>
-              <div className="mt-4 flex justify-end gap-2">
-                <Button variant="ghost" onClick={onClose}>Cancel</Button>
-                <Button disabled={!pf || pf.blockers.length > 0 || migrate.isPending} onClick={() => fire()}>
-                  {migrate.isPending ? 'Starting…' : 'Migrate'}
-                </Button>
-              </div>
-            </>
-          )}
+            <div>
+              actual downtime: {measuredDowntime != null
+                ? `${measuredDowntime.toFixed(1)}s (measured)`
+                : 'not finished yet'}
+            </div>
+          </div>
+          <JobLog jobId={jobId} />
+          <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="mt-4 space-y-3">
+            <div>
+              <label htmlFor="migrate-target"
+                     className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                Target host
+              </label>
+              <select id="migrate-target" className={inputCls} value={targetHostId ?? ''}
+                      disabled={hosts.isError}
+                      onChange={(e) => { const v = e.target.value; if (v) runPreflight(Number(v)) }}>
+                {hosts.isError
+                  ? <option value="">Could not load hosts</option>
+                  : <option value="">Select a host…</option>}
+                {targets.map((h) => (
+                  <option key={h.id} value={h.id} disabled={h.status !== 'connected'}>
+                    {h.name}{h.status !== 'connected' ? ` (${h.status})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {preflight.isPending && <p className="text-[12.5px] text-text-3">Checking…</p>}
+
+            {pf && (
+              <div className="space-y-2 rounded-ctl border border-line-soft bg-elev p-3 text-[12.5px] text-text-2">
+                <div className="text-text">{STRATEGY_LABEL[pf.strategy](pf)}</div>
+                <div>
+                  transfer size:{' '}
+                  {pf.transfer_bytes != null
+                    ? `${fmtBytes(pf.transfer_bytes)} (${pf.estimate_basis === 'last_backup' ? 'from last backup' : 'live disk size'})`
+                    : 'unknown, no measured backup and no live disk size were available'}
+                </div>
+                <div>
+                  est. downtime: {pf.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
+                </div>
+                <div className="text-text-3">{pf.downtime_statement}</div>
+                <div>
+                  target capacity:{' '}
+                  {pf.capacity_ok == null ? 'unknown' : pf.capacity_ok ? 'OK' : 'insufficient'}
+                </div>
+                {pf.warnings.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-amber">
+                    {pf.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                )}
+                {pf.blockers.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-red">
+                    {pf.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {error && <p className="text-[12.5px] text-red">{error}</p>}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button disabled={!pf || pf.blockers.length > 0 || migrate.isPending} onClick={() => fire()}>
+              {migrate.isPending ? 'Starting…' : 'Migrate'}
+            </Button>
+          </div>
+        </>
+      )}
+      </Dialog>
 
       {guard && (
         <ConfirmSelfDialog

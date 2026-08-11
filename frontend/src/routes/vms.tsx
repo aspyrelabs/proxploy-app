@@ -190,19 +190,13 @@ function DestroyVmButton({ vm }: { vm: VmRow }) {
         />
       )}
       {jobId != null && (
-        <div role="dialog" aria-label="Destroying VM"
-             className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-          <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-            <h2 className="font-display text-[16px] font-semibold">
-              Destroying <span className="font-mono">{vm.name}</span>
-            </h2>
-            <div className="mt-4"><JobLog jobId={jobId} /></div>
-            <Button className="mt-3" variant="ghost"
-                    onClick={() => navigate({ to: '/vms' as never })}>
-              Close
-            </Button>
-          </div>
-        </div>
+        <Dialog title={<>Destroying <span className="font-mono">{vm.name}</span></>} width={480} onClose={() => navigate({ to: '/vms' as never })}>
+        <div className="mt-4"><JobLog jobId={jobId} /></div>
+        <Button className="mt-3" variant="ghost"
+                onClick={() => navigate({ to: '/vms' as never })}>
+          Close
+        </Button>
+        </Dialog>
       )}
     </>
   )
@@ -298,6 +292,7 @@ export function VmOverview() {
 // its eager createRouter() to run mid-cycle when this file is the import
 // entry point (e.g. in tests), before vmsRoute/vmDetailRoute exist.
 import { shellRoute } from './shell'
+import { Dialog } from '../components/ui/dialog'
 
 export const vmsRoute = createRoute({
   getParentRoute: () => shellRoute,

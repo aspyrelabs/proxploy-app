@@ -6,6 +6,7 @@ import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
 
@@ -51,69 +52,64 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[520px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <h2 className="font-display text-[16px] font-semibold text-text">
-          Clone <span className="font-mono">{vm.name}</span>
-        </h2>
+    <Dialog title={<>Clone <span className="font-mono">{vm.name}</span></>} width={520} onClose={onClose}>
 
-        {jobId ? (
-          <div className="mt-4">
-            <JobLog jobId={jobId} />
-            <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
-          </div>
-        ) : (
-          <>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label htmlFor="clone-name" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-                  New name
-                </label>
-                <input id="clone-name" className={inputCls} value={name}
-                  onChange={(e) => setName(e.target.value)} />
-              </div>
-              <fieldset className="space-y-1.5">
-                <legend className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Mode</legend>
-                <label htmlFor="clone-full" className="flex items-center gap-2 text-[13px] text-text-2">
-                  <input id="clone-full" type="radio" name="clone-mode" checked={full}
-                    onChange={() => setFull(true)} />
-                  Full clone, an independent copy of every disk
-                </label>
-                <label htmlFor="clone-linked" className="flex items-center gap-2 text-[13px] text-text-2">
-                  <input id="clone-linked" type="radio" name="clone-mode" checked={!full}
-                    onChange={() => setFull(false)} />
-                  Linked clone, shares the base disk, template sources only
-                </label>
-              </fieldset>
-              <div>
-                <label htmlFor="clone-storage" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-                  Target storage
-                </label>
-                <select id="clone-storage" className={inputCls} value={storage}
-                  disabled={storages.isError}
-                  onChange={(e) => setStorage(e.target.value)}>
-                  {storages.isError
-                    ? <option value="">Could not load datastores</option>
-                    : <option value="">Same as source</option>}
-                  {storeOpts.map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
-                </select>
-              </div>
-              {!full && (
-                <p className="text-[12px] text-text-3">
-                  Proxmox only accepts a linked clone when the source is a template.
-                  Proxploy does not track template-ness, so if this VM is not one,
-                  Proxmox&apos;s own error is shown here unchanged.
-                </p>
-              )}
-              {error && <p className="text-[12.5px] text-red">{error}</p>}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button disabled={clone.isPending || name.trim() === ''} onClick={submit}>Clone</Button>
-            </div>
-          </>
-        )}
+    {jobId ? (
+      <div className="mt-4">
+        <JobLog jobId={jobId} />
+        <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
-    </div>
+    ) : (
+      <>
+        <div className="mt-4 space-y-3">
+          <div>
+            <label htmlFor="clone-name" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+              New name
+            </label>
+            <input id="clone-name" className={inputCls} value={name}
+              onChange={(e) => setName(e.target.value)} />
+          </div>
+          <fieldset className="space-y-1.5">
+            <legend className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Mode</legend>
+            <label htmlFor="clone-full" className="flex items-center gap-2 text-[13px] text-text-2">
+              <input id="clone-full" type="radio" name="clone-mode" checked={full}
+                onChange={() => setFull(true)} />
+              Full clone, an independent copy of every disk
+            </label>
+            <label htmlFor="clone-linked" className="flex items-center gap-2 text-[13px] text-text-2">
+              <input id="clone-linked" type="radio" name="clone-mode" checked={!full}
+                onChange={() => setFull(false)} />
+              Linked clone, shares the base disk, template sources only
+            </label>
+          </fieldset>
+          <div>
+            <label htmlFor="clone-storage" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+              Target storage
+            </label>
+            <select id="clone-storage" className={inputCls} value={storage}
+              disabled={storages.isError}
+              onChange={(e) => setStorage(e.target.value)}>
+              {storages.isError
+                ? <option value="">Could not load datastores</option>
+                : <option value="">Same as source</option>}
+              {storeOpts.map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+            </select>
+          </div>
+          {!full && (
+            <p className="text-[12px] text-text-3">
+              Proxmox only accepts a linked clone when the source is a template.
+              Proxploy does not track template-ness, so if this VM is not one,
+              Proxmox&apos;s own error is shown here unchanged.
+            </p>
+          )}
+          {error && <p className="text-[12.5px] text-red">{error}</p>}
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={clone.isPending || name.trim() === ''} onClick={submit}>Clone</Button>
+        </div>
+      </>
+    )}
+    </Dialog>
   )
 }

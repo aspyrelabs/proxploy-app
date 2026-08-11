@@ -5,6 +5,7 @@ import { JobLog } from './JobLog'
 import { QueryState } from './QueryState'
 import { UsageBar } from './UsageBar'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 type DrawerSearch = { drawer?: 'activity'; job?: number }
 
@@ -73,17 +74,17 @@ export function ActivityDrawer() {
   const jobsQuery = useJobs({ enabled: open })
   if (!open) return null
   return (
-    <aside
-      role="dialog"
-      aria-label="Activity"
-      className="fixed inset-y-0 right-0 z-20 flex w-[400px] max-w-full flex-col border-l border-line bg-panel-2"
-    >
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <h2 className="font-display text-[15px] font-semibold">Activity</h2>
+    <Dialog
+      title="Activity"
+      width={400}
+      variant="sheet"
+      onClose={close}
+      headerRight={(
         <Button variant="ghost" className="px-2 py-1 text-[12px]" onClick={close}>
           Close
         </Button>
-      </div>
+      )}
+    >
       <div className="flex-1 overflow-auto">
         <QueryState query={jobsQuery}
                     emptyTitle="No jobs yet."
@@ -100,6 +101,6 @@ export function ActivityDrawer() {
           )}
         </QueryState>
       </div>
-    </aside>
+    </Dialog>
   )
 }

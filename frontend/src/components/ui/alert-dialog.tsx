@@ -24,7 +24,7 @@ export function AlertDialog({
   onOpenAutoFocus,
   children,
 }: {
-  title: string
+  title: ReactNode
   description: ReactNode
   /** Escape and the cancel control both route here. */
   onCancel: () => void
