@@ -24,7 +24,17 @@ export function fmtPct(n?: number | null): string {
   return n == null ? UNKNOWN : `${Math.round(n)}%`
 }
 
-/** bytes/s → Mbps display (network cards, doc 06 Network/throughput). */
+/** bytes/s → bit-rate display (network cards, doc 06 Network/throughput).
+ *
+ *  Scales its own unit. It used to be hard-wired to Mbps, which reports a real
+ *  4.6 kB/s trickle — the actual traffic on an idle home node — as "0.0 Mbps",
+ *  i.e. as nothing at all. Decimal steps, not binary: network rates have
+ *  always been quoted in thousands. */
 export function fmtBps(n?: number | null): string {
-  return n == null ? UNKNOWN : `${((n * 8) / 1e6).toFixed(1)} Mbps`
+  if (n == null) return UNKNOWN
+  const units = ['bps', 'kbps', 'Mbps', 'Gbps', 'Tbps']
+  let v = n * 8
+  let i = 0
+  while (Math.abs(v) >= 1000 && i < units.length - 1) { v /= 1000; i++ }
+  return `${v.toFixed(1)} ${units[i]}`
 }

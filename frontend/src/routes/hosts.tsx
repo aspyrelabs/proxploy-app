@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createRoute, useNavigate, useParams } from '@tanstack/react-router'
+import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
@@ -10,6 +10,8 @@ import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { HardwareTab } from '../components/HardwareTab'
+import { HostFacts } from '../components/HostFacts'
 import { HostForm } from '../components/HostForm'
 import { KVGrid } from '../components/KVGrid'
 import { NodeCard } from '../components/NodeCard'
@@ -307,9 +309,12 @@ export function HostsPage() {
   )
 }
 
-// Minimal slice of GET /hosts/{id}, this page only needs the opt-in flag;
-// the fleet-overview fields (status, uptime, etc.) already come from `node`.
-type HostDetail = { id: number; name: string; node_shell_enabled: boolean }
+// Minimal slice of GET /hosts/{id}: the opt-in flag and the address the
+// "Open Proxmox web UI" button links to. The fleet-overview fields (status,
+// uptime, etc.) already come from `node`.
+type HostDetail = {
+  id: number; name: string; address: string; node_shell_enabled: boolean
+}
 
 function useHostDetail(id: number) {
   return useQuery({
@@ -348,11 +353,12 @@ function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeSh
   )
 }
 
-export function NodeDetailPage() {
-  // `node` is absent on the legacy /hosts/$hostId route, which resolves to the
-  // host's entry node. Keying the lookup on (host, node) is the fix for a host
-  // with several nodes: `nodes.find(n => n.host_id === id)` used to return
-  // whichever one came first.
+/** (host id, node row, host detail) for whichever of the three host routes is
+ *  mounted. `node` is absent on the legacy /hosts/$hostId route, which
+ *  resolves to the host's entry node. Keying the lookup on (host, node) is the
+ *  fix for a host with several nodes: `nodes.find(n => n.host_id === id)` used
+ *  to return whichever one came first. */
+function useNodeContext() {
   const { hostId, node: nodeName } = useParams({ strict: false }) as
     { hostId: string; node?: string }
   const id = Number(hostId)
@@ -362,6 +368,66 @@ export function NodeDetailPage() {
     ? forHost?.find((n) => n.node === nodeName)
     : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
   const { data: host } = useHostDetail(id)
+  return { id, node, host }
+}
+
+const TABS = [
+  { path: '.', label: 'Overview' },
+  { path: 'hardware', label: 'Hardware' },
+]
+
+/** The host page's frame: who this machine is, where to open it, and the
+ *  tabs. The body is a routed child, matching the app and VM detail pages. */
+export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
+  const { node, host } = useNodeContext()
+  if (!node && !host) {
+    return <EmptyState title="Node not found" note="It may have been removed." />
+  }
+  return (
+    <div>
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <div>
+          <h1 className="font-mono text-[20px] font-semibold">{node?.name ?? host?.name}</h1>
+          {node && (
+            <div className="text-[12px] text-text-3">
+              {node.cluster ? `cluster · ${node.cluster}` : 'standalone'} · PVE {node.pve_version ?? '?'}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {host?.address && (
+            // rel="noopener": without it the opened page can steer this one
+            // through window.opener.
+            <a href={host.address} target="_blank" rel="noopener noreferrer"
+              className="rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2
+                         transition hover:border-amber hover:text-amber">
+              Open Proxmox web UI ↗
+            </a>
+          )}
+          {node && <StatusPill status={node.status} />}
+        </div>
+      </div>
+      <div className="mb-5 flex gap-1 border-b border-line-soft">
+        {TABS.map((t) => (
+          <Link key={t.path} to={t.path as never}
+            from={'/hosts/$hostId/$node' as never}
+            activeOptions={{ exact: t.path === '.' }}
+            className="px-3 py-2 text-[13px] text-text-2 hover:text-text
+                       [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text">
+            {t.label}
+          </Link>
+        ))}
+      </div>
+      {/* The legacy /hosts/$hostId route has no routed children to fill an
+          Outlet, and it renders this page while its redirect resolves; giving
+          it the Overview inline keeps that moment from being a blank frame. */}
+      {inline ? <NodeOverview /> : <Outlet />}
+    </div>
+  )
+}
+
+export function NodeOverview() {
+  const { id, node, host } = useNodeContext()
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   // mem_pct, not mem_bytes: the poller records both for a host, and charting
   // the percentage puts all three of these on one 0..100 scale so they can be
@@ -380,22 +446,15 @@ export function NodeDetailPage() {
   })
   const apps = nodeAppsQuery.data
   const vms = nodeVmsQuery.data
-  if (!node && !host) return <EmptyState title="Node not found" note="It may have been removed." />
+  if (!node && !host) return null
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="font-mono text-[20px] font-semibold">{node?.name ?? host?.name}</h1>
-          {node && (
-            <div className="text-[12px] text-text-3">
-              {node.cluster ? `cluster · ${node.cluster}` : 'standalone'} · PVE {node.pve_version ?? '?'}
-            </div>
-          )}
-        </div>
-        {node && <StatusPill status={node.status} />}
-      </div>
       {node && (
         <>
+          {/* The poller's snapshot: always available, and the only source here
+              for the deduped datastore fill and the guest counts. HostFacts
+              below adds what only the node itself can answer, and disappears
+              if the token cannot read it, so this strip is the floor. */}
           <div className={card}>
             <KVGrid items={[
               ['Node', node.node ?? 'unknown'],
@@ -407,6 +466,9 @@ export function NodeDetailPage() {
               ['VMs', `${node.vms_running}/${node.vms} running`],
             ]} />
           </div>
+          {node.node && (
+            <div className="mt-5"><HostFacts hostId={id} node={node.node} /></div>
+          )}
           {/* Entry node only: the `host:<id>` metric series is recorded from
               the node Proxploy connects through, so drawing it under any other
               node of the cluster would be charting a different machine. */}
@@ -487,6 +549,12 @@ export function NodeDetailPage() {
   )
 }
 
+export function NodeHardware() {
+  const { id, node } = useNodeContext()
+  if (!node?.node) return null
+  return <HardwareTab hostId={id} node={node.node} />
+}
+
 /** /hosts/$hostId, kept alive for every link minted before node detail grew
  *  its node segment (and for anything that only knows a host id).
  *
@@ -507,7 +575,7 @@ export function HostEntryRedirect() {
                  replace: true })
     }
   }, [entry, id, navigate])
-  return <NodeDetailPage />
+  return <NodeDetailPage inline />
 }
 
 // Route objects, imported by router.tsx (settings.tsx precedent). shellRoute
@@ -526,6 +594,18 @@ export const nodeDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/hosts/$hostId/$node',
   component: NodeDetailPage,
+})
+
+export const hostOverviewRoute = createRoute({
+  getParentRoute: () => nodeDetailRoute,
+  path: '/',
+  component: NodeOverview,
+})
+
+export const hostHardwareRoute = createRoute({
+  getParentRoute: () => nodeDetailRoute,
+  path: 'hardware',
+  component: NodeHardware,
 })
 
 // Still routed, still works: it redirects to the entry node above.

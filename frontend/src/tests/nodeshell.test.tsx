@@ -22,11 +22,11 @@ describe('node shell section', () => {
       if (path.startsWith('/hosts/')) return Promise.resolve({ id: 7, name: 'pve1', node_shell_enabled: false })
       return Promise.resolve([])
     })
-    const { NodeDetailPage } = await import('../routes/hosts')
+    const { NodeOverview } = await import('../routes/hosts')
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
-        <NodeDetailPage />
+        <NodeOverview />
       </QueryClientProvider>,
     )
     // /node shell/i alone would match both the "Node shell" heading and the
@@ -46,11 +46,11 @@ describe('node shell section', () => {
       if (path.startsWith('/hosts/')) return Promise.resolve({ id: 7, name: 'pve1', node_shell_enabled: true })
       return Promise.resolve([])
     })
-    const { NodeDetailPage } = await import('../routes/hosts')
+    const { NodeOverview } = await import('../routes/hosts')
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
-        <NodeDetailPage />
+        <NodeOverview />
       </QueryClientProvider>,
     )
     const btn = await screen.findByRole('button', { name: /open node shell/i })

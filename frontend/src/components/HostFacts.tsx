@@ -51,7 +51,9 @@ export function HostFacts({ hostId, node }: { hostId: number; node: string }) {
   const loadPct = Math.round(((s.load[0] ?? 0) / threads) * 1000) / 10
 
   return (
-    <div className="space-y-5">
+    // Carries its own card so that a node which refuses to be read leaves no
+    // empty bordered box behind on the page.
+    <div className="space-y-5 rounded-card border border-line-soft bg-panel p-5">
       <KVGrid items={[
         ['Node', s.node],
         ['PVE version', shortPve(s.pve_version)],

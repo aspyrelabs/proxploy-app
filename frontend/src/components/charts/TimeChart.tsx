@@ -22,7 +22,17 @@ export type ChartUnit = 'percent' | 'bytes' | 'bps'
 export function unitFormatter(unit: ChartUnit): (v: number | null | undefined) => string {
   if (unit === 'bytes') return fmtBytes
   if (unit === 'bps') return fmtBps
-  return (v) => (v == null ? UNKNOWN : `${Math.round(v)}%`)
+  // Precision follows magnitude. A whole-number percent is right at 42% and
+  // catastrophic at 0.14%, where it prints "0%" and tells the reader their
+  // working chart is dead. The live node this was built against idles at
+  // cpu_pct 0.14 and disk_pct 0.30, so this is the normal case, not the edge.
+  return (v) => {
+    if (v == null) return UNKNOWN
+    if (v === 0) return '0%'
+    if (Math.abs(v) < 1) return `${v.toFixed(2)}%`
+    if (Math.abs(v) < 10) return `${v.toFixed(1)}%`
+    return `${Math.round(v)}%`
+  }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -51,11 +61,34 @@ function withAlpha(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+/** Percent axes snap to one of these tops rather than to the data.
+ *
+ *  A real idle node runs at cpu_pct 0.14 and disk_pct 0.30. On a hard 0..100
+ *  axis both are a flat line welded to the floor, indistinguishable from a
+ *  broken chart; auto-scaled to their own range they become a dramatic
+ *  mountain built out of rounding noise, which is the worse lie. Snapping to a
+ *  band keeps the baseline at zero always — so height stays proportional to
+ *  the real number — while giving a quiet series enough room to show shape,
+ *  and the axis label states which band is in force. */
+export const PERCENT_BANDS = [5, 10, 25, 50, 100]
+
+/** Top of the y scale. Zero-anchored in every case: a chart whose baseline
+ *  floats is a chart that can make 6.3% look like 6300%. */
+export function yTop(unit: ChartUnit, max: number): number {
+  if (unit === 'percent') {
+    const want = Math.max(0, max) * 1.25
+    return PERCENT_BANDS.find((b) => b >= want) ?? 100
+  }
+  return max > 0 ? max * 1.05 : 1
+}
+
 export type BuildOptionsArgs = {
   width: number
   height: number
   unit: ChartUnit
   label: string
+  /** Largest value in the series, which sets the top of the y scale. */
+  max: number
   /** Resolved colours, already read off the theme by the caller. */
   accent: string
   axis: string
@@ -84,12 +117,7 @@ export function buildOptions(a: BuildOptionsArgs): uPlot.Options {
     cursor: { show: true, points: { show: true }, x: true, y: true },
     scales: {
       x: { time: true },
-      // A percentage axis is pinned: auto-ranging 2.9%..3.1% draws a dramatic
-      // mountain range out of an idle box, which is its own kind of lying.
-      y: a.unit === 'percent'
-        ? { range: [0, 100] as [number, number] }
-        : { range: (_u: uPlot, _min: number, max: number) =>
-              [0, max > 0 ? max * 1.05 : 1] as [number, number] },
+      y: { range: [0, yTop(a.unit, a.max)] as [number, number] },
     },
     axes: [
       { ...axisBase,
@@ -194,14 +222,22 @@ export function TimeChart({
   // "Has a series" is not "has samples": disk_pct only started recording on
   // this install recently, and guests never record it at all, so a run of
   // nulls is the common case and has to say so rather than draw a flat floor.
-  const hasData = ts.length > 0 && values.some((v) => v != null)
+  //
+  // A series of real ZEROES is emphatically not that case. An idle node
+  // genuinely reports 0.0%, and calling that "no data yet" would hide working
+  // data behind the very message this component exists to stop showing.
+  const real = values.filter((v): v is number => v != null)
+  const hasData = ts.length > 0 && real.length > 0
+  const latest = real.length > 0 ? real[real.length - 1] : null
+  const peak = real.length > 0 ? Math.max(...real) : 0
+  const fmt = unitFormatter(unit)
 
   useEffect(() => {
     const host = hostRef.current
     if (!host || !hasData || width <= 0 || !canDrawCanvas()) return
     const accentColor = getComputedStyle(host).color || NO_STYLESHEET.accent
     const opts = buildOptions({
-      width, height, unit, label,
+      width, height, unit, label, max: peak,
       accent: accentColor,
       axis: readVar('--text-3', NO_STYLESHEET.axis),
       grid: readVar('--line-soft', NO_STYLESHEET.grid),
@@ -217,13 +253,28 @@ export function TimeChart({
     }
     plot.current = made
     return () => { made?.destroy(); plot.current = null }
-  }, [ts, values, unit, label, width, height, themeTick, hasData])
+  }, [ts, values, unit, label, width, height, themeTick, hasData, peak])
 
   return (
     <div ref={boxRef} className="w-full overflow-hidden">
       {hasData ? (
-        <div ref={hostRef} data-testid="timechart-plot" data-width={width}
-          className={`${ACCENT_CLASS[accent]} w-full`} style={{ minHeight: height }} />
+        <>
+          {/* The number in words, above the plot. On a real idle node cpu_pct
+              peaks at 0.14%, which on any honest zero-anchored axis is a flat
+              line on the floor; without this readout that is indistinguishable
+              from a chart that failed to draw. */}
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <span className="font-mono text-[14px] text-text">
+              {fmt(latest)}
+              <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-text-3">now</span>
+            </span>
+            <span className="font-mono text-[11px] text-text-3">
+              peak {fmt(peak)} · axis to {fmt(yTop(unit, peak))}
+            </span>
+          </div>
+          <div ref={hostRef} data-testid="timechart-plot" data-width={width}
+            className={`${ACCENT_CLASS[accent]} w-full`} style={{ minHeight: height }} />
+        </>
       ) : (
         <div style={{ minHeight: height }}
           className="flex flex-col items-center justify-center gap-1 rounded-tile

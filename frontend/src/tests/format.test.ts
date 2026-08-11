@@ -18,6 +18,11 @@ describe('format helpers', () => {
     expect(fmtPct(null)).toBe('unknown')
     expect(fmtBps(1250000)).toBe('10.0 Mbps')
     expect(fmtBps(null)).toBe('unknown')
+    // A real idle node trickles a few kB/s. Hard-wired Mbps reported that as
+    // "0.0 Mbps", which reads as no traffic at all.
+    expect(fmtBps(4657)).toBe('37.3 kbps')
+    expect(fmtBps(100)).toBe('800.0 bps')
+    expect(fmtBps(1_250_000_000)).toBe('10.0 Gbps')
   })
   it('never returns a bare separator for a missing value', () => {
     expect(fmtBytes(undefined)).not.toBe(', ')

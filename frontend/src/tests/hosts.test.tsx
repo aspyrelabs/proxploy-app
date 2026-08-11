@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' = 'ok'
 let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
+// null means the node refuses /nodes/{n}/status, the narrow-token case.
+let nodeStatus: Record<string, unknown> | null = null
 
 const node = (over: Record<string, unknown> = {}) => ({
   host_id: 1, name: 'host-01', node: 'pve1', status: 'connected',
@@ -48,6 +50,20 @@ vi.mock('../api/client', () => ({
     }
     if (path.startsWith('/apps')) return Promise.resolve([])
     if (path.startsWith('/vms')) return Promise.resolve([])
+    if (path.endsWith('/nodes/pve1/status')) {
+      return nodeStatus ? Promise.resolve(nodeStatus) : Promise.reject(new Error('502'))
+    }
+    if (path.endsWith('/nodes/pve1/hardware')) {
+      return Promise.resolve({ disks: [{
+        devpath: '/dev/nvme0n1', model: 'WD Green SN350 2TB', serial: '22303K800007',
+        size: 2000398934016, type: 'nvme', health: 'PASSED', wearout: 99,
+        used: 'LVM', osd_id: null,
+      }] })
+    }
+    if (path === '/hosts/1') {
+      return Promise.resolve({ id: 1, name: 'host-01', address: 'https://10.0.0.5:8006',
+                               node_shell_enabled: false })
+    }
     if (path.startsWith('/hosts')) return Promise.resolve([])
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'host:1', metric: 'net_in_bps', resolution: 'raw', ts: [], value: [] })
@@ -74,12 +90,15 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   ),
   useNavigate: () => navigate,
   useSearch: () => ({}),
+  // The tab body is a routed child; these tests mount the tab components
+  // directly rather than standing up a whole router (vms.test.tsx precedent).
+  Outlet: () => null,
   // NodeDetailPage reads its own params; HostsPage never calls this.
   useParams: () => ({ hostId: '1', node: 'pve1' }),
 }))
 
 import { api } from '../api/client'
-import { HostsPage, NodeDetailPage } from '../routes/hosts'
+import { HostsPage, NodeDetailPage, NodeHardware, NodeOverview } from '../routes/hosts'
 
 const withQuery = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -226,11 +245,35 @@ describe('NodeCard', () => {
 
 describe('NodeDetailPage', () => {
   beforeEach(() => {
-    nodesResult = 'ok'; summaryResult = 'ok'; features = {}; navigate.mockClear()
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}
+    nodeStatus = null; navigate.mockClear()
   })
 
-  it('reports storage used / total alongside memory', async () => {
+  it('links out to the Proxmox web UI, safely', async () => {
     withQuery(<NodeDetailPage />)
+    const link = await screen.findByRole('link', { name: /proxmox web ui/i })
+    expect(link).toHaveAttribute('href', 'https://10.0.0.5:8006')
+    expect(link).toHaveAttribute('target', '_blank')
+    // Without noopener the opened page can navigate this one via window.opener.
+    expect(link.getAttribute('rel')).toContain('noopener')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+  })
+
+  it('offers Overview and Hardware tabs, like every other detail page', async () => {
+    withQuery(<NodeDetailPage />)
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('Hardware')).toBeInTheDocument()
+  })
+})
+
+describe('NodeOverview', () => {
+  beforeEach(() => {
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}
+    nodeStatus = null; navigate.mockClear()
+  })
+
+  it('reports storage used / total alongside the guest counts', async () => {
+    withQuery(<NodeOverview />)
     expect(await screen.findByText('Storage')).toBeInTheDocument()
     expect(screen.getByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
   })
@@ -239,7 +282,7 @@ describe('NodeDetailPage', () => {
     // It used to chart mem_bytes against an axis-free sparkline: a curve of
     // raw byte counts beside two percentage curves, with nothing on screen
     // saying which was which.
-    withQuery(<NodeDetailPage />)
+    withQuery(<NodeOverview />)
     await screen.findByText('2.0 GiB / 32.0 GiB')
     const asked = vi.mocked(api).mock.calls.map((c) => String(c[0]))
     expect(asked.some((p) => p.includes('metric=mem_pct'))).toBe(true)
@@ -249,7 +292,45 @@ describe('NodeDetailPage', () => {
   it('says "no data yet" for a metric with no samples rather than drawing an empty box', async () => {
     // disk_pct only began recording on this install recently, so "no samples"
     // is a real, common state and not an error.
-    withQuery(<NodeDetailPage />)
+    withQuery(<NodeOverview />)
     expect(await screen.findAllByText(/no data yet/i)).toHaveLength(3)
+  })
+
+  it('shows the hardware facts when the node will report them', async () => {
+    nodeStatus = {
+      node: 'pve1', uptime_s: 25029, pve_version: 'pve-manager/9.2.10/43df',
+      kernel: '7.0.14-11-pve', arch: 'x86_64', boot_mode: 'efi', secure_boot: false,
+      cpu: { model: 'Core i5-13500T', vendor: 'GenuineIntel', sockets: 1,
+             cores: 14, threads: 20, mhz: '800.000' },
+      load: [2, 1, 0.5], io_delay: 0.00027,
+      memory: { total: 33306869760, used: 2161287168 }, swap: {}, rootfs: {},
+    }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText(/Core i5-13500T/)).toBeInTheDocument()
+  })
+
+  it('still renders when the node refuses to report them', async () => {
+    // A token too narrow for /nodes/{n}/status must cost the strip, not the page.
+    nodeStatus = null
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
+    expect(screen.queryByText(/Processor/)).not.toBeInTheDocument()
+  })
+})
+
+describe('NodeHardware', () => {
+  beforeEach(() => {
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}
+    nodeStatus = null; navigate.mockClear()
+  })
+
+  it('lists disks with health and wearout', async () => {
+    withQuery(<NodeHardware />)
+    expect(await screen.findByText('WD Green SN350 2TB')).toBeInTheDocument()
+    expect(screen.getByText('PASSED')).toBeInTheDocument()
+    // PVE reports wearout as life REMAINING; "99% used" would invert it.
+    expect(screen.getByText(/99% left/)).toBeInTheDocument()
+    expect(screen.getByText('/dev/nvme0n1')).toBeInTheDocument()
+    expect(screen.getByText('1.8 TiB')).toBeInTheDocument()
   })
 })
