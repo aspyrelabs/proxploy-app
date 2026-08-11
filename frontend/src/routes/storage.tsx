@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import * as Tabs from '@radix-ui/react-tabs'
 import { createRoute } from '@tanstack/react-router'
 import { useDeleteVolume, useStorage, useStorageContent, useStorageDetail } from '../api/storage'
 import type { StorageRow, VolumeRow } from '../api/storage'
@@ -119,28 +120,36 @@ export function ContentBrowser({ row, onClose, onManage }:
         ['Content', row.content.join(', ') || '; '],
       ]} />
 
-      <div className="mb-4 mt-5 flex gap-1 border-b border-line-soft">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setActive(t.key)}
-            className={`px-3 py-2 text-[13px] ${
-              active === t.key
-                ? 'border-b-2 border-amber text-text'
-                : 'text-text-2 hover:text-text'}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Radix Tabs, not router child-routes: this strip only filters the list
+          below it and was never deep-linkable. The tab strips on the apps, host
+          and VM pages ARE child routes and stay that way, because converting
+          them would break links like ?tab=logs. */}
+      <Tabs.Root value={active} onValueChange={(v) => setActive(v as typeof active)}>
+        <Tabs.List className="mb-4 mt-5 flex gap-1 border-b border-line-soft">
+          {tabs.map((t) => (
+            <Tabs.Trigger
+              key={t.key}
+              value={t.key}
+              className="cursor-pointer px-3 py-2 text-[13px] text-text-2 hover:text-text
+                         data-[state=active]:border-b-2 data-[state=active]:border-amber
+                         data-[state=active]:text-text"
+            >
+              {t.label}
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
 
-      {isError ? (
-        <EmptyState title="Content listing unavailable"
-          note="Proxploy could not reach this datastore; it may be offline or the node may be down." />
-      ) : (
-        <VolumeTable volumes={volumes ?? []} hostId={row.host_id} node={row.node} storage={row.storage} />
-      )}
+        {tabs.map((t) => (
+          <Tabs.Content key={t.key} value={t.key}>
+            {isError ? (
+              <EmptyState title="Content listing unavailable"
+                note="Proxploy could not reach this datastore; it may be offline or the node may be down." />
+            ) : (
+              <VolumeTable volumes={volumes ?? []} hostId={row.host_id} node={row.node} storage={row.storage} />
+            )}
+          </Tabs.Content>
+        ))}
+      </Tabs.Root>
     </div>
   )
 }

@@ -6,6 +6,7 @@ import type { AppRow } from '../api/hooks'
 import { errBody } from '../api/network'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 const label = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
 
@@ -70,78 +71,72 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
   }
 
   return (
-    <div role="dialog" aria-label="Reconfigure app"
-         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-      <div className="w-[520px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <h2 className="font-display text-[16px] font-semibold text-text">
-          Reconfigure <span className="font-mono">{app.name}</span>
-        </h2>
+    <Dialog title={<>Reconfigure <span className="font-mono">{app.name}</span></>} width={520} onClose={onClose}>
 
-        <div className="mt-4 space-y-4">
-          <fieldset className="space-y-2">
-            <legend className="mb-1 text-[12px] font-semibold text-text">
-              Resources (pushed to Proxmox live)
-            </legend>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label htmlFor="reconf-cores" className={label}>Cores</label>
-                <input id="reconf-cores" className={inputCls} type="number" min={1}
-                  placeholder="unchanged" value={cores}
-                  onChange={(e) => setCores(e.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="reconf-mem" className={label}>Memory (MB)</label>
-                <input id="reconf-mem" className={inputCls} type="number" min={16}
-                  placeholder="unchanged" value={memoryMb}
-                  onChange={(e) => setMemoryMb(e.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="reconf-swap" className={label}>Swap (MB)</label>
-                <input id="reconf-swap" className={inputCls} type="number" min={0}
-                  placeholder="unchanged" value={swapMb}
-                  onChange={(e) => setSwapMb(e.target.value)} />
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset className="space-y-2">
-            <legend className="mb-1 text-[12px] font-semibold text-text">
-              Presentation (Proxploy only, no PVE call)
-            </legend>
-            <div>
-              <label htmlFor="reconf-name" className={label}>Name</label>
-              <input id="reconf-name" className={inputCls} value={name}
-                onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label htmlFor="reconf-port" className={label}>Web port</label>
-                <input id="reconf-port" className={inputCls} type="number" min={1}
-                  value={webPort} onChange={(e) => setWebPort(e.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="reconf-protocol" className={label}>Protocol</label>
-                <input id="reconf-protocol" className={inputCls} value={webProtocol}
-                  onChange={(e) => setWebProtocol(e.target.value)} />
-              </div>
-              <div>
-                <label htmlFor="reconf-path" className={label}>Path</label>
-                <input id="reconf-path" className={inputCls} value={webPath}
-                  onChange={(e) => setWebPath(e.target.value)} />
-              </div>
-            </div>
-          </fieldset>
-
-          {error && <p className="text-[12.5px] text-red">{error}</p>}
+    <div className="mt-4 space-y-4">
+      <fieldset className="space-y-2">
+        <legend className="mb-1 text-[12px] font-semibold text-text">
+          Resources (pushed to Proxmox live)
+        </legend>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label htmlFor="reconf-cores" className={label}>Cores</label>
+            <input id="reconf-cores" className={inputCls} type="number" min={1}
+              placeholder="unchanged" value={cores}
+              onChange={(e) => setCores(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="reconf-mem" className={label}>Memory (MB)</label>
+            <input id="reconf-mem" className={inputCls} type="number" min={16}
+              placeholder="unchanged" value={memoryMb}
+              onChange={(e) => setMemoryMb(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="reconf-swap" className={label}>Swap (MB)</label>
+            <input id="reconf-swap" className={inputCls} type="number" min={0}
+              placeholder="unchanged" value={swapMb}
+              onChange={(e) => setSwapMb(e.target.value)} />
+          </div>
         </div>
+      </fieldset>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={!dirty || reconfigure.isPending} onClick={submit}>
-            {reconfigure.isPending ? 'Saving…' : 'Save'}
-          </Button>
+      <fieldset className="space-y-2">
+        <legend className="mb-1 text-[12px] font-semibold text-text">
+          Presentation (Proxploy only, no PVE call)
+        </legend>
+        <div>
+          <label htmlFor="reconf-name" className={label}>Name</label>
+          <input id="reconf-name" className={inputCls} value={name}
+            onChange={(e) => setName(e.target.value)} />
         </div>
-      </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label htmlFor="reconf-port" className={label}>Web port</label>
+            <input id="reconf-port" className={inputCls} type="number" min={1}
+              value={webPort} onChange={(e) => setWebPort(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="reconf-protocol" className={label}>Protocol</label>
+            <input id="reconf-protocol" className={inputCls} value={webProtocol}
+              onChange={(e) => setWebProtocol(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="reconf-path" className={label}>Path</label>
+            <input id="reconf-path" className={inputCls} value={webPath}
+              onChange={(e) => setWebPath(e.target.value)} />
+          </div>
+        </div>
+      </fieldset>
+
+      {error && <p className="text-[12.5px] text-red">{error}</p>}
     </div>
+
+    <div className="mt-4 flex justify-end gap-2">
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button disabled={!dirty || reconfigure.isPending} onClick={submit}>
+        {reconfigure.isPending ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+    </Dialog>
   )
 }

@@ -97,6 +97,36 @@ describe('UninstallDialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  // Same shape as HostRemoveDialog's gate test. Converting to AlertDialog is
+  // exactly the kind of change that quietly drops a guard like this.
+  it('blocks the destroy until the app name is typed exactly', async () => {
+    calls.length = 0
+    requireFreshPhrase = false
+    wrap()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Destroy container…' }))
+    const confirm = screen.getByRole('button', { name: /^confirm$/i })
+    expect(confirm).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'jellyfi' } })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(confirm)
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+
+    fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'jellyfin' } })
+    expect(confirm).toBeEnabled()
+  })
+
+  it('is a modal alertdialog that Escape closes', async () => {
+    const { onClose } = wrap()
+
+    const panel = await screen.findByRole('alertdialog')
+    expect(panel).toHaveAttribute('aria-modal', 'true')
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
   it('forget path: sends {keep_ct: true} with no confirm, navigates on success', async () => {
     calls.length = 0
     requireFreshPhrase = false

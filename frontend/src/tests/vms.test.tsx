@@ -100,7 +100,11 @@ describe('VmDetail destroy', () => {
     await waitFor(() => expect(calls.length).toBe(1))
     expect(calls[0]).toMatchObject({ path: '/vms/9', method: 'DELETE', body: { confirm: 'win11' } })
 
-    expect(await screen.findByRole('dialog', { name: /destroying vm/i })).toBeInTheDocument()
+    // The accessible name now comes from the visible heading rather than a
+    // separate aria-label, so it names the actual VM instead of the generic
+    // "Destroying VM".
+    const progress = await screen.findByRole('dialog', { name: /destroying win11/i })
+    expect(progress).toHaveAttribute('aria-modal', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(navigateSpy).toHaveBeenCalledWith({ to: '/vms' })
   })

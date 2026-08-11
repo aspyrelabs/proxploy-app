@@ -8,6 +8,7 @@ import type { StorageRow } from '../api/storage'
 import { LockVeil } from './LockVeil'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 type HostRow = { id: number; name: string }
 
@@ -103,75 +104,69 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   }
 
   return (
-    <div role="dialog" aria-label={editing ? `Edit ${existing?.storage}` : 'Add storage'}
-         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[520px] rounded-card border border-line bg-panel p-5">
-        <h2 className="mb-4 text-[16px] font-semibold text-text">
-          {editing ? `Edit ${existing?.storage}` : 'Add storage'}
-        </h2>
+    <Dialog title={<>{editing ? `Edit ${existing?.storage}` : 'Add storage'}</>} width={520} onClose={onClose}>
 
-        {/* doc 06 §e rule 1: never hide a gated feature, veil it. The Close
-            button below sits OUTSIDE the veil, because LockVeil sets
-            pointer-events:none on its children and a dialog you cannot dismiss
-            is a worse bug than the one being gated. */}
-        <LockVeil locked={locked}
-          title="Storage management is a Pro feature"
-          subtitle="Attach, edit and detach datastores without leaving Proxploy.">
-          <form onSubmit={submit} className="space-y-3">
-            {!editing && (
-              <div>
-                <label htmlFor="sf-host"
-                  className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Host</label>
-                <select id="sf-host" className={inputCls} value={hostId ?? ''}
-                  disabled={hosts.isError}
-                  onChange={(e) => setHostId(Number(e.target.value) || null)}>
-                  {hosts.isError
-                    ? <option value="">Could not load hosts</option>
-                    : <option value="">Select a host…</option>}
-                  {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-                </select>
-              </div>
-            )}
-            <div>
-              <label htmlFor="sf-name"
-                className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Name</label>
-              <input id="sf-name" className={inputCls} value={name} disabled={editing}
-                placeholder="nfs-media" onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div>
-              <label htmlFor="sf-type"
-                className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Type</label>
-              <select id="sf-type" className={inputCls} value={type} disabled={editing}
-                onChange={(e) => setType(e.target.value)}>
-                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            {fields.map(([k, label, inputType]) => (
-              <div key={k}>
-                <label htmlFor={`sf-${k}`}
-                  className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
-                <input id={`sf-${k}`} className={inputCls} type={inputType}
-                  value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)}
-                  placeholder={k === 'content' ? 'iso,vztmpl,backup' : ''} />
-              </div>
-            ))}
-            <div className="flex items-center gap-2 pt-1">
-              <Button type="submit" variant="primary" disabled={busy || (!editing && !canAttach)}>
-                {editing ? 'Save' : 'Attach'}
-              </Button>
-              {editing && (
-                <Button type="button" variant="danger" disabled={busy} onClick={remove}>
-                  Detach
-                </Button>
-              )}
-            </div>
-          </form>
-        </LockVeil>
-
-        <div className="mt-4 flex justify-end">
-          <Button variant="ghost" onClick={onClose}>Close</Button>
+    {/* doc 06 §e rule 1: never hide a gated feature, veil it. The Close
+        button below sits OUTSIDE the veil, because LockVeil sets
+        pointer-events:none on its children and a dialog you cannot dismiss
+        is a worse bug than the one being gated. */}
+    <LockVeil locked={locked}
+      title="Storage management is a Pro feature"
+      subtitle="Attach, edit and detach datastores without leaving Proxploy.">
+      <form onSubmit={submit} className="space-y-3">
+        {!editing && (
+          <div>
+            <label htmlFor="sf-host"
+              className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Host</label>
+            <select id="sf-host" className={inputCls} value={hostId ?? ''}
+              disabled={hosts.isError}
+              onChange={(e) => setHostId(Number(e.target.value) || null)}>
+              {hosts.isError
+                ? <option value="">Could not load hosts</option>
+                : <option value="">Select a host…</option>}
+              {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="sf-name"
+            className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Name</label>
+          <input id="sf-name" className={inputCls} value={name} disabled={editing}
+            placeholder="nfs-media" onChange={(e) => setName(e.target.value)} />
         </div>
-      </div>
+        <div>
+          <label htmlFor="sf-type"
+            className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Type</label>
+          <select id="sf-type" className={inputCls} value={type} disabled={editing}
+            onChange={(e) => setType(e.target.value)}>
+            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        {fields.map(([k, label, inputType]) => (
+          <div key={k}>
+            <label htmlFor={`sf-${k}`}
+              className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
+            <input id={`sf-${k}`} className={inputCls} type={inputType}
+              value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)}
+              placeholder={k === 'content' ? 'iso,vztmpl,backup' : ''} />
+          </div>
+        ))}
+        <div className="flex items-center gap-2 pt-1">
+          <Button type="submit" variant="primary" disabled={busy || (!editing && !canAttach)}>
+            {editing ? 'Save' : 'Attach'}
+          </Button>
+          {editing && (
+            <Button type="button" variant="danger" disabled={busy} onClick={remove}>
+              Detach
+            </Button>
+          )}
+        </div>
+      </form>
+    </LockVeil>
+
+    <div className="mt-4 flex justify-end">
+      <Button variant="ghost" onClick={onClose}>Close</Button>
     </div>
+    </Dialog>
   )
 }

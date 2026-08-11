@@ -6,6 +6,7 @@ import { JobLog } from './JobLog'
 import { KVGrid } from './KVGrid'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 // Deliberately local, deliberately narrow row types: the wizard reads the
 // endpoints Tasks 3, 6 and 11 built, not Tasks 12/14's page hooks, so the
@@ -122,169 +123,170 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[560px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-[16px] font-semibold text-text">New VM</h2>
-          <div className="flex gap-1.5">
-            {STEPS.map((s, i) => (
-              <span key={s}
-                className={`rounded-full border px-2 py-0.5 font-mono text-[9.5px] ${i === step ? 'border-amber text-amber' : 'border-line text-text-3'}`}>
-                {i + 1} {s}
-              </span>
-            ))}
-          </div>
+    <Dialog
+      title="New VM"
+      width={560}
+      onClose={onClose}
+      headerRight={(
+        <div className="flex gap-1.5">
+          {STEPS.map((s, i) => (
+            <span key={s}
+              className={`rounded-full border px-2 py-0.5 font-mono text-[9.5px] ${i === step ? 'border-amber text-amber' : 'border-line text-text-3'}`}>
+              {i + 1} {s}
+            </span>
+          ))}
         </div>
+      )}
+    >
 
-        {jobId ? (
-          <div>
-            <JobLog jobId={jobId} />
-            <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
-          </div>
-        ) : (
-          <>
-            {step === 0 && (
-              <div className="space-y-3">
-                <Field id="vm-host" label="Host">
-                  <select id="vm-host" className={inputCls} value={f.host_id}
-                    disabled={hosts.isError}
-                    onChange={(e) => { set('host_id', e.target.value); set('node', ''); set('iso_storage', ''); set('iso', ''); set('storage', ''); set('bridge', '') }}>
-                    {hosts.isError
-                      ? <option value="">Could not load hosts</option>
-                      : <option value="">Select a host…</option>}
-                    {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-                  </select>
-                </Field>
-                <Field id="vm-node" label="Node">
-                  <select id="vm-node" className={inputCls} value={f.node}
-                    disabled={nodes.isError}
-                    onChange={(e) => set('node', e.target.value)}>
-                    {nodes.isError
-                      ? <option value="">Could not load nodes</option>
-                      : <option value="">Select a node…</option>}
-                    {nodeOpts.map((n) => <option key={n.node} value={n.node}>{n.node}</option>)}
-                  </select>
-                </Field>
-                <Field id="vm-name" label="VM name">
-                  <input id="vm-name" className={inputCls} placeholder="ubuntu-lab"
-                    value={f.name} onChange={(e) => set('name', e.target.value)} />
-                </Field>
-              </div>
-            )}
-
-            {step === 1 && (
-              <div className="space-y-3">
-                <Field id="vm-isostore" label="ISO storage">
-                  <select id="vm-isostore" className={inputCls} value={f.iso_storage}
-                    disabled={storages.isError}
-                    onChange={(e) => { set('iso_storage', e.target.value); set('iso', '') }}>
-                    {storages.isError
-                      ? <option value="">Could not load datastores</option>
-                      : <option value="">Select a datastore…</option>}
-                    {storeOpts('iso').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
-                  </select>
-                </Field>
-                <Field id="vm-iso" label="ISO image">
-                  <select id="vm-iso" className={inputCls} value={f.iso}
-                    disabled={isos.isError}
-                    onChange={(e) => set('iso', e.target.value)}>
-                    {isos.isError
-                      ? <option value="">Could not load ISOs</option>
-                      : <option value="">Select an ISO…</option>}
-                    {(isos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
-                  </select>
-                </Field>
-                <Field id="vm-ostype" label="OS type">
-                  <select id="vm-ostype" className={inputCls} value={f.ostype}
-                    onChange={(e) => set('ostype', e.target.value)}>
-                    {OS_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                  </select>
-                </Field>
-                <p className="text-[12px] text-text-3">
-                  No ISOs listed? Upload one on the Storage page, this list is the
-                  datastore's own <span className="font-mono">content=iso</span> listing.
-                </p>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field id="vm-cores" label="Cores">
-                  <input id="vm-cores" type="number" min="1" className={inputCls}
-                    value={f.cores} onChange={(e) => set('cores', e.target.value)} />
-                </Field>
-                <Field id="vm-mem" label="Memory (MB)">
-                  <input id="vm-mem" type="number" min="128" step="128" className={inputCls}
-                    value={f.memory_mb} onChange={(e) => set('memory_mb', e.target.value)} />
-                </Field>
-                <Field id="vm-disk" label="Disk size (GB)">
-                  <input id="vm-disk" type="number" min="1" className={inputCls}
-                    value={f.disk_gb} onChange={(e) => set('disk_gb', e.target.value)} />
-                </Field>
-                <Field id="vm-storage" label="Target storage">
-                  <select id="vm-storage" className={inputCls} value={f.storage}
-                    disabled={storages.isError}
-                    onChange={(e) => set('storage', e.target.value)}>
-                    {storages.isError
-                      ? <option value="">Could not load datastores</option>
-                      : <option value="">Select a datastore…</option>}
-                    {storeOpts('images').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
-                  </select>
-                </Field>
-              </div>
-            )}
-
-            {step === 3 && (
-              <div className="space-y-3">
-                <Field id="vm-bridge" label="Bridge">
-                  <select id="vm-bridge" className={inputCls} value={f.bridge}
-                    disabled={bridges.isError}
-                    onChange={(e) => set('bridge', e.target.value)}>
-                    {bridges.isError
-                      ? <option value="">Could not load bridges</option>
-                      : <option value="">Select a bridge…</option>}
-                    {bridgeOpts.map((i) => <option key={i.iface} value={i.iface}>{i.iface}</option>)}
-                  </select>
-                </Field>
-                <Field id="vm-vlan" label="VLAN tag (optional)">
-                  <input id="vm-vlan" type="number" min="1" max="4094" className={inputCls}
-                    placeholder="untagged" value={f.vlan_tag}
-                    onChange={(e) => set('vlan_tag', e.target.value)} />
-                </Field>
-              </div>
-            )}
-
-            {step === 4 && (
-              <div className="rounded-ctl border border-line-soft bg-elev p-3">
-                <KVGrid items={[
-                  ['Name', f.name],
-                  ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? 'unknown'} / ${f.node}`],
-                  ['OS type', f.ostype],
-                  ['ISO', f.iso],
-                  ['Cores', f.cores],
-                  ['Memory', `${f.memory_mb} MB`],
-                  ['Disk', `${f.disk_gb} GB on ${f.storage}`],
-                  ['Network', f.vlan_tag ? `${f.bridge} tag ${f.vlan_tag}` : f.bridge],
-                ]} />
-              </div>
-            )}
-
-            {error && <p className="mt-3 text-[12.5px] text-red">{error}</p>}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              {step > 0 && (
-                <Button variant="ghost" onClick={() => setStep(step - 1)}>Back</Button>
-              )}
-              {step < STEPS.length - 1 ? (
-                <Button disabled={!ok[step]} onClick={() => setStep(step + 1)}>Next</Button>
-              ) : (
-                <Button disabled={create.isPending} onClick={submit}>Create</Button>
-              )}
-            </div>
-          </>
-        )}
+    {jobId ? (
+      <div>
+        <JobLog jobId={jobId} />
+        <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
-    </div>
+    ) : (
+      <>
+        {step === 0 && (
+          <div className="space-y-3">
+            <Field id="vm-host" label="Host">
+              <select id="vm-host" className={inputCls} value={f.host_id}
+                disabled={hosts.isError}
+                onChange={(e) => { set('host_id', e.target.value); set('node', ''); set('iso_storage', ''); set('iso', ''); set('storage', ''); set('bridge', '') }}>
+                {hosts.isError
+                  ? <option value="">Could not load hosts</option>
+                  : <option value="">Select a host…</option>}
+                {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+            </Field>
+            <Field id="vm-node" label="Node">
+              <select id="vm-node" className={inputCls} value={f.node}
+                disabled={nodes.isError}
+                onChange={(e) => set('node', e.target.value)}>
+                {nodes.isError
+                  ? <option value="">Could not load nodes</option>
+                  : <option value="">Select a node…</option>}
+                {nodeOpts.map((n) => <option key={n.node} value={n.node}>{n.node}</option>)}
+              </select>
+            </Field>
+            <Field id="vm-name" label="VM name">
+              <input id="vm-name" className={inputCls} placeholder="ubuntu-lab"
+                value={f.name} onChange={(e) => set('name', e.target.value)} />
+            </Field>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <Field id="vm-isostore" label="ISO storage">
+              <select id="vm-isostore" className={inputCls} value={f.iso_storage}
+                disabled={storages.isError}
+                onChange={(e) => { set('iso_storage', e.target.value); set('iso', '') }}>
+                {storages.isError
+                  ? <option value="">Could not load datastores</option>
+                  : <option value="">Select a datastore…</option>}
+                {storeOpts('iso').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+              </select>
+            </Field>
+            <Field id="vm-iso" label="ISO image">
+              <select id="vm-iso" className={inputCls} value={f.iso}
+                disabled={isos.isError}
+                onChange={(e) => set('iso', e.target.value)}>
+                {isos.isError
+                  ? <option value="">Could not load ISOs</option>
+                  : <option value="">Select an ISO…</option>}
+                {(isos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
+              </select>
+            </Field>
+            <Field id="vm-ostype" label="OS type">
+              <select id="vm-ostype" className={inputCls} value={f.ostype}
+                onChange={(e) => set('ostype', e.target.value)}>
+                {OS_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </Field>
+            <p className="text-[12px] text-text-3">
+              No ISOs listed? Upload one on the Storage page, this list is the
+              datastore's own <span className="font-mono">content=iso</span> listing.
+            </p>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field id="vm-cores" label="Cores">
+              <input id="vm-cores" type="number" min="1" className={inputCls}
+                value={f.cores} onChange={(e) => set('cores', e.target.value)} />
+            </Field>
+            <Field id="vm-mem" label="Memory (MB)">
+              <input id="vm-mem" type="number" min="128" step="128" className={inputCls}
+                value={f.memory_mb} onChange={(e) => set('memory_mb', e.target.value)} />
+            </Field>
+            <Field id="vm-disk" label="Disk size (GB)">
+              <input id="vm-disk" type="number" min="1" className={inputCls}
+                value={f.disk_gb} onChange={(e) => set('disk_gb', e.target.value)} />
+            </Field>
+            <Field id="vm-storage" label="Target storage">
+              <select id="vm-storage" className={inputCls} value={f.storage}
+                disabled={storages.isError}
+                onChange={(e) => set('storage', e.target.value)}>
+                {storages.isError
+                  ? <option value="">Could not load datastores</option>
+                  : <option value="">Select a datastore…</option>}
+                {storeOpts('images').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+              </select>
+            </Field>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-3">
+            <Field id="vm-bridge" label="Bridge">
+              <select id="vm-bridge" className={inputCls} value={f.bridge}
+                disabled={bridges.isError}
+                onChange={(e) => set('bridge', e.target.value)}>
+                {bridges.isError
+                  ? <option value="">Could not load bridges</option>
+                  : <option value="">Select a bridge…</option>}
+                {bridgeOpts.map((i) => <option key={i.iface} value={i.iface}>{i.iface}</option>)}
+              </select>
+            </Field>
+            <Field id="vm-vlan" label="VLAN tag (optional)">
+              <input id="vm-vlan" type="number" min="1" max="4094" className={inputCls}
+                placeholder="untagged" value={f.vlan_tag}
+                onChange={(e) => set('vlan_tag', e.target.value)} />
+            </Field>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="rounded-ctl border border-line-soft bg-elev p-3">
+            <KVGrid items={[
+              ['Name', f.name],
+              ['Host / node', `${(hosts.data ?? []).find((h) => h.id === hostId)?.name ?? 'unknown'} / ${f.node}`],
+              ['OS type', f.ostype],
+              ['ISO', f.iso],
+              ['Cores', f.cores],
+              ['Memory', `${f.memory_mb} MB`],
+              ['Disk', `${f.disk_gb} GB on ${f.storage}`],
+              ['Network', f.vlan_tag ? `${f.bridge} tag ${f.vlan_tag}` : f.bridge],
+            ]} />
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-[12.5px] text-red">{error}</p>}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {step > 0 && (
+            <Button variant="ghost" onClick={() => setStep(step - 1)}>Back</Button>
+          )}
+          {step < STEPS.length - 1 ? (
+            <Button disabled={!ok[step]} onClick={() => setStep(step + 1)}>Next</Button>
+          ) : (
+            <Button disabled={create.isPending} onClick={submit}>Create</Button>
+          )}
+        </div>
+      </>
+  )}
+</Dialog>
   )
 }

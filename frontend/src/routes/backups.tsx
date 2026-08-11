@@ -18,6 +18,7 @@ import { UsageBar, STORAGE_GRADIENT } from '../components/UsageBar'
 import { Button } from '../components/ui/button'
 import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
+import { Dialog } from '../components/ui/dialog'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
@@ -49,61 +50,53 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   const hostId = picked ?? (hosts.data?.length === 1 ? hosts.data[0].id : null)
 
   return (
-    <div role="dialog" aria-label="Run backup"
-         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-      <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <h2 className="font-display text-[16px] font-semibold">Run a backup now</h2>
-        {jobId != null ? (
-          <div className="mt-4">
-            <JobLog jobId={jobId} />
-            <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
-          </div>
-        ) : (
-          <>
-            <p className="mt-2 text-[12.5px] text-text-3">
-              Backs up every guest on the selected host in snapshot mode, to that host&apos;s
-              default backup datastore.
-            </p>
-            <select className={`${inputCls} mt-4`} value={hostId ?? ''}
-                    aria-label="Host" disabled={hosts.isError}
-                    onChange={(e) => setPicked(Number(e.target.value) || null)}>
-              {hosts.isError
-                ? <option value="">Could not load hosts</option>
-                : <option value="">Select a host…</option>}
-              {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
-            </select>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button disabled={hostId == null || run.isPending}
-                      onClick={() => run.mutate({ hostId }, {
-                        onSuccess: (r) => setJobId(r.job.id),
-                        onError: () => toast.error('Could not start the backup, try again.'),
-                      })}>
-                {run.isPending ? 'Starting…' : 'Start backup'}
-              </Button>
-            </div>
-          </>
-        )}
+    <Dialog title={'Run a backup now'} width={480} onClose={onClose}>
+    {jobId != null ? (
+      <div className="mt-4">
+        <JobLog jobId={jobId} />
+        <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
-    </div>
+    ) : (
+      <>
+        <p className="mt-2 text-[12.5px] text-text-3">
+          Backs up every guest on the selected host in snapshot mode, to that host&apos;s
+          default backup datastore.
+        </p>
+        <select className={`${inputCls} mt-4`} value={hostId ?? ''}
+                aria-label="Host" disabled={hosts.isError}
+                onChange={(e) => setPicked(Number(e.target.value) || null)}>
+          {hosts.isError
+            ? <option value="">Could not load hosts</option>
+            : <option value="">Select a host…</option>}
+          {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+        </select>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={hostId == null || run.isPending}
+                  onClick={() => run.mutate({ hostId }, {
+                    onSuccess: (r) => setJobId(r.job.id),
+                    onError: () => toast.error('Could not start the backup, try again.'),
+                  })}>
+            {run.isPending ? 'Starting…' : 'Start backup'}
+          </Button>
+        </div>
+      </>
+    )}
+    </Dialog>
   )
 }
 
 /** "New job" → a backup.run schedule, in the same dialog shell as RunDialog. */
 function ScheduleDialog({ onClose }: { onClose: () => void }) {
   return (
-    <div role="dialog" aria-label="New scheduled job"
-         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-      <div className="w-[480px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <h2 className="font-display text-[16px] font-semibold">New scheduled backup job</h2>
-        <div className="mt-4">
-          <ScheduleForm jobKind="backup.run" onSaved={onClose} />
-        </div>
-        <div className="mt-4 flex justify-end">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        </div>
-      </div>
+    <Dialog title={'New scheduled backup job'} width={480} onClose={onClose}>
+    <div className="mt-4">
+      <ScheduleForm jobKind="backup.run" onSaved={onClose} />
     </div>
+    <div className="mt-4 flex justify-end">
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+    </div>
+    </Dialog>
   )
 }
 

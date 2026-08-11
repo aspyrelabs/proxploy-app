@@ -7,6 +7,7 @@ import type { UserRow } from '../api/teams'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 
 // self_deactivate/self_delete/last_owner are the three 409s an admin will
 // actually hit while managing their own team, name them plainly instead of
@@ -32,29 +33,25 @@ function ResetPasswordDialog({ user, pending, onCancel, onSubmit }: {
 }) {
   const [password, setPassword] = useState('')
   return (
-    <div role="dialog" aria-label={`Reset password for ${user.email}`}
-         className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-      <div className="w-[380px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-        <h2 className="font-display text-[16px] font-semibold">Reset password, {user.email}</h2>
-        <p className="mt-2 text-[12.5px] text-text-3">
-          Revokes every live session for this account. TOTP is not cleared, do not treat
-          this as a full account reset.
-        </p>
-        <label htmlFor="reset-password"
-          className="mb-1 mt-3 block text-[11px] uppercase tracking-wide text-text-3">
-          New password (min 12 characters)
-        </label>
-        <input id="reset-password" type="password" value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text" />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button disabled={password.length < 12 || pending} onClick={() => onSubmit(password)}>
-            {pending ? 'Setting…' : 'Set password'}
-          </Button>
-        </div>
-      </div>
+    <Dialog title={<>Reset password, {user.email}</>} width={380} onClose={onCancel}>
+    <p className="mt-2 text-[12.5px] text-text-3">
+      Revokes every live session for this account. TOTP is not cleared, do not treat
+      this as a full account reset.
+    </p>
+    <label htmlFor="reset-password"
+      className="mb-1 mt-3 block text-[11px] uppercase tracking-wide text-text-3">
+      New password (min 12 characters)
+    </label>
+    <input id="reset-password" type="password" value={password}
+      onChange={(e) => setPassword(e.target.value)}
+      className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text" />
+    <div className="mt-4 flex justify-end gap-2">
+      <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+      <Button disabled={password.length < 12 || pending} onClick={() => onSubmit(password)}>
+        {pending ? 'Setting…' : 'Set password'}
+      </Button>
     </div>
+    </Dialog>
   )
 }
 

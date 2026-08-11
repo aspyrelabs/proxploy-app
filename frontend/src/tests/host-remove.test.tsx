@@ -34,10 +34,10 @@ vi.mock('../api/client', () => ({
 
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 
-const wrap = (onRemoved = vi.fn()) => {
+const wrap = (onRemoved = vi.fn(), onClose = vi.fn()) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   render(<QueryClientProvider client={qc}>
-    <HostRemoveDialog hostId={5} hostName="pve1" onClose={() => {}} onRemoved={onRemoved} />
+    <HostRemoveDialog hostId={5} hostName="pve1" onClose={onClose} onRemoved={onRemoved} />
   </QueryClientProvider>)
   return onRemoved
 }
@@ -70,5 +70,43 @@ describe('HostRemoveDialog', () => {
     await waitFor(() => expect(calls.length).toBe(2))
     expect(calls[1].body).toEqual({ confirm: 'pve1', forget_apps: true })
     await waitFor(() => expect(onRemoved).toHaveBeenCalled())
+  })
+
+  // The gate is the whole safety mechanism for an irreversible action, and a
+  // migration is exactly when something like this gets quietly dropped.
+  it('blocks removal until the host name is typed exactly', async () => {
+    wrap()
+    const confirm = screen.getByRole('button', { name: 'Confirm' })
+    expect(confirm).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/type pve1 to confirm/i), { target: { value: 'pve' } })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(confirm)
+    expect(calls.length).toBe(0)
+
+    fireEvent.change(screen.getByLabelText(/type pve1 to confirm/i), { target: { value: 'pve1' } })
+    expect(confirm).toBeEnabled()
+  })
+
+  it('is a modal alertdialog that Escape closes', async () => {
+    const onClose = vi.fn()
+    wrap(vi.fn(), onClose)
+
+    const panel = await screen.findByRole('alertdialog')
+    expect(panel).toHaveAttribute('aria-modal', 'true')
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(calls.length).toBe(0)
+  })
+
+  it('keeps the conflict step in its own alertdialog rather than flattening it', async () => {
+    wrap()
+    fireEvent.change(screen.getByLabelText(/type pve1 to confirm/i), { target: { value: 'pve1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(await screen.findByText('pve1 still has apps')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog')).toHaveAttribute('aria-modal', 'true')
   })
 })
