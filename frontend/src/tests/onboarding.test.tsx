@@ -34,6 +34,8 @@ vi.mock('../api/client', () => {
   return {
     api: vi.fn((path: string) => {
       if (path === '/meta/onboarding') return Promise.resolve(onboarding)
+      if (path === '/auth/me') return Promise.resolve({ id: 1, email: 'ops@acme.io',
+        display_name: 'Ops', role: 'owner', totp_enabled: false })
       if (path === '/hosts') return Promise.resolve(hostList)
       if (path.endsWith('/ssh/verify')) {
         return verifyOutcome.ok
@@ -145,5 +147,22 @@ describe('onboarding wizard', () => {
     renderWizard()
     fireEvent.click(await screen.findByRole('button', { name: /skip for now/i }))
     expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+  })
+
+  // unskipped in Task 3, when the edit panel that carries this copy exists
+  it.skip('lets you go back to a completed step', async () => {
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    // Lands on the host step, per the resume behaviour above.
+    expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /admin account/i }))
+    expect(await screen.findByText(/cannot be changed/i)).toBeInTheDocument()
+  })
+
+  it('does not let you jump forward past the step the server is on', async () => {
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    await screen.findByLabelText('API token id')
+    expect(screen.getByRole('button', { name: /authorize installs/i })).toBeDisabled()
   })
 })

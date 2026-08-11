@@ -9,6 +9,7 @@ import { api, ApiError } from '../api/client'
 import { Brand, inputCls } from '../components/LoginForm'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { Button } from '../components/ui/button'
+import { OnboardingRail, type RailStep } from '../components/OnboardingRail'
 
 export const onboardingRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -25,8 +26,9 @@ const STEPS = ['Admin account', 'First host', 'Authorize installs', 'Done'] as c
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
                     ssh_pending: boolean; complete: boolean }
-type HostDetail = { id: number
+type HostDetail = { id: number; name: string
                     credentials: { kind: string; public_meta: string | null }[] }
+type MeOut = { id: number; email: string; display_name: string }
 
 /** Server state decides where you are; the local override only ever moves
  *  you forward within one session, so a reload re-derives instead of
@@ -43,19 +45,59 @@ export function Wizard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const ob = useQuery({ queryKey: ['onboarding'], queryFn: () => api<Onboarding>('/meta/onboarding') })
-  const [advanced, setAdvanced] = useState<number | null>(null)
-  const step = advanced ?? (ob.data ? stepFrom(ob.data) : 0)
+  // `serverStep` is where setup actually is; `view` is what is on screen and
+  // is the only one of the two that may move backwards. Keeping them apart is
+  // what makes Back possible without pretending a committed step can be undone.
+  const serverStep = ob.data ? stepFrom(ob.data) : 0
+  const [view, setView] = useState<number | null>(null)
+  const [skipped, setSkipped] = useState(false)
+  const step = view ?? serverStep
+  const [dir, setDir] = useState<1 | -1>(1)
   const [host, setHost] = useState<HostCreated | null>(null)
   const [admin, setAdmin] = useState({ email: '', password: '', display_name: '' })
   const [error, setError] = useState('')
   const [verifyError, setVerifyError] = useState('')
 
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api<MeOut>('/auth/me'),
+    enabled: !!ob.data?.admin_exists })
+
+  function go(n: number) {
+    setDir(n >= step ? 1 : -1)
+    setView(n)
+  }
+
   // Reload re-derives from the server instead of restarting, so a local
   // "advance" is always paired with invalidating the query it overrides.
   function advance(n: number) {
-    setAdvanced(n)
+    setDir(1)
+    setView(n)
     qc.invalidateQueries({ queryKey: ['onboarding'] })
   }
+
+  // Status comes from the server, never from what was clicked, so a green tick
+  // always means the server agrees the step is done.
+  const done = [
+    !!ob.data?.admin_exists,
+    !!ob.data?.host_added,
+    !!ob.data?.host_added && !ob.data?.ssh_pending,
+    false,
+  ]
+
+  const railSteps: RailStep[] = STEPS.map((label, i) => {
+    const status: RailStep['status'] =
+      i === step ? 'current'
+        : done[i] ? 'done'
+          : skipped && (i === 1 || i === 2) ? 'skipped'
+            : 'todo'
+    const detail = i === 0 && done[0] ? me.data?.email
+      : status === 'skipped' ? 'Skipped'
+        : undefined
+    // Reachable means "clicking this does something": anything already done,
+    // anything skipped (so changing your mind costs one click), and the step
+    // the server is on. Never a step in front of the server.
+    return { label, status, detail,
+             reachable: done[i] || status === 'skipped' || i === step || i <= serverStep }
+  })
 
   // authorized_keys_line is only ever returned once, from POST /hosts. A
   // reload lands here with `host` null, the only way back to that line is
@@ -112,16 +154,24 @@ export function Wizard() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center">
-      <div className="w-[520px] rounded-card border border-line-soft bg-panel p-7">
-        <div className="mb-5 flex items-center justify-between">
-          <Brand />
-          <div className="flex gap-1.5">
-            {STEPS.map((s, i) => (
-              <span key={s} className={`rounded-full border px-2 py-0.5 font-mono text-[9.5px] ${i === step ? 'border-amber text-amber' : 'border-line text-text-3'}`}>{i + 1} {s}</span>
-            ))}
-          </div>
-        </div>
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <aside className="shrink-0 border-b border-line bg-panel px-5 py-4
+                        md:w-[152px] md:border-b-0 md:border-r md:py-6">
+        <Brand />
+        <p className="mb-4 mt-1 text-[9px] uppercase tracking-wide text-text-3 md:mb-5">
+          Setup · {Math.min(step + 1, STEPS.length)} of {STEPS.length}
+        </p>
+        <OnboardingRail steps={railSteps} view={step} onSelect={go} />
+      </aside>
+
+      <main className="grid flex-1 place-items-center px-5 py-8">
+        <div key={step} className={`w-full max-w-[380px] ${dir === 1 ? 'pp-in-fwd' : 'pp-in-back'}`}>
+          {step > 0 && (
+            <button type="button" onClick={() => go(step - 1)}
+              className="mb-3 cursor-pointer text-[12px] text-text-3 transition hover:text-text-2">
+              ← Back
+            </button>
+          )}
 
         {step === 0 && (
           <form onSubmit={createAdmin} className="space-y-4">
@@ -141,7 +191,7 @@ export function Wizard() {
         {step === 1 && (
           <div className="space-y-3">
             <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? 2 : 3) }} />
-            <Button variant="ghost" onClick={() => advance(3)}>Skip for now</Button>
+            <Button variant="ghost" onClick={() => { setSkipped(true); advance(3) }}>Skip for now</Button>
             <p className="text-[12px] text-text-3">
               You can add a host later from Settings. Everything except managing nodes works without one.
             </p>
@@ -175,7 +225,8 @@ export function Wizard() {
             <Button className="w-full" onClick={finish}>Open the dashboard</Button>
           </div>
         )}
-      </div>
+        </div>
+      </main>
     </div>
   )
 }
