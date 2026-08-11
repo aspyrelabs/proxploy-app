@@ -39,7 +39,7 @@ export function AuditPage() {
   }
 
   return (
-    <div className="max-w-5xl space-y-5">
+    <div className="space-y-5">
       <h1 className="font-display text-[22px] font-semibold">Audit log</h1>
 
       <LockVeil locked={denied}

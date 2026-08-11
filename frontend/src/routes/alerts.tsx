@@ -84,7 +84,7 @@ export function AlertsPage() {
   })
 
   return (
-    <div className="max-w-4xl space-y-5">
+    <div className="space-y-5">
       <h1 className="font-display text-[22px] font-semibold">Alerts</h1>
 
       <section className={card}>

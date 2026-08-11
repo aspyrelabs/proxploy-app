@@ -237,7 +237,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="space-y-5">
       <h1 className="font-display text-[22px] font-semibold">Settings</h1>
 
       <Card title="Plan">
