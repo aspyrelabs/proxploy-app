@@ -109,6 +109,63 @@ def test_a_three_node_cluster_is_three_rows_not_one(tmp_path, csrf_header,
         assert [r["is_entry"] for r in rows] == [False, True, False]
 
 
+def test_node_rows_carry_that_node_s_storage(tmp_path, csrf_header,
+                                             bootstrap_admin):
+    """Storage is per NODE, and a shared datastore counts on every node that
+    can use it.
+
+    That is a deliberate choice with a consequence: summing these rows
+    double-counts a shared pool across a cluster, which is why the cluster
+    total comes from /cluster/summary and never from adding these up.
+    """
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from tests.support import seed_host_row, seed_snapshot
+        with app.state.sessionmaker() as db:
+            hid = seed_host_row(db, name="host-01", node="pve1").id
+        seed_snapshot(app, hid, nodes=[
+            {"node": "pve1", "status": "online", "cpu_pct": 1.0, "cpu_cores": 4,
+             "mem_bytes": 1, "mem_total_bytes": 4, "uptime_s": 1},
+            {"node": "pve2", "status": "online", "cpu_pct": 2.0, "cpu_cores": 4,
+             "mem_bytes": 2, "mem_total_bytes": 4, "uptime_s": 2},
+        ], storage=[
+            # same NAME on both nodes, but local: two distinct pools
+            {"storage": "local", "node": "pve1", "used_bytes": 100,
+             "total_bytes": 400, "shared": False},
+            {"storage": "local", "node": "pve2", "used_bytes": 200,
+             "total_bytes": 400, "shared": False},
+            # one shared pool, reported once per node
+            {"storage": "ceph", "node": "pve1", "used_bytes": 500,
+             "total_bytes": 1000, "shared": True},
+            {"storage": "ceph", "node": "pve2", "used_bytes": 500,
+             "total_bytes": 1000, "shared": True},
+        ])
+        rows = {r["node"]: r for r in c.get("/api/v1/cluster/nodes").json()}
+        # pve1 sees its own 100/400 plus the shared 500/1000
+        assert rows["pve1"]["disk_bytes"] == 600
+        assert rows["pve1"]["disk_total_bytes"] == 1400
+        assert rows["pve1"]["disk_pct"] == 42.9
+        # pve2's local pool is a different one, with a different fill
+        assert rows["pve2"]["disk_bytes"] == 700
+        assert rows["pve2"]["disk_total_bytes"] == 1400
+        assert rows["pve2"]["disk_pct"] == 50.0
+
+
+def test_a_host_with_no_snapshot_has_unknown_storage(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    """Nulled like cpu_pct and mem_pct: unknown must not render as 0% full."""
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from tests.support import seed_host_row
+        with app.state.sessionmaker() as db:
+            seed_host_row(db, name="host-01", node="pve1")
+        row = c.get("/api/v1/cluster/nodes").json()[0]
+        assert row["disk_pct"] is None
+        assert row["disk_bytes"] is None and row["disk_total_bytes"] is None
+
+
 def test_an_offline_cluster_node_is_not_reported_as_connected(tmp_path,
                                                               csrf_header,
                                                               bootstrap_admin):

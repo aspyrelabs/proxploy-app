@@ -56,6 +56,10 @@ export type NodeRow = {
   cluster: string | null; pve_version: string | null
   cpu_pct: number | null; mem_pct: number | null
   mem_bytes: number | null; mem_total_bytes: number | null
+  // This node's storage, shared datastores included (storage it can really
+  // use). Never sum these across a cluster: that double-counts shared pools.
+  disk_pct: number | null; disk_bytes: number | null
+  disk_total_bytes: number | null
   uptime_s: number | null; apps: number; apps_running: number
   vms: number; vms_running: number; last_seen_at: string | null
 }

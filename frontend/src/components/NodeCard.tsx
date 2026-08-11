@@ -2,7 +2,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import type { NodeRow } from '../api/hooks'
 import { fmtPct, fmtUptime } from '../lib/format'
 import { StatusPill } from './StatusPill'
-import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
+import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 /** One NODE, not one host: a Host is a single Proxmox API endpoint and the
  *  cluster behind it has as many nodes as it has.
@@ -70,6 +70,14 @@ export function NodeCard({ node }: { node: NodeRow }) {
           <span className="w-8 text-[10.5px] uppercase text-text-3">RAM</span>
           <div className="flex-1"><UsageBar pct={node.mem_pct} gradient={RAM_GRADIENT} /></div>
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.mem_pct)}</span>
+        </div>
+        {/* Storage of THIS node, shared datastores included: they are storage
+            this node can really use. Do not add these up across a cluster,
+            that double-counts every shared pool (see api/cluster.py). */}
+        <div className="flex items-center gap-2">
+          <span className="w-8 text-[10.5px] uppercase text-text-3">Disk</span>
+          <div className="flex-1"><UsageBar pct={node.disk_pct} gradient={STORAGE_GRADIENT} /></div>
+          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.disk_pct)}</span>
         </div>
       </div>
     </div>

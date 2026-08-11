@@ -103,6 +103,15 @@ def cluster_nodes(request: Request, db=Depends(get_db),
     `apps`/`vms` stay HOST-level counts on every row: neither table records
     which node a guest sits on (App has host_id + ctid only), so a per-node
     split would be invented, not measured.
+
+    `disk_*` IS per node, and a SHARED datastore counts on every node that can
+    use it, because the question a node card answers is "how much storage can
+    this node put a guest on". The consequence, stated here because a future
+    reader will otherwise discover it as a bug: SUMMING disk_bytes /
+    disk_total_bytes across these rows double-counts every shared pool. The
+    cluster-wide figure is GET /cluster/summary (name-deduped), and the
+    correctly deduped shared-vs-local aggregate is pollers._disk_pct, which is
+    what the `disk_pct` metric series and therefore alerting use.
     """
     snaps = request.app.state.poller.snapshots
     out = []
@@ -127,8 +136,17 @@ def cluster_nodes(request: Request, db=Depends(get_db),
             out.append(shared | {
                 "node": h.node_name, "is_entry": True, "status": h.status,
                 "cpu_pct": None, "mem_pct": None, "mem_bytes": None,
-                "mem_total_bytes": None, "uptime_s": None})
+                "mem_total_bytes": None, "uptime_s": None,
+                "disk_pct": None, "disk_bytes": None,
+                "disk_total_bytes": None})
             continue
+        # Datastore rows are already one per (node, storage), so a node's own
+        # slice needs no dedup: within one node a name appears once.
+        disk: dict[str, tuple[int, int]] = {}
+        for st in (snap.storage or []):
+            used, total = disk.get(st["node"], (0, 0))
+            disk[st["node"]] = (used + st["used_bytes"],
+                                total + st["total_bytes"])
         # Same fallback the poller uses for `own`: if node_name names nothing
         # in this snapshot, the first node is the entry, so "exactly one entry
         # per host" holds even for a surprising cluster shape.
@@ -143,7 +161,11 @@ def cluster_nodes(request: Request, db=Depends(get_db),
             # host red.
             status = ("unreachable" if n.get("status") == "offline"
                       else h.status)
+            used, total = disk.get(n["node"], (0, 0))
             out.append(shared | {
+                "disk_pct": _pct(used, total) if total else None,
+                "disk_bytes": used if total else None,
+                "disk_total_bytes": total if total else None,
                 "node": n["node"], "is_entry": n["node"] == entry,
                 "status": status,
                 "cpu_pct": n["cpu_pct"],

@@ -363,6 +363,7 @@ export function NodeDetailPage() {
   const { data: host } = useHostDetail(id)
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   const mem = useMetrics(`host:${id}`, 'mem_bytes', 24)
+  const disk = useMetrics(`host:${id}`, 'disk_pct', 24)
   const nodeAppsQuery = useQuery({
     queryKey: ['apps', { host: id }],
     queryFn: () => api<AppRow[]>(`/apps?host=${id}`),
@@ -397,6 +398,7 @@ export function NodeDetailPage() {
               ['PVE version', node.pve_version ?? 'unknown'],
               ['Uptime', fmtUptime(node.uptime_s)],
               ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
+              ['Storage', `${fmtBytes(node.disk_bytes)} / ${fmtBytes(node.disk_total_bytes)}`],
               ['Apps', `${node.apps_running}/${node.apps} running`],
               ['VMs', `${node.vms_running}/${node.vms} running`],
             ]} />
@@ -405,7 +407,7 @@ export function NodeDetailPage() {
               the node Proxploy connects through, so drawing it under any other
               node of the cluster would be charting a different machine. */}
           {node.is_entry && (
-            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className={card}>
                 <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
                 <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
@@ -413,6 +415,13 @@ export function NodeDetailPage() {
               <div className={card}>
                 <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
                 <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
+              </div>
+              {/* Already recorded every cycle by the poller (`disk_pct`), and
+                  correctly shared-vs-local deduped there, so this series is
+                  the host's real fill, not the sum of the node rows. */}
+              <div className={card}>
+                <h2 className="mb-2 text-[13px] uppercase text-text-3">Storage · 24h</h2>
+                <Sparkline ts={disk.data?.ts ?? []} values={disk.data?.value ?? []} color="#A78BFA" width={480} height={120} />
               </div>
             </div>
           )}

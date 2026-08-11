@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' = 'ok'
@@ -10,6 +10,7 @@ const node = (over: Record<string, unknown> = {}) => ({
   host_id: 1, name: 'host-01', node: 'pve1', status: 'connected',
   cluster: null, is_entry: true, pve_version: '8.4.1', cpu_pct: 42, mem_pct: 41,
   mem_bytes: 137, mem_total_bytes: 338, uptime_s: 864000,
+  disk_pct: 25, disk_bytes: 2147483648, disk_total_bytes: 34359738368,
   apps: 1, apps_running: 1, vms: 1, vms_running: 1, last_seen_at: null,
   ...over,
 })
@@ -73,9 +74,11 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   ),
   useNavigate: () => navigate,
   useSearch: () => ({}),
+  // NodeDetailPage reads its own params; HostsPage never calls this.
+  useParams: () => ({ hostId: '1', node: 'pve1' }),
 }))
 
-import { HostsPage } from '../routes/hosts'
+import { HostsPage, NodeDetailPage } from '../routes/hosts'
 
 const withQuery = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -199,6 +202,17 @@ describe('NodeCard', () => {
     }))
   })
 
+  it('shows storage next to CPU and RAM: three bars, three labels', async () => {
+    withQuery(<HostsPage />)
+    // scoped to the card: the summary rings above it are also labelled CPU
+    const card = within((await screen.findByText('host-01')).closest('[role="link"]')!)
+    expect(card.getByText('CPU')).toBeInTheDocument()
+    expect(card.getByText('RAM')).toBeInTheDocument()
+    expect(card.getByText('Disk')).toBeInTheDocument()
+    // the readout beside the bar, not just the bar itself
+    expect(card.getByText('25%')).toBeInTheDocument()
+  })
+
   it('keeps the apps filter as its own affordance, and does not open the node with it', async () => {
     withQuery(<HostsPage />)
     const apps = (await screen.findByText('1 Apps')).closest('a')!
@@ -206,5 +220,17 @@ describe('NodeCard', () => {
     expect(JSON.parse(apps.getAttribute('data-search')!)).toEqual({ host: 1 })
     fireEvent.click(apps)
     expect(navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe('NodeDetailPage', () => {
+  beforeEach(() => {
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}; navigate.mockClear()
+  })
+
+  it('reports storage used / total alongside memory', async () => {
+    withQuery(<NodeDetailPage />)
+    expect(await screen.findByText('Storage')).toBeInTheDocument()
+    expect(screen.getByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
   })
 })
