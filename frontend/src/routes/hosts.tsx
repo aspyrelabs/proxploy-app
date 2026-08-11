@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
-import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
@@ -20,7 +19,6 @@ import { Sparkline } from '../components/charts/Sparkline'
 import { TimeChart } from '../components/charts/TimeChart'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
-import { Terminal } from '../components/terminal/Terminal'
 import { fmtBps, fmtBytes, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -324,32 +322,42 @@ function useHostDetail(id: number) {
   })
 }
 
-function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeShellEnabled: boolean }) {
+/** Opens the node shell in a window of its own, beside the Proxmox web UI
+ *  link, and NEVER goes grey.
+ *
+ *  This replaces a disabled button with a tooltip. Two independent gates could
+ *  disable it — the terminal.node entitlement and the per-host opt-in from
+ *  doc 08 §9 — and a tooltip is invisible on touch and easy to miss anywhere
+ *  else, so the honest reading of a greyed control was "this feature is
+ *  broken". The control now always works; when a gate is shut it says which
+ *  one, and where to open it, instead of opening a dead window. */
+function NodeShellButton({ hostId, nodeShellEnabled }:
+  { hostId: number; nodeShellEnabled: boolean | undefined }) {
   const ent = useEntitlements()
-  const [open, setOpen] = useState(false)
-  const { ticket, failed, reconnect, giveUp } = useReconnectingTicket('host', hostId)
-  const allowed = ent.has('terminal.node') && nodeShellEnabled
-  if (open && failed) {
-    return <EmptyState title="Console connection failed"
-      note="Gave up after repeated attempts. Reload the page to try again." />
-  }
-  if (open && ticket.data) {
-    return (
-      <Terminal key={ticket.data.ticket}
-        wsUrl={consoleWsUrl('host', hostId, ticket.data.ticket)}
-        onDrop={({ fatal }) => (fatal ? giveUp() : reconnect())} />
-    )
-  }
   return (
-    <div className={card}>
-      <h2 className="mb-2 text-[13px] uppercase text-text-3">Node shell</h2>
-      <Button variant="ghost" disabled={!allowed}
-        title={!ent.has('terminal.node') ? 'Pro: Node shells'
-             : !nodeShellEnabled ? 'Enable node shell in host settings first' : undefined}
-        onClick={() => { setOpen(true); ticket.mutate() }}>
-        Open node shell
-      </Button>
-    </div>
+    <button type="button"
+      className="rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2
+                 transition hover:border-amber hover:text-amber"
+      onClick={() => {
+        if (ent.data != null && !ent.has('terminal.node')) {
+          toast.error('Node shells are part of the Pro plan. Everything else on '
+                    + 'this page works without it.')
+          return
+        }
+        if (nodeShellEnabled === false) {
+          toast.error('Node shells are switched off for this host. Turn them on '
+                    + 'in Settings → Hosts, then try again. Proxploy keeps this '
+                    + 'switch separate from your role on purpose: a root shell '
+                    + 'on the hypervisor is not something to inherit by accident.')
+          return
+        }
+        // A terminal wants its own window rather than a tab: it is a working
+        // surface you keep beside the page, not a place you navigate to.
+        window.open(`/shell/host/${hostId}`, `proxploy-shell-${hostId}`,
+                    'width=1040,height=660,noopener,noreferrer')
+      }}>
+      Node shell ↗
+    </button>
   )
 }
 
@@ -379,7 +387,7 @@ const TABS = [
 /** The host page's frame: who this machine is, where to open it, and the
  *  tabs. The body is a routed child, matching the app and VM detail pages. */
 export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
-  const { node, host } = useNodeContext()
+  const { id, node, host } = useNodeContext()
   if (!node && !host) {
     return <EmptyState title="Node not found" note="It may have been removed." />
   }
@@ -395,6 +403,12 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
           )}
         </div>
         <div className="flex items-center gap-3">
+          {/* Entry node only: a shell ticket is minted for the host's own
+              node, so offering it under any other node of the cluster would
+              open a shell on a different box than the page is showing. */}
+          {(node?.is_entry ?? true) && (
+            <NodeShellButton hostId={id} nodeShellEnabled={host?.node_shell_enabled} />
+          )}
           {host?.address && (
             // rel="noopener": without it the opened page can steer this one
             // through window.opener.
@@ -496,14 +510,6 @@ export function NodeOverview() {
             </div>
           )}
         </>
-      )}
-      {/* Also entry-node only: a node shell ticket is minted for the host's
-          own node, so offering it here would open a shell on a different box
-          than the page is showing. */}
-      {(node?.is_entry ?? true) && (
-        <div className="mt-5">
-          <NodeShellSection hostId={id} nodeShellEnabled={host?.node_shell_enabled ?? false} />
-        </div>
       )}
       <div className="mt-5">
         {/* "on this host", not "on this node": neither apps nor vms records
