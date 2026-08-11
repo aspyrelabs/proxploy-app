@@ -103,6 +103,13 @@ describe('HostForm', () => {
     expect(link.getAttribute('rel')).toContain('noreferrer')
   })
 
+  it('leaves TLS verification off by default', () => {
+    // A stock Proxmox node serves a self-signed certificate, so verifying by
+    // default failed the very first connection for almost everyone.
+    render(<HostForm onCreated={() => {}} />)
+    expect(screen.getByLabelText(/verify tls certificate/i)).not.toBeChecked()
+  })
+
   it('warns that the token secret is shown only once', () => {
     render(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /what is the api token secret/i }))

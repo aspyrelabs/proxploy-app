@@ -81,7 +81,14 @@ function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
 
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const [f, setF] = useState({ name: '', address: 'https://', token_id: '',
-    token_secret: '', verify_tls: true, ssh_enroll: false })
+    // Off by default, deliberately diverging from doc 08 §"TLS to Proxmox"
+    // ("verification on by default"). A stock Proxmox node serves a
+    // self-signed certificate, so verifying by default failed the first
+    // connection for almost every operator, and the only escape hatch this
+    // form offers is this same checkbox. The doc's better answer, pinning the
+    // node's fingerprint instead of disabling verification, is implemented in
+    // the backend (HostIn.tls_fingerprint) but not yet collected here.
+    token_secret: '', verify_tls: false, ssh_enroll: false })
   const [probe, setProbe] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
