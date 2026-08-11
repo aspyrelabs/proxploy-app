@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
                     ssh_pending: boolean; complete: boolean }
-type HostDetail = { id: number
+type HostDetail = { id: number; name: string
                     credentials: { kind: string; public_meta: string | null }[] }
 
 let onboarding: Onboarding = { admin_exists: false, host_added: false,
@@ -12,18 +12,22 @@ let onboarding: Onboarding = { admin_exists: false, host_added: false,
 let hostList: { id: number }[] = []
 let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
+let meAuthed = true
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
 // server still knows, GET /hosts then GET /hosts/{id}.
 function mockStoredHost(h: HostDetail) { hostList = [{ id: h.id }]; hostDetail[h.id] = h }
 function mockVerifyFailure(body: unknown) { verifyOutcome = { ok: false, body } }
+// The session died but the admin still exists: /auth/me 401s.
+function mockSignedOut() { meAuthed = false }
 
 beforeEach(() => {
   onboarding = { admin_exists: false, host_added: false, ssh_pending: false, complete: false }
   hostList = []
   hostDetail = {}
   verifyOutcome = { ok: true }
+  meAuthed = true
 })
 
 vi.mock('../api/client', () => {
@@ -34,8 +38,12 @@ vi.mock('../api/client', () => {
   return {
     api: vi.fn((path: string) => {
       if (path === '/meta/onboarding') return Promise.resolve(onboarding)
-      if (path === '/auth/me') return Promise.resolve({ id: 1, email: 'ops@acme.io',
-        display_name: 'Ops', role: 'owner', totp_enabled: false })
+      if (path === '/auth/me') {
+        return meAuthed
+          ? Promise.resolve({ id: 1, email: 'ops@acme.io',
+              display_name: 'Ops', role: 'owner', totp_enabled: false })
+          : Promise.reject(new ApiErrorImpl(401, { detail: 'authentication required' }))
+      }
       if (path === '/hosts') return Promise.resolve(hostList)
       if (path.endsWith('/ssh/verify')) {
         return verifyOutcome.ok
@@ -85,17 +93,29 @@ describe('onboarding wizard', () => {
     expect(screen.queryByLabelText('Password (12+ chars)')).not.toBeInTheDocument()
   })
 
-  it('resumes at the authorize step when a key is enrolled but unverified', async () => {
+  it('resumes at the install step when a key is enrolled but unverified', async () => {
+    // ssh_pending cannot tell "key pasted" from "not pasted", so the server
+    // can only put you at Install; reaching Verify is a local acknowledgement.
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
     renderWizard()
+    expect(await screen.findByRole('button', { name: 'I have added it' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Verify access' })).not.toBeInTheDocument()
+  })
+
+  it('reaches the verify step from install', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [] })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     expect(await screen.findByRole('button', { name: 'Verify access' })).toBeInTheDocument()
   })
 
   it('will not advance until the key actually works', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
-    mockStoredHost({ id: 7, credentials: [] })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [] })
     mockVerifyFailure({ error: 'command_failed', detail: 'the key authenticated but `true` exited 1' })
     renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
     expect(await screen.findByText(/not authorized yet/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
@@ -103,9 +123,10 @@ describe('onboarding wizard', () => {
 
   it('calls out a host key mismatch as a security event, distinct from "not yet"', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
-    mockStoredHost({ id: 7, credentials: [] })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [] })
     mockVerifyFailure({ error: 'host_key_mismatch', detail: 'fingerprint changed' })
     renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
     expect(await screen.findByText(/stop and investigate/i)).toBeInTheDocument()
     expect(screen.queryByText(/not authorized yet/i)).not.toBeInTheDocument()
@@ -113,15 +134,16 @@ describe('onboarding wizard', () => {
 
   it('advances once the server actually verifies the key', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
-    mockStoredHost({ id: 7, credentials: [{ kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAA reload' }] })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [{ kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAA reload' }] })
     renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
     expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 
   it('recovers the authorized_keys line after a reload with no host in session', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
-    mockStoredHost({ id: 7, credentials: [
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [
       { kind: 'api_token', public_meta: 'tok' },
       { kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAAreload proxploy@pve-01' },
     ] })
@@ -154,7 +176,7 @@ describe('onboarding wizard', () => {
     renderWizard()
     // Lands on the host step, per the resume behaviour above.
     expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /admin account/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
     expect(await screen.findByText(/cannot be changed/i)).toBeInTheDocument()
   })
 
@@ -163,7 +185,7 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     await screen.findByLabelText('API token id')
-    fireEvent.click(screen.getByRole('button', { name: /admin account/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
 
     fireEvent.change(await screen.findByLabelText('New password'),
       { target: { value: 'correct-horse-battery' } })
@@ -178,10 +200,70 @@ describe('onboarding wizard', () => {
     expect(paths.indexOf('/auth/login')).toBeGreaterThan(paths.indexOf('/users/1/password'))
   })
 
+  it('offers remove-and-re-add when you go back to a host already added', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [] })
+    renderWizard()
+    await screen.findByRole('button', { name: 'I have added it' })
+    fireEvent.click(screen.getByRole('button', { name: /^Host/ }))
+    expect(await screen.findByRole('button', { name: /remove and re-add/i })).toBeInTheDocument()
+    // The add form must NOT be offered while a host still exists.
+    expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
+  })
+
+  it('keeps a skipped host step clickable', async () => {
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    await screen.findByLabelText('API token id')
+    fireEvent.click(screen.getByRole('button', { name: /skip for now/i }))
+    const host = await screen.findByRole('button', { name: /^Host/ })
+    expect(host.getAttribute('data-status')).toBe('skipped')
+    expect(host).not.toBeDisabled()
+  })
+
+  it('lets you correct the email at the review stage, before anything is created', async () => {
+    const { api } = await import('../api/client')
+    mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'typo@acme.io' } })
+    fireEvent.change(screen.getByLabelText('Password (12+ chars)'),
+      { target: { value: 'correct-horse-battery' } })
+    fireEvent.click(screen.getByRole('button', { name: /review/i }))
+
+    // Nothing is committed yet: the review screen is still local.
+    expect(await screen.findByText('typo@acme.io')).toBeInTheDocument()
+    expect((api as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(c => c[0])).not.toContain('/users')
+
+    fireEvent.click(screen.getByRole('button', { name: /change details/i }))
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'ops@acme.io' } })
+    fireEvent.click(screen.getByRole('button', { name: /review/i }))
+    expect(await screen.findByText('ops@acme.io')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }))
+    const bodies = (api as unknown as { mock: { calls: [string, RequestInit?][] } })
+      .mock.calls.filter(c => c[0] === '/users')
+    expect(bodies).toHaveLength(1)
+    expect(JSON.parse(String(bodies[0][1]?.body)).email).toBe('ops@acme.io')
+  })
+
+  it('does not re-offer the create form when the session died', async () => {
+    // admin_exists is true but /auth/me 401s. Rendering the create form here
+    // would POST /users for an account that exists and surface as "your
+    // password is bad", the same confusion stepFrom() was written to kill.
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    mockSignedOut()
+    renderWizard()
+    await screen.findByLabelText('API token id')
+    fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
+    expect(await screen.findByText(/signed out/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create admin account/i })).not.toBeInTheDocument()
+  })
+
   it('does not let you jump forward past the step the server is on', async () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     await screen.findByLabelText('API token id')
-    expect(screen.getByRole('button', { name: /authorize installs/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Install/ })).toBeDisabled()
   })
 })

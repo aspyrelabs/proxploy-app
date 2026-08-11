@@ -17,23 +17,51 @@ export function AdminAccountStep({ existing, onCreated }: {
 }) {
   const [admin, setAdmin] = useState({ email: '', password: '', display_name: '' })
   const [error, setError] = useState('')
+  // Creating the account is the first irreversible thing onboarding does, and
+  // the email it burns in cannot be changed afterwards. So the form commits to
+  // a local review screen first, and only the review screen calls POST /users.
+  const [reviewing, setReviewing] = useState(false)
 
-  async function createAdmin(e: React.FormEvent) {
-    e.preventDefault(); setError('')
+  async function createAdmin() {
+    setError('')
     try {
       await api('/users', { method: 'POST', body: JSON.stringify(admin) })
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: admin.email, password: admin.password }) })
       onCreated()
-    } catch { setError('Could not create the admin account (password: 12+ characters).') }
+    } catch {
+      setReviewing(false)
+      setError('Could not create the admin account (password: 12+ characters).')
+    }
   }
 
   if (existing) return <EditPanel existing={existing} />
 
+  if (reviewing) return (
+    <div className="space-y-4">
+      <Heading title="Check this over"
+        sub="Nothing has been created yet. The email is the one thing you cannot change afterwards." />
+      <dl className="divide-y divide-line rounded-ctl border border-line bg-panel-2 px-3">
+        {([['Email', admin.email], ['Display name', admin.display_name || '—'],
+           ['Password', '•'.repeat(Math.min(admin.password.length, 16))]] as const).map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-3 py-2">
+            <dt className="text-[11px] uppercase tracking-wide text-text-3">{k}</dt>
+            <dd className="truncate text-[13px] text-text">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {error && <p className="text-[12.5px] text-red">{error}</p>}
+      <div className="flex gap-2">
+        <Button variant="ghost" onClick={() => setReviewing(false)}>Change details</Button>
+        <Button className="flex-1" onClick={createAdmin}>Create account</Button>
+      </div>
+    </div>
+  )
+
   return (
-    <form onSubmit={createAdmin} className="space-y-4">
+    <form onSubmit={e => { e.preventDefault(); setError(''); setReviewing(true) }} className="space-y-4">
       <Heading title="Create your admin account"
-        sub="This is the account you will sign in with. Its email cannot be changed later." />
+        sub="This is the account you will sign in with. You get to check it before anything is created." />
       {([['email', 'Email', 'email'], ['display_name', 'Display name', 'text'],
          ['password', 'Password (12+ chars)', 'password']] as const).map(([k, label, type]) => (
         <div key={k}>
@@ -43,7 +71,7 @@ export function AdminAccountStep({ existing, onCreated }: {
         </div>
       ))}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
-      <Button type="submit" className="w-full">Create admin account</Button>
+      <Button type="submit" className="w-full">Review</Button>
     </form>
   )
 }
