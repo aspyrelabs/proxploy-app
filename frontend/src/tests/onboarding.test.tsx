@@ -13,6 +13,7 @@ let hostList: { id: number }[] = []
 let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 let meAuthed = true
+let probeResult: unknown = { version: '9.2.10', release: '9.2', missing_privileges: [] }
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
@@ -28,6 +29,7 @@ beforeEach(() => {
   hostDetail = {}
   verifyOutcome = { ok: true }
   meAuthed = true
+  probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
 })
 
 vi.mock('../api/client', () => {
@@ -44,6 +46,7 @@ vi.mock('../api/client', () => {
               display_name: 'Ops', role: 'owner', totp_enabled: false })
           : Promise.reject(new ApiErrorImpl(401, { detail: 'authentication required' }))
       }
+      if (path === '/hosts/probe') return Promise.resolve(probeResult)
       if (path === '/hosts') return Promise.resolve(hostList)
       if (path.endsWith('/ssh/verify')) {
         return verifyOutcome.ok
@@ -101,6 +104,25 @@ describe('HostForm', () => {
       'https://docs.proxploy.com/getting-started/proxmox-token/')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link.getAttribute('rel')).toContain('noreferrer')
+  })
+
+  it('reports privileges the token is missing when testing the connection', async () => {
+    // "Connected, PVE 9.2.10" on a token that cannot read rrddata is how a
+    // host got enrolled broken and then reported as unreachable minutes later.
+    probeResult = { version: '9.2.10', release: '9.2',
+                    missing_privileges: ['Sys.Audit', 'Pool.Audit'] }
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/Sys\.Audit/)).toBeInTheDocument()
+    expect(screen.getByText(/Pool\.Audit/)).toBeInTheDocument()
+  })
+
+  it('says plainly when the token has everything it needs', async () => {
+    probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/Connected, PVE 9\.2\.10/)).toBeInTheDocument()
+    expect(screen.queryByText(/missing/i)).not.toBeInTheDocument()
   })
 
   it('leaves TLS verification off by default', () => {

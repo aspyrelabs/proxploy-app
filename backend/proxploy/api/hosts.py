@@ -76,14 +76,55 @@ def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
                          factory=request.app.state.proxmox_factory)
 
 
+# Doc 08's ProxployAudit role: the read-only monitoring set, required for the
+# poller to complete a cycle at all. Deliberately only this set: the lifecycle,
+# console and backup roles gate optional features, and a token without them
+# should still enrol.
+MONITORING_PRIVILEGES = ("VM.Audit", "Datastore.Audit", "Sys.Audit",
+                         "Pool.Audit", "SDN.Audit")
+
+
+def _missing_privileges(client) -> list[str] | None:
+    """Which monitoring privileges this token does not hold anywhere.
+
+    None means "could not tell", which is NOT the same as "none missing": some
+    setups refuse /access/permissions to a token, and reporting unknown as a
+    clean bill of health is how this failed silently in the first place.
+
+    A privilege granted on any path counts. Doc 08 supports scoping Proxploy to
+    a pool by granting the roles on /pool/<name> instead of /, so requiring
+    them at "/" would report a working pool-scoped install as broken.
+    """
+    try:
+        granted: set[str] = set()
+        for privs in (client.permissions() or {}).values():
+            granted.update(p for p, on in (privs or {}).items() if on)
+    except Exception:  # noqa: BLE001  (unknown, never fatal)
+        return None
+    return [p for p in MONITORING_PRIVILEGES if p not in granted]
+
+
+def _privilege_note(missing: list[str] | None) -> str | None:
+    if not missing:
+        return None
+    return ("the API token is missing " + ", ".join(missing)
+            + ". Monitoring reads will fail until these are granted; see "
+              "docs.proxploy.com/getting-started/proxmox-token")
+
+
 @router.post("/probe")
 def probe(request: Request, body: ProbeIn,
           user: User = Depends(_manage_global)):
+    client = _client(request, body)
     try:
-        v = _client(request, body).version()
+        v = client.version()
     except ProxmoxError as e:
         raise HTTPException(502, {"error": e.kind, "detail": str(e)})
-    return {"ok": True, "version": v.get("version"), "release": v.get("release")}
+    # /version succeeds for a privsep token holding no ACLs at all, so on its
+    # own it proves only that the address and secret are right. The privilege
+    # diff is what makes "Test connection" mean the thing operators read it as.
+    return {"ok": True, "version": v.get("version"), "release": v.get("release"),
+            "missing_privileges": _missing_privileges(client)}
 
 
 def _local_node_name(client) -> str | None:
@@ -136,9 +177,15 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
                     ip=request.client.host if request.client else None)
         raise HTTPException(502, {"error": e.kind, "detail": str(e)})
 
+    # Checked at enrolment, not left for the poller to discover minutes later
+    # as a bare "unreachable". Recorded rather than refused: an under-privileged
+    # token is still worth enrolling, and locking an operator out of their own
+    # host at the final step is the worse failure.
+    missing = _missing_privileges(client)
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
                 node_name=_local_node_name(client),
+                last_error=_privilege_note(missing),
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
     db.commit()
@@ -152,7 +199,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 
     out = {"id": host.id, "name": host.name, "address": host.address,
            "node_name": host.node_name, "pve_version": host.pve_version,
-           "status": host.status}
+           "status": host.status, "missing_privileges": missing}
     if body.ssh_enroll:
         private_pem, public_line = generate_ed25519(f"proxploy@{body.name}")
         sblob, sver = ss.encrypt(private_pem)

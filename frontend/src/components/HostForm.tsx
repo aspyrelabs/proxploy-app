@@ -90,16 +90,22 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     // the backend (HostIn.tls_fingerprint) but not yet collected here.
     token_secret: '', verify_tls: false, ssh_enroll: false })
   const [probe, setProbe] = useState('')
+  const [missing, setMissing] = useState<string[] | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k: string, v: unknown) => setF(s => ({ ...s, [k]: v }))
 
   async function testConnection() {
-    setProbe(''); setError('')
+    setProbe(''); setError(''); setMissing(null)
     try {
-      const r = await api<{ version: string; release: string }>('/hosts/probe', {
+      const r = await api<{ version: string; release: string
+                            missing_privileges: string[] | null }>('/hosts/probe', {
         method: 'POST', body: JSON.stringify(f) })
       setProbe(`Connected, PVE ${r.version}`)
+      // Connecting is not the same as being able to read anything. A privsep
+      // token with no ACLs connects fine and then fails every monitoring read,
+      // which used to surface minutes later as the host being "unreachable".
+      setMissing(r.missing_privileges?.length ? r.missing_privileges : null)
     } catch (e) { setError(errText(e)) }
   }
 
@@ -143,7 +149,22 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           </span>
         </span>
       </label>
-      {probe && <p className="font-mono text-[12px] text-green">{probe}</p>}
+      {probe && (
+        <p className={`font-mono text-[12px] ${missing ? 'text-text-2' : 'text-green'}`}>{probe}</p>
+      )}
+      {missing && (
+        <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+          <p className="text-[12.5px] text-amber">
+            Connected, but this token cannot read everything Proxploy needs.
+          </p>
+          <p className="mt-1 font-mono text-[11.5px] text-text-2">missing: {missing.join(', ')}</p>
+          <p className="mt-1.5 text-[11.5px] text-text-3">
+            Monitoring will report the host as unreachable until these are granted.{' '}
+            <a href={TOKEN_DOCS} target="_blank" rel="noopener noreferrer"
+              className="text-amber underline underline-offset-2">How to grant them</a>
+          </p>
+        </div>
+      )}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
       <div className="flex gap-2">
         <Button type="button" variant="ghost" onClick={testConnection}>Test connection</Button>
