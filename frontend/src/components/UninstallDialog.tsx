@@ -7,6 +7,7 @@ import type { JobRow } from '../api/jobs'
 import { errBody } from '../api/network'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
+import { AlertDialog, AlertDialogCancel } from './ui/alert-dialog'
 import { Button } from './ui/button'
 
 type UninstallResult = { job: JobRow } | { removed: true; ct_kept: true }
@@ -91,53 +92,52 @@ export function UninstallDialog({ app, onClose }: { app: AppRow; onClose: () => 
 
   return (
     <>
-      <div role="dialog" aria-label="Uninstall app"
-           className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-        <div className="w-[540px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-          <h2 className="font-display text-[16px] font-semibold text-text">
-            Uninstall <span className="font-mono">{app.name}</span>
-          </h2>
+      <AlertDialog
+        title={<>Uninstall <span className="font-mono">{app.name}</span></>}
+        description={`Destroy CT ${app.ctid} and its disk, or stop tracking it and leave it `
+          + 'running. Destroying asks you to type the name first.'}
+        onCancel={onClose}
+      >
 
-          {jobId != null ? (
-            <div className="mt-4">
-              <JobLog jobId={jobId} />
-              <Button className="mt-3" variant="ghost" onClick={closeJob}>Close</Button>
-            </div>
-          ) : (
-            <>
-              <div className="mt-4 space-y-3">
-                <div className="rounded-ctl border border-red/30 bg-red-dim p-3">
-                  <h3 className="text-[13px] font-semibold text-red">Destroy the container</h3>
-                  <p className="mt-1 text-[12.5px] text-text-2">
-                    Permanently deletes CT {app.ctid} and its disk from {app.host_name}.
-                    This cannot be undone. Requires typing the app's name to confirm.
-                  </p>
-                  <Button className="mt-2" variant="danger" disabled={remove.isPending}
-                          onClick={() => setGuardOpen(true)}>
-                    Destroy container…
-                  </Button>
-                </div>
-                <div className="rounded-ctl border border-line-soft bg-elev p-3">
-                  <h3 className="text-[13px] font-semibold text-text">Forget only</h3>
-                  <p className="mt-1 text-[12.5px] text-text-2">
-                    Stops Proxploy tracking {app.name}. CT {app.ctid} keeps running on{' '}
-                    {app.host_name}, untouched. Nothing is destroyed, and it can be adopted
-                    again later. No confirmation needed.
-                  </p>
-                  <Button className="mt-2" variant="ghost" disabled={remove.isPending}
-                          onClick={doForget}>
-                    Forget, keep container running
-                  </Button>
-                </div>
-                {error && <p className="text-[12.5px] text-red">{error}</p>}
-              </div>
-              <div className="mt-4 flex justify-end">
-                <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              </div>
-            </>
-          )}
+      {jobId != null ? (
+        <div className="mt-4">
+          <JobLog jobId={jobId} />
+          <Button className="mt-3" variant="ghost" onClick={closeJob}>Close</Button>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="mt-4 space-y-3">
+            <div className="rounded-ctl border border-red/30 bg-red-dim p-3">
+              <h3 className="text-[13px] font-semibold text-red">Destroy the container</h3>
+              <p className="mt-1 text-[12.5px] text-text-2">
+                Permanently deletes CT {app.ctid} and its disk from {app.host_name}.
+                This cannot be undone. Requires typing the app's name to confirm.
+              </p>
+              <Button className="mt-2" variant="danger" disabled={remove.isPending}
+                      onClick={() => setGuardOpen(true)}>
+                Destroy container…
+              </Button>
+            </div>
+            <div className="rounded-ctl border border-line-soft bg-elev p-3">
+              <h3 className="text-[13px] font-semibold text-text">Forget only</h3>
+              <p className="mt-1 text-[12.5px] text-text-2">
+                Stops Proxploy tracking {app.name}. CT {app.ctid} keeps running on{' '}
+                {app.host_name}, untouched. Nothing is destroyed, and it can be adopted
+                again later. No confirmation needed.
+              </p>
+              <Button className="mt-2" variant="ghost" disabled={remove.isPending}
+                      onClick={doForget}>
+                Forget, keep container running
+              </Button>
+            </div>
+            {error && <p className="text-[12.5px] text-red">{error}</p>}
+          </div>
+          <div className="mt-4 flex justify-end">
+            <AlertDialogCancel onClick={onClose}>Cancel</AlertDialogCancel>
+          </div>
+        </>
+      )}
+      </AlertDialog>
 
       {guardOpen && (
         <ConfirmSelfDialog
