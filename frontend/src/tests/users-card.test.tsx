@@ -63,6 +63,19 @@ describe('UsersCard', () => {
     expect(screen.getAllByText('active').length).toBe(2)
   })
 
+  it('lines every cell up on one line, including the actions cell', async () => {
+    // The actions cell is taller than a line of text, so with align-top the
+    // email and state sat high and the button hung below them.
+    wrap()
+    const row = (await screen.findByText('owner@example.com')).closest('tr')!
+    expect(row.className).toContain('align-middle')
+    expect(row.className).not.toContain('align-top')
+    // Uneven padding reads as misalignment even when the baselines agree.
+    for (const cell of Array.from(row.querySelectorAll('td'))) {
+      expect(cell.className).toContain('py-2')
+    }
+  })
+
   // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
   // commented out in UsersCard.tsx until there is more than one user to manage; the mutation and the
   // endpoint behind it are untouched. Unskip when the button returns.

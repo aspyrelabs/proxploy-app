@@ -118,13 +118,22 @@ export function UsersCard() {
         {(rows) => (
           <table className="w-full text-left text-[13px]">
             <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-              <th className="pb-2">Email</th><th>Name</th><th>State</th><th /></tr></thead>
+              <th className="pb-2 font-normal">Email</th>
+              <th className="pb-2 font-normal">Name</th>
+              <th className="pb-2 font-normal">State</th>
+              <th className="pb-2" /></tr></thead>
             <tbody>
+              {/* align-middle, not align-top: the actions cell is taller than a
+                  line of text (a button, and sometimes an error above it), so
+                  pinning to the top left the email and state sitting high while
+                  the button hung below them. Every cell carries the same py-2
+                  for the same reason: uneven padding reads as misalignment even
+                  when the text baselines agree. */}
               {rows.map((u) => (
-                <tr key={u.id} className="border-t border-line-soft align-top hover:bg-panel-2">
+                <tr key={u.id} className="border-t border-line-soft align-middle hover:bg-panel-2">
                   <td className="py-2 font-mono">{u.email}</td>
-                  <td className="text-text-2">{u.display_name ?? ''}</td>
-                  <td className={u.is_active ? 'text-green' : 'text-text-3'}>
+                  <td className="py-2 text-text-2">{u.display_name ?? ''}</td>
+                  <td className={`py-2 ${u.is_active ? 'text-green' : 'text-text-3'}`}>
                     {u.is_active ? 'active' : 'deactivated'}
                   </td>
                   <td className="py-2 text-right">
