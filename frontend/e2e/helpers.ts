@@ -53,7 +53,7 @@ async function withSeedLock<T>(fn: () => Promise<T>): Promise<T> {
 // text (verified against each route file), so the same list drives both the
 // click and the heading assertion.
 export const NAV_PAGES = [
-  'Cluster', 'Apps', 'App Store', 'Virtual Machines',
+  'Hosts', 'Apps', 'App Store', 'Virtual Machines',
   'Storage', 'Network', 'Backups', 'Alerts', 'Audit', 'Settings',
 ] as const
 

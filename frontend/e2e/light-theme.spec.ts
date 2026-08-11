@@ -32,7 +32,7 @@ test.describe('light theme', () => {
     const context = await browser.newContext()
     const page = await context.newPage()
     await signIn(page)
-    await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
     sessionCookies = (await context.storageState()).cookies
     await context.close()
   })
@@ -49,9 +49,9 @@ test.describe('light theme', () => {
 
   for (const label of NAV_PAGES) {
     test(`${label} uses no dark-only literals`, async ({ page }) => {
-      await page.goto('/cluster')
-      await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
-      if (label !== 'Cluster') await goToNavPage(page, label)
+      await page.goto('/hosts')
+      await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
+      if (label !== 'Hosts') await goToNavPage(page, label)
 
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
@@ -110,8 +110,8 @@ test.describe('light theme, the surfaces the literal-hunt missed', () => {
     await context.close()
     await page.context().addCookies(cookies)
 
-    await page.goto('/cluster')
-    await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
+    await page.goto('/hosts')
+    await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
     // The bar is translucent over scrolling content, so compare its own

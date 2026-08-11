@@ -28,7 +28,7 @@ vi.mock('../api/client', () => ({
 }))
 
 import { UpdatePanel } from '../routes/apps'
-import { UpdateAllButton } from '../routes/cluster'
+import { UpdateAllButton } from '../routes/hosts'
 
 const wrap = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: {

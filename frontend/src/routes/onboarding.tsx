@@ -20,7 +20,7 @@ export const onboardingRoute = createRoute({
   beforeLoad: async () => {
     const ob = await api<{ complete: boolean }>('/meta/onboarding')
     // cast: circular import with router.tsx blocks full route-tree inference here
-    if (ob.complete) throw redirect({ to: '/cluster' as never })
+    if (ob.complete) throw redirect({ to: '/hosts' as never })
   },
 })
 
@@ -161,7 +161,7 @@ export function Wizard() {
   async function finish() {
     await api('/settings', { method: 'PATCH',
       body: JSON.stringify({ 'onboarding.complete': true }) })
-    navigate({ to: '/cluster' as never })
+    navigate({ to: '/hosts' as never })
   }
 
   return (

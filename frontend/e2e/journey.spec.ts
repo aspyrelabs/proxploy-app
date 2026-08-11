@@ -70,8 +70,8 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // this is a hard prerequisite of the "install an app" clause below.
     await page.getByLabel('Name').fill(HOST_NAME)
     await page.getByLabel('Address').fill('https://10.0.0.5:8006')
-    await page.getByLabel('API token id').fill('proxploy@pve!e2e')
-    await page.getByLabel('API token secret').fill('secret')
+    await page.getByLabel('API token id', { exact: true }).fill('proxploy@pve!e2e')
+    await page.getByLabel('API token secret', { exact: true }).fill('secret')
     await page.getByLabel(/Enable App Store installs/).check()
     await page.getByRole('button', { name: 'Add host' }).click()
     await expect(page.getByRole('button', { name: 'I have added it' })).toBeVisible()
@@ -87,9 +87,9 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await expect(page.getByRole('button', { name: /open the dashboard/i })).toBeVisible()
   })
 
-  await test.step('land on Cluster', async () => {
+  await test.step('land on Hosts', async () => {
     await page.getByRole('button', { name: /open the dashboard/i }).click()
-    await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
   })
 
   await test.step('install an app', async () => {
@@ -131,7 +131,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     }).toPass({ timeout: 20_000 })
     // That request bypassed the app entirely, so it never touched React
     // Query's cache, and main.tsx sets a 15s staleTime, so the "land on
-    // Cluster" step's own earlier (pre-poll, node: null) fetch of this exact
+    // Hosts" step's own earlier (pre-poll, node: null) fetch of this exact
     // ['cluster','nodes'] query would otherwise still be served as fresh to
     // the wizard below. A reload is the one thing guaranteed to start that
     // cache over.

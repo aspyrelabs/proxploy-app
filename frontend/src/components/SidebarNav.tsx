@@ -4,7 +4,7 @@ import { HealthFooter } from './HealthFooter'
 
 export const NAV = [
   { label: 'Overview', items: [
-    { label: 'Cluster', to: '/cluster' },
+    { label: 'Hosts', to: '/hosts' },
     { label: 'Apps', to: '/apps' },
     { label: 'App Store', to: '/store' },
     { label: 'Virtual Machines', to: '/vms' },

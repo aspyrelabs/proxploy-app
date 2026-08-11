@@ -48,13 +48,13 @@ test('login and every nav page renders with a clean console', async ({ page }) =
 
   await test.step('login', async () => {
     await signIn(page)
-    currentPage = 'Cluster'
-    await expect(page.getByRole('heading', { name: 'Cluster', level: 1 })).toBeVisible()
+    currentPage = 'Hosts'
+    await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
     expect(consoleErrors, consoleErrors.join('\n')).toEqual([])
   })
 
   for (const label of NAV_PAGES) {
-    if (label === 'Cluster') continue // already there, asserted above
+    if (label === 'Hosts') continue // already there, asserted above
     // eslint-disable-next-line no-loop-func
     await test.step(label, async () => {
       currentPage = label

@@ -4,7 +4,7 @@ import { NAV } from '../components/SidebarNav'
 describe('fixed nav (doc 01 §0, never reshaped by tier/config/entitlement)', () => {
   it('is exactly the 10 pages in order', () => {
     const labels = NAV.flatMap(g => g.items.map(i => i.label))
-    expect(labels).toEqual(['Cluster', 'Apps', 'App Store', 'Virtual Machines',
+    expect(labels).toEqual(['Hosts', 'Apps', 'App Store', 'Virtual Machines',
                             'Storage', 'Network', 'Backups', 'Alerts', 'Audit', 'Settings'])
   })
   it('groups: Overview then Infrastructure', () => {

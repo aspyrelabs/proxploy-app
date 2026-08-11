@@ -7,14 +7,14 @@ export { rootRoute, shellRoute }
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute, path: '/',
   // cast: indexRoute's own `to` type can't see the tree it's still being built into
-  beforeLoad: () => { throw redirect({ to: '/cluster' as never }) },
+  beforeLoad: () => { throw redirect({ to: '/hosts' as never }) },
 })
 
 import { loginRoute } from './routes/login'
 import { onboardingRoute } from './routes/onboarding'
 import { alertsRoute } from './routes/alerts'
 import { settingsRoute } from './routes/settings'
-import { clusterRoute, nodeDetailRoute } from './routes/cluster'
+import { hostsRoute, nodeDetailRoute } from './routes/hosts'
 import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
 import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute } from './routes/vms'
 import { storeRoute } from './routes/store'
@@ -28,7 +28,7 @@ const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute,
 
 export const routeTree = rootRoute.addChildren([
   indexRoute, loginRoute, onboardingRoute,
-  shellRoute.addChildren([clusterRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
+  shellRoute.addChildren([hostsRoute, nodeDetailRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
                           storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute, auditRoute]),
 ])
 export const router = createRouter({ routeTree, defaultErrorComponent: RouteError })

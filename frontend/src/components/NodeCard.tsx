@@ -14,7 +14,7 @@ export function NodeCard({ node }: { node: NodeRow }) {
     >
       <div className="flex items-center justify-between">
         <Link
-          to={'/cluster/$hostId' as never} // node detail (plan decision 3)
+          to={'/hosts/$hostId' as never} // node detail (plan decision 3)
           params={{ hostId: String(node.host_id) } as never}
           onClick={(e) => e.stopPropagation()}
           className="font-mono text-[13px] text-text hover:text-amber"

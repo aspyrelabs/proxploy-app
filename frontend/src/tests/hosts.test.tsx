@@ -50,18 +50,18 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   useSearch: () => ({}),
 }))
 
-import { ClusterPage } from '../routes/cluster'
+import { HostsPage } from '../routes/hosts'
 
 const withQuery = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
-describe('ClusterPage', () => {
+describe('HostsPage', () => {
   beforeEach(() => { nodesResult = 'ok'; summaryResult = 'ok' })
 
   it('renders rings, counts and node cards from the API', async () => {
-    withQuery(<ClusterPage />)
+    withQuery(<HostsPage />)
     expect(await screen.findByText('host-01')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
     expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
@@ -72,14 +72,14 @@ describe('ClusterPage', () => {
     // bare, message-less <div>; indistinguishable from a fresh install
     // with zero hosts.
     nodesResult = 'error'
-    withQuery(<ClusterPage />)
+    withQuery(<HostsPage />)
     expect(await screen.findByText(/nodes not readable/i)).toBeInTheDocument()
     expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument()
   })
 
   it('tells a fresh install there are no nodes yet, not nothing at all', async () => {
     nodesResult = 'empty'
-    withQuery(<ClusterPage />)
+    withQuery(<HostsPage />)
     expect(await screen.findByText('No nodes yet')).toBeInTheDocument()
     expect(screen.queryByText(/nodes not readable/i)).not.toBeInTheDocument()
   })
@@ -88,7 +88,7 @@ describe('ClusterPage', () => {
     // The bug: pct ?? 0 used to draw a real-looking 0%-used gauge on a
     // failed fetch, indistinguishable from an actually idle cluster.
     summaryResult = 'error'
-    withQuery(<ClusterPage />)
+    withQuery(<HostsPage />)
     expect(await screen.findByRole('img', { name: /CPU unknown/i })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /Memory unknown/i })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /Storage unknown/i })).toBeInTheDocument()

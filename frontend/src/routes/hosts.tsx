@@ -76,7 +76,7 @@ export function UpdateAllButton() {
   )
 }
 
-export function ClusterPage() {
+export function HostsPage() {
   const summaryQuery = useSummary()
   const summary = summaryQuery.data
   const nodesQuery = useNodes()
@@ -101,7 +101,7 @@ export function ClusterPage() {
     <div>
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="font-display text-[22px] font-semibold">Cluster</h1>
+          <h1 className="font-display text-[22px] font-semibold">Hosts</h1>
           <div className="text-[12px] text-text-3">
             {summary
               ? `${summary.counts.nodes} nodes · ${summary.counts.apps} apps · ${summary.counts.vms} VMs`
@@ -357,17 +357,17 @@ export function NodeDetailPage() {
 // Route objects, imported by router.tsx (settings.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
-// entry point (e.g. in tests), before clusterRoute/nodeDetailRoute exist.
+// entry point (e.g. in tests), before hostsRoute/nodeDetailRoute exist.
 import { shellRoute } from './shell'
 
-export const clusterRoute = createRoute({
+export const hostsRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: '/cluster',
-  component: ClusterPage,
+  path: '/hosts',
+  component: HostsPage,
 })
 
 export const nodeDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: '/cluster/$hostId',
+  path: '/hosts/$hostId',
   component: NodeDetailPage,
 })

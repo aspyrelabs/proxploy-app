@@ -24,7 +24,7 @@ function LoginPage() {
           </p>
         )}
         {/* cast: circular import with router.tsx blocks full route-tree inference here */}
-        <LoginForm onSuccess={() => navigate({ to: '/cluster' as never })} />
+        <LoginForm onSuccess={() => navigate({ to: '/hosts' as never })} />
       </div>
     </div>
   )
