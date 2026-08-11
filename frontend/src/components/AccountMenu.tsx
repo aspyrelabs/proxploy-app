@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -14,22 +15,6 @@ export function AccountMenu() {
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const wrap = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    const onClick = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onClick)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onClick)
-    }
-  }, [open])
-
   async function signOut() {
     // Clear the cache before leaving: React Query would otherwise serve the
     // previous user's cached /auth/me, hosts and jobs to whoever signs in next
@@ -44,25 +29,24 @@ export function AccountMenu() {
   const letter = (me?.display_name ?? me?.email ?? '?').slice(0, 1).toUpperCase()
 
   return (
-    <div className="relative" ref={wrap}>
-      <button
-        type="button"
+    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+      <DropdownMenu.Trigger
         aria-label="Account"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
         className="grid h-8 w-8 cursor-pointer place-items-center rounded-tile
                    bg-[linear-gradient(150deg,#5B9DF9,#7C5CFB)] font-display text-[12px]
                    font-semibold text-white transition hover:brightness-110"
       >
         {letter}
-      </button>
+      </DropdownMenu.Trigger>
 
-      {open && (
-        <div role="menu"
-          className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-card border
-                     border-line bg-panel shadow-[0_12px_32px_rgba(0,0,0,.35)]">
-          <div className="border-b border-line-soft px-3 py-2.5">
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={8}
+          className="z-50 w-56 overflow-hidden rounded-card border border-line bg-panel
+                     shadow-[0_12px_32px_rgba(0,0,0,.35)]"
+        >
+          <DropdownMenu.Label className="border-b border-line-soft px-3 py-2.5">
             <p className="truncate text-[13px] text-text">{me?.display_name || 'Signed in'}</p>
             <p className="truncate text-[11.5px] text-text-3">{me?.email}</p>
             {me?.role && (
@@ -70,22 +54,33 @@ export function AccountMenu() {
                 {me.role}
               </p>
             )}
-          </div>
-          <Link to={'/profile' as never} role="menuitem" onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-[13px] text-text-2 hover:bg-panel-2 hover:text-text">
-            Profile and security
-          </Link>
-          <Link to={'/settings' as never} role="menuitem" onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-[13px] text-text-2 hover:bg-panel-2 hover:text-text">
-            Settings
-          </Link>
-          <button type="button" role="menuitem" onClick={signOut}
+          </DropdownMenu.Label>
+
+          <DropdownMenu.Item asChild>
+            <Link to={'/profile' as never}
+              className="block cursor-pointer px-3 py-2 text-[13px] text-text-2 outline-none
+                         data-[highlighted]:bg-panel-2 data-[highlighted]:text-text">
+              Profile and security
+            </Link>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item asChild>
+            <Link to={'/settings' as never}
+              className="block cursor-pointer px-3 py-2 text-[13px] text-text-2 outline-none
+                         data-[highlighted]:bg-panel-2 data-[highlighted]:text-text">
+              Settings
+            </Link>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item
+            onSelect={signOut}
             className="w-full cursor-pointer border-t border-line-soft px-3 py-2 text-left
-                       text-[13px] text-red hover:bg-red-dim">
+                       text-[13px] text-red outline-none data-[highlighted]:bg-red-dim"
+          >
             Sign out
-          </button>
-        </div>
-      )}
-    </div>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   )
 }

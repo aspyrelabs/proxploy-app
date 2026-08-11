@@ -124,7 +124,11 @@ describe('StoragePage', () => {
     withQuery(<StoragePage />)
     fireEvent.click(await screen.findByRole('button', { name: /local/ }))
     await screen.findByText('local:iso/ubuntu-24.04.iso')
-    fireEvent.click(screen.getByRole('button', { name: 'Backups' }))
+    // role="tab" now, not "button": the strip is a real Radix tablist, which
+    // is what gives it arrow-key navigation. Radix activates a tab on
+    // mousedown, so a synthetic click on its own does not switch it. A real
+    // click does, because a real click is a mousedown first.
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Backups' }), { button: 0, ctrlKey: false })
     expect(await screen.findByText('local:backup/vzdump-qemu-100.vma.zst')).toBeInTheDocument()
     expect(calls).toContain('/storage/1/local/content?content=backup')
   })

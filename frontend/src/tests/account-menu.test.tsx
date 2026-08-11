@@ -36,30 +36,34 @@ const renderMenu = () => {
   return render(<QueryClientProvider client={qc}><AccountMenu /></QueryClientProvider>)
 }
 
+// Radix opens a menu on pointerdown, not click, which is what a native menu
+// does. The hand-rolled version used onClick, so every test drove it that way.
+const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+
 describe('AccountMenu', () => {
   it('opens from the avatar, which is a real button', async () => {
     renderMenu()
     const trigger = await screen.findByRole('button', { name: /account/i })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(trigger)
+    openMenu(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('names who is signed in, so the avatar letter is not the only clue', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: /account/i }))
+    openMenu(await screen.findByRole('button', { name: /account/i }))
     expect(await screen.findByText('ops@acme.io')).toBeInTheDocument()
   })
 
   it('offers a profile link', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: /account/i }))
+    openMenu(await screen.findByRole('button', { name: /account/i }))
     expect(await screen.findByText(/profile/i)).toBeInTheDocument()
   })
 
   it('signs out through the endpoint that was never called', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: /account/i }))
+    openMenu(await screen.findByRole('button', { name: /account/i }))
     // menuitem, not button: inside role="menu" the ARIA role wins, and that is
     // the correct markup rather than something to work around.
     fireEvent.click(await screen.findByRole('menuitem', { name: /sign out/i }))

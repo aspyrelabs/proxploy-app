@@ -29,7 +29,11 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 const openViaShortcut = () => fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
-const closeViaEscape = () => fireEvent.keyDown(window, { key: 'Escape' })
+
+// Ctrl+K is still the component's own window listener. Escape is not: Radix
+// dismisses the dialog from a document-level handler, and an event dispatched
+// at window never reaches document, so this has to fire inside the tree.
+const closeViaEscape = () => fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
 
 describe('CommandPalette', () => {
   beforeEach(() => {
@@ -42,7 +46,12 @@ describe('CommandPalette', () => {
   // Every test closes the palette before returning; `paletteOpen` is a
   // module-level flag shared across renders in this file, so leaving it open
   // would leak into the next test's initial state.
-  afterEach(() => { closeViaEscape() })
+  afterEach(async () => {
+    closeViaEscape()
+    // Closing now settles through a Radix effect rather than synchronously, so
+    // the module-level flag is not clear until the next tick.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
 
   it('opens on Ctrl+K and closes on Escape', async () => {
     withQuery(<CommandPalette />)

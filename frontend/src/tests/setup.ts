@@ -12,3 +12,12 @@ window.matchMedia ??= () => ({
   removeEventListener: () => {},
   dispatchEvent: () => false,
 }) as unknown as MediaQueryList
+
+// jsdom doesn't implement ResizeObserver; cmdk constructs one on mount to keep
+// its list sized (CommandPalette). Same shape as the matchMedia stub above:
+// enough to let the component mount, no real observation semantics.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
