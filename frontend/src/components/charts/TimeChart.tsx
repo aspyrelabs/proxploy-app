@@ -95,6 +95,8 @@ export type BuildOptionsArgs = {
   grid: string
   /** Seconds covered by the data, which decides the x tick style. */
   span: number
+  /** Called with the hovered sample index, or null when the pointer leaves. */
+  onHover?: (idx: number | null) => void
 }
 
 /** Pure: given a size, a unit and three resolved colours, the uPlot options.
@@ -113,8 +115,15 @@ export function buildOptions(a: BuildOptionsArgs): uPlot.Options {
     width: a.width,
     height: a.height,
     padding: [8, 8, 0, 0],
-    legend: { show: true, live: true },
+    // uPlot's own legend is off. Its live mode prints "CPU: unknown" and
+    // "time: unknown" under every chart whenever the pointer is not over the
+    // plot, which is most of the time, so the resting state of the page was
+    // three charts each announcing that they knew nothing. The value on hover
+    // is reported to React instead (onHover below) and rendered in the chart's
+    // own header, where the now/peak readout already lives.
+    legend: { show: false },
     cursor: { show: true, points: { show: true }, x: true, y: true },
+    hooks: a.onHover ? { setCursor: [(u: uPlot) => a.onHover!(u.cursor.idx ?? null)] } : {},
     scales: {
       x: { time: true },
       y: { range: [0, yTop(a.unit, a.max)] as [number, number] },
@@ -213,6 +222,8 @@ export function TimeChart({
   // Why the plot did not draw, shown on the page. Silence here is what made
   // "nothing on the charts" impossible to diagnose without the browser.
   const [drawError, setDrawError] = useState<string | null>(null)
+  // Which sample the pointer is over, or null. Replaces uPlot's live legend.
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
 
   useEffect(() => {
     const el = boxRef.current
@@ -247,6 +258,14 @@ export function TimeChart({
   const latest = real.length > 0 ? real[real.length - 1] : null
   const peak = real.length > 0 ? Math.max(...real) : 0
   const fmt = unitFormatter(unit)
+  // The hovered sample, if the pointer is over one with a real value. Null
+  // values are skipped rather than shown as "unknown", which is the whole
+  // reason uPlot's own legend was turned off.
+  const hoverV = hoverIdx != null ? values[hoverIdx] : null
+  const hovered = hoverIdx != null && hoverV != null
+    ? { v: hoverV, at: new Date((ts[hoverIdx] ?? 0) * 1000)
+          .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    : null
 
   useEffect(() => {
     const host = hostRef.current
@@ -258,6 +277,7 @@ export function TimeChart({
       axis: readVar('--text-3', NO_STYLESHEET.axis),
       grid: readVar('--line-soft', NO_STYLESHEET.grid),
       span: (ts[ts.length - 1] ?? 0) - (ts[0] ?? 0),
+      onHover: setHoverIdx,
     })
     let made: uPlot | null = null
     try {
@@ -289,8 +309,10 @@ export function TimeChart({
               from a chart that failed to draw. */}
           <div className="mb-2 flex items-baseline justify-between gap-2">
             <span className="font-mono text-[14px] text-text">
-              {fmt(latest)}
-              <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-text-3">now</span>
+              {fmt(hovered != null ? hovered.v : latest)}
+              <span className="ml-1.5 text-[10.5px] uppercase tracking-wide text-text-3">
+                {hovered != null ? hovered.at : 'now'}
+              </span>
             </span>
             <span className="font-mono text-[11px] text-text-3">
               peak {fmt(peak)} · axis to {fmt(yTop(unit, peak))}

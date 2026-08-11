@@ -146,10 +146,20 @@ describe('buildOptions', () => {
     expect(buildOptions({ ...base, width: 313, unit: 'percent' }).width).toBe(313)
   })
 
-  it('keeps the cursor on, so hovering reads out a value', () => {
-    const o = buildOptions({ ...base, unit: 'percent' })
+  it('keeps the cursor on, but reports hover to React instead of uPlot legend', () => {
+    // uPlot's live legend prints "CPU: unknown" and "time: unknown" under the
+    // plot whenever the pointer is elsewhere, which is most of the time. The
+    // resting state of the page was three charts each announcing they knew
+    // nothing, so the readout moved into the chart header.
+    const seen: (number | null)[] = []
+    const o = buildOptions({ ...base, unit: 'percent', onHover: (i) => seen.push(i) })
     expect(o.cursor?.show).not.toBe(false)
-    expect(o.legend?.show).not.toBe(false)
+    expect(o.legend?.show).toBe(false)
+
+    const hook = (o.hooks as { setCursor?: ((u: unknown) => void)[] }).setCursor?.[0]
+    hook?.({ cursor: { idx: 4 } })
+    hook?.({ cursor: { idx: null } })
+    expect(seen).toEqual([4, null])
   })
 })
 
