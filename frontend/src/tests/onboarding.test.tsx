@@ -221,6 +221,32 @@ describe('onboarding wizard', () => {
     expect(host).not.toBeDisabled()
   })
 
+  it('will not review a password the server would reject', async () => {
+    const { api } = await import('../api/client')
+    mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'short@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password (12+ chars)'), { target: { value: '123' } })
+    fireEvent.click(screen.getByRole('button', { name: /review/i }))
+
+    // "12+ chars" was a label the form never enforced: the only check was
+    // UserIn's, surfacing as a 422 after the review screen had already said
+    // the details were worth committing.
+    expect(await screen.findByText(/at least 12 characters/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument()
+    expect((api as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(c => c[0])).not.toContain('/users')
+  })
+
+  it('states the minimum on the field itself, not just in the label', async () => {
+    mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
+    renderWizard()
+    // The browser's own affordance, so the constraint is enforced before any
+    // click as well as after.
+    expect((await screen.findByLabelText('Password (12+ chars)'))
+      .getAttribute('minlength')).toBe('12')
+  })
+
   it('lets you correct the email at the review stage, before anything is created', async () => {
     const { api } = await import('../api/client')
     mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
