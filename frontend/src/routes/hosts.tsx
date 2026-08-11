@@ -12,7 +12,6 @@ import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { HostForm } from '../components/HostForm'
 import { KVGrid } from '../components/KVGrid'
-import { LivePulse } from '../components/LiveProvider'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
@@ -192,7 +191,6 @@ export function HostsPage() {
               : '…'}
           </div>
         </div>
-        <LivePulse />
       </div>
 
       <div className={`${card} flex justify-around`}>

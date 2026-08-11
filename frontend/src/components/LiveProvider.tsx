@@ -46,7 +46,19 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   return <LiveCtx.Provider value={{ lastEventAt }}>{children}</LiveCtx.Provider>
 }
 
-/** Prototype `.live` badge: "Live · updated Ns ago" bound to the last SSE event. */
+/** Prototype `.live` badge: "Live · updated Ns ago" bound to the last SSE event.
+ *
+ *  CURRENTLY UNRENDERED. It was the Hosts page header's right-hand item and is
+ *  no longer mounted anywhere, for two reasons: `HealthFooter` in the sidebar
+ *  already carries a live status indicator (dot + "N nodes · N alerts"), and a
+ *  visible "last updated" is not wanted at all -- the page should keep itself
+ *  current without announcing when it last did so, which the LiveProvider
+ *  above does regardless (its SSE subscription invalidates the queries; that
+ *  is what actually keeps the page fresh, not this badge).
+ *
+ *  Kept rather than deleted, following the same rule as the hidden Settings
+ *  affordances: hide the surface, keep the code, say why. An unused named
+ *  export does not trip noUnusedLocals. */
 export function LivePulse() {
   const { lastEventAt } = useLive()
   const [, force] = useState(0)
