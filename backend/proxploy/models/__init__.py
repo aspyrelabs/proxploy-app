@@ -130,6 +130,12 @@ class Host(TimestampMixin, Base):
     verify_tls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tls_fingerprint: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="connected", nullable=False)
+    # Why the last poll cycle was not clean, in one sentence, or NULL when it
+    # was. Set for BOTH shapes of trouble: a cycle that failed outright (status
+    # goes unreachable) and one that lost only an optional read (status stays
+    # connected). "unreachable" with no reason is undiagnosable, which is how a
+    # missing Sys.Audit privilege looked exactly like a dead node.
+    last_error: Mapped[str | None] = mapped_column(Text)
     pve_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
     ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(Text)

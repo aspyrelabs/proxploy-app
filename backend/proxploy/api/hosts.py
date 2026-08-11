@@ -172,6 +172,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
     return [{"id": h.id, "name": h.name, "address": h.address,
              "node_name": h.node_name, "status": h.status,
+             "last_error": h.last_error,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "team_id": h.team_id,
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
@@ -187,6 +188,7 @@ def host_detail(host_id: int, db=Depends(get_db),
     creds = db.query(HostCredential).filter_by(host_id=h.id)
     return {"id": h.id, "name": h.name, "address": h.address,
             "node_name": h.node_name, "status": h.status,
+            "last_error": h.last_error,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
             "node_shell_enabled": h.node_shell_enabled, "team_id": h.team_id,
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,

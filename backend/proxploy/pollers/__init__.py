@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import asyncio
 import json as jsonlib
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, utcnow
 from proxploy.services.metrics import write_samples
-from proxploy.services.proxmox import ProxmoxClient
+from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
 POLL_BACKOFF_CAP_S = 300
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -344,9 +348,18 @@ class Poller:
                     self.app.state.bus.publish(name, data)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001  (degrade this host only)
+            except Exception as e:  # noqa: BLE001  (degrade this host only)
                 fails += 1
-                evt = await asyncio.to_thread(self._mark_unreachable, host_id)
+                # This used to swallow the exception whole. A 403 on a
+                # privilege the token was never granted, a TLS failure and a
+                # genuinely dead node all became the bare word "unreachable",
+                # with nothing logged, so there was no way to tell them apart
+                # from either the UI or the server log.
+                reason = (f"{type(e).__name__}: {e}" if str(e)
+                          else f"{type(e).__name__} (no detail)")
+                log.warning("host %s poll failed (attempt %s): %s",
+                            host_id, fails, reason, exc_info=fails == 1)
+                evt = await asyncio.to_thread(self._mark_unreachable, host_id, reason)
                 if evt:
                     self.app.state.bus.publish(*evt)
             delay = (min(settings.poll_interval_s * (2 ** min(fails, 4)),
@@ -370,10 +383,30 @@ class Poller:
                                   factory=app.state.proxmox_factory)
             resources = client.cluster_resources()
             node_names = [r["node"] for r in resources if r.get("type") == "node"]
-            rrd = {n: client.node_rrddata(n) for n in node_names}
+            # Metrics are the optional half of a cycle. On real hardware a
+            # privsep token that can read /cluster/resources still 403s on
+            # /nodes/<n>/rrddata (Sys.Audit), and letting that escape cost the
+            # whole cycle: discovery, node_name and status all went with it,
+            # and the host was reported unreachable while answering fine.
+            rrd, lost = {}, []
+            for n in node_names:
+                try:
+                    rrd[n] = client.node_rrddata(n)
+                except ProxmoxError as e:
+                    lost.append(f"{n}: {e}")
+            degraded = (f"metrics unavailable, {'; '.join(lost)}" if lost else None)
 
             prev = self.snapshots.get(host_id)
             result = ingest_cycle(db, host, resources, rrd, utcnow())
+            # ingest_cycle owns status/last_seen_at, so this is set after it and
+            # committed below with the rest of the cycle. A clean cycle clears
+            # it, or a one-off blip would look permanent.
+            if host.last_error != degraded:
+                host.last_error = degraded
+                db.commit()
+            if degraded:
+                log.warning("host %s (%s) polled with degraded data: %s",
+                            host_id, host.name, degraded)
             events = result.events
             if prev is not None and (
                     {d["ctid"] for d in prev.discovered}
@@ -382,12 +415,19 @@ class Poller:
             self.snapshots[host_id] = result.snapshot
             return events
 
-    def _mark_unreachable(self, host_id: int):
+    def _mark_unreachable(self, host_id: int, reason: str = ""):
         with self.app.state.sessionmaker() as db:
             host = db.get(Host, host_id)
-            if host is None or host.status == "unreachable":
+            if host is None:
                 return None
+            already = host.status == "unreachable"
             host.status = "unreachable"
+            # Written even when the status is unchanged: the reason can change
+            # between cycles (a timeout becoming a 403), and the operator needs
+            # the current one, not the first one ever recorded.
+            host.last_error = reason or None
             db.commit()
+            if already:
+                return None
             return ("resource", {"type": "host", "id": host_id,
                                  "change": "status", "status": "unreachable"})
