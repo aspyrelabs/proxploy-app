@@ -14,6 +14,12 @@ let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 let meAuthed = true
 let probeResult: unknown = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+const scriptResult = { script: "# Proxploy\npveum role add ProxployAudit -privs 'VM.Audit'\n",
+                       capabilities: [
+                         { key: 'monitoring', label: 'Read-only monitoring', why: 'Always required.', required: true, role: 'ProxployAudit' },
+                         { key: 'lifecycle', label: 'Lifecycle', why: 'Start/stop.', required: false, role: 'ProxployLifecycle' },
+                       ] }
+let scriptCalls: { capabilities: string[]; node_shell: boolean }[] = []
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
@@ -30,6 +36,7 @@ beforeEach(() => {
   verifyOutcome = { ok: true }
   meAuthed = true
   probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+  scriptCalls = []
 })
 
 vi.mock('../api/client', () => {
@@ -38,7 +45,8 @@ vi.mock('../api/client', () => {
     constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
   }
   return {
-    api: vi.fn((path: string) => {
+    api: vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/hosts/token-script' && init?.body) scriptCalls.push(JSON.parse(String(init.body)))
       if (path === '/meta/onboarding') return Promise.resolve(onboarding)
       if (path === '/auth/me') {
         return meAuthed
@@ -46,6 +54,7 @@ vi.mock('../api/client', () => {
               display_name: 'Ops', role: 'owner', totp_enabled: false })
           : Promise.reject(new ApiErrorImpl(401, { detail: 'authentication required' }))
       }
+      if (path === '/hosts/token-script') return Promise.resolve(scriptResult)
       if (path === '/hosts/probe') return Promise.resolve(probeResult)
       if (path === '/hosts') return Promise.resolve(hostList)
       if (path.endsWith('/ssh/verify')) {
@@ -123,6 +132,40 @@ describe('HostForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
     expect(await screen.findByText(/Connected, PVE 9\.2\.10/)).toBeInTheDocument()
     expect(screen.queryByText(/missing/i)).not.toBeInTheDocument()
+  })
+
+  it('offers the pveum script so the operator never invents the privileges', async () => {
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    expect(await screen.findByText(/pveum role add ProxployAudit/)).toBeInTheDocument()
+  })
+
+  it('copies exactly the script it displays', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    await screen.findByText(/pveum role add ProxployAudit/)
+    fireEvent.click(screen.getByRole('button', { name: /copy script/i }))
+    expect(writeText).toHaveBeenCalledWith(scriptResult.script)
+  })
+
+  it('asks only for the capabilities left ticked', async () => {
+    render(<HostForm onCreated={() => {}} />)
+    // Doc 08: monitoring is mandatory, the rest are the operator's choice.
+    fireEvent.click(screen.getByLabelText(/lifecycle/i))
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
+    await screen.findByText(/pveum role add ProxployAudit/)
+    expect(scriptCalls.at(-1)?.capabilities).not.toContain('lifecycle')
+    expect(scriptCalls.at(-1)?.capabilities).toContain('backup')
+  })
+
+  it('asks for Sys.Console only when node shells are opted into', async () => {
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    await screen.findByText(/pveum role add ProxployAudit/)
+    const calls = scriptCalls.at(-1)
+    expect(calls?.node_shell).toBe(false)
   })
 
   it('leaves TLS verification off by default', () => {

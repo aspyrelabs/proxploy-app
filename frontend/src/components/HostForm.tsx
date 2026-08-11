@@ -38,6 +38,15 @@ const errText = (e: unknown) => {
 // right in dev and wrong for every customer is the worse failure.
 const TOKEN_DOCS = 'https://docs.proxploy.com/getting-started/proxmox-token/'
 
+// Monitoring is deliberately absent: it is mandatory and the generator emits
+// it whether or not it is asked for, so offering it as a checkbox would be
+// offering a choice that does not exist.
+const CAPABILITY_CHOICES = [
+  { key: 'lifecycle', label: 'Lifecycle' },
+  { key: 'console', label: 'Console' },
+  { key: 'backup', label: 'Backup' },
+] as const
+
 // Only the two fields that ask for something the operator must go and create
 // somewhere else. Name and Address explain themselves.
 const FIELD_HELP: Partial<Record<string, React.ReactNode>> = {
@@ -91,6 +100,8 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     token_secret: '', verify_tls: false, ssh_enroll: false })
   const [probe, setProbe] = useState('')
   const [missing, setMissing] = useState<string[] | null>(null)
+  const [script, setScript] = useState<string | null>(null)
+  const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k: string, v: unknown) => setF(s => ({ ...s, [k]: v }))
@@ -106,6 +117,20 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
       // token with no ACLs connects fine and then fails every monitoring read,
       // which used to surface minutes later as the host being "unreachable".
       setMissing(r.missing_privileges?.length ? r.missing_privileges : null)
+    } catch (e) { setError(errText(e)) }
+  }
+
+  // Doc 08 §2: the operator runs this in a node shell they already own, so
+  // Proxploy never asks for root credentials, even transiently. node_shell
+  // tracks the SSH consent checkbox, because Sys.Console is the privilege that
+  // makes a node shell possible and it is not granted otherwise.
+  async function generateScript() {
+    setError('')
+    try {
+      const r = await api<{ script: string }>('/hosts/token-script', {
+        method: 'POST',
+        body: JSON.stringify({ capabilities: caps, node_shell: f.ssh_enroll }) })
+      setScript(r.script)
     } catch (e) { setError(errText(e)) }
   }
 
@@ -149,6 +174,46 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           </span>
         </span>
       </label>
+      {/* Sits above the token fields on purpose: this is where the values they
+          are asking for come from, and finding it afterwards is too late. */}
+      <div className="rounded-ctl border border-line bg-panel-2 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[12.5px] text-text-2">Don't have a token yet?</p>
+          <Button type="button" variant="ghost" onClick={generateScript}>
+            Generate setup script
+          </Button>
+        </div>
+        {/* Doc 08 §2 step 1: monitoring is mandatory, the rest are the
+            operator's call. Anything left unticked gets no role and no token
+            at all, rather than a broad one it never uses. */}
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          <span className="text-[11.5px] text-text-3">Read-only monitoring (always)</span>
+          {CAPABILITY_CHOICES.map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-1.5 text-[11.5px] text-text-2">
+              <input type="checkbox" checked={caps.includes(key)}
+                onChange={e => setCaps(cs => e.target.checked
+                  ? [...cs, key] : cs.filter(c => c !== key))} />
+              {label}
+            </label>
+          ))}
+        </div>
+        {script && (
+          <>
+            <p className="mt-2 text-[11.5px] text-text-3">
+              Run this in a shell on the node. It creates a dedicated user with
+              only the privileges Proxploy needs, and prints one token secret per
+              capability. Proxploy never sees your root credentials.
+            </p>
+            {/* Dark in both themes on purpose, like ScriptPanel and the
+                authorized_keys block in onboarding: this is shell text, and
+                shell text that follows a light theme stops reading as shell. */}
+            <pre className="mt-2 max-h-64 overflow-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11px] leading-[1.6] text-text-2">{script}</pre>
+            <Button type="button" variant="ghost" className="mt-2"
+              onClick={() => navigator.clipboard.writeText(script)}>Copy script</Button>
+          </>
+        )}
+      </div>
+
       {probe && (
         <p className={`font-mono text-[12px] ${missing ? 'text-text-2' : 'text-green'}`}>{probe}</p>
       )}
