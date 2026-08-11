@@ -80,8 +80,12 @@ def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
 # poller to complete a cycle at all. Deliberately only this set: the lifecycle,
 # console and backup roles gate optional features, and a token without them
 # should still enrol.
-MONITORING_PRIVILEGES = ("VM.Audit", "Datastore.Audit", "Sys.Audit",
-                         "Pool.Audit", "SDN.Audit")
+#
+# Imported from services/pveum, which is also what generates the script that
+# creates these tokens. One table, so a token the wizard tells you to make
+# always satisfies the check the wizard then runs against it.
+from proxploy.services.pveum import (CAPABILITIES, MONITORING_PRIVILEGES,
+                                     generate_script)
 
 
 def _missing_privileges(client) -> list[str] | None:
@@ -110,6 +114,34 @@ def _privilege_note(missing: list[str] | None) -> str | None:
     return ("the API token is missing " + ", ".join(missing)
             + ". Monitoring reads will fail until these are granted; see "
               "docs.proxploy.com/getting-started/proxmox-token")
+
+
+class TokenScriptIn(BaseModel):
+    """Which capabilities to provision. Monitoring is always included by the
+    generator, so omitting it here is not a way to opt out of it."""
+    capabilities: list[str] = []
+    path: str = "/"
+    node_shell: bool = False
+
+
+@router.post("/token-script")
+def token_script(body: TokenScriptIn, user: User = Depends(_manage_global)):
+    """The copy-paste pveum script from doc 08 §2.
+
+    POST rather than GET for the structured body, following /probe: it reads
+    nothing and changes nothing on this side. The operator runs the result in
+    a node shell they already own, which is the whole point: Proxploy never
+    asks for root credentials, even transiently.
+    """
+    try:
+        script = generate_script(body.capabilities, path=body.path,
+                                 node_shell=body.node_shell)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return {"script": script,
+            "capabilities": [{"key": c.key, "label": c.label, "why": c.why,
+                              "required": c.required, "role": c.role}
+                             for c in CAPABILITIES.values()]}
 
 
 @router.post("/probe")
