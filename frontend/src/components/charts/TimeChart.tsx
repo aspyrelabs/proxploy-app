@@ -197,6 +197,9 @@ export function TimeChart({
   // Bumped when <html data-theme> flips, so the canvas (which cannot inherit
   // CSS) re-reads its colours instead of staying dark on a light page.
   const [themeTick, setThemeTick] = useState(0)
+  // Why the plot did not draw, shown on the page. Silence here is what made
+  // "nothing on the charts" impossible to diagnose without the browser.
+  const [drawError, setDrawError] = useState<string | null>(null)
 
   useEffect(() => {
     const el = boxRef.current
@@ -246,10 +249,18 @@ export function TimeChart({
     let made: uPlot | null = null
     try {
       made = new uPlot(opts, [ts, values] as unknown as uPlot.AlignedData, host)
-    } catch {
-      // jsdom has no canvas context. A chart that cannot draw must not take
-      // the page down with it.
+      setDrawError(null)
+    } catch (e) {
+      // A chart that cannot draw must not take the page down with it. But it
+      // must not go quietly either: this catch previously swallowed the
+      // reason, so a chart with 67 points of good data and a bad option
+      // rendered as a blank rectangle with nothing logged anywhere, which is
+      // undiagnosable from the outside and cost three rounds of "still
+      // nothing on the charts".
       made = null
+      const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      setDrawError(why)
+      console.error(`[TimeChart] ${label} failed to draw:`, e, { opts })
     }
     plot.current = made
     return () => { made?.destroy(); plot.current = null }
@@ -274,6 +285,11 @@ export function TimeChart({
           </div>
           <div ref={hostRef} data-testid="timechart-plot" data-width={width}
             className={`${ACCENT_CLASS[accent]} w-full`} style={{ minHeight: height }} />
+          {drawError && (
+            <p className="mt-1 font-mono text-[11px] text-red">
+              chart failed to draw, {drawError}
+            </p>
+          )}
         </>
       ) : (
         <div style={{ minHeight: height }}
