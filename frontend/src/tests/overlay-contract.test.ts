@@ -49,4 +49,26 @@ describe('overlay contract', () => {
 
     expect(offenders, offenders.join('\n')).toEqual([])
   })
+
+  // Not an overlay concern, but the same failure: a panel that states a pixel
+  // width and never says what to do when the viewport is narrower than that.
+  // Scoped to rounded-card so it means "a panel", and does not catch the
+  // 236px sidebar or the fixed-width form fields, which are neither.
+  it('no card panel states a width without a cap', () => {
+    const src = join(__dirname, '..')
+    const offenders: string[] = []
+
+    for (const file of walk(src)) {
+      const rel = file.slice(src.length + 1)
+      if (rel.startsWith('tests/')) continue
+
+      readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+        if (!/\bw-\[\d+px\]/.test(line) || !/rounded-card/.test(line)) return
+        if (/max-w-/.test(line)) return
+        offenders.push(`${rel}:${i + 1}  ${line.trim()}`)
+      })
+    }
+
+    expect(offenders, offenders.join('\n')).toEqual([])
+  })
 })

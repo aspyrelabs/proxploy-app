@@ -19,7 +19,7 @@ function LoginPage() {
     <div className="grid min-h-screen place-items-center">
       <div className="flex flex-col items-center gap-3">
         {ssoFailed && (
-          <p className="w-[360px] text-center text-[12.5px] text-red">
+          <p className="w-[360px] max-w-[92vw] text-center text-[12.5px] text-red">
             Single sign-on failed, try again or use a password.
           </p>
         )}

@@ -61,7 +61,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
   if (pending) {
     return (
-      <form onSubmit={submitCode} className="w-[360px] rounded-card border border-line-soft bg-panel p-7 shadow-2xl">
+      <form onSubmit={submitCode} className="w-[360px] max-w-[92vw] rounded-card border border-line-soft bg-panel p-7 shadow-2xl">
         <div className="mb-6 flex justify-center"><Brand /></div>
         <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3" htmlFor="totp-code">Authentication code</label>
         <input id="totp-code" type="text" inputMode="numeric" autoComplete="one-time-code" autoFocus required
@@ -74,7 +74,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <form onSubmit={submitPassword} className="w-[360px] rounded-card border border-line-soft bg-panel p-7 shadow-2xl">
+    <form onSubmit={submitPassword} className="w-[360px] max-w-[92vw] rounded-card border border-line-soft bg-panel p-7 shadow-2xl">
       <div className="mb-6 flex justify-center"><Brand /></div>
       <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3" htmlFor="email">Email</label>
       <input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className={inputCls + ' mb-4'} />

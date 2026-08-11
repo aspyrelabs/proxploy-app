@@ -16,7 +16,7 @@ export function RouteError({ error, reset }: { error: unknown; reset?: () => voi
   const unreachable = error instanceof TypeError && /fetch/i.test(error.message)
   return (
     <div className="grid min-h-screen place-items-center bg-ink p-6">
-      <div className="w-[520px] rounded-card border border-line-soft bg-panel p-7 text-center">
+      <div className="w-[520px] max-w-[92vw] rounded-card border border-line-soft bg-panel p-7 text-center">
         <h1 className="font-display text-[18px] text-text">
           {unreachable ? 'Proxploy is not answering' : 'Something in Proxploy broke'}
         </h1>
