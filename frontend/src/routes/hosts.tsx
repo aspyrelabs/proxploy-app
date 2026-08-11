@@ -15,6 +15,7 @@ import { KVGrid } from '../components/KVGrid'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
+import { TimeChart } from '../components/charts/TimeChart'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
 import { Terminal } from '../components/terminal/Terminal'
@@ -362,7 +363,10 @@ export function NodeDetailPage() {
     : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
   const { data: host } = useHostDetail(id)
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
-  const mem = useMetrics(`host:${id}`, 'mem_bytes', 24)
+  // mem_pct, not mem_bytes: the poller records both for a host, and charting
+  // the percentage puts all three of these on one 0..100 scale so they can be
+  // read side by side. The absolute figures are one row up, in the KV grid.
+  const mem = useMetrics(`host:${id}`, 'mem_pct', 24)
   const disk = useMetrics(`host:${id}`, 'disk_pct', 24)
   const nodeAppsQuery = useQuery({
     queryKey: ['apps', { host: id }],
@@ -410,18 +414,22 @@ export function NodeDetailPage() {
             <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className={card}>
                 <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
-                <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
+                <TimeChart ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []}
+                  unit="percent" label="CPU" accent="amber" />
               </div>
               <div className={card}>
                 <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
-                <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
+                <TimeChart ts={mem.data?.ts ?? []} values={mem.data?.value ?? []}
+                  unit="percent" label="Memory" accent="cyan" />
               </div>
               {/* Already recorded every cycle by the poller (`disk_pct`), and
                   correctly shared-vs-local deduped there, so this series is
                   the host's real fill, not the sum of the node rows. */}
               <div className={card}>
                 <h2 className="mb-2 text-[13px] uppercase text-text-3">Storage · 24h</h2>
-                <Sparkline ts={disk.data?.ts ?? []} values={disk.data?.value ?? []} color="#A78BFA" width={480} height={120} />
+                <TimeChart ts={disk.data?.ts ?? []} values={disk.data?.value ?? []}
+                  unit="percent" label="Storage" accent="violet"
+                  emptyNote="disk_pct began recording recently; a full day fills in." />
               </div>
             </div>
           )}

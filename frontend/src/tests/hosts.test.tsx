@@ -78,6 +78,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   useParams: () => ({ hostId: '1', node: 'pve1' }),
 }))
 
+import { api } from '../api/client'
 import { HostsPage, NodeDetailPage } from '../routes/hosts'
 
 const withQuery = (ui: React.ReactNode) => {
@@ -232,5 +233,23 @@ describe('NodeDetailPage', () => {
     withQuery(<NodeDetailPage />)
     expect(await screen.findByText('Storage')).toBeInTheDocument()
     expect(screen.getByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
+  })
+
+  it('charts memory as a percentage, so all three charts share one scale', async () => {
+    // It used to chart mem_bytes against an axis-free sparkline: a curve of
+    // raw byte counts beside two percentage curves, with nothing on screen
+    // saying which was which.
+    withQuery(<NodeDetailPage />)
+    await screen.findByText('2.0 GiB / 32.0 GiB')
+    const asked = vi.mocked(api).mock.calls.map((c) => String(c[0]))
+    expect(asked.some((p) => p.includes('metric=mem_pct'))).toBe(true)
+    expect(asked.some((p) => p.includes('metric=mem_bytes'))).toBe(false)
+  })
+
+  it('says "no data yet" for a metric with no samples rather than drawing an empty box', async () => {
+    // disk_pct only began recording on this install recently, so "no samples"
+    // is a real, common state and not an error.
+    withQuery(<NodeDetailPage />)
+    expect(await screen.findAllByText(/no data yet/i)).toHaveLength(3)
   })
 })
