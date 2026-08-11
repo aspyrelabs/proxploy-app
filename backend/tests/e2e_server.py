@@ -12,6 +12,7 @@ What it proves: the product's own logic, routing and UI, end to end.
 What it does not prove: behaviour against real Proxmox hardware.
 """
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +98,42 @@ def _mirror_guest_creates(fake) -> None:
     fake._record_action = record_and_discover
 
 
+def _mirror_ssh_installs(fake):
+    """A community-scripts install creates the container with `pct` over root
+    SSH, never through the PVE API; the node then reflects it in its very next
+    /cluster/resources listing. That is precisely the causal link
+    services/appstore.py::run_install relies on: it runs the script over SSH,
+    then re-reads _lxc_ids() and refuses to file an App row if the CT is not
+    there ("exit status 0 is NOT proof the container was built").
+
+    FakeSSHConnection runs the script as a no-op, so without this the fake node
+    never learns about the CT and that check correctly reports that nothing was
+    installed. The check is right; the fake was lying by omission.
+
+    Deliberately NOT routed through FakePVE's guest-create path the way
+    _mirror_guest_creates does for VMs: no install ever calls it. Modelling it
+    that way would be smaller and would make the test pass by simulating
+    something the product does not do, which is how a fake that quietly does
+    less than the real thing makes its own tests worthless.
+    """
+    def register_ct(command: str) -> None:
+        # env reaches the remote as a shell-quoted `KEY=value` prefix on the
+        # command string, not an SSH env request (executor/ssh.py::run's own
+        # note). run_install sets var_ctid last so it always wins, and it is
+        # the only caller that sets it, so this never fires for the ssh/verify
+        # probe or any other remote command.
+        m = re.search(r"\bvar_ctid=(\d+)", command)
+        if m is None:
+            return
+        ctid = int(m.group(1))
+        if any(r.get("type") == "lxc" and r.get("vmid") == ctid
+               for r in fake.resources):
+            return
+        fake.add_ct(ctid, node=NODE, name=f"ct-{ctid}", status="running")
+
+    return register_ct
+
+
 def _seed_pve():
     from tests.fakes.pve import FakePVE
 
@@ -153,7 +190,8 @@ def create_e2e_app():
     _seed_catalog(settings)
     fake = _seed_pve()
     ssh = FakeSSHConnection(host_key_fingerprint="SHA256:e2e",
-                            stdout_lines=["ok"], stderr_lines=[], exit_status=0)
+                            stdout_lines=["ok"], stderr_lines=[], exit_status=0,
+                            on_create_process=_mirror_ssh_installs(fake))
 
     return create_app(settings,
                       proxmox_factory=make_fake_factory(fake),

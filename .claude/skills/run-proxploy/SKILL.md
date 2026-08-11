@@ -119,12 +119,13 @@ cd frontend && npx playwright test journey.spec.ts
 - **A headless browser has no session cookie**, so `/auth/me` 401s even when an
   admin exists. Pages that branch on the signed-in user render their
   signed-out state under the driver. That is the driver, not a bug.
-- **`journey.spec.ts` fails at "install an app"** with `install script exited 0
-  but CT 150 does not exist on pve-01`. Pre-existing and unrelated to whatever
-  you are changing: `backend/tests/e2e_server.py` only mirrors `kind == "qemu"`
-  guest-creates into the fake node's resource listing, and an App Store install
-  creates an **LXC** container over fake SSH, which the fake PVE never sees.
-  The onboarding steps before it all pass.
+- **The fake node has two separate mirrors, and they exist for different
+  reasons.** `_mirror_guest_creates` reflects VM creates that go through the
+  PVE API; `_mirror_ssh_installs` reflects LXC creates that happen with `pct`
+  over root SSH, which is how community-scripts installs actually work. If you
+  add a flow that creates a guest, check which path it really uses before
+  extending either one — modelling an SSH create as an API create makes the
+  test pass by simulating something the product does not do.
 
 ## Troubleshooting
 
