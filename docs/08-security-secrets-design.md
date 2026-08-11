@@ -39,6 +39,13 @@ per capability, one token per enabled capability.
 | Console | `ProxployConsole` | `VM.Console`; `Sys.Console` only if the user opts into node shells | CT/VM console tickets (termproxy/vncproxy); node shell is a separate opt-in because `Sys.Console` is effectively root on the node |
 | Backup | `ProxployBackup` | `VM.Backup`, `Datastore.AllocateSpace`, `Datastore.Audit` | vzdump/PBS backup + restore jobs, backup listing |
 
+This table is implemented in `backend/proxploy/services/pveum.py::CAPABILITIES`,
+transcribed from here rather than derived from application code. It is the
+single source for both the generated script (step 2 below) and the enrolment
+verifier (step 4), which imports its monitoring set from it; keeping them as
+one table is what stops the wizard telling an operator to create a token the
+wizard then rejects. Change this table and that module together.
+
 ACLs are granted at path `/` with propagate by default (Proxploy is a
 whole-host manager); users who want to scope Proxploy to a pool grant the
 same roles on `/pool/<name>` instead, and the onboarding verifier (below)
@@ -70,9 +77,24 @@ Enabling a capability later re-enters the wizard for just that capability's
 role + token. Disabling one deletes the stored token and tells the user which
 `pveum` commands remove the role/token server-side.
 
-TLS to Proxmox: certificate verification on by default; a per-host
-self-signed fingerprint can be pinned at onboarding (stored, compared on
-every connection) rather than globally disabling verification.
+TLS to Proxmox: a per-host self-signed fingerprint can be pinned at
+onboarding (stored, compared on every connection) rather than globally
+disabling verification. The backend implements the pin
+(`HostIn.tls_fingerprint`, honoured on every `ProxmoxClient` call).
+
+**The add-host form ships with certificate verification unchecked**, which
+reverses this section's original "on by default". A stock Proxmox node serves
+a self-signed certificate, so verifying by default failed the very first
+connection for almost every operator, and the only escape hatch the form
+offers is that same checkbox: the effective default was "the operator
+unticks it", reached via a confusing failure instead of a decision.
+
+This is a real weakening and is recorded rather than dressed up. The fix that
+would let verification default back on is the pin above: the form does not
+yet collect a fingerprint, so there is nothing for an operator to verify
+*against* when the certificate is self-signed. Collecting it at probe time,
+where the certificate is already in hand, is what closes this; until then the
+unchecked box is the honest default rather than a broken one.
 
 ## 3. Encryption at rest
 
