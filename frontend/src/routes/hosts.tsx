@@ -12,14 +12,13 @@ import { EmptyState } from '../components/EmptyState'
 import { HardwareTab } from '../components/HardwareTab'
 import { HostFacts } from '../components/HostFacts'
 import { HostForm } from '../components/HostForm'
-import { KVGrid } from '../components/KVGrid'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
 import { TimeChart } from '../components/charts/TimeChart'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
-import { fmtBps, fmtBytes, fmtUptime } from '../lib/format'
+import { fmtBps, fmtBytes } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 
@@ -465,23 +464,14 @@ export function NodeOverview() {
     <div>
       {node && (
         <>
-          {/* The poller's snapshot: always available, and the only source here
-              for the deduped datastore fill and the guest counts. HostFacts
-              below adds what only the node itself can answer, and disappears
-              if the token cannot read it, so this strip is the floor. */}
-          <div className={card}>
-            <KVGrid items={[
-              ['Node', node.node ?? 'unknown'],
-              ['PVE version', node.pve_version ?? 'unknown'],
-              ['Uptime', fmtUptime(node.uptime_s)],
-              ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
-              ['Storage', `${fmtBytes(node.disk_bytes)} / ${fmtBytes(node.disk_total_bytes)}`],
-              ['Apps', `${node.apps_running}/${node.apps} running`],
-              ['VMs', `${node.vms_running}/${node.vms} running`],
-            ]} />
-          </div>
+          {/* One strip, two sources. HostFacts merges the poller's snapshot
+              (always there, and the only source for the deduped datastore
+              fill and the guest counts) with the node's own /status (on
+              demand, refusable by a narrow token), so a node that will not
+              answer loses rows rather than the whole card. It used to be two
+              cards repeating Node, PVE version, Uptime and Memory. */}
           {node.node && (
-            <div className="mt-5"><HostFacts hostId={id} node={node.node} /></div>
+            <HostFacts hostId={id} node={node.node} snapshot={node} />
           )}
           {/* Entry node only: the `host:<id>` metric series is recorded from
               the node Proxploy connects through, so drawing it under any other

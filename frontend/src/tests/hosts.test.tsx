@@ -272,10 +272,19 @@ describe('NodeOverview', () => {
     nodeStatus = null; navigate.mockClear()
   })
 
-  it('reports storage used / total alongside the guest counts', async () => {
+  it('reports storage used / total alongside the guest counts, in ONE strip', async () => {
     withQuery(<NodeOverview />)
-    expect(await screen.findByText('Storage')).toBeInTheDocument()
-    expect(screen.getByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
+    expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
+    // one Apps row, one VMs row; the fixture has 1/1 for both
+    expect(screen.getByText('Apps')).toBeInTheDocument()
+    expect(screen.getByText('VMs')).toBeInTheDocument()
+    expect(screen.getAllByText('1/1 running')).toHaveLength(2)
+    // The page used to draw two KV cards that both said Node, PVE version,
+    // Uptime and Memory. There is exactly one now.
+    expect(screen.getAllByText('Node')).toHaveLength(1)
+    expect(screen.getAllByText('PVE version')).toHaveLength(1)
+    expect(screen.getAllByText('Uptime')).toHaveLength(1)
+    expect(screen.getAllByText('Memory')).toHaveLength(1)
   })
 
   it('charts memory as a percentage, so all three charts share one scale', async () => {

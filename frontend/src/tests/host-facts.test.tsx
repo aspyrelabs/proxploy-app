@@ -1,6 +1,6 @@
 /** The host page Overview strip: what this machine actually is. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let status: unknown = null
@@ -11,12 +11,27 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
 }))
 
+import type { NodeRow } from '../api/hooks'
 import { HostFacts } from '../components/HostFacts'
 
-const wrap = () => {
+/** The poller's snapshot. Deliberately carrying figures that DIFFER from the
+ *  status payload's rootfs by orders of magnitude, because on a real node they
+ *  do: this is the deduped datastore aggregate, that is one filesystem. */
+const snapshot = (over: Partial<NodeRow> = {}): NodeRow => ({
+  host_id: 1, name: 'host-01', node: 'pve1', status: 'connected', is_entry: true,
+  cluster: null, pve_version: '9.2.10', cpu_pct: 0.14, mem_pct: 6.5,
+  mem_bytes: 2161287168, mem_total_bytes: 33306869760,
+  disk_pct: 0.3, disk_bytes: 6442450944, disk_total_bytes: 2000398934016,
+  uptime_s: 25029, apps: 3, apps_running: 2, vms: 2, vms_running: 1,
+  last_seen_at: null, ...over,
+})
+
+const wrap = (snap: NodeRow = snapshot()) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}><HostFacts hostId={1} node="pve1" /></QueryClientProvider>)
+    <QueryClientProvider client={qc}>
+      <HostFacts hostId={1} node="pve1" snapshot={snap} />
+    </QueryClientProvider>)
 }
 
 describe('HostFacts', () => {
@@ -63,12 +78,43 @@ describe('HostFacts', () => {
     expect(await screen.findByText('9.2.10')).toBeInTheDocument()
   })
 
-  it('costs the strip, not the page, when the node refuses to be read', async () => {
-    // A token too narrow for /nodes/{n}/status must not turn the host page
-    // into an error page: everything else on it came from the poller.
+  it('carries the guest counts and the deduped datastore fill, which /status cannot answer', async () => {
+    wrap()
+    expect(await screen.findByText('2/3 running')).toBeInTheDocument()
+    expect(screen.getByText('1/2 running')).toBeInTheDocument()
+    expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()
+  })
+
+  it('keeps the datastore total and the root filesystem apart', async () => {
+    // On a real node these differ by orders of magnitude. Collapsing them into
+    // one "Storage" row would answer neither question honestly.
+    wrap()
+    // Wait on a status-only row: the snapshot half renders synchronously, so
+    // findAllByText('Storage') would resolve before /status had landed.
+    expect(await screen.findByText('Root filesystem')).toBeInTheDocument()
+    // 'Storage' names both the KV row and the bar beneath it, hence getAllBy.
+    expect(screen.getAllByText('Storage').length).toBeGreaterThan(0)
+    expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()      // datastores
+    expect(screen.getByText('6.0 GiB / 93.9 GiB')).toBeInTheDocument()     // rootfs
+  })
+
+  it('costs the status-only rows, not the strip, when the node refuses to be read', async () => {
+    // A token too narrow for /nodes/{n}/status must not cost the page the
+    // facts the poller already had. Dropping the whole card here is the
+    // regression that merging the two strips could have introduced.
     fails = true
-    const { container } = wrap()
-    await waitFor(() => expect(container).toBeEmptyDOMElement())
+    wrap()
+    expect(await screen.findByText('2/3 running')).toBeInTheDocument()
+    expect(screen.getByText('Node')).toBeInTheDocument()
+    expect(screen.getByText('9.2.10')).toBeInTheDocument()
+    expect(screen.getByText('6h 57m')).toBeInTheDocument()
+    expect(screen.getByText('2.0 GiB / 31.0 GiB')).toBeInTheDocument()
+    expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()
+    // and the rows only the node itself can answer are simply absent
+    expect(screen.queryByText('Processor')).not.toBeInTheDocument()
+    expect(screen.queryByText('Kernel')).not.toBeInTheDocument()
+    expect(screen.queryByText('IO delay')).not.toBeInTheDocument()
+    expect(screen.queryByText('Root filesystem')).not.toBeInTheDocument()
   })
 
   it('survives a node that reports no cpuinfo at all', async () => {
