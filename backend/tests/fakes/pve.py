@@ -170,6 +170,10 @@ class _NetworkNS:
 
     def get(self, **kwargs):
         self._check()
+        # Only the READ is refusable per-section: the host page's hardware tab
+        # reads this list, the staging calls below are a different privilege.
+        if "network" in self._owner.hardware_fail_sections:
+            raise ConnectionError("fake PVE refuses network")
         rows = self._owner.networks_by_node.get(self._node, [])
         want = kwargs.get("type")
         return [r for r in rows if want is None or r.get("type") == want]
@@ -518,12 +522,41 @@ class _VzdumpLeaf:
         return self._owner._record_action("vzdump", vmid, "vzdump")
 
 
+class _SectionLeaf:
+    """One host-page section read, refusable on its own.
+
+    A real node refuses these individually: a token without Sys.Audit answers
+    /subscription and rejects /hardware/pci, and a PVE too old simply has no
+    such path. `fail` is all-or-nothing across the fake, which cannot express
+    that, so `hardware_fail_sections` names the sections that raise while
+    their siblings still answer.
+    """
+
+    def __init__(self, owner, section, mapping_attr, node, default):
+        self._owner, self._section = owner, section
+        self._attr, self._node, self._default = mapping_attr, node, default
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        if self._section in self._owner.hardware_fail_sections:
+            raise ConnectionError(f"fake PVE refuses {self._section}")
+        return getattr(self._owner, self._attr).get(self._node, self._default)
+
+
 class _DisksNS:
     """/nodes/{node}/disks/list -- a namespace, not a leaf, because `list` is a
     path segment here rather than a method."""
 
     def __init__(self, owner, name):
-        self.list = _Leaf(owner.disks_by_node.get(name, []), owner.fail)
+        self.list = _SectionLeaf(owner, "disks", "disks_by_node", name, [])
+
+
+class _HardwareNS:
+    """/nodes/{node}/hardware/pci -- `hardware` is a path segment, not a leaf."""
+
+    def __init__(self, owner, name):
+        self.pci = _SectionLeaf(owner, "pci", "pci_by_node", name, [])
 
 
 class _NodeNS:
@@ -541,6 +574,12 @@ class _NodeNS:
         # lazily from the owner so a test can assign after construction.
         self.status = _Leaf(owner.node_status_by_node.get(name, {}), owner.fail)
         self.disks = _DisksNS(owner, name)
+        self.hardware = _HardwareNS(owner, name)
+        self.services = _SectionLeaf(owner, "services", "services_by_node", name, [])
+        self.subscription = _SectionLeaf(
+            owner, "subscription", "subscription_by_node", name, {})
+        self.dns = _SectionLeaf(owner, "dns", "dns_by_node", name, {})
+        self.time = _SectionLeaf(owner, "time", "time_by_node", name, {})
 
 
 class _NodesNS:
@@ -561,6 +600,16 @@ class FakePVE:
         self.rrd_by_node = rrddata or {}
         self.node_status_by_node: dict[str, dict] = {}
         self.disks_by_node: dict[str, list[dict]] = {}
+        # the rest of the host page's hardware tab, same lazy pattern
+        self.pci_by_node: dict[str, list[dict]] = {}
+        self.services_by_node: dict[str, list[dict]] = {}
+        self.subscription_by_node: dict[str, dict] = {}
+        self.dns_by_node: dict[str, dict] = {}
+        self.time_by_node: dict[str, dict] = {}
+        # section names ("disks", "network", "pci", "services", "subscription",
+        # "dns", "time") that raise while their siblings answer, which `fail`
+        # cannot express.
+        self.hardware_fail_sections: set[str] = set()
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
         self.access = _Access(permissions or {}, fail)
         # infra reads (Phase 6): set before the namespaces below, which read

@@ -359,6 +359,68 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"disk list failed for node {node!r}", e) from e
 
+    # --- the rest of the host page's hardware tab ---------------------------
+    # All on demand, never from the poll loop (doc 02 §3 caps a cycle at
+    # O(nodes)), and every one of them is refusable on its own: a token without
+    # Sys.Audit answers some and rejects others, and a PVE without the path
+    # 501s. Callers gather them independently so one refusal costs one section.
+
+    def node_pci(self, node: str) -> list[dict]:
+        """GET /nodes/{node}/hardware/pci -> the PCI inventory.
+
+        Carries device_name/vendor_name (already resolved against the ids
+        database, so no lookup table is needed here) and iommugroup, which is
+        the field that decides whether a device can be passed to a guest.
+        """
+        try:
+            return self._connect().nodes(node).hardware.pci.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"pci list failed for node {node!r}", e) from e
+
+    def node_services(self, node: str) -> list[dict]:
+        """GET /nodes/{node}/services -> the pve-* and system units systemd
+        reports, with `state`, `active-state` and `unit-state`."""
+        try:
+            return self._connect().nodes(node).services.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"service list failed for node {node!r}", e) from e
+
+    def node_subscription(self, node: str) -> dict:
+        """GET /nodes/{node}/subscription -> {status, message, serverid, url}.
+
+        `status: "notfound"` is the ordinary state of an unsubscribed install,
+        not a failure, and this layer does not editorialise about it.
+        """
+        try:
+            return self._connect().nodes(node).subscription.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"subscription read failed for node {node!r}", e) from e
+
+    def node_dns(self, node: str) -> dict:
+        """GET /nodes/{node}/dns -> {dns1, dns2, dns3, search}. The numbered
+        keys are ABSENT rather than null when unset."""
+        try:
+            return self._connect().nodes(node).dns.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"dns read failed for node {node!r}", e) from e
+
+    def node_time(self, node: str) -> dict:
+        """GET /nodes/{node}/time -> {localtime, time, timezone}."""
+        try:
+            return self._connect().nodes(node).time.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"time read failed for node {node!r}", e) from e
+
     # --- per-guest, user-triggered calls -----------------------------------
     # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered by
     # a human clicking a button and are explicitly outside that budget.

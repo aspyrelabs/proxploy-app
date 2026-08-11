@@ -537,19 +537,40 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
     }
 
 
-@router.get("/{host_id}/nodes/{node}/hardware")
-def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
-                  user: User = Depends(_read)):
-    """Disk inventory. Health and wearout are the point: neither is reachable
-    from /cluster/resources, which only knows datastores."""
-    h = db.get(Host, host_id)
-    if h is None:
-        raise HTTPException(404, "no such host")
+# The high byte of PVE's raw PCI class code is the PCI-SIG base class, i.e.
+# the heading `lspci` prints. Eleven devices as one flat list is a wall of
+# hex; grouped by this they are four or five short groups. Named here rather
+# than in the UI because it is a property of the protocol, not of the page,
+# and an unrecognised byte falls back to the raw code instead of "Other",
+# which would hide a device class we simply have not listed yet.
+_PCI_BASE_CLASS = {
+    0x00: "Unclassified device", 0x01: "Mass storage controller",
+    0x02: "Network controller", 0x03: "Display controller",
+    0x04: "Multimedia controller", 0x05: "Memory controller",
+    0x06: "Bridge", 0x07: "Communication controller",
+    0x08: "Generic system peripheral", 0x09: "Input device controller",
+    0x0A: "Docking station", 0x0B: "Processor",
+    0x0C: "Serial bus controller", 0x0D: "Wireless controller",
+    0x0E: "Intelligent controller", 0x0F: "Satellite communications controller",
+    0x10: "Encryption controller", 0x11: "Signal processing controller",
+    0x12: "Processing accelerator", 0x13: "Non-essential instrumentation",
+}
+
+
+def _pci_class_name(raw) -> str | None:
+    if raw in (None, ""):
+        return None
     try:
-        disks = client_for_host(request.app, db, h).node_disks(node)
-    except ProxmoxError as e:
-        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
-    return {"disks": [{
+        code = int(str(raw), 16)
+    except ValueError:
+        return str(raw)
+    # 0x030000 -> 0x03. A two-digit code (0x03) is already the base class.
+    base = code >> 16 if code > 0xFF else code
+    return _PCI_BASE_CLASS.get(base, str(raw))
+
+
+def _disk_row(d: dict) -> dict:
+    return {
         "devpath": d.get("devpath"), "model": d.get("model"),
         "serial": d.get("serial"), "size": d.get("size"), "type": d.get("type"),
         "health": d.get("health"), "wearout": d.get("wearout"),
@@ -557,7 +578,116 @@ def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
         # PVE uses -1 for "not a Ceph OSD"; passed through, that reads as an
         # OSD id of minus one.
         "osd_id": None if d.get("osdid") in (None, -1) else d.get("osdid"),
-    } for d in disks]}
+    }
+
+
+def _pci_row(p: dict) -> dict:
+    return {
+        "id": p.get("id"), "class_id": p.get("class"),
+        "class_name": _pci_class_name(p.get("class")),
+        "device_id": p.get("device"), "device_name": p.get("device_name"),
+        "vendor_id": p.get("vendor"), "vendor_name": p.get("vendor_name"),
+        "subsystem_vendor_name": p.get("subsystem_vendor_name"),
+        # The group that decides whether this device can be handed to a guest
+        # on its own. PVE spells it as one word.
+        "iommu_group": p.get("iommugroup"),
+    }
+
+
+def _service_row(s: dict) -> dict:
+    # systemd's keys are hyphenated, which no JS caller can address without
+    # bracket syntax. Renamed once, here.
+    return {
+        "name": s.get("name") or s.get("service"), "desc": s.get("desc"),
+        "state": s.get("state"), "active_state": s.get("active-state"),
+        "unit_state": s.get("unit-state"),
+    }
+
+
+def _iface_row(n: dict) -> dict:
+    # NOTE: /nodes/{n}/network carries no link speed. There is no field to
+    # surface one from, so the tab does not claim one.
+    return {
+        "iface": n.get("iface"), "type": n.get("type"),
+        "method": n.get("method"), "method6": n.get("method6"),
+        "families": n.get("families") or [],
+        "active": bool(n.get("active")), "exists": bool(n.get("exists")),
+        "autostart": bool(n.get("autostart")),
+        "cidr": n.get("cidr"), "gateway": n.get("gateway"),
+        "bridge_ports": n.get("bridge_ports"),
+        "altnames": n.get("altnames") or [],
+    }
+
+
+def _dns_row(d: dict) -> dict:
+    # dns2/dns3 are ABSENT, not null, when unset. A fixed three-slot shape
+    # would put two "unknown"s on the page for an ordinary resolver config.
+    return {
+        "servers": [d[k] for k in ("dns1", "dns2", "dns3") if d.get(k)],
+        "search": d.get("search"),
+    }
+
+
+@router.get("/{host_id}/nodes/{node}/hardware")
+def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
+                  user: User = Depends(_read)):
+    """Everything the node will say about itself that is not already on the
+    Overview strip: disks, network interfaces, PCI devices, systemd services,
+    and the subscription/DNS/time facts.
+
+    Gathered INDEPENDENTLY, on purpose. Each of these is separately refusable
+    on a real node — a token with a narrow privilege set answers some and
+    rejects others, and a PVE without a given path 501s — so one refusal
+    returns that section as null and names it in `unreadable` rather than
+    costing the tab its other six sections. The 502 is reserved for the case
+    where nothing at all could be read, which is the node being down.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "no such host")
+    try:
+        cl = client_for_host(request.app, db, h)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
+
+    out: dict = {}
+    unreadable: dict[str, dict] = {}
+
+    def gather(name, call, shape):
+        try:
+            out[name] = shape(call())
+        except ProxmoxError as e:
+            out[name] = None
+            unreadable[name] = {"error": e.kind, "detail": str(e)}
+
+    def rows(shape):
+        return lambda raw: [shape(x) for x in (raw or [])]
+
+    gather("disks", lambda: cl.node_disks(node), rows(_disk_row))
+    gather("network", lambda: cl.node_networks(node), rows(_iface_row))
+    gather("pci", lambda: cl.node_pci(node), rows(_pci_row))
+    gather("services", lambda: cl.node_services(node), rows(_service_row))
+    gather("subscription", lambda: cl.node_subscription(node), lambda s: {
+        # "notfound" is the ordinary state of an unsubscribed install. It is
+        # passed through verbatim and the UI words it neutrally; nothing here
+        # calls it an error.
+        "status": (s or {}).get("status"), "message": (s or {}).get("message"),
+        "level": (s or {}).get("level"), "server_id": (s or {}).get("serverid"),
+    })
+    gather("dns", lambda: cl.node_dns(node), lambda d: _dns_row(d or {}))
+    gather("time", lambda: cl.node_time(node), lambda t: {
+        "timezone": (t or {}).get("timezone"), "localtime": (t or {}).get("localtime"),
+        "utc": (t or {}).get("time"),
+    })
+
+    if len(unreadable) == len(out):
+        # Not one section came back. That is the node being unreachable, not a
+        # narrow token, and seven "could not be read" cards would bury it.
+        first = next(iter(unreadable.values()))
+        raise HTTPException(502, first)
+
+    out["unreadable"] = unreadable
+    return out
 
 
 @router.post("/{host_id}/credentials")
