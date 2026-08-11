@@ -32,6 +32,53 @@ const errText = (e: unknown) => {
   return typeof body?.detail === 'string' ? body.detail : 'Request failed.'
 }
 
+// docs.proxploy.com is the shipping docs site (proxploy-docs' astro `site`).
+// It does not resolve until the docs are published; docs.proxploy.dev is the
+// staging mirror and is deliberately NOT linked here, because a link that is
+// right in dev and wrong for every customer is the worse failure.
+const TOKEN_DOCS = 'https://docs.proxploy.com/getting-started/proxmox-token/'
+
+// Only the two fields that ask for something the operator must go and create
+// somewhere else. Name and Address explain themselves.
+const FIELD_HELP: Partial<Record<string, React.ReactNode>> = {
+  token_id: <>
+    Proxmox names a token <code className="text-text-2">user@realm!name</code>, for
+    example <code className="text-text-2">proxploy@pve!monitoring</code>. Create one
+    under Datacenter → Permissions → API Tokens, or with <code className="text-text-2">pveum</code>.
+    Proxploy wants a privilege-separated token, never root.
+  </>,
+  token_secret: <>
+    The UUID Proxmox shows <strong className="text-text-2">only once</strong>, at the
+    moment the token is created. It cannot be retrieved afterwards: if you did not
+    copy it, delete the token and create another.
+  </>,
+}
+
+/** A disclosure, not a tooltip: this copy is several lines long, has to be
+ *  reachable by keyboard, and has to survive on a touch screen, none of which
+ *  a hover tooltip manages. */
+function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        aria-label={`What is the ${label}?`}
+        className="grid size-[15px] shrink-0 cursor-pointer place-items-center rounded-full
+                   border border-line text-[10px] leading-none text-text-3 transition
+                   hover:border-amber hover:text-amber">
+        i
+      </button>
+      {open && (
+        <p className="order-last w-full basis-full text-[12px] leading-[1.55] text-text-3">
+          {body}{' '}
+          <a href={TOKEN_DOCS} target="_blank" rel="noopener noreferrer"
+            className="text-amber underline underline-offset-2">How to create one</a>
+        </p>
+      )}
+    </>
+  )
+}
+
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const [f, setF] = useState({ name: '', address: 'https://', token_id: '',
     token_secret: '', verify_tls: true, ssh_enroll: false })
@@ -64,7 +111,13 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
          ['token_id', 'API token id', 'proxploy@pve!monitoring'],
          ['token_secret', 'API token secret', '']] as const).map(([k, label, ph]) => (
         <div key={k}>
-          <label htmlFor={k} className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
+          {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
+              it drops onto its own line under the label. Without wrapping it
+              squeezes alongside and the label collapses into a column. */}
+          <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <label htmlFor={k} className="block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
+            {FIELD_HELP[k] && <FieldInfo label={label} body={FIELD_HELP[k]} />}
+          </div>
           <input id={k} required placeholder={ph} className={inputCls}
             type={k === 'token_secret' ? 'password' : 'text'}
             value={f[k]} onChange={e => set(k, e.target.value)} />

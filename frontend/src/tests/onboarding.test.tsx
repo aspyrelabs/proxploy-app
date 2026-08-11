@@ -77,9 +77,45 @@ describe('HostForm', () => {
   it('shows the honest root-consent copy with the SSH checkbox', () => {
     render(<HostForm onCreated={() => {}} />)
     expect(screen.getByLabelText(/address/i)).toBeDefined()
-    expect(screen.getByLabelText(/token id/i)).toBeDefined()
+    // Exact, not /token id/i: the field's info button is labelled "What is the
+    // API token id?" and a loose match now finds both.
+    expect(screen.getByLabelText('API token id')).toBeDefined()
     expect(screen.getByText(/root shell on the node/i)).toBeDefined()
     expect(screen.getByRole('button', { name: /test connection/i })).toBeDefined()
+  })
+
+  // The two token fields were the only ones asking for something the operator
+  // has to go and create elsewhere, with no hint of what it is or where it
+  // comes from.
+  it('explains the API token id and links to the docs', () => {
+    render(<HostForm onCreated={() => {}} />)
+    const toggle = screen.getByRole('button', { name: /what is the api token id/i })
+    expect(screen.queryByText(/user@realm!name/)).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/user@realm!name/)).toBeInTheDocument()
+
+    const link = screen.getByRole('link', { name: /how to create one/i })
+    expect(link).toHaveAttribute('href',
+      'https://docs.proxploy.com/getting-started/proxmox-token/')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+  })
+
+  it('warns that the token secret is shown only once', () => {
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /what is the api token secret/i }))
+    expect(screen.getByText(/only once/i)).toBeInTheDocument()
+  })
+
+  it('collapses an open explanation again', () => {
+    render(<HostForm onCreated={() => {}} />)
+    const toggle = screen.getByRole('button', { name: /what is the api token id/i })
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/user@realm!name/)).not.toBeInTheDocument()
   })
 })
 
