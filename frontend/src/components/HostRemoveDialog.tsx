@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
-import { Button } from './ui/button'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-dialog'
 
 type RemoveResult = { removed: true; forgot_apps: number; was_own_host: boolean }
 type ConflictApp = { id: number; name: string; ctid: number }
@@ -52,26 +52,23 @@ export function HostRemoveDialog({ hostId, hostName, onClose, onRemoved }: {
 
   if (conflictApps) {
     return (
-      <div role="dialog" aria-label={`${hostName} still has apps`}
-           className="fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]">
-        <div className="w-[420px] max-w-[92vw] rounded-card border border-line bg-panel p-5">
-          <h2 className="font-display text-[16px] font-semibold text-amber">{hostName} still has apps</h2>
-          <p className="mt-2 text-[13px] text-text-2">
-            Uninstall them first, or forget Proxploy's records for them and leave the
-            containers running.
-          </p>
-          <ul className="mt-3 max-h-40 space-y-1 overflow-auto font-mono text-[12px] text-text-2">
-            {conflictApps.map((a) => <li key={a.id}>{a.name} (CT {a.ctid})</li>)}
-          </ul>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button variant="danger" disabled={remove.isPending}
-              onClick={() => remove.mutate({ confirm: typed as string, forgetApps: true })}>
-              {remove.isPending ? 'Removing…' : 'Forget apps and remove'}
-            </Button>
-          </div>
+      <AlertDialog
+        title={`${hostName} still has apps`}
+        description={"Uninstall them first, or forget Proxploy's records for them and leave the "
+          + 'containers running.'}
+        onCancel={onClose}
+      >
+        <ul className="mt-3 max-h-40 space-y-1 overflow-auto font-mono text-[12px] text-text-2">
+          {conflictApps.map((a) => <li key={a.id}>{a.name} (CT {a.ctid})</li>)}
+        </ul>
+        <div className="mt-4 flex justify-end gap-2">
+          <AlertDialogCancel onClick={onClose}>Cancel</AlertDialogCancel>
+          <AlertDialogAction disabled={remove.isPending}
+            onClick={() => remove.mutate({ confirm: typed as string, forgetApps: true })}>
+            {remove.isPending ? 'Removing…' : 'Forget apps and remove'}
+          </AlertDialogAction>
         </div>
-      </div>
+      </AlertDialog>
     )
   }
 
