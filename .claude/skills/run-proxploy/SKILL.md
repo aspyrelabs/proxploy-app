@@ -37,7 +37,8 @@ cd frontend && npx playwright install chromium   # needed by the driver too
 Two background processes. Start the backend first.
 
 ```bash
-cd backend && .venv/bin/uvicorn --factory proxploy.main:create_app --reload --port 8000
+cd backend && .venv/bin/uvicorn --factory proxploy.main:create_app --reload \
+  --timeout-graceful-shutdown 3 --port 8000
 cd frontend && npm run dev
 ```
 
@@ -99,6 +100,13 @@ cd frontend && npx playwright test journey.spec.ts
 
 ## Gotchas
 
+- **`--timeout-graceful-shutdown 3` is not optional.** Without it, editing any
+  backend file while a browser tab is open wedges the server permanently:
+  `--reload` starts a graceful shutdown, the open SSE stream
+  (`/api/v1/events/stream`) never closes, and uvicorn waits for it forever.
+  The port stays bound and every API call hangs, so the app looks crashed while
+  Vite still serves 200. The log line to recognise is
+  `Shutting down` / `Waiting for connections to close.` with nothing after it.
 - **Vite 8 binds IPv6 here.** `http://localhost:5173` works;
   `http://127.0.0.1:5173` is refused outright. The backend answers on either.
   This costs a confusing "connection refused" if you assume they are
