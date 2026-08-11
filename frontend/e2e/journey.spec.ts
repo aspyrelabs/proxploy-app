@@ -47,7 +47,18 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await page.getByLabel('Email').fill(ADMIN_EMAIL)
     await page.getByLabel('Display name').fill('E2E Admin')
     await page.getByLabel('Password (12+ chars)').fill(ADMIN_PASSWORD)
-    await page.getByRole('button', { name: 'Create admin account' }).click()
+    // The form commits to a local review screen first; nothing is created
+    // until "Create account", which is the point of the review.
+    await page.getByRole('button', { name: 'Review' }).click()
+    await expect(page.getByText(ADMIN_EMAIL)).toBeVisible()
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByRole('button', { name: 'Add host' })).toBeVisible()
+  })
+
+  await test.step('onboarding: a completed step is reachable again', async () => {
+    await page.getByRole('button', { name: /^Account/ }).click()
+    await expect(page.getByText(/cannot be changed/i)).toBeVisible()
+    await page.getByRole('button', { name: /^Host/ }).click()
     await expect(page.getByRole('button', { name: 'Add host' })).toBeVisible()
   })
 
@@ -63,10 +74,13 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await page.getByLabel('API token secret').fill('secret')
     await page.getByLabel(/Enable App Store installs/).check()
     await page.getByRole('button', { name: 'Add host' }).click()
-    await expect(page.getByRole('button', { name: 'Verify access' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'I have added it' })).toBeVisible()
   })
 
   await test.step('onboarding: authorize the SSH key', async () => {
+    // Install and Verify are separate steps: the server cannot tell whether
+    // the key has been pasted, so acknowledging it is a local move.
+    await page.getByRole('button', { name: 'I have added it' }).click()
     // Task 14: a click used to be taken on its word. FakeSSHConnection
     // (exit_status 0) is what makes this call actually succeed.
     await page.getByRole('button', { name: 'Verify access' }).click()
