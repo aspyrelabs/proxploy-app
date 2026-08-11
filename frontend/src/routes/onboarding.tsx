@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 // mid-cycle (cluster.tsx and storage.tsx carry the same note).
 import { rootRoute } from './shell'
 import { api, ApiError } from '../api/client'
-import { Brand } from '../components/LoginForm'
+import Logo from '../components/Logo'
 import { AdminAccountStep } from '../components/AdminAccountStep'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { Button } from '../components/ui/button'
@@ -143,24 +143,29 @@ export function Wizard() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="shrink-0 border-b border-line bg-panel px-5 py-4
-                        md:w-[152px] md:border-b-0 md:border-r md:py-6">
-        <Brand />
-        <p className="mb-4 mt-1 text-[9px] uppercase tracking-wide text-text-3 md:mb-5">
-          Setup · {Math.min(step + 1, STEPS.length)} of {STEPS.length}
-        </p>
-        <OnboardingRail steps={railSteps} view={step} onSelect={go} />
-      </aside>
+    <div className="grid min-h-screen place-items-center px-5 py-8">
+      <div className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-card
+                      border border-line-soft bg-panel md:flex-row">
+        <aside className="shrink-0 border-b border-line bg-panel-2 px-5 py-5
+                          md:w-[194px] md:border-b-0 md:border-r">
+          {/* Not <Brand />: that renders the lockup at 30px, which is wider
+              than this pane and overhangs the divider. Same artwork, sized to
+              the rail. */}
+          <Logo className="h-[22px] w-auto text-amber" />
+          <p className="mb-4 mt-1.5 text-[9px] uppercase tracking-wide text-text-3 md:mb-5">
+            Setup · {Math.min(step + 1, STEPS.length)} of {STEPS.length}
+          </p>
+          <OnboardingRail steps={railSteps} view={step} onSelect={go} />
+        </aside>
 
-      <main className="grid flex-1 place-items-center px-5 py-8">
-        <div key={step} className={`w-full max-w-[380px] ${dir === 1 ? 'pp-in-fwd' : 'pp-in-back'}`}>
-          {step > 0 && (
-            <button type="button" onClick={() => go(step - 1)}
-              className="mb-3 cursor-pointer text-[12px] text-text-3 transition hover:text-text-2">
-              ← Back
-            </button>
-          )}
+        <main className="min-w-0 flex-1 p-7">
+          <div key={step} className={dir === 1 ? 'pp-in-fwd' : 'pp-in-back'}>
+            {step > 0 && (
+              <button type="button" onClick={() => go(step - 1)}
+                className="mb-3 cursor-pointer text-[12px] text-text-3 transition hover:text-text-2">
+                ← Back
+              </button>
+            )}
 
         {step === 0 && (
           <AdminAccountStep
@@ -206,8 +211,9 @@ export function Wizard() {
             <Button className="w-full" onClick={finish}>Open the dashboard</Button>
           </div>
         )}
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
     </div>
   )
 }
