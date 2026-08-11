@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createRoute, useParams } from '@tanstack/react-router'
+import { createRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
@@ -10,6 +10,7 @@ import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { HostForm } from '../components/HostForm'
 import { KVGrid } from '../components/KVGrid'
 import { LivePulse } from '../components/LiveProvider'
 import { NodeCard } from '../components/NodeCard'
@@ -76,6 +77,89 @@ export function UpdateAllButton() {
   )
 }
 
+/** Nodes that share a cluster, under one heading carrying that cluster's own
+ *  health.
+ *
+ *  Grouped by cluster NAME rather than by host, and that is the point: two
+ *  Hosts enrolled from the same cluster are two API endpoints into ONE
+ *  cluster, so they collapse into a single group instead of drawing the same
+ *  cluster twice. */
+function ClusterGroup({ name, rows }: { name: string; rows: NodeRow[] }) {
+  const down = rows.filter((n) => n.status !== 'connected').length
+  return (
+    <section className="mb-5">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="font-display text-[15px] font-semibold">{name}</h2>
+        <span className="text-[11px] text-text-3">
+          {rows.length} node{rows.length === 1 ? '' : 's'} ·{' '}
+          {down === 0 ? 'all healthy' : `${down} unreachable`}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {rows.map((n) => <NodeCard key={`${n.host_id}:${n.node}`} node={n} />)}
+      </div>
+    </section>
+  )
+}
+
+function groupByCluster(rows: NodeRow[]) {
+  const clusters = new Map<string, NodeRow[]>()
+  const standalone: NodeRow[] = []
+  for (const n of rows) {
+    if (!n.cluster) { standalone.push(n); continue }
+    const group = clusters.get(n.cluster)
+    if (group) group.push(n)
+    else clusters.set(n.cluster, [n])
+  }
+  return { clusters: [...clusters.entries()], standalone }
+}
+
+/** "Add host" where the hosts are, not only buried in Settings.
+ *
+ *  POST /hosts answers 403 {"error":"entitlement_required","feature":
+ *  "hosts.multi"} once one host exists. Saying so BEFORE the form is filled in
+ *  is the whole reason this checks the entitlement itself: a raw 403 at the
+ *  end of a completed form is the worst possible place to learn it. When the
+ *  entitlement fetch itself failed we cannot honestly claim either way, so the
+ *  form opens and the backend stays the authority (HostForm renders that 403
+ *  in words too). */
+function AddHostSection({ hostCount }: { hostCount: number }) {
+  const ent = useEntitlements()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const blocked = hostCount >= 1 && !ent.has('hosts.multi') && !ent.unknown
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-[16px] font-semibold">Nodes</h2>
+        <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
+          {open ? 'Cancel' : 'Add host'}
+        </Button>
+      </div>
+      {open && (blocked ? (
+        <div className={`${card} mb-4`}>
+          <p className="text-[13px] text-text-2">
+            Managing more than one host needs the multi-host plan.
+          </p>
+          <p className="mt-1 text-[12px] text-text-3">
+            One host is included. Every node of that host's cluster is already
+            managed here, at no extra tier.
+          </p>
+        </div>
+      ) : (
+        <div className={`${card} mb-4`}>
+          <HostForm onCreated={() => {
+            setOpen(false)
+            toast.success('Host added. Its nodes appear as the first poll lands.')
+            qc.invalidateQueries({ queryKey: ['hosts'] })
+            qc.invalidateQueries({ queryKey: ['cluster'] })
+          }} />
+        </div>
+      ))}
+    </>
+  )
+}
+
 export function HostsPage() {
   const summaryQuery = useSummary()
   const summary = summaryQuery.data
@@ -130,16 +214,29 @@ export function HostsPage() {
       </div>
 
       <div className="mt-5">
+        <AddHostSection hostCount={new Set((nodes ?? []).map((n) => n.host_id)).size} />
         <QueryState query={nodesQuery}
                     emptyTitle="No nodes yet"
                     emptyNote="Proxmox nodes appear here once a host is added."
                     errorTitle="Nodes not readable"
                     errorNote="Proxploy could not reach the backend to list your nodes.">
-          {(rows) => (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              {rows.map((n) => <NodeCard key={n.host_id} node={n} />)}
-            </div>
-          )}
+          {(rows) => {
+            const { clusters, standalone } = groupByCluster(rows)
+            return (
+              <>
+                {clusters.map(([name, group]) => (
+                  <ClusterGroup key={name} name={name} rows={group} />
+                ))}
+                {standalone.length > 0 && (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {standalone.map((n) => (
+                      <NodeCard key={`${n.host_id}:${n.node}`} node={n} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )
+          }}
         </QueryState>
       </div>
 
@@ -253,10 +350,18 @@ function NodeShellSection({ hostId, nodeShellEnabled }: { hostId: number; nodeSh
 }
 
 export function NodeDetailPage() {
-  const { hostId } = useParams({ strict: false }) as { hostId: string }
+  // `node` is absent on the legacy /hosts/$hostId route, which resolves to the
+  // host's entry node. Keying the lookup on (host, node) is the fix for a host
+  // with several nodes: `nodes.find(n => n.host_id === id)` used to return
+  // whichever one came first.
+  const { hostId, node: nodeName } = useParams({ strict: false }) as
+    { hostId: string; node?: string }
   const id = Number(hostId)
   const { data: nodes } = useNodes()
-  const node = nodes?.find((n) => n.host_id === id)
+  const forHost = nodes?.filter((n) => n.host_id === id)
+  const node = nodeName
+    ? forHost?.find((n) => n.node === nodeName)
+    : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
   const { data: host } = useHostDetail(id)
   const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   const mem = useMetrics(`host:${id}`, 'mem_bytes', 24)
@@ -290,7 +395,7 @@ export function NodeDetailPage() {
         <>
           <div className={card}>
             <KVGrid items={[
-              ['Node', node.node],
+              ['Node', node.node ?? 'unknown'],
               ['PVE version', node.pve_version ?? 'unknown'],
               ['Uptime', fmtUptime(node.uptime_s)],
               ['Memory', `${fmtBytes(node.mem_bytes)} / ${fmtBytes(node.mem_total_bytes)}`],
@@ -298,24 +403,37 @@ export function NodeDetailPage() {
               ['VMs', `${node.vms_running}/${node.vms} running`],
             ]} />
           </div>
-          <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className={card}>
-              <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
-              <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
+          {/* Entry node only: the `host:<id>` metric series is recorded from
+              the node Proxploy connects through, so drawing it under any other
+              node of the cluster would be charting a different machine. */}
+          {node.is_entry && (
+            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className={card}>
+                <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
+                <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" width={480} height={120} />
+              </div>
+              <div className={card}>
+                <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
+                <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
+              </div>
             </div>
-            <div className={card}>
-              <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
-              <Sparkline ts={mem.data?.ts ?? []} values={mem.data?.value ?? []} color="#34D3C6" width={480} height={120} />
-            </div>
-          </div>
+          )}
         </>
       )}
+      {/* Also entry-node only: a node shell ticket is minted for the host's
+          own node, so offering it here would open a shell on a different box
+          than the page is showing. */}
+      {(node?.is_entry ?? true) && (
+        <div className="mt-5">
+          <NodeShellSection hostId={id} nodeShellEnabled={host?.node_shell_enabled ?? false} />
+        </div>
+      )}
       <div className="mt-5">
-        <NodeShellSection hostId={id} nodeShellEnabled={host?.node_shell_enabled ?? false} />
-      </div>
-      <div className="mt-5">
+        {/* "on this host", not "on this node": neither apps nor vms records
+            which node of the cluster a guest sits on, so this list is
+            host-wide and says so. */}
         <h2 className="mb-3 font-display text-[16px] font-semibold">
-          Guests on this node ({(apps?.length ?? 0) + (vms?.length ?? 0)})
+          Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
         </h2>
         <QueryState query={nodeAppsQuery}
                     emptyTitle="No apps on this node"
@@ -354,6 +472,29 @@ export function NodeDetailPage() {
   )
 }
 
+/** /hosts/$hostId, kept alive for every link minted before node detail grew
+ *  its node segment (and for anything that only knows a host id).
+ *
+ *  It resolves to the host's ENTRY node, the one Proxploy connects through,
+ *  and renders the same page meanwhile: a redirect that first showed a blank
+ *  screen would be a regression for the standalone host this used to serve. */
+export function HostEntryRedirect() {
+  const { hostId } = useParams({ strict: false }) as { hostId: string }
+  const id = Number(hostId)
+  const navigate = useNavigate()
+  const { data: nodes } = useNodes()
+  const forHost = nodes?.filter((n) => n.host_id === id)
+  const entry = (forHost?.find((n) => n.is_entry) ?? forHost?.[0])?.node
+  useEffect(() => {
+    if (entry) {
+      navigate({ to: '/hosts/$hostId/$node' as never,
+                 params: { hostId: String(id), node: entry } as never,
+                 replace: true })
+    }
+  }, [entry, id, navigate])
+  return <NodeDetailPage />
+}
+
 // Route objects, imported by router.tsx (settings.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
@@ -368,6 +509,13 @@ export const hostsRoute = createRoute({
 
 export const nodeDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: '/hosts/$hostId',
+  path: '/hosts/$hostId/$node',
   component: NodeDetailPage,
+})
+
+// Still routed, still works: it redirects to the entry node above.
+export const hostEntryRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/hosts/$hostId',
+  component: HostEntryRedirect,
 })

@@ -159,31 +159,40 @@ def probe(request: Request, body: ProbeIn,
             "missing_privileges": _missing_privileges(client)}
 
 
-def _local_node_name(client) -> str | None:
-    """Which node this address actually is, asked at enrolment time.
+def _cluster_identity(client) -> tuple[str | None, str | None]:
+    """(node name, cluster name) for this address, asked at enrolment time.
 
-    Without this the column stayed NULL until the poller's first cycle landed,
-    and every job handler reads `host.node_name or ""`, so anything started in
-    that window sent an EMPTY node name to PVE and failed for a reason the
-    operator could not act on. Enrolling a host and immediately installing
-    something is not an exotic sequence; it is the obvious one.
+    Without the node name the column stayed NULL until the poller's first cycle
+    landed, and every job handler reads `host.node_name or ""`, so anything
+    started in that window sent an EMPTY node name to PVE and failed for a
+    reason the operator could not act on. Enrolling a host and immediately
+    installing something is not an exotic sequence; it is the obvious one.
 
     `/cluster/status` is the only honest answer: on a cluster it marks the node
     you are talking to with `local: 1`, which a `/nodes` listing cannot tell
     you. A standalone node returns exactly one node row. Anything unexpected
     leaves it NULL and the poller fills it in as before, so a surprising
     cluster shape can never block enrolment.
+
+    The SAME response carries cluster membership, in its `{"type": "cluster"}`
+    row (a standalone node has no such row -> None), so recording
+    `hosts.cluster_name` here costs no extra round trip. Before this, that
+    column was written by nothing but migration preflight, and every node card
+    claimed "standalone" no matter how big the cluster was.
     """
     try:
-        rows = [r for r in client.cluster_status() if r.get("type") == "node"]
+        rows = client.cluster_status()
     except Exception:  # noqa: BLE001  (enrolment must survive a probe hiccup)
-        return None
-    if len(rows) == 1:
-        return rows[0].get("name")
-    for r in rows:
+        return None, None
+    cluster = next((r.get("name") for r in rows
+                    if r.get("type") == "cluster"), None)
+    nodes = [r for r in rows if r.get("type") == "node"]
+    if len(nodes) == 1:
+        return nodes[0].get("name"), cluster
+    for r in nodes:
         if r.get("local"):
-            return r.get("name")
-    return None
+            return r.get("name"), cluster
+    return None, cluster
 
 
 @router.post("", status_code=201)
@@ -214,9 +223,10 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     # token is still worth enrolling, and locking an operator out of their own
     # host at the final step is the worse failure.
     missing = _missing_privileges(client)
+    node_name, cluster_name = _cluster_identity(client)
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
-                node_name=_local_node_name(client),
+                node_name=node_name, cluster_name=cluster_name,
                 last_error=_privilege_note(missing),
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
@@ -230,7 +240,8 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
                           public_meta=token_public_meta(body.token_id)))
 
     out = {"id": host.id, "name": host.name, "address": host.address,
-           "node_name": host.node_name, "pve_version": host.pve_version,
+           "node_name": host.node_name, "cluster_name": host.cluster_name,
+           "pve_version": host.pve_version,
            "status": host.status, "missing_privileges": missing}
     if body.ssh_enroll:
         private_pem, public_line = generate_ed25519(f"proxploy@{body.name}")

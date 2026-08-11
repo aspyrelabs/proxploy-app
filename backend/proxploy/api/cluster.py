@@ -86,32 +86,71 @@ def cluster_summary(request: Request, db=Depends(get_db),
 @router.get("/nodes")
 def cluster_nodes(request: Request, db=Depends(get_db),
                   user: User = Depends(_read)):
+    """One row per NODE, not per Host.
+
+    A Proxploy Host is ONE Proxmox API endpoint; the cluster behind that
+    endpoint is many nodes. `/cluster/resources` returns all of them and the
+    poller stores all of them in `snap.nodes`, but this endpoint used to pick
+    the one matching `host.node_name` and drop the rest, so a 3-node cluster
+    rendered as a single card.
+
+    `is_entry` marks the node we actually connect through (the `local: 1` node
+    recorded at enrolment). Exactly one row per host carries it, including a
+    host with no snapshot yet, so a consumer can always resolve a host to a
+    node: `/hosts/{id}` redirects there, node shells open there, and the
+    host-level metric series belongs to it.
+
+    `apps`/`vms` stay HOST-level counts on every row: neither table records
+    which node a guest sits on (App has host_id + ctid only), so a per-node
+    split would be invented, not measured.
+    """
     snaps = request.app.state.poller.snapshots
     out = []
     for h in db.query(Host).order_by(Host.id).all():
         snap = snaps.get(h.id)
-        own = None
-        if snap and snap.nodes:
-            own = next((n for n in snap.nodes if n["node"] == h.node_name),
-                       snap.nodes[0])
         apps = db.query(App).filter_by(host_id=h.id).all()
         vms = db.query(Vm).filter_by(host_id=h.id).all()
-        out.append({
-            "host_id": h.id, "name": h.name, "node": h.node_name,
-            "status": h.status, "cluster": h.cluster_name,
+        shared = {
+            "host_id": h.id, "name": h.name, "cluster": h.cluster_name,
             "pve_version": h.pve_version,
-            "cpu_pct": own["cpu_pct"] if own else None,
-            "mem_pct": (_pct(own["mem_bytes"], own["mem_total_bytes"])
-                        if own else None),
-            "mem_bytes": own["mem_bytes"] if own else None,
-            "mem_total_bytes": own["mem_total_bytes"] if own else None,
-            "uptime_s": own["uptime_s"] if own else None,
             "apps": len(apps),
             "apps_running": sum(1 for a in apps if a.status_cached == "running"),
             "vms": len(vms),
             "vms_running": sum(1 for v in vms if v.status == "running"),
             "last_seen_at": _iso(h.last_seen_at),
-        })
+        }
+        nodes = list(snap.nodes) if snap and snap.nodes else []
+        if not nodes:
+            # No snapshot yet (freshly enrolled, or unreachable): one row from
+            # the DB, exactly as before, so a host never disappears from the
+            # page just because the poller has not run.
+            out.append(shared | {
+                "node": h.node_name, "is_entry": True, "status": h.status,
+                "cpu_pct": None, "mem_pct": None, "mem_bytes": None,
+                "mem_total_bytes": None, "uptime_s": None})
+            continue
+        # Same fallback the poller uses for `own`: if node_name names nothing
+        # in this snapshot, the first node is the entry, so "exactly one entry
+        # per host" holds even for a surprising cluster shape.
+        names = [n["node"] for n in nodes]
+        entry = h.node_name if h.node_name in names else names[0]
+        for n in nodes:
+            # Host.status is per-ENDPOINT ("can Proxploy talk to this
+            # address"), so it is the right answer for every node behind it
+            # -- except a node PVE itself calls offline, which is not up no
+            # matter how healthy the endpoint is. Only an explicit "offline"
+            # downgrades a row: an unfamiliar status must never turn a working
+            # host red.
+            status = ("unreachable" if n.get("status") == "offline"
+                      else h.status)
+            out.append(shared | {
+                "node": n["node"], "is_entry": n["node"] == entry,
+                "status": status,
+                "cpu_pct": n["cpu_pct"],
+                "mem_pct": _pct(n["mem_bytes"], n["mem_total_bytes"]),
+                "mem_bytes": n["mem_bytes"],
+                "mem_total_bytes": n["mem_total_bytes"],
+                "uptime_s": n["uptime_s"]})
     return out
 
 

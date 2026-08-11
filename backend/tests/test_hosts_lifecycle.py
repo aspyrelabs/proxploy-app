@@ -353,3 +353,62 @@ def test_enrolment_survives_a_cluster_status_failure(tmp_path, csrf_header,
             "verify_tls": False}, headers=csrf_header(client))
         assert r.status_code == 201, r.text
         assert r.json()["node_name"] is None
+
+
+def test_enrolment_records_the_cluster_name(tmp_path, csrf_header,
+                                            bootstrap_admin):
+    """`hosts.cluster_name` was written by nothing but migration preflight, so
+    every node card said "standalone" no matter how big the cluster was.
+
+    /cluster/status is already called at enrolment for the node name, and it
+    carries the cluster name in its `{"type": "cluster"}` row, so this costs
+    no extra round trip.
+    """
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    fake = FakePVE()
+    fake.cluster_status_rows = [
+        {"type": "cluster", "name": "prod", "nodes": 3},
+        {"type": "node", "name": "pve1", "local": 0, "online": 1},
+        {"type": "node", "name": "pve2", "local": 1, "online": 1},
+        {"type": "node", "name": "pve3", "local": 0, "online": 1},
+    ]
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = client.post("/api/v1/hosts", json={
+            "name": "host-01", "address": "https://10.0.0.9:8006",
+            "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+            "verify_tls": False}, headers=csrf_header(client))
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            host = db.get(Host, r.json()["id"])
+            assert host.cluster_name == "prod"
+            assert host.node_name == "pve2"
+
+
+def test_a_standalone_node_records_no_cluster_name(tmp_path, csrf_header,
+                                                   bootstrap_admin):
+    """No `{"type": "cluster"}` row means no cluster. NULL is the honest
+    answer, and it is what makes the node card say "standalone"."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    fake = FakePVE()
+    fake.cluster_status_rows = [{"type": "node", "name": "pve1", "local": 1,
+                                 "online": 1}]
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = client.post("/api/v1/hosts", json={
+            "name": "host-01", "address": "https://10.0.0.9:8006",
+            "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+            "verify_tls": False}, headers=csrf_header(client))
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, r.json()["id"]).cluster_name is None

@@ -66,6 +66,75 @@ def test_nodes_cards_and_snapshotless_host(tmp_path, csrf_header, bootstrap_admi
         assert one["cpu_pct"] == 42.0 and one["mem_pct"] == 40.6
         assert one["apps_running"] == 1 and one["vms_running"] == 1
         assert two["status"] == "unreachable" and two["cpu_pct"] is None
+        # a standalone host is still exactly one row, and it is the entry
+        assert one["node"] == "pve1" and one["is_entry"] is True
+        # a host with no snapshot at all still gets its one row, from the DB
+        assert two["node"] == "pve2" and two["is_entry"] is True
+
+
+def test_a_three_node_cluster_is_three_rows_not_one(tmp_path, csrf_header,
+                                                    bootstrap_admin):
+    """A Host is ONE API endpoint; the cluster behind it is many nodes.
+
+    /cluster/resources already returns every node and the poller stores them
+    all, but this endpoint used to pick `own` and throw the rest away, so a
+    3-node cluster rendered as a single card.
+    """
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from tests.support import seed_host_row, seed_snapshot
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, name="host-01", node="pve2")
+            h.cluster_name = "prod"
+            db.commit()
+            hid = h.id
+        seed_snapshot(app, hid, nodes=[
+            {"node": "pve1", "status": "online", "cpu_pct": 10.0, "cpu_cores": 4,
+             "mem_bytes": 1000, "mem_total_bytes": 4000, "uptime_s": 100},
+            {"node": "pve2", "status": "online", "cpu_pct": 20.0, "cpu_cores": 8,
+             "mem_bytes": 2000, "mem_total_bytes": 4000, "uptime_s": 200},
+            {"node": "pve3", "status": "online", "cpu_pct": 30.0, "cpu_cores": 8,
+             "mem_bytes": 3000, "mem_total_bytes": 4000, "uptime_s": 300},
+        ])
+        rows = c.get("/api/v1/cluster/nodes").json()
+        assert [r["node"] for r in rows] == ["pve1", "pve2", "pve3"]
+        assert {r["host_id"] for r in rows} == {hid}
+        assert {r["cluster"] for r in rows} == {"prod"}
+        # per-node metrics, not the entry node's repeated three times
+        assert [r["cpu_pct"] for r in rows] == [10.0, 20.0, 30.0]
+        assert [r["mem_pct"] for r in rows] == [25.0, 50.0, 75.0]
+        assert [r["uptime_s"] for r in rows] == [100, 200, 300]
+        # exactly one entry: the node whose name is the one we connect through
+        assert [r["is_entry"] for r in rows] == [False, True, False]
+
+
+def test_an_offline_cluster_node_is_not_reported_as_connected(tmp_path,
+                                                              csrf_header,
+                                                              bootstrap_admin):
+    """Host status is per-endpoint; a node PVE calls `offline` is not up.
+
+    Only an explicit `offline` downgrades a row, so a snapshot that reports an
+    unfamiliar status can never make a working host look broken.
+    """
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from tests.support import seed_host_row, seed_snapshot
+        with app.state.sessionmaker() as db:
+            hid = seed_host_row(db, name="host-01", node="pve1").id
+        seed_snapshot(app, hid, nodes=[
+            {"node": "pve1", "status": "online", "cpu_pct": 1.0, "cpu_cores": 4,
+             "mem_bytes": 1, "mem_total_bytes": 4, "uptime_s": 1},
+            {"node": "pve2", "status": "offline", "cpu_pct": 0.0, "cpu_cores": 4,
+             "mem_bytes": 0, "mem_total_bytes": 0, "uptime_s": 0},
+            {"node": "pve3", "status": "unknown", "cpu_pct": 0.0, "cpu_cores": 4,
+             "mem_bytes": 0, "mem_total_bytes": 0, "uptime_s": 0},
+        ])
+        rows = {r["node"]: r["status"] for r in
+                c.get("/api/v1/cluster/nodes").json()}
+        assert rows == {"pve1": "connected", "pve2": "unreachable",
+                        "pve3": "connected"}
 
 
 def test_cluster_requires_auth(tmp_path):

@@ -45,8 +45,14 @@ export type Summary = {
     apps_running: number; vms: number; vms_running: number }
 }
 
+// One row per NODE (not per host): a Host is one Proxmox API endpoint and the
+// cluster behind it can have many nodes. `name` is still the HOST's name, and
+// `node` the node's own; `is_entry` marks the one node we connect through, of
+// which every host has exactly one. `node` is null only for a host the poller
+// has not reached yet.
 export type NodeRow = {
-  host_id: number; name: string; node: string; status: string
+  host_id: number; name: string; node: string | null; status: string
+  is_entry: boolean
   cluster: string | null; pve_version: string | null
   cpu_pct: number | null; mem_pct: number | null
   mem_bytes: number | null; mem_total_bytes: number | null
