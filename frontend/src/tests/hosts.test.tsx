@@ -281,10 +281,17 @@ describe('NodeOverview', () => {
     expect(screen.getAllByText('1/1 running')).toHaveLength(2)
     // The page used to draw two KV cards that both said Node, PVE version,
     // Uptime and Memory. There is exactly one now.
-    expect(screen.getAllByText('Node')).toHaveLength(1)
-    expect(screen.getAllByText('PVE version')).toHaveLength(1)
-    expect(screen.getAllByText('Uptime')).toHaveLength(1)
-    expect(screen.getAllByText('Memory')).toHaveLength(1)
+    //
+    // Matched on the KV term specifically: the charts below carry their own
+    // <h3> labels ("Memory", "Storage"), so a bare text match counts those
+    // too and would fail for a reason that has nothing to do with duplicate
+    // strips. The point of this test is one KV strip, not one occurrence of
+    // the word.
+    const kvTerms = () => Array.from(document.querySelectorAll('[data-kv-term]'))
+      .map((el) => el.textContent?.trim())
+    for (const term of ['Node', 'PVE version', 'Uptime', 'Memory']) {
+      expect(kvTerms().filter((t) => t === term)).toHaveLength(1)
+    }
   })
 
   it('charts memory as a percentage, so all three charts share one scale', async () => {

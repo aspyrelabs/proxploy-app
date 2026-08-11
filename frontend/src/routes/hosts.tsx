@@ -15,7 +15,7 @@ import { HostForm } from '../components/HostForm'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
-import { TimeChart } from '../components/charts/TimeChart'
+import { MetricChart } from '../components/charts/MetricChart'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
 import { fmtBps, fmtBytes } from '../lib/format'
@@ -441,12 +441,9 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
 
 export function NodeOverview() {
   const { id, node, host } = useNodeContext()
-  const cpu = useMetrics(`host:${id}`, 'cpu_pct', 24)
   // mem_pct, not mem_bytes: the poller records both for a host, and charting
   // the percentage puts all three of these on one 0..100 scale so they can be
   // read side by side. The absolute figures are one row up, in the KV grid.
-  const mem = useMetrics(`host:${id}`, 'mem_pct', 24)
-  const disk = useMetrics(`host:${id}`, 'disk_pct', 24)
   const nodeAppsQuery = useQuery({
     queryKey: ['apps', { host: id }],
     queryFn: () => api<AppRow[]>(`/apps?host=${id}`),
@@ -478,24 +475,22 @@ export function NodeOverview() {
               node of the cluster would be charting a different machine. */}
           {node.is_entry && (
             <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+              {/* Each chart owns its range: "is the CPU spiking now" and "did
+                  storage creep all week" are different questions. */}
               <div className={card}>
-                <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
-                <TimeChart ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []}
+                <MetricChart target={`host:${id}`} metric="cpu_pct"
                   unit="percent" label="CPU" accent="amber" />
               </div>
               <div className={card}>
-                <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory · 24h</h2>
-                <TimeChart ts={mem.data?.ts ?? []} values={mem.data?.value ?? []}
+                <MetricChart target={`host:${id}`} metric="mem_pct"
                   unit="percent" label="Memory" accent="cyan" />
               </div>
               {/* Already recorded every cycle by the poller (`disk_pct`), and
                   correctly shared-vs-local deduped there, so this series is
                   the host's real fill, not the sum of the node rows. */}
               <div className={card}>
-                <h2 className="mb-2 text-[13px] uppercase text-text-3">Storage · 24h</h2>
-                <TimeChart ts={disk.data?.ts ?? []} values={disk.data?.value ?? []}
-                  unit="percent" label="Storage" accent="violet"
-                  emptyNote="disk_pct began recording recently; a full day fills in." />
+                <MetricChart target={`host:${id}`} metric="disk_pct"
+                  unit="percent" label="Storage" accent="violet" />
               </div>
             </div>
           )}
