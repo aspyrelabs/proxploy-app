@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
-import { useEntitlements, useMe } from '../api/hooks'
+import { useEntitlements } from '../api/hooks'
+import { AccountMenu } from './AccountMenu'
 import { api } from '../api/client'
 import type { JobRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
 import { openCommandPalette } from './CommandPalette'
 
 export function Topbar() {
-  const { data: me } = useMe()
   const { has } = useEntitlements()
   const drawer = useActivityDrawer()
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
@@ -54,9 +54,7 @@ export function Topbar() {
       )}
       <TierPill />
       <ThemeToggle />
-      <span className="grid h-8 w-8 place-items-center rounded-tile bg-[linear-gradient(150deg,#5B9DF9,#7C5CFB)] font-display text-[12px] font-semibold text-white">
-        {(me?.display_name ?? me?.email ?? '?').slice(0, 1).toUpperCase()}
-      </span>
+      <AccountMenu />
     </header>
   )
 }
