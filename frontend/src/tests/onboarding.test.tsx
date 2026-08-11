@@ -192,7 +192,23 @@ describe('onboarding wizard', () => {
     ] })
     renderWizard()
     expect(await screen.findByText(/ssh-ed25519 AAAAreload/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /copy key line/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /copy/i })).toBeInTheDocument()
+  })
+
+  it('copies exactly the command it displays, not just the bare key', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const key = 'ssh-ed25519 AAAAreload proxploy@pve-01'
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [{ kind: 'ssh_key', public_meta: key }] })
+    renderWizard()
+
+    fireEvent.click(await screen.findByRole('button', { name: /copy/i }))
+    // Copying the bare key while showing a shell command means whatever the
+    // operator pastes into the node shell is not what the screen told them to
+    // run.
+    expect(writeText).toHaveBeenCalledWith(
+      `echo '${key}' >> /root/.ssh/authorized_keys`)
   })
 
   it('starts at the admin step on a truly fresh install', async () => {

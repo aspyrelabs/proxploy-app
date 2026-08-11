@@ -101,6 +101,13 @@ export function Wizard() {
   const sshKeyLine = host?.authorized_keys_line
     ?? storedHost.data?.credentials.find(c => c.kind === 'ssh_key')?.public_meta
     ?? null
+  // One value behind both the <pre> and the copy button. They used to be built
+  // separately, so the screen showed a shell command while the button copied
+  // the bare key, and what the operator pasted was not what they had been told
+  // to run.
+  const authorizeCommand = sshKeyLine
+    ? `echo '${sshKeyLine}' >> /root/.ssh/authorized_keys`
+    : null
 
   // Status comes from the server, never from what was clicked, so a green tick
   // always means the server agrees the step is done.
@@ -248,12 +255,12 @@ export function Wizard() {
               {host?.consent_note ?? 'A key was enrolled for this host. Add it to '
                 + '/root/.ssh/authorized_keys on the node, then verify on the next step.'}
             </p>
-            {sshKeyLine && (
-              <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{`echo '${sshKeyLine}' >> /root/.ssh/authorized_keys`}</pre>
+            {authorizeCommand && (
+              <pre className="overflow-x-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11.5px] leading-[1.7] text-text-2">{authorizeCommand}</pre>
             )}
             <div className="flex gap-2">
-              {sshKeyLine && (
-                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(sshKeyLine)}>Copy key line</Button>
+              {authorizeCommand && (
+                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(authorizeCommand)}>Copy command</Button>
               )}
               <Button onClick={() => go(S_VERIFY)}>I have added it</Button>
             </div>
