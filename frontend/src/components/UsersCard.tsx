@@ -68,6 +68,10 @@ export function UsersCard() {
   const clearError = (id: number) =>
     setRowErrors((r) => { const next = { ...r }; delete next[id]; return next })
 
+  // Retained deliberately while its button is commented out below, so the
+  // deactivate/reactivate flow comes back by uncommenting one block rather
+  // than being rewritten. `void` is what keeps noUnusedLocals quiet without
+  // deleting the mutation.
   const toggleActive = useMutation({
     mutationFn: (u: UserRow) => api<{ sessions_revoked: number }>(`/users/${u.id}`, {
       method: 'PATCH', body: JSON.stringify({ is_active: !u.is_active }),
@@ -79,6 +83,8 @@ export function UsersCard() {
     onError: (e, u) => setRowErrors((r) => ({ ...r, [u.id]: errorOf(e) })),
     onSettled: () => qc.invalidateQueries({ queryKey: ['users'] }),
   })
+
+  void toggleActive
 
   const resetPassword = useMutation({
     mutationFn: (vars: { id: number; password: string }) =>
@@ -125,6 +131,18 @@ export function UsersCard() {
                     {rowErrors[u.id] && (
                       <div className="mb-1 text-[11.5px] text-red">{rowErrors[u.id]}</div>
                     )}
+                    {/* HIDDEN UNTIL THERE IS MORE THAN ONE USER TO MANAGE.
+                        With a single account, both of these can only fail:
+                        auth.py refuses self_delete and last_owner on DELETE
+                        /users/{id}, and self_deactivate and last_owner on
+                        PATCH. So the buttons were affordances whose only
+                        possible outcome was an error dialog.
+
+                        Nothing behind them was touched: both endpoints, the
+                        toggleActive mutation, ConfirmSelfDialog and the
+                        rowErrors plumbing are all still here. Restore by
+                        uncommenting.
+
                     <Button variant="ghost" className="px-2 py-1 text-[11px]"
                       disabled={toggleActive.isPending}
                       onClick={() => {
@@ -134,14 +152,17 @@ export function UsersCard() {
                       }}>
                       {u.is_active ? 'Deactivate' : 'Reactivate'}
                     </Button>
-                    <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                    */}
+                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
                       onClick={() => setResetting(u)}>
                       Reset password
                     </Button>
+                    {/*
                     <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
                       onClick={() => setDeleting(u)}>
                       Delete
                     </Button>
+                    */}
                   </td>
                 </tr>
               ))}

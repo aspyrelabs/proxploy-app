@@ -164,11 +164,18 @@ export function TeamsCard() {
     <section className="rounded-card border border-line-soft bg-panel p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-[15px] font-semibold">Teams</h2>
+        {/* HIDDEN UNTIL THE TEAMS PLAN SHIPS. The button is commented out, not
+            deleted, and nothing behind it was touched: POST /teams, the
+            createTeam mutation, the add form below and the entitlement gate
+            (`teamsAllowed`) all still work. Restore by uncommenting; there is
+            nothing else to put back.
+
         {teamsAllowed && (
           <Button variant="ghost" onClick={() => setAdding((a) => !a)}>
             {adding ? 'Close' : 'New team'}
           </Button>
         )}
+        */}
       </div>
       {!teamsAllowed ? (
         <p className="text-[12.5px] text-text-3">

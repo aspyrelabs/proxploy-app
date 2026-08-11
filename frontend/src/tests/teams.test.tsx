@@ -124,7 +124,10 @@ describe('TeamsCard', () => {
     expect(row.textContent).toContain('0') // host_count
   })
 
-  it('renders the create-team form for every role and posts on submit', async () => {
+  // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
+  // commented out in TeamsCard.tsx until the Teams plan ships; the mutation and the
+  // endpoint behind it are untouched. Unskip when the button returns.
+  it.skip('renders the create-team form for every role and posts on submit', async () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'New team' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ops2' } })
@@ -134,7 +137,10 @@ describe('TeamsCard', () => {
       && JSON.stringify(c.body) === JSON.stringify({ name: 'Ops2' }))).toBe(true))
   })
 
-  it('surfaces a 403 from create-team as an error toast rather than hiding the form', async () => {
+  // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
+  // commented out in TeamsCard.tsx until the Teams plan ships; the mutation and the
+  // endpoint behind it are untouched. Unskip when the button returns.
+  it.skip('surfaces a 403 from create-team as an error toast rather than hiding the form', async () => {
     createStatus = 403
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'New team' }))

@@ -63,7 +63,10 @@ describe('UsersCard', () => {
     expect(screen.getAllByText('active').length).toBe(2)
   })
 
-  it('PATCHes is_active: false on deactivate, after confirmation', async () => {
+  // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
+  // commented out in UsersCard.tsx until there is more than one user to manage; the mutation and the
+  // endpoint behind it are untouched. Unskip when the button returns.
+  it.skip('PATCHes is_active: false on deactivate, after confirmation', async () => {
     wrap()
     const rows = await screen.findAllByRole('button', { name: 'Deactivate' })
     fireEvent.click(rows[0])
@@ -72,7 +75,10 @@ describe('UsersCard', () => {
       && JSON.stringify(c.body) === JSON.stringify({ is_active: false }))).toBe(true))
   })
 
-  it('surfaces the last_owner 409 as an inline message on that row, not a toast', async () => {
+  // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
+  // commented out in UsersCard.tsx until there is more than one user to manage; the mutation and the
+  // endpoint behind it are untouched. Unskip when the button returns.
+  it.skip('surfaces the last_owner 409 as an inline message on that row, not a toast', async () => {
     deactivateFails = 'last_owner'
     wrap()
     const rows = await screen.findAllByRole('button', { name: 'Deactivate' })
@@ -81,7 +87,10 @@ describe('UsersCard', () => {
     expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('surfaces the self_deactivate 409 as an inline message', async () => {
+  // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
+  // commented out in UsersCard.tsx until there is more than one user to manage; the mutation and the
+  // endpoint behind it are untouched. Unskip when the button returns.
+  it.skip('surfaces the self_deactivate 409 as an inline message', async () => {
     deactivateFails = 'self_deactivate'
     wrap()
     const rows = await screen.findAllByRole('button', { name: 'Deactivate' })
