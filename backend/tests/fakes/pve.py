@@ -518,6 +518,14 @@ class _VzdumpLeaf:
         return self._owner._record_action("vzdump", vmid, "vzdump")
 
 
+class _DisksNS:
+    """/nodes/{node}/disks/list -- a namespace, not a leaf, because `list` is a
+    path segment here rather than a method."""
+
+    def __init__(self, owner, name):
+        self.list = _Leaf(owner.disks_by_node.get(name, []), owner.fail)
+
+
 class _NodeNS:
     def __init__(self, owner, name):
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
@@ -529,6 +537,10 @@ class _NodeNS:
         self.storage = _NodeStorageFactory(owner, name)
         self.network = _NetworkNS(owner, name)
         self.vzdump = _VzdumpLeaf(owner, name)
+        # The host page's own on-demand reads (doc: host-page spec). Read
+        # lazily from the owner so a test can assign after construction.
+        self.status = _Leaf(owner.node_status_by_node.get(name, {}), owner.fail)
+        self.disks = _DisksNS(owner, name)
 
 
 class _NodesNS:
@@ -547,6 +559,8 @@ class FakePVE:
         self.rrd_fail = rrd_fail  # independent of `fail`: lets tests fail the
         # rrddata leaf alone, since `fail` also gates _connect() itself.
         self.rrd_by_node = rrddata or {}
+        self.node_status_by_node: dict[str, dict] = {}
+        self.disks_by_node: dict[str, list[dict]] = {}
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
         self.access = _Access(permissions or {}, fail)
         # infra reads (Phase 6): set before the namespaces below, which read

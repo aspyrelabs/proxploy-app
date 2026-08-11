@@ -209,3 +209,35 @@ def test_a_rotated_certificate_is_refused_by_the_pin(tmp_path, monkeypatch):
         stop.set()
         lsock.close()
         t.join(timeout=5)
+
+
+def _fake_client(fake):
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.fakes.pve import make_fake_factory
+
+    return ProxmoxClient("https://10.0.0.5:8006", "proxploy@pve!mon", "s3cret",
+                         factory=make_fake_factory(fake))
+
+
+def test_node_status_returns_the_node_payload():
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.node_status_by_node = {"pve1": {"uptime": 25029, "cpuinfo": {"cores": 14}}}
+    assert _fake_client(fake).node_status("pve1")["uptime"] == 25029
+
+
+def test_node_disks_returns_the_inventory():
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.disks_by_node = {"pve1": [{"devpath": "/dev/nvme0n1", "wearout": 99}]}
+    assert _fake_client(fake).node_disks("pve1")[0]["wearout"] == 99
+
+
+def test_node_status_wraps_errors_as_proxmox_error():
+    from proxploy.services.proxmox import ProxmoxError
+    from tests.fakes.pve import FakePVE
+
+    with pytest.raises(ProxmoxError):
+        _fake_client(FakePVE(fail=True)).node_status("pve1")

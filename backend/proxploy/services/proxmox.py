@@ -329,6 +329,36 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"rrddata failed for node {node!r}", e) from e
 
+    def node_status(self, node: str) -> dict:
+        """GET /nodes/{node}/status: the node's own view of itself.
+
+        Carries cpuinfo (model, sockets, cores, cpus), loadavg, wait (the IO
+        delay figure), kversion, boot-info and memory/swap/rootfs. Called when
+        a human opens the host page, never from the poll loop: doc 02 §3 caps
+        a cycle at O(nodes), and almost everything here is static between
+        polls. The figures that are not (load, wait, memory) are already
+        recorded as metric samples every cycle.
+        """
+        try:
+            return self._connect().nodes(node).status.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"node status failed for node {node!r}", e) from e
+
+    def node_disks(self, node: str) -> list[dict]:
+        """GET /nodes/{node}/disks/list: model, serial, size, health, wearout.
+
+        The health and wearout columns are the reason this exists; neither is
+        reachable from /cluster/resources, which only knows datastores.
+        """
+        try:
+            return self._connect().nodes(node).disks.list.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"disk list failed for node {node!r}", e) from e
+
     # --- per-guest, user-triggered calls -----------------------------------
     # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered by
     # a human clicking a button and are explicitly outside that budget.

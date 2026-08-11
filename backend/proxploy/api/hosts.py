@@ -11,6 +11,7 @@ from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        token_public_meta)
+from proxploy.services.hostclient import client_for_host
 from proxploy.services.sshkeys import generate_ed25519
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
@@ -471,6 +472,92 @@ def remove_host(request: Request, host_id: int,
                                                "change": "removed"})
     return {"removed": True, "forgot_apps": len(apps),
             "was_own_host": is_own_host}
+
+
+def _loadavg(raw) -> list[float]:
+    """PVE sends loadavg as strings. A UI should not have to parse them, and a
+    surprising entry must not cost the whole payload."""
+    out: list[float] = []
+    for v in (raw or [])[:3]:
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            out.append(0.0)
+    while len(out) < 3:
+        out.append(0.0)
+    return out
+
+
+@router.get("/{host_id}/nodes/{node}/status")
+def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
+                user: User = Depends(_read)):
+    """The node's own view of itself, for the host page.
+
+    On demand, never from the poll loop: doc 02 §3 caps a cycle at O(nodes),
+    and model/cores/kernel/boot mode do not change between polls. The volatile
+    figures here (load, wait, memory) are already recorded as metric samples
+    every cycle, so polling this would buy nothing and cost a call per node.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "no such host")
+    try:
+        st = client_for_host(request.app, db, h).node_status(node)
+    except ProxmoxError as e:
+        # 502, not 500: a token too narrow to read /nodes/{n}/status is the
+        # node refusing, not Proxploy breaking, and the page degrades to
+        # everything it already had from the poller's snapshot.
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
+
+    cpu = st.get("cpuinfo") or {}
+    kernel = st.get("current-kernel") or {}
+    boot = st.get("boot-info") or {}
+    return {
+        "node": node,
+        "uptime_s": st.get("uptime"),
+        "pve_version": st.get("pveversion"),
+        "kernel": kernel.get("release") or st.get("kversion"),
+        "arch": kernel.get("machine"),
+        "boot_mode": boot.get("mode"),
+        "secure_boot": bool(boot.get("secureboot")),
+        "cpu": {
+            "model": cpu.get("model"), "vendor": cpu.get("vendor"),
+            "sockets": cpu.get("sockets"), "cores": cpu.get("cores"),
+            # PVE's `cpus` is the logical processor count. Renamed to
+            # `threads` here so the UI never has to guess which of the two
+            # numbers is which, which is exactly what "cores" vs "cpus" invites.
+            "threads": cpu.get("cpus"), "mhz": cpu.get("mhz"),
+        },
+        "load": _loadavg(st.get("loadavg")),
+        "io_delay": st.get("wait"),
+        "memory": st.get("memory") or {},
+        "swap": st.get("swap") or {},
+        "rootfs": st.get("rootfs") or {},
+        "ksm_shared": (st.get("ksm") or {}).get("shared"),
+    }
+
+
+@router.get("/{host_id}/nodes/{node}/hardware")
+def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
+                  user: User = Depends(_read)):
+    """Disk inventory. Health and wearout are the point: neither is reachable
+    from /cluster/resources, which only knows datastores."""
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "no such host")
+    try:
+        disks = client_for_host(request.app, db, h).node_disks(node)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
+    return {"disks": [{
+        "devpath": d.get("devpath"), "model": d.get("model"),
+        "serial": d.get("serial"), "size": d.get("size"), "type": d.get("type"),
+        "health": d.get("health"), "wearout": d.get("wearout"),
+        "used": d.get("used"),
+        # PVE uses -1 for "not a Ceph OSD"; passed through, that reads as an
+        # OSD id of minus one.
+        "osd_id": None if d.get("osdid") in (None, -1) else d.get("osdid"),
+    } for d in disks]}
 
 
 @router.post("/{host_id}/credentials")
