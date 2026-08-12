@@ -140,6 +140,14 @@ class Host(TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
     ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(Text)
     node_shell_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Whether the stored token lacks Sys.PowerMgmt (host reboot/power off),
+    # recomputed at enrolment and by POST /hosts/{id}/test, same idiom as
+    # last_error above. NULL means "not checked yet" -- distinct from False
+    # ("checked, and granted") -- so a host enrolled before this existed
+    # reads as unknown rather than a false "granted". Informational only: it
+    # is never used to refuse a power attempt, only to warn ahead of one
+    # (services/pveum.py NODE_POWER_PRIVILEGE, doc 08 §2/§9).
+    node_power_missing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
 
 

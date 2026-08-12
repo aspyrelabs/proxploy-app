@@ -104,3 +104,126 @@ def test_a_permission_read_that_fails_does_not_block_enrolment(tmp_path, csrf_he
         r = c.post("/api/v1/hosts/probe", json=PROBE, headers=csrf_header(c))
         assert r.status_code == 200, r.text
         assert r.json()["missing_privileges"] is None   # unknown, not empty
+
+
+# --- Sys.PowerMgmt: node power reported before the user ever tries ---------
+#
+# Node power (reboot/power off the whole host) is offered on every host page
+# unconditionally, unlike Lifecycle/Console/Backup which are opt-in
+# checkboxes; a user only discovers their token cannot use it by trying, which
+# used to mean a bare Proxmox 403. Checked and reported the same way
+# monitoring privileges are, so it is known before it is tried.
+
+def test_probe_reports_node_power_missing_when_the_token_lacks_it(tmp_path, csrf_header,
+                                                                  bootstrap_admin):
+    c = _client(tmp_path, permissions={})
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", json=PROBE, headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        assert r.json()["node_power_missing"] is True
+
+
+def test_probe_reports_node_power_present_when_granted(tmp_path, csrf_header,
+                                                        bootstrap_admin):
+    perms = {"/": {"Sys.PowerMgmt": 1}}
+    c = _client(tmp_path, permissions=perms)
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", json=PROBE, headers=csrf_header(c))
+        assert r.json()["node_power_missing"] is False
+
+
+def test_a_node_power_privilege_granted_on_a_narrower_path_counts(tmp_path, csrf_header,
+                                                                  bootstrap_admin):
+    perms = {"/pool/prod": {"Sys.PowerMgmt": 1}}
+    c = _client(tmp_path, permissions=perms)
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", json=PROBE, headers=csrf_header(c))
+        assert r.json()["node_power_missing"] is False
+
+
+def test_a_permission_read_that_fails_reports_node_power_as_unknown(tmp_path, csrf_header,
+                                                                    bootstrap_admin):
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+    from fastapi.testclient import TestClient
+
+    fake = FakePVE(resources=[{"type": "node", "node": "pve1", "status": "online"}])
+    fake.access.permissions._fail = True
+    c = TestClient(make_app(tmp_path, fake=fake))
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts/probe", json=PROBE, headers=csrf_header(c))
+        assert r.json()["node_power_missing"] is None   # unknown, not "missing"
+
+
+def test_enrolment_records_node_power_missing_on_the_host(tmp_path, csrf_header,
+                                                          bootstrap_admin):
+    from proxploy.models import Host
+
+    c = _client(tmp_path, permissions={})
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts", json={**PROBE, "name": "pve-01"},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+
+        app = c.app
+        with app.state.sessionmaker() as db:
+            h = db.query(Host).one()
+            assert h.node_power_missing is True
+
+        detail = c.get(f"/api/v1/hosts/{r.json()['id']}").json()
+        assert detail["node_power_missing"] is True
+
+
+def test_an_existing_token_missing_node_power_still_enrols_cleanly_and_keeps_everything_else(
+        tmp_path, csrf_header, bootstrap_admin):
+    """node_power_missing is informational, never a refusal: a token with a
+    perfectly good monitoring grant (everything that worked before this
+    feature existed) must enrol exactly as it always did, only now also
+    telling the operator node power specifically is unavailable."""
+    perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "Datastore.Audit": 1,
+                   "Pool.Audit": 1, "SDN.Audit": 1}}
+    c = _client(tmp_path, permissions=perms)
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts", json={**PROBE, "name": "pve-01"},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        assert r.json()["missing_privileges"] == []
+        assert r.json()["status"] == "connected"
+        assert r.json()["node_power_missing"] is True
+
+
+def test_the_test_endpoint_rechecks_node_power(tmp_path, csrf_header, bootstrap_admin):
+    """POST /hosts/{id}/test re-probes the live token, the same as it already
+    does for reachability: granting Sys.PowerMgmt after enrolment and then
+    testing again must flip node_power_missing to False without re-enrolling."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+    from fastapi.testclient import TestClient
+
+    fake = FakePVE(permissions={},
+                   resources=[{"type": "node", "node": "pve1", "status": "online"}])
+    c = TestClient(make_app(tmp_path, fake=fake))
+    with c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/hosts", json={**PROBE, "name": "pve-01"},
+                   headers=csrf_header(c))
+        host_id = r.json()["id"]
+        assert r.json()["node_power_missing"] is True
+
+        # Grant it, as if the operator had just run the extra pveum commands.
+        # No clean setter exists on this test double: `_fail` above is the
+        # same idiom, reaching past the leaf's own attribute name.
+        fake.access.permissions._value = {"/": {"Sys.PowerMgmt": 1}}
+
+        r2 = c.post(f"/api/v1/hosts/{host_id}/test", headers=csrf_header(c))
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["node_power_missing"] is False
+
+        detail = c.get(f"/api/v1/hosts/{host_id}").json()
+        assert detail["node_power_missing"] is False

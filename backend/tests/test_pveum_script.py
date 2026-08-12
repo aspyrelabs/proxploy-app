@@ -75,3 +75,45 @@ def test_capabilities_are_declared_once_for_both_ui_and_script():
     assert "monitoring" in CAPABILITIES
     assert CAPABILITIES["monitoring"].required is True
     assert CAPABILITIES["lifecycle"].required is False
+
+
+# --- Sys.PowerMgmt: node power, a separate opt-in like Sys.Console ---------
+#
+# Node power (reboot/power off the HOST) is never granted by choosing
+# Lifecycle (guest start/stop/snapshot/etc): folding it in would silently
+# widen every existing user's token scope the next time they regenerate the
+# script, and would make "restart a container" and "power off the host" the
+# same permission. It needs its own explicit opt-in, same precedent as
+# Sys.Console above.
+
+def test_node_power_is_withheld_from_the_script_unless_explicitly_opted_into():
+    without = generate_script(["lifecycle"])
+    assert "Sys.PowerMgmt" not in without
+
+    with_power = generate_script(["lifecycle"], node_power=True)
+    assert "Sys.PowerMgmt" in with_power
+
+
+def test_node_power_never_lands_on_lifecycles_own_role():
+    """A leaked ProxployLifecycle token must not carry the ability to power
+    off the host: Sys.PowerMgmt gets its own role and token, not an
+    augmentation of Lifecycle's."""
+    s = generate_script(["lifecycle"], node_power=True)
+    lifecycle_role_line = next(l for l in s.splitlines()
+                               if l.startswith("pveum role add ProxployLifecycle"))
+    assert "Sys.PowerMgmt" not in lifecycle_role_line
+
+
+def test_node_power_does_not_require_lifecycle_to_be_chosen():
+    """Node power is independent of guest lifecycle management: an operator
+    who wants only monitoring + the ability to reboot the host must be able
+    to get exactly that, not be forced into the guest-power role too."""
+    s = generate_script([], node_power=True)
+    assert "Sys.PowerMgmt" in s
+    assert "ProxployLifecycle" not in s
+
+
+def test_node_power_token_is_privilege_separated_like_every_other():
+    s = generate_script([], node_power=True)
+    assert "-token 'proxploy@pve!nodepower'" in s
+    assert "pveum user token add proxploy@pve nodepower --privsep 1" in s

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The Icon component throws for any name without a codepoint entry, and this
 // menu needs names (more_vert, edit, restart_alt, power_settings_new) that do
@@ -19,6 +19,11 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
 }))
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('../lib/notify', () => ({
+  notify: { error: toastError, success: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+
 import { HostActionsMenu } from '../components/HostActionsMenu'
 
 const host = { name: 'pve1', address: 'https://10.0.0.5:8006' }
@@ -26,15 +31,17 @@ const host = { name: 'pve1', address: 'https://10.0.0.5:8006' }
 // Radix opens a menu on pointerdown, not click (AccountMenu.test.tsx precedent).
 const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
 
-const wrap = () => {
+const wrap = (nodePowerMissing?: boolean | null) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <HostActionsMenu hostId={1} node="pve1" host={host} />
+      <HostActionsMenu hostId={1} node="pve1" host={host} nodePowerMissing={nodePowerMissing} />
     </QueryClientProvider>)
 }
 
 describe('HostActionsMenu', () => {
+  beforeEach(() => { toastError.mockClear() })
+
   it('renders a trigger with an accessible name, hidden from the a11y tree otherwise', () => {
     wrap()
     const trigger = screen.getByRole('button', { name: /actions/i })
@@ -96,5 +103,47 @@ describe('HostActionsMenu', () => {
     const dialog = await screen.findByRole('alertdialog')
     expect(dialog).toHaveTextContent(/power off pve1/i)
     expect(screen.getByLabelText(/type pve1 to confirm/i)).toBeInTheDocument()
+  })
+
+  // --- node power known missing: explain, never grey out (NodeShellButton's
+  // own precedent in routes/hosts.tsx) --------------------------------------
+
+  it('explains a known-missing node power privilege on Reboot instead of opening the dialog', async () => {
+    wrap(true)
+    openMenu(screen.getByRole('button', { name: /actions/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /reboot/i }))
+    expect(toastError).toHaveBeenCalled()
+    // The title says what is wrong, the description says how to fix it, same
+    // split nodeshell.test.tsx pins for NodeShellButton.
+    expect(String(toastError.mock.calls[0][1]?.description)).toMatch(/Sys\.PowerMgmt/)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('explains a known-missing node power privilege on Power off instead of opening the dialog', async () => {
+    wrap(true)
+    openMenu(screen.getByRole('button', { name: /actions/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /power off/i }))
+    expect(toastError).toHaveBeenCalled()
+    expect(String(toastError.mock.calls[0][1]?.description)).toMatch(/Sys\.PowerMgmt/)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('still opens the confirm dialog when node power is not known to be missing', async () => {
+    wrap(false)
+    openMenu(screen.getByRole('button', { name: /actions/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /reboot/i }))
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it('still opens the confirm dialog when node power is unknown (never probed)', async () => {
+    // undefined/null: an older host record, or one not yet re-tested. Never
+    // treated as "definitely missing" -- only a confirmed True explains
+    // instead of opening.
+    wrap(undefined)
+    openMenu(screen.getByRole('button', { name: /actions/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /reboot/i }))
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+    expect(toastError).not.toHaveBeenCalled()
   })
 })

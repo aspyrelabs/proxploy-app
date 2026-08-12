@@ -102,7 +102,23 @@ def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
 # creates these tokens. One table, so a token the wizard tells you to make
 # always satisfies the check the wizard then runs against it.
 from proxploy.services.pveum import (CAPABILITIES, MONITORING_PRIVILEGES,
-                                     generate_script)
+                                     NODE_POWER_PRIVILEGE, generate_script)
+
+
+def _granted_privileges(client) -> set[str] | None:
+    """Every privilege this token holds anywhere, or None if that could not
+    be determined (some setups refuse /access/permissions to a token).
+
+    Shared by both privilege checks below so there is exactly one place that
+    reads /access/permissions and exactly one meaning for "could not tell".
+    """
+    try:
+        granted: set[str] = set()
+        for privs in (client.permissions() or {}).values():
+            granted.update(p for p, on in (privs or {}).items() if on)
+        return granted
+    except Exception:  # noqa: BLE001  (unknown, never fatal)
+        return None
 
 
 def _missing_privileges(client) -> list[str] | None:
@@ -116,13 +132,25 @@ def _missing_privileges(client) -> list[str] | None:
     a pool by granting the roles on /pool/<name> instead of /, so requiring
     them at "/" would report a working pool-scoped install as broken.
     """
-    try:
-        granted: set[str] = set()
-        for privs in (client.permissions() or {}).values():
-            granted.update(p for p, on in (privs or {}).items() if on)
-    except Exception:  # noqa: BLE001  (unknown, never fatal)
+    granted = _granted_privileges(client)
+    if granted is None:
         return None
     return [p for p in MONITORING_PRIVILEGES if p not in granted]
+
+
+def _node_power_missing(client) -> bool | None:
+    """Whether this token lacks Sys.PowerMgmt anywhere. None means "could not
+    tell", same reasoning as _missing_privileges.
+
+    Checked unconditionally, unlike Lifecycle/Console/Backup: the host
+    actions menu offers Reboot/Power off on every host regardless of which
+    optional capabilities were chosen, so this is checked the same way
+    monitoring is, not gated behind an opt-in capability having been picked.
+    """
+    granted = _granted_privileges(client)
+    if granted is None:
+        return None
+    return NODE_POWER_PRIVILEGE not in granted
 
 
 def _privilege_note(missing: list[str] | None) -> str | None:
@@ -139,6 +167,11 @@ class TokenScriptIn(BaseModel):
     capabilities: list[str] = []
     path: str = "/"
     node_shell: bool = False
+    # Independent of `capabilities` (services/pveum.py's own docstring on
+    # NODE_POWER_PRIVILEGE): Sys.PowerMgmt gets its own role and token, not an
+    # augmentation of Lifecycle's, and is not conditional on Lifecycle being
+    # among `capabilities`.
+    node_power: bool = False
 
 
 @router.post("/token-script")
@@ -152,7 +185,8 @@ def token_script(body: TokenScriptIn, user: User = Depends(_manage_global)):
     """
     try:
         script = generate_script(body.capabilities, path=body.path,
-                                 node_shell=body.node_shell)
+                                 node_shell=body.node_shell,
+                                 node_power=body.node_power)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     return {"script": script,
@@ -173,7 +207,8 @@ def probe(request: Request, body: ProbeIn,
     # own it proves only that the address and secret are right. The privilege
     # diff is what makes "Test connection" mean the thing operators read it as.
     return {"ok": True, "version": v.get("version"), "release": v.get("release"),
-            "missing_privileges": _missing_privileges(client)}
+            "missing_privileges": _missing_privileges(client),
+            "node_power_missing": _node_power_missing(client)}
 
 
 def _cluster_identity(client) -> tuple[str | None, str | None]:
@@ -240,11 +275,13 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     # token is still worth enrolling, and locking an operator out of their own
     # host at the final step is the worse failure.
     missing = _missing_privileges(client)
+    node_power_missing = _node_power_missing(client)
     node_name, cluster_name = _cluster_identity(client)
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
                 node_name=node_name, cluster_name=cluster_name,
                 last_error=_privilege_note(missing),
+                node_power_missing=node_power_missing,
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
     db.commit()
@@ -259,7 +296,8 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     out = {"id": host.id, "name": host.name, "address": host.address,
            "node_name": host.node_name, "cluster_name": host.cluster_name,
            "pve_version": host.pve_version,
-           "status": host.status, "missing_privileges": missing}
+           "status": host.status, "missing_privileges": missing,
+           "node_power_missing": node_power_missing}
     if body.ssh_enroll:
         private_pem, public_line = generate_ed25519(f"proxploy@{body.name}")
         sblob, sver = ss.encrypt(private_pem)
@@ -281,6 +319,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              "node_name": h.node_name, "status": h.status,
              "last_error": h.last_error,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
+             "node_power_missing": h.node_power_missing,
              "team_id": h.team_id,
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]
@@ -297,7 +336,8 @@ def host_detail(host_id: int, db=Depends(get_db),
             "node_name": h.node_name, "status": h.status,
             "last_error": h.last_error,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
-            "node_shell_enabled": h.node_shell_enabled, "team_id": h.team_id,
+            "node_shell_enabled": h.node_shell_enabled,
+            "node_power_missing": h.node_power_missing, "team_id": h.team_id,
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": c.last_used_at.isoformat()
                              if c.last_used_at else None} for c in creds]}
@@ -353,10 +393,15 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     cred = db.query(HostCredential).filter_by(host_id=h.id, kind="api_token").one()
     tok = jsonlib.loads(request.app.state.secretstore.decrypt(cred.encrypted_blob))
     try:
-        v = ProxmoxClient(h.address, tok["token_id"], tok["token_secret"],
-                          verify_tls=h.verify_tls, tls_fingerprint=h.tls_fingerprint,
-                          factory=request.app.state.proxmox_factory).version()
+        client = ProxmoxClient(h.address, tok["token_id"], tok["token_secret"],
+                               verify_tls=h.verify_tls, tls_fingerprint=h.tls_fingerprint,
+                               factory=request.app.state.proxmox_factory)
+        v = client.version()
         h.status, h.pve_version, h.last_seen_at = "connected", v.get("version"), utcnow()
+        # Same re-check reachability already got: an operator who just ran
+        # the extra pveum commands for node power should see it reflected
+        # here, not only on the next full enrolment.
+        h.node_power_missing = _node_power_missing(client)
         cred.last_used_at = utcnow()
         result = "ok"
     except ProxmoxError:
@@ -364,7 +409,8 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="host.test",
                 target_type="host", target_id=h.id, result=result)
-    return {"id": h.id, "status": h.status, "pve_version": h.pve_version}
+    return {"id": h.id, "status": h.status, "pve_version": h.pve_version,
+            "node_power_missing": h.node_power_missing}
 
 
 @router.post("/{host_id}/ssh/verify")

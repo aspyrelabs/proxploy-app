@@ -384,6 +384,67 @@ def test_confirmed_self_power_off_still_goes_through(tmp_path, bootstrap_admin, 
     assert body["job"]["kind"] == "host.shutdown"
 
 
+# --- Sys.PowerMgmt missing: a real 403, but a message worth reading --------
+
+def test_a_missing_node_power_privilege_names_it_and_how_to_grant_it(tmp_path):
+    """The bug this whole feature closes: a token that cannot power the node
+    used to fail with a bare Proxmox 403 in job.error. It should now name
+    Sys.PowerMgmt and where to grant it, without losing the original Proxmox
+    text (still useful evidence)."""
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        fake = FakePVE()
+        fake.power_forbidden_nodes = {"pve1"}
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            # NOT the single-char "s" other tests in this file use: _wrap's
+            # secret-scrubbing replaces every occurrence of the literal
+            # secret, and "s" appears inside "Sys.PowerMgmt" and
+            # "docs.proxploy.com" themselves, which this test asserts on.
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "t0k3n-99xz"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.shutdown", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1", "command": "shutdown"}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+            assert "Sys.PowerMgmt" in job.error
+            assert "docs.proxploy.com" in job.error
+
+    asyncio.run(run())
+
+
+def test_reboot_is_not_blocked_by_a_stale_node_power_missing_flag(
+        tmp_path, bootstrap_admin, csrf_header):
+    """node_power_missing (computed at enrolment/test time) is informational,
+    never a pre-emptive gate: it can go stale the moment an operator grants
+    the privilege without re-testing, and refusing on a maybe-stale cache
+    would be a worse failure than the real 403 this whole feature exists to
+    explain."""
+    app, c, fake, hid = _app(tmp_path)
+    with app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        db.get(Host, hid).node_power_missing = True
+        db.commit()
+    bootstrap_admin(c)
+    r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
+               json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))
+    assert r.status_code == 202, r.text
+
+
 def test_a_sibling_node_of_the_same_cluster_host_is_not_flagged_self(
         tmp_path, bootstrap_admin, csrf_header):
     app, c, fake, hid = _app(tmp_path)

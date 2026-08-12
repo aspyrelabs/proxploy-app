@@ -103,6 +103,12 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   const [missing, setMissing] = useState<string[] | null>(null)
   const [script, setScript] = useState<string | null>(null)
   const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
+  // Off by default, same reasoning as Sys.Console/node_shell just below:
+  // Sys.PowerMgmt can take the whole node down, so it is never on unless the
+  // operator explicitly ticks it, and it is independent of `caps` (doc 08
+  // §2/§9, services/pveum.py NODE_POWER_PRIVILEGE) -- Reboot/Power off is
+  // offered on every host regardless of which capabilities were chosen.
+  const [nodePower, setNodePower] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -131,7 +137,8 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     try {
       const r = await api<{ script: string }>('/hosts/token-script', {
         method: 'POST',
-        body: JSON.stringify({ capabilities: caps, node_shell: f.ssh_enroll }) })
+        body: JSON.stringify({ capabilities: caps, node_shell: f.ssh_enroll,
+                              node_power: nodePower }) })
       setScript(r.script)
     } catch (e) { setError(errText(e)) }
   }
@@ -199,6 +206,19 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </label>
           ))}
         </div>
+        {/* Independent of the capability row above on purpose (doc 08 §2/§9):
+            Sys.PowerMgmt gets its own role and token, not a widening of
+            Lifecycle's, and Reboot/Power off is offered on every host
+            regardless of which capabilities were chosen. */}
+        <label className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-text-2">
+          <input type="checkbox" checked={nodePower} className="mt-0.5"
+            onChange={e => setNodePower(e.target.checked)} />
+          <span>Node power (reboot/power off this host).
+            <span className="block text-[11px] text-text-3">
+              Can take down every guest it runs, and Proxploy itself if it runs here.
+            </span>
+          </span>
+        </label>
         {script && (
           <>
             <p className="mt-2 text-[11.5px] text-text-3">

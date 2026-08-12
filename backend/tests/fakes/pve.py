@@ -576,6 +576,12 @@ class _NodeStatusLeaf:
     def post(self, **kwargs):
         if self._owner.fail or self._node in self._owner.power_fail_nodes:
             raise ConnectionError("fake PVE unreachable")
+        if self._node in self._owner.power_forbidden_nodes:
+            # The exact shape real Proxmox returns for a token missing
+            # Sys.PowerMgmt, so ProxmoxClient.node_power's own detection of a
+            # 403 is exercised against realistic text, not an invented one.
+            raise RuntimeError(f"403 Forbidden: Permission check failed "
+                               f"(/nodes/{self._node}, Sys.PowerMgmt)")
         self._owner.node_power_calls.append((self._node, kwargs.get("command")))
         return self._owner._record_action("node", 0, kwargs.get("command") or "power")
 
@@ -625,6 +631,9 @@ class FakePVE:
         # assert exactly what was sent, same idiom as self.migrations etc.
         self.node_power_calls: list[tuple[str, str]] = []
         self.power_fail_nodes: set[str] = set()
+        # Nodes where the token is reachable but lacks Sys.PowerMgmt: a
+        # 403, distinct from power_fail_nodes' unreachable-node simulation.
+        self.power_forbidden_nodes: set[str] = set()
         self.disks_by_node: dict[str, list[dict]] = {}
         # the rest of the host page's hardware tab, same lazy pattern
         self.pci_by_node: dict[str, list[dict]] = {}

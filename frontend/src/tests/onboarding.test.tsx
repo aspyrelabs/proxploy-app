@@ -27,7 +27,7 @@ const scriptResult = { script: "# Proxploy\npveum role add ProxployAudit -privs 
                          { key: 'monitoring', label: 'Read-only monitoring', why: 'Always required.', required: true, role: 'ProxployAudit' },
                          { key: 'lifecycle', label: 'Lifecycle', why: 'Start/stop.', required: false, role: 'ProxployLifecycle' },
                        ] }
-let scriptCalls: { capabilities: string[]; node_shell: boolean }[] = []
+let scriptCalls: { capabilities: string[]; node_shell: boolean; node_power: boolean }[] = []
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
@@ -185,6 +185,20 @@ describe('HostForm', () => {
     await screen.findByText(/pveum role add ProxployAudit/)
     const calls = scriptCalls.at(-1)
     expect(calls?.node_shell).toBe(false)
+  })
+
+  it('asks for node power only when explicitly ticked, independent of capabilities', async () => {
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    await screen.findByText(/pveum role add ProxployAudit/)
+    // Off by default: the same "never widen a scope the operator did not
+    // explicitly ask for" reasoning as node_shell above.
+    expect(scriptCalls.at(-1)?.node_power).toBe(false)
+
+    fireEvent.click(screen.getByLabelText(/node power/i))
+    fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
+    await screen.findByText(/pveum role add ProxployAudit/)
+    expect(scriptCalls.at(-1)?.node_power).toBe(true)
   })
 
   it('leaves TLS verification off by default', () => {

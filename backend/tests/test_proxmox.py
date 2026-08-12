@@ -278,3 +278,37 @@ def test_node_power_wraps_connection_failure_as_proxmox_error():
 
     with pytest.raises(ProxmoxError):
         _fake_client(FakePVE(fail=True)).node_power("pve1", "reboot")
+
+
+def test_node_power_names_the_missing_privilege_on_a_403():
+    """A bare relay of Proxmox's 403 leaves the operator to work out on their
+    own that Sys.PowerMgmt is what is missing, and that our own generated
+    script never granted it. Name it, and say how to fix it."""
+    from proxploy.services.proxmox import ProxmoxError
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.power_forbidden_nodes = {"pve1"}
+    with pytest.raises(ProxmoxError) as ei:
+        _fake_client(fake).node_power("pve1", "shutdown")
+    msg = str(ei.value)
+    assert "Sys.PowerMgmt" in msg
+    assert "docs.proxploy.com" in msg
+    assert ei.value.kind == "permission"
+    # The original Proxmox text stays in the message too: evidence, not
+    # replaced by our own guess.
+    assert "403" in msg
+
+
+def test_node_power_leaves_an_unrelated_failure_generically_classified():
+    """Only a 403 gets the Sys.PowerMgmt-specific treatment; an unreachable
+    node must not be mis-diagnosed as a permission problem."""
+    from proxploy.services.proxmox import ProxmoxError
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.power_fail_nodes = {"pve1"}
+    with pytest.raises(ProxmoxError) as ei:
+        _fake_client(fake).node_power("pve1", "shutdown")
+    assert "Sys.PowerMgmt" not in str(ei.value)
+    assert ei.value.kind != "permission"

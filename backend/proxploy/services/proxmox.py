@@ -12,6 +12,9 @@ import ssl
 from urllib.parse import urlparse
 
 from proxploy.models import utcnow  # noqa: F401  (used by later phases' sync paths)
+# The single source of truth for the privilege name (services/pveum.py's own
+# docstring), so the message below and the script that grants it never drift.
+from proxploy.services.pveum import NODE_POWER_PRIVILEGE
 
 
 class ProxmoxError(RuntimeError):
@@ -248,7 +251,7 @@ class ProxmoxClient:
         """
         return f"PVEAPIToken={self.token_id}={self.token_secret}"
 
-    def _wrap(self, prefix: str, e: Exception) -> ProxmoxError:
+    def _wrap(self, prefix: str, e: Exception, *, kind: str | None = None) -> ProxmoxError:
         """The ONE place a proxmoxer/requests exception becomes our own.
 
         `str(e)` is third-party text we do not control, and urllib3 in
@@ -257,6 +260,10 @@ class ProxmoxClient:
         `detail` (api/hosts.py), to the unencrypted `jobs.error` column and its
         SSE stream (jobs/backend.py::_finish), and to `job_events.message`; so
         the credential is scrubbed here rather than at each of those sinks.
+
+        `kind` lets a caller that already knows more than `_classify` can
+        guess from the raw text (e.g. node_power's own 403 detection below)
+        say so directly, instead of `_classify` re-deriving a coarser answer.
         """
         text = f"{prefix}: {e}"
         for needle in (self.token_secret, self.token_id):
@@ -266,7 +273,7 @@ class ProxmoxClient:
             # since urllib3 reports the header as `b'...'`.
             for form in (needle, repr(needle)[1:-1]):
                 text = text.replace(form, "***")
-        return ProxmoxError(text, kind=_classify(e))
+        return ProxmoxError(text, kind=kind or _classify(e))
 
     def _connect(self):
         if self._api is not None:
@@ -360,6 +367,12 @@ class ProxmoxClient:
         harder by callers (doc 02 §9, doc 08 §1) -- it can take down every
         guest the node hosts, and if the node is the one Proxploy itself runs
         on, Proxploy along with it.
+
+        A 403 here almost always means one specific thing: the token lacks
+        Sys.PowerMgmt, which pveum.py never granted before this privilege
+        existed (doc 08 §2/§9). A bare relay of Proxmox's "Permission check
+        failed" left the operator to work that out alone; named explicitly
+        instead, with where to grant it, while keeping Proxmox's own text too.
         """
         if command not in NODE_POWER_COMMANDS:
             raise ProxmoxError(f"{command!r} is not a node power command")
@@ -368,7 +381,13 @@ class ProxmoxClient:
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001  (one wrap point, like version()
-            raise self._wrap(f"node power ({command}) failed on {node}", e) from e
+            prefix = f"node power ({command}) failed on {node}"
+            if "403" in str(e):
+                prefix += (f": the API token is missing {NODE_POWER_PRIVILEGE}. "
+                          f"Node power will fail until it is granted; see "
+                          f"docs.proxploy.com/getting-started/proxmox-token")
+                raise self._wrap(prefix, e, kind="permission") from e
+            raise self._wrap(prefix, e) from e
 
     def node_disks(self, node: str) -> list[dict]:
         """GET /nodes/{node}/disks/list: model, serial, size, health, wearout.

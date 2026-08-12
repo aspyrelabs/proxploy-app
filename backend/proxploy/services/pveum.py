@@ -64,6 +64,26 @@ CAPABILITIES: dict[str, Capability] = {
 # console capability: it is a separate, explicit opt-in (doc 08 §2 and §9).
 NODE_SHELL_PRIVILEGE = "Sys.Console"
 
+# Sys.PowerMgmt is the ability to reboot or power off the HOST, which can
+# strand every guest it runs and can strand Proxploy itself when it runs on
+# that node. Same category as Sys.Console above, and the same precedent
+# applies: a separate, explicit opt-in.
+#
+# Unlike Sys.Console it does NOT even ride on an existing capability's role.
+# It gets its own role and token (below), never Lifecycle's: Lifecycle covers
+# VM.PowerMgmt (guest power), and folding Sys.PowerMgmt into that role would
+# (a) silently widen every existing Lifecycle token's scope the next time the
+# script is regenerated, and (b) make "restart a container" and "power off
+# the host" the same permission -- a leaked Lifecycle token must not carry
+# node power. It is also independent of which capabilities are chosen: an
+# operator who wants only monitoring plus the ability to reboot the host
+# (doc 08 §9) must not be forced into Lifecycle to get it, since the host
+# actions menu offers Reboot/Power off unconditionally, not behind a
+# Lifecycle checkbox.
+NODE_POWER_PRIVILEGE = "Sys.PowerMgmt"
+NODE_POWER_ROLE = "ProxployNodePower"
+NODE_POWER_TOKEN = "nodepower"
+
 MONITORING_PRIVILEGES: tuple[str, ...] = CAPABILITIES["monitoring"].privileges
 
 _HEADER = """\
@@ -90,12 +110,16 @@ def _privileges_for(cap: Capability, node_shell: bool) -> tuple[str, ...]:
 
 
 def generate_script(capabilities: list[str], *, path: str = "/",
-                    node_shell: bool = False) -> str:
+                    node_shell: bool = False, node_power: bool = False) -> str:
     """Return the script for `capabilities`, monitoring always included.
 
     `path` is where the ACLs are granted. "/" is the default because Proxploy
     is a whole-host manager; narrowing it to /pool/<name> is doc 08's supported
     way to scope Proxploy to part of a cluster.
+
+    `node_power` is independent of `capabilities`: it grants Sys.PowerMgmt via
+    its own role and token (see NODE_POWER_PRIVILEGE above), not as part of
+    any capability's role, and not conditional on Lifecycle being chosen.
     """
     unknown = [c for c in capabilities if c not in CAPABILITIES]
     if unknown:
@@ -121,6 +145,19 @@ def generate_script(capabilities: list[str], *, path: str = "/",
             # own ACLs with the user's, so granting only the user above leaves
             # the token able to do precisely nothing.
             f"pveum acl modify {path} -token '{token_id}' -role {cap.role}",
+            "",
+        ]
+
+    if node_power:
+        token_id = f"{PVE_USER}!{NODE_POWER_TOKEN}"
+        lines += [
+            f"# Node power: reboot/power off the host itself. Separate from "
+            f"Lifecycle on purpose -- powering off the hypervisor is a very "
+            f"different blast radius than restarting one guest on it.",
+            f"pveum role add {NODE_POWER_ROLE} -privs '{NODE_POWER_PRIVILEGE}'",
+            f"pveum acl modify {path} -user {PVE_USER} -role {NODE_POWER_ROLE}",
+            f"pveum user token add {PVE_USER} {NODE_POWER_TOKEN} --privsep 1",
+            f"pveum acl modify {path} -token '{token_id}' -role {NODE_POWER_ROLE}",
             "",
         ]
 

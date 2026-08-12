@@ -310,9 +310,12 @@ export function HostsPage() {
 
 // Minimal slice of GET /hosts/{id}: the opt-in flag and the address the
 // "Open Proxmox web UI" button links to. The fleet-overview fields (status,
-// uptime, etc.) already come from `node`.
+// uptime, etc.) already come from `node`. node_power_missing (doc 08 §2/§9)
+// feeds HostActionsMenu's Reboot/Power off items, null/undefined meaning
+// "not probed since this existed", not "granted".
 type HostDetail = {
   id: number; name: string; address: string; node_shell_enabled: boolean
+  node_power_missing?: boolean | null
 }
 
 function useHostDetail(id: number) {
@@ -431,7 +434,8 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
               resolved before it can render at all. */}
           {node?.node && host && (
             <HostActionsMenu hostId={id} node={node.node}
-              host={{ name: host.name, address: host.address }} />
+              host={{ name: host.name, address: host.address }}
+              nodePowerMissing={host.node_power_missing} />
           )}
         </div>
       </div>
