@@ -39,10 +39,11 @@ export function SidebarNav() {
           this pane rather than beside it, so the pane starts under the header
           and its height is the window minus that bar. */}
       <aside className={`sticky top-14 flex h-[calc(100vh-3.5rem)] shrink-0 flex-col border-r border-line-soft bg-panel/60 transition-[width] duration-200 motion-reduce:transition-none max-[720px]:hidden ${collapsed ? 'w-16' : 'w-[236px]'}`}>
-        {/* py-2.5 (10px), matching the mark's clearance in the header above:
-            the toggle is h-8, so this row is 52px and the first group's rule
-            starts there instead of 56px down. */}
-        <div className={`flex px-2 py-2.5 ${collapsed ? 'justify-center' : 'justify-end'}`}>
+        {/* py-[3px], not py-2.5: the button is a 32px hit target holding an
+            18px glyph, so it already carries 7px around it. 10px of row
+            padding on top of that put 17px above the chevron. 3 + 7 gives the
+            glyph its 10px while the button stays big enough to hit. */}
+        <div className={`flex px-2 py-[3px] ${collapsed ? 'justify-center' : 'justify-end'}`}>
           <button type="button" onClick={toggle}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="grid h-8 w-8 place-items-center rounded-tile text-text-3 hover:bg-panel-2 hover:text-text">
