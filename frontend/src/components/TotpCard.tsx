@@ -6,6 +6,7 @@ import { useEntitlements } from '../api/hooks'
 import { useTotpStatus } from '../api/account'
 import type { TotpEnrollment } from '../api/account'
 import { Button } from './ui/button'
+import { CardLoadingOverlay } from './ui/card-loading-overlay'
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
@@ -64,15 +65,26 @@ export function TotpCard() {
   const copy = (text: string) => { void navigator.clipboard?.writeText(text) }
 
   return (
+    <CardLoadingOverlay state={{
+      // Not-yet-known-if-entitled, then /auth/me's own first fetch.
+      // `isPending`, not `isFetching`, so it stays quiet on the
+      // invalidateQueries refetch each mutation below triggers.
+      firstLoad: ent.isPending || (totpAllowed && me.isPending),
+      // All three mutations are defined directly on this card and each one
+      // swaps the card between its major states (not-enrolled / enrolling /
+      // enabled), the exact "content jumps" case the veil exists for.
+      mutating: enroll.isPending || confirm.isPending || disable.isPending,
+    }}>
     <section className="rounded-card border border-line-soft bg-panel p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-[15px] font-semibold">Two-factor authentication</h2>
       </div>
       {!totpAllowed ? (
-        <p className="text-[12.5px] text-text-3">
-          {ent.unknown ? 'Could not check your plan, try reloading.'
-            : ent.data == null ? 'Loading…' : 'Not included in your plan.'}
-        </p>
+        !ent.isPending && (
+          <p className="text-[12.5px] text-text-3">
+            {ent.unknown ? 'Could not check your plan, try reloading.' : 'Not included in your plan.'}
+          </p>
+        )
       ) : me.isError ? (
         // Security-relevant: me.data is undefined on error same as on a
         // genuine "not enrolled" response, so without this branch a failed
@@ -189,5 +201,6 @@ export function TotpCard() {
         </Button>
       )}
     </section>
+    </CardLoadingOverlay>
   )
 }

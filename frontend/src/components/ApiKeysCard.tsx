@@ -7,6 +7,7 @@ import { useApiKeys } from '../api/apikeys'
 import type { ApiKeyCreated, ApiKeyRow } from '../api/apikeys'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
+import { CardLoadingOverlay } from './ui/card-loading-overlay'
 
 // Mirrors backend/proxploy/services/authz.py::PERMISSIONS' resource column.
 // A key's scope can only narrow its owner's role, never widen it (doc 04) --
@@ -79,6 +80,21 @@ export function ApiKeysCard() {
   }
 
   return (
+    <CardLoadingOverlay state={{
+      // First load covers two phases: not yet knowing whether the plan
+      // includes api.tokens (ent.isPending), then, once it does, the keys
+      // list's own first fetch. `isPending` on both, never `isFetching` --
+      // this must stay quiet through the background refetch that follows
+      // every mutation's invalidateQueries below.
+      firstLoad: ent.isPending || (apiTokensAllowed && keys.isPending),
+      // Both mutations are defined directly on this card (not in a nested
+      // subcomponent) and both change what the card shows wholesale: a
+      // successful create reveals the one-time-secret panel and closes the
+      // form, a revoke flips a row's state. Row-level `disabled={x.isPending}`
+      // treatment stays on the buttons too; the veil is the card-level signal
+      // that something is in flight, not a replacement for it.
+      mutating: createKey.isPending || revokeKey.isPending,
+    }}>
     <section className="rounded-card border border-line-soft bg-panel p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-[15px] font-semibold">API keys</h2>
@@ -88,11 +104,10 @@ export function ApiKeysCard() {
           </Button>
         )}
       </div>
-      {!apiTokensAllowed ? (
-        <p className="text-[12.5px] text-text-3">
-          {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
-        </p>
-      ) : (
+      {ent.data != null && !apiTokensAllowed && (
+        <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+      )}
+      {apiTokensAllowed && (
         <>
           {justCreated && (
             <div className="mb-4 rounded-ctl border border-amber/40 bg-amber-dim p-3">
@@ -121,6 +136,10 @@ export function ApiKeysCard() {
           )}
 
           <QueryState query={keys}
+                      // The outer CardLoadingOverlay already veils the card
+                      // for keys.isPending; suppress QueryState's own
+                      // "Loading…" placeholder so the two don't stack.
+                      loading={<></>}
                       emptyTitle="No API keys yet."
                       emptyNote=""
                       errorTitle="API keys not readable"
@@ -210,5 +229,6 @@ export function ApiKeysCard() {
         </>
       )}
     </section>
+    </CardLoadingOverlay>
   )
 }

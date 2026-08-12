@@ -7,6 +7,7 @@ import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
 import type { MemberRow, TeamRow, UserRow } from '../api/teams'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
+import { CardLoadingOverlay } from './ui/card-loading-overlay'
 
 const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
 
@@ -161,6 +162,19 @@ export function TeamsCard() {
   }
 
   return (
+    <CardLoadingOverlay state={{
+      // Not-yet-known-if-entitled, then the teams list's own first fetch.
+      // `isPending`, not `isFetching`: stays quiet on the invalidation
+      // refetches every mutation below triggers.
+      firstLoad: ent.isPending || (teamsAllowed && teams.isPending),
+      // createTeam and removeMember are defined directly on this card.
+      // setRole/addMember live in the nested TeamMembers subcomponent (one
+      // per expanded team row) and keep their own existing inline pending
+      // treatment instead -- lifting that state up here would be a bigger
+      // refactor than this card needs. removeMember has no per-row pending
+      // indicator at all today, so the card veil is its only feedback.
+      mutating: createTeam.isPending || removeMember.isPending,
+    }}>
     <section className="rounded-card border border-line-soft bg-panel p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-[15px] font-semibold">Teams</h2>
@@ -177,13 +191,16 @@ export function TeamsCard() {
         )}
         */}
       </div>
-      {!teamsAllowed ? (
-        <p className="text-[12.5px] text-text-3">
-          {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
-        </p>
-      ) : (
+      {ent.data != null && !teamsAllowed && (
+        <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+      )}
+      {teamsAllowed && (
         <>
           <QueryState query={teams}
+                      // The outer CardLoadingOverlay already veils the card
+                      // for teams.isPending; suppress the inner placeholder
+                      // so the two don't stack.
+                      loading={<></>}
                       emptyTitle="No teams yet."
                       emptyNote=""
                       errorTitle="Teams not readable"
@@ -239,5 +256,6 @@ export function TeamsCard() {
         </>
       )}
     </section>
+    </CardLoadingOverlay>
   )
 }

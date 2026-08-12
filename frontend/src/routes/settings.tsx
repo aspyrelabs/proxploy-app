@@ -22,6 +22,7 @@ import { TotpCard } from '../components/TotpCard'
 import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
+import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
@@ -343,17 +344,25 @@ export function SettingsPage() {
         )}
       </Card>
 
+      {/* This is the card's own entitlement-gated first load: not yet known
+          whether the plan includes notify.channels, then the channels list's
+          own first fetch. `isPending`, not `isFetching`, so this stays quiet
+          on the invalidation refetches the mutations below trigger. */}
+      <CardLoadingOverlay state={{ firstLoad: ent.isPending || (channelsAllowed && channels.isPending) }}>
       <Card title="Notifications"
             action={channelsAllowed && <Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
               {addingChannel ? 'Close' : 'Add channel'}
             </Button>}>
-        {!channelsAllowed ? (
-          <p className="text-[12.5px] text-text-3">
-            {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
-          </p>
-        ) : (
+        {ent.data != null && !channelsAllowed && (
+          <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+        )}
+        {channelsAllowed && (
           <>
             <QueryState query={channels}
+                        // The overlay above already veils the card for
+                        // channels.isPending; suppress the inner placeholder
+                        // so the two don't stack.
+                        loading={<></>}
                         emptyTitle="No channels yet"
                         emptyNote="Add one to get told when a job fails."
                         errorTitle="Channels not readable"
@@ -399,6 +408,7 @@ export function SettingsPage() {
           </>
         )}
       </Card>
+      </CardLoadingOverlay>
 
       <SchedulesCard />
 

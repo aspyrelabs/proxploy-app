@@ -10,6 +10,7 @@ import { useEntitlements } from '../api/hooks'
 import { AlertRuleForm } from '../components/AlertRuleForm'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'text-[10.5px] uppercase tracking-wide text-text-3'
@@ -144,6 +145,11 @@ export function AlertsPage() {
         )}
       </section>
 
+      {/* This card's own entitlement-gated first load: not yet known whether
+          the plan includes alerts.rules, then the rules list's own first
+          fetch. `isPending`, not `isFetching`, so it stays quiet on the
+          invalidation refetches toggleRule/removeRule trigger below. */}
+      <CardLoadingOverlay state={{ firstLoad: ent.isPending || (rulesAllowed && rules.isPending) }}>
       <section className={card}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-[15px] font-semibold">Rules</h2>
@@ -153,13 +159,16 @@ export function AlertsPage() {
             </Button>
           )}
         </div>
-        {!rulesAllowed ? (
-          <p className="text-[12.5px] text-text-3">
-            {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
-          </p>
-        ) : (
+        {ent.data != null && !rulesAllowed && (
+          <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+        )}
+        {rulesAllowed && (
           <>
             <QueryState query={rules}
+                        // The overlay above already veils the card for
+                        // rules.isPending; suppress the inner placeholder so
+                        // the two don't stack.
+                        loading={<></>}
                         emptyTitle="No rules yet"
                         emptyNote="Add one to be told when a host runs hot."
                         errorTitle="Alert rules not readable"
@@ -218,6 +227,7 @@ export function AlertsPage() {
           </>
         )}
       </section>
+      </CardLoadingOverlay>
     </div>
   )
 }
