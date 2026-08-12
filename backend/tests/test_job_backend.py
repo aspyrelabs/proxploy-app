@@ -296,6 +296,42 @@ def test_subscribers_receive_line_progress_and_status_frames(tmp_path, monkeypat
     asyncio.run(run())
 
 
+def test_progress_never_reports_a_lower_value_than_the_last_one_for_that_job(tmp_path, monkeypatch):
+    """Safety net on top of the band-aware call sites (services/migrate.py,
+    services/pvetask.py): a handler bug that reports a lower percentage than
+    it already reported must not reach a subscriber or the job row as a
+    regression. This is a backstop, not the fix: it clamps up rather than
+    reflecting the real, lower-but-honest value, which is why the real fix is
+    banding each phase's calls correctly in the first place."""
+    from proxploy.jobs import HANDLERS, JobBackend
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path)
+        backend = JobBackend(app)
+        gate = asyncio.Event()
+
+        async def backslides(ctx, params):
+            await gate.wait()
+            ctx.progress(80)
+            ctx.progress(20)  # would-be regression: must not go backwards
+            return {"ok": True}
+
+        monkeypatch.setitem(HANDLERS, "test.backslides", backslides)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="test.backslides").id
+        q = backend.subscribe(job_id)
+        gate.set()
+        assert await backend.wait(job_id, timeout=5) is True
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+        progress_pcts = [f["data"]["pct"] for f in frames if f["event"] == "progress"]
+        assert progress_pcts == [80, 80]
+
+    asyncio.run(run())
+
+
 def test_sweep_orphans_marks_interrupted_and_never_resumes(tmp_path):
     from proxploy.jobs import JobBackend
     from tests.support import make_job_app

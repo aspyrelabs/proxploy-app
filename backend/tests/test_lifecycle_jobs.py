@@ -88,6 +88,39 @@ def test_app_start_calls_proxmox_and_archives_the_task_log(tmp_path):
     asyncio.run(run())
 
 
+def test_app_start_still_reports_the_10_to_100_bracket_unchanged(tmp_path):
+    """run_lifecycle is a single-await_task caller that never opted into a
+    band (no start_pct/end_pct passed): migrate.py's multi-phase fix must not
+    change what a single-task job like this reports. Locks in pvetask.py's
+    default bracket (10 then 100) as the behaviour every un-opted-in caller
+    keeps."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401  (registers handlers)
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                     target_id=app_id,
+                                     params={"target_id": app_id}).id
+        q = backend.subscribe(job_id)
+        await backend.wait(job_id, timeout=10)
+        progress_pcts = []
+        while not q.empty():
+            frame = q.get_nowait()
+            if frame["event"] == "progress":
+                progress_pcts.append(frame["data"]["pct"])
+        assert progress_pcts == [10, 100]
+
+    asyncio.run(run())
+
+
 def test_vm_pause_uses_qemu_and_the_suspend_verb(tmp_path):
     from proxploy.jobs import JobBackend
     from tests.fakes.pve import FakePVE

@@ -237,6 +237,144 @@ def test_transfer_strategy_copies_archive_restores_on_target_and_cleans_up(tmp_p
     asyncio.run(go())
 
 
+def test_transfer_strategy_progress_never_decreases(tmp_path):
+    """The bug: byte-level transfer progress climbs, vzdump's own bracket
+    closes at what used to be the WHOLE job's 100%, then the SFTP hop's real
+    climb resumes from ~10-18%. Each phase now occupies its own band, so the
+    reported sequence for the whole job must never go down."""
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+        fake_tgt.add_ct(500, node="pve-tgt", name="immich", status="running")
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        q = app.state.jobs.subscribe(job_id)
+        await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                            "target_host_id": tgt_id})
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+        pcts = [f["data"]["pct"] for f in frames if f["event"] == "progress"]
+
+        assert len(pcts) > 1, "expected more than one progress tick"
+        for earlier, later in zip(pcts, pcts[1:]):
+            assert later >= earlier, f"progress went backwards: {pcts}"
+        assert pcts[-1] == 100
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_vzdump_completing_does_not_report_the_whole_job_done(tmp_path):
+    """Root cause of the bug: pvetask.await_task brackets the vzdump task it
+    waits on with ctx.progress(end_pct), which used to default to 100. vzdump
+    finishing a LOCAL staging dump is not the whole migration finishing: 100
+    may legitimately appear more than once at the very tail (the final start
+    task's own end_pct, then the handler's own closing ctx.progress(100)),
+    but it must never show up as a mid-job artifact of an earlier phase's
+    completion, only in one contiguous run at the end."""
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+        fake_tgt.add_ct(500, node="pve-tgt", name="immich", status="running")
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        q = app.state.jobs.subscribe(job_id)
+        await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                            "target_host_id": tgt_id})
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+        pcts = [f["data"]["pct"] for f in frames if f["event"] == "progress"]
+
+        trailing_100s = pcts.count(100)
+        assert trailing_100s >= 1
+        assert pcts[-1] == 100
+        assert 100 not in pcts[:-trailing_100s], (
+            f"100 appeared mid-job, not just in the closing run: {pcts}")
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_byte_level_progress_moves_within_its_own_band(tmp_path, monkeypatch):
+    """The byte-level SFTP progress (services/migrate.py's on_progress) is
+    the most granular signal in the product and must not be flattened into a
+    single jump from its band's start to its band's end: forcing small SFTP
+    chunks should still show multiple distinct, increasing values, all
+    strictly between the vzdump phase's ceiling and the restore phase's
+    floor."""
+    monkeypatch.setattr(transfer_mod, "CHUNK_SIZE", 64)
+
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+        fake_tgt.add_ct(500, node="pve-tgt", name="immich", status="running")
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        q = app.state.jobs.subscribe(job_id)
+        await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                            "target_host_id": tgt_id})
+        frames = []
+        while not q.empty():
+            frames.append(q.get_nowait())
+        pcts = [f["data"]["pct"] for f in frames if f["event"] == "progress"]
+
+        # PAYLOAD is ~29000 bytes; a 64-byte chunk size forces several hundred
+        # on_progress calls, so the transfer band's distinct values must be
+        # more than a single before/after jump.
+        transfer_band = [p for p in pcts if 5 < p < 90]
+        assert len(set(transfer_band)) > 2, (
+            f"byte-level transfer progress looks flattened: {pcts}")
+        for earlier, later in zip(transfer_band, transfer_band[1:]):
+            assert later >= earlier, f"transfer band went backwards: {pcts}"
+
+    asyncio.run(go())
+
+
 def test_transfer_strategy_missing_dir_storage_on_target_fails_naming_the_side(tmp_path):
     async def go():
         fake_src, fake_tgt = FakePVE(), FakePVE()

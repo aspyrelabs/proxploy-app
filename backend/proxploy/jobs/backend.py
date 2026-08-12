@@ -58,10 +58,29 @@ class JobContext:
         self.backend = backend
         self.job_id = job_id
         self._seq = 0
+        # Safety net, not the fix: a job's phases are expected to band their
+        # own calls into a monotonic sequence (services/migrate.py, the
+        # start_pct/end_pct a caller passes to services/pvetask.py's
+        # await_task). This only guards against a handler bug reporting a
+        # value lower than one it already reported; it clamps UP to the last
+        # value rather than reflecting a genuinely lower number, so it must
+        # never be relied on to make a badly-banded job look right, a job
+        # whose real next phase starts low would freeze at the earlier
+        # phase's high-water mark instead of showing honest progress.
+        self._last_pct = 0
 
     def _next_seq(self) -> int:
         self._seq += 1
         return self._seq
+
+    @property
+    def last_pct(self) -> int:
+        """The last value this job reported, for a caller that wants to hold
+        progress steady rather than move it (services/migrate.py's best-effort
+        scratch-file cleanup: deleting a transfer artifact is not forward
+        progress on the migration, but bracketing it through await_task with
+        no band would still jump to that helper's own default end_pct)."""
+        return self._last_pct
 
     def log(self, message: str, stream: str = "stdout") -> None:
         seq = self._next_seq()
@@ -77,6 +96,8 @@ class JobContext:
 
     def progress(self, pct: int) -> None:
         pct = max(0, min(100, int(pct)))
+        pct = max(pct, self._last_pct)  # safety net: never report backwards, see __init__
+        self._last_pct = pct
         with self.backend.app.state.sessionmaker() as db:
             job = db.get(Job, self.job_id)
             if job is not None:

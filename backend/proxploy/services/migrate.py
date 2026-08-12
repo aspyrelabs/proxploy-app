@@ -292,6 +292,26 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
 HEALTH_CHECK_DEADLINE_S = 60.0
 HEALTH_CHECK_POLL_S = 1.0
 
+# migrate_app is several PVE tasks (and, for the transfer strategy, an SFTP
+# hop) chained into one job. Each of pvetask.py's await_task calls brackets
+# its own task with ctx.progress(start_pct) / ctx.progress(end_pct); left at
+# the module default (10, 100) every phase would report itself as the WHOLE
+# job, so vzdump finishing would hit 100 and then the SFTP transfer's real,
+# honest climb would resume from ~10%, the bug this band table fixes. Every
+# strategy's phases are given their own slice of 0-100 here so the number the
+# job reports only ever goes up. The three strategies use different numbers
+# of phases, so each gets its own row; all of them fold back into the same
+# START_PCT band for the final "start the target guest" task, so that one
+# call site doesn't need to know which strategy ran before it.
+STOP_PCT = (0, 5)
+CLUSTER_MIGRATE_PCT = (5, 90)
+SHARED_VZDUMP_PCT = (5, 45)
+SHARED_RESTORE_PCT = (45, 90)
+TRANSFER_VZDUMP_PCT = (5, 40)
+TRANSFER_BYTES_PCT = (40, 80)   # on_progress scales into this band, byte by byte
+TRANSFER_RESTORE_PCT = (80, 90)
+START_PCT = (90, 100)
+
 
 def _load(app, app_id: int, target_host_id: int) -> dict:
     """Blocking: fresh in-handler preflight (never the route's stale one) +
@@ -382,7 +402,15 @@ async def _cleanup_volume(ctx: JobContext, client, node: str, storage: str | Non
     try:
         upid = await asyncio.to_thread(client.storage_delete_volume, node, storage, volid)
         if upid:
-            await await_task(ctx, client, node, upid, timeout_s=timeout_s)
+            # Deleting a scratch archive is not forward progress on the
+            # migration itself: hold the job's reported percentage exactly
+            # where it already was rather than let await_task's own bracket
+            # jump it (its default end_pct is 100, which is the same class
+            # of bug this whole band table exists to fix, see migrate_app's
+            # STOP_PCT/CLUSTER_MIGRATE_PCT/etc comment above).
+            hold = ctx.last_pct
+            await await_task(ctx, client, node, upid, timeout_s=timeout_s,
+                             start_pct=hold, end_pct=hold)
         ctx.log(f"cleaned up transfer artifact {volid}")
     except Exception as e:  # noqa: BLE001  (cleanup is best-effort by design)
         ctx.log(f"could not remove transfer artifact {volid}: {e}", stream="stderr")
@@ -430,7 +458,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         ctx.log(f"stopping CT {source_ctid} on {source_host_name}")
         upid = await asyncio.to_thread(src_client.guest_action, "lxc", source_node,
                                        source_ctid, "stop")
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
+        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+                         start_pct=STOP_PCT[0], end_pct=STOP_PCT[1])
     else:
         ctx.log(f"CT {source_ctid} on {source_host_name} was already stopped")
 
@@ -440,7 +469,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 f"{target_node}")
         upid = await asyncio.to_thread(src_client.migrate_guest, "lxc", source_node,
                                        source_ctid, {"target": target_node})
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
+        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+                         start_pct=CLUSTER_MIGRATE_PCT[0], end_pct=CLUSTER_MIGRATE_PCT[1])
     elif strategy == STRATEGY_SHARED:
         shared = pf["shared_storage"]
         ctx.log(f"vzdump CT {source_ctid} on {source_host_name}/{source_node} "
@@ -448,7 +478,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         upid = await asyncio.to_thread(src_client.vzdump, source_node,
                                        {"vmid": source_ctid, "storage": shared,
                                         "mode": "stop", "compress": "zstd"})
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
+        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+                         start_pct=SHARED_VZDUMP_PCT[0], end_pct=SHARED_VZDUMP_PCT[1])
 
         rows = await asyncio.to_thread(tgt_client.storage_content, target_node,
                                        shared, "backup")
@@ -466,7 +497,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 f"{target_host_name}/{target_node}")
         upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
                                        target_ctid, {"ostemplate": volid, "restore": 1})
-        await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s)
+        await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
+                         start_pct=SHARED_RESTORE_PCT[0], end_pct=SHARED_RESTORE_PCT[1])
     else:  # STRATEGY_TRANSFER, vzdump locally, SFTP the archive, restore
         ssh = loaded["ssh"]
         src_storage_rows = await asyncio.to_thread(src_client.cluster_storage)
@@ -485,7 +517,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         upid = await asyncio.to_thread(src_client.vzdump, source_node,
                                        {"vmid": source_ctid, "storage": src_storage,
                                         "mode": "stop", "compress": "zstd"})
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s)
+        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+                         start_pct=TRANSFER_VZDUMP_PCT[0], end_pct=TRANSFER_VZDUMP_PCT[1])
 
         rows = await asyncio.to_thread(src_client.storage_content, source_node,
                                        src_storage, "backup")
@@ -520,10 +553,12 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         dst_path = f"{tgt_root.rstrip('/')}/dump/{filename}"
 
         def on_progress(done: int) -> None:
-            # 10-80%: vzdump above already reached 10 via await_task's
-            # default start_pct, restore below reaches 100 via its own.
+            # Scales into TRANSFER_BYTES_PCT: vzdump above already reached
+            # this band's floor via its own end_pct, restore below starts
+            # from this band's ceiling via its own start_pct.
+            lo, hi = TRANSFER_BYTES_PCT
             if archive_bytes:
-                ctx.progress(min(80, 10 + int(70 * done / archive_bytes)))
+                ctx.progress(min(hi, lo + int((hi - lo) * done / archive_bytes)))
 
         def on_new_src_fp(fp: str) -> None:
             # Fresh session: the `_load` one that read `ssh` is already closed.
@@ -569,7 +604,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 f"SFTP transfer of {filename} failed: {e}, source CT "
                 f"{source_ctid} on {source_host_name} is stopped but intact"
             ) from e
-        ctx.progress(80)
+        ctx.progress(TRANSFER_BYTES_PCT[1])
 
         ctx.log(f"restoring {dst_volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}")
@@ -577,7 +612,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
                                            target_ctid, {"ostemplate": dst_volid,
                                                          "restore": 1})
-            await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s)
+            await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
+                             start_pct=TRANSFER_RESTORE_PCT[0], end_pct=TRANSFER_RESTORE_PCT[1])
         except JobFailed:
             await _cleanup_volume(ctx, src_client, source_node, src_storage,
                                   src_volid, timeout_s)
@@ -598,7 +634,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"starting CT {target_ctid} on {target_host_name}/{target_node}")
     upid = await asyncio.to_thread(tgt_client.guest_action, "lxc", target_node,
                                    target_ctid, "start")
-    await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s)
+    await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
+                     start_pct=START_PCT[0], end_pct=START_PCT[1])
 
     healthy = await _wait_running(tgt_client, target_ctid)
     if not healthy:
