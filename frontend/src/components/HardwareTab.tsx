@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { CardLoadingOverlay } from './ui/card-loading-overlay'
 import { useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import { fmtBytes } from '../lib/format'
@@ -129,6 +130,23 @@ export function HardwareTab({ hostId, node }: { hostId: number; node: string }) 
           out of reach rather than one privilege being missing.
         </p>
       </section>
+    )
+  }
+  // Was `return null`, so the tab rendered nothing at all for the couple of
+  // seconds this call takes against a real node: a blank pane that reads as a
+  // broken page rather than a slow one. The placeholders are card shaped and
+  // roughly section sized so the real content does not jump into place when it
+  // arrives, which is the whole reason this veil exists rather than a bare
+  // spinner on an empty pane.
+  if (q.isPending) {
+    return (
+      <CardLoadingOverlay state={{ firstLoad: true }} label="Reading hardware">
+        <div className="space-y-4" aria-hidden>
+          <section className={`${card} h-44`} />
+          <section className={`${card} h-44`} />
+          <section className={`${card} h-32`} />
+        </div>
+      </CardLoadingOverlay>
     )
   }
   if (!q.data) return null
