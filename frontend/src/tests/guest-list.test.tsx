@@ -89,4 +89,16 @@ describe('GuestList', () => {
     wrap([])
     expect(screen.queryByText('app')).not.toBeInTheDocument()
   })
+
+  it('badges an app with an update available, and leaves the VM alone', () => {
+    wrap(toGuests([app({ update_available: 'v2.4.0' })], [vm()]))
+    expect(screen.getByText('update')).toBeInTheDocument()
+    expect(screen.getAllByText('update')).toHaveLength(1)
+  })
+
+  it('has real list semantics, not an undifferentiated run of buttons', () => {
+    wrap()
+    expect(screen.getByRole('list')).toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
 })

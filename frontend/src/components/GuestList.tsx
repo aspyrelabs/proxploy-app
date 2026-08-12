@@ -16,6 +16,9 @@ export type Guest = {
   cpu_pct: number | null
   /** Pre-formatted, because only the app side has a total to divide by. */
   mem: string
+  /** AppRow.update_available carried through; null on the VM side, which has
+   *  no update concept. */
+  update?: string | null
 }
 
 /** Apps first, then VMs: the host page lists what Proxploy installed before
@@ -28,6 +31,7 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
       mem: a.mem_total_bytes
         ? `${fmtBytes(a.mem_bytes)} / ${fmtBytes(a.mem_total_bytes)}`
         : fmtBytes(a.mem_bytes),
+      update: a.update_available,
     })),
     ...vms.map((v): Guest => ({
       kind: 'vm', id: v.id, name: v.name, label: `VM ${v.vmid}`,
@@ -35,6 +39,9 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
       // No mem_total_bytes on VmRow. Inventing one to make the two rows match
       // would be making up a number.
       mem: fmtBytes(v.mem_bytes),
+      // VmRow has no update concept at all — not "no update available", but
+      // nothing to report either way.
+      update: null,
     })),
   ]
 }
@@ -47,7 +54,7 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
  *  flattened to name/id/status to match the VMs. */
 export function GuestList({ guests }: { guests: Guest[] }) {
   return (
-    <div className="rounded-card border border-line-soft bg-panel">
+    <div role="list" className="rounded-card border border-line-soft bg-panel">
       {guests.map((g) => <GuestRow key={`${g.kind}-${g.id}`} guest={g} />)}
     </div>
   )
@@ -61,7 +68,8 @@ function GuestRow({ guest: g }: { guest: Guest }) {
     ? { appId: String(g.id) }
     : { vmId: String(g.id) }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line-soft
+    <div role="listitem"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line-soft
                     px-4 py-3 first:border-t-0">
       {/* basis-full below sm puts the name on its own line and lets the id,
           status and usage wrap beneath it; sm:basis-auto resolves the row. */}
@@ -76,6 +84,12 @@ function GuestRow({ guest: g }: { guest: Guest }) {
         {g.kind}
       </span>
       <span className="font-mono text-[11px] text-text-3">{g.label}</span>
+      {g.update && (
+        <span className="rounded bg-amber-dim px-1.5 py-0.5 font-mono text-[9.5px]
+                         uppercase text-amber">
+          update
+        </span>
+      )}
       <StatusPill status={g.status} />
       <div className="flex w-28 items-center gap-2">
         <div className="flex-1"><UsageBar pct={g.cpu_pct} gradient={CPU_GRADIENT} /></div>

@@ -449,7 +449,7 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
 function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
   const entryNode = entry?.node
   return (
-    <div className="mt-5 rounded-card border border-line border-l-2 border-l-amber
+    <div className="rounded-card border border-line border-l-2 border-l-amber
                     bg-panel p-4 text-[13px] text-text-2">
       Metrics and the node shell are recorded on{' '}
       {entryNode
@@ -554,15 +554,16 @@ export function NodeOverview() {
   if (!node && !host) return null
   return (
     <div className="lg:grid lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start lg:gap-5">
-      {/* minmax(0,1fr), not 1fr: the charts' SVG content would otherwise set
-          the column's min-content width and the grid would refuse to shrink
-          below 1440px — the exact bug this stage exists to fix. */}
-      <div className="mb-5 lg:sticky lg:top-16 lg:mb-0">
-        {/* One rail, two sources. NodeIdentityRail merges the poller's
-            snapshot (always there, and the only source for the deduped
-            datastore fill) with the node's own /status (on demand, refusable
-            by a narrow token), so a node that will not answer loses rows —
-            and whole groups — rather than the whole card. */}
+      {/* minmax(0,1fr), not 1fr: it lets the track shrink below the charts'
+          intrinsic content width instead of refusing to shrink at all. */}
+      <div className="mb-5 lg:sticky lg:top-16 lg:mb-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+        {/* The rail is dense reference material, not something worth pinning
+            at the cost of reachability: with /status answering it runs to
+            roughly 700px, and lg:top-16 alone left its bottom rows (Boot,
+            part of Memory & storage) permanently below the fold on any
+            viewport under ~765px tall — a 1366x768 laptop among them,
+            comfortably inside `lg`. max-h + overflow-y-auto trades that for a
+            nested scrollbar, which can always reach the bottom. */}
         {node?.node && (
           <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
         )}
@@ -574,22 +575,34 @@ export function NodeOverview() {
         {node && (node.is_entry
           ? (
             /* Each chart owns its range: "is the CPU spiking now" and "did
-               storage creep all week" are different questions. */
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="cpu_pct"
-                  unit="percent" label="CPU" accent="amber" />
-              </div>
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="mem_pct"
-                  unit="percent" label="Memory" accent="cyan" />
-              </div>
-              {/* Already recorded every cycle by the poller (`disk_pct`), and
-                  correctly shared-vs-local deduped there, so this series is
-                  the host's real fill, not the sum of the node rows. */}
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="disk_pct"
-                  unit="percent" label="Storage" accent="violet" />
+               storage creep all week" are different questions.
+               @container/@3xl, not lg: a chart card needs roughly 200px of
+               inner width to fit its non-wrapping 30m/1h/12h/24h range group,
+               and this RIGHT COLUMN — not the viewport — is what decides
+               that width. The 290px rail plus its gap can hold the column
+               under 200px well past `lg` (~91px of card width at a 1024px
+               viewport, versus ~194px before the rail existed), which is
+               exactly what a viewport-keyed `lg:grid-cols-3` missed. @3xl
+               (768px of container width) is the narrowest container step
+               that still clears ~200px per card once p-5 padding, borders
+               and gap-4 gutters come out of it. */
+            <div className="@container">
+              <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-3">
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="cpu_pct"
+                    unit="percent" label="CPU" accent="amber" />
+                </div>
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="mem_pct"
+                    unit="percent" label="Memory" accent="cyan" />
+                </div>
+                {/* Already recorded every cycle by the poller (`disk_pct`), and
+                    correctly shared-vs-local deduped there, so this series is
+                    the host's real fill, not the sum of the node rows. */}
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="disk_pct"
+                    unit="percent" label="Storage" accent="violet" />
+                </div>
               </div>
             </div>
           )
