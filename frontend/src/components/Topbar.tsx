@@ -37,7 +37,9 @@ export function Topbar() {
     // tie doesn't matter here either — Radix portals it to the end of
     // document.body, later in tree order, so it paints above this header
     // regardless of what z-index either one carries.)
-    <header className="sticky top-0 z-10 flex h-14 items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
+    // justify-end is gone with the search lane's arrival: a flex-1 child
+    // absorbs every pixel of free space, so there is nothing left to justify.
+    <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
       {/* GhostMark below sm: Logo's viewBox (aspect ratio 5.6) renders it
           134px wide at h-6, which alone overruns a 375px header once search,
           bell, tier pill, theme toggle and avatar are laid out beside it.
@@ -47,17 +49,27 @@ export function Topbar() {
         <GhostMark className="h-6 w-6 sm:hidden" />
         <Logo className="hidden h-6 w-auto sm:block" />
       </Link>
-      <button
-        aria-label="Search (Ctrl+K)"
-        onClick={openCommandPalette}
-        className="mr-auto flex h-8 items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
-      >
-        <MagnifyingGlassIcon aria-hidden className="h-[18px] w-[18px]" />
-        <span className="hidden text-[12px] sm:inline">Search</span>
-        <span className="hidden rounded-tile border border-line px-1 font-mono text-[10px] text-text-3 sm:inline">
-          Ctrl+K
-        </span>
-      </button>
+      {/* Centred in a flex-1 lane rather than absolutely positioned: the bar
+          already overran a 375px phone once, and an absolutely-centred control
+          would sit under the mark and the account menu instead of pushing
+          against them. The lane centres the box between the two groups and
+          still collapses cleanly when there is no room. */}
+      <div className="flex min-w-0 flex-1 justify-center">
+        <button
+          aria-label="Search (Ctrl+K)"
+          onClick={openCommandPalette}
+          className="flex h-8 w-full max-w-[220px] items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
+        >
+          <MagnifyingGlassIcon aria-hidden className="h-[18px] w-[18px] shrink-0" />
+          <span className="hidden text-[12px] sm:inline">Search</span>
+          {/* ml-auto, not a gap: the box is now wider than its contents, so the
+              shortcut belongs against the right edge rather than floating
+              beside the word. */}
+          <span className="ml-auto hidden shrink-0 rounded-tile border border-line px-1 font-mono text-[10px] text-text-3 sm:inline">
+            Ctrl+K
+          </span>
+        </button>
+      </div>
       {has('notify.inapp') && (
         <button
           aria-label="Activity"
