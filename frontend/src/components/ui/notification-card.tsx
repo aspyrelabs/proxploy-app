@@ -1,14 +1,7 @@
-import {
-  Bars3BottomLeftIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  InformationCircleIcon,
-  XCircleIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Button } from './button'
+import { Icon } from './icon'
 import { Loading } from './loading'
 
 /**
@@ -30,9 +23,9 @@ import { Loading } from './loading'
  *    (VARIANT below), not worth a new dependency for.
  *  - No `cn` helper: this repo has no clsx/tailwind-merge; class lists are
  *    plain template literals.
- *  - Icons from @heroicons/react/24/outline (already a dependency) instead
- *    of upstream's lucide placeholders: InformationCircleIcon,
- *    CheckCircleIcon, ExclamationTriangleIcon, XCircleIcon.
+ *  - Icons from the self-hosted Material Symbols font (components/ui/
+ *    icon.tsx) instead of upstream's lucide placeholders: info, check_circle,
+ *    warning, cancel.
  *  - Folded Alert/AlertTitle/AlertDescription/AlertAction into one component
  *    instead of shadcn's four-piece slot system: there is exactly one call
  *    site (LiveProvider's `toast.custom`) and it always wants icon + title +
@@ -62,11 +55,14 @@ import { Loading } from './loading'
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'destructive'
 
-const ICON: Record<NotificationSeverity, typeof InformationCircleIcon> = {
-  info: InformationCircleIcon,
-  success: CheckCircleIcon,
-  warning: ExclamationTriangleIcon,
-  destructive: XCircleIcon,
+// `icon:`, not a bare string value, so scripts/icon-names.mjs's build-time
+// scan (the same pattern NAV in SidebarNav.tsx uses) finds these names
+// without needing a second one-off pattern of its own.
+const ICON: Record<NotificationSeverity, { icon: string }> = {
+  info: { icon: 'info' },
+  success: { icon: 'check_circle' },
+  warning: { icon: 'warning' },
+  destructive: { icon: 'cancel' },
 }
 
 // Split in two on purpose. The card needs an OPAQUE base (it floats over the
@@ -82,10 +78,10 @@ const BORDER: Record<NotificationSeverity, string> = {
 }
 
 const FILL: Record<NotificationSeverity, string> = {
-  info: 'bg-blue-dim [&>svg]:text-blue',
-  success: 'bg-green-dim [&>svg]:text-green',
-  warning: 'bg-amber-dim [&>svg]:text-amber',
-  destructive: 'bg-red-dim [&>svg]:text-red',
+  info: 'bg-blue-dim [&>.material-symbols-outlined]:text-blue',
+  success: 'bg-green-dim [&>.material-symbols-outlined]:text-green',
+  warning: 'bg-amber-dim [&>.material-symbols-outlined]:text-amber',
+  destructive: 'bg-red-dim [&>.material-symbols-outlined]:text-red',
 }
 
 export function NotificationCard({
@@ -111,13 +107,13 @@ export function NotificationCard({
   onViewLog?: () => void
   onDismiss: () => void
 }) {
-  const Icon = ICON[severity]
+  const iconName = ICON[severity].icon
   return (
     <div role="alert"
       className={`relative w-[400px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-ctl border bg-panel text-[13px] shadow-[0_8px_24px_rgba(0,0,0,.28)] ${BORDER[severity]}`}
     >
       <div className={`grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-1 px-3 py-2.5 pr-8 ${FILL[severity]}`}>
-        <Icon aria-hidden className="h-4 w-4 translate-y-0.5" />
+        <Icon name={iconName} size={16} className="translate-y-0.5" />
         <div className="col-start-2 font-medium tracking-tight text-text">
           {title}
         </div>
@@ -142,11 +138,11 @@ export function NotificationCard({
         <div className="absolute right-2 top-2 flex items-center gap-1">
           {onViewLog && (
             <IconAction label="View log" onClick={onViewLog}>
-              <Bars3BottomLeftIcon aria-hidden="true" className="h-3.5 w-3.5" />
+              <Icon name="notes" size={14} />
             </IconAction>
           )}
           <IconAction label="Dismiss" onClick={onDismiss}>
-            <XMarkIcon aria-hidden="true" className="h-3.5 w-3.5" />
+            <Icon name="close" size={14} />
           </IconAction>
         </div>
       </Tooltip.Provider>

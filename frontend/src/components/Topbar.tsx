@@ -1,4 +1,4 @@
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { Icon } from './ui/icon'
 import { BellPopover } from './BellPopover'
 import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
@@ -47,7 +47,7 @@ export function Topbar() {
           onClick={openCommandPalette}
           className="flex h-8 w-full max-w-[220px] items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
         >
-          <MagnifyingGlassIcon aria-hidden className="h-[18px] w-[18px] shrink-0" />
+          <Icon name="search" className="shrink-0" />
           <span className="hidden text-[12px] sm:inline">Search</span>
           {/* ml-auto, not a gap: the box is now wider than its contents, so the
               shortcut belongs against the right edge rather than floating

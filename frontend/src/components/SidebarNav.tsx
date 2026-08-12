@@ -1,28 +1,28 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import {
-  ArchiveBoxIcon, BellAlertIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon,
-  CircleStackIcon, ClipboardDocumentListIcon, Cog6ToothIcon, ComputerDesktopIcon,
-  GlobeAltIcon, ServerStackIcon, ShoppingBagIcon, Squares2X2Icon,
-} from '@heroicons/react/24/outline'
+import { Icon } from './ui/icon'
 import { HealthFooter } from './HealthFooter'
 import { readSidebarCollapsed, setSidebarCollapsed } from '../lib/sidebar'
 
+// `icon` is a Material Symbols name (see components/ui/icon.tsx), not a
+// component reference -- these ten are a deliberate, fixed set of concepts
+// (see nav.test.tsx) and each name below is verified against the real font
+// in the material-symbols report, not guessed.
 export const NAV = [
   { label: 'Overview', items: [
-    { label: 'Hosts', to: '/hosts', icon: ServerStackIcon },
-    { label: 'Apps', to: '/apps', icon: Squares2X2Icon },
-    { label: 'App Store', to: '/store', icon: ShoppingBagIcon },
-    { label: 'Virtual Machines', to: '/vms', icon: ComputerDesktopIcon },
+    { label: 'Hosts', to: '/hosts', icon: 'dns' },
+    { label: 'Apps', to: '/apps', icon: 'grid_view' },
+    { label: 'App Store', to: '/store', icon: 'storefront' },
+    { label: 'Virtual Machines', to: '/vms', icon: 'computer' },
   ]},
   { label: 'Infrastructure', items: [
-    { label: 'Storage', to: '/storage', icon: CircleStackIcon },
-    { label: 'Network', to: '/network', icon: GlobeAltIcon },
-    { label: 'Backups', to: '/backups', icon: ArchiveBoxIcon },
-    { label: 'Alerts', to: '/alerts', icon: BellAlertIcon },
-    { label: 'Audit', to: '/audit', icon: ClipboardDocumentListIcon },
-    { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
+    { label: 'Storage', to: '/storage', icon: 'database' },
+    { label: 'Network', to: '/network', icon: 'public' },
+    { label: 'Backups', to: '/backups', icon: 'archive' },
+    { label: 'Alerts', to: '/alerts', icon: 'notifications_active' },
+    { label: 'Audit', to: '/audit', icon: 'fact_check' },
+    { label: 'Settings', to: '/settings', icon: 'settings' },
   ]},
 ] as const
 
@@ -47,9 +47,7 @@ export function SidebarNav() {
           <button type="button" onClick={toggle}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="grid h-8 w-8 place-items-center rounded-tile text-text-3 hover:bg-panel-2 hover:text-text">
-            {collapsed
-              ? <ChevronDoubleRightIcon aria-hidden className="h-[18px] w-[18px]" />
-              : <ChevronDoubleLeftIcon aria-hidden className="h-[18px] w-[18px]" />}
+            <Icon name={collapsed ? 'keyboard_double_arrow_right' : 'keyboard_double_arrow_left'} />
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-2">
@@ -87,7 +85,7 @@ function NavItem({ item, collapsed }: {
       aria-label={collapsed ? item.label : undefined}
       className={`relative flex items-center gap-3 rounded-tile py-2 text-[13.5px] text-text-2 hover:bg-panel-2 hover:text-text ${collapsed ? 'justify-center px-0' : 'px-3'}`}
       activeProps={{ className: 'bg-panel-2 !text-text before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded before:bg-amber' }}>
-      <item.icon aria-hidden className="h-[18px] w-[18px] shrink-0" />
+      <Icon name={item.icon} className="shrink-0" />
       {!collapsed && item.label}
     </Link>
   )

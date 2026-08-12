@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { useQuery } from '@tanstack/react-query'
-import { BellIcon } from '@heroicons/react/24/outline'
+import { Icon } from './ui/icon'
 import { api } from '../api/client'
 import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
@@ -248,7 +248,7 @@ export function BellPopover() {
         aria-label="Activity"
         className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
       >
-        <BellIcon aria-hidden className="h-[18px] w-[18px]" />
+        <Icon name="notifications" />
         {count > 0 && (
           // --amber-ink is not a token in tokens.css; this literal predates
           // this change and is left as-is rather than inventing one.

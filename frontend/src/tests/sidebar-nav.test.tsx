@@ -17,33 +17,31 @@ vi.mock('../components/HealthFooter', () => ({ HealthFooter: () => null }))
 import { NAV, SidebarNav } from '../components/SidebarNav'
 
 describe('SidebarNav icons', () => {
-  it('gives every one of the ten nav items an icon', () => {
+  it('gives every one of the ten nav items an icon name', () => {
     // .map().flat() rather than .flatMap(): with NAV's heterogeneous
     // per-group `as const` tuples, flatMap's overload resolution collapses
     // the item union into the first group's shape and tsc rejects it.
     const items = NAV.map((g) => g.items).flat()
     expect(items).toHaveLength(10)
     for (const item of items) {
-      // Not toBeTypeOf('function'): @heroicons/react v2 icons are
-      // React.forwardRef components, so typeof is 'object' at runtime even
-      // though they render fine as JSX tags. toBeDefined() would also pass
-      // for a stray string or number, so pin the two shapes an icon
-      // component can actually take instead.
-      expect(['function', 'object']).toContain(typeof item.icon)
+      // A Material Symbols name (see components/ui/icon.tsx), not a
+      // component reference -- a plain lowercase snake_case string.
+      expect(item.icon).toMatch(/^[a-z][a-z0-9_]*$/)
     }
   })
 
-  it('renders an svg beside each label, hidden from the accessibility tree', () => {
+  it('renders one icon beside each label, hidden from the accessibility tree', () => {
     render(<SidebarNav />)
-    // Every nav link holds exactly one svg, and that svg is aria-hidden: the
-    // label beside it is the accessible name, so an icon announcing itself
-    // would make every item read twice.
+    // Every nav link holds exactly one icon glyph, and that glyph is
+    // aria-hidden: the label beside it is the accessible name, so an icon
+    // announcing itself would make every item read twice.
     for (const item of NAV.map((g) => g.items).flat()) {
       const link = screen.getByText(item.label).closest('a')
       expect(link, `${item.label} link missing`).not.toBeNull()
-      const svgs = link!.querySelectorAll('svg')
-      expect(svgs).toHaveLength(1)
-      expect(svgs[0].getAttribute('aria-hidden')).toBe('true')
+      const icons = link!.querySelectorAll('.material-symbols-outlined')
+      expect(icons).toHaveLength(1)
+      expect(icons[0].getAttribute('aria-hidden')).toBe('true')
+      expect(icons[0].getAttribute('data-icon')).toBe(item.icon)
     }
   })
 

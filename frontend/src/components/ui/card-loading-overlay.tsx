@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ArrowPathIcon } from '@heroicons/react/24/outline'
+import { Icon } from './icon'
 
 /**
  * Vendored by hand from ReUI's `c-spinner-11` usage example
@@ -15,11 +15,10 @@ import { ArrowPathIcon } from '@heroicons/react/24/outline'
  * (https://reui.io/r/spinner.json) could not be fetched at all -- unlike
  * `c-spinner-11.json`, that endpoint 401s with "Provide your license key via
  * Authorization header", it sits behind ReUI's paid tier and this task has
- * no license key for it. Per this repo's own documented fallback ("if the
- * spinner needs an icon, use @heroicons/react"), the spin is
- * `@heroicons/react`'s `ArrowPathIcon` (a circular-arrow glyph, the standard
- * stand-in for a loading spinner) driven by Tailwind's `animate-spin`,
- * standing in for ReUI's own `<Spinner>` primitive.
+ * no license key for it. The spin is the self-hosted Material Symbols
+ * `refresh` glyph (components/ui/icon.tsx; a circular-arrow shape, the
+ * standard stand-in for a loading spinner) driven by Tailwind's
+ * `animate-spin`, standing in for ReUI's own `<Spinner>` primitive.
  *
  * Further adaptations from the fetched example:
  *  - No `cn` helper: this repo has no clsx/tailwind-merge; class lists are
@@ -86,9 +85,10 @@ export function CardLoadingOverlay({ state, label = 'Loading', className = '', c
           className="absolute inset-0 z-10 grid place-items-center rounded-card
                      bg-panel/80 backdrop-blur-sm motion-reduce:backdrop-blur-none"
         >
-          <ArrowPathIcon
-            aria-hidden="true"
-            className="h-5 w-5 animate-spin text-text-2 motion-reduce:animate-none"
+          <Icon
+            name="refresh"
+            size={20}
+            className="animate-spin text-text-2 motion-reduce:animate-none"
           />
           <span role="status" className="sr-only">{label}</span>
         </div>

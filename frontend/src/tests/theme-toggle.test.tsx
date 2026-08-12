@@ -37,18 +37,28 @@ describe('ThemeToggle', () => {
   // aria-label the WHOLE accessible name rather than a supplement to visible
   // text — so an icon that stopped being aria-hidden, or a label that got
   // dropped as "redundant", would leave the control nameless.
+  //
+  // The button's textContent is not '' any more: Material Symbols is a
+  // ligature font, so the DOM literally holds the glyph's name ("dark_mode")
+  // as text until the browser substitutes it visually. That text is
+  // aria-hidden (asserted below), so it never reaches the accessible name --
+  // the icon's own name is the ONLY text here, which is what "icon-only"
+  // now means for this control.
   it('is icon-only, and keeps the Toggle theme accessible name across a toggle', () => {
     render(<ThemeToggle />)
     const button = screen.getByRole('button', { name: 'Toggle theme' })
-    expect(button.textContent).toBe('')
-    expect(button.querySelector('svg')).not.toBeNull()
+    const icon = button.querySelector('.material-symbols-outlined')
+    expect(icon).not.toBeNull()
+    expect(icon).toHaveAttribute('aria-hidden', 'true')
+    expect(button.textContent).toBe(icon!.textContent)
 
     fireEvent.click(button)
 
     // Still the same element, still reachable by the same name after the flip.
     const sameButton = screen.getByRole('button', { name: 'Toggle theme' })
     expect(sameButton).toBe(button)
-    expect(sameButton.textContent).toBe('')
+    const sameIcon = sameButton.querySelector('.material-symbols-outlined')
+    expect(sameButton.textContent).toBe(sameIcon!.textContent)
     expect(document.documentElement.dataset.theme).toBe('light')
   })
 

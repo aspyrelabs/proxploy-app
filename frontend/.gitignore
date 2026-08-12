@@ -28,3 +28,8 @@ dist-ssr
 /playwright-report/
 /.playwright/
 /.e2e-data/
+
+# Subset Material Symbols font, built by scripts/build-icon-font.mjs as part
+# of `npm run build`. Not checked in: it is derived entirely from src/ and
+# node_modules/material-symbols, and would go stale silently if committed.
+/src/styles/generated/

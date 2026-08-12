@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { MoonIcon, SunIcon } from '@heroicons/react/24/outline'
+import { Icon } from './ui/icon'
 import { applyStoredTheme, setStoredTheme } from '../lib/theme'
 
 /**
@@ -24,9 +24,9 @@ import { applyStoredTheme, setStoredTheme } from '../lib/theme'
  *    live entirely in lib/theme.ts; there is one owner of that state (a
  *    single useState here, no MutationObserver/uncontrolled fallback like
  *    upstream needs for its next-themes-less default mode).
- *  - Icons from @heroicons/react (already a dependency) instead of
- *    lucide-react (which this project deliberately does not depend on), sized
- *    h-4 w-4 to match the control this replaces.
+ *  - Icons from the self-hosted Material Symbols font (via components/ui/
+ *    icon.tsx) instead of lucide-react (which this project deliberately does
+ *    not depend on), sized 18px to match the control this replaces.
  *  - No `cn` helper (this repo has no clsx/tailwind-merge) -- className is
  *    a plain string.
  *  - Icon-only, like upstream, at the user's request: the old ThemeToggle
@@ -148,9 +148,7 @@ export function ThemeToggle() {
     <button ref={buttonRef} aria-label="Toggle theme" title="Toggle theme"
       onClick={toggleTheme}
       className="grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev">
-      {theme === 'dark'
-        ? <SunIcon aria-hidden className="h-[18px] w-[18px]" />
-        : <MoonIcon aria-hidden className="h-[18px] w-[18px]" />}
+      <Icon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} />
     </button>
   )
 }

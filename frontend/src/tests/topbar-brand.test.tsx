@@ -36,9 +36,10 @@ describe('Topbar', () => {
   // The sidebar is max-[720px]:hidden, so before this the product showed no
   // logo at all on a phone. The header is the one chrome that is always there.
   //
-  // Not `container.querySelector('header svg')`: the search control's
-  // MagnifyingGlassIcon also matches that selector, so the assertion stayed
-  // green when <Logo> was deleted outright. Logo carries `role="img"
+  // Not `container.querySelector('header svg')`: Logo is the only <svg> in
+  // the header now (the search control's icon is a Material Symbols span,
+  // not an svg), but asserting on the tag would still miss <Logo> being
+  // swapped for some other svg. Logo carries `role="img"
   // aria-label="Proxploy"`; assert that specifically.
   it('carries the brand mark', () => {
     wrap()
