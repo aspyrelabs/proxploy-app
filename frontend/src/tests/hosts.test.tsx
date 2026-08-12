@@ -7,6 +7,11 @@ let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
 let nodeStatus: Record<string, unknown> | null = null
+// Controls for `/apps?host=` and `/vms?host=` specifically — NodeOverview's
+// own guest queries, distinct from HostsPage's unfiltered `/apps` and `/vms`
+// (which stay empty-array below; nothing in this file exercises their rows).
+let nodeAppsResult: 'empty' | 'ok' | 'error' = 'empty'
+let nodeVmsResult: 'empty' | 'ok' | 'error' = 'empty'
 // NodeDetailPage/NodeOverview/NodeHardware read their own params; reassigned
 // per-test so a single fixture (pve1/pve2/pve3, see the cluster fixture
 // below) can stand in for whichever node a test needs to look at.
@@ -19,6 +24,24 @@ const node = (over: Record<string, unknown> = {}) => ({
   disk_pct: 25, disk_bytes: 2147483648, disk_total_bytes: 34359738368,
   apps: 1, apps_running: 1, vms: 1, vms_running: 1, last_seen_at: null,
   ...over,
+})
+
+// Minimal AppRow/VmRow fixtures for the NodeOverview guest-list tests below.
+// Full field lists live in guest-list.test.tsx; this file only needs enough
+// to prove a row rendered.
+const nodeAppFixture = () => ({
+  id: 7, name: 'jellyfin', slug: 'jellyfin', host_id: 1, host_name: 'host-01',
+  node: 'pve1', ctid: 104, category: null, catalog_slug: null,
+  icon_initials: null, icon_colors: null, web_port: null, web_protocol: null,
+  web_path: null, status: 'running', ip: null, cpu_pct: 12,
+  mem_bytes: 2161287168, mem_total_bytes: 4294967296, uptime_s: 100,
+  update_available: null, adopted: false,
+})
+
+const nodeVmFixture = () => ({
+  id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
+  status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
+  mem_bytes: 2161287168, disk_bytes: null, uptime_s: 500, synced_at: null,
 })
 
 vi.mock('../api/client', () => ({
@@ -57,6 +80,16 @@ vi.mock('../api/client', () => ({
         return Promise.resolve([node({ is_entry: false })])
       }
       return Promise.resolve([node()])
+    }
+    if (path.startsWith('/apps?host=')) {
+      if (nodeAppsResult === 'error') return Promise.reject(new Error('boom'))
+      if (nodeAppsResult === 'ok') return Promise.resolve([nodeAppFixture()])
+      return Promise.resolve([])
+    }
+    if (path.startsWith('/vms?host=')) {
+      if (nodeVmsResult === 'error') return Promise.reject(new Error('boom'))
+      if (nodeVmsResult === 'ok') return Promise.resolve([nodeVmFixture()])
+      return Promise.resolve([])
     }
     if (path.startsWith('/apps')) return Promise.resolve([])
     if (path.startsWith('/vms')) return Promise.resolve([])
@@ -282,6 +315,55 @@ describe('NodeOverview', () => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
     params = { hostId: '1', node: 'pve1' }
+    nodeAppsResult = 'empty'; nodeVmsResult = 'empty'
+  })
+
+  // CRITICAL: GuestList merges apps and VMs under one QueryState keyed to the
+  // apps query alone, so `/apps` -> [] used to short-circuit to the empty
+  // state before `vms` was ever looked at — hiding a real, running VM. A
+  // fresh install with an adopted-app count of zero and real VMs hit this on
+  // first load.
+  it('renders VMs even when the node has zero apps', async () => {
+    nodeAppsResult = 'empty'; nodeVmsResult = 'ok'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('win11-lab')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+    expect(screen.getByText('Guests on this host (1)')).toBeInTheDocument()
+  })
+
+  it('renders apps even when the node has zero VMs', async () => {
+    nodeAppsResult = 'ok'; nodeVmsResult = 'empty'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('jellyfin')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+    expect(screen.getByText('Guests on this host (1)')).toBeInTheDocument()
+  })
+
+  it('shows one empty state, not two, when both apps and VMs are empty', async () => {
+    nodeAppsResult = 'empty'; nodeVmsResult = 'empty'
+    withQuery(<NodeOverview />)
+    expect(await screen.findAllByText('No guests on this node')).toHaveLength(1)
+  })
+
+  it('still renders VMs when the apps query fails', async () => {
+    // QueryState used to gate the whole merged list on the apps query alone:
+    // an apps error rendered "Guests not readable" and hid working VMs
+    // entirely, regardless of what /vms answered.
+    nodeAppsResult = 'error'; nodeVmsResult = 'ok'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('win11-lab')).toBeInTheDocument()
+    expect(screen.queryByText('Guests not readable')).not.toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+  })
+
+  it('still renders apps when the VMs query fails', async () => {
+    // The mirror case: /vms erroring used to be swallowed entirely by
+    // `vms ?? []`, with no error surface and a heading that silently
+    // undercounted.
+    nodeAppsResult = 'ok'; nodeVmsResult = 'error'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('jellyfin')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
   })
 
   it('reports storage used / total in the identity rail', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { api } from '../api/client'
@@ -467,6 +467,73 @@ function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
   )
 }
 
+/** What to draw for "Guests on this host", derived from BOTH the apps and
+ *  VMs queries at once.
+ *
+ *  This replaces a single `QueryState query={nodeAppsQuery}` that decided
+ *  loading/empty/error from the apps query alone and folded `vms` in only
+ *  once apps had already succeeded and come back non-empty — so an
+ *  apps-empty node (a fresh install with real VMs and zero adopted apps) hid
+ *  its VMs behind "No guests on this node", and an apps-erroring node hid
+ *  them behind "Guests not readable". The one behaviour that must hold: if
+ *  either list has rows, those rows render. So: pending if either query is
+ *  still pending; a hard error only when BOTH failed (there is then truly
+ *  nothing to show); otherwise render whatever rows the succeeding side(s)
+ *  have, empty only when that combined count is zero, and a partial-failure
+ *  note — not a swallowed error — when exactly one side failed but the other
+ *  still has something to show. */
+type GuestsState =
+  | { kind: 'loading' }
+  | { kind: 'error'; title: string; note: string }
+  | { kind: 'empty' }
+  | { kind: 'ok'; guests: ReturnType<typeof toGuests>; warning?: string }
+
+function combineGuestQueries(
+  appsQuery: UseQueryResult<AppRow[]>,
+  vmsQuery: UseQueryResult<VmRow[]>,
+): GuestsState {
+  if (appsQuery.isPending || vmsQuery.isPending) return { kind: 'loading' }
+  const appsFailed = appsQuery.isError
+  const vmsFailed = vmsQuery.isError
+  if (appsFailed && vmsFailed) {
+    return {
+      kind: 'error', title: 'Guests not readable',
+      note: 'Proxploy could not reach the backend to list guests on this node.',
+    }
+  }
+  const apps = appsFailed ? [] : appsQuery.data ?? []
+  const vms = vmsFailed ? [] : vmsQuery.data ?? []
+  const guests = toGuests(apps, vms)
+  if (guests.length === 0) {
+    // The failed side might genuinely have guests we simply could not read;
+    // saying "no guests" here would be no more honest than the bug this
+    // replaces. Name the side that failed instead.
+    if (appsFailed) {
+      return {
+        kind: 'error', title: 'Apps not readable',
+        note: 'Proxploy could not reach the backend to list apps on this node. '
+            + 'This node has no VMs either, but that count is only certain, not the apps one.',
+      }
+    }
+    if (vmsFailed) {
+      return {
+        kind: 'error', title: 'VMs not readable',
+        note: 'Proxploy could not reach the backend to list VMs on this node. '
+            + 'This node has no apps either, but that count is only certain, not the VMs one.',
+      }
+    }
+    return { kind: 'empty' }
+  }
+  return {
+    kind: 'ok', guests,
+    warning: appsFailed
+      ? 'Apps could not be read. This list is missing whatever apps this node has.'
+      : vmsFailed
+        ? 'VMs could not be read. This list is missing whatever VMs this node has.'
+        : undefined,
+  }
+}
+
 export function NodeOverview() {
   const { id, node, host, entry } = useNodeContext()
   // mem_pct, not mem_bytes: the poller records both for a host, and charting
@@ -482,8 +549,8 @@ export function NodeOverview() {
     queryFn: () => api<VmRow[]>(`/vms?host=${id}`),
     refetchInterval: 30_000,
   })
-  const apps = nodeAppsQuery.data
-  const vms = nodeVmsQuery.data
+  const guestsState = combineGuestQueries(nodeAppsQuery, nodeVmsQuery)
+  const guestCount = guestsState.kind === 'ok' ? guestsState.guests.length : 0
   if (!node && !host) return null
   return (
     <div className="lg:grid lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start lg:gap-5">
@@ -532,15 +599,33 @@ export function NodeOverview() {
               which node of the cluster a guest sits on, so this list is
               host-wide and says so. */}
           <h2 className="mb-3 font-display text-[16px] font-semibold">
-            Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
+            Guests on this host ({guestCount})
           </h2>
-          <QueryState query={nodeAppsQuery}
-                      emptyTitle="No guests on this node"
-                      emptyNote="Installed or adopted apps and QEMU guests on this node appear here."
-                      errorTitle="Guests not readable"
-                      errorNote="Proxploy could not reach the backend to list guests on this node.">
-            {(rows) => <GuestList guests={toGuests(rows, vms ?? [])} />}
-          </QueryState>
+          {guestsState.kind === 'loading' && (
+            <div role="status" aria-live="polite"
+                 className="grid place-items-center rounded-card border border-dashed
+                           border-line py-20 text-[12.5px] text-text-3">
+              Loading…
+            </div>
+          )}
+          {guestsState.kind === 'error' && (
+            <EmptyState title={guestsState.title} note={guestsState.note} />
+          )}
+          {guestsState.kind === 'empty' && (
+            <EmptyState title="No guests on this node"
+              note="Installed or adopted apps and QEMU guests on this node appear here." />
+          )}
+          {guestsState.kind === 'ok' && (
+            <>
+              {guestsState.warning && (
+                <p role="alert" className="mb-3 rounded-ctl border border-amber/30
+                                           bg-amber-dim p-2 text-[12.5px] text-text-2">
+                  <span className="text-amber">{guestsState.warning}</span>
+                </p>
+              )}
+              <GuestList guests={guestsState.guests} />
+            </>
+          )}
         </div>
       </div>
     </div>
