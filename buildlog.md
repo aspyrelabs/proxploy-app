@@ -1518,3 +1518,11 @@ caught a class of defect the suite cannot see, several times in one day.
   fake-node tests cover the request shape, not the reload itself.
 - `host.power`'s `owner` permission tier is a judgment call with no doc
   precedent, flagged in its own commit, not resolved here.
+- `migrate.py` keeps its `cluster_resources()` reads on the monitoring
+  capability rather than lifecycle or backup, reasoned from PVE's documented
+  ACL filtering but never checked on hardware. Verify a monitoring-only token
+  can still enumerate what migration needs, on a real cluster.
+- Lifecycle now grants `Sys.Modify`, `Datastore.Allocate` and
+  `Datastore.AllocateSpace`. None of those paths (bridge apply, storage pool
+  attach and edit, ISO upload, stray volume delete) has run against real
+  hardware under a lifecycle-scoped token.

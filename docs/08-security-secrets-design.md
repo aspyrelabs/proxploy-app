@@ -39,6 +39,20 @@ per capability, one token per enabled capability.
 | Console | `ProxployConsole` | `VM.Console`; `Sys.Console` only if the user opts into node shells | CT/VM console tickets (termproxy/vncproxy); node shell is a separate opt-in because `Sys.Console` is effectively root on the node |
 | Backup | `ProxployBackup` | `VM.Backup`, `Datastore.AllocateSpace`, `Datastore.Audit` | vzdump/PBS backup + restore jobs, backup listing |
 
+**Lifecycle is no longer guest-only, and that is a deliberate widening.** It
+originally meant "things you do to a CT or VM". It now also carries three
+node-level privileges (`Sys.Modify`, `Datastore.Allocate`,
+`Datastore.AllocateSpace`) because the app edits node network bridges and
+storage pool definitions, and writes storage content (ISO upload, stray volume
+delete), on the guests' behalf. Those calls previously 403'd whichever token
+was pasted, since no capability granted them.
+
+Folding storage-content actions into lifecycle rather than minting a fifth
+capability is a judgement call, recorded here so it is visible rather than
+inferred: it keeps the operator-facing choice at four tokens, at the cost of
+lifecycle granting more than its name suggests. If storage content ever needs
+to be withheld separately from guest operations, this is the seam to split.
+
 This table is implemented in `backend/proxploy/services/pveum.py::CAPABILITIES`,
 transcribed from here rather than derived from application code. It is the
 single source for both the generated script (step 2 below) and the enrolment
