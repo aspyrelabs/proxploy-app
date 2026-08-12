@@ -25,7 +25,8 @@ import { applyStoredTheme, setStoredTheme } from '../lib/theme'
  *    single useState here, no MutationObserver/uncontrolled fallback like
  *    upstream needs for its next-themes-less default mode).
  *  - Icons from @heroicons/react (already a dependency) instead of
- *    lucide-react, sized h-4 w-4 to match the control this replaces.
+ *    lucide-react (which this project deliberately does not depend on), sized
+ *    h-4 w-4 to match the control this replaces.
  *  - No `cn` helper (this repo has no clsx/tailwind-merge) -- className is
  *    a plain string.
  *  - Icon-only, like upstream, at the user's request: the old ThemeToggle

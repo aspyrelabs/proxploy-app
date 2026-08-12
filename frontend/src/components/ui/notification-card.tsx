@@ -1,12 +1,13 @@
 import {
+  Bars3BottomLeftIcon,
   CheckCircleIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
   XCircleIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Logs, XIcon } from 'lucide-react'
 import { Button } from './button'
 
 /**
@@ -134,11 +135,11 @@ export function NotificationCard({
         <div className="absolute right-2 top-2 flex items-center gap-1">
           {onViewLog && (
             <IconAction label="View log" onClick={onViewLog}>
-              <Logs aria-hidden="true" className="h-3.5 w-3.5" />
+              <Bars3BottomLeftIcon aria-hidden="true" className="h-3.5 w-3.5" />
             </IconAction>
           )}
           <IconAction label="Dismiss" onClick={onDismiss}>
-            <XIcon aria-hidden="true" className="h-3.5 w-3.5" />
+            <XMarkIcon aria-hidden="true" className="h-3.5 w-3.5" />
           </IconAction>
         </div>
       </Tooltip.Provider>
