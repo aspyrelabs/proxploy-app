@@ -5,12 +5,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { extractIconNames } from '../../scripts/icon-names.mjs'
 
 /**
- * scripts/icon-names.mjs is what decides which glyphs the production font
- * subset ships with (see scripts/build-icon-font.mjs) -- get its extraction
- * wrong and an icon renders in dev (full font) but goes missing in a build
- * (subset font). These are fixture-based unit tests of the extraction rule
- * itself, in isolation from the real src/ tree; src/tests/icon-subset.test.ts
- * is the end-to-end guard that runs it against real source and real renders.
+ * scripts/icon-names.mjs is what decides which names the Google Fonts CDN
+ * link's `icon_names` parameter requests (see
+ * vite-plugin-material-symbols-link.mjs) -- get its extraction wrong and an
+ * icon renders fine in this test suite (jsdom loads no fonts at all) but
+ * shows up as the literal word in a real browser, because the CDN never
+ * got asked for its glyph. These are fixture-based unit tests of the
+ * extraction rule itself, in isolation from the real src/ tree;
+ * src/tests/icon-names-coverage.test.tsx is the end-to-end guard that runs
+ * it against real source and real renders.
  */
 describe('extractIconNames', () => {
   let dir: string

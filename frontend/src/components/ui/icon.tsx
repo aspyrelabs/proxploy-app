@@ -1,39 +1,39 @@
 import type { ComponentPropsWithoutRef } from 'react'
-import { MATERIAL_SYMBOLS_CODEPOINTS } from '../../lib/material-symbols-codepoints.mjs'
 
 /**
  * Renders one Material Symbols (Outlined) glyph, by name (e.g. "settings").
  *
- * Material Symbols ships each glyph two ways: as a ligature (type the word
- * "settings" as text, the font substitutes an icon) and as a Private Use
- * Area codepoint (map straight to the glyph via cmap, no substitution). This
- * component uses the codepoint form, not the ligature: subsetting by
- * ligature name forces harfbuzz to retain most of the font's shared GSUB
- * substitution tree even for a couple dozen icons (measured 3.3MB, barely
- * under the 3.9MB full font); subsetting by codepoint needs none of that
- * (measured 2.4KB for the same 23 icons). See the material symbols report.
+ * The font loads from the Google Fonts CDN (see vite.config.ts's
+ * materialSymbolsLink plugin, which injects the <link> into index.html with
+ * an `icon_names` parameter listing every name this app actually uses).
+ * Proxploy's app store already downloads container templates over the
+ * internet, so the box has connectivity by definition -- there is no
+ * air-gapped case to build a self-hosted, build-time-subset font for.
  *
- * The DOM still ends up with a text node either way (a lone Private Use
- * Area character rather than the readable word), and a screen reader has no
- * defined pronunciation for a PUA character -- so this is still hidden from
- * the accessibility tree by default, same as the ligature form would need.
+ * Material Symbols is a ligature font: typing the word "settings" as plain
+ * text is what makes the font substitute the glyph, so this component's
+ * text content is the readable name itself, not a decoded codepoint. A
+ * screen reader has no reason to stay silent about a real word, so
+ * `aria-hidden` is still load-bearing here, just for a more ordinary
+ * reason than before: every call site places a label next to the icon (a
+ * nav item's text, a button's aria-label), and that label is already the
+ * accessible name -- an icon that also announced itself would read twice.
  * This component is the one place that rule is enforced, so no call site
- * can forget it. `data-icon` carries the readable name for anything that
- * needs to inspect it (devtools, tests) without decoding the character.
+ * can forget it.
  *
- * Sizing: Heroicons (SVGs) were sized with Tailwind width/height classes
- * (`h-[18px] w-[18px]`). A font glyph has no intrinsic box to size that way
- * -- it renders at `font-size` like any other character. `size` replaces
- * the old class pairs with a single number, applied to `font-size` AND to
- * `width`/`height`, so the glyph keeps the exact square footprint (and thus
- * layout: grid columns, translate offsets, hit targets) the SVG used to
- * occupy. The default (18) matches the most common Heroicons size in this
- * codebase; call sites that used a different size (16, 14, 20) pass it
- * explicitly.
+ * Sizing: a font glyph has no intrinsic box the way an SVG did, it renders
+ * at `font-size` like any other character. `size` applies one number to
+ * `font-size` AND to `width`/`height`, so the glyph keeps a fixed square
+ * footprint regardless of what the surrounding layout expects (grid
+ * columns, translate offsets, hit targets). Default 18, matching the most
+ * common call-site size; four call sites pass a different one explicitly.
  */
 type IconProps = {
-  /** A Material Symbols (Outlined) name, e.g. "settings" -- must have an
-   *  entry in lib/material-symbols-codepoints.ts. */
+  /** A Material Symbols (Outlined) name, e.g. "settings". Must also appear
+   *  in the Google Fonts link's `icon_names` list (vite.config.ts) or it
+   *  renders as the literal word instead of a glyph -- that list is
+   *  generated from every <Icon name="..."> and icon: '...' literal in
+   *  src/, so using a real name here is enough; see scripts/icon-names.mjs. */
   name: string
   /** Pixel size, applied to both font-size and the box the glyph sits in.
    *  Defaults to 18, the size Heroicons used everywhere except the four
@@ -43,22 +43,14 @@ type IconProps = {
 } & Omit<ComponentPropsWithoutRef<'span'>, 'className' | 'children'>
 
 export function Icon({ name, size = 18, className = '', ...rest }: IconProps) {
-  const codepoint = MATERIAL_SYMBOLS_CODEPOINTS[name]
-  if (codepoint === undefined) {
-    throw new Error(
-      `Icon: "${name}" has no entry in lib/material-symbols-codepoints.ts. ` +
-      `Look up its codepoint at https://fonts.google.com/icons and add it there.`,
-    )
-  }
   return (
     <span
       aria-hidden="true"
-      data-icon={name}
       className={`material-symbols-outlined inline-block shrink-0 select-none align-middle leading-none ${className}`}
       style={{ fontSize: size, width: size, height: size }}
       {...rest}
     >
-      {String.fromCodePoint(codepoint)}
+      {name}
     </span>
   )
 }

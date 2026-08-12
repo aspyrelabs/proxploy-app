@@ -15,10 +15,11 @@ import { Icon } from './icon'
  * (https://reui.io/r/spinner.json) could not be fetched at all -- unlike
  * `c-spinner-11.json`, that endpoint 401s with "Provide your license key via
  * Authorization header", it sits behind ReUI's paid tier and this task has
- * no license key for it. The spin is the self-hosted Material Symbols
- * `refresh` glyph (components/ui/icon.tsx; a circular-arrow shape, the
- * standard stand-in for a loading spinner) driven by Tailwind's
- * `animate-spin`, standing in for ReUI's own `<Spinner>` primitive.
+ * no license key for it. The spin is the Material Symbols `progress_activity`
+ * glyph (components/ui/icon.tsx; a partial ring, purpose-built by Material
+ * Symbols as a loading indicator rather than repurposed from a refresh
+ * action) driven by Tailwind's `animate-spin`, standing in for ReUI's own
+ * `<Spinner>` primitive.
  *
  * Further adaptations from the fetched example:
  *  - No `cn` helper: this repo has no clsx/tailwind-merge; class lists are
@@ -86,7 +87,7 @@ export function CardLoadingOverlay({ state, label = 'Loading', className = '', c
                      bg-panel/80 backdrop-blur-sm motion-reduce:backdrop-blur-none"
         >
           <Icon
-            name="refresh"
+            name="progress_activity"
             size={20}
             className="animate-spin text-text-2 motion-reduce:animate-none"
           />

@@ -24,9 +24,10 @@ import { applyStoredTheme, setStoredTheme } from '../lib/theme'
  *    live entirely in lib/theme.ts; there is one owner of that state (a
  *    single useState here, no MutationObserver/uncontrolled fallback like
  *    upstream needs for its next-themes-less default mode).
- *  - Icons from the self-hosted Material Symbols font (via components/ui/
- *    icon.tsx) instead of lucide-react (which this project deliberately does
- *    not depend on), sized 18px to match the control this replaces.
+ *  - Icons from the Google Fonts CDN Material Symbols font (via
+ *    components/ui/icon.tsx) instead of lucide-react (which this project
+ *    deliberately does not depend on), sized 18px to match the control this
+ *    replaces.
  *  - No `cn` helper (this repo has no clsx/tailwind-merge) -- className is
  *    a plain string.
  *  - Icon-only, like upstream, at the user's request: the old ThemeToggle

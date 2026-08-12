@@ -133,3 +133,20 @@ html[data-theme-transition="active"]::view-transition-new(root) {
   border: none;
   padding: 0;
 }
+
+/* Material Symbols loads from the Google Fonts CDN (vite.config.ts injects
+   the <link>; components/ui/icon.tsx renders each icon's readable ligature
+   name, e.g. "settings", as its own text content) rather than being
+   self-hosted, so a slow or blocked connection can leave that literal word
+   showing before the font arrives. Every icon starts invisible and
+   src/lib/reveal-icons-when-ready.ts flips `icons-ready` onto <html> once
+   the font has actually settled (success or failure), so there is never a
+   flash of readable text where a glyph belongs -- see that file for why
+   revealing anyway on failure, rather than hiding forever, is the right
+   call here. */
+.material-symbols-outlined {
+  opacity: 0;
+}
+html.icons-ready .material-symbols-outlined {
+  opacity: 1;
+}

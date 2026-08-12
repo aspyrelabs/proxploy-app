@@ -91,4 +91,16 @@ describe('CardLoadingOverlay', () => {
     await waitFor(() => expect(screen.getByText('second page')).toBeInTheDocument())
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
+
+  it('spins the progress_activity glyph, Material Symbols\' purpose-built spinner icon', async () => {
+    const d = deferred<string>()
+    const { container } = wrap(<TestCard queryFn={() => d.promise} />)
+
+    await screen.findByRole('status')
+    const spinner = container.querySelector('.material-symbols-outlined')
+    expect(spinner).not.toBeNull()
+    expect(spinner!.textContent).toBe('progress_activity')
+
+    d.resolve('loaded')
+  })
 })

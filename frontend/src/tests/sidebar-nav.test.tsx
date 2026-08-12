@@ -41,7 +41,7 @@ describe('SidebarNav icons', () => {
       const icons = link!.querySelectorAll('.material-symbols-outlined')
       expect(icons).toHaveLength(1)
       expect(icons[0].getAttribute('aria-hidden')).toBe('true')
-      expect(icons[0].getAttribute('data-icon')).toBe(item.icon)
+      expect(icons[0].textContent).toBe(item.icon)
     }
   })
 

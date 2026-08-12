@@ -23,7 +23,7 @@ import { Loading } from './loading'
  *    (VARIANT below), not worth a new dependency for.
  *  - No `cn` helper: this repo has no clsx/tailwind-merge; class lists are
  *    plain template literals.
- *  - Icons from the self-hosted Material Symbols font (components/ui/
+ *  - Icons from the Google Fonts CDN Material Symbols font (components/ui/
  *    icon.tsx) instead of upstream's lucide placeholders: info, check_circle,
  *    warning, cancel.
  *  - Folded Alert/AlertTitle/AlertDescription/AlertAction into one component

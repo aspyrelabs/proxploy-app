@@ -11,7 +11,8 @@ import { join } from 'node:path'
 // All three bottom out in plain string literals somewhere in the source
 // text, never a value that only exists at runtime (an import, a function
 // call) -- an icon name that can't be read straight out of the source can't
-// be subset at build time either, so it isn't a name this extractor
+// go into the Google Fonts link's icon_names parameter either (see
+// vite-plugin-material-symbols-link.mjs), so it isn't a name this extractor
 // resolves.
 const ICON_NAME_ATTR = /<Icon\b[^>]*?\bname\s*=\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|\{([^{}]*)\})/g
 const ICON_FIELD = /\bicon\s*:\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)')/g
@@ -62,10 +63,11 @@ function collectIconNameAttrs(text, into) {
 }
 
 /** Every Material Symbols name referenced anywhere under `srcDir`, as a Set.
- *  This is the single source of truth for both the build-time font subset
- *  (scripts/build-icon-font.mjs) and the dev/prod parity guard
- *  (src/tests/icon-subset.test.ts) -- there is no separately hand-maintained
- *  list of icon names to drift out of sync with either one. */
+ *  This is the single source of truth for both the Google Fonts CDN link's
+ *  `icon_names` parameter (vite-plugin-material-symbols-link.mjs) and the
+ *  rendered-vs-extracted coverage guard
+ *  (src/tests/icon-names-coverage.test.tsx) -- there is no separately
+ *  hand-maintained list of icon names to drift out of sync with either one. */
 export function extractIconNames(srcDir) {
   const names = new Set()
   for (const file of walk(srcDir)) {
