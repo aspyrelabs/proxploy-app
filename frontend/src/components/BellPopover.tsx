@@ -143,9 +143,12 @@ export function BellPopover() {
 
   /** align="end" pins the cards to the BELL's right edge, and the bell is not
    *  the rightmost control — the account menu is — so that left a wide gap.
-   *  Radix's alignOffset is a crossAxis offset (positive = right for a
-   *  bottom-side popover), so this measures how far the bell sits from the
-   *  window edge and shifts by exactly that, less the gap we want to keep. */
+   *
+   *  alignOffset shifts along the alignment axis, and for align="end" it runs
+   *  toward the START: a positive value moves the cards further LEFT, deeper
+   *  into the window, which is the opposite of what is wanted here. Hence the
+   *  negation. Measured, not hardcoded, so a longer display name in the
+   *  account menu or a different tier pill cannot put it back out. */
   const [alignOffset, setAlignOffset] = useState(0)
   useLayoutEffect(() => {
     if (!open) return
@@ -154,7 +157,7 @@ export function BellPopover() {
       if (!el) return
       const { right } = el.getBoundingClientRect()
       const shift = Math.max(0, window.innerWidth - EDGE_GAP_PX - right)
-      setAlignOffset((cur) => (cur === shift ? cur : shift))
+      setAlignOffset((cur) => (cur === -shift ? cur : -shift))
     }
     place()
     window.addEventListener('resize', place)
