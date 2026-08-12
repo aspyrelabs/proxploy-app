@@ -112,10 +112,29 @@ function useFittingCount(
 }
 import { Dialog } from './ui/dialog'
 import { JobLog } from './JobLog'
-import { EmptyState } from './EmptyState'
 import { LoadingBlock } from './ui/loading'
 import { NotificationCard } from './ui/notification-card'
 import type { NotificationSeverity } from './ui/notification-card'
+
+/** The tray's own empty/error placeholder, sized to sit alongside the
+ *  NotificationCards it stands in for rather than EmptyState's page-level
+ *  `py-20`. EmptyState is a page-level component (11 other callers rely on
+ *  that full-height treatment for a whole route going empty); this tray is a
+ *  400px popover, and the same box read as a mostly blank rectangle far
+ *  taller than any card it replaced. Local to this file rather than a variant
+ *  on EmptyState: nothing else needs a compact empty state today, and a
+ *  shared variant would be speculative reuse for a problem this file alone
+ *  has. Borrows NotificationCard's own chrome (rounded-ctl, border-line,
+ *  bg-panel, shadow) so it reads as a card that happens to hold a message
+ *  instead of a shape borrowed from a page it isn't. */
+function TrayEmptyState({ title, note }: { title: string; note: string }) {
+  return (
+    <div className="rounded-ctl border border-line bg-panel px-3 py-2.5 text-center shadow-lg">
+      <h2 className="font-display text-[16px] text-text-2">{title}</h2>
+      <p className="mt-1 text-[12.5px] text-text-3">{note}</p>
+    </div>
+  )
+}
 
 /** One notification, as a card.
  *
@@ -370,13 +389,13 @@ export function BellPopover() {
               the other. The loading/error/empty states below are therefore
               about the MERGED list being empty, not about jobsQuery alone. */}
           {undismissed.length === 0 && jobsQuery.isError ? (
-            <EmptyState title="Notifications not readable"
-                        note="Proxploy could not reach the backend." />
+            <TrayEmptyState title="Notifications not readable"
+                            note="Proxploy could not reach the backend." />
           ) : undismissed.length === 0 && (jobsQuery.isPending || jobsQuery.data === undefined) ? (
             <LoadingBlock />
           ) : undismissed.length === 0 ? (
-            <EmptyState title="Nothing to report."
-                        note="Installs, lifecycle actions and backups show up here." />
+            <TrayEmptyState title="Nothing to report."
+                            note="Installs, lifecycle actions and backups show up here." />
           ) : (
             <>
               {/* Only shown from two cards up, mirroring the sonner-era
