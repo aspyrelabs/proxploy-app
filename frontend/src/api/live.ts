@@ -76,6 +76,18 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
   qc.invalidateQueries({ queryKey: [key] })
 }
 
+/** The severity NotificationCard (components/ui/notification-card.tsx) takes,
+ *  which LiveProvider's `job`/`alert` SSE handlers render via `toast.custom`
+ *  in place of the plain toast.success/toast.error calls those used to be. */
+export type ToastSeverity = 'info' | 'success' | 'warning' | 'destructive'
+
+/** applyJob's toast kind -> card severity: ok is good news, err is bad news,
+ *  anything else (queued/running/progress, an intermediate delta that still
+ *  reached the toast callback) is informational rather than either. */
+export function jobToastSeverity(kind: 'ok' | 'err' | 'info'): ToastSeverity {
+  return kind === 'ok' ? 'success' : kind === 'err' ? 'destructive' : 'info'
+}
+
 type JobDelta = {
   id: number; kind?: string; status?: string
   progress_pct?: number; target_type?: string | null
@@ -119,6 +131,18 @@ type AlertDelta = {
   severity: 'info' | 'warning' | 'critical'; message: string
 }
 type AlertToastFn = (t: { kind: 'ok' | 'err'; text: string; alertId: number }) => void
+
+/** applyAlert's toast kind, plus the severity the alert *payload* itself
+ *  carries -> card severity. A resolution is always good news regardless of
+ *  how bad the alert was (applyAlert below toasts 'ok' at any severity); a
+ *  firing alert keeps the distinction the payload already draws between
+ *  'warning' and 'critical' rather than collapsing both into one colour --
+ *  applyAlert never calls this for a firing 'info' alert, since it stays
+ *  quiet at that severity (doc 06: warning+). */
+export function alertToastSeverity(kind: 'ok' | 'err', payloadSeverity: AlertDelta['severity']): ToastSeverity {
+  if (kind === 'ok') return 'success'
+  return payloadSeverity === 'critical' ? 'destructive' : 'warning'
+}
 
 /** SSE `alert` event → invalidate `['alerts','firing']`; toast for `firing` at
  *  warning+ severity (doc 06 §d, verbatim).

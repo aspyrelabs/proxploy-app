@@ -57,8 +57,8 @@ export function Topbar() {
           </span>
         </button>
       </div>
-      {has('notify.inapp') && <BellPopover />}
       <TierPill />
+      {has('notify.inapp') && <BellPopover />}
       <ThemeToggle />
       <AccountMenu />
     </header>

@@ -22,7 +22,6 @@ export function AppShell() {
       <Toaster
         position="bottom-right"
         duration={2600}
-        closeButton
         toastOptions={{
           className: 'rounded-ctl border border-line bg-panel-2 text-text text-[13px]',
         }}
