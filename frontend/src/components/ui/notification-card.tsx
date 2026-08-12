@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react'
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
   XCircleIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { Logs, XIcon } from 'lucide-react'
+import { Button } from './button'
 
 /**
  * Vendored by hand from ReUI's `alert` component (https://reui.io/r/alert.json,
@@ -85,7 +85,7 @@ const FILL: Record<NotificationSeverity, string> = {
 }
 
 export function NotificationCard({
-  severity, title, description, footer, action, onDismiss,
+  severity, title, description, footer, onViewLog, onDismiss,
 }: {
   severity: NotificationSeverity
   title: string
@@ -96,11 +96,10 @@ export function NotificationCard({
    *  Deliberately a single line: the full label/value table this replaced
    *  buried the message it was meant to support. */
   footer?: string
-  /** Optional trailing control — ReUI's AlertAction, which was dropped when
-   *  nothing needed it. The bell's cards use it for "View log"; toasts pass
-   *  nothing, because a transient toast is the wrong place to start reading a
+  /** When given, a log control sits beside the dismiss control. Toasts leave
+   *  it out: a card that vanishes in 2.6s is the wrong place to start reading a
    *  transcript. */
-  action?: ReactNode
+  onViewLog?: () => void
   onDismiss: () => void
 }) {
   const Icon = ICON[severity]
@@ -120,18 +119,22 @@ export function NotificationCard({
             {description}
           </div>
         )}
-        {action && <div className="col-start-2 mt-1.5">{action}</div>}
         {footer && (
           <div className="col-start-2 mt-0.5 font-mono text-[11px] text-text-3">
             {footer}
           </div>
         )}
       </div>
-      <button type="button" aria-label="Dismiss" onClick={onDismiss}
-        className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-tile text-text-3 hover:bg-elev hover:text-text"
-      >
-        <XMarkIcon aria-hidden className="h-3.5 w-3.5" />
-      </button>
+      <div className="absolute right-2 top-2 flex items-center gap-1">
+        {onViewLog && (
+          <Button size="icon-xs" variant="ghost" aria-label="View log" onClick={onViewLog}>
+            <Logs aria-hidden="true" className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={onDismiss}>
+          <XIcon aria-hidden="true" className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }

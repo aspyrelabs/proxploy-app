@@ -105,7 +105,6 @@ function useFittingCount(
 }
 import { Dialog } from './ui/dialog'
 import { JobLog } from './JobLog'
-import { Button } from './ui/button'
 import { QueryState } from './QueryState'
 import { NotificationCard } from './ui/notification-card'
 import type { NotificationSeverity } from './ui/notification-card'
@@ -285,12 +284,7 @@ export function BellPopover() {
                     title={`${j.kind} #${j.id}`}
                     description={messageOf(j)}
                     footer={footerOf(j)}
-                    action={
-                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                              onClick={() => setLogJob(j)}>
-                        View log
-                      </Button>
-                    }
+                    onViewLog={() => setLogJob(j)}
                     onDismiss={() => setDismissed((d) => [...d, j.id])}
                   />
                 ))}
