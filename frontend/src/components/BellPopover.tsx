@@ -34,9 +34,20 @@ const CHROME_PX = 96
  *
  *  In jsdom every offsetHeight is 0, so the measurement is skipped entirely and
  *  the ceiling stands — tests assert on MAX_VISIBLE, not on layout. */
-function useFittingCount(listRef: React.RefObject<HTMLDivElement | null>, open: boolean) {
+function useFittingCount(
+  listRef: React.RefObject<HTMLDivElement | null>,
+  open: boolean,
+  total: number,
+) {
   const [count, setCount] = useState(() =>
     Math.max(1, Math.min(MAX_VISIBLE, Math.floor((window.innerHeight - CHROME_PX) / CARD_ESTIMATE_PX))))
+
+  /** The count that was tried and did not fit, at one particular window height.
+   *  Without it, growth and shrink fight: adding a card that overflows shrinks
+   *  back, leaving room that looks like space for another card, which gets
+   *  added, which overflows. Forgotten as soon as the window resizes, because a
+   *  different height deserves a fresh attempt. */
+  const blocked = useRef<{ available: number; count: number } | null>(null)
 
   useLayoutEffect(() => {
     if (!open) return
@@ -48,6 +59,7 @@ function useFittingCount(listRef: React.RefObject<HTMLDivElement | null>, open: 
       if (measured.length === 0) return   // jsdom, or not laid out yet
       const gap = 8
       const available = window.innerHeight - CHROME_PX
+
       let used = 0
       let n = 0
       for (const card of measured) {
@@ -56,10 +68,33 @@ function useFittingCount(listRef: React.RefObject<HTMLDivElement | null>, open: 
         used = next
         n += 1
       }
-      // At least one, even on a window too short for it: a clipped card beats
-      // a popover that opens empty and looks broken.
-      const fitted = Math.max(1, Math.min(MAX_VISIBLE, n))
-      setCount((cur) => (cur === fitted ? cur : fitted))
+
+      if (n < measured.length) {
+        // Overflowed. Shrink to what actually fits, and remember that one more
+        // than that does not, so the growth branch cannot immediately undo it.
+        blocked.current = { available, count: n + 1 }
+        const fitted = Math.max(1, n)
+        setCount((cur) => (cur === fitted ? cur : fitted))
+        return
+      }
+
+      // Everything rendered fits, so the window may have grown. The loop above
+      // can only count cards that are RENDERED, which is why shrinking used to
+      // be a one-way ratchet: the measurement was bounded by its own previous
+      // result, so a window that grew back had nothing new to measure.
+      //
+      // Growing one at a time re-renders, re-measures, and either keeps going
+      // or trips the block above. That converges without guessing the next
+      // card's height, which is unknowable in advance — a failure's message
+      // wraps to however many lines its error needs.
+      const isBlocked = blocked.current !== null
+        && blocked.current.available === available
+        && count + 1 >= blocked.current.count
+      const room = available - used
+      const shortest = Math.min(...measured.map((c) => c.offsetHeight))
+      if (!isBlocked && count < MAX_VISIBLE && count < total && room >= shortest + gap) {
+        setCount((cur) => Math.min(MAX_VISIBLE, total, cur + 1))
+      }
     }
     fit()
     window.addEventListener('resize', fit)
@@ -163,7 +198,6 @@ export function BellPopover() {
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
   })
-  const visible = useFittingCount(listRef, open)
 
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
   // created_at desc, so a long-running job older (by creation time) than the
@@ -185,6 +219,10 @@ export function BellPopover() {
   // after a fractional-second suffix like '.123456Z', so a zero-microsecond
   // row would sort as newer than a genuinely later same-second row).
   const jobsQuery = useJobs({ enabled: open })
+  // The fit loop needs to know how many cards COULD be shown, or it would keep
+  // trying to grow past the end of the list on a tall window with few jobs.
+  const undismissedCount = (jobsQuery.data ?? []).filter((j) => !dismissed.includes(j.id)).length
+  const visible = useFittingCount(listRef, open, undismissedCount)
 
   return (
     <PopoverPrimitive.Root
