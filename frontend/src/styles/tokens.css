@@ -85,3 +85,31 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .pp-rail-fill, .pp-tick, .pp-in-fwd, .pp-in-back { animation: none }
 }
+
+/* ThemeToggle's circular wipe (components/ThemeToggle.tsx), ported from
+   MagicUI's animated-theme-toggler required-CSS step, plus one rule that
+   step doesn't actually ship (see ThemeToggle.tsx for why). All three are
+   necessary for the effect, not just polish:
+   - Without the first rule the browser's default old/new crossfade competes
+     visibly with the clip-path wipe driven from ThemeToggle.tsx.
+   - Without the second, the view-transition group's default ~250ms UA
+     animation can finish before the wipe's own animation does, which lets
+     the browser tear the transition pseudo-tree down mid-wipe.
+   - Without the third, a browser that paints ::view-transition-new(root)
+     before ThemeToggle.tsx's animate() call produces its first frame (seen
+     on Firefox) shows the new theme fully unclipped for a frame.
+   The last two are scoped to [data-theme-transition="active"], which
+   ThemeToggle.tsx sets only while a toggle is in flight, so neither touches
+   any other view transition this app might add later. */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-theme-transition="active"]::view-transition-group(root) {
+  animation-duration: 400ms;
+}
+
+html[data-theme-transition="active"]::view-transition-new(root) {
+  clip-path: var(--pp-theme-vt-clip-from);
+}
