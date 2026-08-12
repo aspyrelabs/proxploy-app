@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' = 'ok'
+let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' = 'ok'
 let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
@@ -49,6 +49,12 @@ vi.mock('../api/client', () => ({
           node({ node: 'pve3', cluster: 'prod', is_entry: false, status: 'unreachable' }),
           node({ host_id: 2, name: 'host-02', node: 'lab', cluster: null }),
         ])
+      }
+      // No row for this host claims is_entry — the entry node dropped out of
+      // /cluster/nodes (or the host was never fully enrolled), so nothing
+      // here can be named or linked to.
+      if (nodesResult === 'noEntry') {
+        return Promise.resolve([node({ is_entry: false })])
       }
       return Promise.resolve([node()])
     }
@@ -349,6 +355,16 @@ describe('NodeOverview', () => {
     withQuery(<NodeOverview />)
     expect(await screen.findByText('Identity')).toBeInTheDocument()
     expect(screen.queryByText(/recorded on/i)).not.toBeInTheDocument()
+  })
+
+  it('still says the sentence, with no link, when no entry node is known', async () => {
+    // No row for this host claims is_entry: true (the fixture above) — the
+    // note must still name the reason, just without a node to point at.
+    nodesResult = 'noEntry'
+    params = { hostId: '1', node: 'pve1' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText(/this host.s entry node/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^Open /)).not.toBeInTheDocument()
   })
 })
 

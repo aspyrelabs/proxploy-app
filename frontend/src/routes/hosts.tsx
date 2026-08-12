@@ -447,19 +447,20 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
  *  simply absent on every other node of a cluster, which reads as a missing
  *  feature rather than a deliberate one. */
 function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
+  const entryNode = entry?.node
   return (
     <div className="mt-5 rounded-card border border-line border-l-2 border-l-amber
                     bg-panel p-4 text-[13px] text-text-2">
       Metrics and the node shell are recorded on{' '}
-      {entry?.node
-        ? <span className="font-mono text-text">{entry.node}</span>
+      {entryNode
+        ? <span className="font-mono text-text">{entryNode}</span>
         : <span>this host&rsquo;s entry node</span>}
       , the node Proxploy connects through.{' '}
-      {entry?.node && (
+      {entryNode && (
         <Link to={'/hosts/$hostId/$node' as never}
-          params={{ hostId: String(hostId), node: entry.node } as never}
+          params={{ hostId: String(hostId), node: entryNode } as never}
           className="text-amber hover:underline">
-          Open {entry.node} →
+          Open {entryNode} →
         </Link>
       )}
     </div>
