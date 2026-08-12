@@ -2,67 +2,35 @@ import { useState } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { useQuery } from '@tanstack/react-query'
 import { BellIcon } from '@heroicons/react/24/outline'
-import { toast } from 'sonner'
-import { ApiError, api } from '../api/client'
-import { TERMINAL, useCancelJob, useJobs } from '../api/jobs'
+import { api } from '../api/client'
+import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
-import { ago, TINT } from './activityDisplay'
-import { JobLog } from './JobLog'
+import { ago } from './activityDisplay'
 import { QueryState } from './QueryState'
-import { Button } from './ui/button'
+import { NotificationCard } from './ui/notification-card'
+import type { NotificationSeverity } from './ui/notification-card'
 
-/** Doc 05 `POST /jobs/{id}/cancel`: only a job that hasn't reached a terminal
- *  state can be cancelled. Same rule ActivityFeed's isCancellable encodes,
- *  against TERMINAL rather than a locally re-listed 'running' | 'queued'. */
-function isCancellable(job: JobRow): boolean {
-  return !TERMINAL.includes(job.status)
+/** One notification, as a card.
+ *
+ *  The user asked for notification cards rather than a list, so this renders
+ *  the same NotificationCard the live toasts use — same four severities, same
+ *  x — instead of the bespoke row this popover shipped with. Dismiss hides the
+ *  card locally: /jobs is a server-side record, not an inbox, so there is
+ *  nothing to mark read; the x clears it from view until the query refetches.
+ */
+function severityOf(status: string): NotificationSeverity {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'destructive'
+  if (status === 'canceled' || status === 'interrupted') return 'warning'
+  return 'info'
 }
 
-function JobItem({ job, expanded, onToggle }: {
-  job: JobRow
-  expanded: boolean
-  onToggle: () => void
-}) {
-  const cancel = useCancelJob()
-  const tint = TINT[job.status] ?? 'bg-panel-2 text-text-3'
-
-  const onCancel = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    cancel.mutate(job.id, {
-      onError: (err) => {
-        const detail = err instanceof ApiError && typeof (err.body as Record<string, unknown>)?.detail === 'string'
-          ? (err.body as Record<string, unknown>).detail as string
-          : 'Could not cancel that job.'
-        toast.error(detail)
-      },
-    })
-  }
-
-  return (
-    <div data-testid="bell-job" className="border-b border-line-soft px-3 py-2.5 last:border-b-0">
-      <div className="flex items-start gap-2">
-        <button className="min-w-0 flex-1 text-left" onClick={onToggle}>
-          <span className={`inline-block rounded-tile px-1.5 py-0.5 font-mono text-[10px] uppercase ${tint}`}>
-            {job.status}
-          </span>
-          <div className="mt-1 truncate font-mono text-[12.5px] text-text">
-            {job.kind} #{job.id}
-          </div>
-          <div className="truncate font-mono text-[11px] text-text-3">
-            {job.target_type ?? 'system'}{job.target_id != null ? ` ${job.target_id}` : ''} · {ago(job.created_at)}
-          </div>
-        </button>
-        {isCancellable(job) && (
-          <Button variant="ghost" className="shrink-0 px-2 py-1 text-[11px]"
-                  disabled={cancel.isPending} onClick={onCancel}>
-            Cancel
-          </Button>
-        )}
-      </div>
-      {job.error && <div className="mt-1.5 text-[11.5px] text-red">{job.error}</div>}
-      {expanded && <div className="mt-2"><JobLog jobId={job.id} /></div>}
-    </div>
-  )
+function describe(job: JobRow): string {
+  const where = `${job.target_type ?? 'system'}${job.target_id != null ? ` ${job.target_id}` : ''}`
+  // A failure's reason is the whole point of showing it; the target and age
+  // are context that follows it.
+  return job.error ? `${job.error} — ${where} · ${ago(job.created_at)}`
+                   : `${where} · ${ago(job.created_at)}`
 }
 
 /**
@@ -76,7 +44,7 @@ function JobItem({ job, expanded, onToggle }: {
  */
 export function BellPopover() {
   const [open, setOpen] = useState(false)
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [dismissed, setDismissed] = useState<number[]>([])
 
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
   // created_at desc, so a long-running job older (by creation time) than the
@@ -102,7 +70,7 @@ export function BellPopover() {
   return (
     <PopoverPrimitive.Root
       open={open}
-      onOpenChange={(next) => { setOpen(next); if (!next) setExpandedId(null) }}
+      onOpenChange={setOpen}
     >
       <PopoverPrimitive.Trigger
         aria-label="Activity"
@@ -137,13 +105,15 @@ export function BellPopover() {
                         errorNote="Proxploy could not reach the backend to list recent jobs.">
               {(jobs) => (
                 <>
-                  {jobs.map((j) => (
-                    <JobItem
-                      key={j.id}
-                      job={j}
-                      expanded={expandedId === j.id}
-                      onToggle={() => setExpandedId((cur) => (cur === j.id ? null : j.id))}
-                    />
+                  {jobs.filter((j) => !dismissed.includes(j.id)).map((j) => (
+                    <div key={j.id} className="px-2 py-1.5">
+                      <NotificationCard
+                        severity={severityOf(j.status)}
+                        title={`${j.kind} #${j.id}`}
+                        description={describe(j)}
+                        onDismiss={() => setDismissed((d) => [...d, j.id])}
+                      />
+                    </div>
                   ))}
                 </>
               )}

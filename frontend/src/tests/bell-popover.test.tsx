@@ -3,7 +3,7 @@
  *  the replacement: a popover anchored to the topbar bell, reading /jobs
  *  (not /cluster/activity, whose ActivityRow has no `error` field). */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JobRow } from '../api/jobs'
 
@@ -121,48 +121,33 @@ describe('BellPopover', () => {
     expect(await screen.findByText(/no jobs yet/i)).toBeInTheDocument()
   })
 
-  it('offers Cancel on the running job but not on the succeeded one', async () => {
+  // The user asked for notification cards rather than a list, so each row is
+  // the same NotificationCard the live toasts use: role="alert", a severity,
+  // and its own dismiss. Cancel and the expandable job log went with the list.
+  it('renders each job as a notification card, not a list row', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
-    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
-    const runningRow = screen.getByText(/app\.start/).closest('[data-testid="bell-job"]')!
-    expect(within(runningRow as HTMLElement).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    const cards = await screen.findAllByRole('alert')
+    expect(cards.length).toBeGreaterThan(0)
+    expect(cards[0].querySelector('button[aria-label="Dismiss"]')).not.toBeNull()
   })
 
-  it('pressing Cancel posts to /jobs/{id}/cancel for that row', async () => {
+  // A failure's reason is the whole point of surfacing it — the drawer showed
+  // it, the feed cannot (ActivityRow carries no error field), so this card is
+  // the only place it appears.
+  it("carries a failed job's error text in the card", async () => {
     wrap()
     await openBell()
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(cancelCalls.some(
-      (c) => c.path === '/jobs/10/cancel' && c.method === 'POST')).toBe(true))
+    expect(await screen.findByText(/disk full/i)).toBeInTheDocument()
   })
 
-  it('a rejected cancel surfaces an error toast with the API detail', async () => {
-    cancelResult = 'conflict'
+  it('dismissing a card removes only that one', async () => {
     wrap()
     await openBell()
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('job is already succeeded'))
-  })
-
-  it("shows a failed job's error text in place", async () => {
-    wrap()
-    await openBell()
-    expect(await screen.findByText('disk full: retry failed')).toBeInTheDocument()
-  })
-
-  it('expanding a row mounts the log for that job id, and only one row expands at a time', async () => {
-    wrap()
-    await openBell()
-    const failedRow = (await screen.findByText(/vm\.backup/)).closest('[data-testid="bell-job"]')!
-    fireEvent.click(within(failedRow as HTMLElement).getByText(/vm\.backup/))
-    expect(await screen.findByText('reading superblock')).toBeInTheDocument()
-
-    const runningRow = screen.getByText(/app\.start/).closest('[data-testid="bell-job"]')!
-    fireEvent.click(within(runningRow as HTMLElement).getByText(/app\.start/))
-    expect(await screen.findByText('copying rootfs')).toBeInTheDocument()
-    expect(screen.queryByText('reading superblock')).not.toBeInTheDocument()
+    const before = (await screen.findAllByRole('alert')).length
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
+    await waitFor(() =>
+      expect(screen.getAllByRole('alert')).toHaveLength(before - 1))
   })
 
   it('closes on Escape', async () => {
