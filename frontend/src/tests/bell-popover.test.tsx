@@ -111,14 +111,14 @@ describe('BellPopover', () => {
     jobsResult = 'error'
     wrap()
     await openBell()
-    expect(await screen.findByText(/activity not readable/i)).toBeInTheDocument()
+    expect(await screen.findByText(/notifications not readable/i)).toBeInTheDocument()
   })
 
   it('shows the real empty copy when there genuinely are no jobs', async () => {
     jobsResult = 'empty'
     wrap()
     await openBell()
-    expect(await screen.findByText(/no jobs yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing to report/i)).toBeInTheDocument()
   })
 
   // The user asked for notification cards rather than a list, so each row is

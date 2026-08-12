@@ -64,11 +64,23 @@ const ICON: Record<NotificationSeverity, typeof InformationCircleIcon> = {
   destructive: XCircleIcon,
 }
 
-const VARIANT: Record<NotificationSeverity, string> = {
-  info: 'border-blue bg-blue-dim [&>svg]:text-blue',
-  success: 'border-green bg-green-dim [&>svg]:text-green',
-  warning: 'border-amber bg-amber-dim [&>svg]:text-amber',
-  destructive: 'border-red bg-red-dim [&>svg]:text-red',
+// Split in two on purpose. The card needs an OPAQUE base (it floats over the
+// page in the bell popover, not just over a panel) plus the translucent -dim
+// tint on top. Both on one element would be two background-color utilities of
+// equal specificity, so which one won would depend on the order Tailwind
+// happened to emit them — a coin flip. Two elements, two backgrounds, no race.
+const BORDER: Record<NotificationSeverity, string> = {
+  info: 'border-blue',
+  success: 'border-green',
+  warning: 'border-amber',
+  destructive: 'border-red',
+}
+
+const FILL: Record<NotificationSeverity, string> = {
+  info: 'bg-blue-dim [&>svg]:text-blue',
+  success: 'bg-green-dim [&>svg]:text-green',
+  warning: 'bg-amber-dim [&>svg]:text-amber',
+  destructive: 'bg-red-dim [&>svg]:text-red',
 }
 
 export function NotificationCard({
@@ -82,15 +94,17 @@ export function NotificationCard({
   const Icon = ICON[severity]
   return (
     <div role="alert"
-      className={`relative grid w-[356px] max-w-[calc(100vw-2rem)] grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5 rounded-ctl border px-3 py-2.5 pr-7 text-[13px] ${VARIANT[severity]}`}
+      className={`relative w-[356px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-ctl border bg-panel text-[13px] shadow-[0_8px_24px_rgba(0,0,0,.28)] ${BORDER[severity]}`}
     >
-      <Icon aria-hidden className="h-4 w-4 translate-y-0.5" />
-      <div className="col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight text-text">
-        {title}
+      <div className={`grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5 px-3 py-2.5 pr-7 ${FILL[severity]}`}>
+        <Icon aria-hidden className="h-4 w-4 translate-y-0.5" />
+        <div className="col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight text-text">
+          {title}
+        </div>
+        {description && (
+          <div className="col-start-2 text-text-2">{description}</div>
+        )}
       </div>
-      {description && (
-        <div className="col-start-2 text-text-2">{description}</div>
-      )}
       <button type="button" aria-label="Dismiss" onClick={onDismiss}
         className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-tile text-text-3 hover:bg-elev hover:text-text"
       >

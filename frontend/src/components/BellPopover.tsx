@@ -87,38 +87,35 @@ export function BellPopover() {
       </PopoverPrimitive.Trigger>
 
       <PopoverPrimitive.Portal>
+        {/* No panel, no header: a bordered box titled "Activity" wrapping the
+            cards read as an activity list, which is the one thing this was
+            asked not to be. The Content is a transparent, borderless column
+            and each card is its own floating surface — the cards ARE the
+            popover. */}
         <PopoverPrimitive.Content
           align="end"
           sideOffset={8}
-          className="z-30 w-96 max-w-[92vw] overflow-hidden rounded-card border border-line bg-panel shadow-[0_12px_32px_rgba(0,0,0,.35)]"
+          className="z-30 flex max-h-[70vh] w-[372px] max-w-[92vw] flex-col gap-2 overflow-y-auto bg-transparent p-0"
         >
-          <div className="border-b border-line-soft px-3 py-2.5">
-            <p className="font-display text-[13px] font-semibold text-text">Activity</p>
-          </div>
-          {/* Scrolls rather than growing past the viewport: a busy cluster can
-              easily have 50+ jobs, and the popover is not a full-height sheet. */}
-          <div className="max-h-[60vh] overflow-y-auto">
-            <QueryState query={jobsQuery}
-                        emptyTitle="No jobs yet."
-                        emptyNote="Lifecycle actions, installs and backups show up here."
-                        errorTitle="Activity not readable"
-                        errorNote="Proxploy could not reach the backend to list recent jobs.">
-              {(jobs) => (
-                <>
-                  {jobs.filter((j) => !dismissed.includes(j.id)).map((j) => (
-                    <div key={j.id} className="px-2 py-1.5">
-                      <NotificationCard
-                        severity={severityOf(j.status)}
-                        title={`${j.kind} #${j.id}`}
-                        description={describe(j)}
-                        onDismiss={() => setDismissed((d) => [...d, j.id])}
-                      />
-                    </div>
-                  ))}
-                </>
-              )}
-            </QueryState>
-          </div>
+          <QueryState query={jobsQuery}
+                      emptyTitle="Nothing to report."
+                      emptyNote="Installs, lifecycle actions and backups show up here."
+                      errorTitle="Notifications not readable"
+                      errorNote="Proxploy could not reach the backend.">
+            {(jobs) => (
+              <>
+                {jobs.filter((j) => !dismissed.includes(j.id)).map((j) => (
+                  <NotificationCard
+                    key={j.id}
+                    severity={severityOf(j.status)}
+                    title={`${j.kind} #${j.id}`}
+                    description={describe(j)}
+                    onDismiss={() => setDismissed((d) => [...d, j.id])}
+                  />
+                ))}
+              </>
+            )}
+          </QueryState>
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
