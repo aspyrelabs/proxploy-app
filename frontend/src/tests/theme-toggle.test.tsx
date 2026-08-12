@@ -33,17 +33,23 @@ describe('ThemeToggle', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe('light')
   })
 
-  it('keeps the visible Light/Dark label and the Toggle theme accessible name across a toggle', () => {
+  // Icon-only at the user's request. The word Light/Dark is gone, which makes
+  // aria-label the WHOLE accessible name rather than a supplement to visible
+  // text — so an icon that stopped being aria-hidden, or a label that got
+  // dropped as "redundant", would leave the control nameless.
+  it('is icon-only, and keeps the Toggle theme accessible name across a toggle', () => {
     render(<ThemeToggle />)
     const button = screen.getByRole('button', { name: 'Toggle theme' })
-    expect(button).toHaveTextContent('Light')
+    expect(button.textContent).toBe('')
+    expect(button.querySelector('svg')).not.toBeNull()
 
     fireEvent.click(button)
 
-    // Still reachable by the same accessible name after the state flip.
+    // Still the same element, still reachable by the same name after the flip.
     const sameButton = screen.getByRole('button', { name: 'Toggle theme' })
     expect(sameButton).toBe(button)
-    expect(sameButton).toHaveTextContent('Dark')
+    expect(sameButton.textContent).toBe('')
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 
   it('still flips the theme when document.startViewTransition is unavailable (jsdom default)', () => {

@@ -28,9 +28,10 @@ import { applyStoredTheme, setStoredTheme } from '../lib/theme'
  *    lucide-react, sized h-4 w-4 to match the control this replaces.
  *  - No `cn` helper (this repo has no clsx/tailwind-merge) -- className is
  *    a plain string.
- *  - Kept the visible "Light"/"Dark" text label the old ThemeToggle showed;
- *    upstream is icon-only with an sr-only label. aria-label and title are
- *    also carried over unchanged from the old ThemeToggle.
+ *  - Icon-only, like upstream, at the user's request: the old ThemeToggle
+ *    showed the word "Light"/"Dark" beside the icon and no longer does. That
+ *    makes `aria-label` the WHOLE accessible name rather than a supplement to
+ *    visible text, so it and `title` are load-bearing here, not decoration.
  *  - Added a prefers-reduced-motion escape hatch (upstream has none): skip
  *    the view transition and flip the theme directly, matching the
  *    `motion-reduce:` intent already used elsewhere (UsageBar, SidebarNav,
@@ -145,10 +146,10 @@ export function ThemeToggle() {
   return (
     <button ref={buttonRef} aria-label="Toggle theme" title="Toggle theme"
       onClick={toggleTheme}
-      className="inline-flex items-center gap-1.5 rounded-ctl border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-text-2 hover:bg-elev">
+      className="grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev">
       {theme === 'dark'
-        ? <><SunIcon aria-hidden className="h-4 w-4" /> Light</>
-        : <><MoonIcon aria-hidden className="h-4 w-4" /> Dark</>}
+        ? <SunIcon aria-hidden className="h-[18px] w-[18px]" />
+        : <MoonIcon aria-hidden className="h-[18px] w-[18px]" />}
     </button>
   )
 }
