@@ -7,6 +7,9 @@ import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
 import { ago } from './activityDisplay'
 
+/** How close the cards sit to the right edge of the window. */
+const EDGE_GAP_PX = 5
+
 /** Hard ceiling on cards, however tall the window is. */
 const MAX_VISIBLE = 15
 
@@ -136,6 +139,27 @@ export function BellPopover() {
   const [open, setOpen] = useState(false)
   const [dismissed, setDismissed] = useState<number[]>([])
   const listRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  /** align="end" pins the cards to the BELL's right edge, and the bell is not
+   *  the rightmost control — the account menu is — so that left a wide gap.
+   *  Radix's alignOffset is a crossAxis offset (positive = right for a
+   *  bottom-side popover), so this measures how far the bell sits from the
+   *  window edge and shifts by exactly that, less the gap we want to keep. */
+  const [alignOffset, setAlignOffset] = useState(0)
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      const el = triggerRef.current
+      if (!el) return
+      const { right } = el.getBoundingClientRect()
+      const shift = Math.max(0, window.innerWidth - EDGE_GAP_PX - right)
+      setAlignOffset((cur) => (cur === shift ? cur : shift))
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  })
   const visible = useFittingCount(listRef, open)
 
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
@@ -165,6 +189,7 @@ export function BellPopover() {
       onOpenChange={setOpen}
     >
       <PopoverPrimitive.Trigger
+        ref={triggerRef}
         aria-label="Activity"
         className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
       >
@@ -188,6 +213,10 @@ export function BellPopover() {
           ref={listRef}
           align="end"
           sideOffset={8}
+          alignOffset={alignOffset}
+          // Without this the shift above is clamped back by collision
+          // detection to Radix's own padding, undoing it.
+          collisionPadding={EDGE_GAP_PX}
           className="z-30 flex w-[400px] max-w-[92vw] flex-col gap-2 bg-transparent p-0"
         >
           <QueryState query={jobsQuery}
