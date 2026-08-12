@@ -23,7 +23,7 @@ def _seeded(tmp_path, fake=None):
             if fake is not None:
                 blob, ver = app.state.secretstore.encrypt(json.dumps(
                     {"token_id": "proxploy@pve!t", "token_secret": "s"}).encode())
-                db.add(HostCredential(host_id=h.id, kind="api_token",
+                db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
                                       encrypted_blob=blob, key_version=ver,
                                       public_meta="proxploy@pve!t"))
             row = App(host_id=h.id, ctid=150, name="Immich", slug="immich",
@@ -133,7 +133,7 @@ def test_uninstall_job_stops_before_destroying_and_then_forgets_the_row(tmp_path
             db.add(host); db.commit()
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!t", "token_secret": "s"}).encode())
-            db.add(HostCredential(host_id=host.id, kind="api_token",
+            db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver,
                                   public_meta="proxploy@pve!t"))
             row = App(host_id=host.id, ctid=150, name="Immich", slug="immich")

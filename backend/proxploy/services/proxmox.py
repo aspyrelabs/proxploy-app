@@ -213,16 +213,46 @@ def _classify(exc: BaseException) -> str:
     with an explicit `kind` at the point they are known, self-classifying,
     so they never reach here and this function does not need to recognize
     them.
+
+    A 403 ("permission") used to fall all the way through to "unknown",
+    indistinguishable from a dead node or a broken cert; that is the literal
+    bug the Sys.PowerMgmt gap surfaced as a bare 502 (see
+    node-power-privilege-report.md). It is not special to node power: ANY
+    call a token is too narrow for lands here the same way, so the fix is
+    generic, not a second node_power-shaped special case.
     """
     text = str(exc).lower()
     if "fingerprint" in text:
         return "tls_fingerprint"
     if isinstance(exc, PermissionError) or "401" in text or "authentication" in text:
         return "auth"
+    if "403" in text or "permission check failed" in text or "permission denied" in text:
+        return "permission"
     if isinstance(exc, (ConnectionError, TimeoutError)) or "refused" in text \
             or "timed out" in text or "unreachable" in text or "resolve" in text:
         return "unreachable"
     return "unknown"
+
+
+# Proxmox's own 403 text names exactly what it wanted: "Permission check
+# failed (/nodes/node2, Sys.PowerMgmt)", sometimes with more than one
+# privilege after the comma. This makes that fact machine-checkable so every
+# call site gets the same honesty node_power's own fix pioneered, without
+# each one re-deriving it by hand.
+_PERMISSION_DETAIL_RE = re.compile(
+    r"permission check failed\s*\(([^,]+),\s*([^)]+)\)", re.IGNORECASE)
+
+
+def _permission_detail(text: str) -> str | None:
+    """-> "Priv on /path", or None if `text` doesn't carry PVE's own
+    "Permission check failed (/path, Priv)" shape (kind=="permission" can
+    also be reached via a bare "403" with no such text, e.g. a differently
+    worded proxy error; inventing a privilege name in that case would be
+    worse than saying nothing)."""
+    m = _PERMISSION_DETAIL_RE.search(text)
+    if not m:
+        return None
+    return f"{m.group(2).strip()} on {m.group(1).strip()}"
 
 
 class ProxmoxClient:
@@ -264,6 +294,11 @@ class ProxmoxClient:
         `kind` lets a caller that already knows more than `_classify` can
         guess from the raw text (e.g. node_power's own 403 detection below)
         say so directly, instead of `_classify` re-deriving a coarser answer.
+        A caller-supplied `kind` also means the caller is handing back its
+        own bespoke sentence already, so the generic permission-detail
+        sentence below is skipped for it: node_power's message stays exactly
+        what it is, the generic path exists for every OTHER call site that
+        does not (yet) hand-write one.
         """
         text = f"{prefix}: {e}"
         for needle in (self.token_secret, self.token_id):
@@ -273,7 +308,18 @@ class ProxmoxClient:
             # since urllib3 reports the header as `b'...'`.
             for form in (needle, repr(needle)[1:-1]):
                 text = text.replace(form, "***")
-        return ProxmoxError(text, kind=kind or _classify(e))
+        resolved_kind = kind or _classify(e)
+        if kind is None and resolved_kind == "permission":
+            # Generalizes node_power's own fix to every call site: a 403 is
+            # never again a bare, unlabelled 502 -- it says which privilege
+            # PVE wanted, using PVE's own text as the source of truth rather
+            # than a per-call-site guess.
+            detail = _permission_detail(str(e))
+            if detail:
+                text += (f" -- the API token is missing {detail}. This will "
+                         f"fail until it is granted; see "
+                         f"docs.proxploy.com/getting-started/proxmox-token")
+        return ProxmoxError(text, kind=resolved_kind)
 
     def _connect(self):
         if self._api is not None:

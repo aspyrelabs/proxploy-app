@@ -26,10 +26,15 @@ def _seed(app, *, ct_net="virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,tag=10,firewall=
                     status="connected", pve_version="8.4.1")
         db.add(host)
         db.commit()
-        blob, ver = app.state.secretstore.encrypt(json.dumps(
-            {"token_id": "proxploy@pve!net", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
-                              encrypted_blob=blob, key_version=ver))
+        # This file exercises both reads (guest_nics/list_bridges, monitoring)
+        # and the guest NIC write (set_guest_nic, lifecycle -- see
+        # api/network.py's docstring on why the read+write share one client).
+        for cap in ("monitoring", "lifecycle"):
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": f"proxploy@pve!net-{cap}",
+                 "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=host.id, kind=f"api_token:{cap}",
+                                  encrypted_blob=blob, key_version=ver))
         a = App(host_id=host.id, ctid=150, name="Immich", slug="immich")
         v = Vm(host_id=host.id, vmid=201, name="win11", status="running")
         db.add_all([a, v])
@@ -108,7 +113,9 @@ def test_bridges_degrades_one_bad_host_instead_of_500ing_the_page(tmp_path, csrf
         body = r.json()
         assert body["nodes"][0]["host_id"] == host_id  # the good host still served
         assert body["errors"] == [{"host_id": bad_id, "host_name": "host-02",
-                                   "error": "host host-02 has no API token credential"}]
+                                   "error": ("host-02 has no monitoring API token "
+                                             "configured; add one in Settings -> "
+                                             "Hosts before this operation can run.")}]
 
 
 def test_bridges_filters_by_host(tmp_path, csrf_header, bootstrap_admin):

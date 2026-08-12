@@ -70,7 +70,7 @@ def sync_host_backups(app, host_id: int) -> dict:
         if host is None:
             raise RuntimeError(f"host {host_id} not found")
         try:
-            client = client_for_host(app, db, host)
+            client = client_for_host(app, db, host, capability="backup")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
         node = host.node_name or ""
@@ -189,7 +189,7 @@ def _host_target(app, host_id: int):
         if host is None:
             raise JobFailed(f"host {host_id} not found")
         try:
-            return client_for_host(app, db, host), host.node_name or "", host.name
+            return client_for_host(app, db, host, capability="backup"), host.node_name or "", host.name
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 
@@ -211,7 +211,7 @@ def _backup_target(app, backup_id: int):
                 "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
                 "guest_name": b.guest_name}
         try:
-            return client_for_host(app, db, host), host.node_name or "", info
+            return client_for_host(app, db, host, capability="backup"), host.node_name or "", info
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 

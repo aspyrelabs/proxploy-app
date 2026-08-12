@@ -179,7 +179,7 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
         # cluster_nextid is advisory, not a reservation: between this call and
         # the job's POST another orchestrator can take the id, and PVE then
         # rejects the create. See create_vm()'s ponytail comment: no retry.
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="lifecycle")
         try:
             vmid = int(client.cluster_nextid())
         except ProxmoxError as e:
@@ -350,7 +350,7 @@ def clone_vm_route(request: Request, vm_id: int,
         raise HTTPException(422, "name must be a hostname-shaped label")
     newid = body.newid
     if newid is None:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="lifecycle")
         try:
             newid = int(client.cluster_nextid())
         except ProxmoxError as e:

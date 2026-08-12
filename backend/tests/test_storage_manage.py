@@ -13,9 +13,10 @@ def _seed(app):
                     status="connected", pve_version="8.4.1")
         db.add(host)
         db.commit()
+        # attach/edit/detach all run under "lifecycle" (Datastore.Allocate).
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!store", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!store"))
         db.commit()

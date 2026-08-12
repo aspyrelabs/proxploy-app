@@ -13,11 +13,16 @@ def _seed(app):
                     status="connected", pve_version="8.4.1")
         db.add(host)
         db.commit()
-        blob, ver = app.state.secretstore.encrypt(json.dumps(
-            {"token_id": "proxploy@pve!store", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
-                              encrypted_blob=blob, key_version=ver,
-                              public_meta="proxploy@pve!store"))
+        # upload/delete_content (job) run under "lifecycle"
+        # (Datastore.AllocateSpace); the pre-upload overwrite check
+        # (api/storage.py::_refuse_silent_overwrite) is a plain read, monitoring.
+        for cap in ("monitoring", "lifecycle"):
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": f"proxploy@pve!store-{cap}",
+                 "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=host.id, kind=f"api_token:{cap}",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta=f"proxploy@pve!store-{cap}"))
         db.commit()
         return host.id
 

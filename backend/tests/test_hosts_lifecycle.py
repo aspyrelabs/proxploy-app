@@ -21,7 +21,7 @@ def _seeded(tmp_path, fake=None, with_app=False):
             h = seed_host_row(db)
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!old", "token_secret": "old"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver,
                                   public_meta="proxploy@pve!old"))
             db.add(Vm(host_id=h.id, vmid=100, name="win11", status="running"))
@@ -119,8 +119,8 @@ def test_a_rejected_new_token_leaves_the_old_one_in_place(
                    headers=csrf_header(c))
         assert r.status_code == 502 and r.json()["error"] == "token_rejected"
         with app.state.sessionmaker() as db:
-            cred = db.query(HostCredential).filter_by(host_id=host_id,
-                                                      kind="api_token").one()
+            cred = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one()
             assert cred.public_meta == "proxploy@pve!old"
 
 
@@ -136,13 +136,58 @@ def test_rotating_the_api_token_replaces_it_after_verifying(
         r = c.post(f"/api/v1/hosts/{host_id}/credentials",
                    json={"token_id": "proxploy@pve!new", "token_secret": "new"},
                    headers=csrf_header(c))
-        assert r.status_code == 200 and r.json()["rotated"] == ["api_token"]
+        assert r.status_code == 200
+        # No `capability` in the request body: default "monitoring" preserves
+        # every caller written before per-capability tokens existed.
+        assert r.json()["rotated"] == ["api_token:monitoring"]
         with app.state.sessionmaker() as db:
-            cred = db.query(HostCredential).filter_by(host_id=host_id,
-                                                      kind="api_token").one()
+            cred = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one()
             assert "new" in cred.public_meta
             tok = json.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
             assert tok["token_secret"] == "new"
+
+
+def test_rotating_a_named_capability_touches_only_that_kind_row(
+        tmp_path, csrf_header, bootstrap_admin):
+    """CredentialRotateIn.capability lets a caller add/replace a specific
+    capability's token (lifecycle/console/backup) without disturbing the
+    others -- the mechanism a later UI step needs to let an operator add
+    lifecycle after enrolling monitoring-only, and proof the rotate route
+    isn't hardwired to the single-token model."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!lifecycle",
+                        "token_secret": "new-lc", "capability": "lifecycle"},
+                   headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["rotated"] == ["api_token:lifecycle"]
+        with app.state.sessionmaker() as db:
+            # The pre-existing monitoring row is untouched.
+            mon = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one()
+            assert mon.public_meta == "proxploy@pve!old"
+            lc = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:lifecycle").one()
+            assert lc.public_meta == "proxploy@pve!lifecycle"
+
+
+def test_rotating_an_unknown_capability_is_422(tmp_path, csrf_header, bootstrap_admin):
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!x", "token_secret": "x",
+                        "capability": "teleportation"},
+                   headers=csrf_header(c))
+        assert r.status_code == 422
 
 
 def test_rotating_ssh_clears_verification_and_returns_the_new_public_key(

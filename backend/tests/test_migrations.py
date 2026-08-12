@@ -252,6 +252,61 @@ def test_every_allowlisted_kind_and_null_are_accepted_by_the_database(tmp_path):
         eng.dispose()
 
 
+# --- per-capability tokens: kind="api_token" -> kind="api_token:monitoring" -
+#
+# Step one of the per-capability host token work (host-token-privileges-
+# step-one-report.md). Before this migration every host had at most one
+# `host_credentials` row with kind="api_token" and every call site used it
+# for everything; after it, the capability is encoded into `kind` itself
+# (api_token:monitoring/lifecycle/console/backup) and UniqueConstraint(host_id,
+# kind) enforces one token per capability for free, no new column.
+
+def test_the_single_legacy_token_becomes_the_monitoring_token_on_upgrade(tmp_path):
+    """An existing install's one `api_token` row is what monitoring (the
+    mandatory capability) has been running on all along, so the migration
+    renames it rather than discarding it: nobody loses a working credential
+    by upgrading. Lifecycle/console/backup simply have no row yet, which is
+    "not configured", the same state a fresh install reaches by ticking only
+    Read-only monitoring, not a broken one."""
+    from alembic import command
+
+    db_url = f"sqlite:///{tmp_path}/existing.db"
+    cfg = _alembic_cfg(db_url)
+    command.upgrade(cfg, "aef437ae90d2")  # everything before this migration
+
+    eng = create_engine(db_url)
+    with eng.begin() as c:
+        c.execute(text(
+            "INSERT INTO hosts (name, address, verify_tls, status, "
+            "created_at, updated_at) VALUES ('h', 'https://x:8006', 1, "
+            "'connected', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"))
+        host_id = c.execute(text("SELECT id FROM hosts WHERE name = 'h'")).scalar_one()
+        c.execute(text(
+            "INSERT INTO host_credentials (host_id, kind, encrypted_blob, "
+            "key_version, public_meta, created_at, updated_at) VALUES "
+            "(:hid, 'api_token', :blob, 1, 'proxploy@pve!old', "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"),
+            {"hid": host_id, "blob": b"\x00\x01"})
+    eng.dispose()
+
+    command.upgrade(cfg, "head")
+
+    eng = create_engine(db_url)
+    try:
+        rows = eng.connect().execute(
+            text("SELECT kind, public_meta, encrypted_blob FROM host_credentials")
+        ).all()
+        # Renamed, not duplicated or dropped: still exactly one row, same
+        # blob (the same token that already worked keeps working), new kind.
+        assert rows == [("api_token:monitoring", "proxploy@pve!old", b"\x00\x01")]
+        # Nothing manufactures rows for the capabilities nobody configured.
+        kinds = {r[0] for r in eng.connect().execute(
+            text("SELECT kind FROM host_credentials")).all()}
+        assert kinds == {"api_token:monitoring"}
+    finally:
+        eng.dispose()
+
+
 def test_migration_0002_applies_cleanly_on_top_of_an_existing_0001_database(tmp_path):
     """`run_migrations` at startup runs against real, already-migrated
     production databases, not just fresh ones -- confirm 0002 upgrades an

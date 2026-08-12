@@ -661,6 +661,13 @@ def reconfigure_app(request: Request, app_id: int,
     Disk size is deliberately not here. Growing a CT's root volume is a
     different PVE endpoint and is one-way (PVE cannot shrink), which makes it
     its own feature with its own confirmation rather than a field on a PATCH.
+
+    cores/memory/swap are VM.Config.CPU/Memory, lifecycle privileges, so the
+    client below asks for "lifecycle" explicitly: this call site defaulted
+    to whatever `client_for_host` resolved before per-capability tokens
+    existed, which worked only because the one token in play was
+    over-scoped. Found during the sweep (host-token-privileges-step-one-
+    report.md), same class of gap as Sys.PowerMgmt.
     """
     a = db.get(App, app_id)
     if a is None:
@@ -686,7 +693,7 @@ def reconfigure_app(request: Request, app_id: int,
             raise HTTPException(409, "app has no host")
         from proxploy.services.hostclient import client_for_host
         try:
-            client = client_for_host(request.app, db, host)
+            client = client_for_host(request.app, db, host, capability="lifecycle")
             client.guest_config_update("lxc", host.node_name or "", a.ctid, pve_config)
         except ProxmoxError as e:
             raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e

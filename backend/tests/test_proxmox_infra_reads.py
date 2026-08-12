@@ -26,7 +26,7 @@ def _seed_host_with_token(app, secret="s3cret"):
         db.commit()
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!infra", "token_secret": secret}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
                               encrypted_blob=blob, key_version=ver))
         db.commit()
         return host.id
@@ -182,7 +182,7 @@ def test_client_for_host_raises_when_the_host_has_no_api_token(tmp_path):
             host = Host(name="bare", address="https://10.0.0.8:8006", node_name="pve1")
             db.add(host)
             db.commit()
-            with pytest.raises(ProxmoxError, match="no API token credential"):
+            with pytest.raises(ProxmoxError, match="no monitoring API token configured"):
                 client_for_host(app, db, host)
 
 

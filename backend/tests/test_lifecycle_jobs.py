@@ -13,7 +13,10 @@ def _seed_host(app, fake_token="s3cret"):
         db.commit()
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!life", "token_secret": fake_token}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        # services/lifecycle.py::_resolve asks for the "lifecycle" capability
+        # (VM.PowerMgmt etc): every handler in this file exercises a
+        # lifecycle action, so this is the row that must exist.
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!life"))
         db.commit()
@@ -449,9 +452,9 @@ def test_task_timeout_fails_the_job(tmp_path):
 
 
 def test_missing_credential_fails_the_job(tmp_path):
-    """_resolve's "no API token credential" branch: a host with no
-    HostCredential row must fail the job cleanly instead of KeyError-ing on
-    a missing token."""
+    """_resolve's CapabilityNotConfigured branch: a host with no
+    HostCredential row at all must fail the job cleanly instead of
+    KeyError-ing on a missing token."""
     from proxploy.jobs import JobBackend
     from tests.fakes.pve import FakePVE
     from tests.support import make_job_app
@@ -475,7 +478,56 @@ def test_missing_credential_fails_the_job(tmp_path):
         with app.state.sessionmaker() as db:
             job = db.get(Job, job_id)
             assert job.status == "failed"
-            assert "no API token credential" in job.error
+            assert "lifecycle" in job.error
+            assert "host-01" in job.error
+
+    asyncio.run(run())
+
+
+def test_a_monitoring_only_host_gets_a_legible_lifecycle_not_configured_error(tmp_path):
+    """The exact gap this step closes: before per-capability tokens, a
+    monitoring-only token attempting a lifecycle action either happened to
+    work (an over-scoped single token) or 403'd with no useful message
+    (services/proxmox.py's old `kind="unknown"` fall-through). Now it is
+    caught before any PVE call, naming the missing capability and where to
+    add it -- never a raw 403 relay."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            host = Host(name="mon-only", address="https://10.0.0.7:8006",
+                       node_name="pve1", status="connected", pve_version="8.4.1")
+            db.add(host)
+            db.commit()
+            host_id = host.id
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=host_id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="proxploy@pve!mon"))
+            db.commit()
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                     target_id=app_id,
+                                     params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+            # Names the missing capability and the host, and where to fix it
+            # -- not a bare 403, and no PVE call was ever made (the fake
+            # recorded no action, would have raised loudly if it had).
+            assert "lifecycle" in job.error
+            assert "mon-only" in job.error
+            assert "Settings" in job.error
+        assert fake.actions == []
 
     asyncio.run(run())
 

@@ -32,6 +32,21 @@ def test_lifecycle_carries_doc_08s_exact_privilege_set():
         assert priv in s, priv
 
 
+def test_lifecycle_carries_node_infrastructure_privileges_too():
+    """Editing a node's network bridges needs Sys.Modify; attaching or
+    allocating a storage pool needs Datastore.Allocate; uploading/deleting
+    storage content (an ISO, a stray volume) needs Datastore.AllocateSpace.
+    None of these are guest privileges, but api/network.py's bridge routes
+    and api/storage.py's attach/edit/detach/content routes run under the
+    lifecycle capability (doc 08's own "resource edits" wording already
+    implies node-level config, not only guest config), so lifecycle's role
+    must carry them or every one of those calls 403s no matter which token
+    is pasted -- the same class of gap Sys.PowerMgmt was."""
+    s = generate_script(["lifecycle"])
+    for priv in ("Sys.Modify", "Datastore.Allocate", "Datastore.AllocateSpace"):
+        assert priv in s, priv
+
+
 def test_console_withholds_sys_console_unless_node_shells_are_opted_into():
     without = generate_script(["console"])
     assert "VM.Console" in without

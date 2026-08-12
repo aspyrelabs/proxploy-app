@@ -52,11 +52,21 @@ def _seed(app, *, src_node="pve-src", tgt_node="pve-tgt", ctid=150):
         tgt = Host(name="host-tgt", address=TGT_ADDR, node_name=tgt_node,
                   status="connected", pve_version="8.4.1")
         db.add(src); db.add(tgt); db.commit()
+        # Migration needs monitoring (preflight/health-check reads),
+        # lifecycle (stop/start/cluster-migrate) and backup (vzdump/
+        # restore/cleanup) on BOTH hosts (services/migrate.py::_load).
+        # FakePVE does not validate token identity against capability, so
+        # every row below reuses the same secret; what matters here is that
+        # `client_for_host(..., capability=X)` finds a row for every X this
+        # job asks for.
         for h, tag in ((src, "src"), (tgt, "tgt")):
-            blob, ver = app.state.secretstore.encrypt(json.dumps(
-                {"token_id": f"proxploy@pve!{tag}", "token_secret": "s3cret"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token", encrypted_blob=blob,
-                                  key_version=ver, public_meta=f"proxploy@pve!{tag}"))
+            for cap in ("monitoring", "lifecycle", "backup"):
+                blob, ver = app.state.secretstore.encrypt(json.dumps(
+                    {"token_id": f"proxploy@pve!{tag}-{cap}",
+                     "token_secret": "s3cret"}).encode())
+                db.add(HostCredential(host_id=h.id, kind=f"api_token:{cap}",
+                                      encrypted_blob=blob, key_version=ver,
+                                      public_meta=f"proxploy@pve!{tag}-{cap}"))
         a = App(host_id=src.id, ctid=ctid, name="immich", slug="immich",
                web_protocol="http", web_path="/")
         db.add(a)
@@ -193,6 +203,111 @@ def test_cluster_strategy_uses_migrate_guest_keeps_ctid_no_vzdump(tmp_path):
         host_id, ctid = _app_row(app, app_id)
         assert host_id == tgt_id
         assert ctid == 150
+
+    asyncio.run(go())
+
+
+# --- per-capability tokens: non-cluster migration needs lifecycle AND -----
+# backup on both hosts, not one blended credential (per-capability-tokens-
+# plan.md §3 point 2, host-token-privileges-step-one-report.md). Cluster
+# migration needs only lifecycle (native PVE migrate, no vzdump/restore).
+
+def _seed_partial(app, *, src_caps, tgt_caps, src_node="pve-src",
+                  tgt_node="pve-tgt", ctid=150):
+    """Like `_seed`, but only the named capabilities get a token per host --
+    for proving the degrade path when one is deliberately left out."""
+    with app.state.sessionmaker() as db:
+        src = Host(name="host-src", address=SRC_ADDR, node_name=src_node,
+                  status="connected", pve_version="8.4.1")
+        tgt = Host(name="host-tgt", address=TGT_ADDR, node_name=tgt_node,
+                  status="connected", pve_version="8.4.1")
+        db.add(src); db.add(tgt); db.commit()
+        for h, tag, caps in ((src, "src", src_caps), (tgt, "tgt", tgt_caps)):
+            for cap in caps:
+                blob, ver = app.state.secretstore.encrypt(json.dumps(
+                    {"token_id": f"proxploy@pve!{tag}-{cap}",
+                     "token_secret": "s3cret"}).encode())
+                db.add(HostCredential(host_id=h.id, kind=f"api_token:{cap}",
+                                      encrypted_blob=blob, key_version=ver,
+                                      public_meta=f"proxploy@pve!{tag}-{cap}"))
+        a = App(host_id=src.id, ctid=ctid, name="immich", slug="immich",
+               web_protocol="http", web_path="/")
+        db.add(a)
+        db.commit()
+        return src.id, tgt.id, a.id
+
+
+def test_non_cluster_migration_needs_both_lifecycle_and_backup_not_monitoring_alone(tmp_path):
+    """A host enrolled with only the mandatory monitoring token (the state
+    every fresh install and every upgraded pre-per-capability install
+    reaches) must fail the migration with a message naming exactly which
+    capability is missing, before any PVE call -- not a mid-job 403."""
+    async def go():
+        fake_src, fake_tgt = _shared_pair()  # no cluster: forces shared_storage
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
+        src_id, tgt_id, app_id = _seed_partial(
+            app, src_caps=("monitoring",),
+            tgt_caps=("monitoring", "lifecycle", "backup"))
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        with pytest.raises(JobFailed) as ei:
+            await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                                "target_host_id": tgt_id})
+        msg = str(ei.value)
+        assert "host-src" in msg
+        assert "lifecycle" in msg
+        # No PVE call was ever attempted with the missing credential: the
+        # source is not even touched (no stop, no vzdump).
+        assert fake_src.actions == []
+        assert fake_src.vzdumps == []
+
+    asyncio.run(go())
+
+
+def test_non_cluster_migration_needs_backup_too_lifecycle_alone_is_not_enough(tmp_path):
+    async def go():
+        fake_src, fake_tgt = _shared_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
+        src_id, tgt_id, app_id = _seed_partial(
+            app, src_caps=("monitoring", "lifecycle"),
+            tgt_caps=("monitoring", "lifecycle", "backup"))
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        with pytest.raises(JobFailed) as ei:
+            await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                                "target_host_id": tgt_id})
+        assert "host-src" in str(ei.value)
+        assert "backup" in str(ei.value)
+
+    asyncio.run(go())
+
+
+def test_cluster_strategy_needs_only_lifecycle_backup_absent_is_fine(tmp_path):
+    """The flip side: cluster-native migration never calls vzdump/restore,
+    so a host with no backup token at all must still be able to migrate via
+    the cluster strategy. Proves the backup client is resolved lazily, only
+    for the strategies that actually use it."""
+    async def go():
+        fake_src, fake_tgt = _shared_pair(cluster="prod")
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_tgt.add_ct(150, node="pve-tgt", name="immich", status="running")
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
+        src_id, tgt_id, app_id = _seed_partial(
+            app, src_caps=("monitoring", "lifecycle"),
+            tgt_caps=("monitoring", "lifecycle"))
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        out = await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                                   "target_host_id": tgt_id})
+        assert out["strategy"] == "cluster"
 
     asyncio.run(go())
 

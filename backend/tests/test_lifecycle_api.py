@@ -14,7 +14,7 @@ def _seed(app, ctid=150, vmid=201):
         db.commit()
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!life", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver))
         a = App(host_id=host.id, ctid=ctid, name="Immich", slug="immich")
         v = Vm(host_id=host.id, vmid=vmid, name="win11", status="running")

@@ -24,7 +24,7 @@ def _seed_credential(app, host):
     with app.state.sessionmaker() as db:
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!console", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token", encrypted_blob=blob,
+        db.add(HostCredential(host_id=host.id, kind="api_token:console", encrypted_blob=blob,
                               key_version=ver))
         db.commit()
 

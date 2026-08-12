@@ -43,7 +43,7 @@ def _seed(app, ct_status="stopped"):
         db.commit()
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!bk", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token", encrypted_blob=blob,
+        db.add(HostCredential(host_id=host.id, kind="api_token:backup", encrypted_blob=blob,
                               key_version=ver, public_meta="proxploy@pve!bk"))
         a = App(host_id=host.id, ctid=150, name="Immich", slug="immich",
                 status_cached=ct_status)

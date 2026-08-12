@@ -52,7 +52,7 @@ def test_create_host_with_ssh_enrolment(pve_client, csrf_header):
     # credentials at rest: encrypted, public_meta only ever exposed
     detail = c.get(f"/api/v1/hosts/{body['id']}").json()
     kinds = {cred["kind"] for cred in detail["credentials"]}
-    assert kinds == {"api_token", "ssh_key"}
+    assert kinds == {"api_token:monitoring", "ssh_key"}
     assert all("encrypted_blob" not in cred for cred in detail["credentials"])
     assert any(cred["public_meta"] == "proxploy@pve!mon"
                for cred in detail["credentials"])

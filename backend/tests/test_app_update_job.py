@@ -17,7 +17,7 @@ def _seed(app, *, ctid=101, pinned="a" * 40, upstream="b" * 40, script_source="u
         # api_token: client_for_host()/_lxc_ids' live /cluster/resources guard.
         ablob, aver = app.state.secretstore.encrypt(
             b'{"token_id": "root@pam!t", "token_secret": "s"}')
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
                               encrypted_blob=ablob, key_version=aver))
         # ssh_key: SSHExecutor.run_for_host's get_ssh_private_key.
         sblob, sver = app.state.secretstore.encrypt(
@@ -291,7 +291,7 @@ def test_a_missing_credential_reports_as_a_failed_job_not_a_handler_bug(tmp_path
         app.state.jobs = JobBackend(app)
         _, app_id = _seed(app)
         with app.state.sessionmaker() as db:
-            db.query(HostCredential).filter_by(kind="api_token").delete()
+            db.query(HostCredential).filter_by(kind="api_token:monitoring").delete()
             db.commit()
 
         ctx = JobContext(app.state.jobs, _job(app, app_id))

@@ -69,6 +69,16 @@ def test_ci_drives_the_product_end_to_end_over_bearer_only(
         assert any(row["id"] == host_id and row["status"] == "connected"
                    for row in r.json())
 
+        # 1b. Enrolment only ever writes the mandatory "monitoring" token
+        # (api/hosts.py::create_host); the app.start step below is a
+        # lifecycle action, so add that capability's token the same way an
+        # operator would, over the same bearer-only surface this test is
+        # proving end to end.
+        r = _bearer(bearer, "post", f"/api/v1/hosts/{host_id}/credentials", h,
+                   json={"token_id": "proxploy@pve!life",
+                        "token_secret": "s3cret", "capability": "lifecycle"})
+        assert r.status_code == 200, r.text
+
         # 2. POST /apps/adopt for a CT the fake reports -> identity lands
         # with no SSH needed (adopt never touches the wire; it is the same
         # "trust the operator's word for what's already on the node"

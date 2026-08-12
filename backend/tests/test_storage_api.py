@@ -20,7 +20,7 @@ def _seed(tmp_path, fake=None):
             host = seed_host_row(db)
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!store", "token_secret": "s3cret"}).encode())
-            db.add(HostCredential(host_id=host.id, kind="api_token",
+            db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver,
                                   public_meta="proxploy@pve!store"))
             db.commit()

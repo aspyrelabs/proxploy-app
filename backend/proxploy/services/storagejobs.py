@@ -29,13 +29,21 @@ from proxploy.services.pvetask import await_task
 
 
 def _resolve(app, host_id: int, node: str | None):
-    """Blocking: host_id -> (ProxmoxClient, node). Runs in a thread."""
+    """Blocking: host_id -> (ProxmoxClient, node). Runs in a thread.
+
+    `capability="lifecycle"`: uploading an ISO or deleting a stray volume
+    needs Datastore.AllocateSpace, a node-infrastructure privilege that
+    lives on the lifecycle role (the per-capability token sweep found this
+    was granted nowhere at all before -- host-token-privileges-step-one-
+    report.md), not monitoring's read-only set.
+    """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
         try:
-            return client_for_host(app, db, host), (node or host.node_name or "")
+            return (client_for_host(app, db, host, capability="lifecycle"),
+                    (node or host.node_name or ""))
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 

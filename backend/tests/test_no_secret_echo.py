@@ -311,7 +311,7 @@ def test_public_meta_is_rebuilt_from_parsed_parts_not_the_submitted_string(
         assert created.status_code == 201, created.text
         detail = c.get(f"/api/v1/hosts/{created.json()['id']}").json()
         meta = [cred["public_meta"] for cred in detail["credentials"]
-                if cred["kind"] == "api_token"]
+                if cred["kind"] == "api_token:monitoring"]
         assert meta == ["root@pam!proxploy"]
         assert PVE_TOKEN_SECRET not in c.get(f"/api/v1/hosts/{created.json()['id']}").text
         assert PVE_TOKEN_SECRET not in c.get("/api/v1/audit?per_page=100").text

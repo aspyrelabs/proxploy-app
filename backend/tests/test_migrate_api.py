@@ -41,11 +41,16 @@ def _seed(app, *, src_node="pve-src", tgt_node="pve-tgt", ctid=150, name="immich
         tgt = Host(name="host-tgt", address=TGT_ADDR, node_name=tgt_node,
                   status="connected", pve_version="8.4.1")
         db.add(src); db.add(tgt); db.commit()
+        # Migration needs monitoring/lifecycle/backup on both hosts
+        # (services/migrate.py::_load); FakePVE ignores token identity.
         for h, tag in ((src, "src"), (tgt, "tgt")):
-            blob, ver = app.state.secretstore.encrypt(json.dumps(
-                {"token_id": f"proxploy@pve!{tag}", "token_secret": "s3cret"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token", encrypted_blob=blob,
-                                  key_version=ver, public_meta=f"proxploy@pve!{tag}"))
+            for cap in ("monitoring", "lifecycle", "backup"):
+                blob, ver = app.state.secretstore.encrypt(json.dumps(
+                    {"token_id": f"proxploy@pve!{tag}-{cap}",
+                     "token_secret": "s3cret"}).encode())
+                db.add(HostCredential(host_id=h.id, kind=f"api_token:{cap}",
+                                      encrypted_blob=blob, key_version=ver,
+                                      public_meta=f"proxploy@pve!{tag}-{cap}"))
         a = App(host_id=src.id, ctid=ctid, name=name, slug=name, web_protocol="http",
                web_path="/")
         db.add(a)

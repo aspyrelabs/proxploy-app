@@ -387,8 +387,15 @@ class Poller:
             host = db.get(Host, host_id)
             if host is None:
                 return []
+            # Monitoring is the one capability every enrolled host is
+            # guaranteed to have (mandatory at enrolment, api/hosts.py::
+            # create_host), so the poller keeps reading it directly rather
+            # than going through client_for_host's capability="monitoring"
+            # default; this is the same row, just addressed the way it has
+            # always been addressed, renamed per the per-capability token
+            # encoding (host-token-privileges-step-one-report.md).
             cred = (db.query(HostCredential)
-                    .filter_by(host_id=host.id, kind="api_token").one())
+                    .filter_by(host_id=host.id, kind="api_token:monitoring").one())
             tok = jsonlib.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
             client = ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
                                   verify_tls=host.verify_tls,

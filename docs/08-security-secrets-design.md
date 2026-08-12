@@ -35,7 +35,7 @@ per capability, one token per enabled capability.
 | Capability | Custom role | PVE privileges | Used for |
 |---|---|---|---|
 | Read-only monitoring (always required) | `ProxployAudit` | `VM.Audit`, `Datastore.Audit`, `Sys.Audit`, `Pool.Audit`, `SDN.Audit` | Pollers, dashboard, metrics, Apps/VMs read views, storage/network read pages |
-| Lifecycle | `ProxployLifecycle` | `VM.PowerMgmt`, `VM.Config.Disk`, `VM.Config.CPU`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Options`, `VM.Allocate`, `VM.Clone`, `VM.Snapshot`, `VM.Snapshot.Rollback`, `VM.Migrate` | Start/stop/restart/pause, resource edits, snapshots, clone, cluster-native migration, CT/VM create-destroy (installs create CTs via script, but adoption/cleanup and VM creation go through the API) |
+| Lifecycle | `ProxployLifecycle` | `VM.PowerMgmt`, `VM.Config.Disk`, `VM.Config.CPU`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Options`, `VM.Allocate`, `VM.Clone`, `VM.Snapshot`, `VM.Snapshot.Rollback`, `VM.Migrate`, `Sys.Modify`, `Datastore.Allocate`, `Datastore.AllocateSpace` | Start/stop/restart/pause, resource edits, snapshots, clone, cluster-native migration, CT/VM create-destroy (installs create CTs via script, but adoption/cleanup and VM creation go through the API); also node-level infrastructure this app edits on the guests' behalf: network bridge staging/apply/revert (`Sys.Modify`), attaching/editing/detaching a storage pool definition (`Datastore.Allocate`), and storage content writes -- ISO upload, stray volume delete (`Datastore.AllocateSpace`) |
 | Console | `ProxployConsole` | `VM.Console`; `Sys.Console` only if the user opts into node shells | CT/VM console tickets (termproxy/vncproxy); node shell is a separate opt-in because `Sys.Console` is effectively root on the node |
 | Backup | `ProxployBackup` | `VM.Backup`, `Datastore.AllocateSpace`, `Datastore.Audit` | vzdump/PBS backup + restore jobs, backup listing |
 
@@ -45,6 +45,24 @@ single source for both the generated script (step 2 below) and the enrolment
 verifier (step 4), which imports its monitoring set from it; keeping them as
 one table is what stops the wizard telling an operator to create a token the
 wizard then rejects. Change this table and that module together.
+
+**Storage:** `host_credentials.kind` carries the capability directly --
+`api_token:monitoring` / `api_token:lifecycle` / `api_token:console` /
+`api_token:backup` (`ssh_key` unchanged, it has no capability) -- rather than
+a separate column. `UniqueConstraint(host_id, kind)` already gives "one
+credential per (host, capability)" for free. `services/hostclient.py::
+client_for_host(app, db, host, capability=...)` resolves the row for the
+capability a call site actually needs (default `"monitoring"`, the one every
+host is guaranteed to have) and raises `CapabilityNotConfigured` -- a typed,
+named error, not a raw PVE 403 -- the moment a capability's token is missing,
+before any network call. An install that predates this (a single
+`kind="api_token"` row) is migrated to `api_token:monitoring` on upgrade;
+lifecycle/console/backup are then simply "not configured" until the operator
+adds them, the same state a fresh install reaches by ticking only Read-only
+monitoring, not a broken one. See `.superpowers/sdd/host-token-privileges-
+step-one-report.md` for the full sweep that closed the gap where node-level
+operations (bridges, storage pools, storage content) had no capability that
+actually granted what they needed.
 
 ACLs are granted at path `/` with propagate by default (Proxploy is a
 whole-host manager); users who want to scope Proxploy to a pool grant the

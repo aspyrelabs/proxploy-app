@@ -47,9 +47,25 @@ CAPABILITIES: dict[str, Capability] = {
         privileges=("VM.PowerMgmt", "VM.Config.Disk", "VM.Config.CPU",
                     "VM.Config.Memory", "VM.Config.Network", "VM.Config.Options",
                     "VM.Allocate", "VM.Clone", "VM.Snapshot",
-                    "VM.Snapshot.Rollback", "VM.Migrate"),
+                    "VM.Snapshot.Rollback", "VM.Migrate",
+                    # Node-level infrastructure edits that guest lifecycle
+                    # management also depends on, not guest privileges:
+                    # Sys.Modify is what PVE checks for staging/applying a
+                    # node network bridge (api/network.py's host-config
+                    # routes), Datastore.Allocate for attaching/detaching a
+                    # storage pool definition (api/storage.py's manage
+                    # routes), Datastore.AllocateSpace for writing storage
+                    # CONTENT (an uploaded ISO, a stray volume delete --
+                    # api/storage.py's content routes, and the guest NIC/
+                    # resize writes that share this capability's client).
+                    # None of the four capabilities carried these before,
+                    # so every one of those calls 403'd no matter which
+                    # token was pasted -- confirmed the same class of gap
+                    # as Sys.PowerMgmt (see node-power-privilege-report.md).
+                    "Sys.Modify", "Datastore.Allocate", "Datastore.AllocateSpace"),
         why="Start/stop/restart, resource edits, snapshots, clone, migration, "
-            "and VM create/destroy."),
+            "VM create/destroy, and node-level network/storage config "
+            "(bridges, storage pools, storage content)."),
     "console": Capability(
         key="console", label="Console", role="ProxployConsole", token="console",
         privileges=("VM.Console",),

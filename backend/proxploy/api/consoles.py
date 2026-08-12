@@ -41,7 +41,7 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
         raise HTTPException(404, "host not found")
     _refuse_if_not_running(a.status_cached, a.name)
     try:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
@@ -87,7 +87,7 @@ def _auth_header_for(app, db, host: Host | None) -> str | None:
     if host is None:
         return None
     try:
-        return client_for_host(app, db, host).pve_auth_header
+        return client_for_host(app, db, host, capability="console").pve_auth_header
     except ProxmoxError:
         return None
 
@@ -187,7 +187,7 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
                              "opt in via host settings first (doc 08 §9: a "
                              "second, deliberate gate on top of RBAC)")
     try:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
@@ -220,7 +220,7 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
         raise HTTPException(404, "host not found")
     _refuse_if_not_running(v.status, v.name or f"vm {v.vmid}")
     try:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""

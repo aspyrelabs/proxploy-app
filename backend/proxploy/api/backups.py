@@ -305,7 +305,7 @@ def prune_preview_route(request: Request, host_id: int, storage: str,
                         "keep_weekly": keep_weekly, "keep_monthly": keep_monthly,
                         "keep_yearly": keep_yearly})
     try:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="backup")
         rows = client.prune_preview(node or host.node_name or "", storage,
                                     _prune_call(spec, guest_type, vmid))
     except ProxmoxError as e:

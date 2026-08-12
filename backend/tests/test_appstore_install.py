@@ -18,7 +18,7 @@ def _seed_api_token(app, db, host_id):
 
     blob, ver = app.state.secretstore.encrypt(
         b'{"token_id": "root@pam!t", "token_secret": "s"}')
-    db.add(HostCredential(host_id=host_id, kind="api_token",
+    db.add(HostCredential(host_id=host_id, kind="api_token:monitoring",
                           encrypted_blob=blob, key_version=ver))
 
 

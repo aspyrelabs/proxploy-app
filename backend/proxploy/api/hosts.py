@@ -289,8 +289,14 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     ss = request.app.state.secretstore
     blob, ver = ss.encrypt(jsonlib.dumps(
         {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
-    db.add(HostCredential(host_id=host.id, kind="api_token", encrypted_blob=blob,
-                          key_version=ver,
+    # Enrolment always creates the "monitoring" row: it is the one mandatory
+    # capability (CAPABILITIES["monitoring"].required, services/pveum.py),
+    # and there is only one token pasted at this step of the wizard.
+    # Lifecycle/console/backup tokens are added later via
+    # POST /hosts/{id}/credentials (CredentialRotateIn.capability), a later
+    # step's UI work, not this one.
+    db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
+                          encrypted_blob=blob, key_version=ver,
                           public_meta=token_public_meta(body.token_id)))
 
     out = {"id": host.id, "name": host.name, "address": host.address,
@@ -390,7 +396,8 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     h = db.get(Host, host_id)
     if not h:
         raise HTTPException(404, "no such host")
-    cred = db.query(HostCredential).filter_by(host_id=h.id, kind="api_token").one()
+    cred = db.query(HostCredential).filter_by(
+        host_id=h.id, kind="api_token:monitoring").one()
     tok = jsonlib.loads(request.app.state.secretstore.decrypt(cred.encrypted_blob))
     try:
         client = ProxmoxClient(h.address, tok["token_id"], tok["token_secret"],
@@ -487,10 +494,25 @@ class CredentialRotateIn(BaseModel):
     # credentials for you.
     token_id: str | None = None
     token_secret: str | None = None
+    # Which capability's token this is. Defaults to "monitoring" so every
+    # caller written before per-capability tokens existed (the single-token
+    # model) keeps rotating the same row it always did with no request
+    # change required. Validated against CAPABILITIES the same place
+    # token_script's `capabilities` list already is (ValueError -> 422),
+    # not against a separate hand-kept list that could drift from it.
+    capability: str = "monitoring"
     # Regenerate the SSH keypair in-process. The new public key has to be
     # authorized on the node before installs work again, which is why the
     # response hands it back with the same consent note onboarding uses.
     rotate_ssh: bool = False
+
+    @field_validator("capability")
+    @classmethod
+    def _known_capability(cls, v: str) -> str:
+        if v not in CAPABILITIES:
+            raise ValueError(f"capability must be one of "
+                             f"{', '.join(sorted(CAPABILITIES))}")
+        return v
 
 
 @router.delete("/{host_id}")
@@ -881,16 +903,22 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
                           f"the old one is still in place: {e}"}) from e
         blob, ver = request.app.state.secretstore.encrypt(jsonlib.dumps(
             {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
+        kind = f"api_token:{body.capability}"
         cred = (db.query(HostCredential)
-                .filter_by(host_id=h.id, kind="api_token").one_or_none())
+                .filter_by(host_id=h.id, kind=kind).one_or_none())
         if cred is None:
-            cred = HostCredential(host_id=h.id, kind="api_token")
+            cred = HostCredential(host_id=h.id, kind=kind)
             db.add(cred)
         cred.encrypted_blob, cred.key_version = blob, ver
         cred.public_meta = token_public_meta(body.token_id)
         cred.last_used_at = utcnow()
-        h.status, h.last_seen_at = "connected", utcnow()
-        rotated.append("api_token")
+        if body.capability == "monitoring":
+            # Only monitoring's own connectivity/last_seen bookkeeping: a
+            # lifecycle/console/backup rotation proves that ONE capability's
+            # token works (the version() check above), not that the host's
+            # overall reachability (what h.status reports) has changed.
+            h.status, h.last_seen_at = "connected", utcnow()
+        rotated.append(kind)
 
     if body.rotate_ssh:
         # generate_ed25519 returns the private half as bytes already; the

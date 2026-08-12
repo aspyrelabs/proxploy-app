@@ -316,6 +316,12 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     The response deliberately echoes NO config: a credential the caller just
     sent must not come back out of a GET the browser might cache or a screenshot
     someone pastes into a ticket.
+
+    `capability="lifecycle"`: attaching/editing/detaching a storage POOL
+    DEFINITION needs Datastore.Allocate, a node-infrastructure privilege
+    none of the four capabilities carried until the per-capability token
+    sweep found the gap (host-token-privileges-step-one-report.md), the
+    same class of bug Sys.PowerMgmt was.
     """
     host = _host_or_404(db, body.host_id)
     ip = request.client.host if request.client else None
@@ -325,7 +331,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     # (deliberate free-form plugin passthrough), so this collision is even
     # more open than network.py's.
     try:
-        client_for_host(request.app, db, host).storage_create(
+        client_for_host(request.app, db, host, capability="lifecycle").storage_create(
             {**body.config, "storage": body.storage, "type": body.type})
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
@@ -352,7 +358,7 @@ def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
     keys = sorted(body.config)
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).storage_update(name, body.config)
+        client_for_host(request.app, db, host, capability="lifecycle").storage_update(name, body.config)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
                     target_type="storage", target_id=host.id,
@@ -377,7 +383,7 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).storage_remove(name)
+        client_for_host(request.app, db, host, capability="lifecycle").storage_remove(name)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
                     target_type="storage", target_id=host.id,

@@ -219,7 +219,9 @@ def test_pve_task_timeout_actually_reaches_await_task(tmp_path):
             db.commit()
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!t", "token_secret": "s3cret"}).encode())
-            db.add(HostCredential(host_id=host.id, kind="api_token",
+            # network.apply runs under the "lifecycle" capability
+            # (Sys.Modify), see services/guestjobs.py::_resolve_host.
+            db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             host_id = host.id

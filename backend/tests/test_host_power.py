@@ -35,7 +35,7 @@ def _app(tmp_path, fail=False):
         h = seed_host_row(db, node="pve1")
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-        db.add(HostCredential(host_id=h.id, kind="api_token",
+        db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!mon"))
         db.commit()
@@ -127,7 +127,7 @@ def test_reboot_job_actually_reboots_the_node_and_reaches_a_terminal_status(tmp_
             from proxploy.models import HostCredential
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -164,7 +164,7 @@ def test_power_off_job_calls_proxmox_with_shutdown_and_succeeds(tmp_path):
             from proxploy.models import HostCredential
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -208,7 +208,7 @@ def test_reboot_job_reports_no_fake_progress(tmp_path, monkeypatch):
             from proxploy.models import HostCredential
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -241,7 +241,7 @@ def test_a_proxmox_error_fails_the_job_rather_than_ending_the_request(tmp_path):
             from proxploy.models import HostCredential
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -411,7 +411,7 @@ def test_a_missing_node_power_privilege_names_it_and_how_to_grant_it(tmp_path):
             # "docs.proxploy.com" themselves, which this test asserts on.
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "t0k3n-99xz"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token",
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(

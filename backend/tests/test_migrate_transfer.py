@@ -116,10 +116,15 @@ def _seed(app, *, src_node="pve-src", tgt_node="pve-tgt", ctid=150):
                   status="connected", pve_version="8.4.1")
         db.add(src); db.add(tgt); db.commit()
         for h, tag in ((src, "src"), (tgt, "tgt")):
-            ablob, aver = app.state.secretstore.encrypt(json.dumps(
-                {"token_id": f"proxploy@pve!{tag}", "token_secret": "s3cret"}).encode())
-            db.add(HostCredential(host_id=h.id, kind="api_token", encrypted_blob=ablob,
-                                  key_version=aver, public_meta=f"proxploy@pve!{tag}"))
+            # Migration needs monitoring/lifecycle/backup on both hosts
+            # (services/migrate.py::_load); FakePVE ignores token identity.
+            for cap in ("monitoring", "lifecycle", "backup"):
+                ablob, aver = app.state.secretstore.encrypt(json.dumps(
+                    {"token_id": f"proxploy@pve!{tag}-{cap}",
+                     "token_secret": "s3cret"}).encode())
+                db.add(HostCredential(host_id=h.id, kind=f"api_token:{cap}",
+                                      encrypted_blob=ablob, key_version=aver,
+                                      public_meta=f"proxploy@pve!{tag}-{cap}"))
             sblob, sver = app.state.secretstore.encrypt(FAKE_KEY)
             db.add(HostCredential(host_id=h.id, kind="ssh_key", encrypted_blob=sblob,
                                   key_version=sver, public_meta="ssh-ed25519 AAAA fake"))

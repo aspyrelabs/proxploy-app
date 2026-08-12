@@ -82,13 +82,23 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[d
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                   target_id: int, host: Host, kind: str, vmid: int,
                   iface: str, body: NicIn) -> dict:
-    """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update."""
+    """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update.
+
+    `capability="lifecycle"`, not the module default: the read half
+    (`guest_config`) only needs monitoring's VM.Audit, but the write half
+    (`guest_config_update`) needs VM.Config.Network, a lifecycle privilege,
+    and both halves run through the SAME client here. Found during the
+    per-capability token sweep (host-token-privileges-step-one-report.md):
+    before per-capability tokens existed this always worked because the one
+    token in play was over-scoped; a monitoring-only token would 403 on the
+    write with no useful message.
+    """
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
     node = host.node_name or ""
     ip = request.client.host if request.client else None
     try:
-        client = client_for_host(request.app, db, host)
+        client = client_for_host(request.app, db, host, capability="lifecycle")
         cfg = client.guest_config(kind, node, vmid)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
@@ -285,7 +295,7 @@ def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
     cfg = {**_check_config(body.config), "iface": body.iface, "type": body.type}
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).network_create(body.node, cfg)
+        client_for_host(request.app, db, host, capability="lifecycle").network_create(body.node, cfg)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
                     target_type="host", target_id=host.id,
@@ -308,7 +318,7 @@ def update_bridge(request: Request, host_id: int, node: str, iface: str,
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).network_update(
+        client_for_host(request.app, db, host, capability="lifecycle").network_update(
             node, iface, _check_config(body.config))
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
@@ -331,7 +341,7 @@ def delete_bridge(request: Request, host_id: int, node: str, iface: str,
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).network_delete(node, iface)
+        client_for_host(request.app, db, host, capability="lifecycle").network_delete(node, iface)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
                     target_type="host", target_id=host.id,
@@ -386,7 +396,7 @@ def revert_network(request: Request, host_id: int, node: str, db=Depends(get_db)
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     try:
-        client_for_host(request.app, db, host).network_revert(node)
+        client_for_host(request.app, db, host, capability="lifecycle").network_revert(node)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.revert",
                     target_type="host", target_id=host.id, params={"node": node},

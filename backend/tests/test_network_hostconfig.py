@@ -20,9 +20,11 @@ def _seed(app):
                     status="connected", pve_version="8.4.1")
         db.add(host)
         db.commit()
+        # Bridge create/update/delete/apply/revert all run under "lifecycle"
+        # (Sys.Modify -- api/network.py's host-config routes).
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!net", "token_secret": "s3cret"}).encode())
-        db.add(HostCredential(host_id=host.id, kind="api_token",
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver))
         db.commit()
         return host.id

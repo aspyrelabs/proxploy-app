@@ -205,12 +205,21 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
 
     `app_row` and `target_host_id` are assumed already validated by the route
     (app exists, target host exists, target != source, target is connected).
+
+    Every call this function makes (cluster_status, cluster_storage,
+    cluster_resources, cluster_nextid, storages) is a READ, so it runs on
+    the "monitoring" capability deliberately: a preview of a migration must
+    not require the operator to have already configured lifecycle/backup
+    tokens on both hosts just to see the estimate, and monitoring is the
+    one capability every enrolled host is guaranteed to have. The actual
+    `migrate.app` job below resolves lifecycle/backup separately, and only
+    fails on their absence when it is actually about to use them.
     """
     source_host = db.get(Host, app_row.host_id)
     target_host = db.get(Host, target_host_id)
 
-    src_client = client_for_host(app, db, source_host)
-    tgt_client = client_for_host(app, db, target_host)
+    src_client = client_for_host(app, db, source_host, capability="monitoring")
+    tgt_client = client_for_host(app, db, target_host, capability="monitoring")
 
     src_cluster = _cluster_name(src_client.cluster_status())
     tgt_cluster = _cluster_name(tgt_client.cluster_status())
@@ -315,12 +324,26 @@ START_PCT = (90, 100)
 
 def _load(app, app_id: int, target_host_id: int) -> dict:
     """Blocking: fresh in-handler preflight (never the route's stale one) +
-    both clients, in one db session. Returns only plain values/client
-    objects, no ORM instance escapes the closed session.
+    every client the chosen strategy needs, in one db session. Returns only
+    plain values/client objects, no ORM instance escapes the closed session.
 
     Raises JobFailed for anything the route already should have prevented
     but that may have changed in the gap between "operator clicks migrate"
-    and "this job actually runs" (doc 05 Interfaces note on Task 15).
+    and "this job actually runs" (doc 05 Interfaces note on Task 15). A
+    missing lifecycle/backup token on either host is exactly this class of
+    gap now: `client_for_host` raises `CapabilityNotConfigured` (naming the
+    host and the capability) before any PVE call, caught the same way as
+    every other resolution failure here and turned into one JobFailed line
+    instead of a mid-job 403 (host-token-privileges-step-one-report.md, per-
+    capability-tokens-plan.md §3 point 2).
+
+    Non-cluster migration (shared_storage/transfer) genuinely needs TWO
+    capabilities on top of needing two hosts: lifecycle for the stop/start
+    calls, backup for vzdump/restore/storage cleanup. Cluster-native
+    migration needs only lifecycle (PVE's own migrate call), so backup is
+    resolved lazily, only for the strategies that actually use it -- an
+    operator who only wants same-cluster migration must not be forced to
+    configure a backup token they will never touch.
     """
     with app.state.sessionmaker() as db:
         app_row = db.get(App, app_id)
@@ -336,8 +359,26 @@ def _load(app, app_id: int, target_host_id: int) -> dict:
         source_host = db.get(Host, app_row.host_id)
         target_host = db.get(Host, target_host_id)
         try:
-            src_client = client_for_host(app, db, source_host)
-            tgt_client = client_for_host(app, db, target_host)
+            # Health-check/status reads (_is_running, _wait_running): always
+            # monitoring, guaranteed present, never the reason a migration
+            # can't start.
+            src_mon_client = client_for_host(app, db, source_host,
+                                             capability="monitoring")
+            tgt_mon_client = client_for_host(app, db, target_host,
+                                             capability="monitoring")
+            # Stop the source, start the target: every strategy does both.
+            src_client = client_for_host(app, db, source_host,
+                                         capability="lifecycle")
+            tgt_client = client_for_host(app, db, target_host,
+                                         capability="lifecycle")
+            src_backup_client = tgt_backup_client = None
+            if pf["strategy"] != STRATEGY_CLUSTER:
+                # vzdump/restore/cleanup: only the two strategies that
+                # actually back up and restore need this token at all.
+                src_backup_client = client_for_host(app, db, source_host,
+                                                    capability="backup")
+                tgt_backup_client = client_for_host(app, db, target_host,
+                                                    capability="backup")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
         # Plain strings only, never the ORM rows themselves: used solely by
@@ -350,8 +391,11 @@ def _load(app, app_id: int, target_host_id: int) -> dict:
               "src_fingerprint": source_host.ssh_host_key_fingerprint,
               "tgt_address": target_host.address,
               "tgt_fingerprint": target_host.ssh_host_key_fingerprint}
-    return {"pf": pf, "app_name": app_name, "src_client": src_client,
-            "tgt_client": tgt_client, "ssh": ssh}
+    return {"pf": pf, "app_name": app_name,
+            "src_client": src_client, "tgt_client": tgt_client,
+            "src_mon_client": src_mon_client, "tgt_mon_client": tgt_mon_client,
+            "src_backup_client": src_backup_client,
+            "tgt_backup_client": tgt_backup_client, "ssh": ssh}
 
 
 def _is_running(client, ctid: int) -> bool:
@@ -433,6 +477,9 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     loaded = await asyncio.to_thread(_load, app, app_id, target_host_id)
     pf = loaded["pf"]
     src_client, tgt_client = loaded["src_client"], loaded["tgt_client"]
+    src_mon_client, tgt_mon_client = loaded["src_mon_client"], loaded["tgt_mon_client"]
+    src_backup_client, tgt_backup_client = (loaded["src_backup_client"],
+                                            loaded["tgt_backup_client"])
     strategy = pf["strategy"]
 
     source, target = pf["source"], pf["target"]
@@ -453,7 +500,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     # passes its health check).
     t0 = utcnow()
 
-    running = await asyncio.to_thread(_is_running, src_client, source_ctid)
+    running = await asyncio.to_thread(_is_running, src_mon_client, source_ctid)
     if running:
         ctx.log(f"stopping CT {source_ctid} on {source_host_name}")
         upid = await asyncio.to_thread(src_client.guest_action, "lxc", source_node,
@@ -475,13 +522,13 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         shared = pf["shared_storage"]
         ctx.log(f"vzdump CT {source_ctid} on {source_host_name}/{source_node} "
                 f"-> {shared}")
-        upid = await asyncio.to_thread(src_client.vzdump, source_node,
+        upid = await asyncio.to_thread(src_backup_client.vzdump, source_node,
                                        {"vmid": source_ctid, "storage": shared,
                                         "mode": "stop", "compress": "zstd"})
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+        await await_task(ctx, src_backup_client, source_node, upid, timeout_s=timeout_s,
                          start_pct=SHARED_VZDUMP_PCT[0], end_pct=SHARED_VZDUMP_PCT[1])
 
-        rows = await asyncio.to_thread(tgt_client.storage_content, target_node,
+        rows = await asyncio.to_thread(tgt_backup_client.storage_content, target_node,
                                        shared, "backup")
         candidates = sorted(
             (r for r in rows if parse_volid(r.get("volid") or "") == ("ct", source_ctid)),
@@ -495,14 +542,14 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
 
         ctx.log(f"restoring {volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}")
-        upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
+        upid = await asyncio.to_thread(tgt_backup_client.restore_guest, "lxc", target_node,
                                        target_ctid, {"ostemplate": volid, "restore": 1})
-        await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
+        await await_task(ctx, tgt_backup_client, target_node, upid, timeout_s=timeout_s,
                          start_pct=SHARED_RESTORE_PCT[0], end_pct=SHARED_RESTORE_PCT[1])
     else:  # STRATEGY_TRANSFER, vzdump locally, SFTP the archive, restore
         ssh = loaded["ssh"]
-        src_storage_rows = await asyncio.to_thread(src_client.cluster_storage)
-        tgt_storage_rows = await asyncio.to_thread(tgt_client.cluster_storage)
+        src_storage_rows = await asyncio.to_thread(src_backup_client.cluster_storage)
+        tgt_storage_rows = await asyncio.to_thread(tgt_backup_client.cluster_storage)
         src_storage = _dir_storage(src_storage_rows)
         tgt_storage = _dir_storage(tgt_storage_rows)
         if src_storage is None or tgt_storage is None:
@@ -514,13 +561,13 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
 
         ctx.log(f"vzdump CT {source_ctid} on {source_host_name}/{source_node} "
                 f"-> {src_storage} (local staging for transfer)")
-        upid = await asyncio.to_thread(src_client.vzdump, source_node,
+        upid = await asyncio.to_thread(src_backup_client.vzdump, source_node,
                                        {"vmid": source_ctid, "storage": src_storage,
                                         "mode": "stop", "compress": "zstd"})
-        await await_task(ctx, src_client, source_node, upid, timeout_s=timeout_s,
+        await await_task(ctx, src_backup_client, source_node, upid, timeout_s=timeout_s,
                          start_pct=TRANSFER_VZDUMP_PCT[0], end_pct=TRANSFER_VZDUMP_PCT[1])
 
-        rows = await asyncio.to_thread(src_client.storage_content, source_node,
+        rows = await asyncio.to_thread(src_backup_client.storage_content, source_node,
                                        src_storage, "backup")
         candidates = sorted(
             (r for r in rows if parse_volid(r.get("volid") or "") == ("ct", source_ctid)),
@@ -539,7 +586,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         src_root = _storage_path(src_storage_rows, src_storage)
         tgt_root = _storage_path(tgt_storage_rows, tgt_storage)
         if src_root is None or tgt_root is None:
-            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+            await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
             missing_storage = src_storage if src_root is None else tgt_storage
             missing_host = source_host_name if src_root is None else target_host_name
@@ -596,9 +643,9 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             # leave it as an orphan. The destination file may or may not
             # exist depending on how far the copy got: the delete call is a
             # harmless no-op on real PVE either way (Path never existed).
-            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+            await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
-            await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+            await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
                                   dst_volid, timeout_s)
             raise JobFailed(
                 f"SFTP transfer of {filename} failed: {e}, source CT "
@@ -609,15 +656,15 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         ctx.log(f"restoring {dst_volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}")
         try:
-            upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
+            upid = await asyncio.to_thread(tgt_backup_client.restore_guest, "lxc", target_node,
                                            target_ctid, {"ostemplate": dst_volid,
                                                          "restore": 1})
-            await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
+            await await_task(ctx, tgt_backup_client, target_node, upid, timeout_s=timeout_s,
                              start_pct=TRANSFER_RESTORE_PCT[0], end_pct=TRANSFER_RESTORE_PCT[1])
         except JobFailed:
-            await _cleanup_volume(ctx, src_client, source_node, src_storage,
+            await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
-            await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+            await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
                                   dst_volid, timeout_s)
             raise
 
@@ -637,7 +684,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
                      start_pct=START_PCT[0], end_pct=START_PCT[1])
 
-    healthy = await _wait_running(tgt_client, target_ctid)
+    healthy = await _wait_running(tgt_mon_client, target_ctid)
     if not healthy:
         ctx.log(
             f"HEALTH CHECK FAILED after {HEALTH_CHECK_DEADLINE_S:.0f}s: source "

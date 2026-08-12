@@ -122,8 +122,12 @@ def test_app_console_ticket_and_ws_against_real_pve(tmp_path, csrf_header,
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": os.environ["PROXPLOY_TEST_PVE_TOKEN_ID"],
                  "token_secret": os.environ["PROXPLOY_TEST_PVE_TOKEN_SECRET"]}).encode())
-            db.add(HostCredential(host_id=host_id, kind="api_token",
-                                  encrypted_blob=blob, key_version=ver))
+            # Live-hardware suite: the operator pastes ONE real token with
+            # every privilege the pveum script can grant, so it is valid for
+            # every capability the per-capability token scheme now encodes.
+            for cap in ("monitoring", "lifecycle", "console", "backup"):
+                db.add(HostCredential(host_id=host_id, kind=f"api_token:{cap}",
+                                      encrypted_blob=blob, key_version=ver))
             db.commit()
 
         asyncio.run(_make_running_ct(app, host_id, ctid))

@@ -169,8 +169,11 @@ def live_app(tmp_path, *, poll=False):
         tok = json.dumps({"token_id": os.environ["PROXPLOY_TEST_PVE_TOKEN_ID"],
                           "token_secret": os.environ["PROXPLOY_TEST_PVE_TOKEN_SECRET"]}).encode()
         blob, ver = app.state.secretstore.encrypt(tok)
-        db.add(HostCredential(host_id=host_id, kind="api_token",
-                              encrypted_blob=blob, key_version=ver))
+        # Live-hardware harness: one real token, valid for every capability
+        # (see test_console_pve_integration.py's identical note).
+        for cap in ("monitoring", "lifecycle", "console", "backup"):
+            db.add(HostCredential(host_id=host_id, kind=f"api_token:{cap}",
+                                  encrypted_blob=blob, key_version=ver))
         kb, kv = app.state.secretstore.encrypt(executor_key())
         db.add(HostCredential(host_id=host_id, kind="ssh_key",
                               encrypted_blob=kb, key_version=kv))

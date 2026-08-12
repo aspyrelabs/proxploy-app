@@ -13,7 +13,8 @@ FIX = Path(__file__).parent / "fixtures" / "pve"
 
 
 def _app(tmp_path, status=None, disks=None, fail=False, pci=None, services=None,
-         subscription=None, dns=None, time=None, networks=None, refuse=()):
+         subscription=None, dns=None, time=None, networks=None, refuse=(),
+         status_forbidden=()):
     from fastapi.testclient import TestClient
     from proxploy.models import HostCredential
     from tests.fakes.pve import FakePVE
@@ -29,6 +30,7 @@ def _app(tmp_path, status=None, disks=None, fail=False, pci=None, services=None,
     fake.time_by_node = {"pve1": time or {}}
     fake.networks_by_node = {"pve1": networks or []}
     fake.hardware_fail_sections = set(refuse)
+    fake.status_forbidden_nodes = set(status_forbidden)
     app = make_app(tmp_path, fake=fake)
     c = TestClient(app)
     c.__enter__()
@@ -40,7 +42,7 @@ def _app(tmp_path, status=None, disks=None, fail=False, pci=None, services=None,
         # refuses" test below pass for entirely the wrong reason.
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
-        db.add(HostCredential(host_id=h.id, kind="api_token",
+        db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!mon"))
         db.commit()
@@ -237,6 +239,32 @@ def test_the_hardware_tab_502s_only_when_the_node_is_unreachable(tmp_path, boots
     # Nothing at all could be read: that is the node being down, not a narrow
     # token, and the page should say so rather than render seven empty cards.
     assert r.status_code == 502, r.text
+
+
+# --- 403 vs 502: a permission problem must not read as a generic relay -----
+# Before this fix, _classify() (services/proxmox.py) had no case for "403",
+# so a too-narrow token's permission failure fell through as kind="unknown"
+# and the body carried nothing beyond Proxmox's own raw text under a label
+# indistinguishable from an unreachable node or a broken cert. This is why
+# the Sys.PowerMgmt gap gave no useful message, and it is not special to
+# node power: any 403 anywhere took the same fall.
+
+def test_a_permission_denied_403_names_the_privilege_not_a_generic_unknown(
+        tmp_path, bootstrap_admin):
+    # FakePVE.status_forbidden_nodes makes GET /nodes/pve1/status 403 with
+    # PVE's own realistic "Permission check failed (/path, Priv)" text.
+    app, c, hid = _app(tmp_path, status_forbidden={"pve1"})
+    bootstrap_admin(c)
+    r = c.get(f"/api/v1/hosts/{hid}/nodes/pve1/status")
+    assert r.status_code == 502, r.text
+    body = r.json()
+    # error/detail keys, not raw text: see api/hosts.py's HTTPException(502,
+    # {"error": e.kind, "detail": str(e)}) shape (main.py's problem_handler
+    # merges a dict `detail` straight onto the body). Before this fix `error`
+    # was "unknown" here, indistinguishable from a broken cert or a dead node.
+    assert body["error"] == "permission", body
+    assert "Sys.Audit" in body["detail"]
+    assert "403" in body["detail"]
 
 
 def test_an_unknown_host_is_404(tmp_path, bootstrap_admin):

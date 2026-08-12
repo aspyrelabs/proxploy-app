@@ -21,14 +21,21 @@ from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 
 
-def _resolve_host(app, host_id: int):
-    """Blocking: host_id -> (ProxmoxClient, host name). Runs in a thread."""
+def _resolve_host(app, host_id: int, capability: str = "monitoring"):
+    """Blocking: host_id -> (ProxmoxClient, host name). Runs in a thread.
+
+    Shared by `run_network_apply` (needs "lifecycle": staging/applying a
+    bridge is Sys.Modify) and `run_host_power` (deliberately left at the
+    "monitoring" default -- node power is its own capability dimension,
+    landing separately per per-capability-tokens-plan.md §3 footnote 3;
+    changing what it resolves to is out of scope for this sweep).
+    """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
         try:
-            return client_for_host(app, db, host), host.name
+            return client_for_host(app, db, host, capability=capability), host.name
         except ProxmoxError as e:
             # Same sentence as lifecycle.py::_resolve: a job reports a missing
             # credential as a failed job, never as a 502.
@@ -48,7 +55,8 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     app = ctx.backend.app
     host_id = int(params["host_id"])
     node = str(params["node"])
-    client, host_name = await asyncio.to_thread(_resolve_host, app, host_id)
+    client, host_name = await asyncio.to_thread(
+        _resolve_host, app, host_id, "lifecycle")
     ctx.log(f"applying staged network config on node {node} ({host_name})")
     ctx.progress(5)
     upid = await asyncio.to_thread(client.network_apply, node)
@@ -94,6 +102,10 @@ async def run_host_power(ctx: JobContext, params: dict) -> dict:
     host_id = int(params["host_id"])
     node = str(params["node"])
     command = str(params["command"])
+    # Deliberately the "monitoring" default, not "lifecycle": node power is
+    # its own capability dimension and does not exist as one of the four
+    # `kind="api_token:<capability>"` rows this sweep encodes (see
+    # _resolve_host's docstring). Unchanged behaviour, out of scope here.
     client, host_name = await asyncio.to_thread(_resolve_host, app, host_id)
     verb = "rebooting" if command == "reboot" else "powering off"
     ctx.log(f"{verb} node {node} ({host_name})")
@@ -127,7 +139,7 @@ def _vm_target(app, vm_id: int):
         if host is None:
             raise JobFailed(f"host {v.host_id} not found")
         try:
-            client = client_for_host(app, db, host)
+            client = client_for_host(app, db, host, capability="lifecycle")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
         return (client, host.node_name or "",
@@ -210,7 +222,8 @@ def _host_client(app, host_id: int):
         if host is None:
             raise JobFailed(f"host {host_id} not found")
         try:
-            return client_for_host(app, db, host), host.node_name or "", host.name
+            return (client_for_host(app, db, host, capability="lifecycle"),
+                    host.node_name or "", host.name)
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 

@@ -48,10 +48,13 @@ def _resolve(app, target_type: str, target_id: int):
         if host is None:
             raise JobFailed(f"host for {target_type} {target_id} not found")
         try:
-            client = client_for_host(app, db, host)
+            client = client_for_host(app, db, host, capability="lifecycle")
         except ProxmoxError as e:
             # Same sentence as before the extraction: a job reports a missing
-            # credential as a failed job, never as a 502.
+            # credential as a failed job, never as a 502. Now also covers a
+            # host with monitoring configured but no lifecycle token: the
+            # message names lifecycle specifically (CapabilityNotConfigured),
+            # not a bare 403 relay.
             raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
         vmid = row.ctid if target_type == "app" else row.vmid

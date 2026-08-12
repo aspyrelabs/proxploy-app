@@ -571,6 +571,13 @@ class _NodeStatusLeaf:
     def get(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
+        if self._node in self._owner.status_forbidden_nodes:
+            # Same realistic shape as power_forbidden_nodes below, for a GET
+            # rather than the node-power POST: proves the generic 403 ->
+            # kind="permission" classification (services/proxmox.py::_classify)
+            # is not special-cased to node_power alone.
+            raise RuntimeError(f"403 Forbidden: Permission check failed "
+                               f"(/nodes/{self._node}, Sys.Audit)")
         return self._owner.node_status_by_node.get(self._node, {})
 
     def post(self, **kwargs):
@@ -634,6 +641,9 @@ class FakePVE:
         # Nodes where the token is reachable but lacks Sys.PowerMgmt: a
         # 403, distinct from power_fail_nodes' unreachable-node simulation.
         self.power_forbidden_nodes: set[str] = set()
+        # Nodes where GET /nodes/{n}/status 403s (e.g. Sys.Audit missing),
+        # distinct from `fail`'s all-or-nothing unreachable simulation.
+        self.status_forbidden_nodes: set[str] = set()
         self.disks_by_node: dict[str, list[dict]] = {}
         # the rest of the host page's hardware tab, same lazy pattern
         self.pci_by_node: dict[str, list[dict]] = {}
