@@ -51,23 +51,20 @@ function duration(job: JobRow): string | null {
                                              : `${Math.round(ms / 60_000)}m`
 }
 
-/** Everything the job row actually knows, rather than the one line it used to
- *  show. Pairs with no value are dropped so a sparse job does not render a
- *  column of "unknown". */
-function metaOf(job: JobRow): [string, string][] {
-  const pairs: [string, string][] = [['Status', job.status]]
+/** One line of context under the message. Trimmed from a label/value table
+ *  that carried status, requester and schedule too — that much detail buried
+ *  the message it was there to support. What survives is what you actually
+ *  scan for: what it touched, how far along, and how long ago. */
+function footerOf(job: JobRow): string {
+  const bits: string[] = []
   if (job.target_type) {
-    pairs.push(['Target', `${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`])
+    bits.push(`${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`)
   }
-  if (job.progress_pct != null && job.status === 'running') {
-    pairs.push(['Progress', `${job.progress_pct}%`])
-  }
-  pairs.push(['Started', job.started_at ? ago(job.started_at) : `created ${ago(job.created_at)}`])
+  if (job.progress_pct != null && job.status === 'running') bits.push(`${job.progress_pct}%`)
   const took = duration(job)
-  if (took) pairs.push(['Took', took])
-  if (job.requested_by != null) pairs.push(['Requested by', String(job.requested_by)])
-  if (job.schedule_id != null) pairs.push(['Schedule', `#${job.schedule_id}`])
-  return pairs
+  if (took) bits.push(took)
+  bits.push(ago(job.started_at ?? job.created_at))
+  return bits.join(' · ')
 }
 
 /**
@@ -150,7 +147,7 @@ export function BellPopover() {
                     severity={severityOf(j.status)}
                     title={`${j.kind} #${j.id}`}
                     description={messageOf(j)}
-                    meta={metaOf(j)}
+                    footer={footerOf(j)}
                     onDismiss={() => setDismissed((d) => [...d, j.id])}
                   />
                 ))}

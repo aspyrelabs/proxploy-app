@@ -84,17 +84,17 @@ const FILL: Record<NotificationSeverity, string> = {
 }
 
 export function NotificationCard({
-  severity, title, description, meta, onDismiss,
+  severity, title, description, footer, onDismiss,
 }: {
   severity: NotificationSeverity
   title: string
   /** The message itself. Never clamped: on a failure this is the reason, and
    *  a reason you cannot read is not a notification. */
   description?: string
-  /** Label/value pairs shown beneath the message — target, timings, who asked
-   *  for it. Rendered as a definition list so the pairing survives a screen
-   *  reader. */
-  meta?: [string, string][]
+  /** One muted line of context beneath the message — target, age, duration.
+   *  Deliberately a single line: the full label/value table this replaced
+   *  buried the message it was meant to support. */
+  footer?: string
   onDismiss: () => void
 }) {
   const Icon = ICON[severity]
@@ -114,15 +114,10 @@ export function NotificationCard({
             {description}
           </div>
         )}
-        {meta && meta.length > 0 && (
-          <dl className="col-start-2 mt-0.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t border-line-soft pt-1.5 font-mono text-[11px]">
-            {meta.map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="text-text-3">{k}</dt>
-                <dd className="break-words text-text-2">{v}</dd>
-              </div>
-            ))}
-          </dl>
+        {footer && (
+          <div className="col-start-2 mt-0.5 font-mono text-[11px] text-text-3">
+            {footer}
+          </div>
         )}
       </div>
       <button type="button" aria-label="Dismiss" onClick={onDismiss}

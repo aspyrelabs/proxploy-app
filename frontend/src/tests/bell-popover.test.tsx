@@ -173,14 +173,13 @@ describe('BellPopover', () => {
   })
 
   // A failure's reason is the message, and must not be clamped away.
-  it('shows the full error text and the job detail, not just a heading', async () => {
+  it('shows the full error text and a line of context, not just a heading', async () => {
     wrap()
     await openBell()
     expect(await screen.findByText('disk full: retry failed')).toBeInTheDocument()
-    // Three cards, so three Status rows — the point is that the detail is
-    // there at all, not that it is unique.
-    expect(screen.getAllByText('Status')).toHaveLength(3)
-    expect(screen.getAllByText('failed').length).toBeGreaterThan(0)
+    // One muted context line per card, not a label/value table: what it
+    // touched and how long ago.
+    expect(screen.getByText(/vm 3 ·/)).toBeInTheDocument()
   })
 
   it('closes on Escape', async () => {
