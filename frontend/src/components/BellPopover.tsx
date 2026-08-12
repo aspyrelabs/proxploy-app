@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { useQuery } from '@tanstack/react-query'
 import { BellIcon } from '@heroicons/react/24/outline'
@@ -7,8 +7,64 @@ import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
 import { ago } from './activityDisplay'
 
-/** How many cards are on screen at once. */
-const VISIBLE = 15
+/** Hard ceiling on cards, however tall the window is. */
+const MAX_VISIBLE = 15
+
+/** Rough height of the shortest possible card plus its gap. Only used for the
+ *  first paint, before the real cards can be measured — see useFittingCount. */
+const CARD_ESTIMATE_PX = 84
+
+/** How much of the viewport the popover cannot use: the topbar it hangs from,
+ *  its own sideOffset, and a margin so the last card is not flush to the edge. */
+const CHROME_PX = 96
+
+/** How many cards fit in the window, measured rather than guessed.
+ *
+ *  Card height is not constant — a failure's message wraps to however many
+ *  lines its error needs — so dividing by a fixed constant either clips the
+ *  last card or wastes a slot. This estimates on the first paint, then measures
+ *  the cards actually rendered and settles on the real number.
+ *
+ *  It converges in one extra pass because a card's height does not depend on
+ *  how many are shown; the guard against setting an unchanged value is what
+ *  stops a resize from looping.
+ *
+ *  In jsdom every offsetHeight is 0, so the measurement is skipped entirely and
+ *  the ceiling stands — tests assert on MAX_VISIBLE, not on layout. */
+function useFittingCount(listRef: React.RefObject<HTMLDivElement | null>, open: boolean) {
+  const [count, setCount] = useState(() =>
+    Math.max(1, Math.min(MAX_VISIBLE, Math.floor((window.innerHeight - CHROME_PX) / CARD_ESTIMATE_PX))))
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const fit = () => {
+      const el = listRef.current
+      if (!el) return
+      const cards = Array.from(el.children) as HTMLElement[]
+      const measured = cards.filter((c) => c.offsetHeight > 0)
+      if (measured.length === 0) return   // jsdom, or not laid out yet
+      const gap = 8
+      const available = window.innerHeight - CHROME_PX
+      let used = 0
+      let n = 0
+      for (const card of measured) {
+        const next = used + card.offsetHeight + (n > 0 ? gap : 0)
+        if (next > available) break
+        used = next
+        n += 1
+      }
+      // At least one, even on a window too short for it: a clipped card beats
+      // a popover that opens empty and looks broken.
+      const fitted = Math.max(1, Math.min(MAX_VISIBLE, n))
+      setCount((cur) => (cur === fitted ? cur : fitted))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  })
+
+  return count
+}
 import { QueryState } from './QueryState'
 import { NotificationCard } from './ui/notification-card'
 import type { NotificationSeverity } from './ui/notification-card'
@@ -79,6 +135,8 @@ function footerOf(job: JobRow): string {
 export function BellPopover() {
   const [open, setOpen] = useState(false)
   const [dismissed, setDismissed] = useState<number[]>([])
+  const listRef = useRef<HTMLDivElement>(null)
+  const visible = useFittingCount(listRef, open)
 
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
   // created_at desc, so a long-running job older (by creation time) than the
@@ -127,6 +185,7 @@ export function BellPopover() {
             and each card is its own floating surface — the cards ARE the
             popover. */}
         <PopoverPrimitive.Content
+          ref={listRef}
           align="end"
           sideOffset={8}
           className="z-30 flex w-[400px] max-w-[92vw] flex-col gap-2 bg-transparent p-0"
@@ -138,10 +197,10 @@ export function BellPopover() {
                       errorNote="Proxploy could not reach the backend.">
             {(jobs) => (
               <>
-                {/* VISIBLE at a time, and no scrollbar: dismissing one is what
+                {/* As many as fit, and no scrollbar: dismissing one is what
                     reveals the next, so the backlog drains through the x rather
                     than through a scroll nobody asked for. */}
-                {jobs.filter((j) => !dismissed.includes(j.id)).slice(0, VISIBLE).map((j) => (
+                {jobs.filter((j) => !dismissed.includes(j.id)).slice(0, visible).map((j) => (
                   <NotificationCard
                     key={j.id}
                     severity={severityOf(j.status)}

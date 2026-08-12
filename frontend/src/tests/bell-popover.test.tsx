@@ -155,9 +155,17 @@ describe('BellPopover', () => {
       expect(screen.getAllByRole('alert')).toHaveLength(before - 1))
   })
 
-  // 15 at a time with no scrollbar: the backlog drains through the x, so
-  // dismissing one is what reveals the next.
+  /** jsdom reports every offsetHeight as 0, so the popover's measure pass is
+   *  skipped and its viewport-height estimate is what decides the count. That
+   *  makes innerHeight the lever these tests pull. */
+  const setViewportHeight = (px: number) => {
+    Object.defineProperty(window, 'innerHeight', { value: px, configurable: true })
+  }
+
+  // Capped at 15 however tall the window is, with no scrollbar: the backlog
+  // drains through the x, so dismissing one is what reveals the next.
   it('shows at most 15 cards, and reveals the next when one is dismissed', async () => {
+    setViewportHeight(2000)
     jobsResult = 'many'
     wrap()
     await openBell()
@@ -170,6 +178,28 @@ describe('BellPopover', () => {
 
     await waitFor(() => expect(screen.getByText('bulk.job15 #115')).toBeInTheDocument())
     expect(screen.getAllByRole('alert')).toHaveLength(15)
+  })
+
+  // The count follows the window rather than a constant: a laptop should not
+  // get a column of cards running off the bottom with no way to scroll to them.
+  it('shows fewer cards in a short window than a tall one', async () => {
+    jobsResult = 'many'
+    setViewportHeight(600)
+    const short = render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BellPopover />
+      </QueryClientProvider>)
+    await openBell()
+    const shortCount = (await screen.findAllByRole('alert')).length
+    short.unmount()
+
+    setViewportHeight(2000)
+    wrap()
+    await openBell()
+    const tallCount = (await screen.findAllByRole('alert')).length
+
+    expect(shortCount).toBeLessThan(tallCount)
+    expect(shortCount).toBeGreaterThanOrEqual(1)
   })
 
   // A failure's reason is the message, and must not be clamped away.
