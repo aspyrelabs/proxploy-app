@@ -7,6 +7,10 @@ let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
 let nodeStatus: Record<string, unknown> | null = null
+// NodeDetailPage/NodeOverview/NodeHardware read their own params; reassigned
+// per-test so a single fixture (pve1/pve2/pve3, see the cluster fixture
+// below) can stand in for whichever node a test needs to look at.
+let params: { hostId: string; node?: string } = { hostId: '1', node: 'pve1' }
 
 const node = (over: Record<string, unknown> = {}) => ({
   host_id: 1, name: 'host-01', node: 'pve1', status: 'connected',
@@ -94,7 +98,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   // directly rather than standing up a whole router (vms.test.tsx precedent).
   Outlet: () => null,
   // NodeDetailPage reads its own params; HostsPage never calls this.
-  useParams: () => ({ hostId: '1', node: 'pve1' }),
+  useParams: () => params,
 }))
 
 import { api } from '../api/client'
@@ -247,6 +251,7 @@ describe('NodeDetailPage', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
   })
 
   it('links out to the Proxmox web UI, safely', async () => {
@@ -270,6 +275,7 @@ describe('NodeOverview', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
   })
 
   it('reports storage used / total in the identity rail', async () => {
@@ -315,12 +321,42 @@ describe('NodeOverview', () => {
     expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
     expect(screen.queryByText(/Processor/)).not.toBeInTheDocument()
   })
+
+  it('says where the metrics live instead of silently dropping the charts', async () => {
+    // pve1 is not the entry node; pve2 is. The host:<id> series is recorded
+    // from the node Proxploy connects through, so charting it here would be
+    // charting a different machine — but saying nothing reads as a bug.
+    nodesResult = 'cluster'
+    params = { hostId: '1', node: 'pve1' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText(/recorded on/i)).toBeInTheDocument()
+    // Exact match: the entry-node span reads "pve2" alone, while the link's
+    // own text is "Open pve2 →" — a /pve2/ regex matches both and is
+    // ambiguous, so this pins down the plain mention specifically.
+    expect(screen.getByText('pve2')).toBeInTheDocument()
+    // The mocked <Link> (above) renders a bare <a> with no href, so it has no
+    // accessible "link" role in jsdom; assert on the routed destination the
+    // way the NodeCard tests in this file already do.
+    const openLink = screen.getByText(/open pve2/i).closest('a')!
+    expect(openLink.getAttribute('data-to')).toBe('/hosts/$hostId/$node')
+    expect(JSON.parse(openLink.getAttribute('data-params')!))
+      .toEqual({ hostId: '1', node: 'pve2' })
+  })
+
+  it('draws the charts, and no note, on the entry node', async () => {
+    nodesResult = 'cluster'
+    params = { hostId: '1', node: 'pve2' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    expect(screen.queryByText(/recorded on/i)).not.toBeInTheDocument()
+  })
 })
 
 describe('NodeHardware', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
   })
 
   it('lists disks with health and wearout', async () => {

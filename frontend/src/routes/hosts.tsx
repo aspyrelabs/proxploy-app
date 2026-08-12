@@ -375,8 +375,10 @@ function useNodeContext() {
   const node = nodeName
     ? forHost?.find((n) => n.node === nodeName)
     : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
+  // The page needs to NAME the entry node, not just know it is not this one.
+  const entry = forHost?.find((n) => n.is_entry)
   const { data: host } = useHostDetail(id)
-  return { id, node, host }
+  return { id, node, host, entry }
 }
 
 const TABS = [
@@ -440,8 +442,32 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
   )
 }
 
+/** Charts and the node shell belong to the entry node — the `host:<id>` metric
+ *  series is recorded there and the shell ticket is minted for it. Both were
+ *  simply absent on every other node of a cluster, which reads as a missing
+ *  feature rather than a deliberate one. */
+function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
+  return (
+    <div className="mt-5 rounded-card border border-line border-l-2 border-l-amber
+                    bg-panel p-4 text-[13px] text-text-2">
+      Metrics and the node shell are recorded on{' '}
+      {entry?.node
+        ? <span className="font-mono text-text">{entry.node}</span>
+        : <span>this host&rsquo;s entry node</span>}
+      , the node Proxploy connects through.{' '}
+      {entry?.node && (
+        <Link to={'/hosts/$hostId/$node' as never}
+          params={{ hostId: String(hostId), node: entry.node } as never}
+          className="text-amber hover:underline">
+          Open {entry.node} →
+        </Link>
+      )}
+    </div>
+  )
+}
+
 export function NodeOverview() {
-  const { id, node, host } = useNodeContext()
+  const { id, node, host, entry } = useNodeContext()
   // mem_pct, not mem_bytes: the poller records both for a host, and charting
   // the percentage puts all three of these on one 0..100 scale so they can be
   // read side by side. The absolute figures are one row up, in the KV grid.
@@ -473,10 +499,10 @@ export function NodeOverview() {
           {/* Entry node only: the `host:<id>` metric series is recorded from
               the node Proxploy connects through, so drawing it under any other
               node of the cluster would be charting a different machine. */}
-          {node.is_entry && (
+          {node.is_entry ? (
+            /* Each chart owns its range: "is the CPU spiking now" and "did
+               storage creep all week" are different questions. */
             <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-              {/* Each chart owns its range: "is the CPU spiking now" and "did
-                  storage creep all week" are different questions. */}
               <div className={card}>
                 <MetricChart target={`host:${id}`} metric="cpu_pct"
                   unit="percent" label="CPU" accent="amber" />
@@ -493,6 +519,8 @@ export function NodeOverview() {
                   unit="percent" label="Storage" accent="violet" />
               </div>
             </div>
+          ) : (
+            <EntryNodeNote hostId={id} entry={entry} />
           )}
         </>
       )}
