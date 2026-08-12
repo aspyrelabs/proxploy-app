@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { BellIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
 import { useEntitlements } from '../api/hooks'
@@ -7,6 +8,7 @@ import { api } from '../api/client'
 import type { JobRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
 import { openCommandPalette } from './CommandPalette'
+import Logo from './Logo'
 
 export function Topbar() {
   const { has } = useEntitlements()
@@ -27,12 +29,13 @@ export function Topbar() {
   const count = running?.length ?? 0
   return (
     <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 py-2.5 backdrop-blur-[10px]">
+      <Logo className="h-6 w-auto shrink-0 text-amber" />
       <button
         aria-label="Search (Ctrl+K)"
         onClick={openCommandPalette}
         className="mr-auto flex h-8 items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
       >
-        <span aria-hidden>🔎</span>
+        <MagnifyingGlassIcon aria-hidden className="h-[18px] w-[18px]" />
         <span className="hidden text-[12px] sm:inline">Search</span>
         <span className="hidden rounded-tile border border-line px-1 font-mono text-[10px] text-text-3 sm:inline">
           Ctrl+K
@@ -44,7 +47,7 @@ export function Topbar() {
           onClick={drawer.toggle}
           className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
         >
-          <span aria-hidden>🔔</span>
+          <BellIcon aria-hidden className="h-[18px] w-[18px]" />
           {count > 0 && (
             <span className="absolute -right-1 -top-1 rounded-full bg-amber px-1 font-mono text-[9px] text-[#20160a]">
               {count}

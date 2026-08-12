@@ -4,7 +4,6 @@ import {
   Cog6ToothIcon, ComputerDesktopIcon, GlobeAltIcon, ServerStackIcon,
   ShoppingBagIcon, Squares2X2Icon,
 } from '@heroicons/react/24/outline'
-import { Brand } from './LoginForm'
 import { HealthFooter } from './HealthFooter'
 
 export const NAV = [
@@ -27,7 +26,6 @@ export const NAV = [
 export function SidebarNav() {
   return (
     <aside className="sticky top-0 flex h-screen w-[236px] shrink-0 flex-col border-r border-line-soft bg-panel/60 max-[720px]:hidden">
-      <div className="px-4 py-4"><Brand /></div>
       <nav className="flex-1 overflow-y-auto px-2">
         {NAV.map(group => (
           <div key={group.label} className="mb-4">
