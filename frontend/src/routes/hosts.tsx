@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { api } from '../api/client'
@@ -9,8 +9,9 @@ import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { GuestList, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
-import { HostFacts } from '../components/HostFacts'
+import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
@@ -374,8 +375,10 @@ function useNodeContext() {
   const node = nodeName
     ? forHost?.find((n) => n.node === nodeName)
     : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
+  // The page needs to NAME the entry node, not just know it is not this one.
+  const entry = forHost?.find((n) => n.is_entry)
   const { data: host } = useHostDetail(id)
-  return { id, node, host }
+  return { id, node, host, entry }
 }
 
 const TABS = [
@@ -439,8 +442,100 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
   )
 }
 
+/** Charts and the node shell belong to the entry node — the `host:<id>` metric
+ *  series is recorded there and the shell ticket is minted for it. Both were
+ *  simply absent on every other node of a cluster, which reads as a missing
+ *  feature rather than a deliberate one. */
+function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
+  const entryNode = entry?.node
+  return (
+    <div className="rounded-card border border-line border-l-2 border-l-amber
+                    bg-panel p-4 text-[13px] text-text-2">
+      Metrics and the node shell are recorded on{' '}
+      {entryNode
+        ? <span className="font-mono text-text">{entryNode}</span>
+        : <span>this host&rsquo;s entry node</span>}
+      , the node Proxploy connects through.{' '}
+      {entryNode && (
+        <Link to={'/hosts/$hostId/$node' as never}
+          params={{ hostId: String(hostId), node: entryNode } as never}
+          className="text-amber hover:underline">
+          Open {entryNode} →
+        </Link>
+      )}
+    </div>
+  )
+}
+
+/** What to draw for "Guests on this host", derived from BOTH the apps and
+ *  VMs queries at once.
+ *
+ *  This replaces a single `QueryState query={nodeAppsQuery}` that decided
+ *  loading/empty/error from the apps query alone and folded `vms` in only
+ *  once apps had already succeeded and come back non-empty — so an
+ *  apps-empty node (a fresh install with real VMs and zero adopted apps) hid
+ *  its VMs behind "No guests on this node", and an apps-erroring node hid
+ *  them behind "Guests not readable". The one behaviour that must hold: if
+ *  either list has rows, those rows render. So: pending if either query is
+ *  still pending; a hard error only when BOTH failed (there is then truly
+ *  nothing to show); otherwise render whatever rows the succeeding side(s)
+ *  have, empty only when that combined count is zero, and a partial-failure
+ *  note — not a swallowed error — when exactly one side failed but the other
+ *  still has something to show. */
+type GuestsState =
+  | { kind: 'loading' }
+  | { kind: 'error'; title: string; note: string }
+  | { kind: 'empty' }
+  | { kind: 'ok'; guests: ReturnType<typeof toGuests>; warning?: string }
+
+function combineGuestQueries(
+  appsQuery: UseQueryResult<AppRow[]>,
+  vmsQuery: UseQueryResult<VmRow[]>,
+): GuestsState {
+  if (appsQuery.isPending || vmsQuery.isPending) return { kind: 'loading' }
+  const appsFailed = appsQuery.isError
+  const vmsFailed = vmsQuery.isError
+  if (appsFailed && vmsFailed) {
+    return {
+      kind: 'error', title: 'Guests not readable',
+      note: 'Proxploy could not reach the backend to list guests on this node.',
+    }
+  }
+  const apps = appsFailed ? [] : appsQuery.data ?? []
+  const vms = vmsFailed ? [] : vmsQuery.data ?? []
+  const guests = toGuests(apps, vms)
+  if (guests.length === 0) {
+    // The failed side might genuinely have guests we simply could not read;
+    // saying "no guests" here would be no more honest than the bug this
+    // replaces. Name the side that failed instead.
+    if (appsFailed) {
+      return {
+        kind: 'error', title: 'Apps not readable',
+        note: 'Proxploy could not reach the backend to list apps on this node. '
+            + 'This node has no VMs either, but that count is only certain, not the apps one.',
+      }
+    }
+    if (vmsFailed) {
+      return {
+        kind: 'error', title: 'VMs not readable',
+        note: 'Proxploy could not reach the backend to list VMs on this node. '
+            + 'This node has no apps either, but that count is only certain, not the VMs one.',
+      }
+    }
+    return { kind: 'empty' }
+  }
+  return {
+    kind: 'ok', guests,
+    warning: appsFailed
+      ? 'Apps could not be read. This list is missing whatever apps this node has.'
+      : vmsFailed
+        ? 'VMs could not be read. This list is missing whatever VMs this node has.'
+        : undefined,
+  }
+}
+
 export function NodeOverview() {
-  const { id, node, host } = useNodeContext()
+  const { id, node, host, entry } = useNodeContext()
   // mem_pct, not mem_bytes: the poller records both for a host, and charting
   // the percentage puts all three of these on one 0..100 scale so they can be
   // read side by side. The absolute figures are one row up, in the KV grid.
@@ -454,87 +549,97 @@ export function NodeOverview() {
     queryFn: () => api<VmRow[]>(`/vms?host=${id}`),
     refetchInterval: 30_000,
   })
-  const apps = nodeAppsQuery.data
-  const vms = nodeVmsQuery.data
+  const guestsState = combineGuestQueries(nodeAppsQuery, nodeVmsQuery)
+  const guestCount = guestsState.kind === 'ok' ? guestsState.guests.length : 0
   if (!node && !host) return null
   return (
-    <div>
-      {node && (
-        <>
-          {/* One strip, two sources. HostFacts merges the poller's snapshot
-              (always there, and the only source for the deduped datastore
-              fill and the guest counts) with the node's own /status (on
-              demand, refusable by a narrow token), so a node that will not
-              answer loses rows rather than the whole card. It used to be two
-              cards repeating Node, PVE version, Uptime and Memory. */}
-          {node.node && (
-            <HostFacts hostId={id} node={node.node} snapshot={node} />
-          )}
-          {/* Entry node only: the `host:<id>` metric series is recorded from
-              the node Proxploy connects through, so drawing it under any other
-              node of the cluster would be charting a different machine. */}
-          {node.is_entry && (
-            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-              {/* Each chart owns its range: "is the CPU spiking now" and "did
-                  storage creep all week" are different questions. */}
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="cpu_pct"
-                  unit="percent" label="CPU" accent="amber" />
-              </div>
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="mem_pct"
-                  unit="percent" label="Memory" accent="cyan" />
-              </div>
-              {/* Already recorded every cycle by the poller (`disk_pct`), and
-                  correctly shared-vs-local deduped there, so this series is
-                  the host's real fill, not the sum of the node rows. */}
-              <div className={card}>
-                <MetricChart target={`host:${id}`} metric="disk_pct"
-                  unit="percent" label="Storage" accent="violet" />
+    <div className="lg:grid lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start lg:gap-5">
+      {/* minmax(0,1fr), not 1fr: it lets the track shrink below the charts'
+          intrinsic content width instead of refusing to shrink at all. */}
+      <div className="mb-5 lg:sticky lg:top-16 lg:mb-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+        {/* The rail is dense reference material, not something worth pinning
+            at the cost of reachability: with /status answering it runs to
+            roughly 700px, and lg:top-16 alone left its bottom rows (Boot,
+            part of Memory & storage) permanently below the fold on any
+            viewport under ~765px tall — a 1366x768 laptop among them,
+            comfortably inside `lg`. max-h + overflow-y-auto trades that for a
+            nested scrollbar, which can always reach the bottom. */}
+        {node?.node && (
+          <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
+        )}
+      </div>
+      <div>
+        {/* Entry node only: the `host:<id>` metric series is recorded from
+            the node Proxploy connects through, so drawing it under any other
+            node of the cluster would be charting a different machine. */}
+        {node && (node.is_entry
+          ? (
+            /* Each chart owns its range: "is the CPU spiking now" and "did
+               storage creep all week" are different questions.
+               @container/@3xl, not lg: a chart card needs roughly 200px of
+               inner width to fit its non-wrapping 30m/1h/12h/24h range group,
+               and this RIGHT COLUMN — not the viewport — is what decides
+               that width. The 290px rail plus its gap can hold the column
+               under 200px well past `lg` (~91px of card width at a 1024px
+               viewport, versus ~194px before the rail existed), which is
+               exactly what a viewport-keyed `lg:grid-cols-3` missed. @3xl
+               (768px of container width) is the narrowest container step
+               that still clears ~200px per card once p-5 padding, borders
+               and gap-4 gutters come out of it. */
+            <div className="@container">
+              <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-3">
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="cpu_pct"
+                    unit="percent" label="CPU" accent="amber" />
+                </div>
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="mem_pct"
+                    unit="percent" label="Memory" accent="cyan" />
+                </div>
+                {/* Already recorded every cycle by the poller (`disk_pct`), and
+                    correctly shared-vs-local deduped there, so this series is
+                    the host's real fill, not the sum of the node rows. */}
+                <div className={card}>
+                  <MetricChart target={`host:${id}`} metric="disk_pct"
+                    unit="percent" label="Storage" accent="violet" />
+                </div>
               </div>
             </div>
-          )}
-        </>
-      )}
-      <div className="mt-5">
-        {/* "on this host", not "on this node": neither apps nor vms records
-            which node of the cluster a guest sits on, so this list is
-            host-wide and says so. */}
-        <h2 className="mb-3 font-display text-[16px] font-semibold">
-          Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
-        </h2>
-        <QueryState query={nodeAppsQuery}
-                    emptyTitle="No apps on this node"
-                    emptyNote="Installed or adopted apps on this node appear here."
-                    errorTitle="Apps not readable"
-                    errorNote="Proxploy could not reach the backend to list apps on this node.">
-          {(rows) => (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {rows.map((a) => <AppCard key={a.id} app={a} />)}
+          )
+          : <EntryNodeNote hostId={id} entry={entry} />)}
+        <div className="mt-5">
+          {/* "on this host", not "on this node": neither apps nor vms records
+              which node of the cluster a guest sits on, so this list is
+              host-wide and says so. */}
+          <h2 className="mb-3 font-display text-[16px] font-semibold">
+            Guests on this host ({guestCount})
+          </h2>
+          {guestsState.kind === 'loading' && (
+            <div role="status" aria-live="polite"
+                 className="grid place-items-center rounded-card border border-dashed
+                           border-line py-20 text-[12.5px] text-text-3">
+              Loading…
             </div>
           )}
-        </QueryState>
-        <QueryState query={nodeVmsQuery}
-                    emptyTitle="No VMs on this node"
-                    emptyNote="QEMU guests on this node appear here."
-                    errorTitle="VMs not readable"
-                    errorNote="Proxploy could not reach the backend to list VMs on this node.">
-          {(rows) => (
-            <div className={`${card} mt-4`}>
-              <table className="w-full text-left text-[13px]">
-                <tbody>
-                  {rows.map((v) => (
-                    <tr key={v.id} className="border-t border-line-soft first:border-t-0">
-                      <td className="py-2 font-mono">{v.name}</td>
-                      <td className="py-2 text-text-2">VMID {v.vmid}</td>
-                      <td className="py-2"><StatusPill status={v.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {guestsState.kind === 'error' && (
+            <EmptyState title={guestsState.title} note={guestsState.note} />
           )}
-        </QueryState>
+          {guestsState.kind === 'empty' && (
+            <EmptyState title="No guests on this node"
+              note="Installed or adopted apps and QEMU guests on this node appear here." />
+          )}
+          {guestsState.kind === 'ok' && (
+            <>
+              {guestsState.warning && (
+                <p role="alert" className="mb-3 rounded-ctl border border-amber/30
+                                           bg-amber-dim p-2 text-[12.5px] text-text-2">
+                  <span className="text-amber">{guestsState.warning}</span>
+                </p>
+              )}
+              <GuestList guests={guestsState.guests} />
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

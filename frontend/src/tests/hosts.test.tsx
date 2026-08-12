@@ -2,11 +2,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' = 'ok'
+let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' = 'ok'
 let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
 let nodeStatus: Record<string, unknown> | null = null
+// Controls for `/apps?host=` and `/vms?host=` specifically — NodeOverview's
+// own guest queries, distinct from HostsPage's unfiltered `/apps` and `/vms`
+// (which stay empty-array below; nothing in this file exercises their rows).
+let nodeAppsResult: 'empty' | 'ok' | 'error' = 'empty'
+let nodeVmsResult: 'empty' | 'ok' | 'error' = 'empty'
+// NodeDetailPage/NodeOverview/NodeHardware read their own params; reassigned
+// per-test so a single fixture (pve1/pve2/pve3, see the cluster fixture
+// below) can stand in for whichever node a test needs to look at.
+let params: { hostId: string; node?: string } = { hostId: '1', node: 'pve1' }
 
 const node = (over: Record<string, unknown> = {}) => ({
   host_id: 1, name: 'host-01', node: 'pve1', status: 'connected',
@@ -15,6 +24,24 @@ const node = (over: Record<string, unknown> = {}) => ({
   disk_pct: 25, disk_bytes: 2147483648, disk_total_bytes: 34359738368,
   apps: 1, apps_running: 1, vms: 1, vms_running: 1, last_seen_at: null,
   ...over,
+})
+
+// Minimal AppRow/VmRow fixtures for the NodeOverview guest-list tests below.
+// Full field lists live in guest-list.test.tsx; this file only needs enough
+// to prove a row rendered.
+const nodeAppFixture = () => ({
+  id: 7, name: 'jellyfin', slug: 'jellyfin', host_id: 1, host_name: 'host-01',
+  node: 'pve1', ctid: 104, category: null, catalog_slug: null,
+  icon_initials: null, icon_colors: null, web_port: null, web_protocol: null,
+  web_path: null, status: 'running', ip: null, cpu_pct: 12,
+  mem_bytes: 2161287168, mem_total_bytes: 4294967296, uptime_s: 100,
+  update_available: null, adopted: false,
+})
+
+const nodeVmFixture = () => ({
+  id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
+  status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
+  mem_bytes: 2161287168, disk_bytes: null, uptime_s: 500, synced_at: null,
 })
 
 vi.mock('../api/client', () => ({
@@ -46,7 +73,23 @@ vi.mock('../api/client', () => ({
           node({ host_id: 2, name: 'host-02', node: 'lab', cluster: null }),
         ])
       }
+      // No row for this host claims is_entry — the entry node dropped out of
+      // /cluster/nodes (or the host was never fully enrolled), so nothing
+      // here can be named or linked to.
+      if (nodesResult === 'noEntry') {
+        return Promise.resolve([node({ is_entry: false })])
+      }
       return Promise.resolve([node()])
+    }
+    if (path.startsWith('/apps?host=')) {
+      if (nodeAppsResult === 'error') return Promise.reject(new Error('boom'))
+      if (nodeAppsResult === 'ok') return Promise.resolve([nodeAppFixture()])
+      return Promise.resolve([])
+    }
+    if (path.startsWith('/vms?host=')) {
+      if (nodeVmsResult === 'error') return Promise.reject(new Error('boom'))
+      if (nodeVmsResult === 'ok') return Promise.resolve([nodeVmFixture()])
+      return Promise.resolve([])
     }
     if (path.startsWith('/apps')) return Promise.resolve([])
     if (path.startsWith('/vms')) return Promise.resolve([])
@@ -94,7 +137,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   // directly rather than standing up a whole router (vms.test.tsx precedent).
   Outlet: () => null,
   // NodeDetailPage reads its own params; HostsPage never calls this.
-  useParams: () => ({ hostId: '1', node: 'pve1' }),
+  useParams: () => params,
 }))
 
 import { api } from '../api/client'
@@ -247,6 +290,7 @@ describe('NodeDetailPage', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
   })
 
   it('links out to the Proxmox web UI, safely', async () => {
@@ -270,28 +314,61 @@ describe('NodeOverview', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
+    nodeAppsResult = 'empty'; nodeVmsResult = 'empty'
   })
 
-  it('reports storage used / total alongside the guest counts, in ONE strip', async () => {
+  // CRITICAL: GuestList merges apps and VMs under one QueryState keyed to the
+  // apps query alone, so `/apps` -> [] used to short-circuit to the empty
+  // state before `vms` was ever looked at — hiding a real, running VM. A
+  // fresh install with an adopted-app count of zero and real VMs hit this on
+  // first load.
+  it('renders VMs even when the node has zero apps', async () => {
+    nodeAppsResult = 'empty'; nodeVmsResult = 'ok'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('win11-lab')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+    expect(screen.getByText('Guests on this host (1)')).toBeInTheDocument()
+  })
+
+  it('renders apps even when the node has zero VMs', async () => {
+    nodeAppsResult = 'ok'; nodeVmsResult = 'empty'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('jellyfin')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+    expect(screen.getByText('Guests on this host (1)')).toBeInTheDocument()
+  })
+
+  it('shows one empty state, not two, when both apps and VMs are empty', async () => {
+    nodeAppsResult = 'empty'; nodeVmsResult = 'empty'
+    withQuery(<NodeOverview />)
+    expect(await screen.findAllByText('No guests on this node')).toHaveLength(1)
+  })
+
+  it('still renders VMs when the apps query fails', async () => {
+    // QueryState used to gate the whole merged list on the apps query alone:
+    // an apps error rendered "Guests not readable" and hid working VMs
+    // entirely, regardless of what /vms answered.
+    nodeAppsResult = 'error'; nodeVmsResult = 'ok'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('win11-lab')).toBeInTheDocument()
+    expect(screen.queryByText('Guests not readable')).not.toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+  })
+
+  it('still renders apps when the VMs query fails', async () => {
+    // The mirror case: /vms erroring used to be swallowed entirely by
+    // `vms ?? []`, with no error surface and a heading that silently
+    // undercounted.
+    nodeAppsResult = 'ok'; nodeVmsResult = 'error'
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('jellyfin')).toBeInTheDocument()
+    expect(screen.queryByText('No guests on this node')).not.toBeInTheDocument()
+  })
+
+  it('reports storage used / total in the identity rail', async () => {
     withQuery(<NodeOverview />)
     expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
-    // one Apps row, one VMs row; the fixture has 1/1 for both
-    expect(screen.getByText('Apps')).toBeInTheDocument()
-    expect(screen.getByText('VMs')).toBeInTheDocument()
-    expect(screen.getAllByText('1/1 running')).toHaveLength(2)
-    // The page used to draw two KV cards that both said Node, PVE version,
-    // Uptime and Memory. There is exactly one now.
-    //
-    // Matched on the KV term specifically: the charts below carry their own
-    // <h3> labels ("Memory", "Storage"), so a bare text match counts those
-    // too and would fail for a reason that has nothing to do with duplicate
-    // strips. The point of this test is one KV strip, not one occurrence of
-    // the word.
-    const kvTerms = () => Array.from(document.querySelectorAll('[data-kv-term]'))
-      .map((el) => el.textContent?.trim())
-    for (const term of ['Node', 'PVE version', 'Uptime', 'Memory']) {
-      expect(kvTerms().filter((t) => t === term)).toHaveLength(1)
-    }
   })
 
   it('charts memory as a percentage, so all three charts share one scale', async () => {
@@ -332,12 +409,52 @@ describe('NodeOverview', () => {
     expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
     expect(screen.queryByText(/Processor/)).not.toBeInTheDocument()
   })
+
+  it('says where the metrics live instead of silently dropping the charts', async () => {
+    // pve1 is not the entry node; pve2 is. The host:<id> series is recorded
+    // from the node Proxploy connects through, so charting it here would be
+    // charting a different machine — but saying nothing reads as a bug.
+    nodesResult = 'cluster'
+    params = { hostId: '1', node: 'pve1' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText(/recorded on/i)).toBeInTheDocument()
+    // Exact match: the entry-node span reads "pve2" alone, while the link's
+    // own text is "Open pve2 →" — a /pve2/ regex matches both and is
+    // ambiguous, so this pins down the plain mention specifically.
+    expect(screen.getByText('pve2')).toBeInTheDocument()
+    // The mocked <Link> (above) renders a bare <a> with no href, so it has no
+    // accessible "link" role in jsdom; assert on the routed destination the
+    // way the NodeCard tests in this file already do.
+    const openLink = screen.getByText(/open pve2/i).closest('a')!
+    expect(openLink.getAttribute('data-to')).toBe('/hosts/$hostId/$node')
+    expect(JSON.parse(openLink.getAttribute('data-params')!))
+      .toEqual({ hostId: '1', node: 'pve2' })
+  })
+
+  it('draws the charts, and no note, on the entry node', async () => {
+    nodesResult = 'cluster'
+    params = { hostId: '1', node: 'pve2' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    expect(screen.queryByText(/recorded on/i)).not.toBeInTheDocument()
+  })
+
+  it('still says the sentence, with no link, when no entry node is known', async () => {
+    // No row for this host claims is_entry: true (the fixture above) — the
+    // note must still name the reason, just without a node to point at.
+    nodesResult = 'noEntry'
+    params = { hostId: '1', node: 'pve1' }
+    withQuery(<NodeOverview />)
+    expect(await screen.findByText(/this host.s entry node/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^Open /)).not.toBeInTheDocument()
+  })
 })
 
 describe('NodeHardware', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}
     nodeStatus = null; navigate.mockClear()
+    params = { hostId: '1', node: 'pve1' }
   })
 
   it('lists disks with health and wearout', async () => {
