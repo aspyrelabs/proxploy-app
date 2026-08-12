@@ -54,7 +54,7 @@ export function OnboardingRail({ steps, view, onSelect }: {
             <span aria-hidden className={`grid size-[21px] shrink-0 place-items-center rounded-full
               border text-[11px] font-bold transition ${dot[s.status]}`}>
               {s.status === 'done' ? <span className="pp-tick">✓</span>
-                : s.status === 'skipped' ? '–' : i + 1}
+                : s.status === 'skipped' ? '-' : i + 1}
             </span>
             <span className="min-w-0 pt-px">
               <span className={`block text-[14px] leading-tight ${label[s.status]}`}>{s.label}</span>

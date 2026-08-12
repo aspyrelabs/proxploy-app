@@ -178,8 +178,8 @@ export function HardwareTab({ hostId, node }: { hostId: number; node: string }) 
               <td className="py-2 font-mono">
                 {n.cidr ?? (n.method === 'dhcp' ? 'from DHCP' : 'none')}
               </td>
-              <td className="py-2 font-mono text-text-2">{n.gateway ?? '—'}</td>
-              <td className="py-2 font-mono text-text-2">{n.bridge_ports ?? '—'}</td>
+              <td className="py-2 font-mono text-text-2">{n.gateway ?? 'unknown'}</td>
+              <td className="py-2 font-mono text-text-2">{n.bridge_ports ?? 'unknown'}</td>
               <td className={`py-2 ${n.active ? 'text-green' : 'text-text-3'}`}>
                 {n.active ? 'up' : 'down'}
                 {!n.autostart && n.exists ? ' · no autostart' : ''}
@@ -237,7 +237,7 @@ function PciSection({ devices, refusal }: { devices: Pci[] | null; refusal?: Ref
                   <tr key={p.id} className="border-t border-line-soft align-middle">
                     <td className="w-32 py-2 font-mono text-text-2">{p.id}</td>
                     <td className="py-2">{p.device_name ?? p.device_id ?? 'unknown'}</td>
-                    <td className="py-2 text-text-2">{p.vendor_name ?? '—'}</td>
+                    <td className="py-2 text-text-2">{p.vendor_name ?? 'unknown'}</td>
                     {/* The IOMMU group is what decides whether this device can
                         be handed to a guest on its own, which is the only
                         reason most people open this list. */}

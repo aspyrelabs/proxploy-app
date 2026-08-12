@@ -10,7 +10,7 @@ import { Loading } from './ui/loading'
 const BADGE: Record<string, string> = { job: 'JOB', audit: 'AUD', alert: 'ALT' }
 
 /** Doc 05 `POST /jobs/{id}/cancel`: only a job row that hasn't reached a
- *  terminal state can be cancelled — an audit/alert row has no job to
+ *  terminal state can be cancelled: an audit/alert row has no job to
  *  cancel, and a finished job has nothing left to stop. `TERMINAL` already
  *  encodes "still active" as its inverse in one place, so this reads off
  *  that rather than re-listing 'running' | 'queued' locally and risking the

@@ -23,7 +23,7 @@ const STEPS = ['Target', 'OS', 'Resources', 'Network', 'Confirm'] as const
 // PVE `ostype` values for qemu. The full list is longer; these four cover
 // everything Proxploy's own install paths produce plus an honest escape hatch.
 const OS_TYPES = [
-  ['l26', 'Linux (kernel 2.6 – 6.x)'],
+  ['l26', 'Linux (kernel 2.6-6.x)'],
   ['win11', 'Windows 11 / Server 2022'],
   ['win10', 'Windows 10 / Server 2016-2019'],
   ['other', 'Other / unspecified'],

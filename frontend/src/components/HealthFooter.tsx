@@ -13,11 +13,11 @@ import type { NodeRow } from '../api/hooks'
  *  "All systems healthy", the one piece of UI that must never lie.
  *
  *  `collapsed` (the 64px icon rail): there is no room here for even one word
- *  of the two-line body — "systems"/"healthy" alone are each wider than the
- *  32px of content the rail leaves, so they'd overflow past the aside's
+ *  of the two-line body ("systems"/"healthy" alone are each wider than the
+ *  32px of content the rail leaves), so they'd overflow past the aside's
  *  border rather than wrap cleanly, and a `truncate` would just leave a
  *  meaningless sliver of a word. So collapsed renders the dot alone, carries
- *  the headline as its accessible name, and repeats it in a Radix tooltip —
+ *  the headline as its accessible name, and repeats it in a Radix tooltip,
  *  the same pattern the collapsed nav items already use. */
 export function HealthFooter({ collapsed = false }: { collapsed?: boolean }) {
   const alerts = useFiringAlerts()

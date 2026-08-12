@@ -8,7 +8,7 @@ import { toast, useSonner } from 'sonner'
  *
  *  The count comes from sonner's own store via useSonner() rather than from a
  *  counter of our own, because toasts also disappear on their duration timer
- *  and on the per-toast x — a hand-kept tally would drift out of sync with
+ *  and on the per-toast x: a hand-kept tally would drift out of sync with
  *  what is actually on screen. */
 export function ClearAllToasts() {
   const { toasts } = useSonner()
@@ -17,7 +17,7 @@ export function ClearAllToasts() {
     // Sonner's toaster is z-index 999999999 and sits 24px off the bottom (16px
     // under 600px wide), with its toasts anchored to bottom: 0 inside it. At
     // z-[9999] and bottom-2 this button was painted UNDER the front toast, with
-    // the covered strip swallowing clicks — the control you reach for, hidden
+    // the covered strip swallowing clicks, the control you reach for, hidden
     // behind the thing it dismisses. Above sonner's plane, and clear of the
     // stack's footprint at both widths.
     <div className="fixed bottom-[88px] right-4 z-[1000000000] max-[600px]:bottom-[80px]">

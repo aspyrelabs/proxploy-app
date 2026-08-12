@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 // Path-aware on purpose. LifecycleActions calls useEntitlements, whose `has`
-// reads `q.data?.features[key]` — the optional chain guards `data`, NOT
+// reads `q.data?.features[key]`: the optional chain guards `data`, NOT
 // `features`. Resolving every call to [] would make `[].features[key]` throw,
 // and the failure would look like a GuestList bug.
 vi.mock('../api/client', () => ({
@@ -71,7 +71,7 @@ describe('GuestList', () => {
 
   it('gives both kinds their lifecycle controls', async () => {
     wrap()
-    // Exact names, not /start/i — LifecycleActions renders Stop AND Restart
+    // Exact names, not /start/i: LifecycleActions renders Stop AND Restart
     // for a running guest, and /start/i matches "Restart" too, which would
     // make getByRole throw on multiple matches rather than assert anything.
     // The running app supplies Stop, the stopped VM supplies Start.

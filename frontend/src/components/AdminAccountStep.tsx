@@ -58,7 +58,7 @@ export function AdminAccountStep({ existing, onCreated }: {
       <Heading title="Check this over"
         sub="Nothing has been created yet. The email is the one thing you cannot change afterwards." />
       <dl className="divide-y divide-line rounded-ctl border border-line bg-panel-2 px-3">
-        {([['Email', admin.email], ['Display name', admin.display_name || '—'],
+        {([['Email', admin.email], ['Display name', admin.display_name || 'not set'],
            ['Password', '•'.repeat(Math.min(admin.password.length, 16))]] as const).map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-3 py-2">
             <dt className="text-[11px] uppercase tracking-wide text-text-3">{k}</dt>

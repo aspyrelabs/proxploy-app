@@ -10,7 +10,7 @@ export type Guest = {
   kind: 'app' | 'vm'
   id: number
   name: string
-  /** "CT 104" / "VM 201" — the id an operator actually types. */
+  /** "CT 104" / "VM 201": the id an operator actually types. */
   label: string
   status: string
   cpu_pct: number | null
@@ -39,7 +39,7 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
       // No mem_total_bytes on VmRow. Inventing one to make the two rows match
       // would be making up a number.
       mem: fmtBytes(v.mem_bytes),
-      // VmRow has no update concept at all — not "no update available", but
+      // VmRow has no update concept at all: not "no update available", but
       // nothing to report either way.
       update: null,
     })),

@@ -73,7 +73,7 @@ describe('HealthFooter', () => {
 
 // The 64px icon rail has ~32px of content width; the two-line body's own
 // words ("systems", "healthy") are each wider than that at 12px Inter, so
-// there is no room for any of it here — see CRITICAL 1 of the phase-fix
+// there is no room for any of it here: see CRITICAL 1 of the phase-fix
 // report this covers. Collapsed drops to the dot alone.
 describe('HealthFooter collapsed', () => {
   it('renders the dot alone, with the headline as the link\'s accessible name', async () => {
@@ -81,7 +81,7 @@ describe('HealthFooter collapsed', () => {
     state.hosts = [{ status: 'connected' }, { status: 'connected' }, { status: 'connected' }]
     const { container } = wrap(<HealthFooter collapsed />)
     const link = await screen.findByRole('link', { name: 'All systems healthy' })
-    // The headline lives only in the accessible name, not as visible text —
+    // The headline lives only in the accessible name, not as visible text:
     // a truncated fragment of it would be worse than nothing.
     expect(link.textContent).toBe('')
     expect(container.querySelector('.bg-green')).not.toBeNull()

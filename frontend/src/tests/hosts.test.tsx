@@ -7,7 +7,7 @@ let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
 let nodeStatus: Record<string, unknown> | null = null
-// Controls for `/apps?host=` and `/vms?host=` specifically — NodeOverview's
+// Controls for `/apps?host=` and `/vms?host=` specifically: NodeOverview's
 // own guest queries, distinct from HostsPage's unfiltered `/apps` and `/vms`
 // (which stay empty-array below; nothing in this file exercises their rows).
 let nodeAppsResult: 'empty' | 'ok' | 'error' = 'empty'
@@ -73,7 +73,7 @@ vi.mock('../api/client', () => ({
           node({ host_id: 2, name: 'host-02', node: 'lab', cluster: null }),
         ])
       }
-      // No row for this host claims is_entry — the entry node dropped out of
+      // No row for this host claims is_entry: the entry node dropped out of
       // /cluster/nodes (or the host was never fully enrolled), so nothing
       // here can be named or linked to.
       if (nodesResult === 'noEntry') {
@@ -320,7 +320,7 @@ describe('NodeOverview', () => {
 
   // CRITICAL: GuestList merges apps and VMs under one QueryState keyed to the
   // apps query alone, so `/apps` -> [] used to short-circuit to the empty
-  // state before `vms` was ever looked at — hiding a real, running VM. A
+  // state before `vms` was ever looked at, hiding a real, running VM. A
   // fresh install with an adopted-app count of zero and real VMs hit this on
   // first load.
   it('renders VMs even when the node has zero apps', async () => {
@@ -413,13 +413,13 @@ describe('NodeOverview', () => {
   it('says where the metrics live instead of silently dropping the charts', async () => {
     // pve1 is not the entry node; pve2 is. The host:<id> series is recorded
     // from the node Proxploy connects through, so charting it here would be
-    // charting a different machine — but saying nothing reads as a bug.
+    // charting a different machine, but saying nothing reads as a bug.
     nodesResult = 'cluster'
     params = { hostId: '1', node: 'pve1' }
     withQuery(<NodeOverview />)
     expect(await screen.findByText(/recorded on/i)).toBeInTheDocument()
     // Exact match: the entry-node span reads "pve2" alone, while the link's
-    // own text is "Open pve2 →" — a /pve2/ regex matches both and is
+    // own text is "Open pve2 →": a /pve2/ regex matches both and is
     // ambiguous, so this pins down the plain mention specifically.
     expect(screen.getByText('pve2')).toBeInTheDocument()
     // The mocked <Link> (above) renders a bare <a> with no href, so it has no
@@ -440,7 +440,7 @@ describe('NodeOverview', () => {
   })
 
   it('still says the sentence, with no link, when no entry node is known', async () => {
-    // No row for this host claims is_entry: true (the fixture above) — the
+    // No row for this host claims is_entry: true (the fixture above); the
     // note must still name the reason, just without a node to point at.
     nodesResult = 'noEntry'
     params = { hostId: '1', node: 'pve1' }

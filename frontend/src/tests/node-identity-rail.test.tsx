@@ -116,7 +116,7 @@ describe('NodeIdentityRail', () => {
   })
 
   // This is the rule grouping ADDS. Without it, a refused /status leaves a
-  // "Processor" heading over nothing and a "Boot" heading over nothing —
+  // "Processor" heading over nothing and a "Boot" heading over nothing:
   // grouping would have made the degraded case worse than the flat strip.
   it('renders no heading for a group whose rows all vanished', async () => {
     fails = true

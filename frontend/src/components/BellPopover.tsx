@@ -14,7 +14,7 @@ const EDGE_GAP_PX = 5
 const MAX_VISIBLE = 15
 
 /** Rough height of the shortest possible card plus its gap. Only used for the
- *  first paint, before the real cards can be measured — see useFittingCount. */
+ *  first paint, before the real cards can be measured: see useFittingCount. */
 const CARD_ESTIMATE_PX = 84
 
 /** How much of the viewport the popover cannot use: the topbar it hangs from,
@@ -23,8 +23,8 @@ const CHROME_PX = 96
 
 /** How many cards fit in the window, measured rather than guessed.
  *
- *  Card height is not constant — a failure's message wraps to however many
- *  lines its error needs — so dividing by a fixed constant either clips the
+ *  Card height is not constant (a failure's message wraps to however many
+ *  lines its error needs), so dividing by a fixed constant either clips the
  *  last card or wastes a slot. This estimates on the first paint, then measures
  *  the cards actually rendered and settles on the real number.
  *
@@ -33,7 +33,7 @@ const CHROME_PX = 96
  *  stops a resize from looping.
  *
  *  In jsdom every offsetHeight is 0, so the measurement is skipped entirely and
- *  the ceiling stands — tests assert on MAX_VISIBLE, not on layout. */
+ *  the ceiling stands: tests assert on MAX_VISIBLE, not on layout. */
 function useFittingCount(
   listRef: React.RefObject<HTMLDivElement | null>,
   open: boolean,
@@ -85,7 +85,7 @@ function useFittingCount(
       //
       // Growing one at a time re-renders, re-measures, and either keeps going
       // or trips the block above. That converges without guessing the next
-      // card's height, which is unknowable in advance — a failure's message
+      // card's height, which is unknowable in advance: a failure's message
       // wraps to however many lines its error needs.
       const isBlocked = blocked.current !== null
         && blocked.current.available === available
@@ -112,8 +112,8 @@ import type { NotificationSeverity } from './ui/notification-card'
 /** One notification, as a card.
  *
  *  The user asked for notification cards rather than a list, so this renders
- *  the same NotificationCard the live toasts use — same four severities, same
- *  x — instead of the bespoke row this popover shipped with. Dismiss hides the
+ *  the same NotificationCard the live toasts use (same four severities, same
+ *  x) instead of the bespoke row this popover shipped with. Dismiss hides the
  *  card locally: /jobs is a server-side record, not an inbox, so there is
  *  nothing to mark read; the x clears it from view until the query refetches.
  */
@@ -148,7 +148,7 @@ function duration(job: JobRow): string | null {
 }
 
 /** One line of context under the message. Trimmed from a label/value table
- *  that carried status, requester and schedule too — that much detail buried
+ *  that carried status, requester and schedule too: that much detail buried
  *  the message it was there to support. What survives is what you actually
  *  scan for: what it touched, how far along, and how long ago. */
 function footerOf(job: JobRow): string {
@@ -172,7 +172,7 @@ function progressOf(job: JobRow): number | undefined {
 
 /**
  * The bell's popover: what the activity drawer used to show, without the
- * full-height sheet. Reads GET /jobs (not /cluster/activity — ActivityRow
+ * full-height sheet. Reads GET /jobs (not /cluster/activity: ActivityRow
  * has no `error` field, and this is the one surface that has to show it).
  *
  * A popover rather than DropdownMenu: this list holds buttons (Cancel) and
@@ -190,7 +190,7 @@ export function BellPopover() {
   const triggerRef = useRef<HTMLButtonElement>(null)
 
   /** align="end" pins the cards to the BELL's right edge, and the bell is not
-   *  the rightmost control — the account menu is — so that left a wide gap.
+   *  the rightmost control (the account menu is), so that left a wide gap.
    *
    *  alignOffset shifts along the alignment axis, and for align="end" it runs
    *  toward the START: a positive value moves the cards further LEFT, deeper
@@ -262,7 +262,7 @@ export function BellPopover() {
         {/* No panel, no header: a bordered box titled "Activity" wrapping the
             cards read as an activity list, which is the one thing this was
             asked not to be. The Content is a transparent, borderless column
-            and each card is its own floating surface — the cards ARE the
+            and each card is its own floating surface: the cards ARE the
             popover. */}
         <PopoverPrimitive.Content
           ref={listRef}

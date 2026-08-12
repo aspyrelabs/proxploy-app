@@ -69,7 +69,7 @@ const ICON: Record<NotificationSeverity, { icon: string }> = {
 // page in the bell popover, not just over a panel) plus the translucent -dim
 // tint on top. Both on one element would be two background-color utilities of
 // equal specificity, so which one won would depend on the order Tailwind
-// happened to emit them — a coin flip. Two elements, two backgrounds, no race.
+// happened to emit them: a coin flip. Two elements, two backgrounds, no race.
 const BORDER: Record<NotificationSeverity, string> = {
   info: 'border-blue',
   success: 'border-green',
@@ -92,7 +92,7 @@ export function NotificationCard({
   /** The message itself. Never clamped: on a failure this is the reason, and
    *  a reason you cannot read is not a notification. */
   description?: string
-  /** One muted line of context beneath the message — target, age, duration.
+  /** One muted line of context beneath the message: target, age, duration.
    *  Deliberately a single line: the full label/value table this replaced
    *  buried the message it was meant to support. */
   footer?: string
@@ -132,7 +132,7 @@ export function NotificationCard({
         )}
       </div>
       {/* Provider lives INSIDE the card, not in AppShell: these cards render in
-          two places — the bell popover and sonner's toast portal — and a toast
+          two places (the bell popover and sonner's toast portal) and a toast
           has no app-tree ancestor to inherit a provider from. */}
       <Tooltip.Provider delayDuration={200}>
         <div className="absolute right-2 top-2 flex items-center gap-1">
@@ -151,7 +151,7 @@ export function NotificationCard({
 }
 
 /** An icon-only control with its name on hover AND on keyboard focus. The
- *  aria-label is the accessible name whether or not the tooltip ever opens —
+ *  aria-label is the accessible name whether or not the tooltip ever opens:
  *  the tooltip is for sighted pointer users, not a substitute for a name. */
 function IconAction({ label, onClick, children }: {
   label: string

@@ -16,7 +16,7 @@ export function Topbar() {
     // stay above it: a sticky element with z-index:auto paints in stacking
     // step 8, any positive z-index in step 9, and the sidebar is still
     // z-index:auto. (Radix dialogs are also z-index'd, but that tie doesn't
-    // matter here either — Radix portals them to the end of document.body,
+    // matter here either: Radix portals them to the end of document.body,
     // later in tree order, so they paint above this header regardless of
     // what z-index either one carries.)
     // justify-end is gone with the search lane's arrival: a flex-1 child
@@ -29,7 +29,7 @@ export function Topbar() {
           to it below sm keeps the same h-6 footprint down to a 24px square. */}
       {/* h-9 is the tallest the mark can be without changing the bar: the
           header is h-14 (56px) and items-center, so a 36px mark leaves exactly
-          10px above and below it. Growing the mark must not grow the bar —
+          10px above and below it. Growing the mark must not grow the bar:
           the sidebar sticks at top-14 and its height is calc(100vh-3.5rem),
           both of which are that 56px. */}
       <Link to={'/hosts' as never} aria-label="Proxploy" className="shrink-0 text-amber">

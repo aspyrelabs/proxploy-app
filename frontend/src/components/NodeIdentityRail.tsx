@@ -44,7 +44,7 @@ function shortPve(raw: string | null): string {
  *  refusable by a narrow token).
  *
  *  The snapshot half ALWAYS renders. Only the status-only rows disappear when
- *  the node will not answer — and a group left with no rows renders no heading,
+ *  the node will not answer, and a group left with no rows renders no heading,
  *  because a "Processor" label over nothing is worse than the flat strip this
  *  replaced.
  */
@@ -57,8 +57,8 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
     queryKey: ['hosts', hostId, 'node', node, 'status'],
     queryFn: () => api<Status>(`/hosts/${hostId}/nodes/${node}/status`),
     retry: false,
-    // Most of this payload is static between reboots — kernel, architecture,
-    // CPU model, cores, sockets — but Load and IO delay change second to
+    // Most of this payload is static between reboots (kernel, architecture,
+    // CPU model, cores, sockets), but Load and IO delay change second to
     // second, and so does the Load bar computed from them. Without a timer
     // they sat at whatever they were when the page was opened, with nothing
     // saying so. 30s matches the cadence the nodes query already polls at, so
@@ -144,7 +144,7 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
   )
 }
 
-/** Label left, value right — not KVGrid, whose label-above-value grid is built
+/** Label left, value right: not KVGrid, whose label-above-value grid is built
  *  for wide containers and would waste most of a 290px rail. */
 function FactGroup({ title, items }: { title: string; items: Fact[] }) {
   return (

@@ -71,7 +71,7 @@ export function ProfilePage() {
           <div>
             <span className={label}>Email</span>
             <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13.5px] text-text-2">
-              {me?.email ?? '—'}
+              {me?.email ?? 'unknown'}
             </p>
             <p className="mt-1 text-[11.5px] text-text-3">
               The email cannot be changed after the account is created.
@@ -80,7 +80,7 @@ export function ProfilePage() {
           <div>
             <span className={label}>Role</span>
             <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-text-2">
-              {me?.role ?? '—'}
+              {me?.role ?? 'unknown'}
             </p>
           </div>
         </div>

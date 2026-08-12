@@ -137,7 +137,7 @@ describe('BellPopover', () => {
     expect(cards[0].querySelector('button[aria-label="Dismiss"]')).not.toBeNull()
   })
 
-  // A failure's reason is the whole point of surfacing it — the drawer showed
+  // A failure's reason is the whole point of surfacing it: the drawer showed
   // it, the feed cannot (ActivityRow carries no error field), so this card is
   // the only place it appears.
   it("carries a failed job's error text in the card", async () => {
@@ -245,7 +245,7 @@ describe('BellPopover', () => {
   })
 
   // Deleting the activity drawer took the only UI path to GET /jobs/{id}/events
-  // for a job you did not start in this session — an endpoint sold behind the
+  // for a job you did not start in this session: an endpoint sold behind the
   // jobs.history / jobs.stream entitlements. This is that path. It was lost
   // once already, so it gets a test.
   it('opens any job\'s transcript from its card', async () => {
@@ -290,7 +290,7 @@ describe('BellPopover', () => {
     await screen.findByText(/app\.start/)
     // Radix's DismissableLayer defers a left-button pointerdown outside until
     // the matching click fires (so a drag-selection that starts outside and
-    // ends inside doesn't dismiss the layer) — both events are needed here.
+    // ends inside doesn't dismiss the layer); both events are needed here.
     fireEvent.pointerDown(document.body, { button: 0 })
     fireEvent.click(document.body)
     await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())

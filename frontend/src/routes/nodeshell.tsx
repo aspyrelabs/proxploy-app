@@ -21,7 +21,7 @@ import { rootRoute } from './shell'
  *
  *  The three that actually happen: the per-host opt-in is off (409 from
  *  api/consoles.py), the entitlement is missing (403), or Proxmox itself
- *  refuses because the API token does not hold Sys.Console — which arrives as
+ *  refuses because the API token does not hold Sys.Console, which arrives as
  *  a 409 carrying the ProxmoxError text and is otherwise indistinguishable
  *  from the opt-in case unless we read it.
  */

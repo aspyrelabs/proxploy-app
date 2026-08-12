@@ -67,8 +67,8 @@ function withAlpha(color: string, alpha: number): string {
  *  axis both are a flat line welded to the floor, indistinguishable from a
  *  broken chart; auto-scaled to their own range they become a dramatic
  *  mountain built out of rounding noise, which is the worse lie. Snapping to a
- *  band keeps the baseline at zero always — so height stays proportional to
- *  the real number — while giving a quiet series enough room to show shape,
+ *  band keeps the baseline at zero always, so height stays proportional to
+ *  the real number, while giving a quiet series enough room to show shape,
  *  and the axis label states which band is in force. */
 export const PERCENT_BANDS = [5, 10, 25, 50, 100]
 

@@ -2,8 +2,8 @@ import { render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 // AppShell's defining shape: a full-width header, then a flex row (sidebar +
-// main) starting beneath it. Everything else it renders — the router outlet,
-// the command palette, the toaster — is provider-side wiring unrelated to
+// main) starting beneath it. Everything else it renders (the router outlet,
+// the command palette, the toaster) is provider-side wiring unrelated to
 // that shape, so those collapse to markers here.
 vi.mock('@tanstack/react-router', () => ({ Outlet: () => <div data-testid="outlet" /> }))
 vi.mock('sonner', () => ({ Toaster: () => null }))

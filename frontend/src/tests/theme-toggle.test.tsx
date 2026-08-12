@@ -35,7 +35,7 @@ describe('ThemeToggle', () => {
 
   // Icon-only at the user's request. The word Light/Dark is gone, which makes
   // aria-label the WHOLE accessible name rather than a supplement to visible
-  // text — so an icon that stopped being aria-hidden, or a label that got
+  // text, so an icon that stopped being aria-hidden, or a label that got
   // dropped as "redundant", would leave the control nameless.
   //
   // The button's textContent is not '' any more: Material Symbols is a
