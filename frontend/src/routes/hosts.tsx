@@ -486,24 +486,29 @@ export function NodeOverview() {
   const vms = nodeVmsQuery.data
   if (!node && !host) return null
   return (
-    <div>
-      {node && (
-        <>
-          {/* One rail, two sources. NodeIdentityRail merges the poller's
-              snapshot (always there, and the only source for the deduped
-              datastore fill) with the node's own /status (on demand, refusable
-              by a narrow token), so a node that will not answer loses rows —
-              and whole groups — rather than the whole card. */}
-          {node.node && (
-            <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
-          )}
-          {/* Entry node only: the `host:<id>` metric series is recorded from
-              the node Proxploy connects through, so drawing it under any other
-              node of the cluster would be charting a different machine. */}
-          {node.is_entry ? (
+    <div className="lg:grid lg:grid-cols-[290px_minmax(0,1fr)] lg:items-start lg:gap-5">
+      {/* minmax(0,1fr), not 1fr: the charts' SVG content would otherwise set
+          the column's min-content width and the grid would refuse to shrink
+          below 1440px — the exact bug this stage exists to fix. */}
+      <div className="mb-5 lg:sticky lg:top-16 lg:mb-0">
+        {/* One rail, two sources. NodeIdentityRail merges the poller's
+            snapshot (always there, and the only source for the deduped
+            datastore fill) with the node's own /status (on demand, refusable
+            by a narrow token), so a node that will not answer loses rows —
+            and whole groups — rather than the whole card. */}
+        {node?.node && (
+          <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
+        )}
+      </div>
+      <div>
+        {/* Entry node only: the `host:<id>` metric series is recorded from
+            the node Proxploy connects through, so drawing it under any other
+            node of the cluster would be charting a different machine. */}
+        {node && (node.is_entry
+          ? (
             /* Each chart owns its range: "is the CPU spiking now" and "did
                storage creep all week" are different questions. */
-            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className={card}>
                 <MetricChart target={`host:${id}`} metric="cpu_pct"
                   unit="percent" label="CPU" accent="amber" />
@@ -520,25 +525,23 @@ export function NodeOverview() {
                   unit="percent" label="Storage" accent="violet" />
               </div>
             </div>
-          ) : (
-            <EntryNodeNote hostId={id} entry={entry} />
-          )}
-        </>
-      )}
-      <div className="mt-5">
-        {/* "on this host", not "on this node": neither apps nor vms records
-            which node of the cluster a guest sits on, so this list is
-            host-wide and says so. */}
-        <h2 className="mb-3 font-display text-[16px] font-semibold">
-          Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
-        </h2>
-        <QueryState query={nodeAppsQuery}
-                    emptyTitle="No guests on this node"
-                    emptyNote="Installed or adopted apps and QEMU guests on this node appear here."
-                    errorTitle="Guests not readable"
-                    errorNote="Proxploy could not reach the backend to list guests on this node.">
-          {(rows) => <GuestList guests={toGuests(rows, vms ?? [])} />}
-        </QueryState>
+          )
+          : <EntryNodeNote hostId={id} entry={entry} />)}
+        <div className="mt-5">
+          {/* "on this host", not "on this node": neither apps nor vms records
+              which node of the cluster a guest sits on, so this list is
+              host-wide and says so. */}
+          <h2 className="mb-3 font-display text-[16px] font-semibold">
+            Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
+          </h2>
+          <QueryState query={nodeAppsQuery}
+                      emptyTitle="No guests on this node"
+                      emptyNote="Installed or adopted apps and QEMU guests on this node appear here."
+                      errorTitle="Guests not readable"
+                      errorNote="Proxploy could not reach the backend to list guests on this node.">
+            {(rows) => <GuestList guests={toGuests(rows, vms ?? [])} />}
+          </QueryState>
+        </div>
       </div>
     </div>
   )
