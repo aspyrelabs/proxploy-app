@@ -30,6 +30,17 @@ export function jobLabel(j: { kind: string; status: string }): string {
   return `${j.kind} ${j.status}`
 }
 
+/** 10s while the bell popover is open, never otherwise (`enabled` gates it). */
+export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
+  const { enabled = true, status } = opts
+  return useQuery({
+    queryKey: ['jobs', { status }],
+    enabled,
+    refetchInterval: enabled ? 10_000 : false,
+    queryFn: () => api<JobRow[]>(status ? `/jobs?status=${status}` : '/jobs'),
+  })
+}
+
 /** Archived transcript. The live tail is the SSE stream in JobLog. */
 export function useJobEvents(id: number | null) {
   return useQuery({

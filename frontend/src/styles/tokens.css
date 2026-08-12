@@ -113,3 +113,23 @@ html[data-theme-transition="active"]::view-transition-group(root) {
 html[data-theme-transition="active"]::view-transition-new(root) {
   clip-path: var(--pp-theme-vt-clip-from);
 }
+
+/* AppShell's <Toaster toastOptions={{ className: '...border...bg-panel-2...' }}>
+   applies that class to every toast's outer <li data-sonner-toast>, plain-text
+   or not -- sonner does not offer a "not this one" hook for it. A
+   NotificationCard rendered via toast.custom() (LiveProvider.tsx) draws its
+   OWN severity-coloured border/background (ui/notification-card.tsx), so
+   without this rule that card would sit inside a second, ambient
+   panel-2/border-line box.
+   `data-styled="false"` is sonner's own signal for "this toast's content is
+   custom JSX" (it sets the same attribute to skip its own base padding/bg/
+   width for a toast.custom() call) -- reusing it here, rather than fighting
+   Tailwind's utility-class cascade order with a second conflicting
+   border/bg class on the same element, is exact and needs no new plumbing.
+   Plain toast()/toast.success()/toast.error() calls elsewhere in the app
+   keep data-styled="true" and are unaffected. */
+[data-sonner-toast][data-styled="false"] {
+  background: transparent;
+  border: none;
+  padding: 0;
+}

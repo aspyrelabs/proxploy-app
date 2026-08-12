@@ -1,6 +1,8 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
-import { applyAlert, applyJob, applyMetrics, applyResource } from '../api/live'
+import {
+  alertToastSeverity, applyAlert, applyJob, applyMetrics, applyResource, jobToastSeverity,
+} from '../api/live'
 
 function client() {
   const qc = new QueryClient()
@@ -130,5 +132,35 @@ describe('applyAlert', () => {
     applyAlert(qc, { id: 1, state: 'resolved', severity: 'critical',
                      message: 'Resolved: host-02 CPU' }, (t) => seen.push(t))
     expect(seen).toEqual([{ kind: 'ok', text: 'Resolved: host-02 CPU', alertId: 1 }])
+  })
+})
+
+// LiveProvider's SSE handlers render a NotificationCard via toast.custom
+// rather than plain toast.success/toast.error; these two pure functions are
+// the mapping from an applyJob/applyAlert toast payload to the card's
+// severity, kept here (next to the payload shapes they read) so the mapping
+// itself is unit-testable without standing up an EventSource + Toaster.
+describe('jobToastSeverity', () => {
+  it('maps a job err event to the destructive card', () => {
+    expect(jobToastSeverity('err')).toBe('destructive')
+  })
+  it('maps a job ok event to the success card', () => {
+    expect(jobToastSeverity('ok')).toBe('success')
+  })
+  it('maps anything else (queued/running/progress) to the info card', () => {
+    expect(jobToastSeverity('info')).toBe('info')
+  })
+})
+
+describe('alertToastSeverity', () => {
+  it('maps a resolution to success, whatever the payload severity was', () => {
+    expect(alertToastSeverity('ok', 'critical')).toBe('success')
+    expect(alertToastSeverity('ok', 'warning')).toBe('success')
+  })
+  it('maps a firing critical-severity alert to destructive', () => {
+    expect(alertToastSeverity('err', 'critical')).toBe('destructive')
+  })
+  it('maps a firing warning-severity alert to warning, not destructive', () => {
+    expect(alertToastSeverity('err', 'warning')).toBe('warning')
   })
 })

@@ -1,30 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
-import { BellIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { BellPopover } from './BellPopover'
 import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
 import { useEntitlements } from '../api/hooks'
 import { AccountMenu } from './AccountMenu'
-import { api } from '../api/client'
-import type { JobRow } from '../api/jobs'
 import { openCommandPalette } from './CommandPalette'
 import { Link } from '@tanstack/react-router'
 import Logo, { GhostMark } from './Logo'
 
 export function Topbar() {
   const { has } = useEntitlements()
-  // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
-  // created_at desc, so a long-running job older (by creation time) than the
-  // 20 most-recently-created jobs would silently drop out of that feed while
-  // still running. The bell's count needs to be unbounded, so it runs its own
-  // one-shot query against /jobs?status=running instead of riding useActivity
-  // or useJobs({status}), which would coincidentally couple this
-  // always-mounted bell to whatever poll interval that hook carries.
-  const { data: running } = useQuery({
-    queryKey: ['jobs', 'running-count'],
-    queryFn: () => api<JobRow[]>('/jobs?status=running'),
-    refetchInterval: 30_000,
-  })
-  const count = running?.length ?? 0
   return (
     // h-14 rather than py-2.5: the sidebar now sticks BELOW this bar, so its
     // offset has to be a number something else can rely on. z-10 is enough to
@@ -72,23 +57,8 @@ export function Topbar() {
           </span>
         </button>
       </div>
-      {has('notify.inapp') && (
-        <Link
-          to={'/hosts' as never}
-          aria-label="Activity"
-          className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
-        >
-          <BellIcon aria-hidden className="h-[18px] w-[18px]" />
-          {count > 0 && (
-            // --amber-ink is not a token in tokens.css; this literal predates
-            // this change and is left as-is rather than inventing one.
-            <span className="absolute -right-1 -top-1 rounded-full bg-amber px-1 font-mono text-[9px] text-[#20160a]">
-              {count}
-            </span>
-          )}
-        </Link>
-      )}
       <TierPill />
+      {has('notify.inapp') && <BellPopover />}
       <ThemeToggle />
       <AccountMenu />
     </header>
