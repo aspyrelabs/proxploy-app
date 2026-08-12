@@ -47,6 +47,21 @@ export function useActivity(limit = 20) {
   })
 }
 
+/** The activity feed row's Cancel control (doc 05 `POST /jobs/{id}/cancel`).
+ *  Invalidates both `jobs` and the activity feed's own key so the row
+ *  reflects the cancellation without waiting for the 30s poll. */
+export function useCancelJob() {
+  const qc = useQueryClient()
+  return useMutation<{ id: number; status: string }, ApiError, number>({
+    mutationFn: (id) =>
+      api<{ id: number; status: string }>(`/jobs/${id}/cancel`, { method: 'POST' }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
+    },
+  })
+}
+
 export type LifecycleVars = {
   target: 'app' | 'vm'; id: number; action: string; confirm?: string
 }
