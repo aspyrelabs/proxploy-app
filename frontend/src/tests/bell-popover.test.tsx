@@ -3,9 +3,12 @@
  *  the replacement: a popover anchored to the topbar bell, reading /jobs
  *  (not /cluster/activity, whose ActivityRow has no `error` field). */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JobRow } from '../api/jobs'
+import {
+  getNotifications, pushAction, pushJobEvent, resetNotificationStore,
+} from '../lib/notificationStore'
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
@@ -97,11 +100,27 @@ describe('BellPopover', () => {
     jobEventsError = false
     cancelCalls.length = 0
     toastError.mockClear()
+    resetNotificationStore()
   })
 
-  it('still shows the running-job count badge on the bell', async () => {
+  // The badge used to count only running jobs; the tray now also shows
+  // action notifications and SSE-delivered job/alert events, so a badge that
+  // still only counted running jobs would drift from what the tray actually
+  // holds -- the exact confusion this change exists to remove. It now counts
+  // running jobs (still in flight, still worth knowing about) plus whatever
+  // in the store has arrived since the tray was last opened.
+  it('shows the running-job count when nothing new has arrived', async () => {
     wrap()
     expect(await screen.findByText('1')).toBeInTheDocument()
+  })
+
+  it('grows when a fresh notification arrives, and settles back once the tray is opened', async () => {
+    wrap()
+    await screen.findByText('1')
+    act(() => { pushAction('success', 'Saved.') })
+    expect(await screen.findByText('2')).toBeInTheDocument()
+    await openBell()
+    await waitFor(() => expect(screen.getByText('1')).toBeInTheDocument())
   })
 
   it('opens from the bell and lists recent jobs', async () => {
@@ -294,5 +313,55 @@ describe('BellPopover', () => {
     fireEvent.pointerDown(document.body, { button: 0 })
     fireEvent.click(document.body)
     await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+  })
+
+  // Radix's Popover.Content legitimately carries role="dialog" (a non-modal
+  // dialog is still a dialog, per the ARIA spec); what makes it NOT a modal,
+  // and what this locks down, is the absence of aria-modal, plus outside
+  // clicks and Escape (proved above) working exactly like any other popover
+  // rather than being swallowed by a focus trap.
+  it('renders no scrim and no aria-modal', async () => {
+    wrap()
+    await openBell()
+    await screen.findByText(/app\.start/)
+    expect(document.querySelector('[aria-modal]')).toBeNull()
+  })
+
+  // The real risk in collapsing two surfaces into one: a job delivered once
+  // over SSE (LiveProvider pushes it into the store the instant it lands)
+  // and again the next time GET /jobs is polled must never render twice.
+  it('a job present in both the SSE-fed store and GET /jobs appears once, not twice', async () => {
+    pushJobEvent(11, 'success', 'app.stop succeeded')
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const forJob11 = cards.filter((c) => c.textContent?.includes('app.stop'))
+    expect(forJob11).toHaveLength(1)
+  })
+
+  // Action notifications ("Saved.", "Could not cancel that job.") live only
+  // in the client-side store, so they must show up in the tray the instant
+  // they are pushed, with nothing to reload or refetch.
+  it('an action notification appears in the tray without a reload', async () => {
+    wrap()
+    act(() => { pushAction('destructive', 'Could not cancel that job.') })
+    await openBell()
+    expect(await screen.findByText('Could not cancel that job.')).toBeInTheDocument()
+  })
+
+  it('clear all empties the tray, jobs and action notifications alike', async () => {
+    wrap()
+    act(() => { pushAction('success', 'Saved.') })
+    await openBell()
+    await screen.findByText('Saved.')
+    expect((await screen.findAllByRole('alert')).length).toBeGreaterThan(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
+
+    await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(0))
+    // The action notification is forgotten outright (nothing server-side
+    // owns it); a job card would reappear on the next /jobs poll, which
+    // this test does not wait for.
+    expect(getNotifications()).toHaveLength(0)
   })
 })

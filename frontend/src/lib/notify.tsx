@@ -1,30 +1,31 @@
-import { toast } from 'sonner'
-import { NotificationCard } from '../components/ui/notification-card'
-import type { NotificationSeverity } from '../components/ui/notification-card'
+import { pushAction } from './notificationStore'
+import type { NotifySeverity } from './notificationStore'
 
-/** The one place every toast in the app goes through. Before this, LiveProvider's
- *  SSE job/alert events rendered NotificationCard via `toast.custom`, while every
- *  other call site used sonner's plain toast.success/toast.error/toast.info
- *  directly, so the bottom-right corner showed two different designs. Now
- *  everything, LiveProvider included, calls through here instead of pasting
- *  `toast.custom(...)` at each site. */
+/** The one place every action notification in the app goes through
+ *  (notify.success/error/info/warning, plus notify.custom for
+ *  LiveProvider's already-known severities). It used to render straight
+ *  into sonner's toast.custom, the bottom-right corner's one card design;
+ *  now it pushes into lib/notificationStore.ts instead, the memory the tray
+ *  (BellPopover, top right, anchored to the bell) and the brief
+ *  under-the-bell banner (NotificationSurface) both read. See
+ *  .superpowers/sdd/one-notification-tray-report.md for why the bottom-right
+ *  corner is gone.
+ *
+ *  The exported names and signatures are unchanged from before this file
+ *  moved off sonner: HostPowerDialog.tsx, HostEditDialog.tsx and
+ *  routes/hosts.tsx are mid-migration to this helper by a separate change
+ *  and must keep compiling against it exactly as it already was. */
+
+export type { NotifySeverity as NotificationSeverity } from './notificationStore'
 
 type NotifyOptions = {
-  /** The reason, detail, or extra context beneath the title. Passed straight
-   *  through to NotificationCard's own `description`, so it is never
-   *  clamped: see that prop's comment for why. */
+  /** The reason, detail, or extra context beneath the title. Never
+   *  clamped: see notification-card.tsx's own comment on the prop for why. */
   description?: string
 }
 
-function show(severity: NotificationSeverity, title: string, options?: NotifyOptions) {
-  return toast.custom((id) => (
-    <NotificationCard
-      severity={severity}
-      title={title}
-      description={options?.description}
-      onDismiss={() => toast.dismiss(id)}
-    />
-  ))
+function show(severity: NotifySeverity, title: string, options?: NotifyOptions) {
+  pushAction(severity, title, options?.description)
 }
 
 export const notify = {
@@ -36,9 +37,11 @@ export const notify = {
   info: (title: string, options?: NotifyOptions) => show('info', title, options),
   warning: (title: string, options?: NotifyOptions) => show('warning', title, options),
   /** LiveProvider's SSE handlers already know the card severity up front
-   *  (jobToastSeverity/alertToastSeverity in api/live.ts), so they call
-   *  straight through here instead of mapping that back to one of the four
-   *  names above. */
-  custom: (severity: NotificationSeverity, title: string, options?: NotifyOptions) =>
+   *  (jobToastSeverity/alertToastSeverity in api/live.ts). Job and alert
+   *  events push straight into the store with their own id (see
+   *  notificationStore.pushJobEvent/pushAlertEvent) so they can be deduped
+   *  against GET /jobs; this is for any other caller that already has a
+   *  severity in hand and nothing to dedupe. */
+  custom: (severity: NotifySeverity, title: string, options?: NotifyOptions) =>
     show(severity, title, options),
 }

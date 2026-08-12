@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { alertToastSeverity, applyAlert, applyJob, applyMetrics, applyResource, jobToastSeverity } from '../api/live'
 import { useEntitlements } from '../api/hooks'
-import { notify } from '../lib/notify'
+import { pushAlertEvent, pushJobEvent } from '../lib/notificationStore'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
 
@@ -33,11 +33,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     wire('resource', (d) => applyResource(qc, d))
     wire('job', (d) => applyJob(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
-      notify.custom(jobToastSeverity(t.kind), t.text, { description: `job #${t.jobId}` })
+      // Keyed by jobId, not a fresh push: notificationStore.pushJobEvent and
+      // notificationMerge.ts are what keep this job from ever rendering
+      // twice once GET /jobs carries the same terminal delta.
+      pushJobEvent(t.jobId, jobToastSeverity(t.kind), t.text, `job #${t.jobId}`)
     }))
     wire('alert', (d) => applyAlert(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
-      notify.custom(alertToastSeverity(t.kind, d.severity), t.text, { description: 'alert' })
+      pushAlertEvent(t.alertId, alertToastSeverity(t.kind, d.severity), t.text, 'alert')
     }))
     return () => es.close()
   }, [qc])

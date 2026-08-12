@@ -1,7 +1,6 @@
 import { Outlet } from '@tanstack/react-router'
-import { Toaster } from 'sonner'
-import { ClearAllToasts } from './ClearAllToasts'
 import { CommandPalette } from './CommandPalette'
+import { NotificationSurface } from './NotificationSurface'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 
@@ -19,14 +18,17 @@ export function AppShell() {
         <main className="min-w-0 flex-1 p-6"><Outlet /></main>
       </div>
       <CommandPalette />
-      <Toaster
-        position="bottom-right"
-        duration={2600}
-        toastOptions={{
-          className: 'rounded-ctl border border-line bg-panel-2 text-text text-[13px]',
-        }}
-      />
-      <ClearAllToasts />
+      {/* sonner's bottom-right <Toaster> and ClearAllToasts used to live
+          here. There is one notification tray now, anchored to the topbar
+          bell (BellPopover) with NotificationSurface as its brief
+          under-the-bell preview -- nothing in the bottom corner any more.
+          See .superpowers/sdd/one-notification-tray-report.md. The `sonner`
+          package stays a dependency only because HostPowerDialog.tsx,
+          HostEditDialog.tsx and routes/hosts.tsx still call its
+          toast.success/error directly, mid-migration to notify.tsx by a
+          separate change; their toasts render nothing until that migration
+          lands, since nothing here mounts a <Toaster> for them any more. */}
+      <NotificationSurface />
     </div>
   )
 }
