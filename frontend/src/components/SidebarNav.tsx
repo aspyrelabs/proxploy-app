@@ -36,7 +36,10 @@ export function SidebarNav() {
   }
   return (
     <Tooltip.Provider delayDuration={200}>
-      <aside className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-line-soft bg-panel/60 transition-[width] duration-200 motion-reduce:transition-none max-[720px]:hidden ${collapsed ? 'w-16' : 'w-[236px]'}`}>
+      {/* top-14 / 100vh-3.5rem, not top-0 / h-screen: the header is now above
+          this pane rather than beside it, so the pane starts under the header
+          and its height is the window minus that bar. */}
+      <aside className={`sticky top-14 flex h-[calc(100vh-3.5rem)] shrink-0 flex-col border-r border-line-soft bg-panel/60 transition-[width] duration-200 motion-reduce:transition-none max-[720px]:hidden ${collapsed ? 'w-16' : 'w-[236px]'}`}>
         <div className={`flex px-2 py-3 ${collapsed ? 'justify-center' : 'justify-end'}`}>
           <button type="button" onClick={toggle}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

@@ -28,7 +28,10 @@ export function Topbar() {
   })
   const count = running?.length ?? 0
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 py-2.5 backdrop-blur-[10px]">
+    // h-14 rather than py-2.5: the sidebar now sticks BELOW this bar, so its
+    // offset has to be a number something else can rely on. z-20 keeps it over
+    // the sidebar, which is itself sticky.
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
       <Logo className="h-6 w-auto shrink-0 text-amber" />
       <button
         aria-label="Search (Ctrl+K)"
