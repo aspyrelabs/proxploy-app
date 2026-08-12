@@ -19,11 +19,7 @@ export type Guest = {
 }
 
 /** Apps first, then VMs: the host page lists what Proxploy installed before
- *  what it merely found. Within each kind the server's order is kept. Not a
- *  component, so it doesn't belong in its own file just to satisfy
- *  react/only-export-components — the route and this file's own test both
- *  import it directly from here. */
-// eslint-disable-next-line react/only-export-components
+ *  what it merely found. Within each kind the server's order is kept. */
 export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
   return [
     ...apps.map((a): Guest => ({
