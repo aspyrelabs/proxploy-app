@@ -1243,3 +1243,63 @@ outside a test process. That is no longer true, `api.proxploy.dev` and
 which means the database and signing key both loaded in a real container.
 Still true: no page has been checked against real Proxmox hardware, which
 remains the gate (PXP-18).
+
+### 2026-08-12T15:50:00+05:30: host page redesign, chrome icons, and a correction to PXP-18
+
+Two branches merged to `main` (`d5d3df0..5991635`), and a standing claim in
+this log corrected.
+
+**What shipped:**
+- **The host page is two columns.** `HostFacts`' flat 17-row strip became
+  `NodeIdentityRail`: four labelled groups, and no heading at all for a group
+  whose rows the node refused to report — without that rule, a refused
+  `/status` would have left a "Processor" label over nothing, making the
+  degraded case worse than the strip it replaced. The `AppCard` grid and the
+  bare VM table became one `GuestList`, unifying *upward*: VMs gained the CPU
+  bar, lifecycle controls and console that apps already had. A non-entry node
+  now names the node that holds its metrics instead of silently rendering less
+- **The chrome has real icons.** Heroicons (24/outline at 18px) on the ten nav
+  items and on search/activity/theme, which were emoji — glyphs that render
+  per-OS, ignore `currentColor` so they cannot follow the theme, and carry no
+  accessible name. The header became the shell's first row at full width, so
+  the mark sits in the window's corner rather than inside the pane that
+  collapses; the sidebar collapses to a 64px rail with Radix tooltips and
+  remembers the choice. Two dependencies bought deliberately:
+  `@heroicons/react`, `@radix-ui/react-tooltip`
+- **Verification:** frontend 65 files / 470 passed / 5 skipped; backend 985
+  passed with `-m "not pve_integration and not e2e"`; `tsc -b` clean; oxlint 45
+
+**Two defects the per-task reviews could not see, both caught by whole-branch
+review:**
+- The merged guest list was gated on the apps query alone, so a host with VMs
+  and no adopted apps showed "Guests on this host (1)" above "No guests on
+  this node" with the VM nowhere. No page-level test had ever rendered
+  `GuestList` inside `NodeOverview` — the seam had zero coverage in either
+  direction, which is exactly why it survived four task reviews
+- `HealthFooter` was never made collapse-aware; in a 64px rail its two lines
+  wrapped to ~8 fragments and painted out over the page. Invisible because
+  every sidebar test mocked that component to `null`
+
+**Correction to PXP-18.** The Phase 9d addendum above says the remaining gate
+is that nothing "has been checked against real Proxmox hardware". That stopped
+being true on **2026-08-10**, when the `pve_integration` suites ran against a
+real node from the Linux workspace. The evidence is in `tests/livepve.py`'s own
+docstring, which records what was learned there: "a host that looks idle can
+hold real data. The PBS datastore used for these tests held 121 archives
+belonging to six other guests." Nine live tests cover the app lifecycle, VM
+create/start/console/snapshot/clone/delete, console tickets over a real WS,
+ISO upload, and backup sync/restore/prune against a real datastore.
+
+**The residual gap is one endpoint, not the product.** `apply_network`
+(`proxploy/api/network.py:350`, `PUT /nodes/{node}/network` → `ifreload -a`)
+has never run against real hardware. It is covered by 28 fake-node tests
+across `test_network_api.py` and `test_network_hostconfig.py` for request
+shape and the typed node-name confirmation, but the reload itself has not
+happened on a real node. Note that
+`test_network_apply_is_gated_behind_an_explicit_opt_in` **skips
+unconditionally even when `PROXPLOY_TEST_PVE_ALLOW_NETWORK_APPLY=1` is set** —
+its second `pytest.skip` is not behind a condition. It exists to make the gate
+visible in the run, not to exercise the apply. Setting that variable therefore
+proves nothing; closing this gap means a supervised manual apply on a node
+with confirmed out-of-band access (IPMI or a physical console), because a
+wrong bridge write cuts the node off with no in-band undo.
