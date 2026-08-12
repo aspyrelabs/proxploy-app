@@ -5,6 +5,7 @@ import type { ActivityRow, JobStatus } from '../api/jobs'
 import { ago, TINT } from './activityDisplay'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
+import { Loading } from './ui/loading'
 
 const BADGE: Record<string, string> = { job: 'JOB', audit: 'AUD', alert: 'ALT' }
 
@@ -48,6 +49,12 @@ function Item({ row }: { row: ActivityRow }) {
           {row.actor ? ` · ${row.actor}` : ''} · {ago(row.at)}
         </span>
       </span>
+      {/* Only a job still running gets a determinate ring: a finished job's
+          progress_pct (backfilled to 100 on success) is history, not a live
+          figure, and a null one has no real value to show. */}
+      {row.status === 'running' && row.progress_pct != null && (
+        <Loading value={row.progress_pct} label="Progress" size={20} className="mt-0.5 shrink-0" />
+      )}
       {isCancellable(row) && (
         <Button variant="ghost" className="shrink-0 self-center px-2 py-1 text-[11px]"
                 disabled={cancel.isPending} onClick={onCancel}>

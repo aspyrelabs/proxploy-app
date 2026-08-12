@@ -146,6 +146,38 @@ describe('BellPopover', () => {
     expect(await screen.findByText(/disk full/i)).toBeInTheDocument()
   })
 
+  // JOBS[0] (app.start) is 'running' with progress_pct: 40. footerOf used to
+  // fold that into the plain-text footer line as "40%"; it now renders as
+  // the shared ring instead.
+  it("shows a progress ring on a running job's card instead of plain percent text", async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const running = cards.find((c) => c.textContent?.includes('app.start'))!
+    expect(within(running).getByRole('status')).toHaveAttribute(
+      'aria-label', expect.stringContaining('40 percent'))
+    expect(within(running).queryByText('40%')).toBeNull()
+  })
+
+  // JOBS[1] (app.stop) already succeeded, even though it carries
+  // progress_pct: 100. A determinate ring is for a job still running.
+  it('shows no ring on a finished job, even one with a progress figure', async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const finished = cards.find((c) => c.textContent?.includes('app.stop'))!
+    expect(within(finished).queryByRole('status')).toBeNull()
+  })
+
+  // JOBS[2] (vm.backup) failed with progress_pct: null, no figure, no ring.
+  it('shows no ring on a job with no progress figure', async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const failed = cards.find((c) => c.textContent?.includes('vm.backup'))!
+    expect(within(failed).queryByRole('status')).toBeNull()
+  })
+
   it('dismissing a card removes only that one', async () => {
     wrap()
     await openBell()

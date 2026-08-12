@@ -59,6 +59,7 @@ vi.mock('../api/client', () => ({
 import { ActivityFeed } from '../components/ActivityFeed'
 import { JobLog } from '../components/JobLog'
 import { TerminalPanel } from '../components/TerminalPanel'
+import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
 const wrap = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -117,6 +118,34 @@ describe('ActivityFeed', () => {
     expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
   })
 
+  // app.stop is 'running' with progress_pct: 40, the one row in this fixture
+  // a determinate ring may honestly appear on.
+  it('shows a progress ring on the running job row', async () => {
+    wrap(<ActivityFeed />)
+    await screen.findByText('app.stop')
+    const row = screen.getByText('app.stop').closest('div')!
+    expect(within(row).getByRole('status')).toHaveAttribute(
+      'aria-label', expect.stringContaining('40 percent'))
+  })
+
+  // host.create is an audit row: progress_pct is null. No ring, and no zero
+  // standing in for "no figure" either.
+  it('shows no ring on a row with no progress figure', async () => {
+    wrap(<ActivityFeed />)
+    await screen.findByText('host.create')
+    const row = screen.getByText('host.create').closest('div')!
+    expect(within(row).queryByRole('status')).toBeNull()
+  })
+
+  // app.start already finished (status: succeeded) even though it carries
+  // progress_pct: 100. A determinate ring is for a job still running.
+  it('shows no ring on a finished job even though it carries a progress figure', async () => {
+    wrap(<ActivityFeed />)
+    await screen.findByText('app.start')
+    const row = screen.getByText('app.start').closest('div')!
+    expect(within(row).queryByRole('status')).toBeNull()
+  })
+
   it('pressing Cancel posts to /jobs/{id}/cancel for that row', async () => {
     wrap(<ActivityFeed />)
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
@@ -149,5 +178,33 @@ describe('JobLog', () => {
     wrap(<JobLog jobId={12} />)
     expect(await screen.findByText(/could not load this job.s transcript/i)).toBeInTheDocument()
     expect(screen.queryByText(/no output yet/i)).not.toBeInTheDocument()
+  })
+
+  // The enabling half of the determinate ring: JobLog owns the one
+  // EventSource for a job, so a caller that wants live progress has to get
+  // it through JobLog rather than opening a second connection.
+  it('calls onProgress when the stream emits a progress frame', async () => {
+    const restore = installFakeEventSource()
+    const onProgress = vi.fn()
+    wrap(<JobLog jobId={12} onProgress={onProgress} />)
+    await screen.findByText('starting CT 150')
+
+    FakeEventSource.last.emit('progress', { pct: 55 })
+
+    expect(onProgress).toHaveBeenCalledWith(55)
+    restore()
+  })
+
+  it('does not call onProgress for a line or status frame', async () => {
+    const restore = installFakeEventSource()
+    const onProgress = vi.fn()
+    wrap(<JobLog jobId={12} onProgress={onProgress} />)
+    await screen.findByText('starting CT 150')
+
+    FakeEventSource.last.emit('line', { stream: 'stdout', message: 'hi' })
+    FakeEventSource.last.emit('status', { status: 'succeeded' })
+
+    expect(onProgress).not.toHaveBeenCalled()
+    restore()
   })
 })

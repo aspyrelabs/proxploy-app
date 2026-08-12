@@ -38,6 +38,12 @@ let features: Record<string, boolean> = {
 }
 /** which 409 the next in-place restore should hit, if any */
 let restoreGuard: 'confirm' | 'self' | null = null
+/** GET /backups' own `stale` flag: location 2's ring only ever polls while
+ *  this is true. */
+let backupsStale = false
+/** The one `backup.sync` job GET /jobs?status=running&kind=backup.sync
+ *  reports back, or null for "nothing running". */
+let syncJob: Record<string, unknown> | null = null
 
 vi.mock('../api/client', () => {
   class ApiError extends Error {
@@ -55,7 +61,10 @@ vi.mock('../api/client', () => {
         return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       }
       if (method !== 'GET') calls.push({ path, method, body })
-      if (path === '/backups') return Promise.resolve(BACKUPS)
+      if (path === '/backups') return Promise.resolve({ ...BACKUPS, stale: backupsStale })
+      if (path === '/jobs?status=running&kind=backup.sync') {
+        return Promise.resolve(syncJob ? [syncJob] : [])
+      }
       if (path === '/schedules') return Promise.resolve([])
       if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
       if (path.startsWith('/backups/prune-preview')) return Promise.resolve(PRUNE)
@@ -236,5 +245,47 @@ describe('BackupsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Connect PBS' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByLabelText(/Type/i)).toHaveValue('pbs')
+  })
+
+  // services/backupjobs.py::sync_backups is the only genuinely granular
+  // progress in the product (int((i+1)/len(host_ids)*100) per host), and the
+  // only place that job is displayed at all is the "refreshing from
+  // Proxmox…" banner GET /backups' own `stale` flag already renders.
+  describe('the backup-sync banner', () => {
+    it('shows the plain banner with no ring while nothing has reported progress', async () => {
+      backupsStale = true
+      syncJob = null
+      wrap()
+      expect(await screen.findByText(/refreshing from proxmox/i)).toBeInTheDocument()
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    // Seeded straight from the first poll: a sync already partway through
+    // when the page mounts must never flash 0 before showing 66.
+    it('shows the ring at the running sync job\'s real progress, never a zero', async () => {
+      backupsStale = true
+      syncJob = {
+        id: 40, kind: 'backup.sync', status: 'running',
+        target_type: 'system', target_id: null, params: null, result: null,
+        error: null, progress_pct: 66, requested_by: null, schedule_id: null,
+        started_at: '2026-08-12T09:00:00Z', finished_at: null,
+        created_at: '2026-08-12T09:00:00Z',
+      }
+      wrap()
+      await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute(
+        'aria-label', expect.stringContaining('66 percent')))
+      expect(screen.queryByText('0')).toBeNull()
+    })
+
+    it('polls for the running sync job only while the cache is stale', async () => {
+      backupsStale = false
+      syncJob = null
+      const { api } = await import('../api/client')
+      vi.mocked(api).mockClear()
+      wrap()
+      await screen.findByText(/Proxmox Backup Server/)
+      expect(vi.mocked(api).mock.calls.some(
+        (c) => c[0] === '/jobs?status=running&kind=backup.sync')).toBe(false)
+    })
   })
 })

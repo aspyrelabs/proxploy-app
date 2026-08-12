@@ -156,11 +156,18 @@ function footerOf(job: JobRow): string {
   if (job.target_type) {
     bits.push(`${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`)
   }
-  if (job.progress_pct != null && job.status === 'running') bits.push(`${job.progress_pct}%`)
+  // A running job's percent used to be folded in here as plain text; it now
+  // renders as NotificationCard's own ring (see `progress` below) instead.
   const took = duration(job)
   if (took) bits.push(took)
   bits.push(ago(job.started_at ?? job.created_at))
   return bits.join(' · ')
+}
+
+/** 0..100 for a job still running with a real figure, or undefined: never a
+ *  fake zero for a job that hasn't reported anything yet. */
+function progressOf(job: JobRow): number | undefined {
+  return job.status === 'running' && job.progress_pct != null ? job.progress_pct : undefined
 }
 
 /**
@@ -284,6 +291,7 @@ export function BellPopover() {
                     title={`${j.kind} #${j.id}`}
                     description={messageOf(j)}
                     footer={footerOf(j)}
+                    progress={progressOf(j)}
                     onViewLog={() => setLogJob(j)}
                     onDismiss={() => setDismissed((d) => [...d, j.id])}
                   />

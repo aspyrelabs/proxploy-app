@@ -10,12 +10,14 @@ import { AppCard } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
 import { ReconfigureDialog } from '../components/ReconfigureDialog'
 import { UninstallDialog } from '../components/UninstallDialog'
+import { Loading } from '../components/ui/loading'
 import { Terminal } from '../components/terminal/Terminal'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
@@ -318,6 +320,11 @@ export function UpdatePanel({ appId, app }:
   const qc = useQueryClient()
   const ent = useEntitlements()
   const [consent, setConsent] = useState(false)
+  const [jobId, setJobId] = useState<number | null>(null)
+  // services/appstore.py::run_update reports the same ctx.progress(10)/(80)/
+  // (100) shape run_install does: null on the freshly-enqueued job the
+  // update POST returns, seeded from that row rather than assumed zero.
+  const [progress, setProgress] = useState<number | null>(null)
   // Wait for the first entitlements fetch before deciding (settings.tsx
   // precedent), otherwise this fires GET /update for every viewer of every
   // app overview and offers a consent+button whose POST always 403s.
@@ -328,10 +335,13 @@ export function UpdatePanel({ appId, app }:
     enabled: updatesAllowed,
   })
   const run = useMutation({
-    mutationFn: () => api(`/apps/${appId}/update`, {
-      method: 'POST', body: JSON.stringify({ consent: true }),
-    }),
-    onSuccess: () => toast.success('Update started, follow it on the Hosts page.'),
+    mutationFn: () => api<{ job: { id: number; kind: string; progress_pct: number | null } }>(
+      `/apps/${appId}/update`, { method: 'POST', body: JSON.stringify({ consent: true }) }),
+    onSuccess: (r) => {
+      setJobId(r.job.id)
+      setProgress(r.job.progress_pct)
+      toast.success('Update started.')
+    },
     onError: () => toast.error('Could not start the update, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
@@ -347,6 +357,19 @@ export function UpdatePanel({ appId, app }:
     return <div className="text-[12.5px] text-text-3">
       {ent.data == null ? 'Loading…' : 'Not included in your plan.'}
     </div>
+  }
+  if (jobId != null) {
+    return (
+      <div>
+        <div className="mb-3 flex items-center gap-2">
+          {/* Never shown before the first step reports in: a zero here would
+              read as stalled rather than as "not started yet". */}
+          {progress != null && <Loading value={progress} label="Update progress" size={28} />}
+          <span className="text-[12.5px] text-text-2">Updating {app.name}…</span>
+        </div>
+        <JobLog jobId={jobId} onProgress={setProgress} />
+      </div>
+    )
   }
   return (
     <div>

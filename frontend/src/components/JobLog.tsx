@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useJobEvents } from '../api/jobs'
 import type { TermLine } from './TerminalPanel'
 import { TerminalPanel } from './TerminalPanel'
@@ -7,10 +7,19 @@ import { TerminalPanel } from './TerminalPanel'
  * Archived transcript first, then follow live (doc 06 §d). EventSource resumes
  * itself via Last-Event-ID = job_events.seq; on a terminal `status` frame the
  * server closes the stream and the transcript query owns re-opens.
+ *
+ * `onProgress` is the one way a caller observes the job's `progress` SSE
+ * frames (proxploy/jobs/backend.py::JobContext.progress). It rides this same
+ * EventSource rather than opening a second one for the same job: the stream
+ * resumes via Last-Event-ID, so a duplicate connection would double every
+ * line. Kept in a ref so passing an unmemoized inline callback cannot itself
+ * cause a reconnect; the effect below still only depends on `jobId`.
  */
-export function JobLog({ jobId }: { jobId: number }) {
+export function JobLog({ jobId, onProgress }: { jobId: number; onProgress?: (pct: number) => void }) {
   const archived = useJobEvents(jobId)
   const [live, setLive] = useState<TermLine[]>([])
+  const onProgressRef = useRef(onProgress)
+  onProgressRef.current = onProgress
 
   useEffect(() => {
     setLive([])
@@ -20,6 +29,10 @@ export function JobLog({ jobId }: { jobId: number }) {
     es.addEventListener('line', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
       push({ stream: d.stream, message: d.message })
+    })
+    es.addEventListener('progress', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      onProgressRef.current?.(d.pct)
     })
     es.addEventListener('status', (e) => {
       const d = JSON.parse((e as MessageEvent).data)

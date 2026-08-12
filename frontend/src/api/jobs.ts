@@ -50,6 +50,30 @@ export function useJobEvents(id: number | null) {
   })
 }
 
+/**
+ * The one running job of a given kind, if any (`/jobs` supports `kind` as a
+ * server-side filter, see backend/proxploy/api/jobs.py::list_jobs). Built for
+ * routes/backups.tsx's stale banner, the one surface in the product that
+ * displays `backup.sync` at all: GET /backups enqueues that job fire-and-
+ * forget and never returns its id, so this is how the banner finds it.
+ *
+ * Polled only while `enabled`: a page sitting on fresh data has no reason to
+ * run a job query on a timer for a banner it isn't even rendering. 2s rather
+ * than this app's usual ~30s cadence, deliberately: services/backupjobs.py's
+ * sweep is per-host and often finishes well inside 30s, so that cadence would
+ * see at most one sample of the only genuinely granular progress in the
+ * product, the same coarse jump the app-install/update steps already show.
+ */
+export function useRunningJobOfKind(kind: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['jobs', 'running', kind],
+    enabled,
+    refetchInterval: enabled ? 2_000 : false,
+    queryFn: () => api<JobRow[]>(`/jobs?status=running&kind=${kind}`),
+    select: (rows) => rows[0] ?? null,
+  })
+}
+
 export function useActivity(limit = 20) {
   return useQuery({
     queryKey: ['cluster', 'activity', limit],

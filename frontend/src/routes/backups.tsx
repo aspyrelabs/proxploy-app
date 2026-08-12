@@ -7,6 +7,7 @@ import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
+import { useRunningJobOfKind } from '../api/jobs'
 import { useSchedules } from '../api/schedules'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
@@ -19,6 +20,7 @@ import { Button } from '../components/ui/button'
 import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
 import { Dialog } from '../components/ui/dialog'
+import { Loading } from '../components/ui/loading'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
@@ -253,6 +255,11 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
 export function BackupsPage() {
   const ent = useEntitlements()
   const { data, isError } = useBackups()
+  // services/backupjobs.py::sync_backups is the only genuinely granular
+  // progress in the product (per-host, not a fixed handful of steps), and
+  // this stale banner is the one place `backup.sync` is ever displayed:
+  // GET /backups enqueues it fire-and-forget and never returns its id.
+  const syncJob = useRunningJobOfKind('backup.sync', Boolean(data?.stale))
   const [running, setRunning] = useState(false)
   const [restoring, setRestoring] = useState<BackupRow | null>(null)
   const [connecting, setConnecting] = useState(false)
@@ -294,7 +301,17 @@ export function BackupsPage() {
                   ? `Proxmox Backup Server · ${biggest.storage}`
                   : 'No backup datastore found yet')
               : '…'}
-            {data?.stale && <span className="ml-2 text-amber">· refreshing from Proxmox…</span>}
+            {data?.stale && (
+              <span className="ml-2 inline-flex items-center gap-1.5 text-amber">
+                {/* Only when the sync job has actually reported something:
+                    before its first host completes, progress_pct is null and
+                    a ring here would show a zero that reads as stalled. */}
+                {syncJob.data?.progress_pct != null && (
+                  <Loading value={syncJob.data.progress_pct} label="Syncing backups" size={16} />
+                )}
+                <span>· refreshing from Proxmox…</span>
+              </span>
+            )}
           </div>
         </div>
         <div className="flex gap-2">

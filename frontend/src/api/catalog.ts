@@ -76,7 +76,7 @@ export function useInstall() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (v: InstallVars) =>
-      api<{ job: { id: number; kind: string } }>(`/catalog/${v.slug}/install`, {
+      api<{ job: { id: number; kind: string; progress_pct: number | null } }>(`/catalog/${v.slug}/install`, {
         method: 'POST',
         body: JSON.stringify({ host_id: v.host_id, name: v.name, ctid: v.ctid,
                               overrides: v.overrides, consent: v.consent }),

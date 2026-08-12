@@ -5,6 +5,7 @@ import { useCatalogEntry, useInstall } from '../api/catalog'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 type HostRow = { id: number; name: string }
 
@@ -17,6 +18,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [ctid, setCtid] = useState('')
   const [consent, setConsent] = useState(false)
   const [jobId, setJobId] = useState<number | null>(null)
+  // services/appstore.py::run_install only calls ctx.progress(80) then (100),
+  // so this is null on the freshly-enqueued job the install POST returns.
+  // Seeded from that row rather than assumed zero, in case that ever changes.
+  const [progress, setProgress] = useState<number | null>(null)
 
   if (!entry) return null
 
@@ -26,7 +31,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     if (!canSubmit || hostId == null) return
     install.mutate(
       { slug, host_id: hostId, name, ctid: Number(ctid), overrides: {}, consent },
-      { onSuccess: (r) => setJobId(r.job.id) },
+      { onSuccess: (r) => { setJobId(r.job.id); setProgress(r.job.progress_pct) } },
     )
   }
 
@@ -35,7 +40,14 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
     {jobId ? (
       <div className="mt-4">
-        <JobLog jobId={jobId} />
+        <div className="mb-3 flex items-center gap-2">
+          {/* Two or three real steps (services/appstore.py), so the ring
+              jumps rather than sweeps: honest, not smoothed. Never shown
+              before the first step, a zero here would read as stalled. */}
+          {progress != null && <Loading value={progress} label="Install progress" size={28} />}
+          <span className="text-[12.5px] text-text-2">Installing {entry.name ?? slug}…</span>
+        </div>
+        <JobLog jobId={jobId} onProgress={setProgress} />
         <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
     ) : (

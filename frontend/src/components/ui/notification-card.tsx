@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Button } from './button'
+import { Loading } from './loading'
 
 /**
  * Vendored by hand from ReUI's `alert` component (https://reui.io/r/alert.json,
@@ -88,7 +89,7 @@ const FILL: Record<NotificationSeverity, string> = {
 }
 
 export function NotificationCard({
-  severity, title, description, footer, onViewLog, onDismiss,
+  severity, title, description, footer, progress, onViewLog, onDismiss,
 }: {
   severity: NotificationSeverity
   title: string
@@ -99,6 +100,11 @@ export function NotificationCard({
    *  Deliberately a single line: the full label/value table this replaced
    *  buried the message it was meant to support. */
   footer?: string
+  /** 0..100 for a job still running with a real figure to show. Renders as
+   *  the shared ring beside the footer line, in place of folding a "40%"
+   *  into the footer text itself. Omit entirely rather than pass 0, a
+   *  determinate ring with no real value behind it reads as stalled work. */
+  progress?: number
   /** When given, a log control sits beside the dismiss control. Toasts leave
    *  it out: a card that vanishes in 2.6s is the wrong place to start reading a
    *  transcript. */
@@ -123,8 +129,9 @@ export function NotificationCard({
           </div>
         )}
         {footer && (
-          <div className="col-start-2 mt-0.5 font-mono text-[11px] text-text-3">
-            {footer}
+          <div className="col-start-2 mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-text-3">
+            {progress != null && <Loading value={progress} label="Progress" size={16} />}
+            <span>{footer}</span>
           </div>
         )}
       </div>
