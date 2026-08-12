@@ -1303,3 +1303,218 @@ visible in the run, not to exercise the apply. Setting that variable therefore
 proves nothing; closing this gap means a supervised manual apply on a node
 with confirmed out-of-band access (IPMI or a physical console), because a
 wrong bridge write cuts the node off with no in-band undo.
+
+### 2026-08-12T22:30:00+05:30: notifications rebuilt three times, icons reversed twice, host power onto the job engine
+
+44 commits on `main` since the last entry (`6b80b60..7142831`), one long day.
+Three small branches merged (`notifications-toasts`, `animated-theme-toggle`,
+`bell-popover`); everything else landed as direct commits: icons, loading
+indicators, migrate progress, a host actions menu, an em dash sweep held back
+from the earlier one, and the tray that finally replaced every notification
+surface above it at once.
+
+**Notifications were rebuilt three times**, each time in response to what the
+user actually saw next.
+1. Plain `sonner` toasts (`toast.success`/`toast.error`) became ReUI-style
+   severity cards (`notification-card.tsx`, vendored by hand: no shadcn CLI,
+   no `cva`, colors mapped onto this app's own `--blue`/`--green`/`--amber`/
+   `--red` tokens). The bell still opened a job-list popover underneath.
+2. The bell popover was made to show the same cards instead of a list, and
+   still shipped as a list once more before it stuck (`0de311d`), because the
+   popover kept its own bespoke row markup; once fixed, the cards sat inside
+   a bordered panel titled "Activity" (`cdb2fc9`), which read as a list
+   regardless of what was rendered inside it.
+3. Both surfaces collapsed into one tray (`d3ff15c`): a client-side store
+   (`lib/notificationStore.ts`) that both `notify.tsx` and `LiveProvider`
+   push into, merged with `GET /jobs` in `BellPopover` so job history still
+   survives a reload, deduped by job id (`lib/notificationMerge.ts`, tested
+   directly, since a duplicate delivered once over SSE and again on the next
+   `/jobs` poll is exactly the failure most likely to happen). `sonner`'s
+   `<Toaster>` and `ClearAllToasts` left `AppShell` entirely; "Clear all"
+   survives as a tray affordance instead.
+
+The badge changed meaning three times to match: running jobs alone (before
+this arc), then running jobs plus an unread count of the store (`d3ff15c`),
+then, because that still didn't describe what the tray held, the tray's own
+length (`11a45ef`), red instead of amber, hidden at zero, capped at 99+.
+
+Smaller fixes along the way: cancel came back on the activity feed rows after
+the drawer's deletion had taken it as uncaught dead code (`174d257`); a job's
+transcript became reachable again through a "View log" action on each card,
+restoring what the drawer's removal had quietly cut, with its own test
+because "this gap was lost once already and shipped" (`837ed49`); the card
+count that follows window height had to be taught to grow back, not just
+shrink, when the window did (`b1ca75b`); and the cards' position relative to
+the bell needed two separate fixes, one for being pinned to the wrong
+trigger's edge (`758070d`) and one for `alignOffset`'s sign running the
+opposite way, pushing the cards further into the window instead of toward
+its edge (`1d30958`).
+
+**Two live regressions shipped and were then fixed.** The tray landed with no
+`<Toaster>` mounted anywhere, so the seven remaining `toast.success`/
+`toast.error` calls still living in `HostPowerDialog.tsx`, `HostEditDialog.tsx`
+and `routes/hosts.tsx` (held back because another agent was mid-edit on those
+files) rendered nothing at all; saving a host edit gave silence (`a173d29`
+fixed it, routing all seven through `notify`). And the Hardware tab's pending
+branch was a bare `return null`, so for however long the real fetch took
+against a live node the tab showed a blank pane, which reads as broken rather
+than slow (`7142831`: a card-shaped skeleton under the existing loading veil
+instead).
+
+**The theme toggle** became MagicUI's `animated-theme-toggler`, vendored by
+hand rather than pulled through the shadcn CLI, because this repo has no
+`components.json`, no `cn`, no `@/` alias, and `shadcn init` would have
+rewritten `tokens.css`. Adapted to drive `data-theme` on `<html>` through
+`lib/theme.ts` rather than a `dark` class next-themes would own (there is no
+Tailwind `dark:` variant here), Heroicons instead of lucide, and a
+`prefers-reduced-motion` escape hatch upstream does not have. Also closed a
+gap in what MagicUI itself ships: its component sets a
+`--magicui-theme-vt-clip-from` custom property with a comment claiming it
+pins the wipe's starting clip so Firefox doesn't flash the new theme
+unclipped for a frame, but no stylesheet upstream ships, registry JSON or the
+compiled docs site, actually reads that property. The consuming rule was
+added here, on this app's own tokens.
+
+**Icons went through five states in one day.** Heroicons (already the app's
+icon set from the earlier chrome pass) picked up two lucide-react imports for
+the notification card's corner controls (`8dddae3`), then lost them back to
+Heroicons once two icons turned out not to be worth a second icon dependency
+(`8e1310e`). Then the whole app moved off Heroicons entirely, to a
+self-hosted, build-time-subset Material Symbols font (`f774d29`): Heroicons'
+~300 icons had become limiting, but full Material Symbols is one shared GSUB
+decision tree across roughly 3,600 ligatures, so subsetting by ligature name
+barely shrinks it once a modest vocabulary of real English words is in play;
+subsetting by Private Use Area codepoint instead, no GSUB involved, got the
+23 icons this app uses down to 2.4KB. It was kept self-hosted specifically on
+the assumption that an install might have no internet at all. That assumption
+was then retired (`707a7ef`): the user pointed out that the app store already
+downloads container templates over the internet, so air-gapped was never a
+real constraint on this install, and the self-hosting, the build-time
+subsetting, and a hand-maintained codepoint table were complexity bought for
+a constraint that never applied. Icons now load from `fonts.googleapis.com`,
+scoped to exactly the names in use via the CDN's own `icon_names` parameter,
+injected by a small Vite plugin. A new `reveal-icons-when-ready.ts` keeps
+every icon invisible until the CSS Font Loading API confirms the font
+settled, since Google's CSS2 response carries no `font-display` the way the
+old subset build did, and a slow or blocked CDN should never flash a literal
+icon name where a glyph belongs.
+
+**Loading indicators** got a shared ring, wired to whatever real signal
+exists and nothing pretending to have one it doesn't. The determinate half
+(`168330d`) covered the three places with a genuine completion figure: app
+install/update, the backup sweep (the only per-host granular progress the
+backend had, polled from the existing stale banner since `GET /backups`
+never returns a job id to follow directly), and the bell popover's
+running-job rows, which used to render `progress_pct` as bare text instead
+of the ring. The indeterminate half (`a405b69`) covered six more spots that
+had no honest completion signal and were previously either silent or showed
+static "Loading..." text with no `role=status`. A card-level blur overlay
+(`35199b8`, `CardLoadingOverlay`, vendored from ReUI's paid-tier spinner
+example with a Heroicons arrow standing in for the licensed primitive) went
+on `ApiKeysCard`, `TeamsCard`, `TotpCard` and two settings sections,
+deliberately keyed off `query.isPending` rather than `isFetching`, so a
+background poll or a post-mutation refetch never flashes the veil over
+content that's already there.
+
+**A wrong call from that same pass was corrected minutes later.**
+`MigrateDialog` had been wired indeterminate on the premise that nothing in
+the migrate path reports real progress. That premise was wrong: the SFTP
+transfer hop already reports byte-level progress, the most granular signal
+anywhere in the product, and every job row already carries whatever
+`ctx.progress()` last wrote. `9199710` gave it back its determinate ring,
+seeded from the job row rather than assumed zero, kept live over the same
+SSE connection `JobLog` already had.
+
+**Migrate progress was also climbing to 100 and dropping back** (`356f240`),
+a separate defect from the ring-type mistake above: a cross-host migration
+chains several PVE tasks (stop, vzdump, the SFTP hop, restore, start), and
+`await_task`'s progress bracket defaults to (10, 100) for a single task, so
+every phase of a migration was reporting as though it were the whole job.
+vzdump finishing would hit 100 for a migration maybe 40% done, then the SFTP
+hop's honest byte climb would resume from ~10, reading as progress running
+backwards once the frontend started rendering it as a ring instead of a
+spinner. Fixed by giving each phase its own band within 0-100, plus a
+monotonic clamp added to `JobContext.progress` as a safety net for a future
+handler bug, not as the fix itself.
+
+**Host actions.** An Edit/Reboot/Power off menu on the host page (`ab41f8f`),
+backed by new endpoints: `PATCH /hosts/{id}` gained optional `name`/`address`,
+and a new `POST /hosts/{id}/nodes/{node}/power` calls Proxmox's own
+node-status endpoint. Reboot and power off both go through the same typed
+name-confirmation dialog the remove flow already uses, and the self-guard
+that stops Proxploy from powering off its own node was extended from
+`app`/`vm` targets to host+node, since a `Host` row can be a whole cluster
+and only the recorded entry node can ever be the machine Proxploy runs on.
+`host.power` was set to the `owner` permission tier, matching
+`host.remove`/`host.credentials`, flagged in its own commit as a judgment
+call with no doc precedent behind it; an argument exists for `admin` instead,
+since a reboot destroys no data the way a remove does. It landed synchronous
+at first (fire the command, hand back a bare UPID) because the job engine
+files were mid-edit by a concurrent agent, then moved onto the job engine
+once that cleared (`716e664`), enqueuing `host.reboot`/`host.shutdown` so
+both actions leave a transcript in the bell popover like every other
+destructive action, instead of a toast with no way to follow what happened
+next. No progress percentage is reported for either: the honest signal
+available is "Proxmox accepted the command," not "the node finished
+rebooting," and a percentage would have claimed certainty the job doesn't
+have. If Proxploy runs on the node being powered off, the process, job
+engine included, disappears mid-poll; nothing special-cases this, the
+existing orphan sweep marks the row interrupted at next boot, same as any
+other job an ungraceful restart catches mid-flight.
+
+**Also landed, smaller:** every remaining plain-text toast call site (59
+across 26 files, outside the three held back for the tray work) now goes
+through one `notify.tsx` helper instead of calling `sonner` directly
+(`07ce817`); a host's recorded PVE version now refreshes on an in-place
+Proxmox upgrade instead of waiting for a manual Test click, and the identity
+rail's Load/IO delay values poll every 30 seconds instead of freezing at
+page load (`f48631d`); the topbar stopped overrunning a 375px phone, mostly
+the tier pill, by dropping the "ALL FEATURES" qualifier below the `sm`
+breakpoint (`54ec9af`); and the em dashes remaining in `hosts.tsx` and
+`HostForm.tsx`, held back from the earlier sweep because they were being
+actively edited, are gone (`a57f0ca`, following `f472511`'s sweep of 60 em
+dashes and 2 en dashes across 24 other files).
+
+**Verification, two things that both matter, not one deficiency.**
+
+What the machine checked: frontend, 84 test files, 620 passed, 5 skipped;
+`npx tsc -b` clean; `npx oxlint`, 44 warnings, 0 errors, all in categories
+(fast-refresh export shape, hook dependency arrays) that predate this range.
+Backend: 1024 passed, 2 skipped, 10 deselected, `pytest tests/ -q -m "not
+pve_integration and not e2e"`. That is real coverage, and it has a real edge:
+jsdom does not evaluate CSS, so the theme wipe, the card veil, and the tray's
+arrival behavior are invisible to the suite by construction, and the
+`run-proxploy` driver has no login step, so every one of these authenticated
+surfaces is out of its reach too.
+
+What the human review caught, which the suite was structurally blind to: the
+bell popover rendering a job list when cards had been asked for, twice; the
+notification cards sitting inside a bordered "Activity" panel that still
+read as a list regardless of what was in it; the badge counting running jobs
+plus an unread tally instead of the tray's own contents, so it sat at zero
+while the tray plainly held something; the Hardware tab rendering nothing at
+all while it loaded; Clear All not surviving a reload because dismissal
+lived only in React state; the popover's `alignOffset` pushing the cards
+further into the window instead of out toward its edge; and the icon
+self-hosting and build-time subsetting solving a constraint, air-gapped
+installs, that does not exist for this product. None of those are things a
+passing test suite would have shown. The user ran the dev session alongside
+this work all day and reviewed every change as it landed, and that loop
+caught a class of defect the suite cannot see, several times in one day.
+
+**Known gaps, stated plainly:**
+- The tray's arrival behavior (`NotificationSurface`, the brief
+  under-the-bell appearance before a new item settles into the tray) has not
+  been seen in a browser by anything except the user.
+- The badge has a roughly 30-second double-count window: a job that just
+  turned terminal stays in the stale `running` count until its next poll
+  while it is already counted fresh in the unread store. Self-corrects, only
+  visible while the tray is closed.
+- Action notifications and alerts do not survive a page reload, by design:
+  there is nothing server-side to reload them from. Job history still does,
+  through `GET /jobs`.
+- `apply_network`'s `ifreload -a` (`PUT /nodes/{node}/network`) still has
+  never run against real hardware, unchanged from the last entry's note; 28
+  fake-node tests cover the request shape, not the reload itself.
+- `host.power`'s `owner` permission tier is a judgment call with no doc
+  precedent, flagged in its own commit, not resolved here.
