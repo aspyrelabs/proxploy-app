@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { useSessions } from '../api/account'
 import type { SessionRow } from '../api/account'
 import { QueryState } from './QueryState'
@@ -21,7 +21,7 @@ export function SessionsCard() {
 
   const revoke = useMutation({
     mutationFn: (id: number) => api(`/auth/sessions/${id}`, { method: 'DELETE' }),
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['auth', 'sessions'] }),
   })
 

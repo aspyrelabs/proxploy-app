@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -87,7 +87,7 @@ describe('ActivityFeed', () => {
     activityResult = 'ok'
     cancelResult = 'ok'
     cancelCalls.length = 0
-    toastError.mockClear()
+    notifyError.mockClear()
   })
 
   it('renders merged job and audit rows with their actor', async () => {
@@ -157,7 +157,7 @@ describe('ActivityFeed', () => {
     cancelResult = 'conflict'
     wrap(<ActivityFeed />)
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('job is already succeeded'))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('job is already succeeded'))
   })
 })
 

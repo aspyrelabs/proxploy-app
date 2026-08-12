@@ -7,8 +7,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
-const { toastSuccess } = vi.hoisted(() => ({ toastSuccess: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: vi.fn() } }))
+const { notifySuccess } = vi.hoisted(() => ({ notifySuccess: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { success: notifySuccess, error: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 let updateJob: { id: number; kind: string; progress_pct: number | null } = {
   id: 21, kind: 'app.update', progress_pct: null,
@@ -58,7 +58,7 @@ describe('UpdatePanel', () => {
     wrap()
     await startUpdate()
 
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    await waitFor(() => expect(notifySuccess).toHaveBeenCalled())
     expect(screen.queryByRole('status')).toBeNull()
 
     FakeEventSource.last.emit('progress', { pct: 80 })

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-dialog'
 
@@ -32,9 +32,12 @@ export function HostRemoveDialog({ hostId, hostName, onClose, onRemoved }: {
         body: JSON.stringify({ confirm: vars.confirm, forget_apps: vars.forgetApps }),
       }),
     onSuccess: (r) => {
-      toast.success(r.forgot_apps
-        ? `${hostName} removed, ${r.forgot_apps} app record(s) forgotten (containers left running).`
-        : `${hostName} removed.`)
+      if (r.forgot_apps) {
+        notify.success(`${hostName} removed.`,
+          { description: `${r.forgot_apps} app record(s) forgotten (containers left running).` })
+      } else {
+        notify.success(`${hostName} removed.`)
+      }
       qc.invalidateQueries({ queryKey: ['hosts'] })
       qc.invalidateQueries({ queryKey: ['apps'] })
       onRemoved()
@@ -45,7 +48,7 @@ export function HostRemoveDialog({ hostId, hostName, onClose, onRemoved }: {
         setTyped(vars.confirm)
         return
       }
-      toast.error(detailOf(e))
+      notify.error(detailOf(e))
       onClose()
     },
   })

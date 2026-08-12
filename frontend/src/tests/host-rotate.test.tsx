@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -36,7 +36,7 @@ const wrap = () => {
 }
 
 describe('HostRotateDialog', () => {
-  beforeEach(() => { calls.length = 0; toastError.mockClear(); rotateResult = 'ok' })
+  beforeEach(() => { calls.length = 0; notifyError.mockClear(); rotateResult = 'ok' })
   afterEach(() => vi.restoreAllMocks())
 
   it('disables Rotate and never calls the API when only the token id is filled in', () => {
@@ -80,6 +80,6 @@ describe('HostRotateDialog', () => {
     fireEvent.change(screen.getByLabelText('New API token id'), { target: { value: 'proxploy@pve!x' } })
     fireEvent.change(screen.getByLabelText('New API token secret'), { target: { value: 'shh' } })
     fireEvent.click(screen.getByRole('button', { name: 'Rotate' }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('nope'))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('nope'))
   })
 })

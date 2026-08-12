@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }))
+const { notifySuccess, notifyError } = vi.hoisted(() => ({ notifySuccess: vi.fn(), notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { success: notifySuccess, error: notifyError, info: vi.fn(), warning: vi.fn() } }))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -43,7 +43,7 @@ const wrap = (onRemoved = vi.fn(), onClose = vi.fn()) => {
 }
 
 describe('HostRemoveDialog', () => {
-  beforeEach(() => { calls.length = 0; toastSuccess.mockClear(); toastError.mockClear() })
+  beforeEach(() => { calls.length = 0; notifySuccess.mockClear(); notifyError.mockClear() })
   afterEach(() => vi.restoreAllMocks())
 
   it('does not send forget_apps on the first submit', async () => {

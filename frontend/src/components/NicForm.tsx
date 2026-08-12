@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import type { Attachment, NicPatch } from '../api/network'
 import { errBody, useSetNic } from '../api/network'
+import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -36,8 +36,8 @@ export function NicForm({ nic, bridges, onClose }: {
       onSuccess: (r) => {
         // pending_reboot means PVE filed the change under the guest's PENDING
         // section, say so plainly instead of a green "saved".
-        if (r.pending_reboot) toast(r.detail)
-        else toast.success(`${nic.iface} updated`)
+        if (r.pending_reboot) notify.info(r.detail)
+        else notify.success(`${nic.iface} updated`)
         onClose()
       },
       onError: (err) =>

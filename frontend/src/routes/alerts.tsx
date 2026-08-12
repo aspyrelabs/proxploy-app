@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api } from '../api/client'
+import { notify } from '../lib/notify'
 import { useAckAlert, useAlertHistory, useAlertMetrics, useAlertRules, useFiringAlerts } from '../api/alerts'
 import type { AlertRow, AlertRuleRow } from '../api/alerts'
 import { useEntitlements } from '../api/hooks'
@@ -75,12 +75,12 @@ export function AlertsPage() {
     mutationFn: (r: AlertRuleRow) => api(`/alert-rules/${r.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }),
     }),
-    onError: () => toast.error('Could not update that rule, try again.'),
+    onError: () => notify.error('Could not update that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
   const removeRule = useMutation({
     mutationFn: (id: number) => api(`/alert-rules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that rule, try again.'),
+    onError: () => notify.error('Could not remove that rule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }),
   })
 

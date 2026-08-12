@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import type { BridgeConfig, Iface } from '../api/network'
 import { errBody, useStageBridge, useUpdateBridge } from '../api/network'
+import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -41,7 +41,7 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
     if (comments.trim()) config.comments = comments.trim()
     const done = {
       onSuccess: () => {
-        toast(`${name} staged on ${node}, nothing changes until you Apply.`)
+        notify.info(`${name} staged on ${node}, nothing changes until you Apply.`)
         onClose()
       },
       onError: (err: unknown) =>

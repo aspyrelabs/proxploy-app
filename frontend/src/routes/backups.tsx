@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { toast } from 'sonner'
 import { shellRoute } from './shell'
+import { notify } from '../lib/notify'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
@@ -77,7 +77,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
           <Button disabled={hostId == null || run.isPending}
                   onClick={() => run.mutate({ hostId }, {
                     onSuccess: (r) => setJobId(r.job.id),
-                    onError: () => toast.error('Could not start the backup, try again.'),
+                    onError: () => notify.error('Could not start the backup, try again.'),
                   })}>
             {run.isPending ? 'Starting…' : 'Start backup'}
           </Button>
@@ -144,7 +144,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
     setPruneJobId(null)
     prune.mutate(params, {
       onSuccess: (r) => setPruneJobId(r.job.id),
-      onError: () => toast.error('Could not start the prune, try again.'),
+      onError: () => notify.error('Could not start the prune, try again.'),
     })
   }
 
@@ -286,7 +286,7 @@ export function BackupsPage() {
     if (!window.confirm(
       `Delete ${b.volid}? The archive is removed from ${b.storage} and cannot be recovered.`)) return
     del.mutate(b.id, {
-      onError: () => toast.error('Could not delete that archive, try again.'),
+      onError: () => notify.error('Could not delete that archive, try again.'),
     })
   }
 

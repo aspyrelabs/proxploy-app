@@ -1,9 +1,9 @@
 import { Fragment, useState } from 'react'
 import { createRoute, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { useSchedules } from '../api/schedules'
 import type { ScheduleRow } from '../api/schedules'
@@ -59,13 +59,13 @@ export function SchedulesCard() {
     mutationFn: (s: ScheduleRow) => api(`/schedules/${s.id}`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !s.enabled }),
     }),
-    onError: () => toast.error('Could not update that schedule, try again.'),
+    onError: () => notify.error('Could not update that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
-    onSuccess: () => toast.success('Started, follow it on the Hosts page.'),
-    onError: () => toast.error('Could not start that job, try again.'),
+    onSuccess: () => notify.success('Started, follow it on the Hosts page.'),
+    onError: () => notify.error('Could not start that job, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -73,7 +73,7 @@ export function SchedulesCard() {
   })
   const remove = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that schedule, try again.'),
+    onError: () => notify.error('Could not remove that schedule, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
 
@@ -160,7 +160,7 @@ export function SettingsPage() {
     mutationFn: (h: HostRow) => api(`/hosts/${h.id}`, {
       method: 'PATCH', body: JSON.stringify({ node_shell_enabled: !h.node_shell_enabled }),
     }),
-    onError: () => toast.error('Could not update node shell setting, try again.'),
+    onError: () => notify.error('Could not update node shell setting, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
@@ -174,8 +174,8 @@ export function SettingsPage() {
   const syncHost = useMutation({
     mutationFn: (h: HostRow) => api<{ id: number; status: string; last_seen_at: string | null; events: number }>(
       `/hosts/${h.id}/sync`, { method: 'POST' }),
-    onSuccess: (r) => toast.success(`Synced, ${r.events} event(s) applied.`),
-    onError: (e) => toast.error(e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
+    onSuccess: (r) => notify.success('Synced.', { description: `${r.events} event(s) applied.` }),
+    onError: (e) => notify.error(e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
       ? (e.body as any).detail : 'Sync failed, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
@@ -192,7 +192,7 @@ export function SettingsPage() {
       method: 'PATCH',
       body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled, team_id: teamId }),
     }),
-    onError: () => toast.error('Could not assign that host to a team, try again.'),
+    onError: () => notify.error('Could not assign that host to a team, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
@@ -210,14 +210,14 @@ export function SettingsPage() {
   const testChannel = useMutation({
     mutationFn: (id: number) =>
       api<{ sent: boolean }>(`/notifications/channels/${id}/test`, { method: 'POST' }),
-    onSuccess: (r) => toast[r.sent ? 'success' : 'error'](
+    onSuccess: (r) => notify[r.sent ? 'success' : 'error'](
       r.sent ? 'Test notification sent' : 'Channel unreachable'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const deleteChannel = useMutation({
     mutationFn: (id: number) =>
       api(`/notifications/channels/${id}`, { method: 'DELETE' }),
-    onError: () => toast.error('Could not remove that channel, try again.'),
+    onError: () => notify.error('Could not remove that channel, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const toggleChannel = useMutation({
@@ -225,7 +225,7 @@ export function SettingsPage() {
       api(`/notifications/channels/${ch.id}`, {
         method: 'PATCH', body: JSON.stringify({ enabled: !ch.enabled }),
       }),
-    onError: () => toast.error('Could not update that channel, try again.'),
+    onError: () => notify.error('Could not update that channel, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const removeChannel = (ch: ChannelRow) => {

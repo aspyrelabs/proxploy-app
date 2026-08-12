@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 type Call = { path: string; method?: string; body: unknown }
 const calls: Call[] = []
@@ -87,7 +87,7 @@ const wrap = () => {
 
 describe('TeamsCard', () => {
   beforeEach(() => {
-    calls.length = 0; toastError.mockClear(); teamsRbac = true; createStatus = 201
+    calls.length = 0; notifyError.mockClear(); teamsRbac = true; createStatus = 201
     teamsError = false; membersError = false
   })
   afterEach(() => vi.restoreAllMocks())
@@ -146,7 +146,7 @@ describe('TeamsCard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New team' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'X' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('forbidden'))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('forbidden'))
   })
 
   it('expands a team to list members with a role select wired to PUT', async () => {
@@ -192,7 +192,7 @@ describe('TeamsCard', () => {
     fireEvent.click(await screen.findByText('Default', { exact: false }))
     const memberRow = (await screen.findByLabelText('role for admin@example.com')).closest('tr')!
     fireEvent.click(within(memberRow).getByRole('button', { name: 'Remove' }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('cannot remove the last owner'))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('cannot remove the last owner'))
   })
 
   it('removing a member with other teams asks a plain confirmation, no lockout warning', async () => {

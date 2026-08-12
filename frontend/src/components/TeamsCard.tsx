@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { notify } from '../lib/notify'
 import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
 import type { MemberRow, TeamRow, UserRow } from '../api/teams'
 import { QueryState } from './QueryState'
@@ -37,14 +37,14 @@ function TeamMembers({ team, users, usersError, onRemove }: {
   const setRole = useMutation({
     mutationFn: ({ userId, role }: { userId: number; role: string }) =>
       api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
     onSettled: invalidate,
   })
   const addMember = useMutation({
     mutationFn: ({ userId, role }: { userId: number; role: string }) =>
       api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
     onSuccess: () => setPickUserId(''),
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
     onSettled: invalidate,
   })
 
@@ -132,7 +132,7 @@ export function TeamsCard() {
     // Deliberate per Task 20: the "New team" affordance renders for every
     // role (owner-only enforcement is the backend's job, not UI cosmetics)
     // -- an operator/admin gets teams.py's 403 back here, verbatim.
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   const removeMember = useMutation({
@@ -143,7 +143,7 @@ export function TeamsCard() {
     // not swallowed); a non-default team's last membership for a user is
     // allowed and returns 200 -- that case is warned about *before* the
     // click, in confirmRemove below, per amendment A1.
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
     onSettled: (_d, _e, v) => {
       qc.invalidateQueries({ queryKey: ['teams'] })
       qc.invalidateQueries({ queryKey: ['teams', v.teamId, 'members'] })

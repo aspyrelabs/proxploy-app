@@ -1,5 +1,5 @@
-import { toast } from 'sonner'
 import { ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { TERMINAL, useActivity, useCancelJob } from '../api/jobs'
 import type { ActivityRow, JobStatus } from '../api/jobs'
 import { ago, TINT } from './activityDisplay'
@@ -31,7 +31,7 @@ function Item({ row }: { row: ActivityRow }) {
         const detail = err instanceof ApiError && typeof (err.body as Record<string, unknown>)?.detail === 'string'
           ? (err.body as Record<string, unknown>).detail as string
           : 'Could not cancel that job.'
-        toast.error(detail)
+        notify.error(detail)
       },
     })
   }

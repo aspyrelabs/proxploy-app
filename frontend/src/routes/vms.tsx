@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
+import { notify } from '../lib/notify'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { api, ApiError } from '../api/client'
 import type { VmRow } from '../api/hooks'
@@ -166,7 +166,7 @@ function DestroyVmButton({ vm }: { vm: VmRow }) {
         const msg = body?.error === 'self_target'
           ? 'Proxploy will not destroy the guest it is running inside.'
           : String(body?.detail ?? 'Could not destroy that VM, try again.')
-        toast.error(msg)
+        notify.error(msg)
       },
     })
   }

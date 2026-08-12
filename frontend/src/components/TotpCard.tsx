@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useTotpStatus } from '../api/account'
+import { notify } from '../lib/notify'
 import type { TotpEnrollment } from '../api/account'
 import { Button } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
@@ -32,7 +32,7 @@ export function TotpCard() {
   const enroll = useMutation({
     mutationFn: () => api<TotpEnrollment>('/auth/totp/enroll', { method: 'POST' }),
     onSuccess: (r) => setEnrollment(r),
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   const confirm = useMutation({
@@ -47,7 +47,7 @@ export function TotpCard() {
       setConfirmCode('')
       invalidateMe()
     },
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   const disable = useMutation({
@@ -59,7 +59,7 @@ export function TotpCard() {
       setPassword('')
       invalidateMe()
     },
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   const copy = (text: string) => { void navigator.clipboard?.writeText(text) }

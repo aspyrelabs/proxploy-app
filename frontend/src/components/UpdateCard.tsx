@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { useApplyUpdate, useUpdateStatus } from '../api/account'
+import { notify } from '../lib/notify'
 import { Button } from './ui/button'
 
 // Matches backend/proxploy/config.py's update_timeout_s default. The updater
@@ -57,7 +57,7 @@ export function UpdateCard() {
     setNewVersion(null)
     apply.mutate(latest, {
       onSuccess: () => setPoll('polling'),
-      onError: (e) => toast.error(detailOf(e)),
+      onError: (e) => notify.error(detailOf(e)),
     })
   }
 

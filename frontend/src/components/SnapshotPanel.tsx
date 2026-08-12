@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { ApiError } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useSnapshotAction, useSnapshots } from '../api/snapshots'
@@ -9,6 +8,7 @@ import { EmptyState } from './EmptyState'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { fmtBytes } from '../lib/format'
+import { notify } from '../lib/notify'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 
@@ -64,12 +64,12 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
             })
             return
           }
-          toast.error(`Could not ${op} snapshot "${target}"`)
+          notify.error(`Could not ${op} snapshot "${target}"`)
         },
         onSuccess: () => {
           setGuard(null)
           if (op === 'create') { setName(''); setDesc(''); setWithRam(false) }
-          toast.success(`Snapshot ${op} queued`)
+          notify.success(`Snapshot ${op} queued`)
         },
       },
     )

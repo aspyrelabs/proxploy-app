@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { ApiError } from '../api/client'
 import { useUploadContent, type VolumeExists } from '../api/storage'
+import { notify } from '../lib/notify'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -39,7 +39,7 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
           setCollision(body as VolumeExists)
           return
         }
-        toast.error(body ? String(body.detail ?? 'Upload rejected') : 'Upload failed')
+        notify.error(body ? String(body.detail ?? 'Upload rejected') : 'Upload failed')
       },
     })
   }

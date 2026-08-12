@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { api } from '../api/client'
+import { notify } from '../lib/notify'
 import { useMe } from '../api/hooks'
 import { inputCls } from '../components/LoginForm'
 import { SessionsCard } from '../components/SessionsCard'
@@ -32,14 +32,14 @@ export function ProfilePage() {
   async function saveName() {
     if (!me) return
     // PATCH rejects a no-op body with 422, so don't send one.
-    if (name === (me.display_name ?? '')) { toast.info('Display name unchanged.'); return }
+    if (name === (me.display_name ?? '')) { notify.info('Display name unchanged.'); return }
     setBusy(true)
     try {
       await api(`/users/${me.id}`, { method: 'PATCH',
         body: JSON.stringify({ display_name: name }) })
       qc.invalidateQueries({ queryKey: ['me'] })
-      toast.success('Display name updated.')
-    } catch { toast.error('Could not update the display name.') } finally { setBusy(false) }
+      notify.success('Display name updated.')
+    } catch { notify.error('Could not update the display name.') } finally { setBusy(false) }
   }
 
   async function savePassword() {
@@ -54,8 +54,8 @@ export function ProfilePage() {
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: me.email, password: pw }) })
       setPw('')
-      toast.success('Password updated. Other sessions were signed out.')
-    } catch { toast.error('Could not set the password (12+ characters).') } finally { setBusy(false) }
+      notify.success('Password updated.', { description: 'Other sessions were signed out.' })
+    } catch { notify.error('Could not set the password (12+ characters).') } finally { setBusy(false) }
   }
 
   return (

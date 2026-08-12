@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { ApiError, api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { notify } from '../lib/notify'
 import { useAttachStorage, useDetachStorage, useEditStorage } from '../api/storage'
 import type { StorageRow } from '../api/storage'
 import { LockVeil } from './LockVeil'
@@ -77,15 +77,15 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
     e.preventDefault()
     if (editing && existing) {
       edit.mutate({ host_id: existing.host_id, storage: existing.storage, config: filled }, {
-        onSuccess: (r) => { toast.success(`Updated ${r.updated.join(', ')}`); onClose() },
-        onError: (err) => toast.error(errText(err)),
+        onSuccess: (r) => { notify.success(`Updated ${r.updated.join(', ')}`); onClose() },
+        onError: (err) => notify.error(errText(err)),
       })
       return
     }
     if (!canAttach || hostId == null) return
     attach.mutate({ host_id: hostId, storage: name.trim(), type, config: filled }, {
-      onSuccess: () => { toast.success(`Attached ${name.trim()}`); onClose() },
-      onError: (err) => toast.error(errText(err)),
+      onSuccess: () => { notify.success(`Attached ${name.trim()}`); onClose() },
+      onError: (err) => notify.error(errText(err)),
     })
   }
 
@@ -98,8 +98,8 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
       `Detach storage "${existing.storage}" from ${existing.host_name}? ` +
       'Guests still pointing at it will lose their disks. The data upstream is not deleted.')) return
     detach.mutate({ host_id: existing.host_id, storage: existing.storage }, {
-      onSuccess: () => { toast.success(`Detached ${existing.storage}`); onClose() },
-      onError: (err) => toast.error(errText(err)),
+      onSuccess: () => { notify.success(`Detached ${existing.storage}`); onClose() },
+      onError: (err) => notify.error(errText(err)),
     })
   }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { useApiKeys } from '../api/apikeys'
 import type { ApiKeyCreated, ApiKeyRow } from '../api/apikeys'
@@ -64,12 +64,12 @@ export function ApiKeysCard() {
       setName(''); setScopes(new Set()); setExpiresAt(''); setAdding(false)
       qc.invalidateQueries({ queryKey: ['api-keys'] })
     },
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   const revokeKey = useMutation({
     mutationFn: (id: number) => api(`/api-keys/${id}`, { method: 'DELETE' }),
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   })
 

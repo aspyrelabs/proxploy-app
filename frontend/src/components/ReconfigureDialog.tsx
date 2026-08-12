@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { api } from '../api/client'
 import type { AppRow } from '../api/hooks'
 import { errBody } from '../api/network'
+import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -57,7 +57,7 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
     if (!dirty) return
     setError('')
     reconfigure.mutate(body, {
-      onSuccess: () => { toast.success('Saved.'); onClose() },
+      onSuccess: () => { notify.success('Saved.'); onClose() },
       onError: (e) => {
         const b = errBody(e)
         // 502 pve_error's `detail` is Proxmox's own rejection reason, the only
@@ -65,7 +65,7 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
         // paraphrased. Every other 4xx here (404/409/422) also carries a
         // plain string `detail` (see main.py::problem_handler).
         setError(String(b?.detail ?? 'Could not save the change, try again.'))
-        toast.error(String(b?.detail ?? 'Could not save the change.'))
+        notify.error(String(b?.detail ?? 'Could not save the change.'))
       },
     })
   }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { useUsers } from '../api/teams'
 import type { UserRow } from '../api/teams'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
@@ -75,7 +75,10 @@ export function UsersCard() {
     }),
     onSuccess: (r, u) => {
       clearError(u.id)
-      if (u.is_active) toast.success(`${u.email} deactivated, ${r.sessions_revoked} session(s) revoked.`)
+      if (u.is_active) {
+        notify.success(`${u.email} deactivated.`,
+          { description: `${r.sessions_revoked} session(s) revoked.` })
+      }
     },
     onError: (e, u) => setRowErrors((r) => ({ ...r, [u.id]: errorOf(e) })),
     onSettled: () => qc.invalidateQueries({ queryKey: ['users'] }),
@@ -89,10 +92,11 @@ export function UsersCard() {
         method: 'POST', body: JSON.stringify({ password: vars.password }),
       }),
     onSuccess: (r) => {
-      toast.success(`Password set, ${r.sessions_revoked} session(s) revoked. TOTP was not cleared.`)
+      notify.success('Password set.',
+        { description: `${r.sessions_revoked} session(s) revoked. TOTP was not cleared.` })
       setResetting(null)
     },
-    onError: (e) => toast.error(errorOf(e)),
+    onError: (e) => notify.error(errorOf(e)),
   })
 
   const deleteUser = useMutation({

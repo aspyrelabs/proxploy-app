@@ -11,8 +11,8 @@ let features: Record<string, boolean> = { 'sched.windows': true, 'store.auto_upd
 let postError: { status: number; body: any } | null = null
 let schedulesError = false
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 vi.mock('../api/client', () => {
   class ApiError extends Error {
@@ -110,14 +110,14 @@ describe('ScheduleForm', () => {
 
   it('shows an entitlement message, not the generic one, on a 403', async () => {
     posted.length = 0
-    toastError.mockClear()
+    notifyError.mockClear()
     postError = { status: 403, body: { error: 'entitlement_required', feature: 'sched.windows' } }
     wrap(<ScheduleForm onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'x' } })
     await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Not included in your plan.'))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Not included in your plan.'))
     postError = null
   })
 })

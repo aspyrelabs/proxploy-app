@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -37,7 +37,7 @@ export function HostRotateDialog({ hostId, hostName, onClose }: {
       }),
     }),
     onSuccess: (r) => { setResult(r); qc.invalidateQueries({ queryKey: ['hosts'] }) },
-    onError: (e) => toast.error(detailOf(e)),
+    onError: (e) => notify.error(detailOf(e)),
   })
 
   return (

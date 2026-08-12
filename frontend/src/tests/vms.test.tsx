@@ -60,8 +60,8 @@ vi.mock('../api/client', () => {
   }
 })
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
-import { toast } from 'sonner'
+vi.mock('../lib/notify', () => ({ notify: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
+import { notify } from '../lib/notify'
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
@@ -84,7 +84,7 @@ describe('VmDetail destroy', () => {
     vmStatus = 'stopped'
     deleteOutcome = 'ok'
     navigateSpy.mockClear()
-    vi.mocked(toast.error).mockClear()
+    vi.mocked(notify.error).mockClear()
   })
 
   it('sends the typed VM name as confirm, then surfaces the job and navigates back on close', async () => {
@@ -130,7 +130,7 @@ describe('VmDetail destroy', () => {
     fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'win11' } })
     fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
     await waitFor(() => expect(calls.length).toBe(1))
-    expect(toast.error).toHaveBeenCalledWith('stop win11 before destroying it')
+    expect(notify.error).toHaveBeenCalledWith('stop win11 before destroying it')
   })
 
   it('states plainly that Proxploy will not destroy the guest it runs inside, on a self_target 409', async () => {
@@ -140,6 +140,6 @@ describe('VmDetail destroy', () => {
     fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'win11' } })
     fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
     await waitFor(() => expect(calls.length).toBe(1))
-    expect(toast.error).toHaveBeenCalledWith('Proxploy will not destroy the guest it is running inside.')
+    expect(notify.error).toHaveBeenCalledWith('Proxploy will not destroy the guest it is running inside.')
   })
 })

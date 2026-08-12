@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 type Call = { path: string; method?: string }
 const calls: Call[] = []
@@ -47,7 +47,7 @@ const wrap = () => {
 describe('SessionsCard', () => {
   beforeEach(() => {
     calls.length = 0
-    toastError.mockClear()
+    notifyError.mockClear()
     sessionsError = false
     sessionRows = [
       { id: 1, ip: '10.0.0.1', user_agent: 'Chrome', created_at: '2026-08-01T00:00:00',

@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 import { api } from '../api/client'
+import { notify } from '../lib/notify'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
@@ -340,9 +340,9 @@ export function UpdatePanel({ appId, app }:
     onSuccess: (r) => {
       setJobId(r.job.id)
       setProgress(r.job.progress_pct)
-      toast.success('Update started.')
+      notify.success('Update started.')
     },
-    onError: () => toast.error('Could not start the update, try again.'),
+    onError: () => notify.error('Could not start the update, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { toast } from 'sonner'
 import { shellRoute } from './shell'
 import { useEntitlements } from '../api/hooks'
+import { notify } from '../lib/notify'
 import { errBody, useApplyNetwork, useBridges, useDeleteBridge, useRevertNetwork, useThroughput } from '../api/network'
 import type { Attachment, HostThroughput, Iface, NetSeries, NodeIfaces } from '../api/network'
 import { BridgeForm } from '../components/BridgeForm'
@@ -214,7 +214,7 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                      detail: String(b.detail ?? '') })
           return
         }
-        toast.error('Could not apply the staged config, the node was not changed.')
+        notify.error('Could not apply the staged config, the node was not changed.')
       },
     })
 
@@ -222,8 +222,8 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
     if (!window.confirm(
       `Stage removal of ${iface} on ${node}? It disappears from the live config only when you apply.`)) return
     remove.mutate({ hostId, node, iface }, {
-      onSuccess: () => toast(`${iface} removal staged on ${node}`),
-      onError: () => toast.error(`Could not stage the removal of ${iface}.`),
+      onSuccess: () => notify.info(`${iface} removal staged on ${node}`),
+      onError: () => notify.error(`Could not stage the removal of ${iface}.`),
     })
   }
 
@@ -265,8 +265,8 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                   <Button variant="ghost" className="px-2 py-1 text-[11px]"
                           disabled={revert.isPending}
                           onClick={() => revert.mutate({ hostId: n.host_id, node: n.node }, {
-                            onSuccess: () => toast(`Staged changes discarded on ${n.node}`),
-                            onError: () => toast.error('Could not discard the staged config.'),
+                            onSuccess: () => notify.info(`Staged changes discarded on ${n.node}`),
+                            onError: () => notify.error('Could not discard the staged config.'),
                           })}>
                     Discard staged
                   </Button>

@@ -1,10 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { toast } from 'sonner'
 import { alertToastSeverity, applyAlert, applyJob, applyMetrics, applyResource, jobToastSeverity } from '../api/live'
 import { useEntitlements } from '../api/hooks'
-import { NotificationCard } from './ui/notification-card'
+import { notify } from '../lib/notify'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
 
@@ -34,17 +33,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     wire('resource', (d) => applyResource(qc, d))
     wire('job', (d) => applyJob(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
-      toast.custom((id) => (
-        <NotificationCard severity={jobToastSeverity(t.kind)} title={t.text}
-          description={`job #${t.jobId}`} onDismiss={() => toast.dismiss(id)} />
-      ))
+      notify.custom(jobToastSeverity(t.kind), t.text, { description: `job #${t.jobId}` })
     }))
     wire('alert', (d) => applyAlert(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
-      toast.custom((id) => (
-        <NotificationCard severity={alertToastSeverity(t.kind, d.severity)} title={t.text}
-          description="alert" onDismiss={() => toast.dismiss(id)} />
-      ))
+      notify.custom(alertToastSeverity(t.kind, d.severity), t.text, { description: 'alert' })
     }))
     return () => es.close()
   }, [qc])

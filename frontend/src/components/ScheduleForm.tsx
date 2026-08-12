@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
 import { SCHEDULABLE } from '../api/schedules'
+import { notify } from '../lib/notify'
 import { Button } from './ui/button'
 
 const input = 'w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13px] text-text'
@@ -59,10 +59,10 @@ export function ScheduleForm({ jobKind, onSaved }:
     onError: (e) => {
       if (e instanceof ApiError && e.status === 403
           && (e.body as any)?.error === 'entitlement_required') {
-        toast.error('Not included in your plan.')
+        notify.error('Not included in your plan.')
         return
       }
-      toast.error(
+      notify.error(
         e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
           ? (e.body as any).detail
           : 'Could not create that schedule, check the fields and try again.')

@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }))
+const { notifySuccess, notifyError } = vi.hoisted(() => ({ notifySuccess: vi.fn(), notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({ notify: { success: notifySuccess, error: notifyError, info: vi.fn(), warning: vi.fn() } }))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -47,7 +47,7 @@ const wrap = () => {
 describe('UsersCard', () => {
   beforeEach(() => {
     calls.length = 0
-    toastSuccess.mockClear(); toastError.mockClear()
+    notifySuccess.mockClear(); notifyError.mockClear()
     deactivateFails = null
     userRows = [
       { id: 1, email: 'owner@example.com', display_name: 'Owner', is_active: true, teams: [] },
@@ -97,7 +97,7 @@ describe('UsersCard', () => {
     const rows = await screen.findAllByRole('button', { name: 'Deactivate' })
     fireEvent.click(rows[0])
     expect(await screen.findByText(/last owner/i)).toBeInTheDocument()
-    expect(toastError).not.toHaveBeenCalled()
+    expect(notifyError).not.toHaveBeenCalled()
   })
 
   // SKIPPED WITH THE BUTTON, NOT DELETED. The affordance this drives is
@@ -109,6 +109,6 @@ describe('UsersCard', () => {
     const rows = await screen.findAllByRole('button', { name: 'Deactivate' })
     fireEvent.click(rows[0])
     expect(await screen.findByText(/cannot deactivate your own account/i)).toBeInTheDocument()
-    expect(toastError).not.toHaveBeenCalled()
+    expect(notifyError).not.toHaveBeenCalled()
   })
 })
