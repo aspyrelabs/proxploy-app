@@ -327,8 +327,8 @@ function useHostDetail(id: number) {
  *  link, and NEVER goes grey.
  *
  *  This replaces a disabled button with a tooltip. Two independent gates could
- *  disable it — the terminal.node entitlement and the per-host opt-in from
- *  doc 08 §9 — and a tooltip is invisible on touch and easy to miss anywhere
+ *  disable it (the terminal.node entitlement and the per-host opt-in from
+ *  doc 08 §9), and a tooltip is invisible on touch and easy to miss anywhere
  *  else, so the honest reading of a greyed control was "this feature is
  *  broken". The control now always works; when a gate is shut it says which
  *  one, and where to open it, instead of opening a dead window. */
@@ -451,7 +451,7 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
   )
 }
 
-/** Charts and the node shell belong to the entry node — the `host:<id>` metric
+/** Charts and the node shell belong to the entry node: the `host:<id>` metric
  *  series is recorded there and the shell ticket is minted for it. Both were
  *  simply absent on every other node of a cluster, which reads as a missing
  *  feature rather than a deliberate one. */
@@ -481,7 +481,7 @@ function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
  *
  *  This replaces a single `QueryState query={nodeAppsQuery}` that decided
  *  loading/empty/error from the apps query alone and folded `vms` in only
- *  once apps had already succeeded and come back non-empty — so an
+ *  once apps had already succeeded and come back non-empty, so an
  *  apps-empty node (a fresh install with real VMs and zero adopted apps) hid
  *  its VMs behind "No guests on this node", and an apps-erroring node hid
  *  them behind "Guests not readable". The one behaviour that must hold: if
@@ -489,7 +489,7 @@ function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
  *  still pending; a hard error only when BOTH failed (there is then truly
  *  nothing to show); otherwise render whatever rows the succeeding side(s)
  *  have, empty only when that combined count is zero, and a partial-failure
- *  note — not a swallowed error — when exactly one side failed but the other
+ *  note, not a swallowed error, when exactly one side failed but the other
  *  still has something to show. */
 type GuestsState =
   | { kind: 'loading' }
@@ -570,7 +570,7 @@ export function NodeOverview() {
             at the cost of reachability: with /status answering it runs to
             roughly 700px, and lg:top-16 alone left its bottom rows (Boot,
             part of Memory & storage) permanently below the fold on any
-            viewport under ~765px tall — a 1366x768 laptop among them,
+            viewport under ~765px tall (a 1366x768 laptop among them),
             comfortably inside `lg`. max-h + overflow-y-auto trades that for a
             nested scrollbar, which can always reach the bottom. */}
         {node?.node && (
@@ -587,7 +587,7 @@ export function NodeOverview() {
                storage creep all week" are different questions.
                @container/@3xl, not lg: a chart card needs roughly 200px of
                inner width to fit its non-wrapping 30m/1h/12h/24h range group,
-               and this RIGHT COLUMN — not the viewport — is what decides
+               and this RIGHT COLUMN, not the viewport, is what decides
                that width. The 290px rail plus its gap can hold the column
                under 200px well past `lg` (~91px of card width at a 1024px
                viewport, versus ~194px before the rail existed), which is
