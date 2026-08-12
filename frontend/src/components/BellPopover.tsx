@@ -1,15 +1,13 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
-import { useQuery } from '@tanstack/react-query'
 import { Icon } from './ui/icon'
-import { api } from '../api/client'
 import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
 import { ago } from './activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
-  clearNotifications, getLastSeenAt, getNotifications, removeNotification,
+  clearNotifications, getNotifications, removeNotification,
   setTrayOpen, subscribeNotifications,
 } from '../lib/notificationStore'
 
@@ -232,36 +230,23 @@ export function BellPopover() {
     return () => window.removeEventListener('resize', place)
   })
 
-  // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
-  // created_at desc, so a long-running job older (by creation time) than the
-  // 20 most-recently-created jobs would silently drop out of that feed while
-  // still running. The bell's count needs to be unbounded, so it runs its own
-  // one-shot query against /jobs?status=running instead of riding useJobs,
-  // which would coincidentally couple this always-mounted badge to whatever
-  // poll interval the popover's own list carries.
-  const { data: running } = useQuery({
-    queryKey: ['jobs', 'running-count'],
-    queryFn: () => api<JobRow[]>('/jobs?status=running'),
-    refetchInterval: 30_000,
-  })
 
-  // The badge used to count only running jobs; the tray now also holds
-  // action notifications and SSE-delivered job/alert events, and a badge
-  // counting one thing while the tray shows another is the exact confusion
-  // this change exists to remove. It now counts running jobs (still in
-  // flight, still worth knowing about, and never absent from the tray while
-  // true) plus whatever in the store arrived since the tray was last
-  // opened -- an ordinary unread count, reset by opening the popover.
+  // The badge counts exactly what the tray holds, nothing cleverer. It has
+  // been two other things: running jobs only, then running jobs plus an unread
+  // tally. Both meant the number on the icon described something other than the
+  // list behind it, which is the confusion this tray exists to remove, and the
+  // unread version read as broken because a quiet page with no jobs in flight
+  // sat at zero while the tray plainly had items in it.
   const storeItems = useSyncExternalStore(subscribeNotifications, getNotifications, getNotifications)
-  const unreadStoreCount = storeItems.filter((n) => n.createdAt > getLastSeenAt()).length
-  const count = (running?.length ?? 0) + unreadStoreCount
 
   // GET /jobs already orders newest-first server-side. Do not re-sort here:
   // string-comparing ISO created_at timestamps client-side reproduces the
   // zero-microsecond tie bug the backend explicitly avoids (a bare 'Z' sorts
   // after a fractional-second suffix like '.123456Z', so a zero-microsecond
   // row would sort as newer than a genuinely later same-second row).
-  const jobsQuery = useJobs({ enabled: open })
+  // Always enabled, not only while open: the badge counts what the tray holds,
+  // and it cannot know that if the list is only fetched on opening.
+  const jobsQuery = useJobs()
 
   const toJobItem = (j: JobRow): TrayItem => ({
     id: `job:${j.id}`,
@@ -279,6 +264,7 @@ export function BellPopover() {
   // render once, not twice; see notificationMerge.ts.
   const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem)
   const undismissed = merged.filter((m) => !dismissed.has(m.id))
+  const count = undismissed.length
   // The fit loop needs to know how many cards COULD be shown, or it would keep
   // trying to grow past the end of the list on a tall window with few jobs.
   const visible = useFittingCount(listRef, open, undismissed.length)
@@ -309,11 +295,13 @@ export function BellPopover() {
         className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
       >
         <Icon name="notifications" />
+        {/* Red, and only when there is something to see: a badge showing 0 is
+            a badge that has stopped meaning anything. text-ink rather than a
+            literal, so the number stays legible on --red in both themes (ink is
+            near black on dark, near white on light). */}
         {count > 0 && (
-          // --amber-ink is not a token in tokens.css; this literal predates
-          // this change and is left as-is rather than inventing one.
-          <span className="absolute -right-1 -top-1 rounded-full bg-amber px-1 font-mono text-[9px] text-[#20160a]">
-            {count}
+          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-red px-1 text-center font-mono text-[9px] leading-4 text-ink">
+            {count > 99 ? '99+' : count}
           </span>
         )}
       </PopoverPrimitive.Trigger>

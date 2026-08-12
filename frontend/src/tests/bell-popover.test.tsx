@@ -109,18 +109,33 @@ describe('BellPopover', () => {
   // holds -- the exact confusion this change exists to remove. It now counts
   // running jobs (still in flight, still worth knowing about) plus whatever
   // in the store has arrived since the tray was last opened.
-  it('shows the running-job count when nothing new has arrived', async () => {
+  // The badge counts exactly what the tray holds. It has been two other things
+  // (running jobs only, then running jobs plus an unread tally) and both meant
+  // the number described something other than the list behind it.
+  it('counts what the tray holds, not something else', async () => {
     wrap()
-    expect(await screen.findByText('1')).toBeInTheDocument()
+    // The fixture has three jobs, so the closed bell says three.
+    expect(await screen.findByText('3')).toBeInTheDocument()
   })
 
-  it('grows when a fresh notification arrives, and settles back once the tray is opened', async () => {
+  it('grows when a notification arrives and shrinks when one is dismissed', async () => {
     wrap()
-    await screen.findByText('1')
+    await screen.findByText('3')
     act(() => { pushAction('success', 'Saved.') })
-    expect(await screen.findByText('2')).toBeInTheDocument()
+    expect(await screen.findByText('4')).toBeInTheDocument()
+
     await openBell()
-    await waitFor(() => expect(screen.getByText('1')).toBeInTheDocument())
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
+    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument())
+  })
+
+  // A badge showing 0 has stopped meaning anything.
+  it('shows no badge at all when the tray is empty', async () => {
+    jobsResult = 'empty'
+    wrap()
+    await openBell()
+    await screen.findByText(/nothing to report/i)
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
 
   it('opens from the bell and lists recent jobs', async () => {
