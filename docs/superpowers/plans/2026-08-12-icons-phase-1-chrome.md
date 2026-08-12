@@ -430,18 +430,25 @@ git commit -m "feat(chrome): the logo moves to the one bar every viewport has"
 - [ ] **Step 1: Write the failing test**
 
 Append to `frontend/src/tests/sidebar-nav.test.tsx`. Keep the existing mocks at
-the top of the file, and extend its imports with exactly these two lines:
+the top of the file, and extend its two existing imports:
 
-```tsx
-import userEvent from '@testing-library/user-event'
-```
+- add `beforeEach` to the `vitest` import, so it reads
+  `import { beforeEach, describe, expect, it, vi } from 'vitest'`
+- add `fireEvent` to the `@testing-library/react` import, so it reads
+  `import { fireEvent, render, screen } from '@testing-library/react'`
 
-and add `beforeEach` to the existing `vitest` import, so it reads
-`import { beforeEach, describe, expect, it, vi } from 'vitest'`.
+**Use `fireEvent`, not `user-event`.** `@testing-library/user-event` is **not a
+dependency of this project** — the installed testing libraries are
+`@testing-library/react` and `@testing-library/jest-dom` only, and every
+existing suite (see `hosts.test.tsx`) clicks with `fireEvent.click`. Do not
+install it; follow the codebase.
 
 ```tsx
 describe('SidebarNav collapse', () => {
   beforeEach(() => localStorage.clear())
+
+  const toggle = (name: RegExp) =>
+    fireEvent.click(screen.getByRole('button', { name }))
 
   it('starts expanded, showing labels', () => {
     render(<SidebarNav />)
@@ -449,10 +456,9 @@ describe('SidebarNav collapse', () => {
     expect(screen.getByText('Overview')).toBeInTheDocument()
   })
 
-  it('collapses to icons when the toggle is pressed', async () => {
-    const user = userEvent.setup()
+  it('collapses to icons when the toggle is pressed', () => {
     render(<SidebarNav />)
-    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }))
+    toggle(/collapse sidebar/i)
     // The labels go; the links, and their icons, stay.
     expect(screen.queryByText('Hosts')).not.toBeInTheDocument()
     expect(screen.getAllByRole('link')).toHaveLength(10)
@@ -460,30 +466,27 @@ describe('SidebarNav collapse', () => {
     expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument()
   })
 
-  it('names every icon for assistive tech once the label is gone', async () => {
-    const user = userEvent.setup()
+  it('names every icon for assistive tech once the label is gone', () => {
     render(<SidebarNav />)
-    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }))
+    toggle(/collapse sidebar/i)
     // With no visible text, the link itself must carry the name.
     expect(screen.getByRole('link', { name: 'Virtual Machines' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'App Store' })).toBeInTheDocument()
   })
 
-  it('remembers the choice across a remount', async () => {
-    const user = userEvent.setup()
+  it('remembers the choice across a remount', () => {
     const { unmount } = render(<SidebarNav />)
-    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }))
+    toggle(/collapse sidebar/i)
     unmount()
     render(<SidebarNav />)
     expect(screen.queryByText('Hosts')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeInTheDocument()
   })
 
-  it('expands again', async () => {
-    const user = userEvent.setup()
+  it('expands again', () => {
     render(<SidebarNav />)
-    await user.click(screen.getByRole('button', { name: /collapse sidebar/i }))
-    await user.click(screen.getByRole('button', { name: /expand sidebar/i }))
+    toggle(/collapse sidebar/i)
+    toggle(/expand sidebar/i)
     expect(screen.getByText('Hosts')).toBeInTheDocument()
   })
 })
