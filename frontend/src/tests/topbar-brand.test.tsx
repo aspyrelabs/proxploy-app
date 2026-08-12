@@ -15,6 +15,13 @@ vi.mock('../components/ActivityDrawer', () => ({
   useActivityDrawer: () => ({ toggle: vi.fn() }),
 }))
 vi.mock('../components/CommandPalette', () => ({ openCommandPalette: vi.fn() }))
+// The brand mark is now a Link (to /hosts); Link needs a real RouterProvider
+// to resolve its href, which this file doesn't mount. Mock it thin, matching
+// sidebar-nav.test.tsx / healthfooter.test.tsx.
+vi.mock('@tanstack/react-router', async (orig) => ({
+  ...(await orig() as object),
+  Link: ({ children, ...rest }: { children?: unknown }) => <a {...rest}>{children as never}</a>,
+}))
 
 import { Topbar } from '../components/Topbar'
 
@@ -26,9 +33,14 @@ const wrap = () => {
 describe('Topbar', () => {
   // The sidebar is max-[720px]:hidden, so before this the product showed no
   // logo at all on a phone. The header is the one chrome that is always there.
+  //
+  // Not `container.querySelector('header svg')`: the search control's
+  // MagnifyingGlassIcon also matches that selector, so the assertion stayed
+  // green when <Logo> was deleted outright. Logo carries `role="img"
+  // aria-label="Proxploy"`; assert that specifically.
   it('carries the brand mark', () => {
-    const { container } = wrap()
-    expect(container.querySelector('header svg')).not.toBeNull()
+    wrap()
+    expect(screen.getByRole('img', { name: 'Proxploy' })).toBeInTheDocument()
   })
 
   // The emoji became SVGs; the accessible names must not have moved with them.

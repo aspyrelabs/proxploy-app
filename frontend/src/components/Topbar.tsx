@@ -8,7 +8,8 @@ import { api } from '../api/client'
 import type { JobRow } from '../api/jobs'
 import { useActivityDrawer } from './ActivityDrawer'
 import { openCommandPalette } from './CommandPalette'
-import Logo from './Logo'
+import { Link } from '@tanstack/react-router'
+import Logo, { GhostMark } from './Logo'
 
 export function Topbar() {
   const { has } = useEntitlements()
@@ -29,10 +30,23 @@ export function Topbar() {
   const count = running?.length ?? 0
   return (
     // h-14 rather than py-2.5: the sidebar now sticks BELOW this bar, so its
-    // offset has to be a number something else can rely on. z-20 keeps it over
-    // the sidebar, which is itself sticky.
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
-      <Logo className="h-6 w-auto shrink-0 text-amber" />
+    // offset has to be a number something else can rely on. z-10 is enough to
+    // stay above it: a sticky element with z-index:auto paints in stacking
+    // step 8, any positive z-index in step 9, and the sidebar is still
+    // z-index:auto. (The activity drawer's sheet is also z-index'd, but that
+    // tie doesn't matter here either — Radix portals it to the end of
+    // document.body, later in tree order, so it paints above this header
+    // regardless of what z-index either one carries.)
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-end gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
+      {/* GhostMark below sm: Logo's viewBox (aspect ratio 5.6) renders it
+          134px wide at h-6, which alone overruns a 375px header once search,
+          bell, tier pill, theme toggle and avatar are laid out beside it.
+          The ghost is the mark's small-screen form (see Logo.tsx); swapping
+          to it below sm keeps the same h-6 footprint down to a 24px square. */}
+      <Link to={'/hosts' as never} aria-label="Proxploy" className="shrink-0 text-amber">
+        <GhostMark className="h-6 w-6 sm:hidden" />
+        <Logo className="hidden h-6 w-auto sm:block" />
+      </Link>
       <button
         aria-label="Search (Ctrl+K)"
         onClick={openCommandPalette}
