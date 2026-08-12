@@ -22,8 +22,8 @@ vi.mock('../api/client', () => ({
 import { api } from '../api/client'
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({
-  toast: Object.assign(vi.fn(), { error: toastError, success: vi.fn() }),
+vi.mock('../lib/notify', () => ({
+  notify: { error: toastError, success: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 vi.mock('@tanstack/react-router', async (orig) => ({
@@ -110,7 +110,11 @@ describe('the node shell control', () => {
     await screen.findByRole('link', { name: /proxmox web ui/i })
     fireEvent.click(screen.getByRole('button', { name: /node shell/i }))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(String(toastError.mock.calls[0][0])).toMatch(/settings/i)
+    // The title says what is wrong, the description says where to fix it. Both
+    // are asserted because splitting them is exactly how the "where" could get
+    // dropped without a test noticing.
+    expect(String(toastError.mock.calls[0][0])).toMatch(/switched off/i)
+    expect(String(toastError.mock.calls[0][1]?.description)).toMatch(/settings/i)
     // and no dead window: a blank popup is the failure mode being complained about
     expect(open).not.toHaveBeenCalled()
     vi.unstubAllGlobals()

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -89,7 +89,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
         })
       }
       invalidate()
-      toast.success(`${name.trim() || host.name} saved.`)
+      notify.success(`${name.trim() || host.name} saved.`)
       // Verify what is now actually stored, not what used to be here.
       const r = await api<TestResult>(`/hosts/${hostId}/test`, { method: 'POST' })
       setTestResult(r)

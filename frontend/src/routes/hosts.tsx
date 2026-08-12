@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { toast } from 'sonner'
 import { api } from '../api/client'
+import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { AppCard } from '../components/AppCard'
@@ -54,13 +54,13 @@ export function UpdateAllButton() {
       if (r.jobs.length === 0) {
         // Never a bare silence: "nothing happened" and "it is broken" look
         // identical otherwise.
-        toast('Nothing to update, every app is on its catalog commit.')
+        notify.info('Nothing to update, every app is on its catalog commit.')
         return
       }
-      toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
+      notify.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
                     + 'follow them in Recent activity below.')
     },
-    onError: () => toast.error('Could not start the updates, try again.'),
+    onError: () => notify.error('Could not start the updates, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -151,7 +151,7 @@ function AddHostSection({ hostCount }: { hostCount: number }) {
         <div className={`${card} mb-4`}>
           <HostForm onCreated={() => {
             setOpen(false)
-            toast.success('Host added. Its nodes appear as the first poll lands.')
+            notify.success('Host added. Its nodes appear as the first poll lands.')
             qc.invalidateQueries({ queryKey: ['hosts'] })
             qc.invalidateQueries({ queryKey: ['cluster'] })
           }} />
@@ -341,15 +341,18 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
                  transition hover:border-amber hover:text-amber"
       onClick={() => {
         if (ent.data != null && !ent.has('terminal.node')) {
-          toast.error('Node shells are part of the Pro plan. Everything else on '
-                    + 'this page works without it.')
+          notify.error('Node shells are part of the Pro plan.', {
+            description: 'Everything else on this page works without it.',
+          })
           return
         }
         if (nodeShellEnabled === false) {
-          toast.error('Node shells are switched off for this host. Turn them on '
-                    + 'in Settings → Hosts, then try again. Proxploy keeps this '
-                    + 'switch separate from your role on purpose: a root shell '
-                    + 'on the hypervisor is not something to inherit by accident.')
+          notify.error('Node shells are switched off for this host.', {
+            description: 'Turn them on in Settings → Hosts, then try again. '
+                       + 'Proxploy keeps this switch separate from your role on '
+                       + 'purpose: a root shell on the hypervisor is not '
+                       + 'something to inherit by accident.',
+          })
           return
         }
         // A terminal wants its own window rather than a tab: it is a working

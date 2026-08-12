@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { api, ApiError } from '../api/client'
+import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
@@ -61,7 +61,7 @@ export function HostPowerDialog({ hostId, node, command, onClose }: {
       qc.invalidateQueries({ queryKey: ['cluster', 'nodes'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
-    onError: (e) => { toast.error(detailOf(e)); onClose() },
+    onError: (e) => { notify.error('Could not send that action.', { description: detailOf(e) }); onClose() },
   })
 
   if (jobId != null) {

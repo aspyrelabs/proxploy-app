@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { toastSuccess } = vi.hoisted(() => ({ toastSuccess: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: vi.fn() } }))
+vi.mock('../lib/notify', () => ({
+  notify: { success: toastSuccess, error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
