@@ -125,11 +125,11 @@ component. shadcn components are copied in and restyled with our tokens
 
 | Component | Prototype source | Implementation | Notes |
 |---|---|---|---|
-| `AppShell` | `.app` grid (236px sidebar + main), `.side`, `.main` | custom | Sticky sidebar `100vh`; responsive: sidebar hidden ≤720px (mobile nav = Sheet) |
-| `SidebarNav` | `.nav`, `.lbl` group labels, `.on` active state with 3px amber left rail (`::before`), `.cnt` mono count | custom | Groups: Overview (Cluster, Apps, App Store, Virtual Machines) / Infrastructure (Storage, Network, Backups, Settings); counts fed by query cache |
-| `BrandMark` | `.brand`, amber-gradient `.mark` tile + Prox**ploy** wordmark | custom | Links to `/cluster` |
+| `AppShell` | `.app` grid (236px sidebar + main), `.side`, `.main` | custom | Sticky sidebar `100vh`, width transitioning between 236px and a 64px icon rail (`motion-reduce`-safe); responsive: sidebar hidden ≤720px (mobile nav = Sheet) |
+| `SidebarNav` | `.nav`, `.lbl` group labels, `.on` active state with 3px amber left rail (`::before`), `.cnt` mono count | custom | Every item pairs a Heroicon (24/outline, 18px, `aria-hidden`) with its label. A header-row toggle collapses the rail to icons only: group labels give way to a plain rule (no room for the word, and truncating it would read worse than a line), each link gains an `aria-label` since its text is gone, and a Radix `Tooltip` shows the label on hover/focus. The choice persists to `localStorage` (`pp_sidebar`), defaulting to expanded so a first-time user meets the labels before being asked to recognise ten icons cold. Groups: Overview (Hosts, Apps, App Store, Virtual Machines) / Infrastructure (Storage, Network, Backups, Alerts, Audit, Settings); counts fed by query cache |
+| `BrandMark` | `.brand`, amber-gradient `.mark` tile + Prox**ploy** wordmark | custom | Lives in the `Topbar`, not the sidebar — the sidebar's `max-[720px]:hidden` meant no logo showed on a phone before this move. Links to `/cluster` |
 | `HealthFooter` | `.side-foot` ("All systems healthy", green dot, "3 nodes · 0 alerts") | custom | Bound to `/alerts?state=firing` + host status; dot turns `--red` with firing alerts |
-| `Topbar` | `.top` sticky, `rgba(11,15,22,.82)` + `backdrop-filter: blur(10px)` | custom | |
+| `Topbar` | `.top` sticky, `rgba(11,15,22,.82)` + `backdrop-filter: blur(10px)` | custom | Hosts the `BrandMark` (see above); search trigger and activity bell render as Heroicons, not emoji |
 | `ClusterSwitcher` | `.cluster` (blue icon tile, display-font name, chevron) | Radix DropdownMenu trigger styled as prototype | Lists hosts/teams scopes; single-host installs render it inert |
 | `TierPill` | `.pro` / `.pro.free` (`PRO · MULTI-HOST` / `FREE · 1 HOST`, mono 9.5px) | custom Badge | Bound to entitlements tier; click → `/settings` plan card |
 | `GlobalSearch` | `.search` with `⌘K` kbd chip | cmdk (Command) in Radix Dialog | Trigger styled exactly as the prototype input |

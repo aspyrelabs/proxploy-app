@@ -1,12 +1,14 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The nav renders TanStack Router <Link>s. This file only cares about the
-// nav's own markup, so Link becomes a plain anchor carrying its target.
+// nav's own markup, so Link becomes a plain anchor carrying its target. The
+// real Link forwards arbitrary DOM props (e.g. aria-label) onto the anchor,
+// so the stub spreads the rest through rather than naming only a few.
 vi.mock('@tanstack/react-router', () => ({
-  Link: ({ to, children, className }: {
-    to: string; children: React.ReactNode; className?: string
-  }) => <a href={to} data-to={to} className={className}>{children}</a>,
+  Link: ({ to, children, ...rest }: {
+    to: string; children: React.ReactNode
+  }) => <a href={to} data-to={to} {...rest}>{children}</a>,
 }))
 
 // HealthFooter runs its own queries and is not what this file tests.
@@ -48,5 +50,52 @@ describe('SidebarNav icons', () => {
     render(<SidebarNav />)
     expect(screen.getByText('Virtual Machines')).toBeInTheDocument()
     expect(screen.getByText('App Store')).toBeInTheDocument()
+  })
+})
+
+describe('SidebarNav collapse', () => {
+  beforeEach(() => localStorage.clear())
+
+  const toggle = (name: RegExp) =>
+    fireEvent.click(screen.getByRole('button', { name }))
+
+  it('starts expanded, showing labels', () => {
+    render(<SidebarNav />)
+    expect(screen.getByText('Hosts')).toBeInTheDocument()
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+  })
+
+  it('collapses to icons when the toggle is pressed', () => {
+    render(<SidebarNav />)
+    toggle(/collapse sidebar/i)
+    // The labels go; the links, and their icons, stay.
+    expect(screen.queryByText('Hosts')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link')).toHaveLength(10)
+    // and the group headings become a rule rather than text
+    expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument()
+  })
+
+  it('names every icon for assistive tech once the label is gone', () => {
+    render(<SidebarNav />)
+    toggle(/collapse sidebar/i)
+    // With no visible text, the link itself must carry the name.
+    expect(screen.getByRole('link', { name: 'Virtual Machines' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'App Store' })).toBeInTheDocument()
+  })
+
+  it('remembers the choice across a remount', () => {
+    const { unmount } = render(<SidebarNav />)
+    toggle(/collapse sidebar/i)
+    unmount()
+    render(<SidebarNav />)
+    expect(screen.queryByText('Hosts')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /expand sidebar/i })).toBeInTheDocument()
+  })
+
+  it('expands again', () => {
+    render(<SidebarNav />)
+    toggle(/collapse sidebar/i)
+    toggle(/expand sidebar/i)
+    expect(screen.getByText('Hosts')).toBeInTheDocument()
   })
 })
