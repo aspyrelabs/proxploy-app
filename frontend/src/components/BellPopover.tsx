@@ -10,6 +10,9 @@ import {
   clearNotifications, getNotifications, removeNotification,
   setTrayOpen, subscribeNotifications,
 } from '../lib/notificationStore'
+import { notify } from '../lib/notify'
+import { useClearAllDismissed, useDismissedState, useDismissJob } from '../api/notificationDismissals'
+import type { DismissedState } from '../api/notificationDismissals'
 
 /** How close the cards sit to the right edge of the window. */
 const EDGE_GAP_PX = 5
@@ -175,6 +178,18 @@ function progressOf(job: JobRow): number | undefined {
   return job.status === 'running' && job.progress_pct != null ? job.progress_pct : undefined
 }
 
+/** A job's id counts as already cleared if it is at or below the watermark
+ *  ("clear all" as of some earlier moment) or sits in the small list of
+ *  individually dismissed ids above it. `state` is undefined before the
+ *  first load: nothing is hidden yet rather than everything, the same
+ *  fail-open-to-visible choice jobsQuery.data ?? [] makes elsewhere in this
+ *  file. */
+function isPersistedDismissed(state: DismissedState | undefined, jobId: number): boolean {
+  if (!state) return false
+  if (state.cleared_through_job_id != null && jobId <= state.cleared_through_job_id) return true
+  return (state.dismissed_job_ids ?? []).includes(jobId)
+}
+
 /**
  * The bell's popover: what the activity drawer used to show, without the
  * full-height sheet. Reads GET /jobs (not /cluster/activity: ActivityRow
@@ -248,6 +263,16 @@ export function BellPopover() {
   // and it cannot know that if the list is only fetched on opening.
   const jobsQuery = useJobs()
 
+  // Server-side memory of what THIS user already cleared, so a clear
+  // survives a reload, a reboot, and a login from a different browser (the
+  // requirement `dismissed` alone -- component state -- cannot meet; see
+  // .superpowers/sdd/persist-cleared-notifications-report.md). Only job-
+  // backed items are covered: a store item is already gone on reload, see
+  // isPersistedDismissed and dismissItem/clearAll below.
+  const dismissedQuery = useDismissedState()
+  const dismissJobMutation = useDismissJob()
+  const clearAllMutation = useClearAllDismissed()
+
   const toJobItem = (j: JobRow): TrayItem => ({
     id: `job:${j.id}`,
     severity: severityOf(j.status),
@@ -263,15 +288,28 @@ export function BellPopover() {
   // instant it lands) and again the next time GET /jobs is polled must
   // render once, not twice; see notificationMerge.ts.
   const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem)
-  const undismissed = merged.filter((m) => !dismissed.has(m.id))
+  const undismissed = merged.filter((m) => !dismissed.has(m.id)
+    && !(m.jobId != null && isPersistedDismissed(dismissedQuery.data, m.jobId)))
   const count = undismissed.length
   // The fit loop needs to know how many cards COULD be shown, or it would keep
   // trying to grow past the end of the list on a tall window with few jobs.
   const visible = useFittingCount(listRef, open, undismissed.length)
 
+  // `dismissed` hides the card the instant it is clicked, before the write
+  // below has landed -- the round trip must never be what the user waits on.
+  // It is also never rolled back if that write fails: a card that vanished
+  // and then reappeared moments later, unexplained, would be worse than one
+  // that stays gone but risks not surviving a reload. notify.error is the
+  // "not silently" half of that: the failure is surfaced, the hide is not.
   function dismissItem(item: TrayItem) {
     setDismissed((d) => new Set(d).add(item.id))
     removeNotification(item.id)
+    if (item.jobId != null) {
+      dismissJobMutation.mutate(item.jobId, {
+        onError: () => notify.error('Could not save that notification as cleared.',
+          { description: 'It may come back after a reload.' }),
+      })
+    }
   }
 
   function clearAll() {
@@ -281,6 +319,10 @@ export function BellPopover() {
       return next
     })
     clearNotifications()
+    clearAllMutation.mutate(undefined, {
+      onError: () => notify.error('Could not save that the tray was cleared.',
+        { description: 'Some notifications may come back after a reload.' }),
+    })
   }
 
   return (

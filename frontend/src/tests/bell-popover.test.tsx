@@ -46,6 +46,15 @@ let cancelResult: 'ok' | 'forbidden' | 'conflict' = 'ok'
 let jobEventsError = false
 const cancelCalls: Array<{ path: string; method?: string }> = []
 
+// Server-side "already cleared" state (see api/notificationDismissals.ts).
+// Defaults to nothing cleared: the persisted-state checks below are inert
+// unless a test sets this, so every pre-existing test above keeps its
+// original meaning untouched.
+let dismissedState: { cleared_through_job_id: number | null; dismissed_job_ids: number[] } =
+  { cleared_through_job_id: null, dismissed_job_ids: [] }
+let dismissWriteFails = false
+const dismissCalls: Array<{ path: string; method?: string }> = []
+
 vi.mock('../api/client', () => ({
   ApiError,
   api: vi.fn((path: string, opts?: RequestInit) => {
@@ -76,6 +85,19 @@ vi.mock('../api/client', () => ({
       }
       return Promise.resolve(JOBS)
     }
+    if (path === '/notifications/dismissed/clear-all' && method === 'POST') {
+      dismissCalls.push({ path, method })
+      if (dismissWriteFails) return Promise.reject(new ApiError(500, { detail: 'boom' }))
+      return Promise.resolve(dismissedState)
+    }
+    if (path.startsWith('/notifications/dismissed/') && method === 'POST') {
+      dismissCalls.push({ path, method })
+      if (dismissWriteFails) return Promise.reject(new ApiError(500, { detail: 'boom' }))
+      return Promise.resolve(dismissedState)
+    }
+    if (path === '/notifications/dismissed') {
+      return Promise.resolve(dismissedState)
+    }
     return Promise.resolve(null)
   }),
 }))
@@ -99,6 +121,9 @@ describe('BellPopover', () => {
     cancelResult = 'ok'
     jobEventsError = false
     cancelCalls.length = 0
+    dismissedState = { cleared_through_job_id: null, dismissed_job_ids: [] }
+    dismissWriteFails = false
+    dismissCalls.length = 0
     toastError.mockClear()
     resetNotificationStore()
   })
@@ -378,5 +403,107 @@ describe('BellPopover', () => {
     // owns it); a job card would reappear on the next /jobs poll, which
     // this test does not wait for.
     expect(getNotifications()).toHaveLength(0)
+  })
+
+  // --- server-side persistence (persist-cleared-notifications) -----------
+
+  // The tray must consult the persisted state on load, not only its own
+  // component state: a watermark that already covers a job's id has to hide
+  // that job's card the very first time it is fetched, before anyone has
+  // clicked anything in this session.
+  it('hides a job at or below the persisted watermark, on first load', async () => {
+    dismissedState = { cleared_through_job_id: 11, dismissed_job_ids: [] }
+    wrap()
+    // JOBS 10 and 11 are covered by the watermark; only 12 remains.
+    expect(await screen.findByText('1')).toBeInTheDocument()
+    await openBell()
+    expect(await screen.findByText(/vm\.backup/)).toBeInTheDocument()
+    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
+  })
+
+  // The watermark only covers ids at or below it; an id dismissed on its
+  // own above the watermark is what dismissed_job_ids is for.
+  it('hides an individually dismissed job id above the watermark', async () => {
+    dismissedState = { cleared_through_job_id: null, dismissed_job_ids: [11] }
+    wrap()
+    await openBell()
+    expect(await screen.findByText(/app\.start/)).toBeInTheDocument()
+    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/vm\.backup/)).toBeInTheDocument()
+  })
+
+  it('clear all writes through to the server', async () => {
+    wrap()
+    await openBell()
+    await screen.findByText(/app\.start/)
+    fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
+    await waitFor(() => expect(
+      dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
+    ).toBe(true))
+  })
+
+  it('dismissing a job-backed card writes that job id through to the server', async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const jobCard = cards.find((c) => c.textContent?.includes('app.start'))!
+    fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(
+      dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
+    ).toBe(true))
+  })
+
+  // notify.tsx's action notifications have no server record to persist:
+  // dismissing one must not hit the network at all.
+  it('dismissing a client-side action notification writes nothing through', async () => {
+    wrap()
+    act(() => { pushAction('success', 'Saved.') })
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const savedCard = cards.find((c) => c.textContent?.includes('Saved.'))!
+    fireEvent.click(within(savedCard).getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(screen.queryByText('Saved.')).not.toBeInTheDocument())
+    expect(dismissCalls).toHaveLength(0)
+  })
+
+  // The trap this exists to avoid: reverting the optimistic hide on a
+  // failed write would make the card reappear a moment after the user
+  // dismissed it, unexplained. It must stay hidden, and the failure must
+  // be surfaced rather than swallowed.
+  it('a failed dismiss write keeps the card hidden and surfaces the failure', async () => {
+    dismissWriteFails = true
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const jobCard = cards.find((c) => c.textContent?.includes('app.start'))!
+    fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(
+      dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
+    ).toBe(true))
+    // Gave the rejected mutation a full turn to settle; it did not come back.
+    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
+  })
+
+  // Same trap, for clear all: a failed write must not repopulate the tray
+  // it just emptied. The one card left standing afterwards is the failure
+  // notification itself (an ordinary action notification, by design), not
+  // any of the three jobs that were cleared.
+  it('a failed clear-all write keeps the cleared jobs gone and surfaces the failure', async () => {
+    dismissWriteFails = true
+    wrap()
+    await openBell()
+    await screen.findByText(/app\.start/)
+    fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
+    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(
+      dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
+    ).toBe(true))
+    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/vm\.backup/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })
 })

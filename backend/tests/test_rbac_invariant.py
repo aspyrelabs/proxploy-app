@@ -54,6 +54,14 @@ UNGOVERNED = {
     ("GET", "/api/v1/api-keys"),             # self-service (Task 12)
     ("POST", "/api/v1/api-keys"),
     ("DELETE", "/api/v1/api-keys/{key_id}"),
+    # Self-service bell-tray dismissal state (persist-cleared-notifications):
+    # "what have I already cleared" has no (resource, action) pair in
+    # services/authz.py's PERMISSIONS matrix and doesn't need one, same
+    # reasoning as api-keys/sessions above. Ownership is enforced by scoping
+    # every read/write on user.id (proxploy/api/notification_dismissals.py).
+    ("GET", "/api/v1/notifications/dismissed"),
+    ("POST", "/api/v1/notifications/dismissed/clear-all"),
+    ("POST", "/api/v1/notifications/dismissed/{job_id}"),
 }
 
 # Mutations a viewer session IS allowed: own-account self-service only.
@@ -80,6 +88,8 @@ VIEWER_SELF = {
                                              # because its DENIAL is enforcer-driven, and
                                              # a viewer probing it must see 403: asserted
                                              # separately below, not skipped
+    ("POST", "/api/v1/notifications/dismissed/clear-all"),  # own tray state
+    ("POST", "/api/v1/notifications/dismissed/{job_id}"),
 }
 
 

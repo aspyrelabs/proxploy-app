@@ -512,3 +512,30 @@ class AppSetting(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     value: Mapped[dict | list | str | int | bool | None] = mapped_column(JSON)
+
+
+class NotificationDismissal(TimestampMixin, Base):
+    """One row per user: the bell tray's server-side memory of what has
+    already been cleared, so a clear survives a reload, a reboot, and a
+    login from a different browser or machine (a per-user fact, not a
+    per-browser one -- see docs/notes/persist-cleared-notifications-report.md).
+
+    `cleared_through_job_id` is a watermark, not a growing list: "clear all"
+    records the highest job id that existed at the moment of the clear, and
+    every job at or below it counts as dismissed from then on, however many
+    thousands of jobs that eventually covers. Job ids are a strictly
+    increasing sequence (autoincrement primary key on `jobs`), so a job
+    created AFTER a clear always has an id above the watermark and is never
+    swallowed by it.
+
+    `dismissed_job_ids` covers what the watermark cannot: a single item
+    dismissed by its own card, whose job id is above the watermark. It stays
+    bounded because the next "clear all" moves the watermark up past it and
+    the id gets pruned back out (see services/notification_dismissals.py).
+    """
+    __tablename__ = "notification_dismissals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    cleared_through_job_id: Mapped[int | None] = mapped_column(Integer)
+    dismissed_job_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
