@@ -331,7 +331,7 @@ export function UpdatePanel({ appId, app }:
     mutationFn: () => api(`/apps/${appId}/update`, {
       method: 'POST', body: JSON.stringify({ consent: true }),
     }),
-    onSuccess: () => toast.success('Update started, follow it in the activity drawer.'),
+    onSuccess: () => toast.success('Update started, follow it on the Hosts page.'),
     onError: () => toast.error('Could not start the update, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })

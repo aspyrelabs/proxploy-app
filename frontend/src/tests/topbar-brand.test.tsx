@@ -11,16 +11,15 @@ vi.mock('../api/client', () => ({
 }))
 vi.mock('../components/AccountMenu', () => ({ AccountMenu: () => null }))
 vi.mock('../components/TierPill', () => ({ TierPill: () => null }))
-vi.mock('../components/ActivityDrawer', () => ({
-  useActivityDrawer: () => ({ toggle: vi.fn() }),
-}))
 vi.mock('../components/CommandPalette', () => ({ openCommandPalette: vi.fn() }))
-// The brand mark is now a Link (to /hosts); Link needs a real RouterProvider
-// to resolve its href, which this file doesn't mount. Mock it thin, matching
-// sidebar-nav.test.tsx / healthfooter.test.tsx.
+// The brand mark and the activity bell are both Links (to /hosts); Link
+// needs a real RouterProvider to resolve its href, which this file doesn't
+// mount. Mock it thin, matching sidebar-nav.test.tsx / healthfooter.test.tsx,
+// setting href explicitly so the mocked anchor still carries the "link" role.
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
-  Link: ({ children, ...rest }: { children?: unknown }) => <a {...rest}>{children as never}</a>,
+  Link: ({ to, children, ...rest }: { to?: string; children?: unknown }) =>
+    <a href={to} {...rest}>{children as never}</a>,
 }))
 
 import { Topbar } from '../components/Topbar'
@@ -49,9 +48,11 @@ describe('Topbar', () => {
     expect(screen.getByRole('button', { name: /search/i })).toBeInTheDocument()
   })
 
-  it('keeps the activity control named', async () => {
+  it('keeps the activity control named and reachable, now as a link to the feed', async () => {
     wrap()
-    expect(await screen.findByRole('button', { name: 'Activity' })).toBeInTheDocument()
+    const link = await screen.findByRole('link', { name: 'Activity' })
+    expect(link).toBeInTheDocument()
+    expect(link).toHaveAttribute('href', '/hosts')
   })
 
   it('has no emoji left in it', () => {

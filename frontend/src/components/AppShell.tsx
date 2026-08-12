@@ -1,6 +1,6 @@
 import { Outlet } from '@tanstack/react-router'
 import { Toaster } from 'sonner'
-import { ActivityDrawer } from './ActivityDrawer'
+import { ClearAllToasts } from './ClearAllToasts'
 import { CommandPalette } from './CommandPalette'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
@@ -18,15 +18,16 @@ export function AppShell() {
         <SidebarNav />
         <main className="min-w-0 flex-1 p-6"><Outlet /></main>
       </div>
-      <ActivityDrawer />
       <CommandPalette />
       <Toaster
         position="bottom-right"
         duration={2600}
+        closeButton
         toastOptions={{
           className: 'rounded-ctl border border-line bg-panel-2 text-text text-[13px]',
         }}
       />
+      <ClearAllToasts />
     </div>
   )
 }

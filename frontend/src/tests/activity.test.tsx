@@ -1,30 +1,37 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let jobsResult: 'ok' | 'empty' | 'error' = 'ok'
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+
+const { ApiError } = vi.hoisted(() => ({
+  ApiError: class extends Error {
+    status: number; body: unknown
+    constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
+  },
+}))
+
 let activityResult: 'ok' | 'empty' | 'error' = 'ok'
 let jobEventsError = false
+let cancelResult: 'ok' | 'forbidden' | 'conflict' = 'ok'
+const cancelCalls: Array<{ path: string; method?: string }> = []
 
 vi.mock('../api/client', () => ({
-  api: vi.fn((path: string) => {
+  ApiError,
+  api: vi.fn((path: string, opts?: RequestInit) => {
+    const method = opts?.method
+    if (path.startsWith('/jobs/') && path.endsWith('/cancel') && method === 'POST') {
+      cancelCalls.push({ path, method })
+      if (cancelResult === 'forbidden') return Promise.reject(new ApiError(403, { detail: 'forbidden' }))
+      if (cancelResult === 'conflict') return Promise.reject(new ApiError(409, { detail: 'job is already succeeded' }))
+      return Promise.resolve({ id: 13, status: 'canceled' })
+    }
     if (path.startsWith('/jobs/12/events')) {
       if (jobEventsError) return Promise.reject(new Error('boom'))
       return Promise.resolve([
         { seq: 1, ts: '2026-07-29T09:00:00Z', stream: 'stdout', message: 'starting CT 150' },
         { seq: 2, ts: '2026-07-29T09:00:04Z', stream: 'status', message: 'succeeded: ok' },
-      ])
-    }
-    if (path.startsWith('/jobs')) {
-      if (jobsResult === 'error') return Promise.reject(new Error('boom'))
-      if (jobsResult === 'empty') return Promise.resolve([])
-      // Realistic GET /jobs order: newest-first, exactly as the server
-      // returns it, the drawer must not need to re-sort this itself.
-      return Promise.resolve([
-        { id: 13, kind: 'vm.stop', status: 'running', target_type: 'vm',
-          target_id: 2, progress_pct: 40, error: null, created_at: '2026-07-29T09:01:00Z' },
-        { id: 12, kind: 'app.start', status: 'succeeded', target_type: 'app',
-          target_id: 1, progress_pct: 100, error: null, created_at: '2026-07-29T09:00:00Z' },
       ])
     }
     if (path.startsWith('/cluster/activity')) {
@@ -37,6 +44,9 @@ vi.mock('../api/client', () => ({
         { kind: 'audit', id: 4, at: '2026-07-29T08:59:00Z', title: 'host.create',
           status: 'ok', target_type: 'host', target_id: 1,
           actor: 'admin@example.com', job_id: null, progress_pct: null },
+        { kind: 'job', id: 13, at: '2026-07-29T09:01:00Z', title: 'app.stop',
+          status: 'running', target_type: 'app', target_id: 2,
+          actor: 'ops@example.com', job_id: 13, progress_pct: 40 },
       ])
     }
     if (path === '/entitlements') {
@@ -44,18 +54,8 @@ vi.mock('../api/client', () => ({
     }
     return Promise.resolve(null)
   }),
-  ApiError: class extends Error {},
 }))
 
-const search = { drawer: 'activity' as const, job: undefined }
-vi.mock('@tanstack/react-router', async (orig) => ({
-  ...(await orig() as object),
-  useSearch: () => search,
-  useNavigate: () => () => {},
-  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
-}))
-
-import { ActivityDrawer } from '../components/ActivityDrawer'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { JobLog } from '../components/JobLog'
 import { TerminalPanel } from '../components/TerminalPanel'
@@ -81,33 +81,13 @@ describe('TerminalPanel', () => {
   })
 })
 
-describe('ActivityDrawer', () => {
-  beforeEach(() => { jobsResult = 'ok' })
-
-  it('lists jobs newest-first with their status', async () => {
-    wrap(<ActivityDrawer />)
-    expect(await screen.findByText('vm.stop')).toBeInTheDocument()
-    expect(screen.getByText('app.start')).toBeInTheDocument()
-    const rows = screen.getAllByTestId('drawer-job')
-    expect(rows[0]).toHaveTextContent('vm.stop')
-  })
-
-  it('says activity could not be read rather than showing "no jobs yet"', async () => {
-    jobsResult = 'error'
-    wrap(<ActivityDrawer />)
-    expect(await screen.findByText(/activity not readable/i)).toBeInTheDocument()
-    expect(screen.queryByText('No jobs yet.')).not.toBeInTheDocument()
-  })
-
-  it('shows the real empty-jobs copy when there genuinely are none', async () => {
-    jobsResult = 'empty'
-    wrap(<ActivityDrawer />)
-    expect(await screen.findByText('No jobs yet.')).toBeInTheDocument()
-  })
-})
-
 describe('ActivityFeed', () => {
-  beforeEach(() => { activityResult = 'ok' })
+  beforeEach(() => {
+    activityResult = 'ok'
+    cancelResult = 'ok'
+    cancelCalls.length = 0
+    toastError.mockClear()
+  })
 
   it('renders merged job and audit rows with their actor', async () => {
     wrap(<ActivityFeed />)
@@ -127,6 +107,28 @@ describe('ActivityFeed', () => {
     activityResult = 'empty'
     wrap(<ActivityFeed />)
     expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument()
+  })
+
+  it('offers Cancel only on the running job row, not the succeeded job or the audit row', async () => {
+    wrap(<ActivityFeed />)
+    await screen.findByText('app.stop')
+    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
+    const row = screen.getByText('app.stop').closest('div')!
+    expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it('pressing Cancel posts to /jobs/{id}/cancel for that row', async () => {
+    wrap(<ActivityFeed />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(cancelCalls.some(
+      (c) => c.path === '/jobs/13/cancel' && c.method === 'POST')).toBe(true))
+  })
+
+  it('a rejected cancel surfaces an error toast rather than failing silently', async () => {
+    cancelResult = 'conflict'
+    wrap(<ActivityFeed />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('job is already succeeded'))
   })
 })
 
