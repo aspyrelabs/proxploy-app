@@ -57,6 +57,13 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
     queryKey: ['hosts', hostId, 'node', node, 'status'],
     queryFn: () => api<Status>(`/hosts/${hostId}/nodes/${node}/status`),
     retry: false,
+    // Most of this payload is static between reboots — kernel, architecture,
+    // CPU model, cores, sockets — but Load and IO delay change second to
+    // second, and so does the Load bar computed from them. Without a timer
+    // they sat at whatever they were when the page was opened, with nothing
+    // saying so. 30s matches the cadence the nodes query already polls at, so
+    // this adds no new class of load against the node.
+    refetchInterval: 30_000,
   })
   const s = q.data ?? null
 

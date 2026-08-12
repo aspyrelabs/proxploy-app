@@ -235,3 +235,42 @@ def test_mem_pct_and_disk_pct_are_queryable_metrics():
     from proxploy.services.metrics import METRICS
     assert "mem_pct" in METRICS
     assert "disk_pct" in METRICS
+
+
+def test_a_pve_upgrade_reaches_the_host_row(tmp_path):
+    """hosts.pve_version used to be written ONLY at enrolment and by the manual
+    POST /hosts/{id}/test. After an in-place PVE upgrade the header subline
+    (which reads this column via /cluster/nodes) kept reporting the old
+    version, while the identity rail — which reads the node's live /status —
+    reported the new one. The same page contradicted itself until somebody
+    happened to click Test."""
+    from proxploy.models import utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    host.pve_version = "9.2.10"
+    resources, rrd = _fixtures()
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), version="9.3.1")
+    assert host.pve_version == "9.3.1"
+
+
+def test_a_version_probe_that_failed_does_not_erase_the_known_version(tmp_path):
+    """The probe is the optional half of a cycle, like rrddata: a token that
+    reads /cluster/resources can still 403 on /version. Losing it must cost the
+    version refresh and nothing else — writing None would replace a true, if
+    stale, version with 'unknown' on the host page."""
+    from proxploy.models import utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    host.pve_version = "9.2.10"
+    resources, rrd = _fixtures()
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), version=None)
+    assert host.pve_version == "9.2.10"
+    assert host.status == "connected"

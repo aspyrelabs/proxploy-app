@@ -75,7 +75,8 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
 
 
 def ingest_cycle(db, host: Host, resources: list[dict],
-                 rrd_by_node: dict[str, list[dict]], now: datetime) -> CycleResult:
+                 rrd_by_node: dict[str, list[dict]], now: datetime,
+                 version: str | None = None) -> CycleResult:
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
     targets: list[dict] = []
@@ -131,6 +132,18 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         events.append(("resource", {"type": "host", "id": host.id,
                                     "change": "status", "status": "connected"}))
     host.status, host.last_seen_at = "connected", now
+
+    # An in-place PVE upgrade otherwise never reaches this column: it was
+    # written at enrolment and by POST /hosts/{id}/test, and by nothing else.
+    # The host page reads it for the header subline while the identity rail
+    # reads the node's live /status, so the two disagreed after every upgrade
+    # until somebody happened to click Test.
+    #
+    # `version is None` means the probe failed, not that the node has no
+    # version — same shape as rrddata above. Writing it through would replace a
+    # true-but-stale version with "unknown", which is strictly worse.
+    if version and version != host.pve_version:
+        host.pve_version = version
 
     # guests map ----------------------------------------------------------------
     guests: dict[tuple[str, int], dict] = {}
@@ -396,8 +409,17 @@ class Poller:
                     lost.append(f"{n}: {e}")
             degraded = (f"metrics unavailable, {'; '.join(lost)}" if lost else None)
 
+            # Optional, like rrddata above: a token that reads
+            # /cluster/resources can still 403 on /version, and losing the
+            # version refresh must not cost the cycle. None means "not read
+            # this time", and ingest_cycle keeps the version it already had.
+            try:
+                version = client.version().get("version")
+            except ProxmoxError:
+                version = None
+
             prev = self.snapshots.get(host_id)
-            result = ingest_cycle(db, host, resources, rrd, utcnow())
+            result = ingest_cycle(db, host, resources, rrd, utcnow(), version=version)
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.
