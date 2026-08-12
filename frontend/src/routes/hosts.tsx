@@ -10,7 +10,7 @@ import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { HardwareTab } from '../components/HardwareTab'
-import { HostFacts } from '../components/HostFacts'
+import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
 import { NodeCard } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
@@ -461,14 +461,13 @@ export function NodeOverview() {
     <div>
       {node && (
         <>
-          {/* One strip, two sources. HostFacts merges the poller's snapshot
-              (always there, and the only source for the deduped datastore
-              fill and the guest counts) with the node's own /status (on
-              demand, refusable by a narrow token), so a node that will not
-              answer loses rows rather than the whole card. It used to be two
-              cards repeating Node, PVE version, Uptime and Memory. */}
+          {/* One rail, two sources. NodeIdentityRail merges the poller's
+              snapshot (always there, and the only source for the deduped
+              datastore fill) with the node's own /status (on demand, refusable
+              by a narrow token), so a node that will not answer loses rows —
+              and whole groups — rather than the whole card. */}
           {node.node && (
-            <HostFacts hostId={id} node={node.node} snapshot={node} />
+            <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
           )}
           {/* Entry node only: the `host:<id>` metric series is recorded from
               the node Proxploy connects through, so drawing it under any other

@@ -1,4 +1,4 @@
-/** The host page Overview strip: what this machine actually is. */
+/** The host page's identity rail: what this machine is, in four groups. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ vi.mock('../api/client', () => ({
 }))
 
 import type { NodeRow } from '../api/hooks'
-import { HostFacts } from '../components/HostFacts'
+import { NodeIdentityRail } from '../components/NodeIdentityRail'
 
 /** The poller's snapshot. Deliberately carrying figures that DIFFER from the
  *  status payload's rootfs by orders of magnitude, because on a real node they
@@ -30,11 +30,11 @@ const wrap = (snap: NodeRow = snapshot()) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <HostFacts hostId={1} node="pve1" snapshot={snap} />
+      <NodeIdentityRail hostId={1} node="pve1" snapshot={snap} />
     </QueryClientProvider>)
 }
 
-describe('HostFacts', () => {
+describe('NodeIdentityRail', () => {
   beforeEach(() => {
     fails = false
     status = {
@@ -47,6 +47,14 @@ describe('HostFacts', () => {
       swap: { total: 8589930496, used: 0 },
       rootfs: { total: 100861726720, used: 6425862144 },
     }
+  })
+
+  it('names all four groups when the node answers', async () => {
+    wrap()
+    expect(await screen.findByText('Processor')).toBeInTheDocument()
+    expect(screen.getByText('Identity')).toBeInTheDocument()
+    expect(screen.getByText('Memory & storage')).toBeInTheDocument()
+    expect(screen.getByText('Boot')).toBeInTheDocument()
   })
 
   it('separates physical cores from threads', async () => {
@@ -78,33 +86,23 @@ describe('HostFacts', () => {
     expect(await screen.findByText('9.2.10')).toBeInTheDocument()
   })
 
-  it('carries the guest counts and the deduped datastore fill, which /status cannot answer', async () => {
-    wrap()
-    expect(await screen.findByText('2/3 running')).toBeInTheDocument()
-    expect(screen.getByText('1/2 running')).toBeInTheDocument()
-    expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()
-  })
-
   it('keeps the datastore total and the root filesystem apart', async () => {
     // On a real node these differ by orders of magnitude. Collapsing them into
     // one "Storage" row would answer neither question honestly.
     wrap()
-    // Wait on a status-only row: the snapshot half renders synchronously, so
-    // findAllByText('Storage') would resolve before /status had landed.
     expect(await screen.findByText('Root filesystem')).toBeInTheDocument()
-    // 'Storage' names both the KV row and the bar beneath it, hence getAllBy.
+    // 'Storage' names both the fact row and the bar above it, hence getAllBy.
     expect(screen.getAllByText('Storage').length).toBeGreaterThan(0)
     expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()      // datastores
     expect(screen.getByText('6.0 GiB / 93.9 GiB')).toBeInTheDocument()     // rootfs
   })
 
-  it('costs the status-only rows, not the strip, when the node refuses to be read', async () => {
+  it('costs the status-only rows, not the rail, when the node refuses to be read', async () => {
     // A token too narrow for /nodes/{n}/status must not cost the page the
-    // facts the poller already had. Dropping the whole card here is the
-    // regression that merging the two strips could have introduced.
+    // facts the poller already had.
     fails = true
     wrap()
-    expect(await screen.findByText('2/3 running')).toBeInTheDocument()
+    expect(await screen.findByText('Identity')).toBeInTheDocument()
     expect(screen.getByText('Node')).toBeInTheDocument()
     expect(screen.getByText('9.2.10')).toBeInTheDocument()
     expect(screen.getByText('6h 57m')).toBeInTheDocument()
@@ -115,6 +113,28 @@ describe('HostFacts', () => {
     expect(screen.queryByText('Kernel')).not.toBeInTheDocument()
     expect(screen.queryByText('IO delay')).not.toBeInTheDocument()
     expect(screen.queryByText('Root filesystem')).not.toBeInTheDocument()
+  })
+
+  // This is the rule grouping ADDS. Without it, a refused /status leaves a
+  // "Processor" heading over nothing and a "Boot" heading over nothing —
+  // grouping would have made the degraded case worse than the flat strip.
+  it('renders no heading for a group whose rows all vanished', async () => {
+    fails = true
+    wrap()
+    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    expect(screen.getByText('Memory & storage')).toBeInTheDocument()
+    expect(screen.queryByText('Processor')).not.toBeInTheDocument()
+    expect(screen.queryByText('Boot')).not.toBeInTheDocument()
+  })
+
+  // The counts moved to the "Guests on this host (n)" heading, which already
+  // carried a total. Two places stating the same count is the duplication the
+  // 2026-08-11 "one KV strip, not two" commit removed.
+  it('does not restate the guest counts the guests heading already carries', async () => {
+    wrap()
+    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    expect(screen.queryByText('2/3 running')).not.toBeInTheDocument()
+    expect(screen.queryByText('1/2 running')).not.toBeInTheDocument()
   })
 
   it('survives a node that reports no cpuinfo at all', async () => {
