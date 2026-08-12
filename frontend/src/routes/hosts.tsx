@@ -9,6 +9,7 @@ import { AppCard } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { GuestList, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
@@ -503,36 +504,11 @@ export function NodeOverview() {
           Guests on this host ({(apps?.length ?? 0) + (vms?.length ?? 0)})
         </h2>
         <QueryState query={nodeAppsQuery}
-                    emptyTitle="No apps on this node"
-                    emptyNote="Installed or adopted apps on this node appear here."
-                    errorTitle="Apps not readable"
-                    errorNote="Proxploy could not reach the backend to list apps on this node.">
-          {(rows) => (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {rows.map((a) => <AppCard key={a.id} app={a} />)}
-            </div>
-          )}
-        </QueryState>
-        <QueryState query={nodeVmsQuery}
-                    emptyTitle="No VMs on this node"
-                    emptyNote="QEMU guests on this node appear here."
-                    errorTitle="VMs not readable"
-                    errorNote="Proxploy could not reach the backend to list VMs on this node.">
-          {(rows) => (
-            <div className={`${card} mt-4`}>
-              <table className="w-full text-left text-[13px]">
-                <tbody>
-                  {rows.map((v) => (
-                    <tr key={v.id} className="border-t border-line-soft first:border-t-0">
-                      <td className="py-2 font-mono">{v.name}</td>
-                      <td className="py-2 text-text-2">VMID {v.vmid}</td>
-                      <td className="py-2"><StatusPill status={v.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    emptyTitle="No guests on this node"
+                    emptyNote="Installed or adopted apps and QEMU guests on this node appear here."
+                    errorTitle="Guests not readable"
+                    errorNote="Proxploy could not reach the backend to list guests on this node.">
+          {(rows) => <GuestList guests={toGuests(rows, vms ?? [])} />}
         </QueryState>
       </div>
     </div>
