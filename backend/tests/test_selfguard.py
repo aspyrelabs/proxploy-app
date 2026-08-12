@@ -3,7 +3,7 @@
 Detection can miss, an unset identity must NEVER block an action, because the
 typed-confirmation prompt is the backstop, not the only guard."""
 from proxploy.models import App
-from proxploy.services.selfguard import DESTRUCTIVE, is_self
+from proxploy.services.selfguard import DESTRUCTIVE, is_self, is_self_host_node
 from proxploy.services.settings import set_setting
 from tests.support import make_db, seed_host_row
 
@@ -69,3 +69,55 @@ def test_malformed_host_id_setting_fails_open_instead_of_raising(tmp_path):
     set_setting(db, "self.ctid", 150)
     set_setting(db, "self.host_id", "")
     assert is_self(db, "app", a.id) is False
+
+
+# --- is_self_host_node: reboot/power off self-detection (host actions menu) -
+
+def test_no_self_host_id_recorded_is_never_self_node(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    assert is_self_host_node(db, host, "pve1") is False
+
+
+def test_matching_host_and_entry_node_is_self(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    set_setting(db, "self.host_id", host.id)
+    assert is_self_host_node(db, host, "pve1") is True
+
+
+def test_matching_host_but_a_different_node_of_the_same_cluster_is_not_self(tmp_path):
+    """A Host row can represent a whole PVE cluster. Proxploy only ever runs on
+    the entry node it enrolled against (host.node_name); a sibling node of the
+    same cluster is a different physical machine and must not be flagged."""
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    set_setting(db, "self.host_id", host.id)
+    assert is_self_host_node(db, host, "pve2") is False
+
+
+def test_matching_node_name_on_a_different_host_is_not_self(tmp_path):
+    db = make_db(tmp_path)
+    host_a = seed_host_row(db, name="host-01", node="pve1")
+    host_b = seed_host_row(db, name="host-02", node="pve1")
+    set_setting(db, "self.host_id", host_a.id)
+    assert is_self_host_node(db, host_b, "pve1") is False
+
+
+def test_malformed_self_host_id_fails_open_for_node_check_too(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    set_setting(db, "self.host_id", "not-a-number")
+    assert is_self_host_node(db, host, "pve1") is False
+
+
+def test_a_host_with_no_recorded_entry_node_name_is_never_self(tmp_path):
+    """host.node_name is only ever set at enrolment when /cluster/status
+    resolved cleanly (api/hosts.py `_cluster_identity`); when it did not, an
+    unknown entry node must fail open the same as an unset self.host_id."""
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    host.node_name = None
+    db.commit()
+    set_setting(db, "self.host_id", host.id)
+    assert is_self_host_node(db, host, "pve1") is False

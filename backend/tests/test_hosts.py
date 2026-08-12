@@ -218,6 +218,75 @@ def test_patch_host_writes_an_audit_event(pve_client, csrf_header):
         assert row.params == {"node_shell_enabled": True}
 
 
+def test_patch_host_updates_name_and_address(pve_client, csrf_header):
+    """HostPatchIn used to hard-refuse these (doc comment: "name/address/
+    credentials all go through their own dedicated flows"), but there was no
+    dedicated flow for name/address at all -- the Edit dialog needs one."""
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}",
+               json={"name": "pve-renamed", "address": "https://10.0.0.9:8006"},
+               headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    detail = c.get(f"/api/v1/hosts/{hid}").json()
+    assert detail["name"] == "pve-renamed"
+    assert detail["address"] == "https://10.0.0.9:8006"
+
+
+def test_patch_host_name_and_address_are_both_optional_and_independent(
+        pve_client, csrf_header):
+    """The node-shell toggle already patches without name/address; the
+    reverse must hold too -- renaming alone must not require re-sending the
+    node-shell flag or touching the address."""
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"name": "renamed-only"},
+               headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    detail = c.get(f"/api/v1/hosts/{hid}").json()
+    assert detail["name"] == "renamed-only"
+    assert detail["address"] == HOST["address"]
+
+
+def test_patch_host_rejects_a_duplicate_name_on_rename(pve_client, csrf_header):
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    c.post("/api/v1/hosts", json=HOST | {"name": "pve-02"}, headers=csrf_header(c))
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"name": "pve-02"},
+               headers=csrf_header(c))
+    assert r.status_code == 409
+
+
+def test_patch_host_name_change_is_audited_as_host_update(pve_client, csrf_header):
+    from proxploy.models import AuditEvent
+
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    c.patch(f"/api/v1/hosts/{hid}", json={"name": "pve-renamed"},
+           headers=csrf_header(c))
+    with c.app.state.sessionmaker() as db:
+        row = db.query(AuditEvent).filter_by(action="host.update").one()
+        assert row.target_type == "host" and row.target_id == hid
+        assert row.params == {"name": "pve-renamed"}
+
+
+def test_patch_host_still_toggles_node_shell_without_name_or_address(
+        pve_client, csrf_header):
+    """Backward compatibility: node_shell_enabled becoming optional must not
+    change its own behaviour for the Settings page's existing call sites."""
+    from proxploy.models import AuditEvent
+
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": True},
+               headers=csrf_header(c))
+    assert r.status_code == 200
+    assert r.json() == {"id": hid, "node_shell_enabled": True}
+    with c.app.state.sessionmaker() as db:
+        row = db.query(AuditEvent).filter_by(action="host.node_shell_toggle").one()
+        assert row.params == {"node_shell_enabled": True}
+
+
 def test_patch_host_requires_admin_role(pve_client, csrf_header):
     c, _ = pve_client
     hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]

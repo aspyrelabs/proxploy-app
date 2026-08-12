@@ -11,6 +11,7 @@ import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
+import { HostActionsMenu } from '../components/HostActionsMenu'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
 import { NodeCard } from '../components/NodeCard'
@@ -421,6 +422,14 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
             </a>
           )}
           {node && <StatusPill status={node.status} />}
+          {/* Node-scoped (Reboot/Power off target THIS node) and host-scoped
+              (Edit changes the Host record, shared across every node of its
+              cluster) both live behind one trigger, so both need to be
+              resolved before it can render at all. */}
+          {node?.node && host && (
+            <HostActionsMenu hostId={id} node={node.node}
+              host={{ name: host.name, address: host.address }} />
+          )}
         </div>
       </div>
       <div className="mb-5 flex gap-1 border-b border-line-soft">

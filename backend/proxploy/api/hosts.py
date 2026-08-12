@@ -12,6 +12,7 @@ from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        token_public_meta)
 from proxploy.services.hostclient import client_for_host
+from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
@@ -63,11 +64,25 @@ class HostIn(ProbeIn):
 
 
 class HostPatchIn(BaseModel):
-    """Not a general host-update endpoint (name/address/credentials all go
-    through their own dedicated flows) -- just the node-shell opt-in toggle
-    (doc 08 §9) plus team assignment (doc 05 "team assignment")."""
-    node_shell_enabled: bool
+    """Partial update: every field is optional and only the ones supplied are
+    changed. Started as just the node-shell opt-in toggle (doc 08 §9) plus
+    team assignment; name/address joined for the host actions menu's Edit
+    dialog. Credentials are deliberately NOT here -- POST
+    /{host_id}/credentials is their own dedicated, already-existing flow
+    (verifies a new token against the node before it replaces the old one),
+    and the Edit dialog composes both calls rather than this route growing a
+    second credential path."""
+    node_shell_enabled: bool | None = None
     team_id: int | None = None
+    name: str | None = None
+    address: str | None = None
+
+    @field_validator("name", "address")
+    @classmethod
+    def _not_blank(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("cannot be blank")
+        return v
 
 
 def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
@@ -293,16 +308,37 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
     h = db.get(Host, host_id)
     if h is None:
         raise HTTPException(404, "host not found")
-    h.node_shell_enabled = body.node_shell_enabled
-    audit_params = {"node_shell_enabled": h.node_shell_enabled}
+    audit_params: dict = {}
+    if body.node_shell_enabled is not None:
+        h.node_shell_enabled = body.node_shell_enabled
+        audit_params["node_shell_enabled"] = h.node_shell_enabled
     if body.team_id is not None:
         if not db.get(Team, body.team_id):
             raise HTTPException(404, "team not found")
         h.team_id = body.team_id
         audit_params["team_id"] = body.team_id
+    if body.name is not None and body.name != h.name:
+        clash = db.query(Host).filter(Host.name == body.name,
+                                      Host.id != h.id).one_or_none()
+        if clash:
+            raise HTTPException(409, "a host with that name already exists")
+        h.name = body.name
+        audit_params["name"] = body.name
+    if body.address is not None and body.address != h.address:
+        # Deliberately no probe here: verifying a changed address is
+        # POST /{host_id}/test's job (already built, already used by the host
+        # page), not a second implementation of the same check.
+        h.address = body.address
+        audit_params["address"] = body.address
     db.commit()
+    # Same action name as before when only the node-shell toggle (plus,
+    # historically, team assignment) changed -- test_patch_host_writes_an_
+    # audit_event pins that exact string. A name/address change is different
+    # enough in kind (identity, not a feature flag) to get its own name.
+    action = ("host.update" if {"name", "address"} & audit_params.keys()
+             else "host.node_shell_toggle")
     write_audit(db, actor_type="user", actor_id=user.id,
-                action="host.node_shell_toggle", target_type="host",
+                action=action, target_type="host",
                 target_id=h.id, params=audit_params)
     return {"id": h.id, "node_shell_enabled": h.node_shell_enabled}
 
@@ -387,6 +423,7 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
 _sync = authorize("host", "sync", scope_of=scope_host())
 _credentials = authorize("host", "credentials", scope_of=scope_host())
 _remove = authorize("host", "remove", scope_of=scope_host())
+_power = authorize("host", "power", scope_of=scope_host())
 
 
 class HostRemoveIn(BaseModel):
@@ -514,6 +551,11 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
     boot = st.get("boot-info") or {}
     return {
         "node": node,
+        # The host actions menu's Reboot/Power off reads this off the SAME
+        # query the identity rail already fetches, so the confirm dialog can
+        # warn BEFORE the operator types anything, not only after a rejected
+        # call (doc 02 §9, doc 08 §1).
+        "is_self": is_self_host_node(db, h, node),
         "uptime_s": st.get("uptime"),
         "pve_version": st.get("pveversion"),
         "kernel": kernel.get("release") or st.get("kversion"),
@@ -535,6 +577,74 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
         "rootfs": st.get("rootfs") or {},
         "ksm_shared": (st.get("ksm") or {}).get("shared"),
     }
+
+
+class NodePowerIn(BaseModel):
+    command: str  # "reboot" | "shutdown", Proxmox's own node-status verbs
+    # Always required, self or not (doc 02 §9, doc 08 §1/§9 row 14): detection
+    # can miss (a relocated install, an ambiguous hostname), so the typed
+    # prompt is the backstop even when self-detection would have said no.
+    # The frontend already gates Confirm on this matching before it ever
+    # sends the request; this is the server-side half of that gate, not
+    # merely a UI nicety.
+    confirm: str | None = None
+
+    @field_validator("command")
+    @classmethod
+    def _known_command(cls, v: str) -> str:
+        from proxploy.services.proxmox import NODE_POWER_COMMANDS
+        if v not in NODE_POWER_COMMANDS:
+            raise ValueError(f"command must be one of {sorted(NODE_POWER_COMMANDS)}")
+        return v
+
+
+@router.post("/{host_id}/nodes/{node}/power")
+def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
+               db=Depends(get_db), user: User = Depends(_power)):
+    """Reboot or power off a Proxmox NODE, not a guest (doc 02 §9, doc 08 §1
+    and §9 row 14).
+
+    Owner-gated, same severity class as host.remove/host.credentials: this can
+    take the whole node, and every guest it hosts, down. Always requires
+    typing the node's name back, self or not -- GET .../status's `is_self`
+    field lets the confirm dialog say so explicitly BEFORE the operator types
+    anything, but the server enforces the same gate regardless of what the
+    client already showed, since detection can miss.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    ip = request.client.host if request.client else None
+    self_node = is_self_host_node(db, h, node)
+    action = f"host.{body.command}"
+
+    if (body.confirm or "") != node:
+        write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                    target_type="host", target_id=h.id, result="denied",
+                    params={"node": node, "is_self": self_node}, ip=ip)
+        verb = "Rebooting" if body.command == "reboot" else "Powering off"
+        detail = f"{verb} {node} cannot be undone once it starts. "
+        if self_node:
+            detail += (f"{node} is the node Proxploy itself runs on: this can end "
+                       "Proxploy with no in-band way back, recovery would need "
+                       "physical or IPMI access to the machine. ")
+        detail += f"Type the node's name, {node}, to confirm."
+        raise HTTPException(409, {"error": "confirm_required",
+                                  "confirm_phrase": node, "is_self": self_node,
+                                  "detail": detail})
+
+    try:
+        upid = client_for_host(request.app, db, h).node_power(node, body.command)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                    target_type="host", target_id=h.id, result="error",
+                    params={"node": node, "is_self": self_node}, ip=ip)
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
+
+    write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                target_type="host", target_id=h.id,
+                params={"node": node, "is_self": self_node, "upid": upid}, ip=ip)
+    return {"upid": upid, "is_self": self_node}
 
 
 # The high byte of PVE's raw PCI class code is the PCI-SIG base class, i.e.

@@ -31,6 +31,12 @@ LXC_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend", "resu
 QEMU_ACTIONS = frozenset({"start", "stop", "shutdown", "reboot", "suspend",
                           "resume", "reset"})
 
+# The NODE's own power verbs (POST /nodes/{node}/status?command=...), never to
+# be confused with LXC_ACTIONS/QEMU_ACTIONS above: those act on a guest, these
+# act on the physical (or virtual) machine underneath every guest on it.
+# Proxmox's node-status endpoint only ever accepts these two.
+NODE_POWER_COMMANDS = frozenset({"reboot", "shutdown"})
+
 
 # The submitted token id is OPAQUE AND SECRET on ingest: Proxmox's own copy
 # button yields `PVEAPIToken=user@realm!name=<uuid-secret>`, so any caller
@@ -345,6 +351,24 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"node status failed for node {node!r}", e) from e
+
+    def node_power(self, node: str, command: str) -> str:
+        """POST /nodes/{node}/status?command=reboot|shutdown -> UPID.
+
+        The host actions menu's Reboot/Power off. Deliberately separate from
+        guest_action: this acts on the NODE, not a guest, so it is gated far
+        harder by callers (doc 02 §9, doc 08 §1) -- it can take down every
+        guest the node hosts, and if the node is the one Proxploy itself runs
+        on, Proxploy along with it.
+        """
+        if command not in NODE_POWER_COMMANDS:
+            raise ProxmoxError(f"{command!r} is not a node power command")
+        try:
+            return self._connect().nodes(node).status.post(command=command)
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001  (one wrap point, like version()
+            raise self._wrap(f"node power ({command}) failed on {node}", e) from e
 
     def node_disks(self, node: str) -> list[dict]:
         """GET /nodes/{node}/disks/list: model, serial, size, health, wearout.

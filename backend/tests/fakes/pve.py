@@ -559,6 +559,27 @@ class _HardwareNS:
         self.pci = _SectionLeaf(owner, "pci", "pci_by_node", name, [])
 
 
+class _NodeStatusLeaf:
+    """nodes(n).status: GET reads /nodes/{n}/status (cpuinfo etc, host page);
+    POST is the DIFFERENT verb /nodes/{n}/status?command=reboot|shutdown, the
+    node power action (host actions menu). Same path, proxmoxer disambiguates
+    by HTTP method, so this fake does too."""
+
+    def __init__(self, owner, node):
+        self._owner, self._node = owner, node
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        return self._owner.node_status_by_node.get(self._node, {})
+
+    def post(self, **kwargs):
+        if self._owner.fail or self._node in self._owner.power_fail_nodes:
+            raise ConnectionError("fake PVE unreachable")
+        self._owner.node_power_calls.append((self._node, kwargs.get("command")))
+        return self._owner._record_action("node", 0, kwargs.get("command") or "power")
+
+
 class _NodeNS:
     def __init__(self, owner, name):
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
@@ -572,7 +593,7 @@ class _NodeNS:
         self.vzdump = _VzdumpLeaf(owner, name)
         # The host page's own on-demand reads (doc: host-page spec). Read
         # lazily from the owner so a test can assign after construction.
-        self.status = _Leaf(owner.node_status_by_node.get(name, {}), owner.fail)
+        self.status = _NodeStatusLeaf(owner, name)
         self.disks = _DisksNS(owner, name)
         self.hardware = _HardwareNS(owner, name)
         self.services = _SectionLeaf(owner, "services", "services_by_node", name, [])
@@ -599,6 +620,11 @@ class FakePVE:
         # rrddata leaf alone, since `fail` also gates _connect() itself.
         self.rrd_by_node = rrddata or {}
         self.node_status_by_node: dict[str, dict] = {}
+        # nodes(n).status.post(command=...): the host actions menu's
+        # reboot/power off. Recorded as (node, command) tuples so a test can
+        # assert exactly what was sent, same idiom as self.migrations etc.
+        self.node_power_calls: list[tuple[str, str]] = []
+        self.power_fail_nodes: set[str] = set()
         self.disks_by_node: dict[str, list[dict]] = {}
         # the rest of the host page's hardware tab, same lazy pattern
         self.pci_by_node: dict[str, list[dict]] = {}

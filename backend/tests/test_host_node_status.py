@@ -243,3 +243,26 @@ def test_an_unknown_host_is_404(tmp_path, bootstrap_admin):
     app, c, hid = _app(tmp_path)
     bootstrap_admin(c)
     assert c.get("/api/v1/hosts/9999/nodes/pve1/status").status_code == 404
+
+
+# --- is_self: whether this is the node Proxploy itself runs on -------------
+# The host actions menu (Edit/Reboot/Power off) reads this off the SAME
+# query the identity rail already fetches, so the confirm dialog can warn
+# BEFORE the operator types anything, not only after a rejected call.
+
+def test_is_self_is_false_with_no_self_host_id_recorded(tmp_path, bootstrap_admin):
+    app, c, hid = _app(tmp_path)
+    bootstrap_admin(c)
+    body = c.get(f"/api/v1/hosts/{hid}/nodes/pve1/status").json()
+    assert body["is_self"] is False
+
+
+def test_is_self_is_true_for_the_recorded_entry_node(tmp_path, bootstrap_admin):
+    from proxploy.services.settings import set_setting
+
+    app, c, hid = _app(tmp_path)
+    with app.state.sessionmaker() as db:
+        set_setting(db, "self.host_id", hid)
+    bootstrap_admin(c)
+    body = c.get(f"/api/v1/hosts/{hid}/nodes/pve1/status").json()
+    assert body["is_self"] is True

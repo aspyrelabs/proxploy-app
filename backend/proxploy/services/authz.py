@@ -48,6 +48,7 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("host", "manage"): "admin",        # onboard, patch, probe
     ("host", "credentials"): "owner",   # rotate stored secrets
     ("host", "remove"): "owner",
+    ("host", "power"): "owner",         # reboot/power off the underlying node
     ("host", "console"): "admin",       # node shell tickets (doc 08 §6 note)
     ("app", "read"): "viewer",
     ("app", "lifecycle"): "operator",

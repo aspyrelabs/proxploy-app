@@ -241,3 +241,40 @@ def test_node_status_wraps_errors_as_proxmox_error():
 
     with pytest.raises(ProxmoxError):
         _fake_client(FakePVE(fail=True)).node_status("pve1")
+
+
+# --- node_power: reboot/shutdown the NODE itself, not a guest --------------
+
+def test_node_power_reboot_posts_the_reboot_command():
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    upid = _fake_client(fake).node_power("pve1", "reboot")
+    assert fake.node_power_calls == [("pve1", "reboot")]
+    assert upid.startswith("UPID:")
+
+
+def test_node_power_shutdown_posts_the_shutdown_command():
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    _fake_client(fake).node_power("pve1", "shutdown")
+    assert fake.node_power_calls == [("pve1", "shutdown")]
+
+
+def test_node_power_rejects_an_unknown_command_without_calling_proxmox():
+    from proxploy.services.proxmox import ProxmoxError
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    with pytest.raises(ProxmoxError):
+        _fake_client(fake).node_power("pve1", "stop")
+    assert fake.node_power_calls == []
+
+
+def test_node_power_wraps_connection_failure_as_proxmox_error():
+    from proxploy.services.proxmox import ProxmoxError
+    from tests.fakes.pve import FakePVE
+
+    with pytest.raises(ProxmoxError):
+        _fake_client(FakePVE(fail=True)).node_power("pve1", "reboot")
