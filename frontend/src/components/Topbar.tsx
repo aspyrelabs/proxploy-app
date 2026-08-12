@@ -45,9 +45,14 @@ export function Topbar() {
           bell, tier pill, theme toggle and avatar are laid out beside it.
           The ghost is the mark's small-screen form (see Logo.tsx); swapping
           to it below sm keeps the same h-6 footprint down to a 24px square. */}
+      {/* h-9 is the tallest the mark can be without changing the bar: the
+          header is h-14 (56px) and items-center, so a 36px mark leaves exactly
+          10px above and below it. Growing the mark must not grow the bar —
+          the sidebar sticks at top-14 and its height is calc(100vh-3.5rem),
+          both of which are that 56px. */}
       <Link to={'/hosts' as never} aria-label="Proxploy" className="shrink-0 text-amber">
-        <GhostMark className="h-6 w-6 sm:hidden" />
-        <Logo className="hidden h-6 w-auto sm:block" />
+        <GhostMark className="h-9 w-9 sm:hidden" />
+        <Logo className="hidden h-9 w-auto sm:block" />
       </Link>
       {/* Centred in a flex-1 lane rather than absolutely positioned: the bar
           already overran a 375px phone once, and an absolutely-centred control
