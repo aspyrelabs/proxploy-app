@@ -14,6 +14,7 @@ import { JobLog } from './JobLog'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 type HostRow = { id: number; name: string; status: string }
 
@@ -172,7 +173,12 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
 
             {error && <p className="text-[12.5px] text-red">{error}</p>}
           </div>
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex items-center justify-end gap-2">
+            {/* This is the POST that creates the job, before it has an id: there
+                is no honest figure for "how close is starting" regardless of
+                whether the job itself later reports byte progress. Ring, not
+                a number. */}
+            {migrate.isPending && <Loading label="Starting the migration" size={18} className="mr-auto" />}
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button disabled={!pf || pf.blockers.length > 0 || migrate.isPending} onClick={() => fire()}>
               {migrate.isPending ? 'Starting…' : 'Migrate'}

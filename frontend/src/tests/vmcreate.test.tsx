@@ -6,6 +6,10 @@ const calls: { path: string; method: string; body: any }[] = []
 let features: Record<string, boolean> = { 'vms.create': true, 'vms.clone': true }
 let cloneRejects = false
 let vmsListResult: 'ok' | 'empty' | 'error' = 'ok'
+// Held open by the "shows the indeterminate ring" test below so it can
+// observe the pending state before the clone POST resolves.
+let cloneHeld = false
+let releaseClone: ((v: unknown) => void) | null = null
 
 const VM = {
   id: 9, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11',
@@ -53,6 +57,9 @@ vi.mock('../api/client', () => {
         return Promise.reject(new ApiError(502, {
           detail: "proxmox: 400 Parameter verification failed. full: linked clone feature is not supported for drive 'scsi0'",
         }))
+      }
+      if (cloneHeld && path.endsWith('/clone')) {
+        return new Promise((resolve) => { releaseClone = resolve })
       }
       return Promise.resolve({ job: { id: 11, kind: 'vm.create', status: 'queued' } })
     }),
@@ -191,7 +198,24 @@ describe('VmsPage create/clone affordances', () => {
 })
 
 describe('CloneDialog', () => {
-  beforeEach(() => { calls.length = 0; cloneRejects = false })
+  beforeEach(() => { calls.length = 0; cloneRejects = false; cloneHeld = false; releaseClone = null })
+
+  it('shows the indeterminate ring while the clone job is starting, no percentage anywhere', async () => {
+    // Nothing in the clone path calls ctx.progress() (verified against
+    // backend/proxploy/services/ for this task), so there is no honest
+    // completion figure to show while the POST is in flight.
+    cloneHeld = true
+    wrap(<CloneDialog vm={VM as never} onClose={() => {}} />)
+    fireEvent.change(await screen.findByLabelText(/new name/i), { target: { value: 'win11-copy' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clone' }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+
+    releaseClone?.({ job: { id: 11, kind: 'vm.create', status: 'queued' } })
+    expect(await screen.findByText('No output yet.')).toBeInTheDocument()
+  })
 
   it('posts the new name, clone mode and target storage', async () => {
     wrap(<CloneDialog vm={VM as never} onClose={() => {}} />)

@@ -3,6 +3,7 @@ import { ApiError, api } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { LiveProvider } from '../components/LiveProvider'
 import { RouteError } from '../components/RouteError'
+import { LoadingBlock } from '../components/ui/loading'
 
 export const rootRoute = createRootRoute({ component: () => <Outlet /> })
 
@@ -23,6 +24,17 @@ export const shellRoute = createRoute({
     </LiveProvider>
   ),
   errorComponent: RouteError,
+  // beforeLoad below chains two awaited requests before anything mounts, and
+  // no defaultPendingComponent is set at the router level, so without this
+  // the very first paint of the app is a blank page for as long as those
+  // requests take. There is no completion signal for "how much of onboarding
+  // and auth is left to check", so this is the indeterminate ring, never a
+  // number.
+  pendingComponent: () => (
+    <div className="grid min-h-screen place-items-center">
+      <LoadingBlock label="Loading Proxploy" />
+    </div>
+  ),
   beforeLoad: async () => {
     // Left uncaught on purpose: errorComponent above is what renders this
     // failure now (finding F1). A 500 or an unreachable backend here must not

@@ -5,6 +5,7 @@ import { useUploadContent, type VolumeExists } from '../api/storage'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 const LABEL: Record<string, string> = { iso: 'ISO image', vztmpl: 'CT template' }
 
@@ -97,9 +98,10 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
           </div>
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
-          {upload.isPending && (
-            <span className="mr-auto font-mono text-[11px] text-text-3">Uploading…</span>
-          )}
+          {/* Streamed through `fetch`, no `onUploadProgress`, so there is no
+              byte count to show here. XMLHttpRequest could report real bytes
+              sent, but that is a separate change this task does not make. */}
+          {upload.isPending && <Loading label="Uploading" size={18} className="mr-auto" />}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!file || upload.isPending}
             onClick={() => submit()}>

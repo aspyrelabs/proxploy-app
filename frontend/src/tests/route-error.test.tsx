@@ -104,4 +104,19 @@ describe("shell.tsx's beforeLoad", () => {
 
     await expect(shellRoute.options.beforeLoad!({} as never)).resolves.toBeUndefined()
   })
+
+  it('renders a busy indicator instead of a blank first paint while beforeLoad awaits', async () => {
+    // beforeLoad chains GET /meta/onboarding then GET /auth/me and there is no
+    // defaultPendingComponent set at the router level, so this route's own
+    // pendingComponent is the only thing standing between a real load and a
+    // blank screen.
+    const { shellRoute } = await import('../routes/shell')
+    const Pending = shellRoute.options.pendingComponent!
+    expect(Pending).toBeDefined()
+    render(<Pending />)
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    // No progress figure: booting the app is not a signal with a percentage.
+    expect(status.textContent).not.toMatch(/%/)
+  })
 })

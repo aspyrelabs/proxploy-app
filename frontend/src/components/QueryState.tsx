@@ -1,6 +1,7 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 
 import { EmptyState } from './EmptyState'
+import { LoadingBlock } from './ui/loading'
 
 /**
  * Loading, error, empty and data are four different answers and must look
@@ -30,12 +31,9 @@ export function QueryState<T>({
 }) {
   if (query.isError) return <EmptyState title={errorTitle} note={errorNote} />
   if (query.isPending || query.data === undefined) {
-    return loading ?? (
-      <div role="status" aria-live="polite"
-           className="grid place-items-center rounded-card border border-dashed border-line py-20 text-[12.5px] text-text-3">
-        Loading…
-      </div>
-    )
+    // No `value`: a query never carries a real completion signal, so this is
+    // always the indeterminate ring, never a number dressed up as one.
+    return loading ?? <LoadingBlock />
   }
   const isEmpty = empty ? empty(query.data)
     : Array.isArray(query.data) && query.data.length === 0

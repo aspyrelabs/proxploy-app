@@ -8,6 +8,7 @@ import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { fmtBytes } from '../lib/format'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 /**
  * Restore one archive, in place or as a new guest (doc 01 §7).
@@ -93,7 +94,11 @@ export function RestoreDialog({ backup, onClose }: {
             </p>
           )}
 
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex items-center justify-end gap-2">
+            {/* Nothing in the restore path calls ctx.progress() (checked
+                against backend/proxploy/services/), so starting the job is a
+                wait with no honest figure to show: the ring, never a number. */}
+            {restore.isPending && <Loading label="Starting the restore" size={18} className="mr-auto" />}
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button variant={mode === 'in_place' ? 'danger' : 'primary'}
                     disabled={restore.isPending} onClick={() => fire()}>

@@ -7,6 +7,7 @@ import { KVGrid } from './KVGrid'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 // Deliberately local, deliberately narrow row types: the wizard reads the
 // endpoints Tasks 3, 6 and 11 built, not Tasks 12/14's page hooks, so the
@@ -274,7 +275,11 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
 
         {error && <p className="mt-3 text-[12.5px] text-red">{error}</p>}
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex items-center justify-end gap-2">
+          {/* Nothing in the VM-create path calls ctx.progress() (checked
+              against backend/proxploy/services/), so starting the job is a
+              wait with no honest figure to show: the ring, never a number. */}
+          {create.isPending && <Loading label="Creating the VM" size={18} className="mr-auto" />}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {step > 0 && (
             <Button variant="ghost" onClick={() => setStep(step - 1)}>Back</Button>

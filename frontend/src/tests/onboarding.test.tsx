@@ -14,6 +14,14 @@ let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 let meAuthed = true
 let probeResult: unknown = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+// Held open by the pending-state tests below so they can observe the
+// indeterminate ring before the awaited call resolves.
+let probeHeld = false
+let releaseProbe: ((v: unknown) => void) | null = null
+let addHeld = false
+let releaseAdd: ((v: unknown) => void) | null = null
+let verifyHeld = false
+let releaseVerify: ((v: unknown) => void) | null = null
 const scriptResult = { script: "# Proxploy\npveum role add ProxployAudit -privs 'VM.Audit'\n",
                        capabilities: [
                          { key: 'monitoring', label: 'Read-only monitoring', why: 'Always required.', required: true, role: 'ProxployAudit' },
@@ -37,6 +45,9 @@ beforeEach(() => {
   meAuthed = true
   probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
   scriptCalls = []
+  probeHeld = false; releaseProbe = null
+  addHeld = false; releaseAdd = null
+  verifyHeld = false; releaseVerify = null
 })
 
 vi.mock('../api/client', () => {
@@ -55,9 +66,17 @@ vi.mock('../api/client', () => {
           : Promise.reject(new ApiErrorImpl(401, { detail: 'authentication required' }))
       }
       if (path === '/hosts/token-script') return Promise.resolve(scriptResult)
-      if (path === '/hosts/probe') return Promise.resolve(probeResult)
+      if (path === '/hosts/probe') {
+        if (probeHeld) return new Promise((resolve) => { releaseProbe = resolve })
+        return Promise.resolve(probeResult)
+      }
+      if (path === '/hosts' && init?.method === 'POST') {
+        if (addHeld) return new Promise((resolve) => { releaseAdd = resolve })
+        return Promise.resolve({ id: 7, name: JSON.parse(String(init.body)).name })
+      }
       if (path === '/hosts') return Promise.resolve(hostList)
       if (path.endsWith('/ssh/verify')) {
+        if (verifyHeld) return new Promise((resolve) => { releaseVerify = resolve })
         return verifyOutcome.ok
           ? Promise.resolve({ verified: true, verified_at: 'now' })
           : Promise.reject(new ApiErrorImpl(502, verifyOutcome.body))
@@ -189,6 +208,38 @@ describe('HostForm', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText(/user@realm!name/)).not.toBeInTheDocument()
   })
+
+  it('shows the indeterminate ring while testing the connection, no percentage', async () => {
+    probeHeld = true
+    render(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+
+    releaseProbe?.({ version: '9.2.10', release: '9.2', missing_privileges: [] })
+    expect(await screen.findByText(/Connected, PVE 9\.2\.10/)).toBeInTheDocument()
+  })
+
+  it('shows the indeterminate ring while adding the host, no percentage', async () => {
+    addHeld = true
+    const onCreated = vi.fn()
+    render(<HostForm onCreated={onCreated} />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'pve-01' } })
+    fireEvent.change(screen.getByLabelText(/address/i), { target: { value: 'https://10.0.0.5:8006' } })
+    fireEvent.change(screen.getByLabelText('API token id'), { target: { value: 'proxploy@pve!x' } })
+    fireEvent.change(screen.getByLabelText('API token secret'), { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+
+    releaseAdd?.({ id: 7, name: 'pve-01' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(onCreated).toHaveBeenCalled()
+  })
 })
 
 describe('onboarding wizard', () => {
@@ -238,6 +289,25 @@ describe('onboarding wizard', () => {
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
     expect(await screen.findByText(/stop and investigate/i)).toBeInTheDocument()
     expect(screen.queryByText(/not authorized yet/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the indeterminate ring while SSH verify is in flight, no percentage', async () => {
+    // The verify call has no progress signal (proxploy/services/ never calls
+    // ctx.progress() for this path either), so the wait must announce itself
+    // as busy without ever claiming a figure.
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+    mockStoredHost({ id: 7, name: 'pve1', credentials: [] })
+    verifyHeld = true
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
+    fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+
+    releaseVerify?.({ verified: true, verified_at: 'now' })
+    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 
   it('advances once the server actually verifies the key', async () => {

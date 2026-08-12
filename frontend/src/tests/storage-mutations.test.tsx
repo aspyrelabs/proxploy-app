@@ -125,6 +125,29 @@ describe('UploadDialog', () => {
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull()
   })
+
+  it('shows the indeterminate ring while the byte stream is in flight, no percentage', async () => {
+    // fetch() here is not XMLHttpRequest, there is no onUploadProgress, so
+    // there is no honest byte count to show while this awaits.
+    let releaseFetch: (v: unknown) => void = () => {}
+    const held = new Promise((resolve) => { releaseFetch = resolve })
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(held))
+
+    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
+      contentTypes={['iso']} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('File'),
+      { target: { files: [new File(['x'], 'a.iso')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+
+    releaseFetch({
+      ok: true, status: 202, json: () => Promise.resolve({ job: { id: 9, kind: 'storage.upload' } }),
+    })
+    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
 })
 
 describe('StorageForm', () => {

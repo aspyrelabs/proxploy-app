@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { Button } from './ui/button'
 import { inputCls } from './LoginForm'
+import { Loading } from './ui/loading'
 
 export type HostCreated = {
   id: number; name: string; ssh_public_key?: string
@@ -104,10 +105,11 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [testing, setTesting] = useState(false)
   const set = (k: string, v: unknown) => setF(s => ({ ...s, [k]: v }))
 
   async function testConnection() {
-    setProbe(''); setError(''); setMissing(null)
+    setProbe(''); setError(''); setMissing(null); setTesting(true)
     try {
       const r = await api<{ version: string; release: string
                             missing_privileges: string[] | null }>('/hosts/probe', {
@@ -117,7 +119,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
       // token with no ACLs connects fine and then fails every monitoring read,
       // which used to surface minutes later as the host being "unreachable".
       setMissing(r.missing_privileges?.length ? r.missing_privileges : null)
-    } catch (e) { setError(errText(e)) }
+    } catch (e) { setError(errText(e)) } finally { setTesting(false) }
   }
 
   // Doc 08 §2: the operator runs this in a node shell they already own, so
@@ -231,8 +233,15 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         </div>
       )}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
-      <div className="flex gap-2">
-        <Button type="button" variant="ghost" onClick={testConnection}>Test connection</Button>
+      <div className="flex items-center gap-2">
+        {/* Neither call has a progress signal: connecting either succeeds or
+            it doesn't, and adding the host is one POST. Ring, not a number. */}
+        {(testing || busy) && (
+          <Loading label={testing ? 'Testing the connection' : 'Adding the host'} size={18} />
+        )}
+        <Button type="button" variant="ghost" onClick={testConnection} disabled={testing}>
+          Test connection
+        </Button>
         <Button type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add host'}</Button>
       </div>
     </form>

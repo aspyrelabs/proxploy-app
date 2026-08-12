@@ -7,6 +7,7 @@ import { JobLog } from './JobLog'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Loading } from './ui/loading'
 
 type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
 
@@ -104,7 +105,11 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
           )}
           {error && <p className="text-[12.5px] text-red">{error}</p>}
         </div>
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex items-center justify-end gap-2">
+          {/* Nothing in the clone path calls ctx.progress() (checked against
+              backend/proxploy/services/), so starting the job is a wait with
+              no honest figure to show: the ring, never a number. */}
+          {clone.isPending && <Loading label="Starting the clone" size={18} className="mr-auto" />}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button disabled={clone.isPending || name.trim() === ''} onClick={submit}>Clone</Button>
         </div>

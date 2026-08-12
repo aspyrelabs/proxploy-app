@@ -11,6 +11,7 @@ import { AdminAccountStep } from '../components/AdminAccountStep'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { Button } from '../components/ui/button'
+import { Loading } from '../components/ui/loading'
 import { OnboardingRail, type RailStep } from '../components/OnboardingRail'
 
 export const onboardingRoute = createRoute({
@@ -68,6 +69,7 @@ export function Wizard() {
   const [host, setHost] = useState<HostCreated | null>(null)
   const [removing, setRemoving] = useState(false)
   const [verifyError, setVerifyError] = useState('')
+  const [verifying, setVerifying] = useState(false)
 
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<MeOut>('/auth/me'),
     enabled: !!ob.data?.admin_exists })
@@ -139,6 +141,7 @@ export function Wizard() {
 
   async function verifySsh() {
     setVerifyError('')
+    setVerifying(true)
     try {
       // Don't wait on the storedHost query's own timing, the id it would
       // supply is one more fetch away either way, and this can't run before
@@ -149,12 +152,14 @@ export function Wizard() {
       advance(S_DONE)
     } catch (e) {
       // A mis-pasted key used to surface at the first app install instead of
-      // here, far from its cause. host_key_mismatch is a security event, 
+      // here, far from its cause. host_key_mismatch is a security event,
       // everything else just means "not authorized yet".
       setVerifyError(e instanceof ApiError && (e.body as any)?.error === 'host_key_mismatch'
         ? "The node's SSH host key changed since Proxploy first saw it. Stop and investigate."
         : 'Not authorized yet, Proxploy still cannot open a root shell on the node. '
           + 'Check the line was added to /root/.ssh/authorized_keys and saved.')
+    } finally {
+      setVerifying(false)
     }
   }
 
@@ -275,7 +280,13 @@ export function Wizard() {
               the key you just added. Nothing is installed by this check.
             </p>
             {verifyError && <p className="text-[12.5px] text-red">{verifyError}</p>}
-            <Button onClick={verifySsh}>Verify access</Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={verifySsh} disabled={verifying}>Verify access</Button>
+              {/* Nothing on this path calls ctx.progress(), opening a root
+                  shell either works or it does not, so this is the ring, not
+                  a number pretending to know how far along it is. */}
+              {verifying && <Loading label="Verifying access" size={18} />}
+            </div>
           </div>
         )}
 
