@@ -63,7 +63,7 @@ export function SchedulesCard() {
   })
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
-    onSuccess: () => toast.success('Started, follow it in the activity drawer.'),
+    onSuccess: () => toast.success('Started, follow it on the Hosts page.'),
     onError: () => toast.error('Could not start that job, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })

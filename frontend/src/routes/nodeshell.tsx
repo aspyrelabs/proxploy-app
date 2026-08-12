@@ -9,7 +9,7 @@ import { rootRoute } from './shell'
  *
  *  Deliberately a child of rootRoute rather than shellRoute: this is opened
  *  with window.open from the host page, and a terminal in a popup does not
- *  want the sidebar, topbar and activity drawer around it.
+ *  want the sidebar and topbar chrome around it.
  *
  *  Every way this can fail is spelled out on screen. The control that opens
  *  this window used to be a grey button with a tooltip, and "nothing happened"

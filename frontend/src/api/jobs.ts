@@ -30,17 +30,6 @@ export function jobLabel(j: { kind: string; status: string }): string {
   return `${j.kind} ${j.status}`
 }
 
-/** Doc 06 §d: 10s while the activity drawer is open, never otherwise. */
-export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
-  const { enabled = true, status } = opts
-  return useQuery({
-    queryKey: ['jobs', { status }],
-    enabled,
-    refetchInterval: enabled ? 10_000 : false,
-    queryFn: () => api<JobRow[]>(status ? `/jobs?status=${status}` : '/jobs'),
-  })
-}
-
 /** Archived transcript. The live tail is the SSE stream in JobLog. */
 export function useJobEvents(id: number | null) {
   return useQuery({
@@ -55,15 +44,6 @@ export function useActivity(limit = 20) {
     queryKey: ['cluster', 'activity', limit],
     refetchInterval: 30_000,
     queryFn: () => api<ActivityRow[]>(`/cluster/activity?limit=${limit}`),
-  })
-}
-
-export function useCancelJob() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: number) =>
-      api<{ id: number; status: string }>(`/jobs/${id}/cancel`, { method: 'POST' }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
 }
 

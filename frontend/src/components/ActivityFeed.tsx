@@ -1,6 +1,5 @@
 import { useActivity } from '../api/jobs'
 import type { ActivityRow } from '../api/jobs'
-import { useActivityDrawer } from './ActivityDrawer'
 import { QueryState } from './QueryState'
 
 const TINT: Record<string, string> = {
@@ -27,15 +26,10 @@ function ago(iso: string): string {
   return `${Math.round(s / 86400)}d ago`
 }
 
-function Item({ row, onOpen }: { row: ActivityRow; onOpen: () => void }) {
+function Item({ row }: { row: ActivityRow }) {
   const tint = TINT[row.status ?? ''] ?? 'bg-panel-2 text-text-3'
-  const clickable = row.job_id != null
-  const Wrapper = clickable ? 'button' : 'div'
   return (
-    <Wrapper
-      {...(clickable ? { onClick: onOpen, type: 'button' as const } : {})}
-      className={`flex w-full items-start gap-3 py-2 text-left ${clickable ? 'hover:bg-panel-2' : ''}`}
-    >
+    <div className="flex w-full items-start gap-3 py-2 text-left">
       <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-tile font-mono text-[10px] uppercase ${tint}`}>
         {BADGE[row.kind] ?? 'unknown'}
       </span>
@@ -47,14 +41,14 @@ function Item({ row, onOpen }: { row: ActivityRow; onOpen: () => void }) {
           {row.actor ? ` · ${row.actor}` : ''} · {ago(row.at)}
         </span>
       </span>
-    </Wrapper>
+    </div>
   )
 }
 
-/** Doc 06 `ActivityFeed`: dashboard + activity drawer share this row pattern. */
+/** Doc 06 `ActivityFeed`: dashboard row pattern, also used on the Hosts page
+ *  as the app's activity history now that the drawer is gone. */
 export function ActivityFeed({ limit = 8 }: { limit?: number }) {
   const activity = useActivity(limit)
-  const drawer = useActivityDrawer()
   return (
     <QueryState query={activity}
                 emptyTitle="Nothing has happened yet."
@@ -64,8 +58,7 @@ export function ActivityFeed({ limit = 8 }: { limit?: number }) {
       {(data) => (
         <div className="divide-y divide-line-soft">
           {data.slice(0, limit).map((row) => (
-            <Item key={`${row.kind}:${row.id}`} row={row}
-                  onOpen={() => row.job_id != null && drawer.openJob(row.job_id)} />
+            <Item key={`${row.kind}:${row.id}`} row={row} />
           ))}
         </div>
       )}

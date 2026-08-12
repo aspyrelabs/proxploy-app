@@ -3,7 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 
 import {
   dialogOverlayClass, dialogPanelClass, paletteOverlayClass, palettePanelClass,
-  sheetOverlayClass, sheetPanelClass, useRadixClose,
+  useRadixClose,
 } from './overlay'
 
 /**
@@ -34,9 +34,9 @@ export function Dialog({
   description?: ReactNode
   /** Panel width in px. The 92vw cap is applied for you, always. */
   width?: number
-  /** 'sheet' docks it to the right edge, 'palette' sits high and hides its
-   *  heading (the command palette names itself through its input). */
-  variant?: 'center' | 'sheet' | 'palette'
+  /** 'palette' sits high and hides its heading (the command palette names
+   *  itself through its input). */
+  variant?: 'center' | 'palette'
   /** Sits on the title's row, pushed right. The VM wizard's step pills use it
    *  so converting did not have to move them below the heading. */
   headerRight?: ReactNode
@@ -47,8 +47,7 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={requestClose}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className={variant === 'sheet' ? sheetOverlayClass
-          : variant === 'palette' ? paletteOverlayClass : dialogOverlayClass}>
+        <DialogPrimitive.Overlay className={variant === 'palette' ? paletteOverlayClass : dialogOverlayClass}>
           <DialogPrimitive.Content
             onCloseAutoFocus={onCloseAutoFocus}
             // Radix hides the rest of the tree with aria-hidden rather than
@@ -56,8 +55,7 @@ export function Dialog({
             // role="dialog" plus aria-modal is what a screen reader user and
             // an auditor both expect to find.
             aria-modal="true"
-            className={variant === 'sheet' ? sheetPanelClass
-              : variant === 'palette' ? palettePanelClass : dialogPanelClass}
+            className={variant === 'palette' ? palettePanelClass : dialogPanelClass}
             style={{ width }}
             // Radix wires aria-describedby itself when a Description is
             // rendered, and warns when one is missing. Most of these dialogs
@@ -71,16 +69,9 @@ export function Dialog({
               // adding a visible heading above the search field would be a
               // change to the design, not to the accessibility.
               <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
-            ) : headerRight || variant === 'sheet' ? (
-              // The sheet's header is a bordered bar rather than a heading with
-              // margin under it, which is the drawer's existing chrome kept
-              // exactly as it was.
-              <div className={variant === 'sheet'
-                ? 'flex items-center justify-between border-b border-line px-4 py-3'
-                : 'mb-4 flex items-center justify-between'}>
-                <DialogPrimitive.Title className={variant === 'sheet'
-                  ? 'font-display text-[15px] font-semibold'
-                  : 'font-display text-[16px] font-semibold text-text'}>
+            ) : headerRight ? (
+              <div className="mb-4 flex items-center justify-between">
+                <DialogPrimitive.Title className="font-display text-[16px] font-semibold text-text">
                   {title}
                 </DialogPrimitive.Title>
                 {headerRight}

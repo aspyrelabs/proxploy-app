@@ -25,12 +25,6 @@ export const paletteOverlayClass =
 
 export const palettePanelClass = 'max-w-[92vw] rounded-card border border-line bg-panel p-3'
 
-/** The activity drawer: same modal behaviour, docked to the right edge. */
-export const sheetOverlayClass = 'fixed inset-0 z-20 bg-scrim'
-
-export const sheetPanelClass =
-  'fixed inset-y-0 right-0 z-20 flex max-w-full flex-col border-l border-line bg-panel-2'
-
 /**
  * Every call site renders its dialog conditionally and unmounts it to close,
  * so the naive wiring is onOpenChange -> onClose -> parent unmounts us. That

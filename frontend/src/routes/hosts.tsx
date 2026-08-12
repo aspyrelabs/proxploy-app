@@ -57,7 +57,7 @@ export function UpdateAllButton() {
         return
       }
       toast.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
-                    + 'follow them in the activity drawer.')
+                    + 'follow them in Recent activity below.')
     },
     onError: () => toast.error('Could not start the updates, try again.'),
     onSettled: () => {

@@ -106,9 +106,9 @@ prototype behavior where card buttons deep-link into a specific tab.
 | `/onboarding` | First-run wizard | Same centered-card stage, stepper of small `.badge` pills across the top. Steps: 1) Create admin account, 2) Add first Proxmox host (address + API token, "Test connection" ghost button showing scope check results in a mini `.term` panel), 3) Authorize install key (shows the generated ed25519 **public** key with copy button + the one command to authorize it on the node, honest copy about what SSH root means; brief §8), 4) Sync; live progress reusing the job-log terminal panel. Routing guard: `GET /api/v1/meta/onboarding` redirects here until complete. |
 | `/settings/hosts/new` (modal route over Settings) | Add host | Radix Dialog styled as `.card` (`--panel`, `--r` radius): name, address, API token, TLS verify toggle row, optional SSH-key step identical to onboarding step 3. Gated: attempting a 2nd host without `hosts.multi` shows the lock-veil inside the dialog body (exactly the Settings hosts-card treatment). |
 | `/hosts/$hostId/$node` (Overview / Hardware tabs; `/hosts/$hostId` redirects here, to the host's entry node) | Host / node detail | Head pattern shared with the app/VM details: mono node name, `cluster · PVE version` subline (or "standalone"); entry-node-only "Node shell ↗" button that always opens rather than greying out, a toast naming the unmet gate (entitlement or the per-host shell opt-in) when one is shut; "Open Proxmox web UI ↗" link; status pill; amber-underline tabs. **Overview** is two columns from `lg` up and one column below it — the exact breakpoint the rest of this page already had, now applied to its own frame: a 290px `lg:sticky` identity rail (`NodeIdentityRail`, internally scrollable past viewport height) beside a fluid right column, `minmax(0,1fr)` so the track can shrink below its content's intrinsic width instead of refusing to. The rail merges two sources — the poller's snapshot, always present, and the node's own `/status`, on demand and refusable by a narrow token — into usage bars (Load/RAM/Storage/Root, the first and last status-only) above four fact groups (Identity, Processor, Memory & storage, Boot); a group built only from `/status` (Processor, Boot, half of Identity and Memory & storage) renders no heading at all when the node refuses that call, rather than a label over nothing. The right column: the entry node draws three range-scoped `MetricChart` cards (CPU/Memory/Storage, the `host:<id>` series recorded only there); any other node of the cluster gets a note naming and linking to the entry node instead of charts it cannot have. Below either: "Guests on this host (N)" as one `GuestList` merging apps and VMs into a single row shape (kind badge, id, status pill, CPU bar, lifecycle controls, Console button on every row) — VMs show a raw `mem_bytes` figure since `VmRow` carries no total to divide by, while apps show `used / total`. **Hardware** tab: unrelated "Node facts" card, out of this stage's scope. |
-| (global) `/…?drawer=activity` | Job / activity drawer | Right-side sheet (Radix Dialog, 400px, `--panel-2`, border-left `--line`) listing jobs newest-first using the `.fitem` feed row pattern + progress bars for running jobs; clicking a job expands its live SSE log in an embedded `.term` panel. Opened from the topbar and from any "job started" toast. Search-param state so it overlays any page. |
+| (global) notification surface | In-app notifications | Toasts (sonner) are the only in-app notification surface — there is no overlay drawer. Every `job`/`alert` SSE event becomes a toast with its own close button, plus a `ClearAllToasts` "Clear all (N)" control that appears once two or more toasts are showing and dismisses them all. `notify.inapp` gates this surface, not the underlying data (§(d)). Activity history persists in `ActivityFeed`, rendered on `/hosts`, not in a modal. |
 | (global) ⌘K | Command palette | cmdk dialog styled like `.search` grown into a panel: fuzzy across apps, VMs, hosts, store entries, and nav actions; rows reuse icon + mono-subtext layout of `.vn`. |
-| `/store/$slug/install` (modal route) | Install flow | Dialog: target-host select (segmented control), resource overrides (cores/RAM/disk, prefilled from catalog defaults), script preview in a `.code` panel with upstream-diff notice, explicit "runs as root on <node>" confirmation line (brief §8 honesty), then Install → toast + activity drawer opens on the new job's live stream. The prototype's instant install-toast pair ("Deploying X to host-01…" → "X installed and running") becomes the real job lifecycle. |
+| `/store/$slug/install` (modal route) | Install flow | Dialog: target-host select (segmented control), resource overrides (cores/RAM/disk, prefilled from catalog defaults), script preview in a `.code` panel with upstream-diff notice, explicit "runs as root on <node>" confirmation line (brief §8 honesty), then Install → toast, with the new job's live log streaming inline in the same dialog (`JobLog`) in place of the form. The prototype's instant install-toast pair ("Deploying X to host-01…" → "X installed and running") becomes the real job lifecycle. |
 | `/apps` (bulk adopt dialog) | Discover & adopt | Radix Dialog reusing the install-flow's card language: one row per discovered CT (CT name/id, host, suggested catalog match or "No match; adopt as generic"), checkbox select-all/individual, confirm → `POST /api/v1/apps/adopt` (bulk) → toast + Apps grid refresh, discovered panel shrinks by the adopted count |
 
 Auth guard: all routes except `/login` and `/onboarding` require a session
@@ -155,12 +155,12 @@ component. shadcn components are copied in and restyled with our tokens
 | `CodePanel` / script editor | `.code`, `#0a0e14`, syntax colors: comments `--text-3`, keywords `--violet`, strings `--green`, vars `--blue` | CodeMirror 6 (MIT) with a token-matched bash highlight theme | Config tab; read-only mode for store script preview |
 | `ToggleRow` | `.setrow` + `.toggle` (42×24, amber-dim on-state, amber knob) | Radix Switch restyled + custom row | Settings |
 | `LockVeil` | `.locked`/`.lockveil`, blurred `pointer-events:none` content behind `rgba(11,15,22,.72)` + `blur(3px)` veil, amber lock icon, title, subtext, "Unlock Pro" `go` button | custom wrapper | See §(e) |
-| `Toast` | `.toast`, `--panel-2` card, colored icon (ok=green check, warn=amber update, err=red alert, info=blue arrow), slide-up `tin` animation, 2.6s auto-dismiss | sonner, fully restyled with tokens | Job-started toasts link to the activity drawer |
-| `ActivityFeed` | `.feed`/`.fitem`, tinted icon tile (`color-mix` 13% of the accent), text with mono `<b>`, mono meta line | custom | Dashboard + activity drawer |
+| `Toast` | `.toast`, `--panel-2` card, colored icon (ok=green check, warn=amber update, err=red alert, info=blue arrow), slide-up `tin` animation, 2.6s auto-dismiss | sonner, fully restyled with tokens | The in-app notification surface: every toast carries a close button (`closeButton` on `<Toaster>`); `ClearAllToasts` dismisses all of them once two or more are showing |
+| `ActivityFeed` | `.feed`/`.fitem`, tinted icon tile (`color-mix` 13% of the accent), text with mono `<b>`, mono meta line | custom | Dashboard + Hosts page — the activity-history surface, now that there is no drawer |
 | `Sparkline` | `.spark` SVG (300×52, gradient area fill fading to 0, 2px line) | uPlot (area+line preset) at prototype dimensions | Network, detail CPU, dashboard |
 | `EmptyState` | `.empty` | custom | |
 | `LivePulse` | `.live` + `.pulse` keyframe glow | custom | "Live · updated Ns ago" bound to last SSE message time |
-| `Dialog` / `Sheet` | (implied) | Radix Dialog styled as `.card` | Install flow, add host, drawer |
+| `Dialog` | (implied) | Radix Dialog styled as `.card` | Install flow, add host. The `sheet` variant (right-docked panel) existed solely for the activity drawer and was removed with it — `variant` is now `'center' \| 'palette'` |
 | `PageHeader` | `.ph` (display-font h1 22px, `.sub`, right slot) | custom | Every page |
 | `SectionHeader` | `.sec-h` (+ pill `.badge`) | custom | |
 
@@ -305,8 +305,8 @@ variable block) is fixed now.
 ## (d) State & streaming binding
 
 Server state lives exclusively in TanStack Query; no client store duplicates
-it (small UI state, drawer open, active filters; lives in URL search
-params, matching the prototype's re-render-from-state approach).
+it (small UI state, active filters; lives in URL search params, matching
+the prototype's re-render-from-state approach).
 
 ### Query resources & polling
 
@@ -326,7 +326,7 @@ honest until reconnect.
 | `['catalog', cat, q]` | `/catalog` | none (staleTime 5 min) | Changes only on refresh job |
 | `['storage']` / `['network']` | | 60 s | |
 | `['backups']` | `/backups` | 60 s | |
-| `['jobs', filters]` | `/jobs` | 10 s while activity drawer open, else none | |
+| `['jobs', 'running-count']` | `/jobs?status=running` | 30 s | Topbar bell badge; unbounded count, independent of any list view |
 | `['alerts','firing']` | `/alerts?state=firing` | 60 s | Health footer |
 | `['metrics', target, metric, range]` | `/metrics/query` | none (SSE-patched) | uPlot series |
 | `['entitlements']` | `/entitlements` | 5 min | See §(e) |
@@ -354,12 +354,15 @@ operations, **patch when the delta is complete, invalidate when it isn't**:
 
 ### Job log streams
 
-The activity drawer / install dialog opens a **second, scoped** EventSource
-on `/jobs/{id}/events/stream`, rendering `line` events into the static-mode
-`TerminalPanel` (auto-scroll with stick-to-bottom detection), `progress` into
-the drawer's progress bar. On disconnect, EventSource resumes from
-`Last-Event-ID`; on terminal `status` the stream closes and the transcript
-query (`/jobs/{id}/events`) becomes the source for re-opens.
+`JobLog` opens a **second, scoped** EventSource on `/jobs/{id}/events/stream`
+(install/uninstall/clone/migrate/restore dialogs, the VM create wizard, and
+the backups/network/VMs routes all mount it once they have a `jobId`),
+rendering `line` and terminal `status` events into the static-mode
+`TerminalPanel` (auto-scroll with stick-to-bottom detection); the stream's
+`progress` event (doc 05 §Streaming 1) has no frontend consumer today. On
+disconnect, EventSource resumes from `Last-Event-ID`; on terminal `status`
+the stream closes and the transcript query (`/jobs/{id}/events`) becomes the
+source for re-opens.
 
 ### Consoles (xterm.js / noVNC)
 

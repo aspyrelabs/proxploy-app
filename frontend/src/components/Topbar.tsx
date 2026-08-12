@@ -6,22 +6,19 @@ import { useEntitlements } from '../api/hooks'
 import { AccountMenu } from './AccountMenu'
 import { api } from '../api/client'
 import type { JobRow } from '../api/jobs'
-import { useActivityDrawer } from './ActivityDrawer'
 import { openCommandPalette } from './CommandPalette'
 import { Link } from '@tanstack/react-router'
 import Logo, { GhostMark } from './Logo'
 
 export function Topbar() {
   const { has } = useEntitlements()
-  const drawer = useActivityDrawer()
   // GET /cluster/activity applies LIMIT 20 to its jobs subquery ordered by
   // created_at desc, so a long-running job older (by creation time) than the
   // 20 most-recently-created jobs would silently drop out of that feed while
   // still running. The bell's count needs to be unbounded, so it runs its own
   // one-shot query against /jobs?status=running instead of riding useActivity
-  // or useJobs({status}), the latter couples fetch-at-all to the drawer's
-  // 10s-while-open poll (doc 06 §d), which this always-mounted bell must not
-  // trigger unconditionally.
+  // or useJobs({status}), which would coincidentally couple this
+  // always-mounted bell to whatever poll interval that hook carries.
   const { data: running } = useQuery({
     queryKey: ['jobs', 'running-count'],
     queryFn: () => api<JobRow[]>('/jobs?status=running'),
@@ -33,10 +30,10 @@ export function Topbar() {
     // offset has to be a number something else can rely on. z-10 is enough to
     // stay above it: a sticky element with z-index:auto paints in stacking
     // step 8, any positive z-index in step 9, and the sidebar is still
-    // z-index:auto. (The activity drawer's sheet is also z-index'd, but that
-    // tie doesn't matter here either — Radix portals it to the end of
-    // document.body, later in tree order, so it paints above this header
-    // regardless of what z-index either one carries.)
+    // z-index:auto. (Radix dialogs are also z-index'd, but that tie doesn't
+    // matter here either — Radix portals them to the end of document.body,
+    // later in tree order, so they paint above this header regardless of
+    // what z-index either one carries.)
     // justify-end is gone with the search lane's arrival: a flex-1 child
     // absorbs every pixel of free space, so there is nothing left to justify.
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
@@ -76,18 +73,20 @@ export function Topbar() {
         </button>
       </div>
       {has('notify.inapp') && (
-        <button
+        <Link
+          to={'/hosts' as never}
           aria-label="Activity"
-          onClick={drawer.toggle}
           className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
         >
           <BellIcon aria-hidden className="h-[18px] w-[18px]" />
           {count > 0 && (
+            // --amber-ink is not a token in tokens.css; this literal predates
+            // this change and is left as-is rather than inventing one.
             <span className="absolute -right-1 -top-1 rounded-full bg-amber px-1 font-mono text-[9px] text-[#20160a]">
               {count}
             </span>
           )}
-        </button>
+        </Link>
       )}
       <TierPill />
       <ThemeToggle />
