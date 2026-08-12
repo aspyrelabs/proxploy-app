@@ -28,8 +28,13 @@ vi.mock('../api/client', () => ({
       if (powerFails) {
         return Promise.reject(new ApiError(502, { error: 'unreachable', detail: 'the node did not answer' }))
       }
-      return Promise.resolve({ upid: 'UPID:pve1:...', is_self: isSelf })
+      const kind = body?.command === 'shutdown' ? 'host.shutdown' : 'host.reboot'
+      return Promise.resolve({
+        job: { id: 42, kind, status: 'queued', target_type: 'host', target_id: 1 },
+        is_self: isSelf,
+      })
     }
+    if (path === '/jobs/42/events') return Promise.resolve([])
     return Promise.resolve(null)
   }),
 }))
@@ -54,7 +59,7 @@ describe('HostPowerDialog', () => {
     expect(await screen.findByText(/reboot pve1/i)).toBeInTheDocument()
   })
 
-  // The gate is the whole safety mechanism here (doc 08 SS9 row 14), and
+  // The gate is the whole safety mechanism here (doc 08 §9 row 14), and
   // "close enough" typing must never pass it.
   it('keeps Confirm disabled on a near miss and sends nothing', async () => {
     wrap('reboot')
@@ -87,12 +92,26 @@ describe('HostPowerDialog', () => {
     expect(call.body).toEqual({ command: 'shutdown', confirm: 'pve1' })
   })
 
-  it('closes and toasts success once the action is sent', async () => {
+  // Reboot/power off now runs as a job (backend/proxploy/api/hosts.py::
+  // power_node), so the dialog follows InstallDialog/UninstallDialog's shape:
+  // it holds the returned job id and mounts JobLog, rather than closing and
+  // firing its own success toast. The job's own SSE event (LiveProvider)
+  // raises the notification card, this dialog would otherwise double it.
+  it('shows the job transcript rather than closing, once the action is sent', async () => {
     const onClose = wrap('reboot')
     fireEvent.change(await screen.findByLabelText(/type pve1 to confirm/i), { target: { value: 'pve1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(toastSuccess).toHaveBeenCalled()
+    await waitFor(() => expect(calls.some((c) => c.path === '/jobs/42/events')).toBe(true))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  it('the Close button in the job view still calls onClose', async () => {
+    const onClose = wrap('reboot')
+    fireEvent.change(await screen.findByLabelText(/type pve1 to confirm/i), { target: { value: 'pve1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('surfaces a failed power call rather than pretending it worked', async () => {
@@ -103,7 +122,7 @@ describe('HostPowerDialog', () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
-  // The whole point of doc 02 SS9 / doc 08 SS1: an operator must never be
+  // The whole point of doc 02 §9 / doc 08 §1: an operator must never be
   // surprised by this. The warning has to be visible BEFORE Confirm is even
   // reachable, not discovered only after the node goes down.
   it('names this as Proxploy\'s own node and states the cost, when it is self', async () => {
@@ -125,11 +144,12 @@ describe('HostPowerDialog', () => {
 
   it('still lets a confirmed self action through -- the gate is a backstop, not a refusal', async () => {
     isSelf = true
-    const onClose = wrap('shutdown')
+    wrap('shutdown')
     fireEvent.change(await screen.findByLabelText(/type pve1 to confirm/i), { target: { value: 'pve1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith('/power'))).toBe(true))
     const call = calls.find((c) => c.path.endsWith('/power'))!
     expect(call.body).toEqual({ command: 'shutdown', confirm: 'pve1' })
+    await waitFor(() => expect(calls.some((c) => c.path === '/jobs/42/events')).toBe(true))
   })
 })

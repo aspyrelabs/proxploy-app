@@ -67,6 +67,45 @@ def test_await_task_logs_the_upid_drains_the_log_and_returns_the_status(tmp_path
     assert out.progress == 100
 
 
+def test_report_progress_false_never_calls_ctx_progress(tmp_path, monkeypatch):
+    """services/guestjobs.py::run_host_power passes report_progress=False: a
+    node reboot/power-off task finishing tells you Proxmox accepted the
+    command, not that the node has actually finished rebooting or coming back
+    up, so a percentage here would claim certainty this job does not have.
+
+    The polling/logging/exitstatus behaviour must stay identical either way,
+    only the two ctx.progress() calls are skipped.
+    """
+    from proxploy.jobs import backend as jobs_backend
+
+    calls = []
+    orig = jobs_backend.JobContext.progress
+
+    def spy(self, pct):
+        calls.append(pct)
+        return orig(self, pct)
+
+    monkeypatch.setattr(jobs_backend.JobContext, "progress", spy)
+    fake = FakePVE(running_ticks=2)
+
+    async def body(ctx, client, upid):
+        status = await await_task(ctx, client, "pve1", upid, poll_s=0.01,
+                                  report_progress=False)
+        assert status["exitstatus"] == "OK"
+        return {"upid": upid}
+
+    out = _run_probe(tmp_path, fake, body=body)
+    assert out.status == "succeeded", out.error
+    assert calls == []  # never reported a percentage while the job ran
+    # JobBackend._finish stamps every succeeded job's progress_pct to 100 on
+    # its own, a terminal invariant every job kind shares regardless of what
+    # it reported while running, not a progress call this handler made.
+    assert out.progress == 100
+    [upid] = fake.task_lines.keys()
+    messages = [m for m, _ in out.events]
+    assert messages[0] == f"proxmox task {upid}"  # logging is unaffected
+
+
 def test_await_task_fails_closed_on_a_missing_exitstatus(tmp_path):
     """A stopped task with no exitstatus is an UNKNOWN outcome, not a success."""
     fake = FakePVE(task_exit=None)

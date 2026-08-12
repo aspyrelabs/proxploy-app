@@ -63,6 +63,55 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
 HANDLERS["network.apply"] = run_network_apply
 
 
+async def run_host_power(ctx: JobContext, params: dict) -> dict:
+    """Reboot or power off a Proxmox NODE (host actions menu, doc 02 §9,
+    doc 08 §1 and §9 row 14).
+
+    The typed-confirmation gate, including the self-guard warning that the
+    target can be the node Proxploy itself runs on, lives entirely at the API
+    layer (api/hosts.py::power_node); by the time this job runs the operator
+    has already typed the node's name back.
+
+    If the node this runs on turns out to be the one Proxploy itself is on,
+    the job engine dies mid-poll along with everything else on that machine:
+    there is no in-process way to catch that, the whole process disappears
+    with no chance to write a terminal row. Nothing here needs to handle it.
+    JobBackend.sweep_orphans already marks any job still `queued`/`running`
+    as `interrupted` on the next boot, the same as an ordinary ungraceful
+    restart catches any other job mid-flight; a row stuck showing `running`
+    forever would be its own kind of lie, and this needs no special case to
+    avoid that, the existing sweep already covers it.
+
+    No percentage progress is reported (`report_progress=False`): the only
+    thing this job can measure is whether Proxmox accepted the command and
+    the issuing task finished, which usually happens in well under a second,
+    long before the node itself has actually gone anywhere. That says
+    nothing about whether the node has finished rebooting or come back up,
+    so reporting a percentage (even a 10 -> 100 jump) would claim more
+    certainty than this job actually has.
+    """
+    app = ctx.backend.app
+    host_id = int(params["host_id"])
+    node = str(params["node"])
+    command = str(params["command"])
+    client, host_name = await asyncio.to_thread(_resolve_host, app, host_id)
+    verb = "rebooting" if command == "reboot" else "powering off"
+    ctx.log(f"{verb} node {node} ({host_name})")
+    upid = await asyncio.to_thread(client.node_power, node, command)
+    status = await await_task(ctx, client, node, upid, report_progress=False,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
+    ctx.log(f"{node} accepted the {command} command; whether it actually "
+            f"{'reboots' if command == 'reboot' else 'powers off'} is not "
+            f"tracked here")
+    app.state.bus.publish("resource", {"type": "host", "id": host_id, "change": "power"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "node": node,
+            "host_id": host_id, "command": command}
+
+
+HANDLERS["host.reboot"] = run_host_power
+HANDLERS["host.shutdown"] = run_host_power
+
+
 def _vm_target(app, vm_id: int):
     """Blocking: vms.id -> (client, node, vmid, name, host_id). Runs in a thread.
 

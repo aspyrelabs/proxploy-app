@@ -5,9 +5,19 @@ New surface, no plan ever added it. Proxmox exposes one call for both,
 POST /nodes/{node}/status?command=reboot|shutdown; Proxploy gates it far
 harder than a guest lifecycle action because it can take the whole node
 down, and possibly Proxploy's own recovery path with it.
+
+Both actions run through the job engine now (same reasoning as every other
+destructive PVE call: a job leaves a transcript in `job_events` and shows up
+in the bell popover via GET /jobs, a synchronous 200 with a bare UPID does
+not). The typed-confirmation gate and the self-guard warning still run
+BEFORE anything is enqueued, at the API layer, and nothing about them
+changed; only what happens after confirmation moved onto the job engine.
 """
+import asyncio
 import json
 
+from proxploy.jobs import TERMINAL
+from proxploy.models import Job
 from proxploy.services.settings import set_setting
 
 
@@ -41,7 +51,8 @@ def test_an_unknown_host_is_404(tmp_path, bootstrap_admin, csrf_header):
 
 
 def test_reboot_requires_the_node_name_typed_back(tmp_path, bootstrap_admin, csrf_header):
-    """No confirm at all: refused, and nothing was sent to Proxmox."""
+    """No confirm at all: refused, and nothing was sent to Proxmox, and no job
+    was even created."""
     app, c, fake, hid = _app(tmp_path)
     bootstrap_admin(c)
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
@@ -51,29 +62,42 @@ def test_reboot_requires_the_node_name_typed_back(tmp_path, bootstrap_admin, csr
     assert body["error"] == "confirm_required"
     assert body["confirm_phrase"] == "pve1"
     assert fake.node_power_calls == []
+    with app.state.sessionmaker() as db:
+        assert db.query(Job).count() == 0
 
 
 def test_reboot_is_refused_on_a_near_miss_confirm(tmp_path, bootstrap_admin, csrf_header):
+    """The gate is the whole safety mechanism: "close enough" must never pass
+    it, and must never enqueue a job either."""
     app, c, fake, hid = _app(tmp_path)
     bootstrap_admin(c)
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "reboot", "confirm": "pve1 "}, headers=csrf_header(c))
     assert r.status_code == 409
     assert fake.node_power_calls == []
+    with app.state.sessionmaker() as db:
+        assert db.query(Job).count() == 0
 
 
-def test_reboot_calls_proxmox_with_the_reboot_command_once_confirmed(
+def test_reboot_enqueues_a_job_rather_than_acting_synchronously(
         tmp_path, bootstrap_admin, csrf_header):
+    """The whole point of this change: a 202 and a job row, not a synchronous
+    200 with a bare UPID and no transcript."""
     app, c, fake, hid = _app(tmp_path)
     bootstrap_admin(c)
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))
-    assert r.status_code == 200, r.text
-    assert r.json()["is_self"] is False
-    assert fake.node_power_calls == [("pve1", "reboot")]
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["is_self"] is False
+    job = body["job"]
+    assert job["kind"] == "host.reboot"
+    assert job["target_type"] == "host" and job["target_id"] == hid
+    with app.state.sessionmaker() as db:
+        assert db.query(Job).count() == 1
 
 
-def test_power_off_calls_proxmox_with_the_shutdown_command(
+def test_power_off_enqueues_a_job_with_the_shutdown_command(
         tmp_path, bootstrap_admin, csrf_header):
     """Proxmox's own node-status verb for "power off" is `shutdown` (a clean
     ACPI power-down), never `stop`, which is a guest-only lifecycle verb."""
@@ -81,8 +105,194 @@ def test_power_off_calls_proxmox_with_the_shutdown_command(
     bootstrap_admin(c)
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "shutdown", "confirm": "pve1"}, headers=csrf_header(c))
-    assert r.status_code == 200, r.text
-    assert fake.node_power_calls == [("pve1", "shutdown")]
+    assert r.status_code == 202, r.text
+    assert r.json()["job"]["kind"] == "host.shutdown"
+
+
+def test_reboot_job_actually_reboots_the_node_and_reaches_a_terminal_status(tmp_path):
+    """Handler-level: the job really calls Proxmox with the right command and
+    the right node, drains the task log, and settles `succeeded`."""
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401  (registers host.reboot)
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.reboot", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1", "command": "reboot"}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "succeeded", job.error
+            assert job.result["exitstatus"] == "OK"
+            assert job.result["node"] == "pve1"
+            from proxploy.models import JobEvent
+            messages = [e.message for e in db.query(JobEvent)
+                       .filter_by(job_id=job_id).order_by(JobEvent.seq)]
+            assert any("rebooting node pve1" in m for m in messages)
+        assert fake.node_power_calls == [("pve1", "reboot")]
+
+    asyncio.run(run())
+
+
+def test_power_off_job_calls_proxmox_with_shutdown_and_succeeds(tmp_path):
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401  (registers host.shutdown)
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.shutdown", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1", "command": "shutdown"}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+        assert fake.node_power_calls == [("pve1", "shutdown")]
+
+    asyncio.run(run())
+
+
+def test_reboot_job_reports_no_fake_progress(tmp_path, monkeypatch):
+    """Do not fake it: a reboot has no honest percentage, so the real handler
+    must never call ctx.progress while it runs (services/guestjobs.py::
+    run_host_power passes report_progress=False through to pvetask.await_task).
+    """
+    from proxploy.jobs import JobBackend
+    from proxploy.jobs import backend as jobs_backend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        calls = []
+        orig = jobs_backend.JobContext.progress
+
+        def spy(self, pct):
+            calls.append(pct)
+            return orig(self, pct)
+
+        monkeypatch.setattr(jobs_backend.JobContext, "progress", spy)
+
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.reboot", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1", "command": "reboot"}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+        assert calls == []
+
+    asyncio.run(run())
+
+
+def test_a_proxmox_error_fails_the_job_rather_than_ending_the_request(tmp_path):
+    """The route now enqueues before Proxmox is ever called; an unreachable
+    node surfaces as a failed job, not an immediate 502 (same shape as
+    services/guestjobs.py::run_network_apply, api/network.py::apply_network)."""
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        fake = FakePVE(fail=True)
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.reboot", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1", "command": "reboot"}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "failed"
+
+    asyncio.run(run())
+
+
+def test_a_host_power_job_stuck_running_is_marked_interrupted_on_restart(tmp_path):
+    """The case this design has to answer: if the job runs on the node it is
+    powering off, the job engine dies with it mid-poll, no in-process code
+    ever runs to write a terminal row. This is not special-cased in the
+    handler; it relies on the SAME orphan sweep every job kind already gets
+    at boot (jobs/backend.py::sweep_orphans), which marks any row still
+    `queued`/`running` `interrupted` and never resumes it. Proven directly
+    here: a `host.shutdown` row left `running` (simulating the process having
+    died mid-job) is swept to a real terminal status on the next start."""
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app, seed_host_row
+
+    async def run():
+        app = make_job_app(tmp_path)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            job = Job(kind="host.shutdown", status="running", target_type="host",
+                      target_id=h.id,
+                      params={"host_id": h.id, "node": "pve1", "command": "shutdown"})
+            db.add(job)
+            db.commit()
+            job_id = job.id
+        backend = JobBackend(app)
+        n = backend.sweep_orphans()
+        assert n == 1
+        # Drain the fire-and-forget notify task before the loop closes, same
+        # hermetic-teardown reasoning as test_job_backend.py's own sweep test.
+        for _ in range(50):
+            if not backend._side:
+                break
+            await asyncio.sleep(0.05)
+        with app.state.sessionmaker() as db:
+            row = db.get(Job, job_id)
+            assert row.status == "interrupted"
+            assert row.status in TERMINAL
+            assert row.finished_at is not None
+
+    asyncio.run(run())
 
 
 def test_an_unknown_command_is_a_422(tmp_path, bootstrap_admin, csrf_header):
@@ -91,14 +301,6 @@ def test_an_unknown_command_is_a_422(tmp_path, bootstrap_admin, csrf_header):
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "stop", "confirm": "pve1"}, headers=csrf_header(c))
     assert r.status_code == 422
-
-
-def test_a_proxmox_error_is_a_502_not_a_500(tmp_path, bootstrap_admin, csrf_header):
-    app, c, fake, hid = _app(tmp_path, fail=True)
-    bootstrap_admin(c)
-    r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
-               json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))
-    assert r.status_code == 502
 
 
 def test_power_is_owner_gated(tmp_path, bootstrap_admin, csrf_header):
@@ -123,13 +325,15 @@ def test_reboot_writes_an_audit_event(tmp_path, bootstrap_admin, csrf_header):
 
     app, c, fake, hid = _app(tmp_path)
     bootstrap_admin(c)
-    c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
-          json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))
+    r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
+              json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))
+    job_id = r.json()["job"]["id"]
     with app.state.sessionmaker() as db:
         row = db.query(AuditEvent).filter_by(action="host.reboot").one()
         assert row.target_type == "host" and row.target_id == hid
         assert row.result == "ok"
         assert row.params["node"] == "pve1"
+        assert row.job_id == job_id
 
 
 def test_a_denied_confirm_is_still_audited(tmp_path, bootstrap_admin, csrf_header):
@@ -165,16 +369,19 @@ def test_the_confirm_gate_names_the_self_warning_before_the_action_runs(
 
 def test_confirmed_self_power_off_still_goes_through(tmp_path, bootstrap_admin, csrf_header):
     """Doc 08 SS9 row 14: self-management is a typed-confirmation backstop,
-    not a hard refusal -- an operator who really means it can still do it."""
+    not a hard refusal -- an operator who really means it can still do it.
+    The gate still runs before anything is enqueued; only what happens after
+    confirmation (a synchronous PVE call) moved onto the job engine."""
     app, c, fake, hid = _app(tmp_path)
     with app.state.sessionmaker() as db:
         set_setting(db, "self.host_id", hid)
     bootstrap_admin(c)
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "shutdown", "confirm": "pve1"}, headers=csrf_header(c))
-    assert r.status_code == 200, r.text
-    assert r.json()["is_self"] is True
-    assert fake.node_power_calls == [("pve1", "shutdown")]
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["is_self"] is True
+    assert body["job"]["kind"] == "host.shutdown"
 
 
 def test_a_sibling_node_of_the_same_cluster_host_is_not_flagged_self(

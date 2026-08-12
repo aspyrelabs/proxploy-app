@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import authorize, get_db, scope_host
+from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, HostCredential, Team, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
@@ -598,7 +599,7 @@ class NodePowerIn(BaseModel):
         return v
 
 
-@router.post("/{host_id}/nodes/{node}/power")
+@router.post("/{host_id}/nodes/{node}/power", status_code=202)
 def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
                db=Depends(get_db), user: User = Depends(_power)):
     """Reboot or power off a Proxmox NODE, not a guest (doc 02 §9, doc 08 §1
@@ -610,6 +611,13 @@ def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
     field lets the confirm dialog say so explicitly BEFORE the operator types
     anything, but the server enforces the same gate regardless of what the
     client already showed, since detection can miss.
+
+    The actual PVE call runs as a job (services/guestjobs.py::run_host_power),
+    the same reasoning as every other destructive PVE action: a synchronous
+    200 with a bare UPID left this with no transcript in `job_events` and
+    nothing to show in the bell popover (GET /jobs), unlike every other
+    action in the product. The confirmation gate above still runs BEFORE
+    anything is enqueued and is unchanged by the move.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -633,18 +641,13 @@ def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
                                   "confirm_phrase": node, "is_self": self_node,
                                   "detail": detail})
 
-    try:
-        upid = client_for_host(request.app, db, h).node_power(node, body.command)
-    except ProxmoxError as e:
-        write_audit(db, actor_type="user", actor_id=user.id, action=action,
-                    target_type="host", target_id=h.id, result="error",
-                    params={"node": node, "is_self": self_node}, ip=ip)
-        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
-
-    write_audit(db, actor_type="user", actor_id=user.id, action=action,
-                target_type="host", target_id=h.id,
-                params={"node": node, "is_self": self_node, "upid": upid}, ip=ip)
-    return {"upid": upid, "is_self": self_node}
+    out = enqueue_and_audit(request, db, user, kind=action, target_type="host",
+                            target_id=h.id,
+                            params={"host_id": h.id, "node": node,
+                                    "command": body.command, "is_self": self_node},
+                            action=action)
+    out["is_self"] = self_node
+    return out
 
 
 # The high byte of PVE's raw PCI class code is the PCI-SIG base class, i.e.

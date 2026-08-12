@@ -29,14 +29,24 @@ TASK_TIMEOUT_S = 300.0
 
 async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: str, *,
                      timeout_s: float = TASK_TIMEOUT_S, poll_s: float = TASK_POLL_S,
-                     start_pct: int = 10, end_pct: int = 100) -> dict:
+                     start_pct: int = 10, end_pct: int = 100,
+                     report_progress: bool = True) -> dict:
     """Log the UPID, poll it to completion, stream its task log into the job.
 
     Returns the final task-status dict (`{status, exitstatus, ...}`). Raises
     JobFailed on timeout or on any exitstatus other than "OK".
+
+    `report_progress=False` skips both ctx.progress() calls below for a caller
+    with no honest percentage to report (services/guestjobs.py::run_host_power:
+    a node reboot/power-off task finishing tells you Proxmox accepted the
+    command, not that the node has actually finished rebooting or coming back
+    up, so a percentage here would claim certainty the job does not have).
+    The polling, logging and exitstatus handling stay identical either way;
+    every other caller keeps reporting by default.
     """
     ctx.log(f"proxmox task {upid}")
-    ctx.progress(start_pct)
+    if report_progress:
+        ctx.progress(start_pct)
 
     seen = 0
     deadline = asyncio.get_running_loop().time() + timeout_s
@@ -79,5 +89,6 @@ async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: st
         reason = exitstatus if exitstatus else "no exitstatus reported"
         raise JobFailed(f"proxmox task {upid} failed: {reason}")
 
-    ctx.progress(end_pct)
+    if report_progress:
+        ctx.progress(end_pct)
     return status
