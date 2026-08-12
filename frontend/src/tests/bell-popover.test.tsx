@@ -38,7 +38,7 @@ const JOBS: JobRow[] = [
   },
 ]
 
-let jobsResult: 'ok' | 'empty' | 'error' = 'ok'
+let jobsResult: 'ok' | 'empty' | 'error' | 'many' = 'ok'
 let cancelResult: 'ok' | 'forbidden' | 'conflict' = 'ok'
 let jobEventsError = false
 const cancelCalls: Array<{ path: string; method?: string }> = []
@@ -66,6 +66,11 @@ vi.mock('../api/client', () => ({
     if (path === '/jobs') {
       if (jobsResult === 'error') return Promise.reject(new Error('boom'))
       if (jobsResult === 'empty') return Promise.resolve([])
+      if (jobsResult === 'many') {
+        return Promise.resolve(Array.from({ length: 17 }, (_, i) => ({
+          ...JOBS[1], id: 100 + i, kind: `bulk.job${i}`,
+        })))
+      }
       return Promise.resolve(JOBS)
     }
     return Promise.resolve(null)
@@ -148,6 +153,34 @@ describe('BellPopover', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
     await waitFor(() =>
       expect(screen.getAllByRole('alert')).toHaveLength(before - 1))
+  })
+
+  // 15 at a time with no scrollbar: the backlog drains through the x, so
+  // dismissing one is what reveals the next.
+  it('shows at most 15 cards, and reveals the next when one is dismissed', async () => {
+    jobsResult = 'many'
+    wrap()
+    await openBell()
+    await screen.findByText('bulk.job0 #100')
+    expect(screen.getAllByRole('alert')).toHaveLength(15)
+    // #115 is the 16th, so it is queued behind the visible fifteen.
+    expect(screen.queryByText('bulk.job15 #115')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
+
+    await waitFor(() => expect(screen.getByText('bulk.job15 #115')).toBeInTheDocument())
+    expect(screen.getAllByRole('alert')).toHaveLength(15)
+  })
+
+  // A failure's reason is the message, and must not be clamped away.
+  it('shows the full error text and the job detail, not just a heading', async () => {
+    wrap()
+    await openBell()
+    expect(await screen.findByText('disk full: retry failed')).toBeInTheDocument()
+    // Three cards, so three Status rows — the point is that the detail is
+    // there at all, not that it is unique.
+    expect(screen.getAllByText('Status')).toHaveLength(3)
+    expect(screen.getAllByText('failed').length).toBeGreaterThan(0)
   })
 
   it('closes on Escape', async () => {

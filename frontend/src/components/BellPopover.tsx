@@ -6,6 +6,9 @@ import { api } from '../api/client'
 import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
 import { ago } from './activityDisplay'
+
+/** How many cards are on screen at once. */
+const VISIBLE = 15
 import { QueryState } from './QueryState'
 import { NotificationCard } from './ui/notification-card'
 import type { NotificationSeverity } from './ui/notification-card'
@@ -25,12 +28,46 @@ function severityOf(status: string): NotificationSeverity {
   return 'info'
 }
 
-function describe(job: JobRow): string {
-  const where = `${job.target_type ?? 'system'}${job.target_id != null ? ` ${job.target_id}` : ''}`
-  // A failure's reason is the whole point of showing it; the target and age
-  // are context that follows it.
-  return job.error ? `${job.error} — ${where} · ${ago(job.created_at)}`
-                   : `${where} · ${ago(job.created_at)}`
+/** The message. A failure's reason is the message; anything else states what
+ *  happened in a sentence rather than making the reader infer it from a kind
+ *  string. */
+function messageOf(job: JobRow): string {
+  if (job.error) return job.error
+  const where = job.target_type
+    ? `${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`
+    : 'this cluster'
+  if (job.status === 'succeeded') return `Finished on ${where}.`
+  if (job.status === 'canceled') return `Canceled before it finished on ${where}.`
+  if (job.status === 'interrupted') return `Interrupted on ${where}; it may not have completed.`
+  if (job.status === 'queued') return `Queued for ${where}, not started yet.`
+  return `Running on ${where}.`
+}
+
+function duration(job: JobRow): string | null {
+  if (!job.started_at || !job.finished_at) return null
+  const ms = new Date(job.finished_at).getTime() - new Date(job.started_at).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  return ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s`
+                                             : `${Math.round(ms / 60_000)}m`
+}
+
+/** Everything the job row actually knows, rather than the one line it used to
+ *  show. Pairs with no value are dropped so a sparse job does not render a
+ *  column of "unknown". */
+function metaOf(job: JobRow): [string, string][] {
+  const pairs: [string, string][] = [['Status', job.status]]
+  if (job.target_type) {
+    pairs.push(['Target', `${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`])
+  }
+  if (job.progress_pct != null && job.status === 'running') {
+    pairs.push(['Progress', `${job.progress_pct}%`])
+  }
+  pairs.push(['Started', job.started_at ? ago(job.started_at) : `created ${ago(job.created_at)}`])
+  const took = duration(job)
+  if (took) pairs.push(['Took', took])
+  if (job.requested_by != null) pairs.push(['Requested by', String(job.requested_by)])
+  if (job.schedule_id != null) pairs.push(['Schedule', `#${job.schedule_id}`])
+  return pairs
 }
 
 /**
@@ -95,7 +132,7 @@ export function BellPopover() {
         <PopoverPrimitive.Content
           align="end"
           sideOffset={8}
-          className="z-30 flex max-h-[70vh] w-[372px] max-w-[92vw] flex-col gap-2 overflow-y-auto bg-transparent p-0"
+          className="z-30 flex w-[400px] max-w-[92vw] flex-col gap-2 bg-transparent p-0"
         >
           <QueryState query={jobsQuery}
                       emptyTitle="Nothing to report."
@@ -104,12 +141,16 @@ export function BellPopover() {
                       errorNote="Proxploy could not reach the backend.">
             {(jobs) => (
               <>
-                {jobs.filter((j) => !dismissed.includes(j.id)).map((j) => (
+                {/* VISIBLE at a time, and no scrollbar: dismissing one is what
+                    reveals the next, so the backlog drains through the x rather
+                    than through a scroll nobody asked for. */}
+                {jobs.filter((j) => !dismissed.includes(j.id)).slice(0, VISIBLE).map((j) => (
                   <NotificationCard
                     key={j.id}
                     severity={severityOf(j.status)}
                     title={`${j.kind} #${j.id}`}
-                    description={describe(j)}
+                    description={messageOf(j)}
+                    meta={metaOf(j)}
                     onDismiss={() => setDismissed((d) => [...d, j.id])}
                   />
                 ))}

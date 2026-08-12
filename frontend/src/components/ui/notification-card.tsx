@@ -84,25 +84,45 @@ const FILL: Record<NotificationSeverity, string> = {
 }
 
 export function NotificationCard({
-  severity, title, description, onDismiss,
+  severity, title, description, meta, onDismiss,
 }: {
   severity: NotificationSeverity
   title: string
+  /** The message itself. Never clamped: on a failure this is the reason, and
+   *  a reason you cannot read is not a notification. */
   description?: string
+  /** Label/value pairs shown beneath the message — target, timings, who asked
+   *  for it. Rendered as a definition list so the pairing survives a screen
+   *  reader. */
+  meta?: [string, string][]
   onDismiss: () => void
 }) {
   const Icon = ICON[severity]
   return (
     <div role="alert"
-      className={`relative w-[356px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-ctl border bg-panel text-[13px] shadow-[0_8px_24px_rgba(0,0,0,.28)] ${BORDER[severity]}`}
+      className={`relative w-[400px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-ctl border bg-panel text-[13px] shadow-[0_8px_24px_rgba(0,0,0,.28)] ${BORDER[severity]}`}
     >
-      <div className={`grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-0.5 px-3 py-2.5 pr-7 ${FILL[severity]}`}>
+      <div className={`grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-1 px-3 py-2.5 pr-8 ${FILL[severity]}`}>
         <Icon aria-hidden className="h-4 w-4 translate-y-0.5" />
-        <div className="col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight text-text">
+        <div className="col-start-2 font-medium tracking-tight text-text">
           {title}
         </div>
         {description && (
-          <div className="col-start-2 text-text-2">{description}</div>
+          // break-words, no clamp: an error can be a long single token (a path,
+          // a UUID, a command line) and must wrap rather than overflow.
+          <div className="col-start-2 whitespace-pre-wrap break-words text-text-2">
+            {description}
+          </div>
+        )}
+        {meta && meta.length > 0 && (
+          <dl className="col-start-2 mt-0.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t border-line-soft pt-1.5 font-mono text-[11px]">
+            {meta.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="text-text-3">{k}</dt>
+                <dd className="break-words text-text-2">{v}</dd>
+              </div>
+            ))}
+          </dl>
         )}
       </div>
       <button type="button" aria-label="Dismiss" onClick={onDismiss}
