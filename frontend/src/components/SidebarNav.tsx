@@ -1,21 +1,26 @@
 import { Link } from '@tanstack/react-router'
+import {
+  ArchiveBoxIcon, BellAlertIcon, CircleStackIcon, ClipboardDocumentListIcon,
+  Cog6ToothIcon, ComputerDesktopIcon, GlobeAltIcon, ServerStackIcon,
+  ShoppingBagIcon, Squares2X2Icon,
+} from '@heroicons/react/24/outline'
 import { Brand } from './LoginForm'
 import { HealthFooter } from './HealthFooter'
 
 export const NAV = [
   { label: 'Overview', items: [
-    { label: 'Hosts', to: '/hosts' },
-    { label: 'Apps', to: '/apps' },
-    { label: 'App Store', to: '/store' },
-    { label: 'Virtual Machines', to: '/vms' },
+    { label: 'Hosts', to: '/hosts', icon: ServerStackIcon },
+    { label: 'Apps', to: '/apps', icon: Squares2X2Icon },
+    { label: 'App Store', to: '/store', icon: ShoppingBagIcon },
+    { label: 'Virtual Machines', to: '/vms', icon: ComputerDesktopIcon },
   ]},
   { label: 'Infrastructure', items: [
-    { label: 'Storage', to: '/storage' },
-    { label: 'Network', to: '/network' },
-    { label: 'Backups', to: '/backups' },
-    { label: 'Alerts', to: '/alerts' },
-    { label: 'Audit', to: '/audit' },
-    { label: 'Settings', to: '/settings' },
+    { label: 'Storage', to: '/storage', icon: CircleStackIcon },
+    { label: 'Network', to: '/network', icon: GlobeAltIcon },
+    { label: 'Backups', to: '/backups', icon: ArchiveBoxIcon },
+    { label: 'Alerts', to: '/alerts', icon: BellAlertIcon },
+    { label: 'Audit', to: '/audit', icon: ClipboardDocumentListIcon },
+    { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
   ]},
 ] as const
 
@@ -31,8 +36,9 @@ export function SidebarNav() {
               // cast: circular router-tree imports across route files defeat
               // full inference of the nav's `to` union in this TS/router version
               <Link key={item.to} to={item.to as never}
-                className="relative block rounded-tile px-3 py-2 text-[13.5px] text-text-2 hover:bg-panel-2 hover:text-text"
+                className="relative flex items-center gap-3 rounded-tile px-3 py-2 text-[13.5px] text-text-2 hover:bg-panel-2 hover:text-text"
                 activeProps={{ className: 'bg-panel-2 !text-text before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded before:bg-amber' }}>
+                <item.icon aria-hidden className="h-[18px] w-[18px] shrink-0" />
                 {item.label}
               </Link>
             ))}
