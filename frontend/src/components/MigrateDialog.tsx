@@ -45,6 +45,12 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
   const [error, setError] = useState('')
   const [guard, setGuard] = useState<{ phrase: string; detail: string } | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
+  // services/migrate.py's on_progress callback (Task 16's SFTP hop) is
+  // byte-level, the most granular signal in the product, but it only fires
+  // on the transfer strategy; cluster/shared-storage migrations, and every
+  // phase before the first frame arrives on any strategy, leave this null.
+  // Seeded from the job row rather than assumed zero, same as InstallDialog.
+  const [progress, setProgress] = useState<number | null>(null)
 
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
   const targets = (hosts.data ?? []).filter((h) => h.id !== app.host_id)
@@ -77,7 +83,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
     if (targetHostId == null) return
     setError('')
     migrate.mutate({ appId: app.id, targetHostId, confirm }, {
-      onSuccess: (r) => { setGuard(null); setJobId(r.job.id) },
+      onSuccess: (r) => { setGuard(null); setJobId(r.job.id); setProgress(r.job.progress_pct ?? null) },
       onError: (e) => {
         const b = errBody(e)
         if (b?.error === 'self_target') {
@@ -104,6 +110,18 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
 
       {jobId != null ? (
         <div className="mt-4">
+          <div className="mb-3 flex items-center gap-2">
+            {/* Determinate only once a real figure has arrived (progress
+                seeded from the job row, then updated by JobLog's onProgress,
+                the same SSE connection commit 168330d wired for install/
+                update). Indeterminate otherwise, cluster and shared-storage
+                migrations never emit anything finer than pvetask.py's start/
+                end brackets, and even the transfer strategy has nothing to
+                show before its SFTP hop begins, never a zero standing in for
+                a real value. */}
+            <Loading value={progress ?? undefined} label="Migration progress" size={28} />
+            <span className="text-[12.5px] text-text-2">Migrating {app.name}…</span>
+          </div>
           <div className="mb-3 rounded-ctl border border-line-soft bg-elev p-2 text-[12.5px] text-text-2">
             <div>
               est. downtime: {pf?.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
@@ -114,7 +132,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                 : 'not finished yet'}
             </div>
           </div>
-          <JobLog jobId={jobId} />
+          <JobLog jobId={jobId} onProgress={setProgress} />
           <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
         </div>
       ) : (

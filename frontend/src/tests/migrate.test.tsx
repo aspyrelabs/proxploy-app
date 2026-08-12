@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Preflight } from '../api/migrate'
+import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
 const HOSTS = [
   { id: 1, name: 'pve-a', status: 'connected' },
@@ -76,7 +77,7 @@ vi.mock('../api/client', () => {
           }))
         }
         return Promise.resolve({
-          job: { id: 55, kind: 'migrate.app', status: 'queued' },
+          job: { id: 55, kind: 'migrate.app', status: 'queued', progress_pct: null },
           preflight: preflightResponse,
         })
       }
@@ -186,6 +187,32 @@ describe('MigrateDialog', () => {
       expect(migrateCalls[1].body).toEqual({ target_host_id: 2, confirm: 'jellyfin' })
     })
     await waitFor(() => expect(screen.queryByLabelText('Target host')).toBeNull())
+  })
+
+  // Task 16's SFTP hop (services/migrate.py::on_progress) is byte-level, the
+  // most granular signal in the product; it rides JobLog's existing SSE
+  // connection (168330d's onProgress callback) rather than a second stream.
+  it('shows the indeterminate form until the migrate job reports progress, then reflects a live update', async () => {
+    const restore = installFakeEventSource()
+    calls.length = 0
+    preflightResponse = PREFLIGHT_OK
+    migrateRequiresConfirm = false
+    jobRow = { ...jobRow, status: 'running', result: null }
+    await openWithTarget()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Migrate' }))
+    await waitFor(() => expect(screen.queryByLabelText('Target host')).toBeNull())
+
+    // Before the first `progress` frame: the indeterminate ring, never a zero.
+    const ring = screen.getByRole('status')
+    expect(ring).toHaveAttribute('aria-busy', 'true')
+    expect(ring.getAttribute('aria-label')).not.toMatch(/percent/)
+
+    FakeEventSource.last.emit('progress', { pct: 42 })
+    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute(
+      'aria-label', expect.stringContaining('42 percent')))
+
+    restore()
   })
 
   it('shows the completed job\'s measured downtime next to the estimate', async () => {
