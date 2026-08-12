@@ -4,6 +4,8 @@ import {
   InformationCircleIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline'
+import type { ReactNode } from 'react'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { Logs, XIcon } from 'lucide-react'
 import { Button } from './button'
 
@@ -125,16 +127,46 @@ export function NotificationCard({
           </div>
         )}
       </div>
-      <div className="absolute right-2 top-2 flex items-center gap-1">
-        {onViewLog && (
-          <Button size="icon-xs" variant="ghost" aria-label="View log" onClick={onViewLog}>
-            <Logs aria-hidden="true" className="h-3.5 w-3.5" />
-          </Button>
-        )}
-        <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={onDismiss}>
-          <XIcon aria-hidden="true" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      {/* Provider lives INSIDE the card, not in AppShell: these cards render in
+          two places — the bell popover and sonner's toast portal — and a toast
+          has no app-tree ancestor to inherit a provider from. */}
+      <Tooltip.Provider delayDuration={200}>
+        <div className="absolute right-2 top-2 flex items-center gap-1">
+          {onViewLog && (
+            <IconAction label="View log" onClick={onViewLog}>
+              <Logs aria-hidden="true" className="h-3.5 w-3.5" />
+            </IconAction>
+          )}
+          <IconAction label="Dismiss" onClick={onDismiss}>
+            <XIcon aria-hidden="true" className="h-3.5 w-3.5" />
+          </IconAction>
+        </div>
+      </Tooltip.Provider>
     </div>
+  )
+}
+
+/** An icon-only control with its name on hover AND on keyboard focus. The
+ *  aria-label is the accessible name whether or not the tooltip ever opens —
+ *  the tooltip is for sighted pointer users, not a substitute for a name. */
+function IconAction({ label, onClick, children }: {
+  label: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <Button size="icon-xs" variant="ghost" aria-label={label} onClick={onClick}>
+          {children}
+        </Button>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content side="bottom" sideOffset={6}
+          className="z-50 rounded-tile border border-line bg-elev px-2 py-1 text-[12px] text-text shadow-lg">
+          {label}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   )
 }

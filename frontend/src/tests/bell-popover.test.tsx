@@ -229,6 +229,21 @@ describe('BellPopover', () => {
     await waitFor(() => expect(screen.getByText(/reading superblock/)).toBeInTheDocument())
   })
 
+  // Icon-only controls: the aria-label is the accessible name whether or not
+  // the tooltip opens, and the tooltip is what a sighted pointer user gets.
+  it('names both card controls on focus', async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const first = within(cards[0])
+
+    fireEvent.focus(first.getByRole('button', { name: 'View log' }))
+    expect(await screen.findAllByText('View log')).not.toHaveLength(0)
+
+    fireEvent.focus(first.getByRole('button', { name: 'Dismiss' }))
+    expect(await screen.findAllByText('Dismiss')).not.toHaveLength(0)
+  })
+
   it('closes on Escape', async () => {
     wrap()
     await openBell()

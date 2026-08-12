@@ -1,3 +1,4 @@
+import { forwardRef } from 'react'
 import type { ButtonHTMLAttributes } from 'react'
 
 const variants = {
@@ -15,15 +16,21 @@ const sizes = {
   'icon-xs': 'h-6 w-6 p-0',
 } as const
 
-export function Button({ variant = 'primary', size = 'md', className = '', ...props }:
-  ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: keyof typeof variants
-    size?: keyof typeof sizes
-  }) {
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: keyof typeof variants
+  size?: keyof typeof sizes
+}
+
+// forwardRef so Radix's `asChild` triggers (Tooltip, Popover, DropdownMenu)
+// can attach to a Button. Without it the ref lands nowhere and the trigger
+// cannot position or wire aria against the element it is describing.
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'primary', size = 'md', className = '', ...props }, ref) {
   return (
     <button
+      ref={ref}
       className={`inline-flex items-center justify-center gap-2 rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed ${sizes[size]} ${variants[variant]} ${className}`}
       {...props}
     />
   )
-}
+})
