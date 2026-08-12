@@ -29,10 +29,9 @@ export const NAV = [
 export function SidebarNav() {
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
   const toggle = () => {
-    setCollapsed((c) => {
-      setSidebarCollapsed(!c)
-      return !c
-    })
+    const next = !collapsed
+    setSidebarCollapsed(next)
+    setCollapsed(next)
   }
   return (
     <Tooltip.Provider delayDuration={200}>
@@ -64,7 +63,7 @@ export function SidebarNav() {
             </div>
           ))}
         </nav>
-        <HealthFooter />
+        <HealthFooter collapsed={collapsed} />
       </aside>
     </Tooltip.Provider>
   )

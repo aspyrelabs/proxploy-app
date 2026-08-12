@@ -26,9 +26,10 @@ describe('SidebarNav icons', () => {
     for (const item of items) {
       // Not toBeTypeOf('function'): @heroicons/react v2 icons are
       // React.forwardRef components, so typeof is 'object' at runtime even
-      // though they render fine as JSX tags. toBeDefined() still catches
-      // the bug this test exists for (a missing `icon` field).
-      expect(item.icon, `${item.label} has no icon`).toBeDefined()
+      // though they render fine as JSX tags. toBeDefined() would also pass
+      // for a stray string or number, so pin the two shapes an icon
+      // component can actually take instead.
+      expect(['function', 'object']).toContain(typeof item.icon)
     }
   })
 
@@ -81,6 +82,15 @@ describe('SidebarNav collapse', () => {
     // With no visible text, the link itself must carry the name.
     expect(screen.getByRole('link', { name: 'Virtual Machines' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'App Store' })).toBeInTheDocument()
+  })
+
+  it('names the item in a Radix tooltip on focus', async () => {
+    render(<SidebarNav />)
+    toggle(/collapse sidebar/i)
+    const link = screen.getByRole('link', { name: 'Virtual Machines' })
+    fireEvent.focus(link)
+    const tooltip = await screen.findByRole('tooltip')
+    expect(tooltip).toHaveTextContent('Virtual Machines')
   })
 
   it('remembers the choice across a remount', () => {
