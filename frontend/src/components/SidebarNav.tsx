@@ -85,7 +85,12 @@ function NavItem({ item, collapsed }: {
       aria-label={collapsed ? item.label : undefined}
       className={`relative flex items-center gap-3 rounded-tile py-2 text-[13.5px] text-text-2 hover:bg-panel-2 hover:text-text ${collapsed ? 'justify-center px-0' : 'px-3'}`}
       activeProps={{ className: 'bg-panel-2 !text-text before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded before:bg-amber' }}>
-      <Icon name={item.icon} className="shrink-0" />
+      {/* 22 rather than the 18 default: these ten are the app's primary
+          navigation, and they carry the whole meaning of the rail once it is
+          collapsed to icons only. The collapse chevron beside them stays at 18,
+          since it is a control rather than a destination and its row height is
+          tuned to 38px. */}
+      <Icon name={item.icon} size={22} className="shrink-0" />
       {!collapsed && item.label}
     </Link>
   )
