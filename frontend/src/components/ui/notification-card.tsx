@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
@@ -84,7 +85,7 @@ const FILL: Record<NotificationSeverity, string> = {
 }
 
 export function NotificationCard({
-  severity, title, description, footer, onDismiss,
+  severity, title, description, footer, action, onDismiss,
 }: {
   severity: NotificationSeverity
   title: string
@@ -95,6 +96,11 @@ export function NotificationCard({
    *  Deliberately a single line: the full label/value table this replaced
    *  buried the message it was meant to support. */
   footer?: string
+  /** Optional trailing control — ReUI's AlertAction, which was dropped when
+   *  nothing needed it. The bell's cards use it for "View log"; toasts pass
+   *  nothing, because a transient toast is the wrong place to start reading a
+   *  transcript. */
+  action?: ReactNode
   onDismiss: () => void
 }) {
   const Icon = ICON[severity]
@@ -114,6 +120,7 @@ export function NotificationCard({
             {description}
           </div>
         )}
+        {action && <div className="col-start-2 mt-1.5">{action}</div>}
         {footer && (
           <div className="col-start-2 mt-0.5 font-mono text-[11px] text-text-3">
             {footer}

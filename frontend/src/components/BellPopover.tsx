@@ -103,6 +103,9 @@ function useFittingCount(
 
   return count
 }
+import { Dialog } from './ui/dialog'
+import { JobLog } from './JobLog'
+import { Button } from './ui/button'
 import { QueryState } from './QueryState'
 import { NotificationCard } from './ui/notification-card'
 import type { NotificationSeverity } from './ui/notification-card'
@@ -173,6 +176,10 @@ function footerOf(job: JobRow): string {
 export function BellPopover() {
   const [open, setOpen] = useState(false)
   const [dismissed, setDismissed] = useState<number[]>([])
+  // Which job's transcript is open. Deleting the drawer took the only path to
+  // GET /jobs/{id}/events for a job you did not start in this session; this is
+  // that path, without turning the cards back into a list.
+  const [logJob, setLogJob] = useState<JobRow | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
@@ -225,6 +232,7 @@ export function BellPopover() {
   const visible = useFittingCount(listRef, open, undismissedCount)
 
   return (
+    <>
     <PopoverPrimitive.Root
       open={open}
       onOpenChange={setOpen}
@@ -277,6 +285,12 @@ export function BellPopover() {
                     title={`${j.kind} #${j.id}`}
                     description={messageOf(j)}
                     footer={footerOf(j)}
+                    action={
+                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                              onClick={() => setLogJob(j)}>
+                        View log
+                      </Button>
+                    }
                     onDismiss={() => setDismissed((d) => [...d, j.id])}
                   />
                 ))}
@@ -286,5 +300,14 @@ export function BellPopover() {
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+      {logJob && (
+        <Dialog title={`${logJob.kind} #${logJob.id}`}
+                description={logJob.error ?? undefined}
+                width={720}
+                onClose={() => setLogJob(null)}>
+          <JobLog jobId={logJob.id} />
+        </Dialog>
+      )}
+    </>
   )
 }

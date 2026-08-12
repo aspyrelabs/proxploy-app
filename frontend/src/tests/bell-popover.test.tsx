@@ -3,7 +3,7 @@
  *  the replacement: a popover anchored to the topbar bell, reading /jobs
  *  (not /cluster/activity, whose ActivityRow has no `error` field). */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JobRow } from '../api/jobs'
 
@@ -210,6 +210,23 @@ describe('BellPopover', () => {
     // One muted context line per card, not a label/value table: what it
     // touched and how long ago.
     expect(screen.getByText(/vm 3 ·/)).toBeInTheDocument()
+  })
+
+  // Deleting the activity drawer took the only UI path to GET /jobs/{id}/events
+  // for a job you did not start in this session — an endpoint sold behind the
+  // jobs.history / jobs.stream entitlements. This is that path. It was lost
+  // once already, so it gets a test.
+  it('opens any job\'s transcript from its card', async () => {
+    wrap()
+    await openBell()
+    const cards = await screen.findAllByRole('alert')
+    const failed = cards.find((c) => c.textContent?.includes('vm.backup'))!
+    fireEvent.click(within(failed).getByRole('button', { name: /view log/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('vm.backup #12')).toBeInTheDocument()
+    // The archived transcript is fetched for THAT job, not whichever was first.
+    await waitFor(() => expect(screen.getByText(/reading superblock/)).toBeInTheDocument())
   })
 
   it('closes on Escape', async () => {
