@@ -11,6 +11,7 @@ vi.mock('../components/Topbar', () => ({ Topbar: () => <header data-testid="topb
 vi.mock('../components/SidebarNav', () => ({ SidebarNav: () => <aside data-testid="sidebar" /> }))
 vi.mock('../components/ActivityDrawer', () => ({ ActivityDrawer: () => null }))
 vi.mock('../components/CommandPalette', () => ({ CommandPalette: () => null }))
+vi.mock('../components/ClearAllToasts', () => ({ ClearAllToasts: () => null }))
 
 import { AppShell } from '../components/AppShell'
 
