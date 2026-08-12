@@ -43,13 +43,6 @@ class Settings(BaseSettings):
     # operator who wants to send us crashes adds it to
     # /etc/proxploy/proxploy.env deliberately.
     sentry_dsn: str = ""
-    catalog_slugs: list[str] = [
-        "redis", "postgresql", "mysql", "mariadb", "mongodb",
-        "jellyfin", "plex", "immich", "homeassistant", "homebridge", "zigbee2mqtt",
-        "grafana", "prometheus", "uptimekuma", "gitea", "n8n",
-        "pihole", "adguard", "nginxproxymanager", "wireguard",
-        "docker", "paperless-ngx", "vaultwarden", "proxmox-backup-server",
-    ]
     # How old the App Store cache may get before the UI calls it stale (doc 01
     # "staleness indicator"). The catalog.refresh system schedule runs daily at
     # 04:00 UTC, so 48h means "two consecutive refreshes have not landed",

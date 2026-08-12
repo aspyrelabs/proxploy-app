@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
 import { api } from '../api/client'
 import { StoreCard } from '../components/StoreCard'
@@ -16,6 +16,25 @@ vi.mock('../api/client', () => ({ api: vi.fn() }))
 // and throwing. Every test that cares about a response sets it itself, so a
 // clean slate before each is a pure isolation fix, not a behavior change.
 beforeEach(() => { vi.mocked(api).mockReset() })
+
+// The Store grid is virtualized (@tanstack/react-virtual): it sizes its
+// scroll container and measures each row from `offsetWidth`/`offsetHeight`
+// (@tanstack/virtual-core's observeElementRect/measureElement), which jsdom
+// always reports as 0, since it has no real layout engine. Without a
+// generous fixed value the virtualizer would compute an empty visible range
+// and mount nothing at all, the same class of fix time-chart.test.tsx
+// already applies to TimeChart's own container measurement (there via
+// getBoundingClientRect, here via the offset* properties virtual-core reads).
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, value: 2000 })
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, value: 1200 })
+})
+afterEach(() => {
+  if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
+  if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth)
+})
 
 // StorePage reads/writes category+q through router search params. Mock
 // useSearch/useNavigate with a tiny external store (same shape as apps.test.tsx's
@@ -45,7 +64,21 @@ describe('useCatalog', () => {
 
     const { result } = renderHook(() => useCatalog('Databases', 'redis'), { wrapper })
     await waitFor(() => expect(result.current.data).toBeDefined())
-    expect(api).toHaveBeenCalledWith('/catalog?category=Databases&q=redis')
+    // entry_type defaults to "ct": the Store only ever browses LXC apps
+    // (catalog expansion plan: non-LXC entries never appear in the Store).
+    expect(api).toHaveBeenCalledWith('/catalog?category=Databases&q=redis&entry_type=ct')
+  })
+
+  it('requests a different entry_type when asked', async () => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockResolvedValue([])
+    const qc = new QueryClient()
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+
+    const { result } = renderHook(() => useCatalog(undefined, undefined, 'vm'), { wrapper })
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    expect(api).toHaveBeenCalledWith('/catalog?entry_type=vm')
   })
 })
 
@@ -83,7 +116,7 @@ describe('cache invalidation keys', () => {
 })
 
 const REDIS: CatalogRow = {
-  slug: 'redis', name: 'Redis', category: 'Databases', description: null,
+  slug: 'redis', name: 'Redis', category: 'Databases', type: 'ct', description: null,
   icon_url: null, popularity: 42, website: 'https://redis.io/',
   default_cpu: 1, default_ram_mb: 1024, default_disk_gb: 4,
   default_os: 'debian', default_os_version: '13',
@@ -110,6 +143,40 @@ describe('StoreCard', () => {
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
+  })
+
+  it('renders cleanly with just name, type and an initial tile when nothing was scraped', () => {
+    // Scripts are the source of truth; the community-scripts.org scrape is
+    // best-effort decoration only (catalog expansion plan, decision 1). A
+    // card must never look broken just because none of it landed.
+    const bare = { ...REDIS, description: null, icon_url: null, popularity: null,
+      category: null, name: null }
+    render(<StoreCard entry={bare} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByText('redis')).toBeInTheDocument()  // falls back to slug
+    expect(screen.getByText('Uncategorized')).toBeInTheDocument()
+    expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge
+    expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no <img>
+    expect(screen.queryByRole('img')).toBeNull()
+    // still fully interactive despite having nothing scraped
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  it('still shows the Install button while a ct entry has not been classified yet', () => {
+    // installable is tri-state: null means "not yet classified" (decision 2,
+    // lazy classification). The card must not look broken or block install.
+    const unclassified = { ...REDIS, installable: null }
+    render(<StoreCard entry={unclassified} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+    expect(screen.queryByText(/Not installable/)).toBeNull()
+  })
+
+  it('falls back to the initials tile when the scraped logo fails to load', () => {
+    const withLogo = { ...REDIS, icon_url: 'https://example.com/redis.webp' }
+    render(<StoreCard entry={withLogo} onInstall={vi.fn()} installed={false} />)
+    const img = screen.getByRole('img')
+    fireEvent.error(img)
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.getByText('RE')).toBeInTheDocument()
   })
 })
 
@@ -187,13 +254,53 @@ describe('StorePage', () => {
     expect(await screen.findByText('No store entries match your filter.')).toBeInTheDocument()
   })
 
-  it('filters by category chip', async () => {
+  it('filters by category chip, client-side over the one fetched list', async () => {
+    // The Store fetches its ct/ catalog once and filters locally (fast chip
+    // clicks over ~533 rows, no round trip per click), unlike the old
+    // server-filtered design this replaces.
     const { useCatalog } = await import('../api/catalog')
     const mocked = vi.mocked(useCatalog)
-    mocked.mockReturnValue({ data: [REDIS] } as any)
+    const gitea = { ...REDIS, slug: 'gitea', name: 'Gitea', category: 'Dev Tools' }
+    mocked.mockReturnValue({ data: [REDIS, gitea] } as any)
+    mocked.mockClear()  // drop call history from other tests sharing this module-level mock
     withQuery(<StorePage />)
+
+    expect(screen.getByText('Redis')).toBeInTheDocument()
+    expect(screen.getByText('Gitea')).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: 'Databases' }))
-    expect(mocked).toHaveBeenLastCalledWith('Databases', undefined)
+
+    expect(screen.getByText('Redis')).toBeInTheDocument()
+    expect(screen.queryByText('Gitea')).not.toBeInTheDocument()
+    // the chip click never changes what's fetched: every call asked for the
+    // whole ct/ catalog, filtering happened in the browser, not the server
+    for (const call of mocked.mock.calls) {
+      expect(call).toEqual([undefined, undefined, 'ct'])
+    }
+  })
+
+  it('searches by name, client-side', async () => {
+    const { useCatalog } = await import('../api/catalog')
+    const mocked = vi.mocked(useCatalog)
+    const gitea = { ...REDIS, slug: 'gitea', name: 'Gitea', category: 'Dev Tools' }
+    mocked.mockReturnValue({ data: [REDIS, gitea] } as any)
+    withQuery(<StorePage />)
+
+    fireEvent.change(screen.getByPlaceholderText(/search the store/i), { target: { value: 'git' } })
+
+    expect(screen.queryByText('Redis')).not.toBeInTheDocument()
+    expect(screen.getByText('Gitea')).toBeInTheDocument()
+  })
+
+  it('derives category chips from the real data rather than a fixed list', async () => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({
+      data: [REDIS, { ...REDIS, slug: 'haos-vm', category: 'VM Scripts' }],
+    } as any)
+    withQuery(<StorePage />)
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Databases' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'VM Scripts' })).toBeInTheDocument()
   })
 })
 

@@ -247,9 +247,21 @@ class CatalogEntry(TimestampMixin, Base):
     upstream_sha: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[dict | None] = mapped_column(JSON)
     deprecated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    installable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Tri-state on purpose (catalog expansion, see services/catalog.py header
+    # note): None means "discovered but not yet classified", the state every
+    # ct/ row starts in after a refresh. Discovery is 2 GitHub API calls flat
+    # and never fetches a script pair; classification happens lazily, on
+    # card-open or install-attempt, or via the low-priority backlog job.
+    installable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     unsupported_reason: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Which upstream directory this came from: ct/vm/tools-pve/tools-addon/
+    # turnkey, mechanical per the repo's own layout (services/catalog.py's
+    # discover_tree). Only "ct" is ever installable or shown in the Store.
+    entry_type: Mapped[str] = mapped_column(Text, nullable=False, default="ct")
+    # Set only by the best-effort community-scripts.org enrichment pass
+    # (services/community_scripts_scrape.py); None if never enriched.
+    scraped_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 # --- Jobs & scheduling -----------------------------------------------------

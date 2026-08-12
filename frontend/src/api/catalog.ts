@@ -1,26 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 
+// Every non-ct type stays in the catalog table, tagged by type, and never
+// appears in the Store grid (catalog expansion plan, decision: LXC-only
+// Store). "ct" is the only type the Store ever requests.
+export type CatalogEntryType = 'ct' | 'vm' | 'pve' | 'addon' | 'turnkey'
+
 export type CatalogRow = {
-  slug: string; name: string | null; category: string | null
+  slug: string; name: string | null; category: string | null; type: CatalogEntryType
   description: string | null; icon_url: string | null; popularity: number | null
   website: string | null
   default_cpu: number | null; default_ram_mb: number | null; default_disk_gb: number | null
   default_os: string | null; default_os_version: string | null
-  installable: boolean; unsupported_reason: string | null
+  // Tri-state: null means "discovered, not yet classified" (catalog expansion
+  // plan decision 2 - classification is lazy, on card-open or install-attempt,
+  // or the low-priority background pass, never during discovery/refresh).
+  installable: boolean | null; unsupported_reason: string | null
   synced_at: string | null
 }
 
 export type CatalogEntryDetail = CatalogRow & { raw: { ct_script: string; install_script: string } | null }
 
-export function useCatalog(category?: string, q?: string) {
+export function useCatalog(category?: string, q?: string, entryType: CatalogEntryType = 'ct') {
   return useQuery({
-    queryKey: ['catalog', category, q],
+    queryKey: ['catalog', category, q, entryType],
     staleTime: 5 * 60_000,
     queryFn: () => {
       const p = new URLSearchParams()
       if (category) p.set('category', category)
       if (q) p.set('q', q)
+      if (entryType) p.set('entry_type', entryType)
       const qs = p.toString()
       return api<CatalogRow[]>(qs ? `/catalog?${qs}` : '/catalog')
     },

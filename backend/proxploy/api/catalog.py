@@ -1,5 +1,10 @@
-"""Catalog browse + refresh routes (doc 05 Phase 4). Read routes are viewer-
-level; refresh is admin-gated since it fans out into ~24 GitHub fetches."""
+"""Catalog browse + refresh routes (doc 05 Phase 4; catalog expansion plan,
+.superpowers/sdd/app-store-catalog-plan.md). Read routes are viewer-level;
+refresh is admin-gated. A refresh costs exactly 2 api.github.com calls flat,
+regardless of catalog size (services/catalog.py::run_discovery); per-entry
+script pairs are fetched lazily by ensure_classified, from
+raw.githubusercontent.com (a different host, no GitHub rate limit), the
+moment a card is opened here or an install is attempted."""
 from __future__ import annotations
 
 import re
@@ -11,6 +16,7 @@ from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.models import App, CatalogEntry, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
+from proxploy.services.catalog import ensure_classified
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -33,7 +39,7 @@ _install = authorize("app", "install")
 
 def _serialize(r: CatalogEntry) -> dict:
     return {
-        "slug": r.slug, "name": r.name, "category": r.category,
+        "slug": r.slug, "name": r.name, "category": r.category, "type": r.entry_type,
         "description": r.description, "icon_url": r.icon_url,
         "popularity": r.popularity, "website": r.website,
         "default_cpu": r.default_cpu, "default_ram_mb": r.default_ram_mb,
@@ -47,12 +53,18 @@ def _serialize(r: CatalogEntry) -> dict:
 @router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("store.catalog"))])
 def list_catalog(category: str | None = None, q: str | None = None,
+                 entry_type: str | None = None,
                  db=Depends(get_db), user: User = Depends(_read)):
+    """Backs both the Store grid (always `entry_type=ct`, decision: non-LXC
+    entries never appear there) and, unfiltered, the full catalog table every
+    discovered entry lands in regardless of type."""
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
     if q:
         query = query.filter(CatalogEntry.name.ilike(f"%{q}%"))
+    if entry_type:
+        query = query.filter(CatalogEntry.entry_type == entry_type)
     return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
 
 
@@ -77,8 +89,13 @@ def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_r
     """
     from sqlalchemy import func
 
-    newest = db.query(func.max(CatalogEntry.synced_at)).scalar()
-    total = db.query(func.count(CatalogEntry.id)).scalar() or 0
+    # Scoped to ct/ (the Store's own content): a stale count over the whole
+    # discovered corpus (vm/pve/addon/turnkey included) would mix in entries
+    # the Store never shows and that never need "installable" freshness.
+    ct_entries = db.query(CatalogEntry).filter(CatalogEntry.entry_type == "ct")
+    newest = db.query(func.max(CatalogEntry.synced_at)).filter(
+        CatalogEntry.entry_type == "ct").scalar()
+    total = ct_entries.count()
     stale_after_s = request.app.state.settings.catalog_stale_after_s
     age_s = (utcnow() - newest).total_seconds() if newest else None
     return {
@@ -98,6 +115,17 @@ def get_catalog_entry(slug: str, db=Depends(get_db),
     row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
     if row is None:
         raise HTTPException(404, "not found")
+    # Lazy classification (decision 2): opening a card is one of the two
+    # moments a ct/ entry's script pair gets fetched, never during discovery.
+    # Wrapped so a failed upstream fetch (404, network hiccup, rate limit on
+    # raw.githubusercontent.com) degrades to "not yet classified" rather than
+    # 500ing a card the user is just trying to look at.
+    if row.entry_type == "ct" and row.installable is None:
+        try:
+            ensure_classified(db, slug)
+            db.refresh(row)
+        except Exception:  # noqa: BLE001 - the card must still render
+            pass
     return _serialize(row) | {"raw": row.raw}
 
 
@@ -154,6 +182,19 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     entry = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
     if entry is None:
         raise HTTPException(404, "not found")
+    if entry.entry_type != "ct":
+        raise HTTPException(400, f"not an installable LXC app: {entry.unsupported_reason}")
+    if entry.installable is None:
+        # Lazy classification (decision 2): the second of the two moments a
+        # ct/ entry's script pair gets fetched, on demand, right here, not
+        # during discovery. A fetch failure here is a real 400, not a 500:
+        # the caller asked to install something the server could not verify.
+        try:
+            ensure_classified(db, slug)
+            db.refresh(entry)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(400, "could not verify install feasibility from "
+                                     "upstream; try again or refresh the catalog")
     if not entry.installable:
         raise HTTPException(400, f"not installable: {entry.unsupported_reason}")
     # Pre-flight the (host_id, ctid) uniqueness the DB enforces anyway. Without

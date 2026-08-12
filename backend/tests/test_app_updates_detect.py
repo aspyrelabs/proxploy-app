@@ -139,15 +139,18 @@ def test_catalog_refresh_marks_updates_when_it_finishes(tmp_path, monkeypatch):
             db.commit()
             job_id = job.id
 
-        def fake_ingest(db, slugs):
+        def fake_discovery(db):
             row = db.query(CatalogEntry).filter_by(slug="redis").one()
             row.upstream_sha = "c" * 40           # upstream moved
             db.commit()
-            return {"synced": 1, "failed": [], "upstream_sha": "c" * 40}
+            return {"total": 1, "counts": {"ct": 1}, "upstream_sha": "c" * 40}
 
-        monkeypatch.setattr(catalog, "run_ingest", fake_ingest)
+        monkeypatch.setattr(catalog, "run_discovery", fake_discovery)
+        monkeypatch.setattr(
+            "proxploy.services.community_scripts_scrape.fetch_enrichment",
+            lambda: None)
         ctx = JobContext(app.state.jobs, job_id)
-        out = await catalog.refresh_catalog(ctx, {"slugs": ["redis"]})
+        out = await catalog.refresh_catalog(ctx, {})
         assert out["updates_marked"] == 1
 
         with app.state.sessionmaker() as db:

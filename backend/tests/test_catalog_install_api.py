@@ -107,3 +107,96 @@ def test_install_409s_when_that_host_ctid_is_already_tracked(client, csrf_header
     # ...and no job was enqueued for it
     assert client.get("/api/v1/jobs").json() == [] or all(
         j["kind"] != "app.install" for j in client.get("/api/v1/jobs").json())
+
+
+SHA = "d7bc6b59676456f7a8b3a20f24c3ca589d7fe2f6"
+
+
+def test_install_lazily_classifies_an_unclassified_entry_before_enqueueing(
+        client, csrf_header, bootstrap_admin, monkeypatch):
+    """Decision 2: the second of the two moments a ct/ entry's script pair
+    is fetched (the first is opening its card) is attempting an install."""
+    import httpx
+
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", entry_type="ct", upstream_sha=SHA,
+                            script_path="ct/redis.sh", installable=None))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    def fake_get(url, **kw):
+        if url.endswith(f"/{SHA}/ct/redis.sh"):
+            return httpx.Response(200, text='APP="Redis"\nbuild_container\n')
+        if url.endswith(f"/{SHA}/install/redis-install.sh"):
+            return httpx.Response(200, text='msg_info "ok"\n')
+        return httpx.Response(404)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", fake_get)
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 202, r.text
+    assert r.json()["job"]["kind"] == "app.install"
+
+    with client.app.state.sessionmaker() as db:
+        row = db.query(CatalogEntry).filter_by(slug="redis").one()
+        assert row.installable is True
+
+
+def test_install_400s_when_lazy_classification_cannot_reach_upstream(
+        client, csrf_header, bootstrap_admin, monkeypatch):
+    """Decision 1: the store degrades silently when the scrape fails, but an
+    ACTUAL install attempt that can't verify feasibility is a real, honest
+    400, not a job that starts and fails deep inside SSH."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", entry_type="ct", upstream_sha=SHA,
+                            script_path="ct/redis.sh", installable=None))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    def raises(url, **kw):
+        raise TimeoutError("upstream timed out")
+    monkeypatch.setattr("proxploy.services.catalog._fetch", raises)
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 400
+    assert client.get("/api/v1/jobs").json() == []
+
+
+def test_install_refuses_a_non_ct_entry(client, csrf_header, bootstrap_admin):
+    """A vm/pve/addon/turnkey entry must never be installable through this
+    route, even if somehow requested directly by slug."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="dockge-addon", entry_type="addon", installable=False,
+                            unsupported_reason="add-on: installs into an existing container"))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    r = client.post("/api/v1/catalog/dockge-addon/install",
+                    json={"host_id": host_id, "name": "Dockge", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 400
+    assert "not an installable LXC app" in r.json()["detail"]
