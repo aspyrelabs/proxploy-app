@@ -16,14 +16,10 @@
 import { createServer } from 'node:http'
 import { createReadStream, statSync } from 'node:fs'
 import { extname } from 'node:path'
-import { createRequire } from 'node:module'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const REPO = resolve(HERE, '../../..')
-const require = createRequire(`${REPO}/frontend/package.json`)
-const { chromium } = require('playwright')
+const { chromium } = await import('playwright')
 
 // localhost, NOT 127.0.0.1: Vite 8 binds IPv6 here, so the v4 loopback is
 // refused outright. The backend answers on either.
@@ -150,8 +146,17 @@ function serveDir(dir) {
 }
 
 async function overflow() {
-  const [target, selector = '.rounded-card', sizes = '1280,1920,2560,3840,375'] = args
-  if (!target) { console.error('usage: overflow <path-or-url> [selector] [WxH,W,...]'); process.exit(2) }
+  const flags = args.filter(a => a.startsWith('--'))
+  const positional = args.filter(a => !a.startsWith('--'))
+  const [target, selector = '.rounded-card', sizes = '1280,1920,2560,3840,375'] = positional
+  const strict = flags.includes('--fail-on-overflow')
+  // Percent of viewport height a match may occupy, for a capped panel. Only
+  // checked when asked for, since a card has no such cap.
+  const maxVh = Number(flags.find(f => f.startsWith('--max-vh='))?.split('=')[1] ?? 0)
+  if (!target) {
+    console.error('usage: overflow <path-or-url> [selector] [WxH,W,...] [--fail-on-overflow] [--max-vh=N]')
+    process.exit(2)
+  }
   // A file target serves its own directory and navigates to that file, so a
   // multi-page harness can point at one of its pages.
   let url = target
@@ -205,6 +210,54 @@ async function overflow() {
       await page.close()
     }
     console.log(JSON.stringify(out, null, 2))
+
+    if (strict) {
+      /**
+       * THE GATE. Three conditions, each a real defect rather than a
+       * threshold someone picked:
+       *
+       *  1. overflow > 0. Content did not fit its own fixed box. This is
+       *     binary: either the browser had to hide something or it did not,
+       *     so it needs no tolerance and gets none. It is exactly the 224px
+       *     card bug, which overflowed by 9px.
+       *  2. unequal offsetHeight among matches at one width. A fixed height
+       *     exists to make a row line up; two different numbers mean it
+       *     stopped doing that. Also exact: these elements share one class.
+       *  3. a capped panel taller than its cap, when --max-vh says there is
+       *     one. 1px of tolerance here and ONLY here, because 70vh of an odd
+       *     viewport height is fractional and the browser rounds it.
+       *
+       * Deliberately NOT a slack threshold. Slack is reported so a human can
+       * watch it shrink, but failing at "less than 6px spare" would trip on
+       * an innocent copy change and teach everyone to ignore the gate.
+       */
+      const failures = []
+      for (const [size, v] of Object.entries(out)) {
+        for (const c of v.cards) {
+          if (c.overflow > 0) failures.push(`${size}: ${c.state} overflows by ${c.overflow}px`)
+        }
+        const heights = new Set(v.cards.map(c => c.offsetHeight))
+        if (v.cards.length > 1 && heights.size > 1) {
+          failures.push(`${size}: heights differ across the row: ${[...heights].join(', ')}`)
+        }
+        if (maxVh > 0) {
+          const cap = v.viewport.height * (maxVh / 100)
+          for (const c of v.cards) {
+            if (c.offsetHeight > cap + 1) {
+              failures.push(`${size}: ${c.state} is ${c.offsetHeight}px, over the ${maxVh}vh cap of ${Math.round(cap)}px`)
+            }
+          }
+        }
+        if (v.cards.length === 0) failures.push(`${size}: selector matched nothing`)
+      }
+      if (failures.length) {
+        console.error('\nFAIL: ' + failures.length + ' geometry problem(s)')
+        for (const f of failures) console.error('  - ' + f)
+        process.exitCode = 1
+      } else {
+        console.error('\nok: no overflow, heights equal' + (maxVh ? `, within the ${maxVh}vh cap` : ''))
+      }
+    }
   } finally {
     await browser.close()
     served?.close()

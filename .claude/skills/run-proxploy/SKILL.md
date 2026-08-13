@@ -6,7 +6,7 @@ description: Build, launch, drive, and screenshot the Proxploy dev app (FastAPI 
 Proxploy ships as one product: a FastAPI backend (`backend/`) and a React 19 +
 Vite frontend (`frontend/`). In dev they run as two processes; the frontend
 proxies `/api` to the backend. The agent path is
-`.claude/skills/run-proxploy/driver.mjs`, which drives the running app with
+`frontend/e2e/driver.mjs`, which drives the running app with
 Playwright's Chromium and prints what it found.
 
 **All paths below are relative to the repo root.** Verified on macOS (darwin,
@@ -51,13 +51,24 @@ curl -sS --retry 30 --retry-connrefused http://127.0.0.1:8000/api/v1/meta/onboar
 
 ## Run (agent path) — the driver
 
+Run these **from `frontend/`**. The driver moved out of this skill directory
+into `frontend/e2e/driver.mjs` so CI could depend on it without reaching into
+an assistant's skill folder; it sits in the package that owns Playwright.
+
 ```bash
-node .claude/skills/run-proxploy/driver.mjs smoke
-node .claude/skills/run-proxploy/driver.mjs shot /tmp/pp.png /onboarding
-node .claude/skills/run-proxploy/driver.mjs measure aside 'aside svg' /onboarding
-node .claude/skills/run-proxploy/driver.mjs text /onboarding
+node e2e/driver.mjs smoke
+node e2e/driver.mjs shot /tmp/pp.png /onboarding
+node e2e/driver.mjs measure aside 'aside svg' /onboarding
+node e2e/driver.mjs text /onboarding
 ```
 
+- `overflow <path-or-url> <sel> [WxH,W,…] [--fail-on-overflow] [--max-vh=N]` —
+  real geometry for a fixed-height component. Serves a built page on an
+  ephemeral port (so it needs neither dev server) and reports offsetHeight,
+  scrollHeight, slack and position at each viewport size. With
+  `--fail-on-overflow` it exits non-zero on content that does not fit, on a row
+  whose heights disagree, or on a panel over `--max-vh`. This is what
+  `npm run harness` and the `geometry` CI job run.
 - `smoke` — backend onboarding state, landed URL, title, console errors.
 - `shot <out.png> [path]` — screenshot at 1440×900. **Open the file and look at
   it.** A blank frame is a failed launch, not a pass.

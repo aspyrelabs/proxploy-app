@@ -321,3 +321,114 @@ def test_a_row_with_no_upstream_record_serializes_null_not_false(
         assert row[field] is not False, field
     assert row["architectures"] is None and row["port"] is None
     assert row["script_created"] is None and row["script_updated"] is None
+
+
+# --- the local icon mirror: served from disk, upstream as the fallback ------
+
+UPSTREAM_ICON = "https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/redis.webp"
+WEBP = b"RIFF\x00\x00\x00\x00WEBPVP8 fake-bytes"
+
+
+def _cache_icon(client, slug="redis", filename="redis.webp", body=WEBP,
+                source=UPSTREAM_ICON):
+    from proxploy.services.catalog_icons import icon_dir
+    directory = icon_dir(client.app.state.settings.data_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / filename).write_bytes(body)
+    with client.app.state.sessionmaker() as db:
+        row = db.query(CatalogEntry).filter_by(slug=slug).one()
+        row.icon_cache_path = filename
+        row.icon_cache_source = source
+        db.commit()
+    return directory
+
+
+def test_a_cached_icon_is_served_from_disk_and_icon_url_points_at_us(
+        client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, icon_url=UPSTREAM_ICON)
+    _cache_icon(client)
+
+    row = client.get("/api/v1/catalog").json()[0]
+    assert row["icon_url"] == "/api/v1/catalog/redis/icon"
+
+    r = client.get("/api/v1/catalog/redis/icon")
+    assert r.status_code == 200
+    assert r.content == WEBP
+    assert r.headers["content-type"] == "image/webp"
+    # CC BY 4.0 attribution, on the response that redistributes the file.
+    assert 'rel="license"' in r.headers["link"]
+    assert "creativecommons.org/licenses/by/4.0/" in r.headers["link"]
+
+
+def test_an_uncached_slug_falls_back_to_the_upstream_url_not_a_404_tile(
+        client, csrf_header, bootstrap_admin):
+    """The fallback IS the pre-existing behaviour, so a cold cache renders
+    exactly as the Store did before the mirror existed."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, icon_url=UPSTREAM_ICON)
+
+    row = client.get("/api/v1/catalog").json()[0]
+
+    assert row["icon_url"] == UPSTREAM_ICON
+    # ...and asking for the local one is an honest 404, never a 500.
+    assert client.get("/api/v1/catalog/redis/icon").status_code == 404
+
+
+def test_a_cached_row_whose_file_vanished_404s_rather_than_500ing(
+        client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, icon_url=UPSTREAM_ICON)
+    directory = _cache_icon(client)
+    (directory / "redis.webp").unlink()
+
+    assert client.get("/api/v1/catalog/redis/icon").status_code == 404
+
+
+def test_path_traversal_on_the_icon_route_is_rejected(client, csrf_header,
+                                                      bootstrap_admin):
+    """The slug arrives from the URL, so this route reads files off disk on
+    behalf of an HTTP caller. Closed twice: the slug is an exact-match DB
+    lookup rather than a path component, and the resolved path must sit inside
+    the cache dir before it is opened."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, icon_url=UPSTREAM_ICON)
+    _cache_icon(client)
+    secret = client.app.state.settings.data_dir / "master.key"
+
+    for hostile in ("../../etc/passwd", "..%2F..%2Fetc%2Fpasswd",
+                    "%2e%2e%2f%2e%2e%2fmaster.key", "/etc/passwd",
+                    "....//....//master.key"):
+        r = client.get(f"/api/v1/catalog/{hostile}/icon")
+        assert r.status_code in (404, 307), hostile
+        assert secret.read_bytes() not in r.content, hostile
+
+    # ...and even a corrupted column cannot escape the cache dir, which is the
+    # second lock rather than a restatement of the first.
+    with client.app.state.sessionmaker() as db:
+        db.query(CatalogEntry).filter_by(slug="redis").one().icon_cache_path = \
+            "../master.key"
+        db.commit()
+
+    r = client.get("/api/v1/catalog/redis/icon")
+    assert r.status_code == 404
+    assert secret.read_bytes() not in r.content
+
+
+def test_the_full_catalog_and_by_slug_routes_agree_about_the_icon(
+        client, csrf_header, bootstrap_admin):
+    """_serialize is shared, so a card opened from the grid and a card opened
+    by slug must not disagree about where the icon lives."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, icon_url=UPSTREAM_ICON)
+    _cache_icon(client)
+
+    listed = client.get("/api/v1/catalog").json()[0]
+    single = client.get("/api/v1/catalog/redis").json()
+
+    assert listed["icon_url"] == single["icon_url"] == "/api/v1/catalog/redis/icon"

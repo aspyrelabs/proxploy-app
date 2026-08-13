@@ -273,6 +273,21 @@ class CatalogEntry(TimestampMixin, Base):
     updateable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     privileged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     port: Mapped[int | None] = mapped_column(Integer)
+    # Local icon mirror (services/catalog_icons.py), so the Store renders its
+    # icons with no network at all. `icon_url` keeps upstream's URL, which is
+    # what the sync writes and what the API falls back to; these four record
+    # the cached copy beside it.
+    #
+    # `icon_cache_path` is a BARE FILENAME relative to data_dir/icons, never a
+    # path: it is built from our own slug plus an extension allowlist, and
+    # api/catalog.py re-checks containment before opening it.
+    # `icon_cache_source` is the upstream URL the cached bytes came FROM, and
+    # it is what makes a logo change detectable: when it stops matching
+    # `icon_url`, the file is refetched rather than served forever.
+    icon_cache_path: Mapped[str | None] = mapped_column(Text)
+    icon_cache_source: Mapped[str | None] = mapped_column(Text)
+    icon_cache_etag: Mapped[str | None] = mapped_column(Text)
+    icon_cached_at: Mapped[datetime | None] = mapped_column(DateTime)
     # The evidence behind has_arm, e.g. ["amd64", "arm64"]. Kept alongside the
     # boolean rather than instead of it: the flag is what a chip renders, the
     # list is what an "arm64 only" answer needs, and deriving one from the

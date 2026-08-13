@@ -166,6 +166,17 @@ html[data-theme-transition="active"]::view-transition-new(root) {
   padding: 0;
 }
 
+/* The dialog scroll body (components/ui/overlay.ts's dialogScrollBodyClass)
+   scrolls without showing a bar. Requested for the App Store's app popup.
+   Scoped to that ONE class on purpose: every other scroll surface in the app
+   (the changelog box, terminal panes, log views, tables) keeps its scrollbar,
+   because hiding them app-wide would remove the only cue those surfaces have
+   that there is more to see. Tailwind v4 ships no utility for the WebKit
+   pseudo-element, so it lives here beside the other hand-written rules rather
+   than as an arbitrary style at a call site. */
+.pp-scroll-hidden { scrollbar-width: none; }
+.pp-scroll-hidden::-webkit-scrollbar { display: none; }
+
 /* Material Symbols loads from the Google Fonts CDN (vite.config.ts injects
    the <link>; components/ui/icon.tsx renders each icon's readable ligature
    name, e.g. "settings", as its own text content) rather than being

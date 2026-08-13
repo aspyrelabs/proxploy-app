@@ -465,15 +465,21 @@ async def classify_many(sessionmaker, slugs: list[str], concurrency: int = 8) ->
 # sync (one ~255 KB response against ~1.9 MB) writing one integer column on
 # matched rows instead of a raw JSON snapshot, so it takes roughly a third of
 # what that phase does.
-PCT_DISCOVERED = 40
-PCT_METADATA_SYNCED = 78
-PCT_POPULARITY_SYNCED = 90
-PCT_UPDATES_MARKED = 96
+PCT_DISCOVERED = 38
+PCT_METADATA_SYNCED = 72
+PCT_POPULARITY_SYNCED = 82
+# The icon mirror is the one phase whose cost swings wildly: a cold cache
+# downloads ~550 files, and every sync after that makes zero requests and
+# finishes instantly. Weighted for the cold case, which is the one an operator
+# is actually sitting and watching.
+PCT_ICONS_SYNCED = 92
+PCT_UPDATES_MARKED = 97
 
 
 async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     from proxploy.services.appstore import mark_updates_available
     from proxploy.services.catalog_metadata import sync_metadata
+    from proxploy.services.catalog_icons import sync_icons
     from proxploy.services.catalog_telemetry import sync_popularity
 
     app = ctx.backend.app
@@ -549,6 +555,31 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
                 f"{pop['reason']}", stream="stderr")
     result["popularity"] = pop
     ctx.progress(PCT_POPULARITY_SYNCED)
+
+    # Icons, mirrored into data_dir/icons so the Store renders offline
+    # (services/catalog_icons.py). Runs AFTER the metadata sync because it
+    # consumes the icon_url that sync just wrote, and like every other phase
+    # here it is best effort and double wrapped: a CDN outage leaves every
+    # previously cached file in place and every uncached row falling back to
+    # the upstream URL, which is exactly the behaviour before this existed.
+    def _sync_icons() -> dict:
+        with app.state.sessionmaker() as db:
+            return sync_icons(db, app.state.settings.data_dir)
+
+    try:
+        icons = await asyncio.to_thread(_sync_icons)
+    except Exception as e:  # noqa: BLE001 - icons never fail a refresh
+        icons = {"ok": False, "cached": 0, "unchanged": 0, "skipped": 0,
+                 "failed": 0, "requests": 0, "reason": str(e)}
+    if icons["ok"]:
+        ctx.log(f"icons: {icons['cached']} cached, {icons['unchanged']} unchanged, "
+                f"{icons['skipped']} already current, {icons['failed']} failed "
+                f"({icons['requests']} request(s))")
+    else:
+        ctx.log(f"icon sync skipped, kept the cached files: {icons['reason']}",
+                stream="stderr")
+    result["icons"] = icons
+    ctx.progress(PCT_ICONS_SYNCED)
 
     # A refresh is the ONLY moment `update_available` can change, so it is the
     # only place this has to run: no separate sweep, no separate schedule.

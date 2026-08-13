@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useCatalog, useCatalogStatus, useRefreshCatalog } from '../api/catalog'
+import { useCatalog, useCatalogEntry, useCatalogStatus, useRefreshCatalog } from '../api/catalog'
 import type { CatalogRow } from '../api/catalog'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import type { AppRow } from '../api/hooks'
 import { TERMINAL, useJob } from '../api/jobs'
 import { InstallDialog } from '../components/InstallDialog'
-import { StoreDetailContent } from '../components/StoreDetailContent'
+import { InstallAction, StoreDetailContent } from '../components/StoreDetailContent'
 import { StoreCard } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
@@ -113,6 +113,13 @@ export function StorePage() {
   // The detail popup. Same shape as `installing` above, and deliberately
   // never open at the same time: see the handoff in the Dialog below.
   const [detailSlug, setDetailSlug] = useState<string | null>(null)
+  // The SAME query StoreDetailContent runs, by the same key, so this shares
+  // one cache entry and fires no second request. Reading it here rather than
+  // reusing the grid row matters: opening a card is one of the two moments the
+  // backend classifies a ct entry, so the grid's `installable` can still be
+  // null while the detail's is true. The pinned action has to agree with the
+  // Availability section it sits above.
+  const detailEntry = useCatalogEntry(detailSlug)
   const gridTop = useRef<HTMLDivElement>(null)
   // The Store is LXC-only (catalog expansion plan: non-LXC entries stay in
   // the catalog table, tagged by type, and never render here), so this
@@ -436,11 +443,21 @@ export function StorePage() {
           there was no free space left to centre it in. */}
       {detailSlug && (
         <Dialog title={entryName(entries, detailSlug)} width={936} scrollBody
-                onClose={() => setDetailSlug(null)}>
-          <StoreDetailContent slug={detailSlug} onInstall={(slug) => {
-            setDetailSlug(null)
-            setInstalling(slug)
-          }} />
+                onClose={() => setDetailSlug(null)}
+                headerRight={detailEntry.data && (
+                  <InstallAction entry={detailEntry.data}
+                    installed={installedSlugs.has(detailEntry.data.slug)}
+                    onInstall={(slug) => { setDetailSlug(null); setInstalling(slug) }} />
+                )}>
+          {/* showHeaderAction={false}: the action is pinned in the dialog's
+              title row above, which is outside the scroll body, so it stays
+              visible however far down the body is scrolled. The content's own
+              header would scroll away with everything else. */}
+          <StoreDetailContent slug={detailSlug} showHeaderAction={false}
+            onInstall={(slug) => {
+              setDetailSlug(null)
+              setInstalling(slug)
+            }} />
         </Dialog>
       )}
 

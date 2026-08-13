@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
-import { StoreDetailContent } from '../../src/components/StoreDetailContent'
+import { InstallAction, StoreDetailContent } from '../../src/components/StoreDetailContent'
 import { Dialog } from '../../src/components/ui/dialog'
 import './harness.css'
 
@@ -76,8 +76,13 @@ const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={qc}>
-    <Dialog title="Plex Media Server" width={936} scrollBody onClose={() => {}}>
-      <StoreDetailContent slug="plex" onInstall={() => {}} />
+    {/* Mirrors routes/store.tsx exactly: the action is pinned in the dialog's
+        title row, outside the scroll body, and the content does not render its
+        own. The harness is what proves it stays put while the body scrolls. */}
+    <Dialog title="Plex Media Server" width={936} scrollBody onClose={() => {}}
+      headerRight={<InstallAction entry={{ slug: 'plex', installable: true }}
+        installed={false} onInstall={() => {}} />}>
+      <StoreDetailContent slug="plex" showHeaderAction={false} onInstall={() => {}} />
     </Dialog>
   </QueryClientProvider>,
 )

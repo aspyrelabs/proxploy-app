@@ -191,31 +191,94 @@ describe('StoreDetailPage, a fully covered app', () => {
     expect(document.body.textContent).not.toContain('8/13/2026')
   })
 
-  it('renders the changelog as text, never as HTML', async () => {
-    const hostile = {
-      ...rich,
-      raw: {
-        ...(rich.raw as Record<string, unknown>),
-        metadata: {
-          ...((rich.raw as { metadata: Record<string, unknown> }).metadata),
-          github_data: {
-            version: 'v8.0.1',
-            changelog: '### Fixed\r\n\r\n- <b>bold</b> <img src=x onerror="alert(1)"> gone',
-            github_synced_at: null,
-          },
-        },
+  const withChangelog = (changelog: string) => ({
+    ...rich,
+    raw: {
+      ...(rich.raw as Record<string, unknown>),
+      metadata: {
+        ...((rich.raw as { metadata: Record<string, unknown> }).metadata),
+        github_data: { version: 'v8.0.1', changelog, github_synced_at: null },
       },
-    }
-    const { container } = mount(hostile)
-    // The markup arrives as characters on the page, which is the whole point.
-    expect(await screen.findByText(/<b>bold<\/b>/)).toBeInTheDocument()
-    expect(container.querySelector('b')).toBeNull()
-    expect(container.querySelector('img[src="x"]')).toBeNull()
-    // CRLF is normalised so a pre-wrap block carries no stray carriage
-    // returns, and the markdown itself is left intact and readable.
-    expect(container.textContent).toContain('### Fixed')
+    },
+  })
+
+  it('renders the changelog as markdown, not as literal syntax', async () => {
+    // This used to render the raw characters in a <pre>, so readers saw
+    // "### Fixed" and a bare markdown link. 504 of the 556 store-visible rows
+    // carry a changelog, so that was most of them.
+    const { container } = mount(withChangelog(
+      '### Fixed\r\n\r\n- [issue #558](https://github.com/Bubka/2FAuth/issues/558) crash on startup\r\n- **bold** and `code`'))
+
+    expect(await screen.findByRole('heading', { name: 'Fixed' })).toBeInTheDocument()
+    expect(container.querySelector('li')).not.toBeNull()
+    expect(container.querySelector('strong')?.textContent).toBe('bold')
+    expect(container.querySelector('code')?.textContent).toBe('code')
+    // the syntax itself is gone from the text now that it is structure
+    expect(container.textContent).not.toContain('### Fixed')
+    expect(container.textContent).not.toContain('](https://')
+    // CRLF is still normalised; a stray carriage return breaks the parse
     expect(container.textContent).not.toContain('\r')
   })
+
+  it('opens changelog links in a new tab, with the noreferrer pair', async () => {
+    const { container } = mount(withChangelog('[issue](https://github.com/Bubka/2FAuth/issues/558)'))
+    const link = await screen.findByRole('link', { name: 'issue' })
+    expect(link).toHaveAttribute('href', 'https://github.com/Bubka/2FAuth/issues/558')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+    expect(link.getAttribute('rel')).toContain('noopener')
+    expect(container.querySelector('a[href^="javascript"]')).toBeNull()
+  })
+
+  it('never executes the third-party changelog, whatever is in it', async () => {
+    // The rule that did NOT change when this stopped being a <pre>. This is
+    // release-note text written by whoever maintains the app upstream, so it
+    // is attacker-influenced. components/ui/markdown.tsx renders React
+    // elements and never an HTML string, so there is no innerHTML sink; raw
+    // HTML in the source is inert because rehype-raw is deliberately absent.
+    const { container } = mount(withChangelog(
+      '### Fixed\r\n\r\n- <b>bold</b> <img src=x onerror="alert(1)"> gone\r\n'
+      + '- <script>alert(document.cookie)</script>\r\n'
+      + '- [click me](javascript:alert(1))\r\n'
+      + '- [data uri](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)'))
+
+    await screen.findByRole('heading', { name: 'Fixed' })
+    // Scoped to the changelog box: the page's own app logo is a legitimate
+    // <img>, so an unscoped querySelector would find that and prove nothing.
+    const log = container.querySelector('.max-h-72')!
+    expect(log).not.toBeNull()
+    // Raw HTML survives as characters, exactly as before.
+    expect(log.textContent).toContain('<b>bold</b>')
+    expect(log.textContent).toContain('<script>alert(document.cookie)</script>')
+    // and never as elements
+    expect(log.querySelector('b')).toBeNull()
+    expect(log.querySelector('img')).toBeNull()
+    expect(log.querySelector('script')).toBeNull()
+    expect(log.querySelector('[onerror]')).toBeNull()
+    // Dangerous schemes never reach an href. safeUrl blanks them, and a link
+    // with no safe destination renders as its own words instead.
+    for (const a of Array.from(log.querySelectorAll('a'))) {
+      expect(a.getAttribute('href') ?? '').toMatch(/^https?:\/\//)
+    }
+    expect(log.textContent).toContain('click me')
+    expect(log.textContent).toContain('data uri')
+  })
+
+  it('drops elements outside the allowlist but keeps their words', async () => {
+    // Allowlist, not denylist: an <img> or a table is not enumerated as
+    // forbidden, it simply is not in ALLOWED, so anything new upstream adds
+    // is dropped by default rather than admitted by default.
+    const { container } = mount(withChangelog('![shot](https://example.com/x.png)\n\nafter'))
+    await screen.findByText('after')
+    const log = container.querySelector('.max-h-72')!
+    expect(log.querySelector('img')).toBeNull()
+    // An image has no child nodes to unwrap (its alt is an attribute, not a
+    // child), so it drops entirely rather than leaving its alt text behind.
+    // Prose around it is untouched, which is the property that matters: one
+    // unsupported node does not blank the whole changelog.
+    expect(log.textContent).toContain('after')
+  })
+
 })
 
 describe('StoreDetailPage, a row with no upstream metadata', () => {

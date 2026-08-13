@@ -59,6 +59,25 @@ jobs:
           --excludePackages "frontend@0.0.0" --onlyAllow
           "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;MPL-2.0;0BSD;CC0-1.0;Unlicense;OFL-1.1"
 
+  # Geometry, in a real browser. The card and dialog components have FIXED
+  # heights, and jsdom has no layout engine, so the vitest suite can only
+  # compare class names: a card whose text overlapped itself and a dialog
+  # taller than the screen both shipped through a fully green `frontend` job.
+  # This renders the real components with the real stylesheet in Chromium and
+  # fails on content that does not fit, on a row whose heights disagree, and on
+  # a panel over its cap. Needs no backend and no dev server; the harness
+  # serves itself on an ephemeral port.
+  geometry:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run harness
+
   pve-integration:
     # Doc 10 Phase 1 (b): disposable-PVE matrix. Wired now; runs when the repo
     # secrets point at throwaway PVE 8/9 boxes (doc 11 §7). The PVE 9 leg may be

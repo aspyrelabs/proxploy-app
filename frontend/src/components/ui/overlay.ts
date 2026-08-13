@@ -41,8 +41,14 @@ export const dialogScrollPanelClass = 'flex max-h-[70vh] flex-col'
 
 /** min-h-0 is load bearing: a flex child's default min-height is auto, which
  *  refuses to shrink below its content, so the container would grow past the
- *  cap instead of scrolling. */
-export const dialogScrollBodyClass = 'min-h-0 flex-1 overflow-y-auto'
+ *  cap instead of scrolling.
+ *
+ *  pp-scroll-hidden (styles/tokens.css) hides the bar itself while leaving
+ *  every scrolling mechanism intact: wheel, trackpad, touch, arrow keys,
+ *  Page Up/Down, Home/End, and focus moving to an offscreen control. It is
+ *  scoped to this one class, so no other scroll surface in the app loses its
+ *  bar. */
+export const dialogScrollBodyClass = 'min-h-0 flex-1 overflow-y-auto pp-scroll-hidden'
 
 /** The command palette sits high on the screen rather than centred, so it does
  *  not jump as results appear under it. */

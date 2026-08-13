@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import nulls_last
 
@@ -18,6 +19,8 @@ from proxploy.api.jobs import job_out
 from proxploy.models import App, CatalogEntry, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
+from proxploy.services.catalog_icons import (CONTENT_TYPES,
+                                             attribution_headers, icon_dir)
 from proxploy.services.catalog_metadata import store_visible
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -68,7 +71,20 @@ DEFAULT_SORT = "name"
 def _serialize(r: CatalogEntry) -> dict:
     return {
         "slug": r.slug, "name": r.name, "category": r.category, "type": r.entry_type,
-        "description": r.description, "icon_url": r.icon_url,
+        "description": r.description,
+        # OUR endpoint when a local copy exists, upstream's URL when it does
+        # not. The DB column always keeps upstream's URL
+        # (services/catalog_icons.py owns the mirror, the metadata sync owns
+        # the column), so this is a serve-time swap and nothing else.
+        #
+        # Chosen because it needs NO frontend change: StoreCard already
+        # renders `entry.icon_url` and already falls back to an initials tile
+        # on error, so a cached icon, an uncached one and a broken one all
+        # already work. The alternative, a second `icon_local_url` field, would
+        # have made every consumer decide which to prefer, which is a decision
+        # with exactly one right answer and therefore not one to distribute.
+        "icon_url": (f"/api/v1/catalog/{r.slug}/icon" if r.icon_cache_path
+                     else r.icon_url),
         # `docs_url` rides alongside `website` because they are the same kind
         # of thing and now come from the same place (upstream's `website` and
         # `documentation`, services/catalog_metadata.py). Serving one and
@@ -201,6 +217,47 @@ def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_r
         # Never refreshed counts as stale: an empty catalog is not a fresh one.
         "stale": True if newest is None else age_s > stale_after_s,
     }
+
+
+@router.get("/{slug}/icon", dependencies=[Depends(_read),
+                                          Depends(require_entitlement("store.catalog"))])
+def get_catalog_icon(slug: str, db=Depends(get_db), request: Request = None,
+                     user: User = Depends(_read)):
+    """The locally mirrored icon, so the Store renders with no network.
+
+    MUST stay registered above `/{slug}`: Starlette matches in registration
+    order, and while a one-segment template cannot swallow a two-segment path
+    today, the ordering rule this file already documents around `/status` is
+    cheaper to follow than to re-derive.
+
+    PATH TRAVERSAL, closed twice over, because the slug arrives from the URL.
+    First, the slug is never used to build a path: it is an exact-match DB
+    lookup, and the filename comes from the ROW (`icon_cache_path`), which the
+    sync wrote from our own slug plus a fixed extension allowlist. A slug of
+    `../../etc/passwd` matches no row and 404s before touching the filesystem.
+    Second, the resolved path is required to sit inside the cache dir before
+    it is opened, so even a corrupted column cannot escape. Belt and braces on
+    purpose: this route reads files off disk on behalf of an HTTP caller, and
+    that is worth two locks rather than one.
+    """
+    row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
+    if row is None or not row.icon_cache_path:
+        raise HTTPException(404, "no cached icon")
+    directory = icon_dir(request.app.state.settings.data_dir).resolve()
+    path = (directory / row.icon_cache_path).resolve()
+    if not path.is_file() or directory not in path.parents:
+        # Either the file went missing under us or the stored name is not
+        # inside the cache dir. Both are a 404 rather than a 500: the caller
+        # asked for an icon, and _serialize's fallback to the upstream URL is
+        # the honest answer, not a stack trace.
+        raise HTTPException(404, "no cached icon")
+    return FileResponse(
+        path, media_type=CONTENT_TYPES.get(path.suffix.lstrip(".").lower(),
+                                           "application/octet-stream"),
+        # Immutable for a day: the file only changes when a catalog refresh
+        # replaces it, and the refresh runs every 6 hours at most.
+        headers={"Cache-Control": "public, max-age=86400",
+                 **attribution_headers(row.icon_cache_source)})
 
 
 @router.get("/{slug}", dependencies=[Depends(_read),

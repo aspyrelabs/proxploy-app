@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { CatalogEntryDetail } from '../api/catalog'
 import { useCatalogEntry } from '../api/catalog'
@@ -12,8 +12,16 @@ import {
   asList, figure, plainText, readServed, readUpstreamMetadata, text,
 } from '../api/catalogMetadata'
 import { EmptyState } from '../components/EmptyState'
+
+// Code-split: react-markdown plus its unified/micromark tree is 35.7 kB
+// gzipped, and it is needed only when someone opens an app that has release
+// notes. Splitting it keeps that off the initial load for every other page.
+// The fallback is the raw text, which is exactly what this box rendered
+// before, so a slow chunk degrades to the old behaviour rather than a gap.
+const Markdown = lazy(() => import('../components/ui/markdown'))
 import { KVGrid } from '../components/KVGrid'
 import { Button } from '../components/ui/button'
+
 import { LoadingBlock } from '../components/ui/loading'
 import { STORE_GRADIENT } from '../components/UsageBar'
 import { fmtBytes } from '../lib/format'
@@ -161,9 +169,34 @@ function Chip({ children, tone = 'neutral', title }: {
  * nothing here supports, so it says what is true (we do not know yet) and
  * offers the retry, which re-runs classification server-side.
  */
-function Feasibility({ entry, onRecheck, rechecking, installed, onInstall }: {
+/**
+ * The primary action, in the three states it actually has.
+ *
+ * Exported because the two shells place it differently and neither should
+ * re-implement it: the route puts it in this component's own page header, and
+ * the Store popup pins it in the dialog's title row (routes/store.tsx), which
+ * is OUTSIDE the scroll body and therefore stays put while the body scrolls.
+ *
+ * `installable === false` deliberately renders NOTHING here. A disabled
+ * primary action with its explanation somewhere else reads worse than no
+ * action at all, so the reason stays in Availability where there is room for
+ * the sentence. `installable === null` is the same: unconfirmed feasibility is
+ * not an invitation to install, and the recovery affordance stays in
+ * Availability too, being a recovery rather than a primary action.
+ */
+export function InstallAction({ entry, installed, onInstall }: {
+  entry: { slug: string; installable: boolean | null }
+  installed: boolean
+  onInstall: (slug: string) => void
+}) {
+  if (entry.installable !== true) return null
+  return installed
+    ? <Button variant="ghost" disabled>Installed</Button>
+    : <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>
+}
+
+function Feasibility({ entry, onRecheck, rechecking }: {
   entry: CatalogEntryDetail; onRecheck: () => void; rechecking: boolean
-  installed: boolean; onInstall: (slug: string) => void
 }) {
   const reason = text(entry.unsupported_reason)
   return (
@@ -177,15 +210,11 @@ function Feasibility({ entry, onRecheck, rechecking, installed, onInstall }: {
           In particular there is no Install button on a null: feasibility is
           unconfirmed, and offering the action would be asserting the very
           thing this page says it cannot establish. */}
+      {/* The button that used to live here is now at the top right, where a
+          primary action belongs; this section keeps the STATEMENT of
+          feasibility, which is what it was always for. */}
       {entry.installable === true && (
-        <div>
-          <p className="text-[13px] text-green">Installable.</p>
-          <div className="mt-3">
-            {installed
-              ? <Button variant="ghost" disabled>Installed</Button>
-              : <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>}
-          </div>
-        </div>
+        <p className="text-[13px] text-green">Installable.</p>
       )}
       {entry.installable === false && (
         <p className="text-[13px] text-text">
@@ -412,11 +441,24 @@ function Changelog({ github }: { github: NonNullable<UpstreamMetadata['github_da
           As read from GitHub on {synced}.
         </div>
       )}
+      {/* Rendered markdown, not literal characters, but still untrusted: see
+          components/ui/markdown.tsx for why that is safe without a sanitizer
+          (React elements, never an HTML string, so there is no innerHTML sink
+          to filter). `plainText` above still normalizes the \r\n the real
+          data carries, because a stray \r inside a list item breaks the
+          parse into a paragraph.
+
+          The box keeps its own max-h-72 scroller. That containment is what
+          stops a 300-line release note from fighting the dialog's 70vh cap:
+          the changelog scrolls inside itself, the dialog body scrolls around
+          it. */}
       {changelog && (
-        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-tile
-                        border border-line-soft bg-panel-2 p-3 font-mono text-[11.5px] text-text-2">
-          {changelog}
-        </pre>
+        <div className="mt-3 max-h-72 overflow-auto break-words rounded-tile
+                        border border-line-soft bg-panel-2 p-3 text-[11.5px] text-text-2">
+          <Suspense fallback={<pre className="whitespace-pre-wrap break-words font-mono">{changelog}</pre>}>
+            <Markdown>{changelog}</Markdown>
+          </Suspense>
+        </div>
       )}
     </Section>
   )
@@ -547,7 +589,7 @@ function Links({ meta, entry, served }: {
   )
 }
 
-export function StoreDetailContent({ slug, onInstall }: {
+export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }: {
   slug: string
   /** Called with the slug when the operator asks to install. The CALLER
    *  owns what happens next, which is what keeps this component usable in
@@ -555,6 +597,10 @@ export function StoreDetailContent({ slug, onInstall }: {
    *  Store popup closes ITSELF first and then opens InstallDialog, so two
    *  overlays with two focus traps are never mounted at once. */
   onInstall: (slug: string) => void
+  /** Render the Install action in this component's own header. The Store
+   *  popup passes false and pins it in the dialog's title row instead, so
+   *  that it survives scrolling. */
+  showHeaderAction?: boolean
 }) {
   const entryQuery = useCatalogEntry(slug)
   // Same query key as routes/store.tsx's own /apps fetch (and cluster.tsx's),
@@ -604,7 +650,7 @@ export function StoreDetailContent({ slug, onInstall }: {
     <div>
       <div className="mt-2 mb-5 flex items-start gap-4">
         <DetailIcon name={name} iconUrl={entry.icon_url} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="font-display text-[22px] font-semibold">{name}</h1>
           <div className="mt-0.5 font-mono text-[12px] text-text-3">
             {entry.slug}
@@ -615,13 +661,21 @@ export function StoreDetailContent({ slug, onInstall }: {
             <p className="mt-2 max-w-3xl text-[13px] text-text-2">{description}</p>
           )}
         </div>
+        {/* Top right of the page header. The POPUP does not use this: its
+            shell pins the same action in the dialog's own title row, which
+            sits outside the scroll body and so cannot scroll away. Rendering
+            both would put two controls named Install on one screen. */}
+        {showHeaderAction && (
+          <div className="shrink-0">
+            <InstallAction entry={entry} installed={installed} onInstall={onInstall} />
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
         <Feasibility entry={entry}
           rechecking={entryQuery.isFetching}
-          onRecheck={() => { void entryQuery.refetch() }}
-          installed={installed} onInstall={onInstall} />
+          onRecheck={() => { void entryQuery.refetch() }} />
         <DiscoveryDefaults entry={entry} />
         <InstallProfiles meta={meta ?? {}} />
         <Notes notes={notes} />
