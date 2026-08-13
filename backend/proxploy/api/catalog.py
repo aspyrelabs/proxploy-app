@@ -16,7 +16,7 @@ from sqlalchemy import nulls_last
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
-from proxploy.models import App, CatalogEntry, HostCredential, User, utcnow
+from proxploy.models import App, CatalogEntry, Host, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
 from proxploy.services.catalog_icons import (CONTENT_TYPES,
@@ -361,17 +361,30 @@ class InstallIn(BaseModel):
 # This route triggers the single most security-relevant action in the whole
 # phase: SSH as root into a node and run a community-scripts.org script. Two
 # independent gates, either can 400 first (order doesn't matter, both are
-# exercised in tests/test_catalog_install_api.py): explicit `consent: true`
-# (mirrors hosts.py's CONSENT_NOTE shape) and an already-enrolled `ssh_key`
-# HostCredential: no key, no route, regardless of consent.
+# exercised in tests/test_catalog_install_api.py): root-consent for THIS HOST
+# (mirrors hosts.py's CONSENT_NOTE shape, but asked once per host and
+# remembered on Host.install_consent_at rather than re-ticked on every
+# install) and an already-enrolled `ssh_key` HostCredential: no key, no
+# route, regardless of consent.
 @router.post("/{slug}/install", status_code=202,
              dependencies=[Depends(_install),
                           Depends(require_entitlement("store.install"))])
 def install_catalog_entry(slug: str, body: InstallIn, request: Request,
                           db=Depends(get_db), user: User = Depends(_install)):
-    if not body.consent:
+    host = db.get(Host, body.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    # A host that has already acknowledged the root-execution risk (either
+    # ticked it on a prior install, or was backfilled at ssh_key enrolment
+    # time, see the host_install_consent migration) proceeds without asking
+    # again. A host that has not needs the explicit tick, and that tick is
+    # what gets recorded here, on first use, so it is never asked again.
+    if host.install_consent_at is None and not body.consent:
         raise HTTPException(400, "root-consent required: this installs and runs a "
                                  "community-scripts.org script as root on the node")
+    if host.install_consent_at is None and body.consent:
+        host.install_consent_at = utcnow()
+        db.commit()
     cred = (db.query(HostCredential)
             .filter_by(host_id=body.host_id, kind="ssh_key").one_or_none())
     if cred is None:

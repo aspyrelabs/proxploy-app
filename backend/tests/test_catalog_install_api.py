@@ -207,6 +207,125 @@ def test_install_400s_when_lazy_classification_cannot_reach_upstream(
     assert client.get("/api/v1/jobs").json() == []
 
 
+def test_install_refused_without_host_consent(client, csrf_header, bootstrap_admin):
+    """A host with an enrolled ssh_key still needs one explicit tick before its
+    first install: the acknowledgement lives on the host, but it has to be
+    given at least once. Having a key does not substitute for it."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "ctid": 150},
+                    headers=csrf_header(client))
+    assert r.status_code == 400
+    assert "consent" in r.json()["detail"].lower()
+
+
+def test_install_succeeds_without_consent_once_the_host_has_already_acknowledged(
+        client, csrf_header, bootstrap_admin):
+    """The first install on a host that ticks consent records
+    Host.install_consent_at; every later install on that same host reads the
+    acknowledgement already there instead of asking again."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    first = client.post("/api/v1/catalog/redis/install",
+                        json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True},
+                        headers=csrf_header(client))
+    assert first.status_code == 202, first.text
+
+    with client.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, host_id).install_consent_at is not None
+
+    second = client.post("/api/v1/catalog/redis/install",
+                         json={"host_id": host_id, "name": "Redis", "ctid": 151},
+                         headers=csrf_header(client))
+    assert second.status_code == 202, second.text
+
+
+def test_install_404s_on_a_host_that_does_not_exist(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": 999, "name": "Redis", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 404
+
+
+def test_migration_backfills_consent_only_for_hosts_with_an_enrolled_ssh_key(tmp_path):
+    """THE BACKFILL IS A DELIBERATE DECISION, not a default value (see the
+    host_install_consent migration's docstring): enrolling an ssh_key
+    credential IS the grant of root execution, and those operators ticked the
+    old per-install box on every install they ran, so the migration marks
+    them acknowledged. Hosts without a key never granted anything, so they
+    stay NULL."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+    from sqlalchemy import create_engine, text
+
+    import proxploy
+
+    db_url = f"sqlite:///{tmp_path}/existing.db"
+    cfg = AlembicConfig()
+    cfg.set_main_option("script_location", str(Path(proxploy.__file__).parent / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", db_url)
+    command.upgrade(cfg, "634f5b0f23f0")  # everything before this migration
+
+    eng = create_engine(db_url)
+    with eng.begin() as c:
+        c.execute(text(
+            "INSERT INTO hosts (name, address, verify_tls, status, created_at, updated_at) "
+            "VALUES ('with-key', 'https://10.0.0.1:8006', 1, 'connected', "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"))
+        c.execute(text(
+            "INSERT INTO hosts (name, address, verify_tls, status, created_at, updated_at) "
+            "VALUES ('without-key', 'https://10.0.0.2:8006', 1, 'connected', "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"))
+        with_key_id = c.execute(text("SELECT id FROM hosts WHERE name = 'with-key'")).scalar_one()
+        c.execute(text(
+            "INSERT INTO host_credentials (host_id, kind, encrypted_blob, key_version, "
+            "public_meta, created_at, updated_at) VALUES "
+            "(:hid, 'ssh_key', :blob, 1, 'ssh-ed25519 AAAA', "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"),
+            {"hid": with_key_id, "blob": b"\x00\x01"})
+    eng.dispose()
+
+    command.upgrade(cfg, "head")
+
+    eng = create_engine(db_url)
+    try:
+        rows = dict(eng.connect().execute(
+            text("SELECT name, install_consent_at FROM hosts")).all())
+    finally:
+        eng.dispose()
+    assert rows["with-key"] is not None
+    assert rows["without-key"] is None
+
+
 def test_install_refuses_a_non_ct_entry(client, csrf_header, bootstrap_admin):
     """A vm/pve/addon/turnkey entry must never be installable through this
     route, even if somehow requested directly by slug."""

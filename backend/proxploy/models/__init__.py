@@ -157,6 +157,11 @@ class Host(TimestampMixin, Base):
     # rootdir candidate and several vztmpl ones.
     default_container_storage: Mapped[str | None] = mapped_column(Text)
     default_template_storage: Mapped[str | None] = mapped_column(Text)
+    # When this host's operator acknowledged that installs run third-party
+    # scripts as root here. Per host rather than per install: the acknowledgement
+    # is about the host, and re-asking on every install is friction that
+    # surfaces no new information. NULL means not acknowledged.
+    install_consent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class HostCredential(TimestampMixin, Base):
