@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useCatalogEntry, useInstall } from '../api/catalog'
+import { CoreFields, type CoreFieldsValue } from './install/CoreFields'
 import { StorageFields } from './install/StorageFields'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
@@ -30,6 +31,19 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // sole candidate) are honest defaults, so Default mode never has to touch
   // this state at all.
   const [storage, setStorage] = useState({ container: '', template: '' })
+  // Each field is null until the operator types into it, meaning "still
+  // tracking the derived default computed below." cpu/ram/disk/os/version
+  // derive from the catalog entry's script-parsed default_* columns (Task
+  // 7): NOT raw.metadata.install_methods[].resources, which disagrees for
+  // some slugs (dockge is 2/2048/18 in the script and 0/0/0 in that
+  // metadata). hostname derives from the app name typed above instead,
+  // since there is no script-parsed default for it. unprivileged has no
+  // per-entry default at all: every community-scripts install script
+  // defaults var_unprivileged to 1, so the checkbox starts checked.
+  const [coreOverride, setCoreOverride] = useState<{
+    cpu: string | null; ram: string | null; disk: string | null; os: string | null
+    version: string | null; hostname: string | null; unprivileged: boolean
+  }>({ cpu: null, ram: null, disk: null, os: null, version: null, hostname: null, unprivileged: true })
   const [jobId, setJobId] = useState<number | null>(null)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
@@ -37,6 +51,21 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [progress, setProgress] = useState<number | null>(null)
 
   if (!entry) return null
+
+  // The values CoreFields actually displays: whatever the operator typed,
+  // else the derived default. Computed here rather than stored directly so
+  // a still-loading `entry` (undefined on the very first render, before
+  // this early return) never gets baked into useState's one-shot initial
+  // value.
+  const core: CoreFieldsValue = {
+    cpu: coreOverride.cpu ?? (entry.default_cpu != null ? String(entry.default_cpu) : ''),
+    ram: coreOverride.ram ?? (entry.default_ram_mb != null ? String(entry.default_ram_mb) : ''),
+    disk: coreOverride.disk ?? (entry.default_disk_gb != null ? String(entry.default_disk_gb) : ''),
+    os: coreOverride.os ?? (entry.default_os ?? ''),
+    version: coreOverride.version ?? (entry.default_os_version ?? ''),
+    hostname: coreOverride.hostname ?? name,
+    unprivileged: coreOverride.unprivileged,
+  }
 
   // CTID is no longer required: blank means the node assigns the next free
   // id (InstallIn.ctid, backend/proxploy/api/catalog.py). Host consent is
@@ -47,13 +76,28 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
-    // Only send a key the operator actually picked. An empty string here
-    // would reach resolve_storage_pools as a supplied-but-blank value; its
-    // own `.strip() or None` treats that the same as absent, but sending
-    // nothing is more honest about "the operator did not choose."
+    // Only send a key the operator actually picked or that a field with an
+    // honest fallback (an empty string) would otherwise mangle. An empty
+    // string for storage would reach resolve_storage_pools as a
+    // supplied-but-blank value; its own `.strip() or None` treats that the
+    // same as absent, but sending nothing is more honest about "the
+    // operator did not choose." Same reasoning for the core fields below:
+    // Default mode never customized anything, so it sends none of these,
+    // and even in Advanced mode a field the operator cleared to blank is
+    // withheld rather than sent as `var_x=""`.
     const overrides: Record<string, string> = {}
     if (storage.container) overrides.container_storage = storage.container
     if (storage.template) overrides.template_storage = storage.template
+    if (mode === 'advanced') {
+      const setIfFilled = (key: string, val: string) => { if (val.trim() !== '') overrides[key] = val.trim() }
+      setIfFilled('cpu', core.cpu)
+      setIfFilled('ram', core.ram)
+      setIfFilled('disk', core.disk)
+      setIfFilled('os', core.os)
+      setIfFilled('version', core.version)
+      setIfFilled('hostname', core.hostname)
+      overrides.unprivileged = core.unprivileged ? '1' : '0'
+    }
     install.mutate(
       { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides, consent },
       { onSuccess: (r) => { setJobId(r.job.id); setProgress(r.job.progress_pct) } },
@@ -95,7 +139,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               <span>
                 <span className="text-text">Advanced</span>
                 <span className="block text-[12px] text-text-3">
-                  Customize vCPU, RAM, disk, storage and more before install.
+                  Customize resources, OS, storage and more before install.
                 </span>
               </span>
             </label>
@@ -129,8 +173,9 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             <div className="rounded-ctl border border-dashed border-line-soft p-3 text-[12px] text-text-3">
               <span className="text-text">Container customization</span>
               <span className="block mt-1">
-                Resource and OS options land here in a later task.
+                Network and remaining advanced options land here in a later task.
               </span>
+              <CoreFields value={core} onChange={(patch) => setCoreOverride((c) => ({ ...c, ...patch }))} />
               <StorageFields hostId={hostId} container={storage.container} template={storage.template}
                 onChange={setStorage} />
             </div>

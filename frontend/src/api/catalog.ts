@@ -145,6 +145,14 @@ export type InstallVars = {
   // Optional: blank/null means the node assigns the next free id
   // (InstallIn.ctid, backend/proxploy/api/catalog.py).
   slug: string; host_id: number; name: string; ctid: number | null
+  // Every key here reaches the remote script as `var_{key}` (run_install in
+  // backend/proxploy/services/appstore.py). A wrong or misspelled key does
+  // NOT error: build.func just ignores it, falls back to its own default,
+  // and reports success, so the operator believes they chose something they
+  // did not get. Keys this app currently sends (InstallDialog.tsx):
+  // container_storage, template_storage (Task 9), cpu, ram, disk, os,
+  // version, hostname, unprivileged (Task 10). Anything added here must
+  // also be added to the `KNOWN` set pinned in install.test.tsx.
   overrides: Record<string, string | number>; consent: boolean
 }
 

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { api as apiMock } from '../api/client'
 import { InstallDialog } from '../components/InstallDialog'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
@@ -62,6 +63,38 @@ function optionsOf(labelText: string) {
 }
 const containerOptions = () => optionsOf('Container storage')
 const templateOptions = () => optionsOf('Template storage')
+
+/** Reads the args of the last POST to the install endpoint, whatever slug
+ *  it targeted, without asserting on the slug itself. */
+function capturedSubmit() {
+  const calls = vi.mocked(apiMock).mock.calls
+  const call = calls.find(([path]) => String(path).endsWith('/install'))
+  if (!call) throw new Error('no install call captured')
+  return JSON.parse((call[1] as { body: string }).body)
+}
+
+/** Fills every field the Advanced block exposes (as of Task 10: the base
+ *  fields plus cpu/ram/disk/os/version/hostname/unprivileged) and submits.
+ *  Storage pickers are deliberately left untouched: Task 9 already covers
+ *  them and an unset picker is a valid, honest "let the backend decide". */
+async function fillEveryField() {
+  fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+  fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '150' } })
+  // Exact matches, not regexes: the Advanced radio's own subtitle copy
+  // ("Customize vCPU, RAM, disk, storage and more...") contains these same
+  // words inside its wrapping <label>, so a case-insensitive substring match
+  // finds two labelled elements and getByLabelText throws.
+  fireEvent.change(screen.getByLabelText('vCPU'), { target: { value: '4' } })
+  fireEvent.change(screen.getByLabelText('RAM (MB)'), { target: { value: '4096' } })
+  fireEvent.change(screen.getByLabelText('Disk (GB)'), { target: { value: '20' } })
+  fireEvent.change(screen.getByLabelText('OS'), { target: { value: 'ubuntu' } })
+  fireEvent.change(screen.getByLabelText('OS version'), { target: { value: '24.04' } })
+  fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'redis-custom' } })
+  fireEvent.click(screen.getByLabelText(/unprivileged/i))
+  fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+  fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+  await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+}
 
 /** Fills the form and submits, up to (not including) whatever install-job
  *  response the test's own api mock returns. */
@@ -233,5 +266,58 @@ describe('InstallDialog', () => {
 
     await selectHost('host-02')
     await waitFor(() => expect(containerOptions()).toEqual(['host02-lvm']))
+  })
+
+  it('emits only variable names build.func actually reads', async () => {
+    // Pinned from build.func at the catalog's upstream_sha. A typo or an
+    // upstream rename must fail here rather than silently sending an
+    // override into the void.
+    const KNOWN = new Set([
+      'brg', 'container_storage', 'cpu', 'ctid', 'disk', 'fuse', 'gateway',
+      'gpu', 'hostname', 'mtu', 'nesting', 'net', 'os', 'pw', 'ram',
+      'searchdomain', 'ssh', 'ssh_authorized_key', 'tags', 'template_storage',
+      'timezone', 'unprivileged', 'version', 'vlan',
+    ])
+    vi.mocked(apiMock).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve({
+        slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+        default_disk_gb: 4, default_os: 'debian', default_os_version: '13',
+        installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      if (path === '/storage') return Promise.resolve([])
+      if (path === '/catalog/redis/install') return Promise.resolve({
+        job: { id: 9, kind: 'app.install', progress_pct: null },
+      })
+      return Promise.resolve(null)
+    })
+    renderDialog()
+    await openAdvanced()
+    await fillEveryField()
+    const sent = capturedSubmit().overrides
+    for (const key of Object.keys(sent)) expect(KNOWN.has(key)).toBe(true)
+  })
+
+  it('prefills from the script-parsed defaults', async () => {
+    const qc = new QueryClient()
+    vi.mocked(apiMock).mockImplementation((path: string) => {
+      if (path === '/catalog/dockge') return Promise.resolve({
+        slug: 'dockge', name: 'Dockge', default_cpu: 2, default_ram_mb: 2048,
+        default_disk_gb: 18, default_os: 'debian', default_os_version: '13',
+        installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      if (path === '/storage') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(
+      <QueryClientProvider client={qc}>
+        <InstallDialog slug="dockge" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    )
+    await openAdvanced()
+    // not metadata's 0 (raw.metadata.install_methods[].resources disagrees
+    // with the script-parsed columns for this exact slug; see Task 7).
+    expect(screen.getByLabelText(/RAM/i)).toHaveValue(2048)
   })
 })
