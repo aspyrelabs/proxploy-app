@@ -149,6 +149,14 @@ class Host(TimestampMixin, Base):
     # (services/pveum.py NODE_POWER_PRIVILEGE, doc 08 §2/§9).
     node_power_missing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    # The pools this host's operator chose, remembered so the question is asked
+    # once rather than on every install. NULL means "not chosen yet", which is
+    # deliberately distinct from any pool name: services/appstore.py's
+    # resolution order treats NULL as "fall through", and a stored name as an
+    # answer to re-validate. Per content type, because a node can have one
+    # rootdir candidate and several vztmpl ones.
+    default_container_storage: Mapped[str | None] = mapped_column(Text)
+    default_template_storage: Mapped[str | None] = mapped_column(Text)
 
 
 class HostCredential(TimestampMixin, Base):

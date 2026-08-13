@@ -9,7 +9,7 @@ import pytest
 from proxploy.jobs import JobFailed
 from proxploy.services.appstore import _storage_pools
 from tests.fakes.pve import FakePVE
-from tests.support import make_job_app, seed_host_row
+from tests.support import make_db, make_job_app, seed_host_row
 
 
 def _seed_host_with_token(app, db, **host_kwargs):
@@ -88,3 +88,14 @@ def test_storage_pools_raises_when_host_has_no_node_name(tmp_path):
             _storage_pools(app, host_id, "rootdir")
 
     asyncio.run(scenario())
+
+
+def test_host_storage_defaults_start_null(tmp_path):
+    """Null means the operator has not chosen. It must stay distinguishable
+    from a real pool name, so the resolution order can tell "not asked yet"
+    from "asked, and they picked local-lvm"."""
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+
+    assert host.default_container_storage is None
+    assert host.default_template_storage is None
