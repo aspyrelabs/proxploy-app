@@ -46,6 +46,24 @@ export type CatalogRow = {
   // Tri-state: null means "discovered, not yet classified" (catalog expansion
   // plan decision 2 - classification is lazy, on card-open or install-attempt,
   // or the low-priority background pass, never during discovery/refresh).
+  // What discovery found and pinned: the file inside
+  // community-scripts/ProxmoxVE that would run, and the commit it was read
+  // at. The pair is what makes "what will Proxploy run" answerable, so a
+  // missing half means the question goes unanswered rather than guessed at.
+  //
+  // NEVER derive the path from the slug, and note WHY a test cannot catch a
+  // derivation that only ever sees the Store. For ct rows the two cannot
+  // diverge by construction: discovery takes the slug FROM the path
+  // (services/catalog.py::_ct_slug returns path[len("ct/"):-len(".sh")]), so
+  // ct/<slug>.sh holds for all 585 of them and would go on holding. The 84
+  // non-ct rows the same serializer returns are where it breaks, and the
+  // sharpest of them are the 5 addon rows where discovery deliberately
+  // INVENTS a slug that is not the filename: tools/addon/coolify.sh is
+  // `coolify-addon`, so that it cannot shadow the real ct/coolify.sh row.
+  // Reconstructing a path from a slug would have to know about that renaming,
+  // which is precisely the coupling this stored column exists to avoid.
+  script_path: string | null
+  upstream_sha: string | null
   installable: boolean | null; unsupported_reason: string | null
   upstream_state: UpstreamState
   // Install runs recorded by community-scripts' telemetry, terminal events

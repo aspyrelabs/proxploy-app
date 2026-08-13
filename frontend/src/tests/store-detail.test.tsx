@@ -191,6 +191,68 @@ describe('StoreDetailPage, a fully covered app', () => {
     expect(document.body.textContent).not.toContain('8/13/2026')
   })
 
+  const SHA = '3d9a7c25d68913a5f91e7ae34107c29da3fbbccf'
+
+  it('names the exact script, linked at the pinned commit', async () => {
+    // The verifiable answer to "what will Proxploy run as root on my node".
+    mount({ ...rich, script_path: 'ct/2fauth.sh', upstream_sha: SHA })
+    const link = await screen.findByRole('link', { name: 'ct/2fauth.sh' })
+    expect(link).toHaveAttribute(
+      'href', `https://github.com/community-scripts/ProxmoxVE/blob/${SHA}/ct/2fauth.sh`)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+    // the commit is stated beside it, so the two read as one claim
+    expect(screen.getByTitle(SHA)).toHaveTextContent(SHA.slice(0, 12))
+  })
+
+  it('uses the SERVED path, never one derived from the slug', async () => {
+    // The fixture is an ADDON-shaped path on a ct-shaped slug, which is the
+    // real failure mode rather than a coincidence.
+    //
+    // A derivation cannot be caught by any test that only looks at the Store.
+    // For ct rows the slug is taken FROM the path by discovery
+    // (services/catalog.py::_ct_slug), so ct/<slug>.sh is guaranteed, not
+    // merely true today, and ct/<slug>.sh would pass forever. It breaks on the
+    // non-ct rows this route can also be opened for, most sharply the 5 addon
+    // rows whose slug discovery invents so it cannot shadow the standalone ct
+    // row: tools/addon/coolify.sh is stored as `coolify-addon`. Slug and
+    // filename share nothing recoverable there, which is what this asserts.
+    mount({ ...rich, slug: '2fauth', script_path: 'tools/addon/two-factor-auth.sh',
+            upstream_sha: SHA })
+    const link = await screen.findByRole('link', { name: 'tools/addon/two-factor-auth.sh' })
+    expect(link.getAttribute('href')).toContain('/tools/addon/two-factor-auth.sh')
+    expect(link.getAttribute('href')).not.toContain('ct/2fauth.sh')
+  })
+
+  it('never renders an unpinned link to the script', async () => {
+    // A link to main resolves to a different file tomorrow, which would make
+    // this row worse than absent.
+    mount({ ...rich, script_path: 'ct/2fauth.sh', upstream_sha: SHA })
+    await screen.findByRole('link', { name: 'ct/2fauth.sh' })
+    for (const a of Array.from(document.querySelectorAll('a[href*="ProxmoxVE"]'))) {
+      const href = a.getAttribute('href') ?? ''
+      if (href.includes('/blob/')) expect(href).toContain(`/blob/${SHA}/`)
+      expect(href).not.toContain('/blob/main/')
+      expect(href).not.toContain('/main/')
+    }
+  })
+
+  it('shows the bare path as text, not a link, when there is no commit to pin to', async () => {
+    // The path is still a true discovery-owned fact, so it is shown; without
+    // a sha there is nothing honest to link it to.
+    mount({ ...rich, script_path: 'ct/2fauth.sh', upstream_sha: null })
+    expect(await screen.findByText('ct/2fauth.sh')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'ct/2fauth.sh' })).toBeNull()
+    expect(screen.queryByText(/runs as root on the node/)).toBeNull()
+  })
+
+  it('renders no script row at all when the path is unknown', async () => {
+    mount({ ...rich, script_path: null, upstream_sha: SHA })
+    await screen.findByRole('heading', { name: '2FAuth', level: 1 })
+    expect(screen.queryByText('Script')).toBeNull()
+    expect(screen.queryByText(/runs as root on the node/)).toBeNull()
+  })
+
   const withChangelog = (changelog: string) => ({
     ...rich,
     raw: {

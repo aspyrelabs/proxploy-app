@@ -319,7 +319,6 @@ community-scripts/ProxmoxVE metadata, fetched server-side with ETag refresh (bri
 | popularity | int | null in v1, no public source found; see gap note below |
 | upstream_sha | text | commit the metadata was read at |
 | raw | json | full upstream JSON record, forward-compat |
-| deprecated | bool | upstream removed/renamed; kept so installed apps still resolve |
 | installable | bool | set by ingest's install-feasibility classifier: true when the paired `ct/` script has exactly one `build_container` call AND the paired `install/` script has no unguarded interactive prompt (`read`/`whiptail`/`dialog` not preceded by an env-var short-circuit), mechanical, not a guess (doc 01 §3, doc 11 §8, `docs/notes/phase-4-spike.md`); the store only ever offers `install` on true rows |
 | unsupported_reason | text | NULL when `installable`; short honest reason set by ingest otherwise (e.g. "multi-CT / docker-compose pattern", "install script requires interactive input, no non-interactive entrypoint"); shown in the store UI next to the upstream link |
 | synced_at | datetime | |

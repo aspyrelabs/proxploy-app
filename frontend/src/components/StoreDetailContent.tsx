@@ -169,6 +169,75 @@ function Chip({ children, tone = 'neutral', title }: {
  * nothing here supports, so it says what is true (we do not know yet) and
  * offers the retry, which re-runs classification server-side.
  */
+/** Repo the catalog is discovered from. The blob view of a path at a commit.
+ *  Not built from the slug: see the note in ScriptProvenance. */
+const BLOB_BASE = 'https://github.com/community-scripts/ProxmoxVE/blob'
+
+/**
+ * The verifiable answer to "what will Proxploy actually run on my node?"
+ *
+ * This is a provenance fact, not a vendor link, so it sits with the other
+ * discovery-owned facts in Availability rather than with the upstream website
+ * and documentation links further down.
+ *
+ * The path is SERVED, never derived, and the reason is sharper than "it might
+ * not match". For ct rows it cannot NOT match: discovery takes the slug from
+ * the path (services/catalog.py::_ct_slug), so `ct/<slug>.sh` is guaranteed
+ * rather than merely true today, and a derivation would pass every test
+ * written against the Store forever. It breaks on the non-ct rows this same
+ * route can be opened for, most sharply on the 5 addon rows whose slug
+ * discovery invents: `tools/addon/coolify.sh` is stored as `coolify-addon` so
+ * it cannot shadow the standalone `ct/coolify.sh`, and slug and filename
+ * share nothing recoverable. The value here is the same `script_path` the
+ * executor uses.
+ *
+ * PINNED, always. The href carries `upstream_sha`, which is the repo HEAD
+ * commit discovery read the catalog at, and it is the same (sha, path) pair
+ * that services/catalog.py::raw_url builds for the fetch that classifies the
+ * script and for the fetch that runs it. A link to `main` would resolve to a
+ * different file tomorrow and would make this row worse than absent.
+ *
+ * Blob rather than raw: raw serves the file as plain text for download, blob
+ * renders it with syntax highlighting, line numbers and linkable lines, which
+ * is what someone auditing a root shell script actually wants. Both address
+ * identical bytes at this sha.
+ */
+function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
+  const path = text(entry.script_path)
+  const sha = text(entry.upstream_sha)
+  // No path, no row. Nothing here is worth inventing, and a guessed filename
+  // presented as "what runs as root" would be the worst possible thing to be
+  // wrong about.
+  if (path == null) return null
+  return (
+    <div className="mt-3">
+      <div className="text-[10.5px] uppercase tracking-wide text-text-3">Script</div>
+      <div className="mt-1 text-[12.5px]">
+        {sha
+          ? (
+            <a href={`${BLOB_BASE}/${sha}/${path}`} target="_blank" rel="noreferrer noopener"
+              className="font-mono text-amber hover:underline">{path}</a>
+          )
+          // Path but no commit to pin it to. The path is still a true,
+          // discovery-owned fact and is shown, but as TEXT: an unpinned link
+          // would point at whatever `main` holds when it is clicked, which is
+          // exactly the claim this row exists to avoid making.
+          : <span className="font-mono text-text">{path}</span>}
+        {sha && (
+          <span className="text-text-3"> at <span className="font-mono text-text-2" title={sha}>
+            {sha.slice(0, 12)}
+          </span></span>
+        )}
+      </div>
+      {sha && (
+        <p className="mt-1 text-[11.5px] text-text-3">
+          This exact file, at this exact commit, is what runs as root on the node.
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * The primary action, in the three states it actually has.
  *
@@ -233,20 +302,13 @@ function Feasibility({ entry, onRecheck, rechecking }: {
           </Button>
         </div>
       )}
-      {/* No script path row. `script_path` is the discovery-owned answer to
-          "what would actually run", and it belongs here, but
-          api/catalog.py::_serialize does not serve it: it is a column on
-          catalog_entries and nothing else. The per-method `script` upstream
-          publishes is null in every record we hold, so there is no honest
-          substitute, and inventing "ct/<slug>.sh" from the slug would be a
-          guess dressed as a fact. This row appears the day _serialize
-          includes it. */}
       <div className="mt-3">
         <KVGrid items={[
           ['Type', TYPE_LABEL[entry.type]],
           ['Slug', entry.slug],
         ]} />
       </div>
+      <ScriptProvenance entry={entry} />
       {(entry.upstream_state === 'unlisted' || entry.upstream_state === 'delisted') && (
         <p className="mt-3 text-[12px] text-text-3">{UNLISTED_NOTE}</p>
       )}

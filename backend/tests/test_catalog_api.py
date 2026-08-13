@@ -1,6 +1,6 @@
 import httpx
 
-from proxploy.models import CatalogEntry
+from proxploy.models import CatalogEntry, utcnow
 from tests.conftest import client  # noqa: F401 fixture
 
 
@@ -432,3 +432,142 @@ def test_the_full_catalog_and_by_slug_routes_agree_about_the_icon(
     single = client.get("/api/v1/catalog/redis").json()
 
     assert listed["icon_url"] == single["icon_url"] == "/api/v1/catalog/redis/icon"
+
+
+# --- the script identity: exactly which file, at exactly which commit -------
+
+SHA40 = "a222d32a318e3463bcde935bf52fdf5f883fa804"
+
+
+def test_the_script_path_and_pinned_sha_are_served(client, csrf_header,
+                                                   bootstrap_admin):
+    """Together these are the verifiable answer to "what will Proxploy run?":
+    services/appstore.py executes raw_url(upstream_sha, script_path) and
+    nothing else."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, script_path="ct/redis.sh", upstream_sha=SHA40)
+
+    listed = client.get("/api/v1/catalog").json()[0]
+    single = client.get("/api/v1/catalog/redis").json()
+
+    assert listed["script_path"] == "ct/redis.sh"
+    assert listed["upstream_sha"] == SHA40
+    # The by-slug route shares _serialize, so the two cannot disagree about
+    # which file runs.
+    assert (single["script_path"], single["upstream_sha"]) == ("ct/redis.sh", SHA40)
+
+
+def test_the_script_path_is_served_not_derived_from_the_slug(client, csrf_header,
+                                                             bootstrap_admin):
+    """A `ct/<slug>.sh` guess is right for every ct row and wrong for all 84
+    non-ct ones, so a test written only against the grid would pass on a
+    derivation. These two are the shapes that actually break it: `turnkey`
+    shares none of its slug's shape, and `coolify-addon` is a slug discovery
+    INVENTED (dual-variant collision detection appends `-addon` so it cannot
+    shadow the ct row), so its slug is not its filename at all."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, script_path="ct/redis.sh", upstream_sha=SHA40)
+        db.add(CatalogEntry(slug="turnkey", name="Turnkey", entry_type="turnkey",
+                            script_path="turnkey/turnkey.sh", upstream_sha=SHA40))
+        db.add(CatalogEntry(slug="coolify-addon", name="Coolify addon",
+                            entry_type="addon",
+                            script_path="tools/addon/coolify.sh",
+                            upstream_sha=SHA40))
+        db.commit()
+
+    paths = {r["slug"]: r["script_path"] for r in client.get("/api/v1/catalog").json()}
+
+    assert paths["turnkey"] == "turnkey/turnkey.sh"
+    assert paths["coolify-addon"] == "tools/addon/coolify.sh"
+
+
+def test_an_unpinned_row_serves_null_rather_than_a_wrong_link(client, csrf_header,
+                                                              bootstrap_admin):
+    """A row discovery has not pinned yet has no honest link to offer, and a
+    default would be a link to the wrong file rather than no link."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db, script_path=None, upstream_sha=None)
+
+    row = client.get("/api/v1/catalog").json()[0]
+
+    assert row["script_path"] is None and row["upstream_sha"] is None
+
+
+# --- /catalog/status counts what the operator can actually see --------------
+
+def test_the_status_count_matches_what_the_grid_returns(client, csrf_header,
+                                                        bootstrap_admin):
+    """It used to count every ct row and report 585 against a grid showing
+    556. Same class as the search bug: one rule, two places, one of them not
+    updated. Both now go through store_visible()."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_entry(db)
+        db.add(CatalogEntry(slug="syncthing", name="Syncthing", entry_type="ct",
+                            upstream_state="listed"))
+        db.add(CatalogEntry(slug="alpine-syncthing", name="Alpine Syncthing",
+                            entry_type="ct", upstream_state="variant"))
+        db.add(CatalogEntry(slug="netvisor", name="Scanopy", entry_type="ct",
+                            upstream_state="superseded"))
+        db.add(CatalogEntry(slug="haos", name="HAOS", entry_type="vm",
+                            upstream_state="listed"))
+        db.commit()
+
+    grid = client.get("/api/v1/catalog?entry_type=ct").json()
+    status = client.get("/api/v1/catalog/status").json()
+
+    assert status["entries"] == len(grid) == 2
+    assert {r["slug"] for r in grid} == {"redis", "syncthing"}
+
+
+def test_hidden_rows_are_excluded_from_the_status_count(client, csrf_header,
+                                                        bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        for state in ("variant", "superseded"):
+            db.add(CatalogEntry(slug=f"hidden-{state}", name=state,
+                                entry_type="ct", upstream_state=state))
+        db.commit()
+
+    assert client.get("/api/v1/catalog/status").json()["entries"] == 0
+
+
+def test_the_status_count_is_right_on_a_never_synced_install(client, csrf_header,
+                                                             bootstrap_admin):
+    """The IS NULL arm. Discovery runs before the first metadata sync, so
+    every row's upstream_state is NULL, and a bare `!= 'variant'` would count
+    zero and report an empty Store on a fresh install."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        for slug in ("redis", "grafana", "plex"):
+            db.add(CatalogEntry(slug=slug, name=slug.title(), entry_type="ct",
+                                upstream_state=None))
+        db.commit()
+
+    status = client.get("/api/v1/catalog/status").json()
+
+    assert status["entries"] == 3
+    assert status["entries"] == len(client.get("/api/v1/catalog?entry_type=ct").json())
+
+
+def test_freshness_is_still_measured_across_every_ct_row(client, csrf_header,
+                                                         bootstrap_admin):
+    """`synced_at` deliberately is NOT narrowed to visible rows. It answers
+    "is the refresh schedule alive", and discovery stamps hidden rows in the
+    same pass, so an install whose ct rows were all hidden must not report
+    "never refreshed" seconds after a successful refresh."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="alpine-syncthing", name="Alpine Syncthing",
+                            entry_type="ct", upstream_state="variant",
+                            synced_at=utcnow()))
+        db.commit()
+
+    status = client.get("/api/v1/catalog/status").json()
+
+    assert status["entries"] == 0            # nothing visible to show
+    assert status["synced_at"] is not None   # ...but the catalog IS fresh
+    assert status["stale"] is False

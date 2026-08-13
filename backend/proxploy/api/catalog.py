@@ -115,6 +115,37 @@ def _serialize(r: CatalogEntry) -> dict:
         "default_os_version": r.default_os_version,
         "installable": r.installable, "unsupported_reason": r.unsupported_reason,
         "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+        # The verifiable answer to "what will Proxploy actually run?". These
+        # two are only meaningful together: the path names the exact file and
+        # the sha pins the exact revision of it, which is the same
+        # pin-diff-consent posture install and update already hold themselves
+        # to (services/appstore.py runs raw_url(upstream_sha, script_path) and
+        # nothing else).
+        #
+        # `script_path` is SERVED, never derived, and the reason is worth
+        # stating precisely because the obvious reason is wrong. All 585 ct
+        # rows DO match `ct/<slug>.sh`, including the addon-delegated five and
+        # the rename leftovers, and not by luck: discovery takes the slug FROM
+        # the path (services/catalog.py::_ct_slug), so for ct rows the two
+        # cannot diverge by construction. A derivation would pass any test
+        # written only against the grid.
+        #
+        # It breaks on the 84 rows this same serializer returns from the
+        # UNFILTERED catalog call, where the slug is not the filename: 35 pve
+        # (`tools/pve/add-iptag.sh`), 32 addon, 16 vm (`vm/debian-13-vm.sh`)
+        # and `turnkey` at `turnkey/turnkey.sh`. The addon rows are the sharp
+        # case, because there discovery deliberately INVENTS a slug that
+        # differs from the file: dual-variant collision detection renames
+        # `tools/addon/coolify.sh` to `coolify-addon` so it cannot shadow the
+        # ct row. Any rule that reconstructs a path from a slug has to know
+        # about that, which is precisely the coupling this column exists to
+        # avoid. Discovery owns it; this is a read of it, and nothing here is
+        # added to WRITABLE_FIELDS.
+        #
+        # Either being null is normal and serves null: a row discovery has not
+        # pinned yet has no honest link to offer, and a default would be a
+        # link to the wrong file rather than no link.
+        "script_path": r.script_path, "upstream_sha": r.upstream_sha,
         # Upstream's dates for the SCRIPT itself, which is what the Store's
         # "newest" and "recently updated" sorts mean. Not to be confused with
         # `synced_at` (when WE last discovered the row) or with
@@ -200,13 +231,24 @@ def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_r
     """
     from sqlalchemy import func
 
-    # Scoped to ct/ (the Store's own content): a stale count over the whole
-    # discovered corpus (vm/pve/addon/turnkey included) would mix in entries
-    # the Store never shows and that never need "installable" freshness.
-    ct_entries = db.query(CatalogEntry).filter(CatalogEntry.entry_type == "ct")
+    # `entries` counts what the operator can actually SEE, through the same
+    # store_visible() predicate list_catalog and search.py use. It used to
+    # count every ct row and reported 585 against a grid showing 556: the same
+    # class of bug as the search one, a rule applied in one place and not
+    # another, which is why this is the shared helper and not a third copy.
+    total = db.query(CatalogEntry).filter(store_visible()).count()
+
+    # `synced_at` is deliberately NOT narrowed the same way, and the two
+    # answer different questions on purpose. The count answers "how many cards
+    # do I have"; this answers "is the refresh schedule alive". Discovery
+    # stamps every discovered row in the same pass, so a hidden row is exactly
+    # as good a witness to that as a visible one, and restricting the sample
+    # would buy nothing while introducing a real failure mode: an install
+    # whose ct rows were all hidden would report "never refreshed" seconds
+    # after a successful refresh. Scoped to ct because a vm/pve/turnkey row's
+    # freshness has never been part of this signal.
     newest = db.query(func.max(CatalogEntry.synced_at)).filter(
         CatalogEntry.entry_type == "ct").scalar()
-    total = ct_entries.count()
     stale_after_s = request.app.state.settings.catalog_stale_after_s
     age_s = (utcnow() - newest).total_seconds() if newest else None
     return {

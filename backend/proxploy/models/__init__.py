@@ -296,7 +296,6 @@ class CatalogEntry(TimestampMixin, Base):
     architectures: Mapped[list | None] = mapped_column(JSON)
     upstream_sha: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[dict | None] = mapped_column(JSON)
-    deprecated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Tri-state on purpose (catalog expansion, see services/catalog.py header
     # note): None means "discovered but not yet classified", the state every
     # ct/ row starts in after a refresh. Discovery is 2 GitHub API calls flat
@@ -354,9 +353,11 @@ class CatalogEntry(TimestampMixin, Base):
     #              "Scanopy", so the grid showed two "Scanopy" cards, one
     #              working and one blank. Also hidden from the grid.
     #
-    # NULL means never synced. This is deliberately NOT the `deprecated`
-    # column: that one is written nowhere and read nowhere, and overloading a
-    # boolean with four states would lose the distinction the badge needs.
+    # NULL means never synced. A `deprecated` boolean used to sit beside
+    # this column, dead since the first migration and never written; it was
+    # dropped (c9a35b71e0d4) rather than overloaded, because a boolean
+    # cannot carry five states and "deprecated" asserts a judgement
+    # upstream has not made.
     # Visibility only: nothing here ever implies a type or an installability
     # decision, both of which belong to discovery and the classifier.
     upstream_state: Mapped[str | None] = mapped_column(Text)

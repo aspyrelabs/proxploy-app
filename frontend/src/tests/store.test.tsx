@@ -147,6 +147,7 @@ const REDIS: CatalogRow = {
   popularity_synced_at: '2026-08-13T00:00:00', script_created: '2024-05-02T00:00:00',
   script_updated: '2026-06-11T00:00:00', has_arm: true, updateable: true,
   privileged: false, architectures: ['amd64', 'arm64'], port: 6379,
+  script_path: 'ct/redis.sh', upstream_sha: '3d9a7c25d68913a5f91e7ae34107c29da3fbbccf',
 }
 
 describe('StoreCard', () => {

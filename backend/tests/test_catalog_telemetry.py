@@ -176,7 +176,7 @@ UNTOUCHED = ("slug", "name", "description", "category", "entry_type",
              "unsupported_reason", "upstream_state", "metadata_source",
              "metadata_synced_at", "upstream_updated_at", "upstream_sha",
              "default_cpu", "default_ram_mb", "default_disk_gb", "default_os",
-             "default_os_version", "deprecated", "synced_at", "raw")
+             "default_os_version", "synced_at", "raw")
 
 
 def test_a_sync_changes_popularity_and_its_stamp_and_nothing_else(tmp_path, monkeypatch):

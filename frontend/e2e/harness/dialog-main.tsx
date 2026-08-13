@@ -55,6 +55,7 @@ const ENTRY = {
   default_cpu: 2, default_ram_mb: 2048, default_disk_gb: 8,
   default_os: 'debian', default_os_version: '13',
   installable: true, unsupported_reason: null, upstream_state: 'listed',
+  script_path: 'ct/plex.sh', upstream_sha: '3d9a7c25d68913a5f91e7ae34107c29da3fbbccf',
   synced_at: '2026-08-13T08:00:00',
   script_created: '2024-05-02T00:00:00', script_updated: '2026-06-11T00:00:00',
   has_arm: true, updateable: true, privileged: false,

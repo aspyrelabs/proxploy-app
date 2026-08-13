@@ -11,6 +11,7 @@ const BASE: CatalogRow = {
   popularity_synced_at: null, script_created: '2024-01-01T00:00:00',
   script_updated: '2024-01-01T00:00:00', has_arm: true, updateable: true,
   privileged: false, architectures: ['amd64'], port: null,
+  script_path: 'ct/base.sh', upstream_sha: '3d9a7c25d68913a5f91e7ae34107c29da3fbbccf',
 }
 
 const row = (over: Partial<CatalogRow> & { slug: string }): CatalogRow => ({ ...BASE, ...over })
