@@ -1,6 +1,19 @@
 # Addon-delegated installs: running the payload script Proxploy's own way
 
 Date: 2026-08-13
+> **SUPERSEDED in principle** by
+> `2026-08-13-app-install-modes-design.md`.
+>
+> This document's premise, that Proxploy answers an installer's prompts itself
+> from a curated allowlist with no human present, was rejected. The governing
+> rule is now that Proxploy never auto-answers a prompt on the operator's
+> behalf: either the operator chose the value in a form, or answers it live.
+>
+> Its ANALYSIS remains sound and is carried forward: the unpinned tools.func
+> problem, artefact verification rather than exit status, and the finding that
+> the five apps build an empty container that upstream reports as success. Read
+> it for those; do not build its mechanism.
+
 Status: proposed, not approved, nothing implemented
 
 ## Problem
