@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useCatalogEntry, useInstall } from '../api/catalog'
+import { StorageFields } from './install/StorageFields'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -24,6 +25,11 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // even on an otherwise-default install, and Task 12 hangs its collision
   // check off this same field.
   const [mode, setMode] = useState<'default' | 'advanced'>('default')
+  // Empty string means "let resolve_storage_pools decide" (backend/proxploy/
+  // services/appstore.py): its own fallbacks (remembered host default, then
+  // sole candidate) are honest defaults, so Default mode never has to touch
+  // this state at all.
+  const [storage, setStorage] = useState({ container: '', template: '' })
   const [jobId, setJobId] = useState<number | null>(null)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
@@ -41,8 +47,15 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
+    // Only send a key the operator actually picked. An empty string here
+    // would reach resolve_storage_pools as a supplied-but-blank value; its
+    // own `.strip() or None` treats that the same as absent, but sending
+    // nothing is more honest about "the operator did not choose."
+    const overrides: Record<string, string> = {}
+    if (storage.container) overrides.container_storage = storage.container
+    if (storage.template) overrides.template_storage = storage.template
     install.mutate(
-      { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides: {}, consent },
+      { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides, consent },
       { onSuccess: (r) => { setJobId(r.job.id); setProgress(r.job.progress_pct) } },
     )
   }
@@ -88,8 +101,16 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             </label>
           </div>
           <select className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
+            aria-label="Host"
             value={hostId ?? ''} disabled={hosts.isError}
-            onChange={(e) => setHostId(Number(e.target.value) || null)}>
+            onChange={(e) => {
+              setHostId(Number(e.target.value) || null)
+              // Storage pools are per host (StorageFields): a pool picked on
+              // the old host is not necessarily valid on the new one, so a
+              // host switch clears the picks instead of letting a name that
+              // may not exist there reach the install as an override.
+              setStorage({ container: '', template: '' })
+            }}>
             {hosts.isError
               ? <option value="">Could not load hosts</option>
               : <option value="">Select a host…</option>}
@@ -108,8 +129,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             <div className="rounded-ctl border border-dashed border-line-soft p-3 text-[12px] text-text-3">
               <span className="text-text">Container customization</span>
               <span className="block mt-1">
-                Storage, resource and OS options land here in a later task.
+                Resource and OS options land here in a later task.
               </span>
+              <StorageFields hostId={hostId} container={storage.container} template={storage.template}
+                onChange={setStorage} />
             </div>
           )}
           <div className="text-[12px] text-text-2">

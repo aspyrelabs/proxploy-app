@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { InstallDialog } from '../components/InstallDialog'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
@@ -14,6 +14,54 @@ function renderDialog() {
     </QueryClientProvider>,
   )
 }
+
+type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
+type HostRow = { id: number; name: string }
+
+const DEFAULT_HOSTS: HostRow[] = [{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }]
+// host 1 carries a vztmpl-only pool ('local') and a rootdir-only pool
+// ('local-lvm'); host 2 carries a single pool good for both, used by the
+// re-query test to prove the candidate list is keyed on the target host.
+const DEFAULT_STORAGE: StorageRow[] = [
+  { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl', 'iso'] },
+  { host_id: 1, node: 'pve', storage: 'local-lvm', content: ['rootdir'] },
+  { host_id: 2, node: 'pve2', storage: 'host02-lvm', content: ['rootdir', 'vztmpl'] },
+]
+
+async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[] = DEFAULT_HOSTS) {
+  const { api } = await import('../api/client')
+  vi.mocked(api).mockImplementation((path: string) => {
+    if (path === '/catalog/redis') return Promise.resolve({
+      slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+      default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+    })
+    if (path === '/hosts') return Promise.resolve(hosts)
+    if (path === '/storage') return Promise.resolve(rows)
+    return Promise.resolve(null)
+  })
+}
+
+async function openAdvanced() {
+  await waitFor(() => expect(screen.getByRole('radio', { name: /advanced/i })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+  // The pickers need a target host to filter pools for; select the first one.
+  fireEvent.change(screen.getByRole('combobox', { name: /host/i }), { target: { value: '1' } })
+}
+
+async function selectHost(name: string) {
+  const hostSelect = screen.getByRole('combobox', { name: /host/i })
+  const option = within(hostSelect).getByText(name) as HTMLOptionElement
+  fireEvent.change(hostSelect, { target: { value: option.value } })
+}
+
+function optionsOf(labelText: string) {
+  const select = screen.getByLabelText(labelText) as HTMLSelectElement
+  return within(select).getAllByRole('option')
+    .map((o) => (o as HTMLOptionElement).value)
+    .filter((v) => v !== '')
+}
+const containerOptions = () => optionsOf('Container storage')
+const templateOptions = () => optionsOf('Template storage')
 
 /** Fills the form and submits, up to (not including) whatever install-job
  *  response the test's own api mock returns. */
@@ -161,5 +209,29 @@ describe('InstallDialog', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute(
       'aria-label', expect.stringContaining('45 percent')))
+  })
+
+  it('offers only rootdir pools for the container and vztmpl for the template', async () => {
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl', 'iso'] },
+      { host_id: 1, node: 'pve', storage: 'local-lvm', content: ['rootdir'] },
+    ])
+    renderDialog()
+    await openAdvanced()
+
+    // A vztmpl-only pool as the rootfs fails at pct create with a raw Proxmox
+    // error, after this form said it was fine.
+    await waitFor(() => expect(containerOptions()).toEqual(['local-lvm']))
+    expect(templateOptions()).toEqual(['local'])
+  })
+
+  it('re-queries candidates when the target host changes', async () => {
+    await mockStorage()
+    renderDialog()
+    await openAdvanced()
+    await waitFor(() => expect(containerOptions()).toEqual(['local-lvm']))
+
+    await selectHost('host-02')
+    await waitFor(() => expect(containerOptions()).toEqual(['host02-lvm']))
   })
 })
