@@ -1,6 +1,12 @@
 {
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    /* shadcn/ui resolves its own components through the "@/" alias
+       (components.json), so the alias has to exist in the compiler and in
+       Vite alike. Every pre-existing import in this app is relative and
+       stays that way; this only adds a second, additive way to resolve
+       src/, it does not rewrite anything. */
+    "paths": { "@/*": ["./src/*"] },
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",

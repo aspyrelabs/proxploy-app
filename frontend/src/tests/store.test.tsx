@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
 import { api } from '../api/client'
 import { StoreCard } from '../components/StoreCard'
@@ -17,30 +17,34 @@ vi.mock('../api/client', () => ({ api: vi.fn() }))
 // clean slate before each is a pure isolation fix, not a behavior change.
 beforeEach(() => { vi.mocked(api).mockReset() })
 
-// The Store grid is virtualized (@tanstack/react-virtual): it sizes its
-// scroll container and measures each row from `offsetWidth`/`offsetHeight`
-// (@tanstack/virtual-core's observeElementRect/measureElement), which jsdom
-// always reports as 0, since it has no real layout engine. Without a
-// generous fixed value the virtualizer would compute an empty visible range
-// and mount nothing at all, the same class of fix time-chart.test.tsx
-// already applies to TimeChart's own container measurement (there via
-// getBoundingClientRect, here via the offset* properties virtual-core reads).
-const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
-const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
+// The grid used to be virtualized and needed jsdom offsetWidth/offsetHeight
+// stubs to mount anything at all. It renders one page of plain grid cells
+// now, so there is no measurement to fake: what the DOM contains is exactly
+// the page the user is on, which is also what makes the card counts below
+// assertable rather than a function of a simulated viewport.
+//
+// The Select in the pagination bar is Radix, and Radix's dismissable layer
+// drives its trigger through Pointer Events that jsdom does not implement.
+// These three are the standard jsdom gap fillers for it, nothing more: they
+// let the listbox open so the real widget can be exercised.
+const pointerStubs: Array<[string, unknown]> = [
+  ['hasPointerCapture', () => false],
+  ['setPointerCapture', () => {}],
+  ['releasePointerCapture', () => {}],
+  ['scrollIntoView', () => {}],
+]
 beforeEach(() => {
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, value: 2000 })
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, value: 1200 })
-})
-afterEach(() => {
-  if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
-  if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth)
+  for (const [name, impl] of pointerStubs) {
+    Object.defineProperty(Element.prototype, name, { configurable: true, writable: true, value: impl })
+  }
 })
 
-// StorePage reads/writes category+q through router search params. Mock
-// useSearch/useNavigate with a tiny external store (same shape as apps.test.tsx's
-// static stub, but reactive) so a chip click's navigate() actually re-renders
-// the page with the new search, needed to assert useCatalog gets re-called.
-let mockSearch: { category?: string; q?: string } = {}
+// StorePage reads/writes category+q+page+pageSize through router search
+// params. Mock useSearch/useNavigate with a tiny external store (same shape as
+// apps.test.tsx's static stub, but reactive) so a chip click's navigate()
+// actually re-renders the page with the new search, needed to assert
+// useCatalog gets re-called and that paging survives in the URL.
+let mockSearch: { category?: string; q?: string; page?: number; pageSize?: number } = {}
 const searchListeners = new Set<() => void>()
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
@@ -625,5 +629,156 @@ describe('Store refresh progress', () => {
 
     await waitFor(() => expect(screen.getByText(/never synced/i)).toBeInTheDocument())
     expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+})
+
+/**
+ * Pagination (shadcn/ui pagination + select, vendored into components/ui).
+ * The store used to render every matching card into a virtualized scroller;
+ * it now renders one page at a time, with page and page size carried in the
+ * route's search params next to category and q.
+ */
+describe('Store pagination', () => {
+  const manyEntries = (n: number): CatalogRow[] =>
+    Array.from({ length: n }, (_, i) => ({
+      ...REDIS, slug: `app-${i}`, name: `App ${String(i).padStart(3, '0')}`,
+    }))
+
+  const mockEntries = async (rows: CatalogRow[]) => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: rows } as any)
+  }
+
+  // Every fixture row is installable, so one Install button is exactly one
+  // rendered card. Counting them counts the page.
+  const cardCount = () => screen.getAllByRole('button', { name: 'Install' }).length
+
+  beforeEach(() => { mockSearch = {} })
+
+  it('renders only the default 25 of a larger result set', async () => {
+    await mockEntries(manyEntries(30))
+    withQuery(<StorePage />)
+    expect(cardCount()).toBe(25)
+    expect(screen.getByText('Showing 1 to 25 of 30')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument()
+    // page 1 is the URL's default state, so it stays out of the URL
+    expect(mockSearch.page).toBeUndefined()
+  })
+
+  it('pages forward and back, and lands on the right slice', async () => {
+    await mockEntries(manyEntries(30))
+    withQuery(<StorePage />)
+    expect(screen.getByText('App 000')).toBeInTheDocument()
+    expect(screen.queryByText('App 025')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /go to next page/i }))
+
+    expect(cardCount()).toBe(5)  // the 30 - 25 remainder
+    expect(screen.getByText('App 025')).toBeInTheDocument()
+    expect(screen.queryByText('App 000')).not.toBeInTheDocument()
+    expect(screen.getByText('Showing 26 to 30 of 30')).toBeInTheDocument()
+    expect(mockSearch.page).toBe(2)
+
+    fireEvent.click(screen.getByRole('button', { name: /go to previous page/i }))
+
+    expect(screen.getByText('App 000')).toBeInTheDocument()
+    expect(mockSearch.page).toBeUndefined()
+  })
+
+  it('disables Previous on the first page and Next on the last', async () => {
+    // Disabled, not a link that silently does nothing: the ends have to be
+    // announced as unavailable, not just fail to respond.
+    await mockEntries(manyEntries(30))
+    withQuery(<StorePage />)
+    expect(screen.getByRole('button', { name: /go to previous page/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /go to next page/i })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /go to next page/i }))
+
+    expect(screen.getByRole('button', { name: /go to previous page/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /go to next page/i })).toBeDisabled()
+  })
+
+  it('needs no pagination controls at all for a single page', async () => {
+    await mockEntries(manyEntries(3))
+    withQuery(<StorePage />)
+    expect(cardCount()).toBe(3)
+    expect(screen.getByText('Showing 1 to 3 of 3')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /go to previous page/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /go to next page/i })).toBeDisabled()
+  })
+
+  it('honours a page size from the URL', async () => {
+    await mockEntries(manyEntries(30))
+    mockSearch = { pageSize: 15 }
+    withQuery(<StorePage />)
+    expect(cardCount()).toBe(15)
+    expect(screen.getByText('Showing 1 to 15 of 30')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument()
+  })
+
+  it('changes page size through the Select and resets to page 1', async () => {
+    await mockEntries(manyEntries(120))
+    mockSearch = { page: 3 }
+    withQuery(<StorePage />)
+    expect(screen.getByText('Showing 51 to 75 of 120')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('combobox', { name: /apps per page/i }))
+    fireEvent.click(await screen.findByRole('option', { name: '100' }))
+
+    await waitFor(() => expect(mockSearch.pageSize).toBe(100))
+    // Page 1 at the new density, not page 3 of a list that no longer has one.
+    expect(mockSearch.page).toBeUndefined()
+    expect(screen.getByText('Showing 1 to 100 of 120')).toBeInTheDocument()
+    expect(cardCount()).toBe(100)
+  })
+
+  it('offers exactly the four sizes the store supports', async () => {
+    await mockEntries(manyEntries(30))
+    withQuery(<StorePage />)
+    fireEvent.click(screen.getByRole('combobox', { name: /apps per page/i }))
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
+    expect(options).toEqual(['15', '25', '50', '100'])
+  })
+
+  it('drops back to page 1 when the search text changes', async () => {
+    // The classic pagination bug: narrow a 5-page result set to a 1-page one
+    // while sitting on page 4 and the grid renders empty, which reads as "no
+    // matches" when it is really "no page 4".
+    await mockEntries([...manyEntries(30), { ...REDIS, slug: 'gitea', name: 'Gitea' }])
+    mockSearch = { page: 2 }
+    withQuery(<StorePage />)
+    expect(screen.getByText('Gitea')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText(/search the store/i),
+                     { target: { value: 'gitea' } })
+
+    expect(mockSearch.page).toBeUndefined()
+    expect(screen.getByText('Gitea')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument()
+  })
+
+  it('drops back to page 1 when the category chip changes', async () => {
+    const rows = [...manyEntries(30), { ...REDIS, slug: 'gitea', name: 'Gitea', category: 'Dev Tools' }]
+    await mockEntries(rows)
+    mockSearch = { page: 2 }
+    withQuery(<StorePage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dev Tools' }))
+
+    expect(mockSearch.page).toBeUndefined()
+    expect(screen.getByText('Gitea')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument()
+  })
+
+  it('clamps a stale page from the URL to the last real page', async () => {
+    // A deep link to ?page=12 that a catalog refresh has since invalidated
+    // shows the last page rather than an empty grid.
+    await mockEntries(manyEntries(30))
+    mockSearch = { page: 12 }
+    withQuery(<StorePage />)
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument()
+    expect(cardCount()).toBe(5)
   })
 })

@@ -10,6 +10,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), materialSymbolsLink(join(here, 'src'))],
+  // The "@/" alias shadcn/ui's own components import through, mirrored from
+  // tsconfig.app.json's paths so the bundler, Vitest and the compiler all
+  // resolve it the same way. Purely additive: every import this app already
+  // had is relative and none of them were touched.
+  resolve: { alias: { '@': join(here, 'src') } },
   server: { proxy: { '/api': 'http://127.0.0.1:8000' } },
   // e2e/ is Playwright's; it imports @playwright/test, which Vitest cannot
   // collect. Without this exclude the two runners' default globs overlap and

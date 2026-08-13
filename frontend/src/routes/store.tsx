@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,82 +11,68 @@ import { InstallDialog } from '../components/InstallDialog'
 import { StoreCard } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { Field, FieldLabel } from '@/components/ui/field'
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
+} from '@/components/ui/pagination'
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Progress, ProgressLabel, ProgressValue } from '../components/ui/progress'
 import { fmtUptime } from '../lib/format'
 import { shellRoute } from './shell'
 
 const inputCls = 'rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
-// Same breakpoints as the grid classes this replaces (Tailwind's default
-// sm=640px/xl=1280px), kept in one place so the virtualizer's row width and
-// the rendered column count can never disagree with each other.
-function columnsFor(width: number): number {
-  if (width >= 1280) return 3
-  if (width >= 640) return 2
-  return 1
+// The page sizes offered, and the one a fresh visit gets. DEFAULT_PAGE_SIZE
+// is deliberately absent from the URL when it is in force (see the route's
+// validateSearch), so the common case keeps a clean /store link.
+const PAGE_SIZES = [15, 25, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 25
+
+/** The router's own parse yields a number, a hand-typed URL yields a string,
+ *  and anything else is not a number at all. */
+function toNumber(v: unknown): number {
+  return typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
 }
 
-function useColumnCount(): number {
-  const [cols, setCols] = useState(() =>
-    columnsFor(typeof window === 'undefined' ? 0 : window.innerWidth))
-  useEffect(() => {
-    const onResize = () => setCols(columnsFor(window.innerWidth))
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-  return cols
+/** Page 1 is the default, so it is represented by absence, not by "?page=1". */
+function toPage(v: unknown): number | undefined {
+  const n = toNumber(v)
+  return Number.isInteger(n) && n > 1 ? n : undefined
 }
 
-const ROW_ESTIMATE_PX = 268
+/** Only a size actually on the menu survives, and the default is absence
+ *  again, so an invented "?pageSize=7" falls back rather than being honoured. */
+function toPageSize(v: unknown): number | undefined {
+  const n = toNumber(v)
+  return n !== DEFAULT_PAGE_SIZE && (PAGE_SIZES as readonly number[]).includes(n)
+    ? n : undefined
+}
 
-// Virtualized so ~533 LXC cards cost a handful of mounted rows rather than
-// the whole grid at once (catalog expansion plan, decision 5). Logos load
-// lazily as a side effect of this: a card outside the rendered window never
-// mounts, so its <img> never fires a network request in the first place.
+// One page of cards, in the plain responsive grid the virtualizer used to
+// emulate by hand. The virtualizer earned its keep when this rendered all
+// ~557 LXC entries at once; a page is at most 100 cards, so the DOM cost is
+// bounded by the page size and the measurement plumbing is just overhead.
 function StoreGrid({ entries, installedSlugs, onInstall }: {
   entries: CatalogRow[]; installedSlugs: Set<string>; onInstall: (slug: string) => void
 }) {
-  const parentRef = useRef<HTMLDivElement>(null)
-  const columns = useColumnCount()
-  const rowCount = Math.ceil(entries.length / columns)
-  const virtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_ESTIMATE_PX,
-    overscan: 6,
-  })
-
   return (
-    <div ref={parentRef} className="max-h-[calc(100vh-260px)] overflow-y-auto">
-      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((vRow) => {
-          const rowEntries = entries.slice(vRow.index * columns, vRow.index * columns + columns)
-          return (
-            <div
-              key={vRow.key} data-index={vRow.index} ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute', top: 0, left: 0, width: '100%',
-                transform: `translateY(${vRow.start}px)`,
-                display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '1rem',
-              }}
-              className="pb-4"
-            >
-              {rowEntries.map((e) => (
-                <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
-                  onInstall={onInstall} />
-              ))}
-            </div>
-          )
-        })}
-      </div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {entries.map((e) => (
+        <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
+          onInstall={onInstall} />
+      ))}
     </div>
   )
 }
 
 export function StorePage() {
-  const search = useSearch({ strict: false }) as { category?: string; q?: string }
+  const search = useSearch({ strict: false }) as
+    { category?: string; q?: string; page?: number; pageSize?: number }
   const navigate = useNavigate()
   const [installing, setInstalling] = useState<string | null>(null)
+  const gridTop = useRef<HTMLDivElement>(null)
   // The Store is LXC-only (catalog expansion plan: non-LXC entries stay in
   // the catalog table, tagged by type, and never render here), so this
   // fetches the whole ct/ catalog once; category/search are then instant,
@@ -167,8 +152,47 @@ export function StorePage() {
     return rows
   }, [entries, search.category, search.q])
 
-  const setSearch = (patch: Partial<{ category?: string; q?: string }>) =>
+  const setSearch = (patch: Partial<typeof search>) =>
     navigate({ to: '/store' as never, search: { ...search, ...patch } as never, replace: true })
+
+  // Page and page size live in the route's search params, next to category and
+  // q, so a reload, a bookmark and the back button all land on the page the
+  // operator was actually looking at. They are already navigating this page by
+  // URL for category and search; paging is the same kind of state and it would
+  // be odd for it to be the one thing that evaporates on refresh.
+  const pageSize = search.pageSize ?? DEFAULT_PAGE_SIZE
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  // Clamped rather than corrected in place. A hand-edited or stale ?page= (a
+  // refresh can shrink the catalog under a deep link) shows the last real page
+  // instead of an empty grid, and the next Prev/Next click writes an honest
+  // number back. An effect that renavigated here would be one more thing that
+  // can loop with the user's own navigation.
+  const page = Math.min(Math.max(1, search.page ?? 1), pageCount)
+  const firstIndex = (page - 1) * pageSize
+  const pageEntries = filtered.slice(firstIndex, firstIndex + pageSize)
+
+  const goToPage = (next: number) => {
+    setSearch({ page: next <= 1 ? undefined : next })
+    // Page 2 should start at the top of the grid, not wherever the click
+    // happened to leave the viewport. Optional call: jsdom has no
+    // scrollIntoView, and this is presentation, not behaviour.
+    gridTop.current?.scrollIntoView?.({ block: 'start' })
+  }
+
+  // Changing the page size resets to page 1 rather than trying to keep the
+  // first visible card in view. Picked for predictability: "show me 100" is a
+  // request to see the top of the list at a new density, and preserving a
+  // scroll offset across a re-paginate is guesswork the user cannot check.
+  const setPageSize = (next: number) =>
+    setSearch({ pageSize: next === DEFAULT_PAGE_SIZE ? undefined : next, page: undefined })
+
+  // Every filter change drops back to page 1. Without this, narrowing a
+  // 23-page result set to a 2-page one while sitting on page 12 renders an
+  // empty grid that looks like "no results" and is really "no page 12".
+  const setFilter = (patch: Partial<typeof search>) => setSearch({ ...patch, page: undefined })
+
+  const rangeStart = filtered.length === 0 ? 0 : firstIndex + 1
+  const rangeEnd = firstIndex + pageEntries.length
 
   return (
     <div>
@@ -241,7 +265,7 @@ export function StorePage() {
           className={inputCls}
           placeholder="Search the store…"
           defaultValue={search.q ?? ''}
-          onChange={(e) => setSearch({ q: e.target.value || undefined })}
+          onChange={(e) => setFilter({ q: e.target.value || undefined })}
         />
         <div className="flex flex-wrap gap-2">
           {categories.map((c) => (
@@ -249,13 +273,15 @@ export function StorePage() {
               key={c}
               className={`rounded-full px-3 py-1 text-[12px] ${
                 (search.category ?? 'All') === c ? 'bg-elev text-text' : 'text-text-2 hover:bg-panel-2'}`}
-              onClick={() => setSearch({ category: c === 'All' ? undefined : c })}
+              onClick={() => setFilter({ category: c === 'All' ? undefined : c })}
             >
               {c}
             </button>
           ))}
         </div>
       </div>
+
+      <div ref={gridTop} />
 
       <QueryState query={catalogQuery}
                   empty={() => filtered.length === 0}
@@ -264,8 +290,57 @@ export function StorePage() {
                   errorTitle="Store catalog not readable"
                   errorNote="Proxploy could not reach the backend to list the app catalog.">
         {() => (
-          <StoreGrid entries={filtered} installedSlugs={installedSlugs}
-                    onInstall={(slug) => setInstalling(slug)} />
+          <>
+            <StoreGrid entries={pageEntries} installedSlugs={installedSlugs}
+                      onInstall={(slug) => setInstalling(slug)} />
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+              <Field orientation="horizontal" className="w-fit">
+                <FieldLabel htmlFor="select-rows-per-page" className="text-[12px] text-text-2">
+                  Apps per page
+                </FieldLabel>
+                <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                  <SelectTrigger className="w-20" id="select-rows-per-page" size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectGroup>
+                      {PAGE_SIZES.map((n) => (
+                        <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Prev/Next alone say nothing about where you are in 557
+                    apps, so the position is spelled out rather than implied. */}
+                <span className="font-mono text-[11px] text-text-3">
+                  Showing {rangeStart} to {rangeEnd} of {filtered.length}
+                </span>
+                <Pagination className="mx-0 w-auto">
+                  <PaginationContent>
+                    <PaginationItem>
+                      {/* Genuinely disabled at the ends, not a link that
+                          quietly does nothing. */}
+                      <PaginationPrevious disabled={page <= 1}
+                                          onClick={() => goToPage(page - 1)} />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <span className="px-2 text-[12px] text-text-2">
+                        Page {page} of {pageCount}
+                      </span>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext disabled={page >= pageCount}
+                                      onClick={() => goToPage(page + 1)} />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            </div>
+          </>
         )}
       </QueryState>
 
@@ -282,6 +357,13 @@ export const storeRoute = createRoute({
   validateSearch: (s: Record<string, unknown>) => ({
     category: typeof s.category === 'string' ? s.category : undefined,
     q: typeof s.q === 'string' && s.q ? s.q : undefined,
+    // Both default states are represented by their ABSENCE from the URL, so
+    // /store stays clean until the operator actually pages or changes the
+    // density. A page number arrives as a number from the router's own parse
+    // but as a string from a hand-typed URL, so both are accepted; anything
+    // else, including page 1 and the default size, normalises to undefined.
+    page: toPage(s.page),
+    pageSize: toPageSize(s.pageSize),
   }),
   component: StorePage,
 })
