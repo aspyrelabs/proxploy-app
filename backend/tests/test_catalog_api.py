@@ -571,3 +571,36 @@ def test_freshness_is_still_measured_across_every_ct_row(client, csrf_header,
     assert status["entries"] == 0            # nothing visible to show
     assert status["synced_at"] is not None   # ...but the catalog IS fresh
     assert status["stale"] is False
+
+
+def test_install_defaults_come_from_the_script_not_metadata(client, csrf_header,
+                                                             bootstrap_admin):
+    """dockge is the row where the two sources disagree: the ct script says
+    2/2048/18 and the cached metadata's install_methods[0].resources says
+    0/0/0. The script is what actually runs, and metadata is
+    presentation-only (catalog_metadata.apply_writable_fields), so the script
+    wins. Prefilling an install form from the metadata zeros would be a
+    visible bug."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(
+            slug="dockge", name="Dockge", category="Containers & Docker",
+            entry_type="ct", installable=True, unsupported_reason=None,
+            default_cpu=2, default_ram_mb=2048, default_disk_gb=18,
+            default_os="debian", default_os_version="13",
+            raw={"metadata": {"install_methods": [
+                {"type": "default", "resources": {
+                    "cpu": 0, "ram": 0, "hdd": 0,
+                    "os": "Debian", "version": "13",
+                }},
+            ]}},
+        ))
+        db.commit()
+
+    body = client.get("/api/v1/catalog/dockge").json()
+
+    assert body["default_cpu"] == 2
+    assert body["default_ram_mb"] == 2048
+    assert body["default_disk_gb"] == 18
+    assert body["default_os"] == "debian"
+    assert body["default_os_version"] == "13"
