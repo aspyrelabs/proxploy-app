@@ -159,6 +159,41 @@ fail on multi-storage hosts, or something upstream of this (`PHS_SILENT`,
 `mode=default`) suppresses it. Establish which before building, because if it is
 a live bug it is a bugfix that need not wait for the form.
 
+**This rule is a test, not an implementation detail.** It has the same
+silent-ignore failure mode as the variable-name pinning, and the same shape of
+seductive future "optimization": omitting storage when the operator did not
+change it looks like sending less noise, and reintroduces the hang, and only on
+multi-storage hosts, so it passes every test written on a single-storage
+development box. The test asserts that a **Default** install, with no user input
+at all, produces an `env` containing both `var_container_storage` and
+`var_template_storage`. See Testing.
+
+### The picker must offer real candidates, per content type, per host
+
+Because both variables are always sent, the form has to send *valid* ones. It
+cannot ship a free-text box or a guess.
+
+The form queries the storages available on the **selected host** and offers them
+filtered by content type:
+
+- Container storage: pools whose content includes **`rootdir`**
+- Template storage: pools whose content includes **`vztmpl`**
+
+Filtering by content type is not cosmetic. Offering every pool for both fields
+would let an operator pick a `vztmpl`-only pool as the container rootfs, which
+fails at `pct create` time with a raw Proxmox error, after the form told them it
+was fine.
+
+No new endpoint is needed. `/storage` already returns `content: string[]` per
+row (`api/storage.py::_content_list`, which normalises PVE's raw
+`"iso,vztmpl,backup"` string), and `VmCreateWizard`'s `StorageRow` type already
+carries it. This is a client-side filter over data the app already fetches.
+
+Storages are per host, so the candidate list **re-queries when the target host
+changes**, exactly as the CTID collision check does. Selecting a storage that
+exists on host A and then switching to host B must not silently submit a pool
+that does not exist there.
+
 ### Collapsed "Advanced options"
 
 `var_gpu`, `var_nesting`, `var_tags`, `var_timezone`, `var_ssh`,
@@ -289,8 +324,17 @@ visible diff.
   disagrees (use `dockge`, 2/2048/18 against 0/0/0) prefills the script values.
 - Static networking format validation rejects a malformed gateway, CIDR, MTU
   and VLAN; blank `var_net` is accepted and documented as DHCP.
-- Both storage variables are present in `env` on every install, Default mode
-  included, so no install can reach `select_storage`'s interactive branch.
+- **A Default install with no user input produces an `env` containing both
+  `var_container_storage` and `var_template_storage`.** Named as a regression
+  test, not folded into a broader assertion, because the regression it prevents
+  is a future change that omits storage when the operator did not touch it. That
+  change would look like a tidy-up, would pass on any single-storage host, and
+  would hang installs only where there are two or more candidates.
+- The container storage picker offers only pools whose content includes
+  `rootdir`, and the template picker only those including `vztmpl`. A pool
+  valid for one must not be offered for the other.
+- Changing the target host re-queries the storage candidates, and a selection
+  that does not exist on the newly selected host is not submitted.
 - A host without acknowledgement cannot install; a backfilled host can.
 - The migration backfills only hosts with installs enabled.
 - Advanced values survive the round trip from form to `env`.
