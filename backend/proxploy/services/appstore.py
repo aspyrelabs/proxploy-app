@@ -103,19 +103,24 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     app = ctx.backend.app
     catalog_slug = params["catalog_slug"]
     host_id = int(params["host_id"])
-    ctid = int(params["ctid"])
+    ctid = params.get("ctid")
+    ctid = int(ctid) if ctid is not None else None
     name = params["name"]
     overrides = params.get("overrides") or {}
 
     entry, host, install_script = await asyncio.to_thread(
         _resolve, app, catalog_slug, host_id)
 
-    ctx.log(f"installing {catalog_slug} on {host.name} as CT {ctid}")
+    ctx.log(f"installing {catalog_slug} on {host.name}"
+            + (f" as CT {ctid}" if ctid is not None else
+               ", letting the node assign the next free CT id"))
     # Refuse to "install" onto a container that already exists: the catalog
     # script would reconfigure or clobber somebody else's CT and this handler
-    # would then file an App row claiming to own it.
+    # would then file an App row claiming to own it. Nothing to check yet when
+    # no ctid was supplied; the post-check below is what proves which id the
+    # node picked.
     before = await asyncio.to_thread(_lxc_ids, app, host_id)
-    if ctid in before:
+    if ctid is not None and ctid in before:
         raise JobFailed(f"CT {ctid} already exists on {host.name}; "
                         f"refusing to install over it")
 
@@ -156,12 +161,19 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     env["var_container_storage"] = container_pool
     env["var_template_storage"] = template_pool
 
-    # Set last so it always wins over an `overrides` entry: the App row below
-    # records this ctid as fact, so the container has to actually land there.
-    # misc/build.func honours it (`local requested_id="${var_ctid:-$NEXTID}"`);
-    # without it the script silently auto-picks the next free ID instead and
-    # the App row points at a CT that doesn't exist.
-    env["var_ctid"] = str(ctid)
+    if ctid is not None:
+        # Set last so it always wins over an `overrides` entry: the App row
+        # below records this ctid as fact, so the container has to actually
+        # land there. misc/build.func honours it
+        # (`local requested_id="${var_ctid:-$NEXTID}"`).
+        #
+        # When ctid is None the key must be ABSENT from env, never present
+        # and empty: build.func reads it a second time at :1086 with
+        # `[[ -n "${var_ctid:-}" ]]`, which branches on non-empty, and only
+        # absence is honest about "let the node pick" under both that read
+        # and the `:-$NEXTID}` read above. An empty string happens to satisfy
+        # the first reader but not the second.
+        env["var_ctid"] = str(ctid)
 
     executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
 
@@ -205,7 +217,19 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # this check the handler filed an App row for a CT that does not exist,
     # which is exactly what happened on the first real-hardware run.
     after = await asyncio.to_thread(_lxc_ids, app, host_id)
-    if ctid not in after:
+    if ctid is None:
+        # No id was pinned, so read back which one build.func picked from the
+        # diff of the id sets. This assumes an install creates exactly one
+        # container, true of every ct/ script today, and the failure mode
+        # when that assumption breaks is loud (JobFailed) rather than a
+        # silently wrong id recorded on the App row.
+        created = sorted(after - before)
+        if len(created) != 1:
+            raise JobFailed(
+                f"install script exited 0 but {len(created)} containers appeared "
+                f"on {host.name}: cannot record which one is this app")
+        ctid = created[0]
+    elif ctid not in after:
         raise JobFailed(
             f"install script exited 0 but CT {ctid} does not exist on "
             f"{host.name}: nothing was installed")

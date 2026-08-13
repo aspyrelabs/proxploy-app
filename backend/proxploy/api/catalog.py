@@ -338,7 +338,10 @@ def refresh_catalog(request: Request, db=Depends(get_db),
 class InstallIn(BaseModel):
     host_id: int
     name: str
-    ctid: int
+    # Optional: blank means build.func assigns the next free id via
+    # `${var_ctid:-$NEXTID}`. Requiring one was a bug; there is nothing an
+    # operator can usefully say here that the node cannot say better.
+    ctid: int | None = None
     overrides: dict = {}
     consent: bool = False
 

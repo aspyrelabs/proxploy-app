@@ -406,3 +406,105 @@ def test_the_executed_command_is_the_ct_script_either_way(tmp_path):
         assert "tools/addon/" not in cmd
 
     asyncio.run(scenario())
+
+
+# --- Task 5: the CTID is optional -------------------------------------------
+#
+# Requiring an operator-typed container id was a bug: build.func assigns the
+# next free one itself (`local requested_id="${var_ctid:-$NEXTID}"`) when
+# told nothing. The contract that matters is ABSENCE, not emptiness: :1086
+# separately reads `[[ -n "${var_ctid:-}" ]]`, which branches on non-empty,
+# so an empty string would satisfy the first read and silently fail the
+# second the moment build.func drops the colon form. Nothing here sends
+# `ctid` any other way than fully absent from `params` or explicitly None.
+
+
+def test_install_without_a_ctid_omits_var_ctid_and_records_the_id_the_node_picked(tmp_path):
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        def _on_create_process(command):
+            # Stands in for the node auto-picking the next free id via
+            # NEXTID, exactly what happens when var_ctid was never sent.
+            pve.add_ct(151, node="pve1", name="redis", status="running")
+
+        fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=[],
+                                 stderr_lines=[], exit_status=0,
+                                 on_create_process=_on_create_process)
+        app.state.ssh_connect_factory = make_fake_connect_factory(fake)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        result = await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                         "name": "Redis", "ctid": None, "overrides": {}})
+
+        cmd = fake.last_command
+        assert cmd is not None
+        assert "var_ctid" not in cmd
+
+        with app.state.sessionmaker() as db:
+            row = db.query(App).filter_by(slug=result["slug"]).one()
+            assert row.ctid == 151, "the id build.func actually picked must be recorded"
+
+    asyncio.run(scenario())
+
+
+def test_install_without_a_ctid_fails_loudly_when_more_than_one_container_appears(tmp_path):
+    """Stated weakness, implemented as written: the diff-based id inference
+    assumes an install creates exactly one container. True for every ct/
+    script today; this proves the failure is loud (JobFailed, no App row)
+    rather than silently recording the wrong id."""
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        def _on_create_process(command):
+            pve.add_ct(151, node="pve1", name="redis", status="running")
+            pve.add_ct(152, node="pve1", name="redis-extra", status="running")
+
+        fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=[],
+                                 stderr_lines=[], exit_status=0,
+                                 on_create_process=_on_create_process)
+        app.state.ssh_connect_factory = make_fake_connect_factory(fake)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        with pytest.raises(JobFailed, match="2 containers appeared"):
+            await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                    "name": "Redis", "ctid": None, "overrides": {}})
+
+        with app.state.sessionmaker() as db:
+            assert db.query(App).count() == 0, "a phantom App row was filed"
+
+    asyncio.run(scenario())
+
+
+def test_install_without_a_ctid_fails_when_the_script_exits_zero_without_building_anything(tmp_path):
+    """Same false-success shape as the pinned-ctid case, just with nothing to
+    diff against: zero containers appeared, so there is no id to record."""
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        app.state.ssh_connect_factory = _ssh_that_builds(pve, 151, creates=False)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        with pytest.raises(JobFailed, match="0 containers appeared"):
+            await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                    "name": "Redis", "ctid": None, "overrides": {}})
+
+        with app.state.sessionmaker() as db:
+            assert db.query(App).count() == 0
+
+    asyncio.run(scenario())

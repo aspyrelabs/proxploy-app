@@ -64,6 +64,34 @@ def test_install_enqueues_an_app_install_job(client, csrf_header, bootstrap_admi
     assert r.json()["job"]["kind"] == "app.install"
 
 
+def test_install_without_a_ctid_is_accepted_and_enqueues_a_job(client, csrf_header, bootstrap_admin):
+    """Task 5: the install form's ctid is optional. Requiring one was a bug,
+    the Proxmox installer assigns the next free id itself
+    (`${var_ctid:-$NEXTID}`) when told nothing. `ctid` in the enqueued job's
+    params must be None here, never an empty string: services/appstore.py's
+    run_install turns that None into `var_ctid` being fully ABSENT from the
+    environment it hands the remote script."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+        host_id = host.id
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 202, r.text
+    job = r.json()["job"]
+    assert job["kind"] == "app.install"
+    assert job["params"]["ctid"] is None
+
+
 def test_install_refuses_a_host_without_an_enrolled_ssh_key(client, csrf_header, bootstrap_admin):
     bootstrap_admin(client)
     with client.app.state.sessionmaker() as db:
