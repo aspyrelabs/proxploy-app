@@ -17,7 +17,7 @@ import { createServer } from 'node:http'
 import { createReadStream, statSync } from 'node:fs'
 import { extname } from 'node:path'
 import { createRequire } from 'node:module'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -150,23 +150,35 @@ function serveDir(dir) {
 }
 
 async function overflow() {
-  const [target, selector = '.rounded-card', widths = '1280,1920,2560,3840,375'] = args
-  if (!target) { console.error('usage: overflow <dir-or-url> [selector] [w,w,w]'); process.exit(2) }
-  const served = target.startsWith('http') ? null : await serveDir(resolve(target))
-  const url = served ? served.url : target
+  const [target, selector = '.rounded-card', sizes = '1280,1920,2560,3840,375'] = args
+  if (!target) { console.error('usage: overflow <path-or-url> [selector] [WxH,W,...]'); process.exit(2) }
+  // A file target serves its own directory and navigates to that file, so a
+  // multi-page harness can point at one of its pages.
+  let url = target
+  let served = null
+  if (!target.startsWith('http')) {
+    const abs = resolve(target)
+    const isFile = statSync(abs).isFile()
+    served = await serveDir(isFile ? dirname(abs) : abs)
+    url = served.url + (isFile ? basename(abs) : '')
+  }
   const browser = await chromium.launch()
   try {
     const out = {}
-    for (const w of widths.split(',').map(Number)) {
-      const page = await browser.newPage({ viewport: { width: w, height: 1200 } })
+    // "1280" keeps the default height; "1280x800" sets both, which is what a
+    // vh-based cap has to be checked against.
+    for (const size of sizes.split(',')) {
+      const [w, h = 900] = size.split('x').map(Number)
+      const page = await browser.newPage({ viewport: { width: w, height: h } })
       await page.goto(url, { waitUntil: 'networkidle' })
       // Webfonts change line boxes; measuring before they land measures the
       // fallback font instead of the real one.
       await page.evaluate(() => document.fonts.ready)
-      out[w] = await page.evaluate(sel => {
+      out[size] = await page.evaluate(sel => {
         const cards = [...document.querySelectorAll(sel)]
         const lane = document.querySelector('main')
         return {
+          viewport: { width: innerWidth, height: innerHeight },
           lane: lane ? Math.round(lane.getBoundingClientRect().width) : null,
           columns: new Set(cards.map(c => Math.round(c.getBoundingClientRect().x))).size,
           cards: cards.map(el => ({
@@ -181,6 +193,12 @@ async function overflow() {
             // that is what is reported as slack, and it is what to watch.
             overflow: Math.max(0, el.scrollHeight - el.clientHeight),
             slack: el.querySelector(':scope > .flex-1')?.offsetHeight ?? null,
+            // Position, so a capped panel can be checked for actually being
+            // centred and for staying inside the viewport. An element that
+            // overhangs the top reports a negative top, which is exactly the
+            // symptom the height cap exists to prevent.
+            top: Math.round(el.getBoundingClientRect().top),
+            width: Math.round(el.getBoundingClientRect().width),
           })),
         }
       }, selector)

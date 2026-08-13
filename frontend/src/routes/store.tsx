@@ -425,9 +425,17 @@ export function StorePage() {
           Dialog, so stacking them would mount two overlays with two focus
           traps, and would put two buttons named "Install" on screen at once,
           which e2e/journey.spec.ts explicitly scopes around. Exactly one
-          dialog is mounted at any moment. */}
+          dialog is mounted at any moment.
+
+          936 is 720 + 30%. The shared 92vw cap still applies and starts biting
+          below a ~1017px viewport (936 / 0.92), so this is a desktop width
+          that narrows on its own rather than a fixed one that would overhang a
+          phone. scrollBody caps the height at 70vh and scrolls the body only:
+          this content is the whole detail page, which is taller than the
+          screen, and an uncapped panel could not be centred at all because
+          there was no free space left to centre it in. */}
       {detailSlug && (
-        <Dialog title={entryName(entries, detailSlug)} width={720}
+        <Dialog title={entryName(entries, detailSlug)} width={936} scrollBody
                 onClose={() => setDetailSlug(null)}>
           <StoreDetailContent slug={detailSlug} onInstall={(slug) => {
             setDetailSlug(null)

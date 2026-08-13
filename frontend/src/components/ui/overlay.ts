@@ -18,6 +18,32 @@ export const dialogOverlayClass =
  */
 export const dialogPanelClass = 'max-w-[92vw] rounded-card border border-line bg-panel p-5'
 
+/**
+ * Opt-in height cap and scroll container, for a dialog whose body is long
+ * enough to outgrow the viewport.
+ *
+ * The numbers live HERE rather than at the call site, for the same reason
+ * max-w-[92vw] does: a call site that passes its own cap is a call site that
+ * can forget one. `Dialog` takes a boolean, not a height.
+ *
+ * 70vh is the cap: the App Store's detail popup was rendering at full content
+ * height, which for that content is taller than the screen, and a panel taller
+ * than the viewport cannot be centred by `place-items-center` because there is
+ * no free space to distribute. So it overhung the top with no way to scroll
+ * back to it. Capping the height is what restores the centring; no centring
+ * code was added or needed.
+ *
+ * The panel becomes a flex column so the heading can stay put while only the
+ * body scrolls. A dialog whose heading scrolls away leaves the reader with no
+ * anchor and nothing to aim the close button at.
+ */
+export const dialogScrollPanelClass = 'flex max-h-[70vh] flex-col'
+
+/** min-h-0 is load bearing: a flex child's default min-height is auto, which
+ *  refuses to shrink below its content, so the container would grow past the
+ *  cap instead of scrolling. */
+export const dialogScrollBodyClass = 'min-h-0 flex-1 overflow-y-auto'
+
 /** The command palette sits high on the screen rather than centred, so it does
  *  not jump as results appear under it. */
 export const paletteOverlayClass =

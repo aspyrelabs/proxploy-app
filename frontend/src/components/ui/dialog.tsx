@@ -2,8 +2,8 @@ import type { ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 
 import {
-  dialogOverlayClass, dialogPanelClass, paletteOverlayClass, palettePanelClass,
-  useRadixClose,
+  dialogOverlayClass, dialogPanelClass, dialogScrollBodyClass, dialogScrollPanelClass,
+  paletteOverlayClass, palettePanelClass, useRadixClose,
 } from './overlay'
 
 /**
@@ -26,6 +26,7 @@ export function Dialog({
   width = 420,
   variant = 'center',
   headerRight,
+  scrollBody = false,
   onClose,
   children,
 }: {
@@ -40,10 +41,20 @@ export function Dialog({
   /** Sits on the title's row, pushed right. The VM wizard's step pills use it
    *  so converting did not have to move them below the heading. */
   headerRight?: ReactNode
+  /** Caps the panel height and scrolls the BODY, leaving the heading in place.
+   *  Opt-in on purpose: this is shared by InstallDialog, the VM create wizard,
+   *  the schedule dialogs and the rest, and a dialog that fits on screen must
+   *  not grow a scroll container it never needed. A dialog that does not pass
+   *  this renders exactly as it did before the prop existed. The cap itself
+   *  lives in overlay.ts, so a call site cannot pick its own. */
+  scrollBody?: boolean
   onClose: () => void
   children: ReactNode
 }) {
   const { open, requestClose, onCloseAutoFocus } = useRadixClose(onClose)
+  // Empty string unless scrolling, so a dialog that does not opt in emits the
+  // exact same class strings it did before.
+  const shrink = scrollBody ? ' shrink-0' : ''
   return (
     <DialogPrimitive.Root open={open} onOpenChange={requestClose}>
       <DialogPrimitive.Portal>
@@ -55,7 +66,8 @@ export function Dialog({
             // role="dialog" plus aria-modal is what a screen reader user and
             // an auditor both expect to find.
             aria-modal="true"
-            className={variant === 'palette' ? palettePanelClass : dialogPanelClass}
+            className={variant === 'palette' ? palettePanelClass
+              : scrollBody ? `${dialogPanelClass} ${dialogScrollPanelClass}` : dialogPanelClass}
             style={{ width }}
             // Radix wires aria-describedby itself when a Description is
             // rendered, and warns when one is missing. Most of these dialogs
@@ -70,23 +82,25 @@ export function Dialog({
               // change to the design, not to the accessibility.
               <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
             ) : headerRight ? (
-              <div className="mb-4 flex items-center justify-between">
+              <div className={`mb-4 flex items-center justify-between${shrink}`}>
                 <DialogPrimitive.Title className="font-display text-[16px] font-semibold text-text">
                   {title}
                 </DialogPrimitive.Title>
                 {headerRight}
               </div>
             ) : (
-              <DialogPrimitive.Title className="font-display text-[16px] font-semibold text-text">
+              <DialogPrimitive.Title className={`font-display text-[16px] font-semibold text-text${shrink}`}>
                 {title}
               </DialogPrimitive.Title>
             )}
             {description && (
-              <DialogPrimitive.Description className="mt-2 text-[13px] text-text-2">
+              <DialogPrimitive.Description className={`mt-2 text-[13px] text-text-2${shrink}`}>
                 {description}
               </DialogPrimitive.Description>
             )}
-            {children}
+            {scrollBody ? (
+              <div className={dialogScrollBodyClass}>{children}</div>
+            ) : children}
           </DialogPrimitive.Content>
         </DialogPrimitive.Overlay>
       </DialogPrimitive.Portal>

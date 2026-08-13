@@ -120,6 +120,44 @@ function AlertHarness({ onConfirm = () => {} }: { onConfirm?: () => void }) {
   )
 }
 
+describe('Dialog scrollBody', () => {
+  // jsdom has no layout engine, so it cannot tell whether a panel is capped or
+  // whether a body scrolls. What it CAN do is prove the opt-in works: that a
+  // dialog which does not ask for scrolling emits exactly the classes it
+  // always did. The geometry itself is measured in a real browser by
+  // `npm run harness:dialog` (e2e/harness/dialog-main.tsx).
+  const panelOf = () => screen.getByRole('dialog')
+
+  it('leaves a dialog that does not opt in completely untouched', () => {
+    // The regression that would matter: capping every dialog in the app to fix
+    // one of them. InstallDialog, the VM wizard and the schedule dialogs all
+    // share this component.
+    render(<Dialog title="Plain" onClose={vi.fn()}><p>body</p></Dialog>)
+    const panel = panelOf()
+    expect(panel.className).toBe('max-w-[92vw] rounded-card border border-line bg-panel p-5')
+    expect(panel.querySelector('.overflow-y-auto')).toBeNull()
+    // the heading is a direct child, not wrapped in a scroll container
+    expect(screen.getByText('body').parentElement).toBe(panel)
+  })
+
+  it('caps and wraps the body only when asked', () => {
+    render(<Dialog title="Long" scrollBody onClose={vi.fn()}><p>body</p></Dialog>)
+    const panel = panelOf()
+    expect(panel.className).toContain('max-h-[70vh]')
+    expect(panel.className).toContain('flex-col')
+    // the cap still rides on the shared class, so 92vw cannot be forgotten
+    expect(panel.className).toContain('max-w-[92vw]')
+
+    const scroller = panel.querySelector('.overflow-y-auto')!
+    expect(scroller).not.toBeNull()
+    // min-h-0 is what actually lets a flex child shrink and scroll
+    expect(scroller.className).toContain('min-h-0')
+    expect(screen.getByText('body').parentElement).toBe(scroller)
+    // and the heading is OUTSIDE the scroller, so it cannot scroll away
+    expect(scroller.contains(screen.getByText('Long'))).toBe(false)
+  })
+})
+
 describe('AlertDialog', () => {
   it('marks the panel as a modal alertdialog with an accessible name', async () => {
     render(<AlertHarness />)

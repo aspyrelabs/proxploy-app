@@ -14,5 +14,9 @@ export default defineConfig({
   base: './',                                   // file:// needs relative asset URLs
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': join(here, '../../src') } },
-  build: { outDir: join(here, 'dist'), emptyOutDir: true },
+  build: {
+    outDir: join(here, 'dist'), emptyOutDir: true,
+    // Two pages: cards (index.html) and the detail popup (dialog.html).
+    rollupOptions: { input: { index: join(here, 'index.html'), dialog: join(here, 'dialog.html') } },
+  },
 })
