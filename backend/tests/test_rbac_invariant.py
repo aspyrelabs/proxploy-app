@@ -27,6 +27,10 @@ UNGOVERNED = {
     ("POST", "/api/v1/auth/totp/enroll"),
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
+    # Same self-service reasoning: replacing the caller's own lost recovery
+    # codes on an already-enabled account, password-reauth-gated exactly
+    # like disable above, no role question to ask casbin.
+    ("POST", "/api/v1/auth/totp/recovery-codes/regenerate"),
     # Second factor of login (Task 9): pre-session by construction: there is
     # no user yet for authorize() to check a role against, that's the whole
     # point of the route. Ownership/single-use/attempt-cap is enforced by the
@@ -77,6 +81,7 @@ VIEWER_SELF = {
     ("POST", "/api/v1/auth/totp/enroll"),    # own account
     ("POST", "/api/v1/auth/totp/confirm"),
     ("DELETE", "/api/v1/auth/totp"),
+    ("POST", "/api/v1/auth/totp/recovery-codes/regenerate"),  # own account
     ("POST", "/api/v1/auth/totp"),           # UNGOVERNED (pre-session second factor); 
                                              # like /auth/login above, json={} 422s on the
                                              # missing body before anything role-shaped

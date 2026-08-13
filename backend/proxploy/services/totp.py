@@ -63,6 +63,32 @@ def start_enrollment(db, secretstore, user: User) -> dict:
     return {"secret": secret, "otpauth_uri": uri, "recovery_codes": codes}
 
 
+def regenerate_recovery_codes(db, secretstore, user: User) -> list[str] | None:
+    """Issues ten fresh recovery codes for an already-enabled account without
+    touching totp_secret_enc, so the authenticator entry keeps working --
+    only the codes change. Existing rows are deleted first, exactly like
+    start_enrollment's loop, so a lost code set is truly invalidated rather
+    than merely added to. Like start_enrollment, the raw codes are returned
+    here and NEVER again -- nothing recoverable is ever persisted.
+
+    Returns None without touching anything when totp_enabled is False
+    (never enrolled, or enrolled but not yet confirmed): there is no active
+    code set to replace for an account that isn't actually protected by one
+    yet, so this refuses rather than silently minting codes for a pending
+    enrollment confirm() might still reject."""
+    if not user.totp_enabled:
+        return None
+    codes = _gen_recovery_codes()
+
+    db.query(TotpRecoveryCode).filter_by(user_id=user.id).delete(synchronize_session=False)
+    for code in codes:
+        hash_enc, _key_version = secretstore.encrypt(hash_password(code).encode())
+        db.add(TotpRecoveryCode(user_id=user.id, code_hash_enc=hash_enc))
+    db.commit()
+
+    return codes
+
+
 def confirm(db, secretstore, user: User, code: str) -> bool:
     """Flips totp_enabled on proof of possession. Enrollment is not complete
     on the strength of generating a secret alone -- a wrong/missing code

@@ -21,10 +21,12 @@ const calls: Call[] = []
 let totpAllowed = true
 let totpEnabled = false
 let disableStatus: 200 | 403 = 200
+let regenerateStatus: 200 | 403 | 409 = 200
 let entitlementsFail = false
 let meFail = false
 
 const RECOVERY_CODES = Array.from({ length: 10 }, (_, i) => `recovery-code-${i}`)
+const NEW_RECOVERY_CODES = Array.from({ length: 10 }, (_, i) => `new-recovery-code-${i}`)
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -67,6 +69,13 @@ vi.mock('../api/client', () => ({
       totpEnabled = false
       return Promise.resolve({ ok: true })
     }
+    if (path === '/auth/totp/recovery-codes/regenerate' && method === 'POST') {
+      const body = opts?.body ? JSON.parse(String(opts.body)) : null
+      calls.push({ path, method, body })
+      if (regenerateStatus === 403) return Promise.reject(new ApiError(403, { detail: 're-authentication required' }))
+      if (regenerateStatus === 409) return Promise.reject(new ApiError(409, { detail: 'enable two-factor first' }))
+      return Promise.resolve({ recovery_codes: NEW_RECOVERY_CODES })
+    }
     calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
     return Promise.resolve(null)
   }),
@@ -86,6 +95,7 @@ describe('TotpCard', () => {
     totpAllowed = true
     totpEnabled = false
     disableStatus = 200
+    regenerateStatus = 200
     entitlementsFail = false
     meFail = false
   })
@@ -115,16 +125,65 @@ describe('TotpCard', () => {
     expect(screen.getByText(/shown once, store them now/i)).toBeInTheDocument()
   })
 
-  it('confirming the code calls /auth/totp/confirm and flips to enabled state with a Disable flow', async () => {
+  it('submitting the code opens an activation confirm dialog rather than activating immediately', async () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Enable two-factor' }))
     await screen.findByText('JBSWY3DPEHPK3PXP')
     fireEvent.change(screen.getByLabelText(/confirm code/i), { target: { value: '123456' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(await screen.findByText(/activate two-factor authentication/i)).toBeInTheDocument()
+    expect(screen.getByText(/will not be shown again/i)).toBeInTheDocument()
+    // The codes are shown again inside the dialog, not just referenced.
+    for (const code of RECOVERY_CODES) expect(screen.getAllByText(code).length).toBeGreaterThan(0)
+    // No request fired yet: opening the dialog is not activating.
+    expect(calls.some((c) => c.path === '/auth/totp/confirm')).toBe(false)
+  })
+
+  it('the activate button in the dialog stays disabled until the acknowledgement is checked', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable two-factor' }))
+    await screen.findByText('JBSWY3DPEHPK3PXP')
+    fireEvent.change(screen.getByLabelText(/confirm code/i), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    await screen.findByText(/activate two-factor authentication/i)
+
+    const activate = screen.getByRole('button', { name: 'Activate' })
+    expect(activate).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: /saved these recovery codes/i }))
+    expect(activate).not.toBeDisabled()
+  })
+
+  it('cancelling the activation dialog does not activate 2FA', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable two-factor' }))
+    await screen.findByText('JBSWY3DPEHPK3PXP')
+    fireEvent.change(screen.getByLabelText(/confirm code/i), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    await screen.findByText(/activate two-factor authentication/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText(/activate two-factor authentication/i)).not.toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/auth/totp/confirm')).toBe(false)
+    // Still on the enrollment panel, not bounced back to "Enable two-factor".
+    expect(screen.getByLabelText(/confirm code/i)).toBeInTheDocument()
+  })
+
+  it('acknowledging and activating calls /auth/totp/confirm and flips to enabled state with a Disable flow', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Enable two-factor' }))
+    await screen.findByText('JBSWY3DPEHPK3PXP')
+    fireEvent.change(screen.getByLabelText(/confirm code/i), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    await screen.findByText(/activate two-factor authentication/i)
+    fireEvent.click(screen.getByRole('checkbox', { name: /saved these recovery codes/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Activate' }))
+
     await waitFor(() => expect(calls.some((c) =>
       c.path === '/auth/totp/confirm' && c.method === 'POST'
       && JSON.stringify(c.body) === JSON.stringify({ code: '123456' }))).toBe(true))
     expect(await screen.findByRole('button', { name: 'Disable two-factor' })).toBeInTheDocument()
+    expect(screen.queryByText(/activate two-factor authentication/i)).not.toBeInTheDocument()
   })
 
   it('disable flow asks for the password and calls DELETE /auth/totp', async () => {
@@ -163,6 +222,46 @@ describe('TotpCard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Disable two-factor' }))
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm disable' }))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('re-authentication required'))
+  })
+
+  it('regenerate flow asks for the password, calls the regenerate endpoint, and shows ten new once-only codes', async () => {
+    totpEnabled = true
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Regenerate recovery codes' }))
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'hunter2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm regenerate' }))
+
+    await waitFor(() => expect(calls.some((c) =>
+      c.path === '/auth/totp/recovery-codes/regenerate' && c.method === 'POST'
+      && JSON.stringify(c.body) === JSON.stringify({ password: 'hunter2' }))).toBe(true))
+
+    for (const code of NEW_RECOVERY_CODES) expect(await screen.findByText(code)).toBeInTheDocument()
+    expect(screen.getByText(/shown once, store them now/i)).toBeInTheDocument()
+    // The old codes are gone from the screen; only the fresh set remains.
+    for (const code of RECOVERY_CODES) expect(screen.queryByText(code)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(await screen.findByRole('button', { name: 'Regenerate recovery codes' })).toBeInTheDocument()
+  })
+
+  it('cancelling the regenerate password prompt does not call the endpoint', async () => {
+    totpEnabled = true
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Regenerate recovery codes' }))
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'hunter2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(calls.some((c) => c.path === '/auth/totp/recovery-codes/regenerate')).toBe(false)
+    expect(await screen.findByRole('button', { name: 'Regenerate recovery codes' })).toBeInTheDocument()
+  })
+
+  it('surfaces a 403 re-auth error from regenerate as a toast', async () => {
+    totpEnabled = true
+    regenerateStatus = 403
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Regenerate recovery codes' }))
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'wrong' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm regenerate' }))
     await waitFor(() => expect(notifyError).toHaveBeenCalledWith('re-authentication required'))
   })
 })

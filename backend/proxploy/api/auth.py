@@ -223,6 +223,28 @@ def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
     return {"ok": True}
 
 
+@router.post("/totp/recovery-codes/regenerate",
+            dependencies=[Depends(get_current_user), Depends(_totp_ent)])
+def totp_regenerate_recovery_codes(request: Request, body: TotpDisableIn, db=Depends(get_db),
+                                   user: User = Depends(get_current_user)):
+    # Same re-auth requirement as disable above, and the same password-or-
+    # OIDC-code check, verbatim: minting yourself a fresh set of recovery
+    # codes is exactly the kind of action re-auth exists to gate, and this
+    # follows that existing check rather than inventing a second pattern.
+    if user.password_hash:
+        ok = authn.verify_password(user.password_hash, body.password)
+    else:
+        ok = totp.verify_login(db, request.app.state.secretstore, user, body.password)
+    if not ok:
+        raise HTTPException(403, "re-authentication required")
+    codes = totp.regenerate_recovery_codes(db, request.app.state.secretstore, user)
+    if codes is None:
+        raise HTTPException(409, "enable two-factor first")
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="auth.totp.recovery_codes.regenerate")
+    return {"recovery_codes": codes}
+
+
 # --- Session management (Task 9) --------------------------------------------
 #
 # Self-service on the caller's own sessions, same idiom as api/apikeys.py:
