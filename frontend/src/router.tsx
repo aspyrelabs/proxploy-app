@@ -20,6 +20,7 @@ import { profileRoute } from './routes/profile'
 import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
 import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute } from './routes/vms'
 import { storeRoute } from './routes/store'
+import { storeDetailRoute } from './routes/store-detail'
 import { storageRoute } from './routes/storage'
 import { networkRoute } from './routes/network'
 import { backupsRoute } from './routes/backups'
@@ -33,7 +34,7 @@ export const routeTree = rootRoute.addChildren([
   // nodeShellRoute hangs off the root, not the shell: it is opened in a window
   // of its own and a terminal there does not want the sidebar and topbar.
   indexRoute, loginRoute, onboardingRoute, nodeShellRoute,
-  shellRoute.addChildren([hostsRoute, nodeDetailTree, hostEntryRoute, appsRoute, appDetailTree, storeRoute, vmsRoute, vmDetailTree,
+  shellRoute.addChildren([hostsRoute, nodeDetailTree, hostEntryRoute, appsRoute, appDetailTree, storeRoute, storeDetailRoute, vmsRoute, vmDetailTree,
                           storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute, auditRoute, profileRoute]),
 ])
 export const router = createRouter({ routeTree, defaultErrorComponent: RouteError })

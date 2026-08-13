@@ -7,6 +7,8 @@ Everything here is offline: the PocketBase corpus and the archived frontend
 are both faked at `catalog_metadata._fetch`, and the scripts tree at
 `catalog._fetch`, so no test in this file touches the network.
 """
+from datetime import datetime
+
 import httpx
 import pytest
 
@@ -32,6 +34,10 @@ PLEX_PB = {
     "port": 32400, "updateable": True, "privileged": False,
     "platforms": ["pve"], "is_deleted": False, "is_dev": False,
     "updated": "2026-06-11 14:16:43.777Z",
+    # The script's own dates and tags, distinct from the record's `updated`.
+    "script_created": "2024-05-02 00:00:00.000Z",
+    "script_updated": "2026-06-11 00:00:00.000Z",
+    "has_arm": True, "architectures": ["amd64", "arm64"],
     "expand": {
         "categories": [{"id": "scriptcat00013", "name": "Media & Streaming",
                         "icon": "play", "sort_order": 13}],
@@ -143,7 +149,7 @@ def _seed(db, slug, entry_type="ct", **kw):
 
 # --- mapping ---------------------------------------------------------------
 
-def test_pocketbase_record_maps_to_the_six_presentation_fields():
+def test_pocketbase_record_maps_to_the_presentation_and_tag_fields():
     assert cm.map_pocketbase_record(PLEX_PB) == {
         "name": "Plex Media Server",
         "description": PLEX_PB["description"],
@@ -151,22 +157,37 @@ def test_pocketbase_record_maps_to_the_six_presentation_fields():
         "icon_url": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/plex.webp",
         "website": "https://www.plex.tv/",
         "docs_url": "https://support.plex.tv/articles/",
+        "script_created": datetime(2024, 5, 2, 0, 0),
+        "script_updated": datetime(2026, 6, 11, 0, 0),
+        "has_arm": True, "architectures": ["amd64", "arm64"],
+        "updateable": True, "privileged": False, "port": 32400,
     }
 
 
-def test_archive_record_maps_to_the_same_six_fields_through_its_own_schema():
+def test_archive_record_maps_a_smaller_subset_through_its_own_schema():
     """The archive's integer category ids only resolve through metadata.json,
-    which is the whole reason that file is fetched first."""
+    which is the whole reason that file is fetched first. It also carries less
+    than the live source does: `date_created` is its only date, its port field
+    is `interface_port`, and it has no has_arm or architectures at all. The
+    missing keys are OMITTED rather than mapped to None, so a cold-start
+    fallback renders fewer chips instead of wrong ones."""
     categories = {c["id"]: c["name"] for c in ARCHIVE_METADATA["categories"]}
 
-    assert cm.map_archive_record(PLEX_ARCHIVE, categories) == {
+    mapped = cm.map_archive_record(PLEX_ARCHIVE, categories)
+
+    assert mapped == {
         "name": "Plex Media Server",
         "description": PLEX_ARCHIVE["description"],
         "category": "Media & Streaming",
         "icon_url": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/plex.webp",
         "website": "https://www.plex.tv/",
         "docs_url": "https://support.plex.tv/articles/",
+        "script_created": datetime(2024, 5, 2, 0, 0),
+        "updateable": True, "privileged": False, "port": 32400,
     }
+    # Frozen at 2026-03-12, so it has no honest answer for "recently updated".
+    assert "script_updated" not in mapped
+    assert "has_arm" not in mapped and "architectures" not in mapped
 
 
 def test_a_field_upstream_has_nothing_for_is_omitted_not_blanked():
@@ -188,6 +209,78 @@ def test_upstream_timestamp_parses_to_naive_utc():
     assert cm._parse_upstream_ts(None) is None
 
 
+def test_an_upstream_false_survives_as_false_and_is_not_dropped_as_empty():
+    """The mappers strip None to mean "upstream said nothing, leave the column
+    alone". A boolean False is NOT nothing: "this app is not privileged" is a
+    real answer, and a truthiness test here would silently turn every known
+    False into an unknown."""
+    mapped = cm.map_pocketbase_record(
+        {"slug": "x", "has_arm": False, "updateable": False, "privileged": False})
+
+    assert mapped["has_arm"] is False
+    assert mapped["updateable"] is False
+    assert mapped["privileged"] is False
+
+
+def test_a_missing_or_unreadable_tag_is_omitted_rather_than_guessed():
+    """Omitted, so the upsert leaves whatever the row had, rather than
+    asserting a negative we cannot support. The 9 `unlisted` rows never reach
+    a mapper at all and keep NULL for the same reason."""
+    mapped = cm.map_pocketbase_record(
+        {"slug": "x", "has_arm": "yes", "privileged": None,
+         "architectures": [], "port": "8080"})
+
+    for key in ("has_arm", "privileged", "architectures", "port"):
+        assert key not in mapped, key
+
+
+def test_port_and_architectures_are_read_defensively():
+    """`bool` subclasses int in Python, so an unguarded port read would turn a
+    JSON `true` into port 1."""
+    assert cm._port(32400) == 32400
+    assert cm._port(True) is None and cm._port(0) is None
+    assert cm._port(70000) is None and cm._port("8080") is None
+    assert cm._arch_list(["amd64", " arm64 ", "", 7]) == ["amd64", "arm64"]
+    assert cm._arch_list([]) is None and cm._arch_list("amd64") is None
+
+
+def test_the_script_dates_are_the_scripts_own_not_the_records(tmp_path, monkeypatch):
+    """`updated` moves when someone fixes a typo in the description;
+    `script_updated` moves when the script changes. "Recently updated" in the
+    Store has to mean the second one, so they are stored in different
+    columns."""
+    db = make_db(tmp_path)
+    _seed(db, "plex")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[PLEX_PB]))
+
+    cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="plex").one()
+    assert row.script_created == datetime(2024, 5, 2, 0, 0)
+    assert row.script_updated == datetime(2026, 6, 11, 0, 0)
+    # The RECORD's own stamp is a different column and a different value.
+    assert row.upstream_updated_at == datetime(2026, 6, 11, 14, 16, 43, 777000)
+    assert row.has_arm is True and row.privileged is False
+    assert row.architectures == ["amd64", "arm64"] and row.port == 32400
+
+
+def test_an_unmatched_row_keeps_null_tags_rather_than_gaining_false_ones(
+        tmp_path, monkeypatch):
+    """A row upstream has no record for is never handed to a mapper, so every
+    tag stays NULL: unknown, not "no"."""
+    db = make_db(tmp_path)
+    _seed(db, "readarr")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[PLEX_PB]))
+
+    cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="readarr").one()
+    assert row.upstream_state == "unlisted"
+    assert row.has_arm is None and row.updateable is None
+    assert row.privileged is None and row.port is None
+    assert row.script_created is None and row.script_updated is None
+
+
 # --- the write set is enforced, not merely intended -------------------------
 
 def test_every_mapper_output_is_a_subset_of_the_write_set():
@@ -198,6 +291,21 @@ def test_every_mapper_output_is_a_subset_of_the_write_set():
 
     for mapped in outputs:
         assert set(mapped) <= cm.WRITABLE_FIELDS
+
+
+def test_the_write_set_widened_but_the_forbidden_columns_stayed_forbidden():
+    """WRITABLE_FIELDS grew from six to thirteen when the Store gained sorting
+    and tag chips. That is a deliberate widening of an upstream-owned
+    presentation set; what must never widen is the other side of the line, so
+    this pins it by name rather than trusting the count."""
+    assert cm.WRITABLE_FIELDS == {
+        "name", "description", "category", "icon_url", "website", "docs_url",
+        "script_created", "script_updated",
+        "has_arm", "architectures", "updateable", "privileged", "port"}
+    for forbidden in ("slug", "entry_type", "script_path", "installable",
+                      "unsupported_reason", "upstream_state", "popularity",
+                      "metadata_source", "raw"):
+        assert forbidden not in cm.WRITABLE_FIELDS, forbidden
 
 
 def test_a_mapper_key_outside_the_write_set_raises_rather_than_being_dropped(tmp_path):
@@ -666,3 +774,257 @@ def test_a_sync_never_touches_api_github_com(tmp_path, monkeypatch):
     cm.sync_metadata(db)
 
     assert seen and not any("api.github.com" in u for u in seen)
+
+
+# --- fallback join on normalized name ---------------------------------------
+#
+# Upstream's own catalog slug sometimes differs from upstream's own script
+# filename, and our discovery takes the slug from the filename. Measured over
+# the real catalog this produces exactly ONE match and zero ambiguities, so
+# every test below is about what happens the day that stops being true.
+
+def test_a_row_whose_upstream_slug_differs_matches_by_name(tmp_path, monkeypatch):
+    """The live case: ct/apache-airflow.sh exists and is genuinely
+    installable, while the PocketBase record is slug `airflow`, name "Apache
+    Airflow", alive. Exact matching missed it and the card rendered blank and
+    badged as retired."""
+    db = make_db(tmp_path)
+    _seed(db, "apache-airflow", name="Apache Airflow", installable=True)
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("airflow", name="Apache Airflow")]))
+
+    out = cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="apache-airflow").one()
+    assert row.upstream_state == "listed"
+    assert row.description == "airflow from upstream"
+    assert row.category == "Media & Streaming"
+    assert out["name_matched"] == {"apache-airflow": "airflow"}
+    # Recorded on the row, so a heuristic join is inspectable and not just a
+    # log line that has rotated away.
+    assert row.metadata_source == "pocketbase-name-match"
+    # And nothing discovery owns moved.
+    assert row.slug == "apache-airflow" and row.entry_type == "ct"
+    assert row.installable is True
+
+
+def test_an_exact_slug_match_always_beats_a_name_match(tmp_path, monkeypatch):
+    """Fallback only. A row that already matched by slug is never a candidate,
+    so a same-named record elsewhere in the corpus cannot displace it."""
+    db = make_db(tmp_path)
+    _seed(db, "redis", name="Redis")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[
+        _pb_record("redis", description="the real one"),
+        _pb_record("redis-oss", name="Redis"),
+    ]))
+
+    out = cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="redis").one()
+    assert row.description == "the real one"
+    assert row.metadata_source == "pocketbase"
+    assert out["name_matched"] == {}
+
+
+def test_an_ambiguous_name_matches_nothing_rather_than_guessing(tmp_path, monkeypatch):
+    """Two upstream records normalizing to one name is not a tie to break. A
+    wrong match renders one app's description, icon and website on another
+    app's card, which is worse than the blank card it was fixing."""
+    db = make_db(tmp_path)
+    _seed(db, "apache-airflow", name="Apache Airflow")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[
+        _pb_record("airflow", name="Apache Airflow"),
+        _pb_record("apache_airflow", name="apache-airflow"),
+    ]))
+
+    out = cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="apache-airflow").one()
+    assert out["name_matched"] == {}
+    assert row.upstream_state == "unlisted"
+    assert row.description is None and row.metadata_source is None
+
+
+def test_two_of_our_rows_normalizing_alike_both_decline(tmp_path, monkeypatch):
+    """The other direction of 1:1. Two rows cannot both claim one record, so
+    neither does."""
+    db = make_db(tmp_path)
+    _seed(db, "apache-airflow", name="Apache Airflow")
+    _seed(db, "apacheairflow", name="apache airflow")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("airflow", name="Apache Airflow")]))
+
+    out = cm.sync_metadata(db)
+
+    assert out["name_matched"] == {}
+    for slug in ("apache-airflow", "apacheairflow"):
+        assert db.query(CatalogEntry).filter_by(slug=slug).one().description is None
+
+
+def test_a_record_already_claimed_by_a_slug_match_is_not_a_name_candidate(
+        tmp_path, monkeypatch):
+    """`grafana` is claimed by our exact `grafana` row, so our differently
+    slugged row cannot take it too and end up sharing one record."""
+    db = make_db(tmp_path)
+    _seed(db, "grafana", name="Grafana")
+    _seed(db, "grafana-oss", name="Grafana")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("grafana", name="Grafana")]))
+
+    out = cm.sync_metadata(db)
+
+    assert out["name_matched"] == {}
+    assert db.query(CatalogEntry).filter_by(slug="grafana").one().description
+    assert db.query(CatalogEntry).filter_by(
+        slug="grafana-oss").one().description is None
+
+
+def test_normalization_does_not_collapse_two_genuinely_distinct_apps(tmp_path,
+                                                                     monkeypatch):
+    """Conservative on purpose: lowercase and strip non-alphanumerics, and
+    nothing else. No stemming, no edit distance, no prefix or substring
+    matching, each of which turns a missing match into a wrong one."""
+    assert cm.normalized_name("Apache Airflow") == "apacheairflow"
+    assert cm.normalized_name("apache-airflow") == "apacheairflow"
+    assert cm.normalized_name("Pi-hole") == "pihole"
+    assert cm.normalized_name("") is None and cm.normalized_name(None) is None
+    # Similar, and still not equal, so no match may be made between them.
+    assert cm.normalized_name("Paperless") != cm.normalized_name("Paperless-ngx")
+    assert cm.normalized_name("Immich") != cm.normalized_name("Immich Frame")
+
+    db = make_db(tmp_path)
+    _seed(db, "paperless", name="Paperless")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("paperless-ngx", name="Paperless-ngx")]))
+
+    out = cm.sync_metadata(db)
+
+    assert out["name_matched"] == {}
+    assert db.query(CatalogEntry).filter_by(
+        slug="paperless").one().description is None
+
+
+def test_a_name_match_still_cannot_write_anything_discovery_owns(tmp_path,
+                                                                 monkeypatch):
+    """The hard rule is unchanged: this decides WHICH record a row matches,
+    never what may be written from it."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch",
+                        fake_tree_fetch([{"path": "ct/redis.sh", "type": "blob"}]))
+    run_discovery(db)
+    ensure_classified(db, "redis")
+    row = db.query(CatalogEntry).filter_by(slug="redis").one()
+    row.name = "Apache Airflow"          # force it into the name-match path
+    db.commit()
+    before = {f: getattr(row, f) for f in DISCOVERY_OWNED}
+    # Upstream disagrees about type, as it does for the five dual-variant
+    # slugs, and reaching this row by name must not change that answer.
+    upstream = _typed("airflow", "addon")
+    upstream["name"] = "Apache Airflow"
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[upstream]))
+
+    out = cm.sync_metadata(db)
+
+    row = db.query(CatalogEntry).filter_by(slug="redis").one()
+    assert out["name_matched"] == {"redis": "airflow"}
+    assert {f: getattr(row, f) for f in DISCOVERY_OWNED} == before
+
+
+# --- rename leftovers -------------------------------------------------------
+
+def test_a_rename_leftover_is_superseded_and_hidden(tmp_path, monkeypatch):
+    """Upstream renamed netvisor to scanopy. ct/scanopy.sh and its install
+    script exist, so `scanopy` is listed and installable. The old
+    ct/netvisor.sh is still in the repo with NO install script and an APP=
+    line that now reads "Scanopy", so the grid showed two cards both called
+    "Scanopy", one working and one blank."""
+    db = make_db(tmp_path)
+    _seed(db, "scanopy", name="Scanopy", installable=True)
+    _seed(db, "netvisor", name="Scanopy", installable=False,
+          unsupported_reason="no install script found upstream")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("scanopy", name="Scanopy")]))
+
+    out = cm.sync_metadata(db)
+
+    assert db.query(CatalogEntry).filter_by(
+        slug="netvisor").one().upstream_state == "superseded"
+    assert db.query(CatalogEntry).filter_by(
+        slug="scanopy").one().upstream_state == "listed"
+    assert out["states"]["superseded"] == 1
+    assert _in_store(db) == {"scanopy"}
+
+
+def test_two_legitimate_rows_sharing_a_name_are_both_untouched(tmp_path, monkeypatch):
+    """`valkey` and `alpine-valkey` are BOTH listed upstream and both
+    legitimate. A duplicate name on the grid is not by itself evidence of
+    anything, which is why the rule needs all three conditions and not just
+    the collision."""
+    db = make_db(tmp_path)
+    _seed(db, "valkey", name="Valkey", installable=True)
+    _seed(db, "alpine-valkey", name="Valkey", installable=True)
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[
+        _pb_record("valkey", name="Valkey"),
+        _pb_record("alpine-valkey", name="Valkey"),
+    ]))
+
+    cm.sync_metadata(db)
+
+    for slug in ("valkey", "alpine-valkey"):
+        assert db.query(CatalogEntry).filter_by(
+            slug=slug).one().upstream_state == "listed", slug
+    assert _in_store(db) == {"valkey", "alpine-valkey"}
+
+
+def test_an_installable_leftover_is_not_hidden(tmp_path, monkeypatch):
+    """The missing install script is what makes a leftover a corpse rather
+    than a second way to install the same thing. Something still installable
+    keeps its card and its badge."""
+    db = make_db(tmp_path)
+    _seed(db, "scanopy", name="Scanopy", installable=True)
+    _seed(db, "netvisor", name="Scanopy", installable=True)
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("scanopy", name="Scanopy")]))
+
+    cm.sync_metadata(db)
+
+    assert db.query(CatalogEntry).filter_by(
+        slug="netvisor").one().upstream_state == "unlisted"
+    assert _in_store(db) == {"scanopy", "netvisor"}
+
+
+def test_an_unclassified_leftover_is_not_hidden_on_a_guess(tmp_path, monkeypatch):
+    """installable is None means "not looked at yet", not "no install
+    script": classification is lazy and runs in the background. A card that is
+    briefly visible beats a card that is wrongly hidden."""
+    db = make_db(tmp_path)
+    _seed(db, "scanopy", name="Scanopy", installable=True)
+    _seed(db, "netvisor", name="Scanopy", installable=None)
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(
+        items=[_pb_record("scanopy", name="Scanopy")]))
+
+    cm.sync_metadata(db)
+
+    assert db.query(CatalogEntry).filter_by(
+        slug="netvisor").one().upstream_state == "unlisted"
+
+
+def test_the_shared_visibility_helper_hides_every_hidden_state(tmp_path, monkeypatch):
+    """Task A's helper is the single definition of Store visibility, so a new
+    hidden state has to be excluded everywhere at once rather than in the one
+    call site whoever added it happened to remember."""
+    db = make_db(tmp_path)
+    _seed(db, "scanopy", name="Scanopy", installable=True)
+    _seed(db, "netvisor", name="Scanopy", installable=False)
+    _seed(db, "syncthing", name="Syncthing")
+    _seed(db, "alpine-syncthing", name="Alpine Syncthing")
+    monkeypatch.setattr(cm, "_fetch", fake_metadata_fetch(items=[
+        _pb_record("scanopy", name="Scanopy"), _pb_record("syncthing")]))
+
+    cm.sync_metadata(db)
+
+    assert cm.HIDDEN_FROM_STORE == {"variant", "superseded"}
+    hidden = {r.slug for r in db.query(CatalogEntry)
+              .filter(CatalogEntry.upstream_state.in_(sorted(cm.HIDDEN_FROM_STORE)))}
+    assert hidden == {"netvisor", "alpine-syncthing"}
+    assert _in_store(db) == {"scanopy", "syncthing"}

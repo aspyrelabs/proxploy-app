@@ -243,7 +243,42 @@ class CatalogEntry(TimestampMixin, Base):
     default_os: Mapped[str | None] = mapped_column(Text)
     default_os_version: Mapped[str | None] = mapped_column(Text)
     icon_url: Mapped[str | None] = mapped_column(Text)
+    # Terminal install events (success + failed + aborted) from upstream's
+    # telemetry service, NEVER their `total` field, which counts intermediate
+    # progress pings: services/catalog_telemetry.py documents why at length.
+    # None means we have never had a number for this slug, which is different
+    # from 0 and must stay different: telemetry is opt-in upstream, so absence
+    # is silence, not evidence that nobody runs it.
     popularity: Mapped[int | None] = mapped_column(Integer)
+    # When WE last read that number. Its own column because upstream caches
+    # these aggregates for 23h, so the value can be a full day old and moves
+    # in jumps; the Store labels it "as of" rather than implying it is live.
+    popularity_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Upstream's own dates for the SCRIPT, distinct from every other timestamp
+    # here: `synced_at` is when we last discovered the row, `updated_at` is
+    # when this DB row changed, `upstream_updated_at` is when the PocketBase
+    # RECORD was last edited (a description fix bumps it), and these two are
+    # when the script itself was first published and last changed. They are
+    # real columns rather than reads out of raw["metadata"] because the Store
+    # SORTS on them, and an ORDER BY over json_extract is neither indexable
+    # nor cheap over 585 rows.
+    script_created: Mapped[datetime | None] = mapped_column(DateTime)
+    script_updated: Mapped[datetime | None] = mapped_column(DateTime)
+    # The tags community-scripts shows on a card. All FOUR are tri-state and
+    # the third state is load bearing: NULL means WE DO NOT KNOW, never "no".
+    # The 9 `unlisted` rows have no upstream record at all, so rendering them
+    # as "not ARM" or "not updateable" would be a claim nothing supports; the
+    # UI must show no chip there rather than a negative one.
+    has_arm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    updateable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    privileged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer)
+    # The evidence behind has_arm, e.g. ["amd64", "arm64"]. Kept alongside the
+    # boolean rather than instead of it: the flag is what a chip renders, the
+    # list is what an "arm64 only" answer needs, and deriving one from the
+    # other at read time would put upstream's architecture vocabulary into our
+    # query layer.
+    architectures: Mapped[list | None] = mapped_column(JSON)
     upstream_sha: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[dict | None] = mapped_column(JSON)
     deprecated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -262,7 +297,12 @@ class CatalogEntry(TimestampMixin, Base):
     # Provenance for the presentation-only fields (name, description,
     # category, icon_url, website, docs_url) that
     # services/catalog_metadata.py syncs from upstream. "pocketbase" for the
-    # live source, "archive" for the frozen cold-start fallback.
+    # live source, "archive" for the frozen cold-start fallback, and either
+    # with a "-name-match" suffix when the row was joined by normalized NAME
+    # rather than by slug (resolve_name_matches: upstream's catalog slug
+    # sometimes differs from its own script filename, e.g. ct/apache-airflow.sh
+    # against the record slugged `airflow`). The suffix exists so a heuristic
+    # join is visible on the row itself, not only in a log line.
     #
     # Both timestamps null is a NORMAL state, not an error: it means no
     # upstream record matched this slug, which is true for 37 of our ct/ rows
@@ -292,6 +332,12 @@ class CatalogEntry(TimestampMixin, Base):
     #              than its own app. Kept in the catalog and installable, but
     #              hidden from the Store grid so Syncthing is one card, not
     #              two, one of them blank.
+    #   "superseded" a rename leftover: unmatched upstream, not installable,
+    #              and sharing a name with a row that IS listed. Upstream
+    #              renamed netvisor to scanopy and left ct/netvisor.sh in the
+    #              repo with no install script and an APP= line reading
+    #              "Scanopy", so the grid showed two "Scanopy" cards, one
+    #              working and one blank. Also hidden from the grid.
     #
     # NULL means never synced. This is deliberately NOT the `deprecated`
     # column: that one is written nowhere and read nowhere, and overloading a

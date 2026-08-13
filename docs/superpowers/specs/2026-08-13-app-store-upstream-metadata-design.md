@@ -94,8 +94,14 @@ slugs**: `coolify`, `runtipi`, `dockge`, `komodo`, `dokploy`. PocketBase types
 them `addon`; our tree discovery types them `ct` because each has *both*
 `ct/<slug>.sh` and `tools/addon/<slug>.sh`. This near-miss is the reason the
 ownership split below is enforced structurally rather than left as a
-convention: letting metadata set `entry_type` would hide five installable LXC
-apps and break dual-variant detection.
+convention: letting metadata set `entry_type` would drop five LXC-typed apps
+out of the Store entirely and break dual-variant detection.
+
+Note on wording: these five classify as **not installable** (`ct/<slug>.sh`
+exists upstream but `install/<slug>-install.sh` does not, so the classifier
+reports "no install script found upstream"). The point stands regardless: as
+`ct` rows they appear in the Store as cards that explain themselves and link
+upstream, whereas as `addon` rows they would vanish from the grid altogether.
 
 ## Design
 
@@ -141,7 +147,7 @@ standalone `ct/<slug>.sh` full-LXC installer and a `tools/addon/<slug>.sh`
 install-into-existing-container script. PocketBase calls them `addon`; our
 tree discovery correctly calls them `ct`. Wiring `entry_type` to upstream
 metadata would look like a tidy one-line improvement, and it would silently
-drop five genuinely installable LXC apps out of the Store and break
+drop five LXC-typed apps out of the Store entirely and break
 dual-variant collision detection. The type disagreement is not upstream being
 wrong; it is upstream answering a different question than the one the Store
 asks. Do not "helpfully" let metadata set type later.

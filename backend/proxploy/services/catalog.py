@@ -366,14 +366,24 @@ async def classify_many(sessionmaker, slugs: list[str], concurrency: int = 8) ->
 # because it writes every row rather than the matched subset. The last two
 # phases are DB-only and near-instant, so they share the final 15 points
 # instead of the half of the bar an even split would hand them.
-PCT_DISCOVERED = 45
-PCT_METADATA_SYNCED = 85
-PCT_UPDATES_MARKED = 95
+#
+# Re-weighted rather than extended when the telemetry phase landed: bolting a
+# fifth number onto the end would have squeezed it into the 10 points between
+# 85 and 95 and implied it costs about as much as a pure-DB pass, which is
+# false. It is a real network fetch, just a much smaller one than the metadata
+# sync (one ~255 KB response against ~1.9 MB) writing one integer column on
+# matched rows instead of a raw JSON snapshot, so it takes roughly a third of
+# what that phase does.
+PCT_DISCOVERED = 40
+PCT_METADATA_SYNCED = 78
+PCT_POPULARITY_SYNCED = 90
+PCT_UPDATES_MARKED = 96
 
 
 async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     from proxploy.services.appstore import mark_updates_available
     from proxploy.services.catalog_metadata import sync_metadata
+    from proxploy.services.catalog_telemetry import sync_popularity
 
     app = ctx.backend.app
     with app.state.sessionmaker() as db:
@@ -397,7 +407,7 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
         meta = await asyncio.to_thread(_sync_metadata)
     except Exception as e:  # noqa: BLE001 - metadata never fails a refresh
         meta = {"ok": False, "source": None, "matched": 0, "unmatched": 0,
-                "states": {}, "reason": str(e)}
+                "states": {}, "name_matched": {}, "reason": str(e)}
     if meta["ok"]:
         # Counts, once, not per slug: an unmatched row in either direction is
         # the steady state (37 of our ct/ rows, 85 upstream slugs), so naming
@@ -408,11 +418,46 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
         states = ", ".join(f"{n} {s}" for s, n in sorted(meta.get("states", {}).items()))
         ctx.log(f"metadata synced from {meta['source']}: {meta['matched']} matched, "
                 f"{meta['unmatched']} unmatched" + (f" ({states})" if states else ""))
+        # Name matches ARE named individually, unlike everything else here.
+        # There is one of them today, it is a heuristic rather than an exact
+        # join, and a wrong pair must be visible to whoever reads this job's
+        # log rather than only discoverable by noticing a card that describes
+        # the wrong app.
+        for our_slug, up_slug in (meta.get("name_matched") or {}).items():
+            ctx.log(f"matched {our_slug} to upstream record {up_slug} by name "
+                    f"(no exact slug match upstream)")
     else:
         ctx.log(f"metadata sync skipped, kept the last good rows: {meta['reason']}",
                 stream="stderr")
     result["metadata"] = meta
     ctx.progress(PCT_METADATA_SYNCED)
+
+    # Install popularity: services/catalog_telemetry.py, a third host with no
+    # fallback source. Deliberately run REGARDLESS of what the metadata sync
+    # just did, and never conditioned on `meta["ok"]`: they are different
+    # services on different hosts with different outages, and skipping the
+    # popularity refresh because PocketBase happened to be down would turn one
+    # service's bad day into two stale signals. Same never-fail-the-job
+    # posture and the same double wrapping: sync_popularity already turns an
+    # upstream failure into an outcome dict, and this catch covers a genuine
+    # bug in it.
+    def _sync_popularity() -> dict:
+        with app.state.sessionmaker() as db:
+            return sync_popularity(db)
+
+    try:
+        pop = await asyncio.to_thread(_sync_popularity)
+    except Exception as e:  # noqa: BLE001 - popularity never fails a refresh
+        pop = {"ok": False, "matched": 0, "unmatched": 0, "telemetry_only": 0,
+               "reason": str(e)}
+    if pop["ok"]:
+        ctx.log(f"popularity synced: {pop['matched']} matched, "
+                f"{pop['unmatched']} with no telemetry")
+    else:
+        ctx.log(f"popularity sync skipped, kept the last good counts: "
+                f"{pop['reason']}", stream="stderr")
+    result["popularity"] = pop
+    ctx.progress(PCT_POPULARITY_SYNCED)
 
     # A refresh is the ONLY moment `update_available` can change, so it is the
     # only place this has to run: no separate sweep, no separate schedule.

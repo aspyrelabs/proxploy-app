@@ -322,17 +322,76 @@ describe('BellPopover', () => {
 
   // Icon-only controls: the aria-label is the accessible name whether or not
   // the tooltip opens, and the tooltip is what a sighted pointer user gets.
+  //
+  // Real .focus() rather than fireEvent.focus: the point of this test is that
+  // a keyboard user landing on the button gets its name, and only a genuine
+  // DOM focus (which is what Tab produces) proves that. A synthetic focus
+  // event would pass even if the button had stopped being focusable at all.
   it('names both card controls on focus', async () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
     const first = within(cards[0])
 
-    fireEvent.focus(first.getByRole('button', { name: 'View log' }))
+    first.getByRole('button', { name: 'View log' }).focus()
     expect(await screen.findAllByText('View log')).not.toHaveLength(0)
 
-    fireEvent.focus(first.getByRole('button', { name: 'Dismiss' }))
+    first.getByRole('button', { name: 'Dismiss' }).focus()
     expect(await screen.findAllByText('Dismiss')).not.toHaveLength(0)
+  })
+
+  /** Everything inside `root` that a Tab press can land on, in tab order. */
+  const tabbables = (root: HTMLElement) =>
+    Array.from(root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]'))
+      .filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'))
+
+  // Radix's Tooltip opens on FOCUS as well as on hover (deliberately: that is
+  // how a keyboard user reads an icon-only button's name), and Radix's Popover
+  // moves focus to the first TABBABLE element of its content when it opens.
+  // With a single card in the tray that element is the card's "View log", so
+  // clicking the bell used to pop that card's tooltip with the pointer nowhere
+  // near it. Two or more cards hid the bug, because then "Clear all" is first
+  // and it has no tooltip -- hence the one-card fixture here.
+  it('opening the tray with the pointer pops no tooltip, tabbing to a control does', async () => {
+    // Everything up to job 11 already cleared, leaving exactly one card.
+    dismissedState = { cleared_through_job_id: 11, dismissed_job_ids: [] }
+    wrap()
+    await screen.findByText('1')
+    const trigger = screen.getByRole('button', { name: 'Activity' })
+    fireEvent.pointerDown(trigger, { button: 0 })
+    fireEvent.click(trigger)
+
+    const card = (await screen.findAllByRole('alert'))[0]
+    expect(within(card).getByRole('button', { name: 'View log' })).toBeInTheDocument()
+
+    // The labels exist as aria-labels either way; an OPEN tooltip is a
+    // rendered text node, and there must not be one.
+    expect(screen.queryByText('View log')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dismiss')).not.toBeInTheDocument()
+
+    // Focus went to the popover itself rather than onto a control inside it,
+    // and the button is still the very next thing Tab reaches: the keyboard
+    // path to the tooltip above is one keystroke, not gone.
+    const content = screen.getByRole('dialog')
+    expect(document.activeElement).toBe(content)
+    const viewLog = within(card).getByRole('button', { name: 'View log' })
+    expect(tabbables(content)[0]).toBe(viewLog)
+
+    // ...and taking that Tab does pop it. Same card, same button, same open
+    // popover: the tooltip was deferred to the keyboard user, not suppressed.
+    viewLog.focus()
+    expect(await screen.findByText('View log')).toBeInTheDocument()
+  })
+
+  // The other half of "focus is not left somewhere unusable": closing must put
+  // it back on the bell, not drop it on <body>.
+  it('returns focus to the bell when the tray closes', async () => {
+    wrap()
+    const trigger = await screen.findByRole('button', { name: 'Activity' })
+    fireEvent.click(trigger)
+    await screen.findByText(/app\.start/)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it('closes on Escape', async () => {

@@ -20,9 +20,11 @@ import {
 } from '@/components/ui/select'
 import { Progress, ProgressLabel, ProgressValue } from '../components/ui/progress'
 import { fmtUptime } from '../lib/format'
+import {
+  DEFAULT_SORT, STORE_SORTS, isStoreSort, popularityBand, popularityThreshold, sortEntries,
+} from '../lib/store-order'
+import type { StoreSort } from '../lib/store-order'
 import { shellRoute } from './shell'
-
-const inputCls = 'rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
 // The page sizes offered, and the one a fresh visit gets. DEFAULT_PAGE_SIZE
 // is deliberately absent from the URL when it is in force (see the route's
@@ -52,15 +54,43 @@ function toPageSize(v: unknown): number | undefined {
 
 // One page of cards, in the plain responsive grid the virtualizer used to
 // emulate by hand. The virtualizer earned its keep when this rendered all
-// ~557 LXC entries at once; a page is at most 100 cards, so the DOM cost is
+// ~556 LXC entries at once; a page is at most 100 cards, so the DOM cost is
 // bounded by the page size and the measurement plumbing is just overhead.
-function StoreGrid({ entries, installedSlugs, onInstall }: {
+function StoreGrid({ entries, installedSlugs, onInstall, popularThreshold }: {
   entries: CatalogRow[]; installedSlugs: Set<string>; onInstall: (slug: string) => void
+  popularThreshold: number | null
 }) {
+  /**
+   * ONE auto-fill rule, no hand-written breakpoints, anchored so a 1080p
+   * monitor shows exactly 4 columns.
+   *
+   * The arithmetic, so the next person can re-derive it rather than guess.
+   * The grid does NOT get the viewport: AppShell.tsx renders
+   * `<main className="min-w-0 flex-1 p-6">` beside a `w-[236px]` sidebar
+   * (SidebarNav.tsx), so at a 1920px viewport the real lane is
+   * 1920 - 236 - 48 = 1636px. With `gap-4` (16px), auto-fill gives
+   * floor((lane + gap) / (min + gap)) columns, so 4 columns needs
+   *     (1636+16)/5 < min+16 <= (1636+16)/4
+   *     314px < min <= 397px
+   * 360px sits mid-range rather than on either edge, which is what keeps
+   * the answer at 4 when the lane moves: with the sidebar collapsed to
+   * w-16 the lane is 1808px and it is still 4 (1824/376 = 4.85), and a
+   * 15px classic scrollbar does not change it either.
+   *
+   * `min(360px, 100%)` rather than a bare 360px is the phone case: below
+   * 360px of lane a bare minimum would make the track wider than its own
+   * container and overflow the page. This caps the track at the container
+   * and yields the one sensible column.
+   *
+   * auto-fill, not auto-fit: with auto-fit the empty tracks collapse, so a
+   * filtered result of two apps would stretch into two enormous cards,
+   * which is the opposite of the fixed-size cards this is here to give.
+   */
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
       {entries.map((e) => (
         <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
+          band={popularityBand(e.popularity, popularThreshold)}
           onInstall={onInstall} />
       ))}
     </div>
@@ -69,15 +99,15 @@ function StoreGrid({ entries, installedSlugs, onInstall }: {
 
 export function StorePage() {
   const search = useSearch({ strict: false }) as
-    { category?: string; q?: string; page?: number; pageSize?: number }
+    { category?: string; page?: number; pageSize?: number; sort?: StoreSort }
   const navigate = useNavigate()
   const [installing, setInstalling] = useState<string | null>(null)
   const gridTop = useRef<HTMLDivElement>(null)
   // The Store is LXC-only (catalog expansion plan: non-LXC entries stay in
   // the catalog table, tagged by type, and never render here), so this
-  // fetches the whole ct/ catalog once; category/search are then instant,
-  // client-side filters over that one list, driving the search+chip
-  // navigation the virtualized grid needs (decision 5).
+  // fetches the whole ct/ catalog once; the category chips are then an
+  // instant, client-side filter over that one list, and paging slices it.
+  // Text search is not here at all any more: it is the global palette's job.
   const catalogQuery = useCatalog(undefined, undefined, 'ct')
   const entries = catalogQuery.data
   const refresh = useRefreshCatalog()
@@ -138,27 +168,29 @@ export function StorePage() {
     if (search.category && search.category !== 'All') {
       rows = rows.filter((e) => (e.category ?? 'Uncategorized') === search.category)
     }
-    if (search.q) {
-      const needle = search.q.toLowerCase()
-      // Description is part of the haystack now that upstream metadata
-      // actually fills it: searching "media server" should find Plex rather
-      // than nothing. Slug stays in it because the ct rows with no upstream
-      // match have nothing but a name and a slug to be found by.
-      rows = rows.filter((e) =>
-        (e.name ?? e.slug).toLowerCase().includes(needle)
-        || e.slug.toLowerCase().includes(needle)
-        || (e.description ?? '').toLowerCase().includes(needle))
-    }
     return rows
-  }, [entries, search.category, search.q])
+  }, [entries, search.category])
+
+  const sort = search.sort ?? DEFAULT_SORT
+  // Sorted after filtering (cheaper, same answer) and before paging, so a page
+  // is a slice of the order the operator asked for rather than of the fetch
+  // order. NULLS LAST lives in sortEntries; see lib/store-order.ts for why
+  // this is client-side at all.
+  const ordered = useMemo(() => sortEntries(filtered, sort), [filtered, sort])
+
+  // The percentile is computed over the whole ct corpus, not the filtered
+  // view: a claim of "top 10%" has to mean the same thing on every card, and
+  // recomputing it per filter would let a category chip promote a card into a
+  // band it is not in.
+  const popularThreshold = useMemo(() => popularityThreshold(entries ?? []), [entries])
 
   const setSearch = (patch: Partial<typeof search>) =>
     navigate({ to: '/store' as never, search: { ...search, ...patch } as never, replace: true })
 
-  // Page and page size live in the route's search params, next to category and
-  // q, so a reload, a bookmark and the back button all land on the page the
+  // Page and page size live in the route's search params, next to category,
+  // so a reload, a bookmark and the back button all land on the page the
   // operator was actually looking at. They are already navigating this page by
-  // URL for category and search; paging is the same kind of state and it would
+  // URL for the category chip; paging is the same kind of state and it would
   // be odd for it to be the one thing that evaporates on refresh.
   const pageSize = search.pageSize ?? DEFAULT_PAGE_SIZE
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
@@ -169,7 +201,7 @@ export function StorePage() {
   // can loop with the user's own navigation.
   const page = Math.min(Math.max(1, search.page ?? 1), pageCount)
   const firstIndex = (page - 1) * pageSize
-  const pageEntries = filtered.slice(firstIndex, firstIndex + pageSize)
+  const pageEntries = ordered.slice(firstIndex, firstIndex + pageSize)
 
   const goToPage = (next: number) => {
     setSearch({ page: next <= 1 ? undefined : next })
@@ -260,13 +292,19 @@ export function StorePage() {
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          className={inputCls}
-          placeholder="Search the store…"
-          defaultValue={search.q ?? ''}
-          onChange={(e) => setFilter({ q: e.target.value || undefined })}
-        />
+      {/* No search box here any more. Text search over the store lives in the
+          one global palette (Ctrl+K), which searches name, slug AND
+          description server-side (backend/proxploy/api/search.py) rather than
+          filtering the page's own already-fetched rows, and which reaches a
+          store-only plan too. The category chips stay: they are a browse
+          affordance over a fixed vocabulary, not a search. */}
+      {/* Two stacked rows, not one flex row: the categories are the real
+          upstream vocabulary of 26, several of them long, so the chip block
+          wraps to three or four lines at most widths. Sort therefore has to
+          be a BLOCK BELOW that block rather than a flex sibling of it, which
+          is the only way it lands under the last wrapped line instead of
+          floating beside the first. */}
+      <div className="mb-4">
         <div className="flex flex-wrap gap-2">
           {categories.map((c) => (
             <button
@@ -278,6 +316,33 @@ export function StorePage() {
               {c}
             </button>
           ))}
+        </div>
+        {/* Right-aligned to the content lane, which is the same right edge the
+            grid below uses, so the two line up. flex-wrap so a narrow viewport
+            drops it to its own line rather than squeezing or overflowing.
+            Changing the order resets to page 1 for the same reason a filter
+            change does: page 7 of an alphabetical list is not page 7 of a
+            popularity one, and holding the number would land the operator
+            somewhere arbitrary. */}
+        <div className="mt-3 flex flex-wrap justify-end">
+          <Field orientation="horizontal" className="w-fit">
+            <FieldLabel htmlFor="select-store-sort" className="text-[12px] text-text-2">
+              Sort by
+            </FieldLabel>
+            <Select value={sort}
+                    onValueChange={(v) => setFilter({ sort: isStoreSort(v) ? v : undefined })}>
+              <SelectTrigger className="w-44" id="select-store-sort" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectGroup>
+                  {(Object.keys(STORE_SORTS) as StoreSort[]).map((k) => (
+                    <SelectItem key={k} value={k}>{STORE_SORTS[k]}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
       </div>
 
@@ -292,6 +357,7 @@ export function StorePage() {
         {() => (
           <>
             <StoreGrid entries={pageEntries} installedSlugs={installedSlugs}
+                      popularThreshold={popularThreshold}
                       onInstall={(slug) => setInstalling(slug)} />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
@@ -314,7 +380,7 @@ export function StorePage() {
               </Field>
 
               <div className="flex flex-wrap items-center gap-3">
-                {/* Prev/Next alone say nothing about where you are in 557
+                {/* Prev/Next alone say nothing about where you are in 556
                     apps, so the position is spelled out rather than implied. */}
                 <span className="font-mono text-[11px] text-text-3">
                   Showing {rangeStart} to {rangeEnd} of {filtered.length}
@@ -356,7 +422,6 @@ export const storeRoute = createRoute({
   path: '/store',
   validateSearch: (s: Record<string, unknown>) => ({
     category: typeof s.category === 'string' ? s.category : undefined,
-    q: typeof s.q === 'string' && s.q ? s.q : undefined,
     // Both default states are represented by their ABSENCE from the URL, so
     // /store stays clean until the operator actually pages or changes the
     // density. A page number arrives as a number from the router's own parse
@@ -364,6 +429,11 @@ export const storeRoute = createRoute({
     // else, including page 1 and the default size, normalises to undefined.
     page: toPage(s.page),
     pageSize: toPageSize(s.pageSize),
+    // Same four keys the server's own `sort` allowlist accepts, and the
+    // default is absence again. Anything else falls back to name rather than
+    // being carried around as a value nothing can honour, which is also what
+    // GET /catalog does with a bad sort.
+    sort: isStoreSort(s.sort) && s.sort !== DEFAULT_SORT ? s.sort : undefined,
   }),
   component: StorePage,
 })

@@ -15,6 +15,10 @@ export type CatalogEntryType = 'ct' | 'vm' | 'pve' | 'addon' | 'turnkey'
  *               the card is fully populated.
  *  - "unlisted" upstream dropped it entirely, so there is no metadata to have
  *               and the card renders bare.
+ *  - "superseded" upstream renamed the app and left the old script behind
+ *               (netvisor became scanopy), so the old slug would render as a
+ *               second, blank card under the new name. Hidden by the same
+ *               server-side rule as "variant" and never reaches the grid.
  *  - "variant"  not an app of its own: the install script implements an
  *               existing app's Alpine variant (ct/alpine-syncthing.sh IS
  *               Syncthing's alpine install_method), so upstream shows one
@@ -26,7 +30,8 @@ export type CatalogEntryType = 'ct' | 'vm' | 'pve' | 'addon' | 'turnkey'
  *  - null       not yet classified, e.g. rows written before the metadata
  *               sync first ran.
  */
-export type UpstreamState = 'listed' | 'delisted' | 'unlisted' | 'variant' | null
+export type UpstreamState =
+  'listed' | 'delisted' | 'unlisted' | 'variant' | 'superseded' | null
 
 export type CatalogRow = {
   slug: string; name: string | null; category: string | null; type: CatalogEntryType
@@ -43,6 +48,21 @@ export type CatalogRow = {
   // or the low-priority background pass, never during discovery/refresh).
   installable: boolean | null; unsupported_reason: string | null
   upstream_state: UpstreamState
+  // Install runs recorded by community-scripts' telemetry, terminal events
+  // only (services/catalog_telemetry.py). Not downloads, and not successes
+  // alone: it counts finished attempts, successful or not.
+  popularity_synced_at: string | null
+  script_created: string | null; script_updated: string | null
+  // THREE-STATE, and the third state is the point: null means upstream has no
+  // record for this slug (the 7 "unlisted" rows), NOT "no". `has_arm: null` is
+  // not "x86 only" and `privileged: null` is not "unprivileged". Anything
+  // rendering these must key off an explicit === true or === false and show
+  // nothing at all for null.
+  has_arm: boolean | null
+  updateable: boolean | null
+  privileged: boolean | null
+  architectures: string[] | null
+  port: number | null
   synced_at: string | null
 }
 

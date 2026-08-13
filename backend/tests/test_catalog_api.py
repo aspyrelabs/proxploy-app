@@ -139,3 +139,185 @@ def test_entry_type_is_returned_and_filterable(client, csrf_header, bootstrap_ad
 
     r = client.get("/api/v1/catalog?entry_type=ct")
     assert [row["slug"] for row in r.json()] == ["redis"]
+
+
+# --- sorting: "what's popular" and "what's new" -----------------------------
+#
+# The whole point of these is the NULL placement. SQLite orders NULL first
+# ascending, so the naive spelling of any of these sorts puts the rows we know
+# nothing about at the TOP of "most popular" and "newest", which is the exact
+# opposite of what either word means.
+
+def _seed_sortable(db):
+    from datetime import datetime
+
+    db.add(CatalogEntry(slug="alpha", name="Alpha", entry_type="ct",
+                        popularity=10,
+                        script_created=datetime(2024, 1, 1),
+                        script_updated=datetime(2026, 1, 1)))
+    db.add(CatalogEntry(slug="bravo", name="Bravo", entry_type="ct",
+                        popularity=9000,
+                        script_created=datetime(2026, 8, 1),
+                        script_updated=datetime(2024, 6, 1)))
+    db.add(CatalogEntry(slug="charlie", name="Charlie", entry_type="ct",
+                        popularity=500,
+                        script_created=datetime(2025, 5, 5),
+                        script_updated=datetime(2026, 7, 1)))
+    # The row we know nothing about: an `unlisted` slug with no upstream
+    # record, so no popularity and no dates. It must sort LAST in all three.
+    db.add(CatalogEntry(slug="unknown", name="Unknown", entry_type="ct",
+                        upstream_state="unlisted"))
+    db.commit()
+
+
+def test_default_sort_is_by_name(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+
+    assert [r["slug"] for r in client.get("/api/v1/catalog").json()] == [
+        "alpha", "bravo", "charlie", "unknown"]
+
+
+def test_sort_by_popularity_puts_the_most_installed_first(client, csrf_header,
+                                                          bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+
+    slugs = [r["slug"] for r in
+             client.get("/api/v1/catalog?sort=popularity").json()]
+
+    assert slugs == ["bravo", "charlie", "alpha", "unknown"]
+
+
+def test_a_row_with_no_popularity_never_ranks_above_one_with_a_real_count(
+        client, csrf_header, bootstrap_admin):
+    """The trap this sort exists to avoid. "No measurement" is not "the most
+    popular app in the catalog", and on the real DB there are 84 rows with no
+    number at all."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+
+    rows = client.get("/api/v1/catalog?sort=popularity").json()
+
+    assert rows[-1]["slug"] == "unknown" and rows[-1]["popularity"] is None
+    ranked = [r["slug"] for r in rows]
+    for slug in ("alpha", "bravo", "charlie"):
+        assert ranked.index(slug) < ranked.index("unknown"), slug
+
+
+def test_sort_by_newest_uses_script_created(client, csrf_header, bootstrap_admin):
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+
+    slugs = [r["slug"] for r in client.get("/api/v1/catalog?sort=newest").json()]
+
+    assert slugs == ["bravo", "charlie", "alpha", "unknown"]
+
+
+def test_sort_by_updated_uses_script_updated_not_script_created(
+        client, csrf_header, bootstrap_admin):
+    """The two dates disagree on purpose in the fixture: bravo is the newest
+    script and the least recently updated one. A sort that confused them would
+    pass the "newest" test and still be wrong here."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+
+    slugs = [r["slug"] for r in client.get("/api/v1/catalog?sort=updated").json()]
+
+    assert slugs == ["charlie", "alpha", "bravo", "unknown"]
+
+
+def test_an_unknown_or_hostile_sort_value_falls_back_to_the_default(
+        client, csrf_header, bootstrap_admin):
+    """A sort key is caller controlled, so the only safe shape is one that
+    never reaches SQL as a string. The Store rendering in the wrong order
+    beats the Store not rendering, so an unknown key is the default rather
+    than a 500 or a 422."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+    by_name = [r["slug"] for r in client.get("/api/v1/catalog").json()]
+
+    # The last four are dict/object attribute names. A JS `key in obj` check
+    # walks the prototype chain and would accept "toString", which the
+    # frontend hit for real; `dict.get` in Python does not, and these pin it.
+    for hostile in ("popularity; DROP TABLE catalog_entries",
+                    "name) --", "../../etc/passwd", "", "POPULARITY",
+                    "raw", "unsupported_reason",
+                    "get", "keys", "items", "__class__"):
+        r = client.get("/api/v1/catalog", params={"sort": hostile})
+        assert r.status_code == 200, hostile
+        assert [row["slug"] for row in r.json()] == by_name, hostile
+
+    # ...and the table is still there, which the previous assertion needs.
+    with client.app.state.sessionmaker() as db:
+        assert db.query(CatalogEntry).count() == 4
+
+
+def test_sorting_composes_with_the_store_grid_filter(client, csrf_header,
+                                                     bootstrap_admin):
+    """Sorting must not reintroduce the alpine variants the grid hides."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        _seed_sortable(db)
+        db.add(CatalogEntry(slug="alpine-alpha", name="Alpine Alpha",
+                            entry_type="ct", upstream_state="variant",
+                            popularity=999999))
+        db.commit()
+
+    slugs = [r["slug"] for r in
+             client.get("/api/v1/catalog?entry_type=ct&sort=popularity").json()]
+
+    assert "alpine-alpha" not in slugs
+    assert slugs == ["bravo", "charlie", "alpha", "unknown"]
+
+
+# --- the card tags: null is unknown, never "no" -----------------------------
+
+def test_the_tag_fields_are_serialized_with_their_real_types(client, csrf_header,
+                                                             bootstrap_admin):
+    from datetime import datetime
+
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="plex", name="Plex Media Server", entry_type="ct",
+                            script_created=datetime(2024, 5, 2),
+                            script_updated=datetime(2026, 6, 11),
+                            has_arm=True, architectures=["amd64", "arm64"],
+                            updateable=True, privileged=False, port=32400))
+        db.commit()
+
+    row = client.get("/api/v1/catalog").json()[0]
+
+    assert row["script_created"] == "2024-05-02T00:00:00"
+    assert row["script_updated"] == "2026-06-11T00:00:00"
+    assert row["has_arm"] is True and row["updateable"] is True
+    assert row["privileged"] is False            # a real, known negative
+    assert row["architectures"] == ["amd64", "arm64"]
+    assert row["port"] == 32400
+
+
+def test_a_row_with_no_upstream_record_serializes_null_not_false(
+        client, csrf_header, bootstrap_admin):
+    """The 9 `unlisted` rows have no upstream record at all, so we do not know
+    whether they are ARM-capable, updateable or privileged. Rendering null as
+    a negative chip would assert something nothing supports; null must stay
+    distinguishable from False all the way to the UI."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="readarr", name="Readarr", entry_type="ct",
+                            upstream_state="unlisted"))
+        db.commit()
+
+    row = client.get("/api/v1/catalog").json()[0]
+
+    for field in ("has_arm", "updateable", "privileged"):
+        assert row[field] is None, field
+        assert row[field] is not False, field
+    assert row["architectures"] is None and row["port"] is None
+    assert row["script_created"] is None and row["script_updated"] is None

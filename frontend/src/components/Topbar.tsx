@@ -42,10 +42,21 @@ export function Topbar() {
           against them. The lane centres the box between the two groups and
           still collapses cleanly when there is no room. */}
       <div className="flex min-w-0 flex-1 justify-center">
+        {/* max-w is 1.5x what it was (220px -> 330px), and it needed no
+            responsive clamp to stay safe. The cap is the only thing that
+            changed: the button is `w-full` inside a `min-w-0 flex-1` lane, so
+            its real width has always been whatever the lane has left after the
+            mark, tier pill, bell, theme toggle and avatar are laid out. Below
+            ~330px of free space the cap never binds and the button simply
+            fills the lane, exactly as before, so nothing is crowded or
+            overflowed at narrow viewports; above it, the box is half again as
+            wide. Growing this does not take space from the controls beside it
+            either, since flex-1 sizes the lane before the cap applies inside
+            it. */}
         <button
           aria-label="Search (Ctrl+K)"
           onClick={openCommandPalette}
-          className="flex h-8 w-full max-w-[220px] items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
+          className="flex h-8 w-full max-w-[330px] items-center gap-1.5 rounded-tile bg-panel-2 px-2.5 text-text-2 hover:bg-elev"
         >
           <Icon name="search" className="shrink-0" />
           <span className="hidden text-[12px] sm:inline">Search</span>

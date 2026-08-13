@@ -381,6 +381,27 @@ export function BellPopover() {
           // Without this the shift above is clamped back by collision
           // detection to Radix's own padding, undoing it.
           collisionPadding={EDGE_GAP_PX}
+          // Radix moves focus to the first TABBABLE element of the content when
+          // the popover opens, and a NotificationCard's icon-only controls open
+          // their tooltip on FOCUS as well as on hover (deliberately: that is
+          // how a keyboard user reads a button that is only an icon). With one
+          // card in the tray the first tabbable is that card's "View log", so
+          // merely clicking the bell popped its tooltip with the pointer nowhere
+          // near it. Two or more cards happened to hide it, because then the
+          // "Clear all" button is first and has no tooltip.
+          //
+          // Focus the content ITSELF instead. Radix's FocusScope puts
+          // tabIndex={-1} on this same element (it is `asChild`, so its props
+          // land on the node listRef points at), and the container precedes its
+          // own children in tab order, so one Tab still walks into the cards and
+          // the tooltip still appears for the keyboard user it exists for.
+          // Focus is deliberately still moved INTO the popover rather than left
+          // on the bell: leaving it on the trigger would tab into the rest of
+          // the topbar instead of into the notifications just opened.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            listRef.current?.focus()
+          }}
           className="z-30 flex w-[400px] max-w-[92vw] flex-col gap-2 bg-transparent p-0"
         >
           {/* An action notification (nothing to do with /jobs) has to show up

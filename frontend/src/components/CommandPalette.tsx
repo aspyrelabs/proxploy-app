@@ -41,10 +41,28 @@ export function CommandPalette() {
   const open = useSyncExternalStore(subscribe, () => paletteOpen)
   const navigate = useNavigate()
   const ent = useEntitlements()
-  // has() reads false until the first entitlements fetch resolves; gating on
-  // !has() alone would show the locked message to every plan during load
-  // (same guard as AttachmentMap in routes/network.tsx).
-  const denied = ent.data != null && !ent.has('ui.global_search')
+  // TWO GATES, mirroring backend/proxploy/api/search.py, which stopped gating
+  // the whole endpoint on one flag: `ui.global_search` covers apps, VMs and
+  // hosts, `store.catalog` covers the store group, and only a caller with
+  // NEITHER is refused.
+  //
+  // The store half is not a nicety. The App Store's own search box was
+  // removed (routes/store.tsx) and it never checked `ui.global_search`, so
+  // telling a store.catalog plan "not included in your plan" here would take
+  // away a capability they had this morning and dress it up as a UI cleanup.
+  //
+  // has() reads false until the first entitlements fetch resolves, so both
+  // states are additionally gated on the data having arrived; without that,
+  // every plan sees the locked copy during load (same guard as AttachmentMap
+  // in routes/network.tsx).
+  const loaded = ent.data != null
+  const canSearchAll = ent.has('ui.global_search')
+  const storeOnly = loaded && !canSearchAll && ent.has('store.catalog')
+  const denied = loaded && !canSearchAll && !ent.has('store.catalog')
+  // What this palette can actually reach, said the same way in the accessible
+  // name, the placeholder and the empty state, so none of the three can
+  // promise a store-only operator something they will not get.
+  const scope = storeOnly ? 'the store' : 'apps, VMs, hosts and the store'
   const [raw, setRaw] = useState('')
   const [query, setQuery] = useState('')
 
@@ -101,16 +119,26 @@ export function CommandPalette() {
       {/* shouldFilter={false}: the result set is already the server's answer to
           this query. Letting cmdk filter it again would hide rows the backend
           matched on fields the label does not show. */}
-      <Command shouldFilter={false} loop label="Search apps, VMs, hosts and the store">
+      <Command shouldFilter={false} loop label={`Search ${scope}`}>
         <Command.Input
           autoFocus
           disabled={denied}
           title={denied ? 'Not included in your plan' : undefined}
           className="w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[14px] text-text outline-none disabled:opacity-60"
-          placeholder="Search apps, VMs, hosts, the store…"
+          placeholder={storeOnly ? 'Search the store…' : 'Search apps, VMs, hosts, the store…'}
           value={raw}
           onValueChange={setRaw}
         />
+
+        {/* Said once, up front, rather than left for the operator to infer
+            from results that never contain their apps. This is what they can
+            do, and then what they cannot, in that order. */}
+        {storeOnly && (
+          <p className="mt-2 px-1 text-[11.5px] text-text-3">
+            Searching the app store. Apps, VMs and hosts need Global search, which is not
+            included in your plan.
+          </p>
+        )}
 
         {denied ? (
           <p className="mt-3 px-1 text-[12.5px] text-text-3">
@@ -122,7 +150,9 @@ export function CommandPalette() {
             {raw.trim().length > 0 && raw.trim().length < 2 ? (
               <p className="px-2 py-3 text-[12.5px] text-text-3">Keep typing, 2 characters minimum.</p>
             ) : query.length === 0 ? (
-              <p className="px-2 py-3 text-[12.5px] text-text-3">Type to search across the fleet.</p>
+              <p className="px-2 py-3 text-[12.5px] text-text-3">
+                {storeOnly ? 'Type to search the store.' : 'Type to search across the fleet.'}
+              </p>
             ) : search.isFetching && flat.length === 0 ? (
               <p className="px-2 py-3 text-[12.5px] text-text-3">Searching…</p>
             ) : flat.length === 0 ? (

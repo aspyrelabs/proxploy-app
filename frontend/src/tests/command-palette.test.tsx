@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let features: Record<string, boolean> = { 'ui.global_search': true }
@@ -51,6 +51,14 @@ describe('CommandPalette', () => {
     // Closing now settles through a Radix effect rather than synchronously, so
     // the module-level flag is not clear until the next tick.
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Radix's FocusScope queues its unmount-auto-focus event on a timer that
+    // outlives the closed dialog. Left pending at the end of this FILE, it
+    // fires during the next file's run, by which point jsdom has swapped
+    // realms and the dispatch throws "parameter 1 is not of type 'Event'" as
+    // an unhandled error attributed to whichever file happened to be running.
+    // Draining it here keeps that timer inside the lifetime of the dialog
+    // that scheduled it.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
   })
 
   it('opens on Ctrl+K and closes on Escape', async () => {
@@ -99,12 +107,76 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
-  it('opens on Ctrl+K even without the entitlement, showing the plan message instead of doing nothing', async () => {
-    features = { 'ui.global_search': false }
+  it('finds a store entry the server matched on its description', async () => {
+    // This assertion used to live in store.test.tsx, against the App Store's
+    // own search box, which is gone. The capability moved to GET /search,
+    // which matches name OR slug OR description (api/search.py), so what the
+    // frontend has to prove now is that a store row the server returned for a
+    // description match actually reaches the operator's eyes.
+    searchResults = {
+      query: 'organizes',
+      results: [
+        { kind: 'store', id: 'plex', label: 'Plex Media Server',
+          sublabel: 'Media & Streaming', href: '/store/plex', status: null },
+      ],
+    }
+    withQuery(<CommandPalette />)
+    openViaShortcut()
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'organizes' } })
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/search?q=organizes'))
+    expect(await screen.findByText('Store')).toBeInTheDocument()
+    expect(screen.getByText('Plex Media Server')).toBeInTheDocument()
+  })
+
+  it('opens on Ctrl+K with neither entitlement, showing the plan message instead of doing nothing', async () => {
+    features = { 'ui.global_search': false, 'store.catalog': false }
     withQuery(<CommandPalette />)
     openViaShortcut()
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(await screen.findByText(/not included in your plan/i)).toBeInTheDocument()
     expect(screen.getByRole('combobox')).toBeDisabled()
+  })
+
+  it('stays usable for a store-only plan, and says so instead of refusing', async () => {
+    // The App Store's own search box never checked ui.global_search, and it
+    // has been removed. Showing this plan a flat "not included" would be a
+    // capability taken away and called a cleanup, so the palette degrades to
+    // store-only rather than to nothing (api/search.py gates per group).
+    features = { 'ui.global_search': false, 'store.catalog': true }
+    searchResults = {
+      query: 'plex',
+      results: [
+        { kind: 'store', id: 'plex', label: 'Plex Media Server',
+          sublabel: 'Media & Streaming', href: '/store/plex', status: null },
+      ],
+    }
+    withQuery(<CommandPalette />)
+    openViaShortcut()
+
+    const input = await screen.findByRole('combobox')
+    await waitFor(() => expect(input).toBeEnabled())
+    // The copy promises the store and nothing else, in the placeholder and in
+    // the standing note, rather than offering the whole fleet and quietly
+    // returning one group.
+    expect(input).toHaveAttribute('placeholder', expect.stringMatching(/store/i))
+    expect(input).not.toHaveAttribute('placeholder', expect.stringMatching(/VMs/i))
+    expect(screen.getByText(/apps, vms and hosts need global search/i)).toBeInTheDocument()
+    expect(screen.queryByText(/upgrade to search apps/i)).toBeNull()
+
+    fireEvent.change(input, { target: { value: 'plex' } })
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/search?q=plex'))
+    expect(await screen.findByText('Plex Media Server')).toBeInTheDocument()
+  })
+
+  it('leaves a full plan untouched, with the whole fleet in the copy', async () => {
+    features = { 'ui.global_search': true, 'store.catalog': true }
+    withQuery(<CommandPalette />)
+    openViaShortcut()
+    const input = await screen.findByRole('combobox')
+    expect(input).toBeEnabled()
+    expect(input).toHaveAttribute('placeholder', expect.stringMatching(/apps, vms, hosts/i))
+    expect(screen.queryByText(/need global search/i)).toBeNull()
+    expect(screen.getByText(/type to search across the fleet/i)).toBeInTheDocument()
   })
 })

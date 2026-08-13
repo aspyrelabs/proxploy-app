@@ -11,13 +11,14 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_
+from sqlalchemy import nulls_last
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.models import App, CatalogEntry, HostCredential, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
+from proxploy.services.catalog_metadata import store_visible
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -38,6 +39,32 @@ _refresh = authorize("catalog", "refresh")
 _install = authorize("app", "install")
 
 
+# The complete set of orderings the Store may ask for, as an ALLOWLIST of
+# prebuilt criteria. A sort key is a query parameter, so it is caller
+# controlled, and the only safe shape for caller-controlled ordering is one
+# that never reaches SQL as a string: an unknown key selects the default here
+# rather than being interpolated, quoted or trusted.
+#
+# NULLS ALWAYS LAST on every descending sort, and this is the trap the whole
+# table exists to avoid. SQLite orders NULL FIRST ascending, so a bare
+# `popularity DESC` puts every row we have no number for at the BOTTOM, which
+# is right, while a bare `popularity ASC` or any NULLS-default flip would put
+# them at the top of "most popular": 84 rows claiming to be the most installed
+# apps in the catalog on the strength of having no measurement at all. Same
+# for "newest" over the 9 unlisted rows that have no script_created. Name is
+# the tiebreak everywhere so equal values do not shuffle between requests.
+_SORTS = {
+    "name": lambda: (CatalogEntry.name.asc(),),
+    "popularity": lambda: (nulls_last(CatalogEntry.popularity.desc()),
+                           CatalogEntry.name.asc()),
+    "newest": lambda: (nulls_last(CatalogEntry.script_created.desc()),
+                       CatalogEntry.name.asc()),
+    "updated": lambda: (nulls_last(CatalogEntry.script_updated.desc()),
+                        CatalogEntry.name.asc()),
+}
+DEFAULT_SORT = "name"
+
+
 def _serialize(r: CatalogEntry) -> dict:
     return {
         "slug": r.slug, "name": r.name, "category": r.category, "type": r.entry_type,
@@ -52,6 +79,13 @@ def _serialize(r: CatalogEntry) -> dict:
         # unserved: they are sync bookkeeping, and the freshness signal the UI
         # actually shows already has its own route in /catalog/status.
         "popularity": r.popularity, "website": r.website, "docs_url": r.docs_url,
+        # The one sync timestamp that IS served, and it has to be: popularity
+        # comes from upstream's telemetry service through a 23h server-side
+        # cache (services/catalog_telemetry.py), so the number can be a full
+        # day old while the name and icon beside it are minutes old. A raw
+        # count with no "as of" next to it would present stale data as live.
+        "popularity_synced_at": (r.popularity_synced_at.isoformat()
+                                 if r.popularity_synced_at else None),
         # "listed" | "delisted" | "unlisted" | "variant" | null. The one
         # metadata-sync column that IS served, because it changes what the
         # card says rather than how fresh it is: "delisted" and "unlisted"
@@ -65,13 +99,31 @@ def _serialize(r: CatalogEntry) -> dict:
         "default_os_version": r.default_os_version,
         "installable": r.installable, "unsupported_reason": r.unsupported_reason,
         "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+        # Upstream's dates for the SCRIPT itself, which is what the Store's
+        # "newest" and "recently updated" sorts mean. Not to be confused with
+        # `synced_at` (when WE last discovered the row) or with
+        # upstream_updated_at (when the upstream RECORD was last edited, which
+        # a description fix bumps). ISO or null.
+        "script_created": (r.script_created.isoformat()
+                           if r.script_created else None),
+        "script_updated": (r.script_updated.isoformat()
+                           if r.script_updated else None),
+        # The card tags. ALL FOUR ARE TRI-STATE AND NULL MEANS UNKNOWN, NEVER
+        # "NO". The 9 `unlisted` rows have no upstream record at all, so we do
+        # not know whether they are ARM-capable, updateable or privileged, and
+        # a UI that renders null as a negative chip ("not ARM") would be
+        # asserting something nothing here supports. No chip is the honest
+        # rendering of null; a negative chip is not.
+        "has_arm": r.has_arm, "architectures": r.architectures,
+        "updateable": r.updateable, "privileged": r.privileged,
+        "port": r.port,
     }
 
 
 @router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("store.catalog"))])
 def list_catalog(category: str | None = None, q: str | None = None,
-                 entry_type: str | None = None,
+                 entry_type: str | None = None, sort: str = DEFAULT_SORT,
                  db=Depends(get_db), user: User = Depends(_read)):
     """Backs both the Store grid (always `entry_type=ct`, decision: non-LXC
     entries never appear there) and, unfiltered, the full catalog table every
@@ -81,26 +133,34 @@ def list_catalog(category: str | None = None, q: str | None = None,
     the `entry_type=ct` filter and not off the query as a whole: the grid must
     not show 28 blank duplicate cards, and the full catalog table must still
     account for every row discovery created.
+
+    `sort` is one of `_SORTS`: name (default), popularity, newest, updated.
+    Anything else falls back to the default rather than erroring, because the
+    Store rendering in the wrong order is a far better failure than the Store
+    not rendering; the value never reaches SQL either way.
+
+    Ordering here is about CORRECTNESS, not paging: the frontend fetches every
+    ct row and slices client side, so this decides which rows the user sees
+    first, not which rows they receive.
     """
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
     if q:
         query = query.filter(CatalogEntry.name.ilike(f"%{q}%"))
-    if entry_type:
+    if entry_type == "ct":
+        # The Store grid. `store_visible()` is the ONE definition of what the
+        # Store may show (services/catalog_metadata.py), shared with the
+        # command palette's store group in api/search.py. It is a shared
+        # helper rather than a predicate written here because it was once
+        # written twice, and the copy in search.py never got the variant
+        # exclusion: the palette offered 28 hidden alpine phantoms and 84
+        # non-ct rows, each linking to a /store/<slug> that opened Not Found.
+        query = query.filter(store_visible())
+    elif entry_type:
         query = query.filter(CatalogEntry.entry_type == entry_type)
-        if entry_type == "ct":
-            # An alpine-<parent> row upstream models as an install METHOD of
-            # its parent app rather than as its own app
-            # (services/catalog_metadata.py::resolve_upstream_state). It stays
-            # a ct row and stays installable; it just is not a card, because
-            # upstream shows one Syncthing, not Syncthing plus a blank Alpine
-            # Syncthing. Written as an explicit NULL branch rather than `!=`:
-            # in SQL, `upstream_state != 'variant'` is NULL for a never-synced
-            # row, which would empty the entire Store on a fresh install.
-            query = query.filter(or_(CatalogEntry.upstream_state.is_(None),
-                                     CatalogEntry.upstream_state != "variant"))
-    return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
+    order_by = _SORTS.get(sort, _SORTS[DEFAULT_SORT])()
+    return [_serialize(r) for r in query.order_by(*order_by).all()]
 
 
 @router.get("/status", dependencies=[Depends(_read),

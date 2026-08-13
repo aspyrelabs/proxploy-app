@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
 import { api } from '../api/client'
 import { StoreCard } from '../components/StoreCard'
+import { popularityBand } from '../lib/store-order'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
 
@@ -39,12 +40,12 @@ beforeEach(() => {
   }
 })
 
-// StorePage reads/writes category+q+page+pageSize through router search
+// StorePage reads/writes category+sort+page+pageSize through router search
 // params. Mock useSearch/useNavigate with a tiny external store (same shape as
 // apps.test.tsx's static stub, but reactive) so a chip click's navigate()
 // actually re-renders the page with the new search, needed to assert
-// useCatalog gets re-called and that paging survives in the URL.
-let mockSearch: { category?: string; q?: string; page?: number; pageSize?: number } = {}
+// useCatalog gets re-called and that paging and ordering survive in the URL.
+let mockSearch: { category?: string; page?: number; pageSize?: number; sort?: string } = {}
 const searchListeners = new Set<() => void>()
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
@@ -56,6 +57,19 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
     mockSearch = opts.search
     searchListeners.forEach((cb) => cb())
   },
+  // StoreCard's title and Read more are real <Link>s now, and a Link outside a
+  // RouterProvider throws on the router context. Same stand-in
+  // icon-names-coverage.test.tsx uses, plus param interpolation, so the tests
+  // below can assert the real resolved path ("/store/redis") rather than just
+  // that some anchor exists: a wrong param name shows up here as an empty
+  // segment instead of passing silently.
+  Link: ({ to, params, children, ...rest }: {
+    to: string; params?: Record<string, string>; children?: React.ReactNode
+  }) => (
+    <a href={String(to).replace(/\$(\w+)/g, (_m, k: string) => params?.[k] ?? '')} {...rest}>
+      {children}
+    </a>
+  ),
 }))
 
 describe('useCatalog', () => {
@@ -125,6 +139,12 @@ const REDIS: CatalogRow = {
   default_cpu: 1, default_ram_mb: 1024, default_disk_gb: 4,
   default_os: 'debian', default_os_version: '13',
   installable: true, unsupported_reason: null, upstream_state: 'listed', synced_at: null,
+  // The default fixture is a fully-known listed row: real booleans, not
+  // nulls, so a test that wants the "upstream told us nothing" case has to
+  // ask for it explicitly rather than getting it by accident.
+  popularity_synced_at: '2026-08-13T00:00:00', script_created: '2024-05-02T00:00:00',
+  script_updated: '2026-06-11T00:00:00', has_arm: true, updateable: true,
+  privileged: false, architectures: ['amd64', 'arm64'], port: 6379,
 }
 
 describe('StoreCard', () => {
@@ -239,6 +259,111 @@ describe('StoreCard', () => {
     expect(screen.getByRole('img')).toHaveAttribute('src', soft.icon_url)
     expect(screen.getByText('S3 compatible object storage.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  it('links the title and a Read more to this row\'s detail route', () => {
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} />)
+    const readMore = screen.getByRole('link', { name: 'Read more' })
+    expect(readMore).toHaveAttribute('href', '/store/redis')
+    // The name is the other way in, for anyone who reaches for the title
+    // rather than the explicit link.
+    expect(screen.getByRole('link', { name: 'Redis' })).toHaveAttribute('href', '/store/redis')
+  })
+
+  it('shows Read more even on a row with no description to read', () => {
+    // The user chose this explicitly, for visual consistency, knowing it puts
+    // the link on cards with nothing more to show. It is still defensible:
+    // the detail page carries availability, resource defaults and popularity
+    // for these rows even when upstream gave us no prose.
+    const bare = { ...REDIS, slug: 'readarr', name: null, description: null,
+      upstream_state: 'unlisted' as const }
+    render(<StoreCard entry={bare} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByRole('link', { name: 'Read more' })).toHaveAttribute('href', '/store/readarr')
+  })
+
+  it('nests no interactive element inside another', () => {
+    // An <a> wrapping the Install <button> would be invalid HTML and would
+    // break both keyboard and screen-reader behaviour, which is why the card
+    // itself is not a link. Asserted structurally so a later "make the whole
+    // card clickable" change has to deal with this test rather than silently
+    // reintroducing the nesting.
+    const { container } = render(
+      <StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band="top10" />)
+    const interactive = Array.from(container.querySelectorAll('a, button'))
+    expect(interactive.length).toBeGreaterThan(2)
+    for (const el of interactive) {
+      expect(el.querySelector('a, button'), `${el.tagName} contains another control`).toBeNull()
+    }
+  })
+
+  const BADGE_TOP = 'Top 10%'
+
+  it('shows the gold star band only when the page says this row is in the top tier', () => {
+    // The raw install count is gone from the card on purpose: 126196 against a
+    // median of 1001 is a figure nobody can place. The band is a percentile,
+    // and the percentile can only be computed against the whole corpus, so the
+    // page resolves it and hands the card the answer.
+    const { rerender } = render(
+      <StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band="top10" />)
+    expect(screen.getByText(BADGE_TOP)).toBeInTheDocument()
+    // star_shine, written as a literal so scripts/icon-names.mjs can extract
+    // it into the Google Fonts link; a Material Symbols glyph renders as its
+    // own ligature text.
+    expect(screen.getByText('star_shine')).toBeInTheDocument()
+
+    rerender(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band={null} />)
+    expect(screen.queryByText(BADGE_TOP)).toBeNull()
+    expect(screen.queryByText('star_shine')).toBeNull()
+  })
+
+  it('never puts the raw popularity number on the card', () => {
+    const popular = { ...REDIS, popularity: 126196 }
+    render(<StoreCard entry={popular} onInstall={vi.fn()} installed={false} band="top10" />)
+    expect(screen.queryByText(/126196/)).toBeNull()
+    expect(screen.queryByText(/126,196/)).toBeNull()
+    // and never this word, which is not what the number counts
+    expect(document.body.textContent).not.toMatch(/downloads/i)
+  })
+
+  it('renders no band at all for a row with no popularity measurement', () => {
+    const unmeasured = { ...REDIS, popularity: null }
+    render(<StoreCard entry={unmeasured} onInstall={vi.fn()} installed={false}
+                      band={popularityBand(null, 9186)} />)
+    expect(screen.queryByText(BADGE_TOP)).toBeNull()
+    expect(screen.queryByText('star_shine')).toBeNull()
+  })
+
+  it('chips only the rare, actionable side of each upstream boolean', () => {
+    // has_arm is true on 87% of rows and updateable on 97%, so chipping those
+    // would be furniture. The exceptions carry the information.
+    const ordinary = { ...REDIS, privileged: false, has_arm: true, updateable: true }
+    const { rerender } = render(
+      <StoreCard entry={ordinary} onInstall={vi.fn()} installed={false} />)
+    expect(screen.queryByText('Privileged')).toBeNull()
+    expect(screen.queryByText('Unprivileged')).toBeNull()  // dropped deliberately
+    expect(screen.queryByText('x86 only')).toBeNull()
+    expect(screen.queryByText('No in-place update')).toBeNull()
+
+    rerender(<StoreCard entry={{ ...REDIS, privileged: true, has_arm: false, updateable: false }}
+                        onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByText('Privileged')).toBeInTheDocument()
+    expect(screen.getByText('x86 only')).toBeInTheDocument()
+    expect(screen.getByText('No in-place update')).toBeInTheDocument()
+  })
+
+  it('claims nothing about a row upstream has no record for', () => {
+    // THE null case. All three booleans are null on the 9 unlisted rows, and
+    // null means "we do not know", never "no". A falsiness check here would
+    // label every one of them x86 only and un-updatable, which upstream has
+    // not said and we cannot know.
+    const unknown = { ...REDIS, upstream_state: 'unlisted' as const,
+      privileged: null, has_arm: null, updateable: null }
+    render(<StoreCard entry={unknown} onInstall={vi.fn()} installed={false} />)
+    expect(screen.queryByText('x86 only')).toBeNull()
+    expect(screen.queryByText('No in-place update')).toBeNull()
+    expect(screen.queryByText('Privileged')).toBeNull()
+    // the one thing we DO know about it still shows
+    expect(screen.getByText('Not listed upstream')).toBeInTheDocument()
   })
 
   it('reads coherently when a row is both unlisted and not installable', () => {
@@ -356,34 +481,24 @@ describe('StorePage', () => {
     }
   })
 
-  it('searches by name, client-side', async () => {
+  it('has no search box of its own: text search is the global palette now', async () => {
+    // The two tests that used to live here asserted client-side matching on
+    // name and on description. That capability did not disappear, it moved
+    // server-side to GET /search (name OR slug OR description) and is
+    // asserted in command-palette.test.tsx, where the surface now is. What
+    // survives here is the negative: this page must not grow a second,
+    // narrower search that only filters the rows it happens to have fetched.
     const { useCatalog } = await import('../api/catalog')
-    const mocked = vi.mocked(useCatalog)
-    const gitea = { ...REDIS, slug: 'gitea', name: 'Gitea', category: 'Dev Tools' }
-    mocked.mockReturnValue({ data: [REDIS, gitea] } as any)
+    vi.mocked(useCatalog).mockReturnValue({
+      data: [REDIS, { ...REDIS, slug: 'gitea', name: 'Gitea' }],
+    } as any)
     withQuery(<StorePage />)
 
-    fireEvent.change(screen.getByPlaceholderText(/search the store/i), { target: { value: 'git' } })
-
-    expect(screen.queryByText('Redis')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    // and the grid is unfiltered, both rows still render
+    expect(screen.getByText('Redis')).toBeInTheDocument()
     expect(screen.getByText('Gitea')).toBeInTheDocument()
-  })
-
-  it('searches descriptions too, not just the name and slug', async () => {
-    // Descriptions are populated now, so the thing an operator actually
-    // remembers about an app ("the one that organizes your media") has to be
-    // findable. A row with a null description must not blow up the filter.
-    const { useCatalog } = await import('../api/catalog')
-    const plex = { ...REDIS, slug: 'plex', name: 'Plex Media Server',
-      description: 'Plex magically scans and organizes your files.' }
-    vi.mocked(useCatalog).mockReturnValue({ data: [REDIS, plex] } as any)
-    withQuery(<StorePage />)
-
-    fireEvent.change(screen.getByPlaceholderText(/search the store/i),
-                     { target: { value: 'organizes' } })
-
-    expect(screen.getByText('Plex Media Server')).toBeInTheDocument()
-    expect(screen.queryByText('Redis')).not.toBeInTheDocument()
   })
 
   it('handles the real upstream category vocabulary in the chips and the filter', async () => {
@@ -742,23 +857,10 @@ describe('Store pagination', () => {
     expect(options).toEqual(['15', '25', '50', '100'])
   })
 
-  it('drops back to page 1 when the search text changes', async () => {
-    // The classic pagination bug: narrow a 5-page result set to a 1-page one
-    // while sitting on page 4 and the grid renders empty, which reads as "no
-    // matches" when it is really "no page 4".
-    await mockEntries([...manyEntries(30), { ...REDIS, slug: 'gitea', name: 'Gitea' }])
-    mockSearch = { page: 2 }
-    withQuery(<StorePage />)
-    expect(screen.getByText('Gitea')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText(/search the store/i),
-                     { target: { value: 'gitea' } })
-
-    expect(mockSearch.page).toBeUndefined()
-    expect(screen.getByText('Gitea')).toBeInTheDocument()
-    expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument()
-  })
-
+  // The search-text half of this pair went with the search box. The rule it
+  // proved (a filter change drops you back to page 1, rather than stranding
+  // you on a page number the narrowed result set no longer has) is the same
+  // rule, and the category chip is the filter that still exists to prove it.
   it('drops back to page 1 when the category chip changes', async () => {
     const rows = [...manyEntries(30), { ...REDIS, slug: 'gitea', name: 'Gitea', category: 'Dev Tools' }]
     await mockEntries(rows)
@@ -780,5 +882,154 @@ describe('Store pagination', () => {
     withQuery(<StorePage />)
     expect(screen.getByText('Page 2 of 2')).toBeInTheDocument()
     expect(cardCount()).toBe(5)
+  })
+})
+
+/**
+ * Sorting and the popularity band. The four sort keys mirror GET /catalog's
+ * own allowlist, but the ordering itself is done client-side over the single
+ * catalog fetch this page already holds (see lib/store-order.ts for why, and
+ * store-order.test.ts for the NULLS LAST rule these rely on).
+ */
+describe('Store sort and popularity band', () => {
+  const app = (slug: string, over: Partial<CatalogRow> = {}): CatalogRow =>
+    ({ ...REDIS, slug, name: slug, ...over })
+
+  const mockEntries = async (rows: CatalogRow[]) => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: rows } as any)
+  }
+
+  // Card titles in DOM order, which is the order the grid rendered them.
+  // `.mt-2.font-semibold` is the name line specifically: the initials tile is
+  // also font-semibold, so matching on that alone reads back "AD" instead of
+  // "adguard".
+  const shownOrder = () =>
+    screen.getAllByRole('button', { name: 'Install' })
+      .map((b) => b.closest('.rounded-card')?.querySelector('.mt-2.font-semibold')?.textContent)
+
+  beforeEach(() => { mockSearch = {} })
+
+  it('offers exactly the four sort options, name first', async () => {
+    await mockEntries([app('a')])
+    withQuery(<StorePage />)
+    fireEvent.click(screen.getByRole('combobox', { name: /sort by/i }))
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
+    expect(options).toEqual(['Name (A to Z)', 'Most installed', 'Newest', 'Recently updated'])
+  })
+
+  it('defaults to name order and keeps the default out of the URL', async () => {
+    await mockEntries([app('zabbix'), app('adguard'), app('plex')])
+    withQuery(<StorePage />)
+    expect(shownOrder()).toEqual(['adguard', 'plex', 'zabbix'])
+    expect(mockSearch.sort).toBeUndefined()
+  })
+
+  it('reorders the grid by install count, and resets to page 1', async () => {
+    // Page 7 of an alphabetical list is not page 7 of a popularity one, so
+    // holding the page number across a sort change would land the operator
+    // somewhere arbitrary.
+    await mockEntries([app('quiet', { popularity: 4 }), app('docker', { popularity: 126196 }),
+                       app('middling', { popularity: 1001 })])
+    mockSearch = { page: 2 }
+    withQuery(<StorePage />)
+
+    fireEvent.click(screen.getByRole('combobox', { name: /sort by/i }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Most installed' }))
+
+    await waitFor(() => expect(mockSearch.sort).toBe('popularity'))
+    expect(mockSearch.page).toBeUndefined()
+    expect(shownOrder()).toEqual(['docker', 'middling', 'quiet'])
+  })
+
+  it('puts rows with no measurement last, not first, when sorting by newest', async () => {
+    // The page-level counterpart to store-order.test.ts's NULLS LAST test:
+    // proves the rule survives the trip through filtering and paging.
+    await mockEntries([
+      app('unlisted-row', { script_created: null, popularity: null }),
+      app('older', { script_created: '2024-05-02T00:00:00' }),
+      app('newest', { script_created: '2026-08-13T00:00:00' }),
+    ])
+    mockSearch = { sort: 'newest' }
+    withQuery(<StorePage />)
+    expect(shownOrder()).toEqual(['newest', 'older', 'unlisted-row'])
+  })
+
+  it('falls back to name order for a sort key the allowlist does not have', async () => {
+    // A hand-typed ?sort=toString used to reach the comparator as a real key
+    // and throw, taking the page down with it.
+    await mockEntries([app('zabbix'), app('adguard')])
+    mockSearch = { sort: 'toString' }
+    withQuery(<StorePage />)
+    expect(shownOrder()).toEqual(['adguard', 'zabbix'])
+  })
+
+  it('bands the top tenth of the whole corpus, not of the current page', async () => {
+    // 100 rows, 1..100 installs, page size 15. Only the top 10 clear the 90th
+    // percentile, so page 1 of a popularity sort shows 10 bands and 5 without,
+    // and the threshold does not shift when the page does.
+    const rows = Array.from({ length: 100 }, (_, i) =>
+      app(`s${String(i).padStart(3, '0')}`, { popularity: i + 1 }))
+    await mockEntries(rows)
+    mockSearch = { sort: 'popularity', pageSize: 15 }
+    withQuery(<StorePage />)
+
+    expect(screen.getAllByText('Top 10%')).toHaveLength(10)
+    expect(screen.getAllByText('star_shine')).toHaveLength(10)
+  })
+
+  it('shows no band anywhere when nothing has been measured', async () => {
+    await mockEntries([app('a', { popularity: null }), app('b', { popularity: null })])
+    withQuery(<StorePage />)
+    expect(screen.queryByText('Top 10%')).toBeNull()
+    expect(screen.queryByText('star_shine')).toBeNull()
+  })
+})
+
+describe('Store grid sizing', () => {
+  const mockEntries = async (rows: CatalogRow[]) => {
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: rows } as any)
+  }
+
+  beforeEach(() => { mockSearch = {} })
+
+  it('sizes columns with one auto-fill rule rather than hand-written breakpoints', async () => {
+    // The column count has to follow the lane, so a 4K monitor fills the row
+    // instead of stopping at whatever the largest breakpoint said. Asserted on
+    // the rule itself because jsdom has no layout engine and cannot report a
+    // real column count.
+    await mockEntries([{ ...REDIS, slug: 'a', name: 'A' }])
+    const { container } = withQuery(<StorePage />)
+    const grid = container.querySelector('.grid')
+    expect(grid?.className).toContain('grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]')
+    // the fixed-breakpoint ladder this replaced must not come back
+    expect(grid?.className).not.toMatch(/sm:grid-cols-|xl:grid-cols-|grid-cols-1\b/)
+  })
+
+  it('gives every card the same fixed height', async () => {
+    // The whole point: a 10-line description next to a 2-line one used to
+    // leave a hole in the grid.
+    await mockEntries([
+      { ...REDIS, slug: 'short', name: 'Short', description: 'Tiny.' },
+      { ...REDIS, slug: 'long', name: 'Long', description: 'x '.repeat(400) },
+      { ...REDIS, slug: 'none', name: 'None', description: null },
+    ])
+    const { container } = withQuery(<StorePage />)
+    const cards = Array.from(container.querySelectorAll('.rounded-card'))
+    expect(cards).toHaveLength(3)
+    for (const card of cards) expect(card.className).toContain('h-[284px]')
+  })
+
+  it('clamps the description and fades it from the card background token', async () => {
+    // A gradient hardcoded to one background smears in the other theme; the
+    // token flips with [data-theme]. Over a short or missing description this
+    // is panel-on-panel, i.e. invisible, which is why it needs no condition.
+    await mockEntries([{ ...REDIS, slug: 'a', name: 'A', description: 'y '.repeat(400) }])
+    const { container } = withQuery(<StorePage />)
+    expect(container.querySelector('.line-clamp-3')).not.toBeNull()
+    const fade = container.querySelector('[class*="linear-gradient(to_top,var(--panel)"]')
+    expect(fade).not.toBeNull()
+    expect(fade?.getAttribute('class')).toContain('pointer-events-none')
   })
 })

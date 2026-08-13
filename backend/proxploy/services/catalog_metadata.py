@@ -49,12 +49,17 @@ see the guard note on `sync_metadata`.
 """
 from __future__ import annotations
 
+import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import and_, or_
 
 from proxploy.models import CatalogEntry, utcnow
+
+logger = logging.getLogger(__name__)
 
 # The live source. `perPage=1000` covers the whole corpus (701 records) in a
 # single page on purpose: paging would turn one predictable request into an
@@ -78,8 +83,24 @@ ARCHIVE_BASE = (
 # The complete set of columns upstream metadata is allowed to write. Not a
 # guideline: `apply_writable_fields` loops over exactly this frozenset and
 # does nothing else, so the write set cannot widen by accident.
+#
+# It HAS widened once, deliberately, from the original six to thirteen, when
+# the Store gained sorting and tag chips. Read what did and did not change:
+# every added name is another way upstream DESCRIBES an app (when its script
+# was published, whether it runs on ARM, which port it serves), and the
+# forbidden set is untouched. `slug`, `entry_type`, `script_path`,
+# `installable` and `unsupported_reason` are still absent, still unwritable,
+# and still protected by the same single loop and the same `_checked` guard,
+# so the five-slug near-miss documented on `apply_writable_fields` cannot come
+# back. Widening this set is a design decision to be argued for; weakening the
+# mechanism around it is not.
 WRITABLE_FIELDS = frozenset({
+    # presentation
     "name", "description", "category", "icon_url", "website", "docs_url",
+    # upstream's own dates for the script, which the Store sorts on
+    "script_created", "script_updated",
+    # the card tags, all tri-state: None means unknown, never "no"
+    "has_arm", "architectures", "updateable", "privileged", "port",
 })
 
 # The prefix upstream uses for an Alpine build of an app it already lists.
@@ -133,6 +154,35 @@ def _parse_upstream_ts(value) -> datetime | None:
     return parsed
 
 
+def _flag(value) -> bool | None:
+    """A real boolean or nothing. Upstream False is a genuine answer ("this
+    app is not privileged") and must survive the None-stripping the mappers do
+    on their way out, which is why this returns None ONLY for a value that is
+    not a bool at all. Anything looser, `bool(value)`, would turn a missing
+    field into a confident "no" on every one of the 9 rows we have no upstream
+    record for."""
+    return value if isinstance(value, bool) else None
+
+
+def _port(value) -> int | None:
+    """A usable TCP port or nothing. `bool` is excluded explicitly because it
+    subclasses int in Python, so a JSON `true` would otherwise become port 1."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 < value <= 65535 else None
+
+
+def _arch_list(value) -> list[str] | None:
+    """Upstream's architecture vocabulary, e.g. ["amd64", "arm64"], normalised
+    only to the extent of dropping entries that are not non-empty strings. An
+    empty list is None: "upstream told us nothing" rather than "this app runs
+    on no architecture at all"."""
+    if not isinstance(value, list):
+        return None
+    out = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+    return out or None
+
+
 def _checked(fields: dict) -> dict:
     """A mapper key outside WRITABLE_FIELDS is a programming error, and it
     raises here rather than being silently dropped. Silent dropping is the
@@ -168,6 +218,18 @@ def map_pocketbase_record(record: dict) -> dict:
         "icon_url": _text(record.get("logo")),
         "website": _text(record.get("website")),
         "docs_url": _text(record.get("documentation")),
+        # Upstream's dates for the SCRIPT, not for the record: `updated` moves
+        # when someone fixes a typo in the description, `script_updated` moves
+        # when the script itself changes, and "recently updated" in the Store
+        # has to mean the second one. Same space-instead-of-T stamp as
+        # everything else here, so the same defensive parser.
+        "script_created": _parse_upstream_ts(record.get("script_created")),
+        "script_updated": _parse_upstream_ts(record.get("script_updated")),
+        "has_arm": _flag(record.get("has_arm")),
+        "architectures": _arch_list(record.get("architectures")),
+        "updateable": _flag(record.get("updateable")),
+        "privileged": _flag(record.get("privileged")),
+        "port": _port(record.get("port")),
     }
     return _checked({k: v for k, v in fields.items() if v is not None})
 
@@ -176,9 +238,15 @@ def map_archive_record(record: dict, categories_by_id: dict[int, str]) -> dict:
     """The archived frontend's `public/json/<slug>.json` to the same writable
     subset. Its schema is NOT the PocketBase one and the differences are load
     bearing: categories are integer ids that only resolve through
-    metadata.json, the port field is `interface_port` not `port` (we ignore
-    both, but the next person will look), and `type` is "ct" where PocketBase
-    says "lxc" (we ignore that too, see apply_writable_fields)."""
+    metadata.json, the port field is `interface_port` not `port`, its only
+    date is `date_created` (there is no script_updated and no has_arm at all),
+    and `type` is "ct" where PocketBase says "lxc" (we ignore that one, see
+    apply_writable_fields).
+
+    It therefore maps a SUBSET of what the live source does, which is correct
+    rather than a gap: this runs only on a cold start with PocketBase down,
+    and an omitted key leaves the column untouched, so a card renders with
+    fewer chips instead of with wrong ones."""
     category = None
     ids = record.get("categories")
     if isinstance(ids, list):
@@ -195,6 +263,16 @@ def map_archive_record(record: dict, categories_by_id: dict[int, str]) -> dict:
         "icon_url": _text(record.get("logo")),
         "website": _text(record.get("website")),
         "docs_url": _text(record.get("documentation")),
+        # `date_created` is the archive's only date and it is the script's
+        # creation date, so it maps to script_created. Nothing here maps to
+        # script_updated: the archive is FROZEN at 2026-03-12, so any
+        # "recently updated" it could offer would be a lie about a snapshot
+        # that stopped moving, and omitting the key leaves whatever the live
+        # source last wrote.
+        "script_created": _parse_upstream_ts(record.get("date_created")),
+        "updateable": _flag(record.get("updateable")),
+        "privileged": _flag(record.get("privileged")),
+        "port": _port(record.get("interface_port")),
     }
     return _checked({k: v for k, v in fields.items() if v is not None})
 
@@ -306,7 +384,7 @@ def apply_writable_fields(row: CatalogEntry, fields: dict) -> None:
     PocketBase calls them "addon" while our tree discovery correctly calls
     them "ct". Wiring `entry_type` to metadata here would read as a tidy
     one-line improvement, and it would silently drop five genuinely
-    installable LXC apps out of the Store and break dual-variant collision
+    LXC-typed apps out of the Store entirely and break dual-variant collision
     detection (services/catalog.py::_classify_path). Upstream is not wrong; it
     is answering a different question than the Store asks. Do not
     "helpfully" let metadata set type later.
@@ -334,9 +412,52 @@ def _record_provenance(row: CatalogEntry, source: str, record: dict,
     row.raw = {**(row.raw or {}), "metadata": record}
 
 
+# Every upstream_state the Store grid refuses to show. Kept as a set beside
+# the criterion below so adding another hidden state is one edit in one place,
+# not a hunt through the callers. Two so far, and they are genuinely different
+# phenomena rather than one with two names, which is why they are two values:
+# a "variant" is a real app upstream shows under its parent's card, while a
+# "superseded" row is a dead script upstream renamed out from under us.
+HIDDEN_FROM_STORE = frozenset({"variant", "superseded"})
+
+
+def store_visible():
+    """THE single source of truth for which catalog rows the Store may show.
+
+    Both callers depend on this and neither may re-implement it:
+
+      - api/catalog.py::list_catalog, for `entry_type=ct` (the grid itself)
+      - api/search.py, for the store group of the command palette
+
+    THIS EXISTS BECAUSE THE RULE WAS ONCE WRITTEN TWICE AND ONLY ONE COPY GOT
+    UPDATED. The variant exclusion landed in list_catalog and never reached
+    search, so the palette went on offering all 28 alpine-<parent> phantoms
+    plus all 84 non-ct rows, each with an `href: /store/<slug>` pointing at a
+    card the Store does not render. Every one of them opened Not Found, and a
+    user reported it. Anything that decides "can the Store show this row"
+    calls this function; nothing re-derives it.
+
+    The explicit IS NULL arm is not redundant. In SQL, `upstream_state NOT IN
+    ('variant')` evaluates to NULL for a never-synced row, and NULL is not
+    true, so a bare NOT IN would silently return zero rows on a fresh install
+    where nothing has been synced yet: an empty Store and an empty search,
+    from a predicate that looks correct.
+    """
+    return and_(
+        CatalogEntry.entry_type == "ct",
+        or_(CatalogEntry.upstream_state.is_(None),
+            CatalogEntry.upstream_state.notin_(sorted(HIDDEN_FROM_STORE))),
+    )
+
+
 def resolve_upstream_state(slug: str, entry_type: str,
-                           payloads: dict[str, tuple[dict, dict]]) -> str | None:
-    """Which of the four answers upstream's catalog gives for this slug.
+                           payloads: dict[str, tuple[dict, dict]],
+                           alias: str | None = None) -> str | None:
+    """Which answer upstream's catalog gives for this slug.
+
+    `alias` is the upstream slug this row matched by NAME rather than by slug
+    (resolve_name_matches). It is consulted instead of the row's own slug when
+    present, so a name-matched row is "listed" like any other match.
 
     "listed"   a live upstream record matched. The normal case, ~547 ct rows.
     "delisted" the record is there but flagged is_deleted. Upstream retired
@@ -384,7 +505,7 @@ def resolve_upstream_state(slug: str, entry_type: str,
     would badge them as retired when upstream lists the app perfectly well
     under its real slug.
     """
-    payload = payloads.get(slug)
+    payload = payloads.get(alias or slug)
     if payload is not None:
         _fields, record = payload
         return "delisted" if record.get("is_deleted") else "listed"
@@ -393,6 +514,124 @@ def resolve_upstream_state(slug: str, entry_type: str,
     if slug.startswith(ALPINE_PREFIX) and slug[len(ALPINE_PREFIX):] in payloads:
         return "variant"
     return "unlisted"
+
+
+# --- fallback join: upstream's catalog slug vs its own script filename ------
+
+def normalized_name(value) -> str | None:
+    """Lowercased with every non-alphanumeric stripped. Deliberately the
+    dumbest normalisation that could possibly work: no stemming, no edit
+    distance, no prefix or substring matching. Every one of those turns a
+    missing match into a WRONG match, and a wrong match here means one app's
+    description, icon and website rendered on a different app's card, which is
+    worse than the blank card it was trying to fix."""
+    if not isinstance(value, str):
+        return None
+    out = re.sub(r"[^a-z0-9]", "", value.lower())
+    return out or None
+
+
+def resolve_name_matches(db, payloads: dict[str, tuple[dict, dict]]
+                         ) -> dict[str, str]:
+    """our slug -> upstream slug, for rows an exact slug match missed.
+
+    WHY THIS EXISTS. Upstream's own catalog slug sometimes differs from
+    upstream's own script filename, and our discovery takes the slug from the
+    filename. Confirmed live: `ct/apache-airflow.sh` exists and is genuinely
+    installable, while the PocketBase record is slug `airflow`, name "Apache
+    Airflow", alive. Exact matching misses it, so a real app renders blank and
+    badged as retired.
+
+    A FALLBACK, AND ONLY A FALLBACK. Every guardrail here is about the future
+    rather than today's data. Measured over the real catalog, this produces
+    exactly ONE match (apache-airflow -> airflow) and zero ambiguities, so the
+    question is not "does it work now" but "what does it do the day upstream
+    ships two apps with similar names":
+
+    - An exact slug match always wins, and an upstream record already claimed
+      by one is never a candidate. Nothing this function does can move a row
+      that already matched.
+    - It must be 1:1 in BOTH directions. If one normalized name reaches two
+      upstream records, or two of our rows reach the same record, the match is
+      DECLINED, not tie-broken. Ambiguity is a reason to leave the card blank
+      and let a human look, not an invitation to guess.
+    - ct rows only, matching the rest of this module: the Store is ct-only,
+      and our synthetic *-addon slugs must never name-match anything.
+
+    It changes WHICH upstream record a row matches. It changes nothing about
+    what may be written: the same WRITABLE_FIELDS loop applies the result, so
+    `slug`, `entry_type`, `script_path`, `installable` and
+    `unsupported_reason` remain as unwritable as they were.
+    """
+    ours = db.query(CatalogEntry.slug, CatalogEntry.name,
+                    CatalogEntry.entry_type).all()
+    our_slugs = {slug for (slug, _name, _type) in ours}
+
+    # Candidates: upstream records no exact slug match has claimed. A
+    # normalized name reaching more than one of them is dropped outright.
+    by_name: dict[str, list[str]] = {}
+    for up_slug in payloads:
+        if up_slug in our_slugs:
+            continue
+        _fields, record = payloads[up_slug]
+        key = normalized_name(record.get("name"))
+        if key is not None:
+            by_name.setdefault(key, []).append(up_slug)
+
+    # And the same collapse on our side: two unmatched rows normalizing alike
+    # cannot both claim one record, so neither does.
+    ours_by_name: dict[str, list[str]] = {}
+    for slug, name, entry_type in ours:
+        if entry_type != "ct" or slug in payloads:
+            continue
+        key = normalized_name(name)
+        if key is not None:
+            ours_by_name.setdefault(key, []).append(slug)
+
+    matches: dict[str, str] = {}
+    for key, our_candidates in ours_by_name.items():
+        up_candidates = by_name.get(key, ())
+        if len(our_candidates) != 1 or len(up_candidates) != 1:
+            continue
+        matches[our_candidates[0]] = up_candidates[0]
+    return matches
+
+
+def resolve_superseded(rows: list[tuple[CatalogEntry, str | None]]) -> set[str]:
+    """Slugs of rename leftovers: a dead script upstream renamed out from
+    under us, still sitting in the repo under its old name.
+
+    CONFIRMED LIVE. Upstream renamed `netvisor` to `scanopy`. `ct/scanopy.sh`
+    plus `install/scanopy-install.sh` exist, so we correctly carry `scanopy`,
+    listed and installable. The old `ct/netvisor.sh` is still in the repo with
+    NO install script, and its `APP=` line was updated to read "Scanopy", so
+    the grid showed TWO cards both called "Scanopy", one working and one
+    blank.
+
+    THREE CONDITIONS, ALL REQUIRED, and the third alone is nowhere near
+    enough. A duplicate name on the grid is not by itself evidence of
+    anything: `valkey` and `alpine-valkey` are both listed upstream, both
+    legitimate, and both must keep their cards. So a leftover must be
+
+      1. UNMATCHED upstream ("unlisted"), because upstream deleting the record
+         is the actual evidence of the rename,
+      2. UNINSTALLABLE, because the missing install script is what makes it a
+         corpse rather than a second way to install the same thing, and
+      3. name-colliding, case-insensitively, with a ct row that IS listed.
+
+    `installable is False` strictly, never None. Classification is lazy and
+    runs in the background, so a freshly discovered row is None until it has
+    been looked at, and hiding a card on the strength of "we have not checked
+    yet" is a guess. One sync later, once the backlog pass has run, the row
+    resolves properly. A card that is briefly visible beats a card that is
+    wrongly hidden.
+    """
+    listed_names = {row.name.lower() for row, state in rows
+                    if state == "listed" and row.entry_type == "ct"
+                    and isinstance(row.name, str)}
+    return {row.slug for row, state in rows
+            if state == "unlisted" and row.installable is False
+            and isinstance(row.name, str) and row.name.lower() in listed_names}
 
 
 def has_cached_metadata(db) -> bool:
@@ -405,48 +644,84 @@ def has_cached_metadata(db) -> bool:
 
 def upsert_metadata(db, payloads: dict[str, tuple[dict, dict]],
                     source: str) -> dict:
-    """Apply a fetched corpus onto existing rows, joined on slug alone: exact
-    match, no fuzzy matching, no normalisation, no guessing. Rows we have and
-    upstream does not keep their discovery-derived name and their
-    catalog_categories.py heuristic category so nothing goes blank, and end
-    with null metadata columns, which is precisely what marks them unmatched.
-    Slugs upstream has and we do not create nothing: the scripts tree decides
-    what exists.
+    """Apply a fetched corpus onto existing rows. Slug is the join key, exact
+    match first and always; `resolve_name_matches` is consulted only for rows
+    that missed. Rows we have and upstream does not keep their
+    discovery-derived name and their catalog_categories.py heuristic category
+    so nothing goes blank, and end with null metadata columns, which is
+    precisely what marks them unmatched. Slugs upstream has and we do not
+    create nothing: the scripts tree decides what exists.
 
     `upstream_state` is recomputed for EVERY row here, matched or not, because
     an unmatched row is exactly what the "unlisted"/"variant" answers are
     about. It is provenance in the same sense metadata_source is: written by
     the sync itself, never sourced from a mapper, and never part of
     WRITABLE_FIELDS. It changes what the Store SHOWS and nothing else, so
-    nothing in this loop touches slug, entry_type, script_path, installable or
-    unsupported_reason. Reached only on a successful fetch; see sync_metadata.
+    nothing in this function touches slug, entry_type, script_path,
+    installable or unsupported_reason. Reached only on a successful fetch; see
+    sync_metadata.
+
+    TWO PASSES, because "superseded" cannot be decided one row at a time: it
+    asks whether some OTHER row ended up listed under the same name, which is
+    only knowable once every row has a state.
 
     Counts are returned, not logged per slug. 37 unmatched ct/ rows and 85
     unmatched upstream slugs are the steady state, so per-slug logging here
-    would be a hundred lines of noise per refresh describing normality.
+    would be a hundred lines of noise per refresh describing normality. Name
+    matches are the exception and ARE logged individually: there is one of
+    them, it is a heuristic rather than an exact join, and a wrong one must be
+    discoverable by a human reading a log rather than invisible until someone
+    notices a card describing the wrong app.
     """
     synced_at = utcnow()
+    name_matches = resolve_name_matches(db, payloads)
+    for our_slug, up_slug in sorted(name_matches.items()):
+        logger.info("catalog metadata name-matched %r to upstream %r "
+                    "(no exact slug match; 1:1 on normalized name)",
+                    our_slug, up_slug)
+
     matched = 0
     unmatched = 0
-    states: dict[str, int] = {}
+    resolved: list[tuple[CatalogEntry, str | None]] = []
     for row in db.query(CatalogEntry).all():
-        state = resolve_upstream_state(row.slug, row.entry_type, payloads)
+        alias = name_matches.get(row.slug)
+        state = resolve_upstream_state(row.slug, row.entry_type, payloads, alias)
         row.upstream_state = state
-        if state is not None:
-            states[state] = states.get(state, 0) + 1
-        payload = payloads.get(row.slug)
+        resolved.append((row, state))
+        payload = payloads.get(alias or row.slug)
         if payload is None:
             unmatched += 1
             continue
         fields, record = payload
         apply_writable_fields(row, fields)
-        _record_provenance(row, source, record, synced_at)
+        # A name-matched row records a DIFFERENT source, so the join that
+        # produced it is inspectable on the row itself rather than only in a
+        # log line that has long since rotated away.
+        _record_provenance(row, f"{source}-name-match" if alias else source,
+                           record, synced_at)
         matched += 1
+
+    # Second pass: rename leftovers, which need every state resolved first.
+    superseded = resolve_superseded(resolved)
+    for row, _state in resolved:
+        if row.slug in superseded:
+            row.upstream_state = "superseded"
+            logger.info("catalog metadata marked %r superseded: unmatched "
+                        "upstream, not installable, and its name collides "
+                        "with a listed row", row.slug)
+
+    states: dict[str, int] = {}
+    for row, _state in resolved:
+        if row.upstream_state is not None:
+            states[row.upstream_state] = states.get(row.upstream_state, 0) + 1
+
     db.commit()
     return {"ok": True, "source": source, "matched": matched,
             "unmatched": unmatched, "states": states,
-            "upstream_only": len(set(payloads) - {r.slug for r in
-                                                  db.query(CatalogEntry.slug).all()}),
+            "name_matched": dict(sorted(name_matches.items())),
+            "upstream_only": len(set(payloads)
+                                 - {r.slug for r in db.query(CatalogEntry.slug).all()}
+                                 - set(name_matches.values())),
             "reason": None}
 
 
@@ -475,7 +750,7 @@ def sync_metadata(db) -> dict:
             # Warm cache: the Store already renders real metadata, so the
             # cheapest correct move is to change nothing at all.
             return {"ok": False, "source": None, "matched": 0, "unmatched": 0,
-                    "states": {}, "upstream_only": 0,
+                    "states": {}, "name_matched": {}, "upstream_only": 0,
                     "reason": f"pocketbase unavailable ({primary_error}); "
                               f"kept the cached metadata"}
         slugs = {s for (s,) in db.query(CatalogEntry.slug).all()}
@@ -484,7 +759,7 @@ def sync_metadata(db) -> dict:
             source = "archive"
         except Exception as fallback_error:  # noqa: BLE001
             return {"ok": False, "source": None, "matched": 0, "unmatched": 0,
-                    "states": {}, "upstream_only": 0,
+                    "states": {}, "name_matched": {}, "upstream_only": 0,
                     "reason": f"pocketbase unavailable ({primary_error}) and the "
                               f"archive fallback failed too ({fallback_error})"}
     return upsert_metadata(db, payloads, source)
