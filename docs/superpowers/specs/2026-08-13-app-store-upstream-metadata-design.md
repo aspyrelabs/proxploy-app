@@ -86,14 +86,16 @@ ceiling is untouched).
 
 616 of our 668 slugs match a PocketBase record. **547 of our 584 `ct` rows get
 real metadata (94%)**. The 37 uncovered `ct` rows are mostly `alpine-*`
-variants plus `mysql`.
+variants plus `mysql`. Upstream also carries 85 slugs we do not discover. Both
+gaps are normal; see "A missing metadata match is normal" below.
 
 Five slugs disagree on type, and they are **exactly the dual-variant collision
 slugs**: `coolify`, `runtipi`, `dockge`, `komodo`, `dokploy`. PocketBase types
 them `addon`; our tree discovery types them `ct` because each has *both*
-`ct/<slug>.sh` and `tools/addon/<slug>.sh`. This is the decisive argument for
-the ownership split below: letting metadata set `entry_type` would hide five
-installable LXC apps and break dual-variant detection.
+`ct/<slug>.sh` and `tools/addon/<slug>.sh`. This near-miss is the reason the
+ownership split below is enforced structurally rather than left as a
+convention: letting metadata set `entry_type` would hide five installable LXC
+apps and break dual-variant detection.
 
 ## Design
 
@@ -108,6 +110,41 @@ of truth only for how it *presents*.
 | `installable`, `unsupported_reason` | lazy classifier |
 | `default_cpu/ram/disk/os/os_version` | ct script parse |
 | `name`, `description`, `category`, `icon_url`, `website`, `docs_url` | upstream metadata |
+
+### Presentation-only is enforced, not merely intended
+
+**Hard rule.** The metadata sync writes exactly six columns and no others:
+
+```python
+WRITABLE_FIELDS = frozenset({
+    "name", "description", "category", "icon_url", "website", "docs_url",
+})
+```
+
+The mapper's contract is to return a dict whose keys are a subset of
+`WRITABLE_FIELDS`. The upsert applies it through a single loop over that
+frozenset and has **no other assignment to a `CatalogEntry` attribute**, so it
+is structurally incapable of touching `slug`, `entry_type`, `script_path`,
+`installable`, `unsupported_reason`, or the resource defaults, whatever a
+future upstream field is named. Provenance columns
+(`metadata_source`, `metadata_synced_at`, `upstream_updated_at`, and the `raw`
+snapshot) are written by the sync itself, not derived from the mapper, and are
+never part of the mapped payload.
+
+A mapper key outside `WRITABLE_FIELDS` is a programming error and raises in
+tests, rather than being silently dropped at runtime.
+
+**Why this is a hard rule and not a convention.** Upstream types five slugs
+differently than we do, and those five are *exactly* the dual-variant collision
+slugs: `coolify`, `runtipi`, `dockge`, `komodo`, `dokploy`. Each has both a
+standalone `ct/<slug>.sh` full-LXC installer and a `tools/addon/<slug>.sh`
+install-into-existing-container script. PocketBase calls them `addon`; our
+tree discovery correctly calls them `ct`. Wiring `entry_type` to upstream
+metadata would look like a tidy one-line improvement, and it would silently
+drop five genuinely installable LXC apps out of the Store and break
+dual-variant collision detection. The type disagreement is not upstream being
+wrong; it is upstream answering a different question than the one the Store
+asks. Do not "helpfully" let metadata set type later.
 
 Metadata never decides installability or type.
 
@@ -142,9 +179,33 @@ Schema delta on `catalog_entries`:
    no metadata at all (cold start on a fresh install with PocketBase down).
    Reads archive `public/json/metadata.json` plus per-slug JSON at pinned SHA
    `e1e6c153e2b1c82287923df2914f33558fc3180f`.
-3. **Upsert by slug.** Slugs with no upstream record keep the
-   `catalog_categories.py` heuristic as category fallback, so the 37 uncovered
-   `alpine-*` rows do not go blank.
+3. **Upsert by slug.** Slug is the only join key. Matching is exact, with no
+   fuzzy matching, no normalisation beyond case, and no guessing.
+
+### A missing metadata match is normal, never an error
+
+37 of our 584 `ct` rows have no PocketBase record (mostly `alpine-*` variants
+plus `mysql`), and upstream carries 85 slugs we do not. Both directions are
+expected and neither is a failure condition.
+
+For an unmatched catalog row:
+
+- It keeps every discovery-derived field untouched: `slug`, `entry_type`,
+  `script_path`, its classification, and its resource defaults.
+- Its `name` stays the discovery-derived display name and its `category` stays
+  the `catalog_categories.py` heuristic value, so it does not go blank.
+- `description` and `icon_url` stay null, and it renders exactly as every card
+  renders today: the initials tile from `StoreCard`'s `CardIcon` fallback and
+  an empty description block that already reserves its own min-height, so the
+  grid does not reflow.
+- `metadata_source` and `metadata_synced_at` stay null, which is what marks it
+  as unmatched.
+
+An unmatched row is never logged as an error, never retried per-slug, and
+never blocks or fails the sync. The sync logs matched and unmatched **counts**
+once, not per slug. An upstream slug with no catalog row is ignored outright:
+the scripts tree decides what exists, so metadata for something we did not
+discover has nothing to attach to.
 
 Archive schema differs and needs mapping: `type` is `ct` (not `lxc`),
 `categories` are integer ids resolved through `metadata.json`,
@@ -199,9 +260,21 @@ per-slug API calls.
 ## Testing
 
 - Mapping unit tests for both schemas, driven by the captured `plex` records.
-- Upsert preserves discovery-owned fields; the five dual-variant slugs stay
-  `entry_type='ct'`.
+- **Write-set enforcement:** every mapper output's keys are asserted to be a
+  subset of `WRITABLE_FIELDS`, and a mapper returning a key outside it raises.
+- **Discovery fields survive a sync:** a row's `slug`, `entry_type`,
+  `script_path`, `installable`, `unsupported_reason` and resource defaults are
+  byte-identical before and after, even when the upstream record disagrees.
+- **The five-slug regression test, by name:** feed `coolify`, `runtipi`,
+  `dockge`, `komodo`, `dokploy` upstream records typed `addon` against catalog
+  rows typed `ct`, and assert all five stay `entry_type='ct'` and stay visible
+  to the Store's LXC-only query. This is the test that stops the "let metadata
+  set type" change.
 - Primary failure with a warm cache is a no-op that keeps prior rows.
 - Fallback fires only on cold cache plus primary failure.
-- Slug with no upstream record retains its heuristic category.
+- **Unmatched rows:** a slug with no upstream record keeps its heuristic
+  category and discovery-derived name, ends with null `description`,
+  `icon_url`, `metadata_source` and `metadata_synced_at`, and the sync still
+  reports success. An upstream slug with no catalog row is ignored and creates
+  nothing.
 - Migration retimes the default cron and leaves a customised one alone.
