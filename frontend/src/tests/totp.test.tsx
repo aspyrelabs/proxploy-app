@@ -5,6 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
 vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
+// jsdom has no QR decoder, so real qrcode.react output can't be asserted on by
+// scanning it back. Stub it with something that records the exact value it was
+// asked to encode, so the test can prove the URI reaches the QR component
+// (rather than just that some element with that text exists, which is what the
+// old copyable-URI assertion checked).
+vi.mock('qrcode.react', () => ({
+  QRCodeSVG: (props: { value: string; title?: string }) => (
+    <svg data-testid="totp-qr" data-value={props.value}><title>{props.title}</title></svg>
+  ),
+}))
+
 type Call = { path: string; method?: string; body: unknown }
 const calls: Call[] = []
 let totpAllowed = true
@@ -92,11 +103,14 @@ describe('TotpCard', () => {
     expect(await screen.findByRole('button', { name: 'Enable two-factor' })).toBeInTheDocument()
   })
 
-  it('enrolling renders the secret, otpauth URI, and all ten recovery codes with the once-only warning', async () => {
+  it('enrolling renders the secret, a QR code encoding the otpauth URI, and all ten recovery codes with the once-only warning', async () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Enable two-factor' }))
     expect(await screen.findByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
-    expect(screen.getByText(/otpauth:\/\/totp\/Proxploy/)).toBeInTheDocument()
+    // The QR component is React.lazy-loaded (see TotpCard.tsx), so it only
+    // appears after its dynamic import resolves -- findBy*, not getBy*.
+    expect(await screen.findByTestId('totp-qr')).toHaveAttribute('data-value',
+      'otpauth://totp/Proxploy:admin@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Proxploy')
     for (const code of RECOVERY_CODES) expect(screen.getByText(code)).toBeInTheDocument()
     expect(screen.getByText(/shown once, store them now/i)).toBeInTheDocument()
   })
