@@ -151,7 +151,7 @@ export function TotpCard() {
             <div className="rounded-ctl bg-white p-3">
               <Suspense fallback={<div className="size-[176px]" />}>
                 <QRCodeSVG value={enrollment.otpauth_uri} size={176} bgColor="#FFFFFF"
-                  fgColor="#000000" marginSize={2} level="M"
+                  fgColor="#000000" marginSize={4} level="M"
                   title="Scan with your authenticator app" />
               </Suspense>
             </div>
