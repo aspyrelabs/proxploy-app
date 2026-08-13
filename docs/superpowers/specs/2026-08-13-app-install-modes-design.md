@@ -62,8 +62,30 @@ inventing a second one.
 
 `InstallDialog` gains a Default/Advanced choice with **Default preselected**.
 
-- **Default**: proceeds on the app's own defaults, no questions.
+- **Default**: proceeds on the app's own defaults. No questions **that have an
+  honest default**.
 - **Advanced**: expands the form in place, same dialog, same submit.
+
+"No questions that have an honest default" is deliberate wording, not a hedge.
+On a host with two `rootdir` pools there is no default to proceed on: build.func
+has none, and this spec does not invent one. So Default asks that one question,
+because only the operator can answer it. One candidate means no question and
+Default stays a single click, which is the common case.
+
+The answer is **remembered per host**, so it is asked once rather than on every
+install. It is stored per host and per content type, since a node can have one
+`rootdir` candidate and several `vztmpl` ones.
+
+Remembering must not become deciding silently. Two rules keep it visible:
+
+- The Default confirmation **displays** the pools it will use, as text rather
+  than a question. The operator always sees where the container is going.
+- Advanced shows the picker **prefilled** with the remembered value, so it is
+  changeable rather than buried.
+
+A remembered pool is re-validated against the node's content list at install
+time. If it no longer exists or no longer carries the required content, the
+question is asked again. It is never silently replaced with another pool.
 
 Install always opens the dialog. A dialog-free Default was considered and
 rejected: the Store card's Install button is ~25px on a card that itself opens
@@ -122,6 +144,93 @@ Note **two** storage variables, not one. There is no `var_storage`. A single
 control, deliberately. They also select on different content types: `rootdir`
 for the container, `vztmpl` for the template, so a host can have one candidate
 for one and several for the other.
+
+### Storage is a live bug, and sending the variables does not fix it
+
+**Investigated and confirmed against the pinned `build.func`.** An earlier draft
+of this spec said "always send both storage variables" and treated that as the
+fix. That was wrong, and the reason is worth recording because it is the same
+mistake in a new place: the sentence was plausible and nobody had read the
+source.
+
+`ensure_storage_selection_for_vars_file` (`build.func:1954`) reads the **vars
+file**, not the environment:
+
+```bash
+tpl=$(grep -E '^var_template_storage=' "$vf" | cut -d= -f2- || true)
+ct=$(grep -E '^var_container_storage=' "$vf" | cut -d= -f2- || true)
+```
+
+So `var_container_storage` in `env` is not consulted on this path at all.
+Sending it changes nothing.
+
+**What actually happens today.** We send `mode=default`, which reaches
+`build.func:3468` and, uniquely among the mode branches, runs
+`defaults_target="$(ensure_global_default_vars_file)"`. That file is `touch`ed
+empty on a fresh host, both greps miss, and `choose_and_set_storage_for_file`
+runs for each class. With one candidate it auto-picks. With two or more it calls
+`select_storage`, which builds a whiptail menu. With no TTY whiptail fails,
+`|| exit_script` fires, and `exit_script` (`core.func:964`) does `exit 0`.
+
+So it is **not a hang. It is a silent `exit 0`.** `run_install`'s post-check
+catches it and reports "install script exited 0 but CT N does not exist", which
+is accurate and says nothing about storage. The only breadcrumb is
+`User exited script` in the job log.
+
+`PHS_SILENT` and `mode` do not suppress it. Upstream has `is_unattended()`
+(`core.func:1180`), which returns true for `mode=default`, `PHS_SILENT=1` and
+`! -t 0`, and guards `check_storage_health` with it, but never calls it on the
+storage-selection path. That is an upstream oversight, not our misconfiguration.
+
+A populated `default.vars` does not rescue it either: that branch sets
+`TEMPLATE_STORAGE`/`CONTAINER_STORAGE` but not `var_*_storage`, and
+`build_container` (`build.func:4531`) then clobbers both back from the empty
+`var_*`, landing in `select_storage` a second time.
+
+### The fix, which ships as its own bugfix ahead of the form
+
+Two changes, neither sufficient alone:
+
+1. **`mode=generated` instead of `mode=default`.** The `generated` branch
+   (`build.func:3517`) is byte-identical to `default` except for `METHOD=` and
+   the absence of the `defaults_target` line, so it never calls
+   `ensure_storage_selection_for_vars_file`. `METHOD` is assignment-only and
+   reaches nothing but the telemetry payload. `is_unattended()` has no
+   `generated` case but falls through to its `PHS_SILENT=1` branch, so
+   unattended behaviour elsewhere is preserved.
+2. **Then send both storage variables**, which `build.func:4531` reads and
+   `create_lxc_container` accepts via `resolve_storage_preselect`.
+
+This changes every install, including single-storage hosts that work today: they
+move from build.func auto-picking to us sending the value explicitly. That is
+better, but it means our resolution must be correct for single-pool hosts too,
+not only multi-pool ones.
+
+**A supplied value must be validated against the node's real content list.**
+`resolve_storage_preselect` returns 238 for a pool the node's content does not
+include, after which `build.func:6553`'s `while true` spins with an empty body:
+a genuine infinite hang, which our 1800s SSH timeout would surface as
+`TimeoutError` with an empty message. Sending an unvalidated pool name is worse
+than sending none.
+
+### The backend never picks a pool
+
+Which pool a container lives on is a question, and this spec's governing rule is
+that Proxploy never answers a question on the operator's behalf. Auto-picking
+"the one with the most free space" is answering it.
+
+Resolution order at install time:
+
+1. The operator's choice for this install, if the form supplied one.
+2. The host's remembered choice, if set and **still valid** for that content type
+   on that node.
+3. The sole candidate, if the node has exactly one for that content type. This
+   is not a pick; there is nothing to choose.
+4. Otherwise **refuse**, with a message naming the candidates.
+
+Until the form exists, step 4 is what a multi-pool host gets. That is a strict
+improvement on today's silent `exit 0`, and it stops being a refusal the moment
+the picker lands.
 
 ### Storage is not optional, and this is the sharpest finding in the spec
 
@@ -335,6 +444,22 @@ visible diff.
   valid for one must not be offered for the other.
 - Changing the target host re-queries the storage candidates, and a selection
   that does not exist on the newly selected host is not submitted.
+- **`mode=generated` is sent, never `mode=default`.** Pinned by name, with the
+  reason in the assertion, because reverting it silently reintroduces the
+  interactive picker. Note `test_appstore_install.py:157` currently pins the
+  exact command string including `mode=default` and must be updated in the same
+  change.
+- The backend refuses, with the candidates named, when a host has two or more
+  pools for a content type and neither the form nor the host's remembered choice
+  supplied one. It must never auto-pick.
+- A remembered pool that no longer carries the required content causes the
+  question to be asked again, not a silent substitution.
+- A supplied pool is validated against the node's content list before being
+  sent, since an invalid one reaches `resolve_storage_preselect`'s 238 path and
+  hangs `build.func` in an empty `while true`.
+- Single-candidate hosts still install correctly under `mode=generated`, which
+  is the regression this change could plausibly cause and the one no
+  multi-storage test would catch.
 - A host without acknowledgement cannot install; a backfilled host can.
 - The migration backfills only hosts with installs enabled.
 - Advanced values survive the round trip from form to `env`.
