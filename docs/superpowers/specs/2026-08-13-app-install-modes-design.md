@@ -339,6 +339,35 @@ visible diff.
 - The migration backfills only hosts with installs enabled.
 - Advanced values survive the round trip from form to `env`.
 
+## Hardware verification
+
+Everything above is testable against fakes, and the fakes are exactly what hid
+the storage problem: the e2e harness models `pct` over SSH but not
+`pvesm status`, so nothing in the suite exercises `build.func`'s storage
+resolution at all. A green suite here proves we **send** the right variables. It
+cannot prove a real node **does** the right thing with them.
+
+Three checks require real hardware and a host with **at least two pools carrying
+`rootdir` and at least two carrying `vztmpl`**. A single-storage host cannot
+exercise any of them, which is the whole point.
+
+1. **Default install, no user input, does not reach `select_storage`.** Pass:
+   the container is created and the job completes. Fail: the job hangs, times
+   out, or logs a storage prompt.
+2. **An explicitly chosen non-default storage is honoured.** Choose a container
+   storage other than the one a single-storage host would auto-pick. Pass:
+   `pct config <ctid>` shows the rootfs on the chosen pool. Sending the variable
+   is not the claim; the container landing there is.
+3. **A `vztmpl`-only pool is not offered as rootfs.** Confirm the container
+   storage picker excludes pools whose content lacks `rootdir`. Provable in a
+   browser against a real host's storage list without running an install.
+
+These are recorded in `docs/12-hardware-verification.md` alongside the other
+standing items (cross-host migration, network apply, whole-storage prune, the
+monitoring-token privilege paths, and the phase-4 install checks that are proven
+only as far as the command string). Do not mark this spec verified on the
+strength of the automated suite alone.
+
 ## Unchanged constraints
 
 - Scripts stay SHA-pinned. Metadata is presentation-only and never decides
