@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
 import { api } from '../api/client'
 import { StoreCard } from '../components/StoreCard'
-import { popularityBand } from '../lib/store-order'
 
-vi.mock('../api/client', () => ({ api: vi.fn() }))
+// ApiError is real-ish here, not just `api`: StoreDetailContent renders
+// inside the popup and distinguishes a 404 from a dead backend with
+// `instanceof ApiError`, which throws outright if the export is undefined.
+vi.mock('../api/client', () => ({ api: vi.fn(), ApiError: class extends Error {} }))
 
 // StorePage now also fires /catalog/status and /entitlements (staleness
 // banner + refresh gating). Without a reset, a mockResolvedValue/
@@ -150,20 +152,20 @@ const REDIS: CatalogRow = {
 describe('StoreCard', () => {
   it('renders an Install button for an installable entry and fires onInstall', () => {
     const onInstall = vi.fn()
-    render(<StoreCard entry={REDIS} onInstall={onInstall} installed={false} />)
+    render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={vi.fn()} installed={false} />)
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     expect(onInstall).toHaveBeenCalledWith('redis')
   })
 
   it('shows a disabled Installed state', () => {
-    render(<StoreCard entry={REDIS} onInstall={vi.fn()} installed />)
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed />)
     expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
   })
 
   it('shows an honest note + upstream link for an unsupported entry, no Install control', () => {
     const unsupported = { ...REDIS, installable: false,
       unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
-    render(<StoreCard entry={unsupported} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unsupported} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
@@ -175,7 +177,7 @@ describe('StoreCard', () => {
     // card must never look broken just because none of it landed.
     const bare = { ...REDIS, description: null, icon_url: null, popularity: null,
       category: null, name: null }
-    render(<StoreCard entry={bare} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByText('redis')).toBeInTheDocument()  // falls back to slug
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
     expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge
@@ -189,7 +191,7 @@ describe('StoreCard', () => {
     // installable is tri-state: null means "not yet classified" (decision 2,
     // lazy classification). The card must not look broken or block install.
     const unclassified = { ...REDIS, installable: null }
-    render(<StoreCard entry={unclassified} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unclassified} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.queryByText(/Not installable/)).toBeNull()
   })
@@ -202,7 +204,7 @@ describe('StoreCard', () => {
     const enriched = { ...REDIS,
       icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/redis.webp',
       description: 'Redis is an open source, in-memory data structure store.' }
-    render(<StoreCard entry={enriched} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={enriched} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', enriched.icon_url)
     expect(img).toHaveAttribute('alt', 'Redis')
@@ -212,7 +214,7 @@ describe('StoreCard', () => {
 
   it('falls back to the initials tile when the scraped logo fails to load', () => {
     const withLogo = { ...REDIS, icon_url: 'https://example.com/redis.webp' }
-    render(<StoreCard entry={withLogo} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={withLogo} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     const img = screen.getByRole('img')
     fireEvent.error(img)
     expect(screen.queryByRole('img')).toBeNull()
@@ -222,11 +224,11 @@ describe('StoreCard', () => {
   const BADGE = 'Not listed upstream'
 
   it('badges nothing for a row upstream still lists, or has not classified', () => {
-    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} />)
+    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByText(BADGE)).toBeNull()
     // null is the pre-sync state, not a signal: it must not badge either.
     rerender(<StoreCard entry={{ ...REDIS, upstream_state: null }}
-                        onInstall={vi.fn()} installed={false} />)
+                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByText(BADGE)).toBeNull()
   })
 
@@ -236,7 +238,7 @@ describe('StoreCard', () => {
     // badge is a fact about upstream, never a block on installing.
     const gone = { ...REDIS, upstream_state: 'unlisted' as const,
       name: null, description: null, icon_url: null, category: null, popularity: null }
-    render(<StoreCard entry={gone} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no icon to show
@@ -254,31 +256,42 @@ describe('StoreCard', () => {
     const soft = { ...REDIS, upstream_state: 'delisted' as const,
       icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/minio.webp',
       name: 'MinIO', description: 'S3 compatible object storage.' }
-    render(<StoreCard entry={soft} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={soft} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('img')).toHaveAttribute('src', soft.icon_url)
     expect(screen.getByText('S3 compatible object storage.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
 
-  it('links the title and a Read more to this row\'s detail route', () => {
-    render(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} />)
-    const readMore = screen.getByRole('link', { name: 'Read more' })
-    expect(readMore).toHaveAttribute('href', '/store/redis')
-    // The name is the other way in, for anyone who reaches for the title
-    // rather than the explicit link.
-    expect(screen.getByRole('link', { name: 'Redis' })).toHaveAttribute('href', '/store/redis')
+  it('opens the detail popup from Read more and from the title, navigating nowhere', () => {
+    // These used to be <Link>s to /store/$slug. The user asked for a popup
+    // instead, so both are buttons now and the card contains no anchor at all.
+    const onOpenDetail = vi.fn()
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
+                      installed={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
+    expect(onOpenDetail).toHaveBeenCalledWith('redis')
+
+    // The title is the other way in, for anyone who reaches for the name
+    // rather than the explicit control.
+    fireEvent.click(screen.getByRole('button', { name: 'Redis' }))
+    expect(onOpenDetail).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
   it('shows Read more even on a row with no description to read', () => {
     // The user chose this explicitly, for visual consistency, knowing it puts
-    // the link on cards with nothing more to show. It is still defensible:
-    // the detail page carries availability, resource defaults and popularity
+    // the control on cards with nothing more to show. It is still defensible:
+    // the detail view carries availability, resource defaults and popularity
     // for these rows even when upstream gave us no prose.
+    const onOpenDetail = vi.fn()
     const bare = { ...REDIS, slug: 'readarr', name: null, description: null,
       upstream_state: 'unlisted' as const }
-    render(<StoreCard entry={bare} onInstall={vi.fn()} installed={false} />)
-    expect(screen.getByRole('link', { name: 'Read more' })).toHaveAttribute('href', '/store/readarr')
+    render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
+                      installed={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
+    expect(onOpenDetail).toHaveBeenCalledWith('readarr')
   })
 
   it('nests no interactive element inside another', () => {
@@ -288,7 +301,7 @@ describe('StoreCard', () => {
     // card clickable" change has to deal with this test rather than silently
     // reintroducing the nesting.
     const { container } = render(
-      <StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band="top10" />)
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     const interactive = Array.from(container.querySelectorAll('a, button'))
     expect(interactive.length).toBeGreaterThan(2)
     for (const el of interactive) {
@@ -296,41 +309,80 @@ describe('StoreCard', () => {
     }
   })
 
-  const BADGE_TOP = 'Top 10%'
-
-  it('shows the gold star band only when the page says this row is in the top tier', () => {
-    // The raw install count is gone from the card on purpose: 126196 against a
-    // median of 1001 is a figure nobody can place. The band is a percentile,
-    // and the percentile can only be computed against the whole corpus, so the
-    // page resolves it and hands the card the answer.
-    const { rerender } = render(
-      <StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band="top10" />)
-    expect(screen.getByText(BADGE_TOP)).toBeInTheDocument()
+  it('shows the install count as a number, with no invented tier word', () => {
+    // The slot briefly carried "Top 10%", then "Popular"/"Common". Those were
+    // labels we invented on top of the data: unverifiable by the reader and
+    // implying a judgement the telemetry never made. The number is the part
+    // that is actually quantifiable, so the number is what shows.
+    const popular = { ...REDIS, popularity: 126196 }
+    render(<StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    // US grouping for every reader, by decision, and NOT abbreviated to
+    // "126k": a rounded abbreviation is just a coarser band wearing a
+    // number's clothes. Written out as a literal rather than computed with
+    // toLocaleString(), so that going back to the reader's own locale FAILS
+    // here instead of passing quietly on a US machine. This dev environment
+    // is en-IN, where an unpinned call renders the same figure 1,26,196.
+    expect(screen.getByText('126,196')).toBeInTheDocument()
+    expect(screen.queryByText('1,26,196')).toBeNull()  // not the runtime locale
+    expect(screen.queryByText('126196')).toBeNull()    // grouped, not raw digits
+    expect(screen.queryByText(/126k/i)).toBeNull()
     // star_shine, written as a literal so scripts/icon-names.mjs can extract
     // it into the Google Fonts link; a Material Symbols glyph renders as its
     // own ligature text.
     expect(screen.getByText('star_shine')).toBeInTheDocument()
-
-    rerender(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} band={null} />)
-    expect(screen.queryByText(BADGE_TOP)).toBeNull()
-    expect(screen.queryByText('star_shine')).toBeNull()
   })
 
-  it('never puts the raw popularity number on the card', () => {
-    const popular = { ...REDIS, popularity: 126196 }
-    render(<StoreCard entry={popular} onInstall={vi.fn()} installed={false} band="top10" />)
-    expect(screen.queryByText(/126196/)).toBeNull()
-    expect(screen.queryByText(/126,196/)).toBeNull()
-    // and never this word, which is not what the number counts
-    expect(document.body.textContent).not.toMatch(/downloads/i)
+  it('never shows a tier label on a card, in any state', () => {
+    // A regression guard, not a restatement: this is the specific thing the
+    // user rejected, so it should fail loudly if it creeps back.
+    for (const popularity of [126196, 1001, 4, null]) {
+      const { container, unmount } = render(
+        <StoreCard entry={{ ...REDIS, popularity }} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+      for (const word of ['Popular', 'Common', 'Top 10%', 'Niche']) {
+        expect(container.textContent, `tier word "${word}" on the card`).not.toContain(word)
+      }
+      unmount()
+    }
   })
 
-  it('renders no band at all for a row with no popularity measurement', () => {
+  it('keeps the caveat in the tooltip and off the card face', () => {
+    // Showing the number is what was asked for; what it counts is a real
+    // footnote, but a footnote, and the card has 284px to spend.
+    const popular = { ...REDIS, popularity: 126196, popularity_synced_at: '2026-08-13T00:00:00' }
+    const { container } = render(
+      <StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    const mark = screen.getByTitle(/install runs recorded/i)
+    // A screen reader gets the figure as text plus an sr-only prefix saying
+    // what it counts, since Icon renders its glyph aria-hidden.
+    expect(mark).toHaveTextContent('Install runs recorded:')
+    expect(mark).toHaveAttribute('title', expect.stringContaining('126,196'))
+    expect(mark.getAttribute('title')).toMatch(/opt-in telemetry/i)
+    expect(mark.getAttribute('title')).toMatch(/failures included/i)
+    expect(mark.getAttribute('title')).toMatch(/not a rating/i)
+    // Pinned to en-US with the month as a word, so it cannot be read back to
+    // front. Both numeric renderings are asserted ABSENT: "13/8/2026" is what
+    // an unpinned call produces on this en-IN machine, and "8/13/2026" is what
+    // it would produce on a US one, so a revert fails here either way instead
+    // of passing quietly on whichever machine happens to run it.
+    expect(mark.getAttribute('title')).toContain('as of Aug 13, 2026')
+    expect(mark.getAttribute('title')).not.toContain('13/8/2026')
+    expect(mark.getAttribute('title')).not.toContain('8/13/2026')
+    // "downloads" appears only as the disclaimer, which is the point: the
+    // number is install runs, and saying so is what stops a reader assuming
+    // otherwise.
+    expect(mark.getAttribute('title')).toMatch(/not downloads/i)
+    // and none of that wording is inline on the card face
+    expect(container.textContent).not.toMatch(/telemetry|attempts|rating/i)
+  })
+
+  it('renders nothing at all for a row with no popularity measurement', () => {
+    // Absence means upstream has no measurement, not zero installs. No icon,
+    // no number, no placeholder.
     const unmeasured = { ...REDIS, popularity: null }
-    render(<StoreCard entry={unmeasured} onInstall={vi.fn()} installed={false}
-                      band={popularityBand(null, 9186)} />)
-    expect(screen.queryByText(BADGE_TOP)).toBeNull()
+    render(<StoreCard entry={unmeasured} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByText('star_shine')).toBeNull()
+    expect(screen.queryByTitle(/install runs recorded/i)).toBeNull()
+    expect(screen.queryByText('0')).toBeNull()
   })
 
   it('chips only the rare, actionable side of each upstream boolean', () => {
@@ -338,14 +390,14 @@ describe('StoreCard', () => {
     // would be furniture. The exceptions carry the information.
     const ordinary = { ...REDIS, privileged: false, has_arm: true, updateable: true }
     const { rerender } = render(
-      <StoreCard entry={ordinary} onInstall={vi.fn()} installed={false} />)
+      <StoreCard entry={ordinary} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByText('Privileged')).toBeNull()
     expect(screen.queryByText('Unprivileged')).toBeNull()  // dropped deliberately
     expect(screen.queryByText('x86 only')).toBeNull()
     expect(screen.queryByText('No in-place update')).toBeNull()
 
     rerender(<StoreCard entry={{ ...REDIS, privileged: true, has_arm: false, updateable: false }}
-                        onInstall={vi.fn()} installed={false} />)
+                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByText('Privileged')).toBeInTheDocument()
     expect(screen.getByText('x86 only')).toBeInTheDocument()
     expect(screen.getByText('No in-place update')).toBeInTheDocument()
@@ -358,7 +410,7 @@ describe('StoreCard', () => {
     // not said and we cannot know.
     const unknown = { ...REDIS, upstream_state: 'unlisted' as const,
       privileged: null, has_arm: null, updateable: null }
-    render(<StoreCard entry={unknown} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unknown} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.queryByText('x86 only')).toBeNull()
     expect(screen.queryByText('No in-place update')).toBeNull()
     expect(screen.queryByText('Privileged')).toBeNull()
@@ -374,7 +426,7 @@ describe('StoreCard', () => {
     // still works.
     const both = { ...REDIS, upstream_state: 'unlisted' as const, installable: false,
       unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
-    render(<StoreCard entry={both} onInstall={vi.fn()} installed={false} />)
+    render(<StoreCard entry={both} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
@@ -964,25 +1016,11 @@ describe('Store sort and popularity band', () => {
     expect(shownOrder()).toEqual(['adguard', 'zabbix'])
   })
 
-  it('bands the top tenth of the whole corpus, not of the current page', async () => {
-    // 100 rows, 1..100 installs, page size 15. Only the top 10 clear the 90th
-    // percentile, so page 1 of a popularity sort shows 10 bands and 5 without,
-    // and the threshold does not shift when the page does.
-    const rows = Array.from({ length: 100 }, (_, i) =>
-      app(`s${String(i).padStart(3, '0')}`, { popularity: i + 1 }))
-    await mockEntries(rows)
-    mockSearch = { sort: 'popularity', pageSize: 15 }
-    withQuery(<StorePage />)
-
-    expect(screen.getAllByText('Top 10%')).toHaveLength(10)
-    expect(screen.getAllByText('star_shine')).toHaveLength(10)
-  })
-
-  it('shows no band anywhere when nothing has been measured', async () => {
+  it('shows no install count anywhere when nothing has been measured', async () => {
     await mockEntries([app('a', { popularity: null }), app('b', { popularity: null })])
     withQuery(<StorePage />)
-    expect(screen.queryByText('Top 10%')).toBeNull()
     expect(screen.queryByText('star_shine')).toBeNull()
+    expect(screen.queryByTitle(/install runs recorded/i)).toBeNull()
   })
 })
 
@@ -1018,7 +1056,65 @@ describe('Store grid sizing', () => {
     const { container } = withQuery(<StorePage />)
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[284px]')
+    for (const card of cards) expect(card.className).toContain('h-[260px]')
+  })
+
+  it('keeps that one height across all three action states', async () => {
+    // The action row is a three-way branch and the not-installable arm carries
+    // a long sentence, so this is where a fixed height is most likely to
+    // break. All three have to render at the same height, on one line.
+    await mockEntries([
+      { ...REDIS, slug: 'ok', name: 'Ok', installable: true },
+      { ...REDIS, slug: 'gone', name: 'Gone', installable: false,
+        unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' },
+      { ...REDIS, slug: 'mine', name: 'Mine', installable: true },
+    ])
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/apps' || path.startsWith('/apps?')) {
+        return Promise.resolve([{ id: 1, name: 'Mine', catalog_slug: 'mine', ctid: 150, host_id: 1 }])
+      }
+      return Promise.resolve(null)
+    })
+    const { container } = withQuery(<StorePage />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Installed' })).toBeInTheDocument())
+    const cards = Array.from(container.querySelectorAll('.rounded-card'))
+    expect(cards).toHaveLength(3)
+    for (const card of cards) expect(card.className).toContain('h-[260px]')
+    // and the three states really are all present
+    expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
+    expect(screen.getByText(/Not installable/)).toBeInTheDocument()
+  })
+
+  it('truncates a long not-installable reason to one line, keeping it whole in the title', async () => {
+    // The full sentence lives in the popup's Availability section; the card
+    // shows as much as fits and hands over the rest via the tooltip, rather
+    // than wrapping and making this card taller than its neighbours.
+    const reason = 'install script requires interactive input, no non-interactive entrypoint'
+    await mockEntries([{ ...REDIS, slug: 'gone', name: 'Gone', installable: false,
+      unsupported_reason: reason }])
+    const { container } = withQuery(<StorePage />)
+
+    const note = screen.getByText(/Not installable/)
+    expect(note.className).toContain('truncate')
+    expect(note).toHaveAttribute('title', `Not installable, ${reason}`)
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[260px]')
+    // no Install control on a row that cannot be installed, and the way out
+    // to upstream survives
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(screen.getByRole('link', { name: /upstream/i })).toBeInTheDocument()
+  })
+
+  it('drops the separator rule that used to divide the action row', async () => {
+    await mockEntries([{ ...REDIS, slug: 'a', name: 'A' }])
+    const { container } = withQuery(<StorePage />)
+    const card = container.querySelector('.rounded-card')
+    expect(card?.innerHTML).not.toContain('border-t')
+    // the Install button sits at the end, pushed right
+    expect(screen.getByRole('button', { name: 'Install' }).className).toContain('ml-auto')
   })
 
   it('clamps the description and fades it from the card background token', async () => {
@@ -1031,5 +1127,109 @@ describe('Store grid sizing', () => {
     const fade = container.querySelector('[class*="linear-gradient(to_top,var(--panel)"]')
     expect(fade).not.toBeNull()
     expect(fade?.getAttribute('class')).toContain('pointer-events-none')
+  })
+})
+
+/**
+ * The detail popup. "Read more" on a card opens components/StoreDetailContent
+ * in a Dialog rather than navigating; routes/store-detail.tsx renders the SAME
+ * component for /store/$slug, which is what a palette result or a pasted link
+ * still lands on (that shell has its own coverage in store-detail.test.tsx).
+ * One component, two shells, so the popup and the page cannot drift apart.
+ */
+describe('Store detail popup', () => {
+  const DETAIL = {
+    ...REDIS,
+    raw: { ct_script: '#!/usr/bin/env bash', install_script: '#!/usr/bin/env bash', metadata: {} },
+  }
+  let detail: Record<string, unknown> = DETAIL
+
+  beforeEach(async () => {
+    mockSearch = {}
+    detail = DETAIL
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: [REDIS] } as any)
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve(detail)
+      if (path === '/apps' || path.startsWith('/apps?')) return Promise.resolve([])
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'pve-01' }])
+      if (path === '/entitlements') {
+        return Promise.resolve({ tier: 'builtin', features: { 'store.refresh': true }, grace: null, clock_skew: false })
+      }
+      return Promise.resolve(null)
+    })
+  })
+
+  const openPopup = async () => {
+    withQuery(<StorePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
+    const dialog = await screen.findByRole('dialog')
+    // The dialog mounts before its own /catalog/<slug> fetch resolves, so it
+    // shows the loading block first; every assertion below is about the
+    // loaded content.
+    await within(dialog).findByText('Availability')
+    return dialog
+  }
+
+  it('opens the detail in a dialog rather than navigating away', async () => {
+    const dialog = await openPopup()
+    // The grid is still mounted behind it: this is an overlay, not a page.
+    // `hidden: true` is required and is itself the point: Radix marks the
+    // background aria-hidden while a modal is open, so the card is present in
+    // the DOM but correctly invisible to assistive tech.
+    expect(screen.getByRole('button', { name: 'Redis', hidden: true })).toBeInTheDocument()
+    expect(within(dialog).getByText('Availability')).toBeInTheDocument()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+
+  it('renders the shared detail sections inside the popup', async () => {
+    // These headings come from StoreDetailContent, the component the route
+    // renders too, so what the popup shows is the page's content by
+    // construction rather than by a second implementation kept in step.
+    const dialog = await openPopup()
+    expect(within(dialog).getByText('Availability')).toBeInTheDocument()
+    expect(within(dialog).getByText('Defaults from the install script')).toBeInTheDocument()
+    expect(within(dialog).getByText('Reported installs')).toBeInTheDocument()
+  })
+
+  it('hands off to InstallDialog by closing itself first, never stacking two', async () => {
+    // InstallDialog is itself a Dialog. Nesting them would mount two overlays
+    // with two focus traps, and would put two "Install" buttons on screen at
+    // once, which e2e/journey.spec.ts scopes around. Sequential, not nested.
+    const dialog = await openPopup()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Install' }))
+
+    // InstallDialog's root-consent checkbox is unique to it, unlike its title
+    // text, which also appears in its heading.
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeInTheDocument())
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.queryByText('Availability')).toBeNull()  // the detail popup is gone
+  })
+
+  it('offers no Install in the popup for a row that is not installable', async () => {
+    detail = { ...DETAIL, installable: false,
+      unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
+    const dialog = await openPopup()
+    expect(within(dialog).getByText(/Not installable/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/requires interactive input/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
+  it('claims neither way in the popup while feasibility is unconfirmed', async () => {
+    // installable === null is "not established yet", never "no". Offering
+    // Install here would assert the very thing the page says it cannot
+    // establish, so the retry is the only affordance.
+    detail = { ...DETAIL, installable: null }
+    const dialog = await openPopup()
+    expect(within(dialog).getByRole('button', { name: /check again/i })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(within(dialog).queryByText(/Not installable/)).toBeNull()
+  })
+
+  it('nests no interactive element inside another in the popup', async () => {
+    const dialog = await openPopup()
+    for (const el of Array.from(dialog.querySelectorAll('a, button'))) {
+      expect(el.querySelector('a, button'), `${el.tagName} contains another control`).toBeNull()
+    }
   })
 })

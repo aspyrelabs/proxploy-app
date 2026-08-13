@@ -13,6 +13,20 @@ const variants = {
 // existing call site renders byte-identical markup.
 const sizes = {
   md: 'px-3.5 py-2 text-[13px]',
+  // The small size, used only by the App Store card's Install button, where a
+  // full-size control dominates a 284px fixed-height card. Whole pixels
+  // rather than fractions, because a fractional font size renders blurry.
+  //
+  // Against md, this is:
+  //   px  14px -> 9px  (-35.7%)
+  //   py   8px -> 6px  (-25.0%)
+  //   text 13px -> 9px (-30.8%)
+  //
+  // Rendered height is roughly 25px, against md's roughly 35px. That is still
+  // well under the ~44px usually recommended for a touch target, so this
+  // stays a deliberately small control on a touch screen; see the note at the
+  // call site in components/StoreCard.tsx.
+  xs: 'px-[9px] py-1.5 text-[9px]',
   'icon-xs': 'h-6 w-6 p-0',
 } as const
 

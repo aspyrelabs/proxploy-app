@@ -32,7 +32,9 @@ import httpx
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import CatalogEntry
 from proxploy.services.catalog_categories import category_for
-from proxploy.services.classifier import classify_install_feasibility
+from proxploy.services.classifier import (UNSUPPORTED_ADDON_DELEGATED,
+                                          addon_delegation_slug,
+                                          classify_install_feasibility)
 
 RAW_BASE = "https://raw.githubusercontent.com/community-scripts/ProxmoxVE"
 HEAD_COMMIT_API = "https://api.github.com/repos/community-scripts/ProxmoxVE/commits/main"
@@ -231,6 +233,37 @@ def _already_classified(row: CatalogEntry) -> bool:
     return row.installable is not None and row.raw is not None
 
 
+def pinned_payload_script(row: CatalogEntry) -> str | None:
+    """The in-container payload script this catalog entry has pinned, whatever
+    shape upstream ships it in, or None if nothing is pinned yet.
+
+    THE ONE READER of that pair of `raw` keys, and it is a shared helper for
+    the same reason services/catalog_metadata.py::store_visible is: there are
+    FOUR call sites and they are all asking the identical question, so a rule
+    copied four times is a rule that gets updated in three of them. This is
+    the reader half of what `ensure_classified` writes.
+
+    Two keys because upstream ships two shapes. A normal app has
+    `install/<slug>-install.sh`, stored under "install_script". Five apps
+    (coolify, dockge, dokploy, komodo, runtipi) instead delegate to
+    `tools/addon/<slug>.sh`, stored under "addon_script"
+    (classifier.addon_delegation_slug). Reading only the first key filed an
+    AppScript row with empty content and the sha256 of the empty string for
+    those five, which is a script viewer showing nothing and a version diff
+    against nothing.
+
+    NOT what gets EXECUTED, and the distinction matters. Both run_install and
+    the update path execute the pinned ct script at
+    `raw_url(upstream_sha, script_path)`, which performs the addon delegation
+    itself at runtime. This is what gets RECORDED, diffed and shown.
+
+    install_script wins when both are somehow present: it is the more specific
+    key, and only the addon-delegating path ever writes the other one.
+    """
+    raw = row.raw or {}
+    return raw.get("install_script") or raw.get("addon_script") or None
+
+
 def _keep_metadata(row: CatalogEntry, new_raw: dict | None) -> dict | None:
     """`raw` carries two independent payloads with two different lifecycles:
     the pinned ct/install script pair this module fetches per upstream commit,
@@ -288,21 +321,79 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
 
     install_path = f"install/{slug}-install.sh"
     install_resp = _fetch(raw_url(row.upstream_sha, install_path))
+    # Which `raw` key the payload lands under, so a reader can tell at a
+    # glance which of the two shapes this row is.
+    payload_key = "install_script"
+    addon_delegated = False
     if install_resp.status_code != 200:
-        # 13 ct/ scripts have no matching install/ file (investigation §1):
-        # a real, known shape, not corrupt data. Store what was fetched so a
-        # retry at the same commit is a no-op, and report it honestly rather
-        # than crash the caller.
-        meta = parse_ct_script(ct_resp.text)
-        _apply_script_presentation(row, meta)
-        row.installable = False
-        row.unsupported_reason = "no install script found upstream"
-        row.raw = _keep_metadata(row, {"ct_script": ct_resp.text})
-        db.commit()
-        return row
+        # Before concluding there is nothing to classify: some ct scripts
+        # delegate their in-container step to tools/addon/<slug>.sh instead of
+        # shipping an install/ file (classifier.addon_delegation_slug). Five
+        # popular apps are in this shape. They are still NOT installable, for
+        # a reason that has nothing to do with the addon script's contents
+        # (see below), but the script is worth fetching: it carries the real
+        # payload for the `raw` snapshot, and reaching this branch at all is
+        # what lets us give an accurate reason instead of the flatly wrong
+        # "no install script found upstream".
+        addon_slug = addon_delegation_slug(ct_resp.text)
+        if addon_slug is None:
+            # 13 ct/ scripts have no matching install/ file (investigation §1)
+            # and no addon delegation either: a real, known shape, not corrupt
+            # data. Store what was fetched so a retry at the same commit is a
+            # no-op, and report it honestly rather than crash the caller.
+            meta = parse_ct_script(ct_resp.text)
+            _apply_script_presentation(row, meta)
+            row.installable = False
+            row.unsupported_reason = "no install script found upstream"
+            row.raw = _keep_metadata(row, {"ct_script": ct_resp.text})
+            db.commit()
+            return row
+        payload_key = "addon_script"
+        addon_delegated = True
+        # PINNED, via the same raw_url helper as the ct and install fetches.
+        # An unpinned addon fetch would classify one revision and let
+        # run_install execute another, which is the entire guarantee the pin
+        # exists to make. raw.githubusercontent.com only; no api.github.com
+        # call is added by this path, so the flat 2-call ceiling is untouched.
+        install_resp = _fetch(raw_url(row.upstream_sha,
+                                      f"tools/addon/{addon_slug}.sh"))
+        if install_resp.status_code != 200:
+            meta = parse_ct_script(ct_resp.text)
+            _apply_script_presentation(row, meta)
+            row.installable = False
+            row.unsupported_reason = ("could not fetch the addon script this "
+                                      "app delegates to")
+            row.raw = _keep_metadata(row, {"ct_script": ct_resp.text})
+            db.commit()
+            return row
 
     meta = parse_ct_script(ct_resp.text)
-    installable, reason = classify_install_feasibility(ct_resp.text, install_resp.text)
+    if addon_delegated:
+        # ALWAYS not-installable, and deliberately NOT a call to
+        # classify_install_feasibility, so this verdict cannot come to depend
+        # on what the addon script happens to contain.
+        #
+        # The addon script is not what an install runs. `build_container`
+        # installs by curling `install/<var_install>.sh` and lxc-attaching it
+        # (misc/build.func:5174), that URL 404s for every app in this shape,
+        # the failure is swallowed because error handling is off at that
+        # point, and `bash -c ""` exits 0. Upstream's own ct script builds a
+        # container, installs nothing, and reports success. The addon script
+        # is referenced only from `update_script()` and never runs here.
+        #
+        # An earlier version of this branch DID run the feasibility check
+        # here. Today all five addon scripts prompt, so all five came back
+        # not-installable and the hole never opened; had one been silent, this
+        # would have marked it installable and an install would have produced
+        # an empty container filed as a success, which run_install's "exited 0
+        # but no CT" guard cannot catch because the CT really does exist. The
+        # fix for that is a real second execution step, specified separately
+        # in docs/superpowers/specs/2026-08-13-addon-delegated-installs-design.md,
+        # not a softer verdict here.
+        installable, reason = False, UNSUPPORTED_ADDON_DELEGATED
+    else:
+        installable, reason = classify_install_feasibility(ct_resp.text,
+                                                           install_resp.text)
     _apply_script_presentation(row, meta)
     row.default_cpu = meta.get("default_cpu")
     row.default_ram_mb = meta.get("default_ram_mb")
@@ -312,7 +403,7 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
     row.installable = installable
     row.unsupported_reason = reason
     row.raw = _keep_metadata(row, {"ct_script": ct_resp.text,
-                                   "install_script": install_resp.text})
+                                   payload_key: install_resp.text})
     db.commit()
     return row
 

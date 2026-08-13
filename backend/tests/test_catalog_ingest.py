@@ -343,3 +343,269 @@ def test_run_discovery_preserves_a_slug_it_no_longer_needs_to_touch(tmp_path, mo
     run_discovery(db)
 
     assert db.query(CatalogEntry).filter_by(slug="redis").one().name == "Redis"
+
+
+# --- ct scripts that delegate their payload to tools/addon/<slug>.sh --------
+#
+# Five popular apps (coolify, dockge, dokploy, komodo, runtipi) ship a full LXC
+# builder with NO install/<slug>-install.sh, delegating the in-container step
+# to tools/addon/<slug>.sh instead. We were reporting all five as "no install
+# script found upstream", which is a wrong conclusion from a right observation
+# about the file convention.
+
+from proxploy.services.classifier import (  # noqa: E402
+    UNSUPPORTED_ADDON_DELEGATED,
+)
+from tests.test_classifier import (  # noqa: E402
+    DELEGATING_CT, INTERACTIVE_ADDON, SILENT_ADDON,
+)
+
+FIVE = ["coolify", "dockge", "dokploy", "komodo", "runtipi"]
+
+
+def _delegating_fetch(slug="dockge", addon_body=SILENT_ADDON, sha=SHA, seen=None,
+                      addon_status=200, tree=None):
+    """A tree where <slug> has a ct script and an addon script but NO install
+    script, exactly as upstream ships these five."""
+    ct_body = DELEGATING_CT.format(slug=slug, name=slug.title())
+    default_tree = {"sha": sha, "truncated": False, "tree": [
+        {"path": f"ct/{slug}.sh", "type": "blob"},
+        {"path": f"tools/addon/{slug}.sh", "type": "blob"},
+        {"path": "ct/redis.sh", "type": "blob"},
+    ]}
+
+    def fake_get(url, **kw):
+        if seen is not None:
+            seen.append(url)
+        if url.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        if "/git/trees/" in url:
+            return httpx.Response(200, json=tree if tree is not None else default_tree)
+        if url.endswith(f"/{sha}/ct/{slug}.sh"):
+            return httpx.Response(200, text=ct_body)
+        if url.endswith(f"/{sha}/tools/addon/{slug}.sh"):
+            return httpx.Response(addon_status, text=addon_body)
+        if url.endswith(f"/{sha}/ct/redis.sh"):
+            return httpx.Response(200, text=REDIS_CT)
+        if url.endswith(f"/{sha}/install/redis-install.sh"):
+            return httpx.Response(200, text=REDIS_INSTALL)
+        return httpx.Response(404)
+    return fake_get
+
+
+def test_a_delegating_ct_row_keeps_the_data_but_is_never_installable(tmp_path,
+                                                                     monkeypatch):
+    """We changed the VERDICT, not the data. The addon script is still
+    fetched and pinned into `raw`, and the ct script's resource defaults are
+    still parsed, which the old "no install script found upstream" dead end
+    never got round to. The reason is now accurate rather than flatly wrong."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", _delegating_fetch())
+    run_discovery(db)
+
+    ensure_classified(db, "dockge")
+
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert row.installable is False
+    assert row.unsupported_reason == UNSUPPORTED_ADDON_DELEGATED
+    assert row.raw["addon_script"] == SILENT_ADDON
+    assert "install_script" not in row.raw
+    assert (row.default_cpu, row.default_ram_mb, row.default_disk_gb) == (2, 2048, 18)
+    assert (row.default_os, row.default_os_version) == ("debian", "13")
+
+
+def test_a_silent_addon_script_does_not_make_the_row_installable(tmp_path,
+                                                                 monkeypatch):
+    """THE REGRESSION THIS EXISTS TO STOP, and the hole that was open until
+    now. SILENT_ADDON has no prompt at all, so a verdict derived from the
+    addon script would call this row installable. Installing it would run the
+    CT SCRIPT, whose build_container curls install/dockge-install.sh, gets a
+    404, swallows the error because `set -Eeuo` is off there, and runs
+    `bash -c ""` which exits 0: an empty container, filed as a successful
+    install, invisible to run_install's "exited 0 but no CT" guard because the
+    CT genuinely exists.
+
+    All five real addon scripts prompt today, so the hole never actually
+    opened. It was one non-interactive upstream rewrite away from opening.
+    """
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch",
+                        _delegating_fetch(addon_body=SILENT_ADDON))
+    run_discovery(db)
+
+    ensure_classified(db, "dockge")
+
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert row.installable is False, "a silent addon script must not flip the verdict"
+    assert row.unsupported_reason == UNSUPPORTED_ADDON_DELEGATED
+    # And the verdict is NOT the interactive-input finding wearing a new hat:
+    # this script has no prompt in it at all.
+    assert "interactive" not in row.unsupported_reason
+    from proxploy.services.classifier import classify_install_feasibility
+    assert classify_install_feasibility(
+        DELEGATING_CT.format(slug="dockge", name="Dockge"), SILENT_ADDON) == (True, None)
+
+
+def test_an_addon_script_that_prompts_is_also_not_installable(tmp_path, monkeypatch):
+    """The real shape of all five at pinned SHA a222d32a..., and it reaches
+    the same verdict by the same route. The interactive-input finding is still
+    true and the detector is untouched; it is simply not what decides this."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch",
+                        _delegating_fetch(addon_body=INTERACTIVE_ADDON))
+    run_discovery(db)
+
+    ensure_classified(db, "dockge")
+
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert row.installable is False
+    assert row.unsupported_reason == UNSUPPORTED_ADDON_DELEGATED
+    assert row.raw["addon_script"] == INTERACTIVE_ADDON
+
+
+def test_the_addon_fetch_is_pinned_to_the_rows_upstream_sha(tmp_path, monkeypatch):
+    """Unpinned, we would classify one revision and let run_install execute
+    another, which is the entire guarantee the pin exists to make. And it is
+    raw.githubusercontent.com only: no api.github.com call is added."""
+    db = make_db(tmp_path)
+    seen: list[str] = []
+    monkeypatch.setattr("proxploy.services.catalog._fetch",
+                        _delegating_fetch(seen=seen))
+    run_discovery(db)
+    seen.clear()
+
+    ensure_classified(db, "dockge")
+
+    addon_urls = [u for u in seen if "tools/addon/" in u]
+    assert addon_urls == [
+        f"https://raw.githubusercontent.com/community-scripts/ProxmoxVE"
+        f"/{SHA}/tools/addon/dockge.sh"]
+    assert "main" not in addon_urls[0].split("/ProxmoxVE/")[1].split("/")[0]
+    assert not any("api.github.com" in u for u in seen)
+
+
+def test_an_unfetchable_addon_script_reports_that_honestly(tmp_path, monkeypatch):
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch",
+                        _delegating_fetch(addon_status=500))
+    run_discovery(db)
+
+    ensure_classified(db, "dockge")
+
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert row.installable is False
+    assert row.unsupported_reason == ("could not fetch the addon script this "
+                                      "app delegates to")
+
+
+def test_a_ct_row_with_neither_install_nor_addon_keeps_the_old_answer(tmp_path,
+                                                                      monkeypatch):
+    """13 ct/ scripts have no install/ file and no delegation either. That
+    path is unchanged."""
+    db = make_db(tmp_path)
+    plain = REDIS_CT.replace("APP=\"Redis\"", "APP=\"Orphan\"")
+
+    def fake_get(url, **kw):
+        if url.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": SHA})
+        if "/git/trees/" in url:
+            return httpx.Response(200, json={"sha": SHA, "truncated": False,
+                                             "tree": [{"path": "ct/orphan.sh",
+                                                       "type": "blob"}]})
+        if url.endswith(f"/{SHA}/ct/orphan.sh"):
+            return httpx.Response(200, text=plain)
+        return httpx.Response(404)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", fake_get)
+    run_discovery(db)
+
+    ensure_classified(db, "orphan")
+
+    row = db.query(CatalogEntry).filter_by(slug="orphan").one()
+    assert row.installable is False
+    assert row.unsupported_reason == "no install script found upstream"
+    assert "addon_script" not in (row.raw or {})
+
+
+def test_classifying_the_ct_row_leaves_the_slug_addon_row_alone(tmp_path,
+                                                                monkeypatch):
+    """One upstream FILE now backs two catalog rows: the ct row classifies
+    against tools/addon/dockge.sh, and the dual-variant collision logic also
+    discovered that same file as its own `dockge-addon` row. Classifying one
+    must not touch the other."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", _delegating_fetch())
+    run_discovery(db)
+    addon_row = db.query(CatalogEntry).filter_by(slug="dockge-addon").one()
+    before = (addon_row.entry_type, addon_row.script_path, addon_row.installable,
+              addon_row.unsupported_reason, addon_row.raw, addon_row.name)
+
+    ensure_classified(db, "dockge")
+
+    addon_row = db.query(CatalogEntry).filter_by(slug="dockge-addon").one()
+    assert (addon_row.entry_type, addon_row.script_path, addon_row.installable,
+            addon_row.unsupported_reason, addon_row.raw, addon_row.name) == before
+    assert addon_row.entry_type == "addon"
+    # ...and the ct row kept the plain slug and its own type.
+    ct_row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert ct_row.entry_type == "ct" and ct_row.script_path == "ct/dockge.sh"
+
+
+def test_all_five_stay_ct_and_visible_to_the_store_grid(tmp_path, monkeypatch):
+    """The five are exactly the dual-variant collision slugs. Whatever the
+    feasibility answer turns out to be, they stay ct rows on the grid."""
+    from proxploy.services.catalog_metadata import store_visible
+
+    db = make_db(tmp_path)
+    tree = {"sha": SHA, "truncated": False, "tree":
+            [{"path": f"ct/{s}.sh", "type": "blob"} for s in FIVE]
+            + [{"path": f"tools/addon/{s}.sh", "type": "blob"} for s in FIVE]}
+    for slug in FIVE:
+        monkeypatch.setattr("proxploy.services.catalog._fetch",
+                            _delegating_fetch(slug=slug, tree=tree))
+        run_discovery(db)
+        ensure_classified(db, slug)
+
+    for slug in FIVE:
+        row = db.query(CatalogEntry).filter_by(slug=slug).one()
+        assert row.entry_type == "ct", slug
+        # All five, including coolify/runtipi/dokploy: not installable, same
+        # reason, whatever their addon scripts contain.
+        assert row.installable is False, slug
+        assert row.unsupported_reason == UNSUPPORTED_ADDON_DELEGATED, slug
+        assert db.query(CatalogEntry).filter_by(slug=f"{slug}-addon").one(
+        ).entry_type == "addon", slug
+    in_grid = {r.slug for r in db.query(CatalogEntry).filter(store_visible())}
+    assert set(FIVE) <= in_grid
+
+
+def test_the_metadata_snapshot_survives_an_addon_classification(tmp_path, monkeypatch):
+    """`raw` carries the upstream record snapshot on its own schedule, and
+    _keep_metadata has to carry it through this path too."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", _delegating_fetch())
+    run_discovery(db)
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    row.raw = {"metadata": {"slug": "dockge", "name": "Dockge"}}
+    db.commit()
+
+    ensure_classified(db, "dockge")
+
+    row = db.query(CatalogEntry).filter_by(slug="dockge").one()
+    assert row.raw["metadata"]["name"] == "Dockge"
+    assert row.raw["addon_script"] == SILENT_ADDON
+
+
+def test_a_normal_app_is_completely_unaffected(tmp_path, monkeypatch):
+    """plex shape: an install/ script exists, so the addon branch is never
+    reached and the verdict comes from the feasibility check as it always
+    did."""
+    db = make_db(tmp_path)
+    monkeypatch.setattr("proxploy.services.catalog._fetch", _delegating_fetch())
+    run_discovery(db)
+
+    ensure_classified(db, "redis")
+
+    row = db.query(CatalogEntry).filter_by(slug="redis").one()
+    assert row.installable is True and row.unsupported_reason is None
+    assert row.raw["install_script"] == REDIS_INSTALL
+    assert "addon_script" not in row.raw

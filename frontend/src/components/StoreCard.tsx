@@ -1,7 +1,5 @@
 import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import type { CatalogRow } from '../api/catalog'
-import type { PopularityBand } from '../lib/store-order'
 import { Button } from './ui/button'
 import { Icon } from './ui/icon'
 import { STORE_GRADIENT } from './UsageBar'
@@ -49,7 +47,7 @@ const TYPE_LABEL: Record<CatalogRow['type'], string> = {
  * Every condition below is an explicit === true or === false. Null means
  * upstream has no record for the slug (the 7 unlisted rows) and must render
  * NOTHING: `has_arm: null` is not "x86 only" and `privileged: null` is not
- * "unprivileged". Testing falsiness here would silently label all 9 of them
+ * "unprivileged". Testing falsiness here would silently label all 7 of them
  * with claims nobody has made.
  */
 const CHIP = 'inline-block rounded border border-line bg-panel-2 px-1.5 py-0.5 text-[10px] text-text-2'
@@ -60,8 +58,9 @@ const UNLISTED_TITLE =
   + 'not a judgement about the app itself.'
 
 // A card must render cleanly with just name, type and an initial tile when
-// upstream metadata has no record for this slug (37 of the 584 ct rows have
-// none, and that is normal, never an error), or the sync hasn't run yet, or
+// upstream metadata has no record for this slug (7 of the 556 store-visible
+// ct rows have none, and that is normal, never an error), or the sync has
+// not run yet, or
 // the <img> itself fails to load: scripts are the source of truth, upstream
 // metadata is presentation-only decoration (catalog expansion plan, decision
 // 1). Icons are rendered straight from upstream's CDN with no local binary
@@ -88,16 +87,83 @@ function CardIcon({ name, iconUrl }: { name: string; iconUrl: string | null }) {
   )
 }
 
-export function StoreCard({ entry, onInstall, installed, band }: {
+/**
+ * The install count, shown as the number it actually is.
+ *
+ * This slot briefly carried invented tiers ("Top 10%", then "Popular" /
+ * "Common"). Those were labels WE made up on top of the data: a reader cannot
+ * check them, cannot say what separates Popular from Common, and the words
+ * imply a judgement the telemetry never made. The underlying number is the
+ * quantifiable thing, so the number is what shows. No banding, no percentile,
+ * no rounding to "126k" either, since an abbreviation is just a coarser band
+ * wearing a number's clothes.
+ *
+ * Gold `text-amber` at 23px glyph and 14px text, which is the sizing that was
+ * asked for and has not changed.
+ *
+ * Grouping is pinned to en-US rather than the reader's own locale, by
+ * decision. A bare toLocaleString() follows the runtime locale, which on an
+ * en-IN machine renders this same figure as 1,26,196 (lakh grouping). Both
+ * forms are correct; one form everywhere is the choice, and routes/
+ * store-detail.tsx pins the identical call for the same figure so the card
+ * and the page it links to can never disagree.
+ *
+ * Null renders NOTHING at all: no icon, no zero. Absence means upstream has no
+ * measurement for this slug, and a zero would be a claim that nobody installed
+ * it. That rule is the same one the tag chips follow for their own nulls.
+ *
+ * Every caveat lives in the tooltip rather than inline on the card: what the
+ * number counts is a real footnote, but it is a footnote, and the card has
+ * 284px to spend.
+ */
+// Pinned to en-US, identically in routes/store-detail.tsx, for the same reason
+// the install count above is pinned: one rendering for every reader rather
+// than one per locale, and the two files must agree because a card links
+// straight to that page.
+//
+// The month is a WORD on purpose. "8/13/2026" and "13/8/2026" are the same
+// nine characters rearranged, and a reader cannot tell which locale produced
+// them; this date carries the staleness caveat for a figure that can sit a
+// day behind upstream, so being misread by half the world is not cosmetic.
+// Only the FORMAT is pinned, never the instant: the time zone stays the
+// reader's own, as it is everywhere else in the app.
+const AS_OF_FMT: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' }
+
+function InstallCount({ count, syncedAt }: { count: number; syncedAt: string | null }) {
+  const shown = count.toLocaleString('en-US')
+  const asOf = syncedAt
+    ? `, as of ${new Date(syncedAt).toLocaleDateString('en-US', AS_OF_FMT)}`
+    : ''
+  const caveat =
+    `${shown} install runs recorded by community-scripts' opt-in telemetry${asOf}. `
+    + 'That counts finished install attempts, failures included, not downloads, '
+    + 'and it is not a rating.'
+  return (
+    // No role="img" here, deliberately. The figure IS text, so it reads
+    // correctly on its own; the only thing missing for a screen reader is what
+    // the number counts, since Icon renders its glyph aria-hidden. An sr-only
+    // prefix supplies that. role="img" would also have collided with the app
+    // logo <img> on the same card, making getByRole('img') ambiguous for
+    // anything querying the logo.
+    <span title={caveat}
+      className="flex shrink-0 items-center gap-1 font-mono text-[14px] text-amber">
+      <Icon name="star_shine" size={23} />
+      <span className="sr-only">Install runs recorded: </span>
+      <span>{shown}</span>
+    </span>
+  )
+}
+
+export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
   entry: CatalogRow; onInstall: (slug: string) => void; installed: boolean
-  /** Resolved by the page from the whole corpus, since a percentile claim can
-   *  only be made against a population (lib/store-order.ts). Absent means no
-   *  band, which is also what a null popularity produces. */
-  band?: PopularityBand | null
+  /** Opens the detail popup. The card navigates nowhere: the same content is
+   *  also a route (/store/$slug) for palette results and pasted links, but
+   *  from here it opens in a Dialog. */
+  onOpenDetail: (slug: string) => void
 }) {
   const name = entry.name ?? entry.slug
   const unlisted = entry.upstream_state === 'delisted' || entry.upstream_state === 'unlisted'
-  const detail = { to: '/store/$slug' as const, params: { slug: entry.slug } }
+  const reason = entry.unsupported_reason
   return (
     /**
      * ONE FIXED HEIGHT FOR EVERY CARD, so a 10-line description next to a
@@ -107,10 +173,16 @@ export function StoreCard({ entry, onInstall, installed, band }: {
      * "Read more" swallows whatever is left, which is what pins the chip row
      * and the action row to the same baseline on every card in a row.
      *
-     * 284px is the sum of the parts plus a little slack for font metrics:
-     * 32 padding + 40 icon + 20 name + 16 category + 57 description block +
-     * 21 read-more + 27 chips + 60 action row is 273, and the spacer absorbs
-     * the remainder rather than letting it show up as ragged bottoms.
+     * 260px, down from 284px. 13px of that came from deleting the action
+     * row's separator rule and the padding it carried (border-t plus pt-3),
+     * and the other 11px came out of the flex spacer, which had been holding
+     * about 34px of slack. The budget now:
+     *
+     *   32 padding + 40 icon + 20 name + 16 category + 57 description block
+     *   + 21 read-more + 27 chip row + 37 action row = 250
+     *
+     * leaving roughly 10px in the spacer for font-metric drift, rather than
+     * sizing this to the exact sum and hoping every glyph agrees.
      *
      * overflow-hidden is a guard, not a plan. The chip row cannot actually
      * wrap: the three tag chips and the unlisted badge are mutually exclusive
@@ -121,44 +193,27 @@ export function StoreCard({ entry, onInstall, installed, band }: {
      * future chip breaks that arithmetic, this clips instead of pushing the
      * action row out of alignment across the row.
      */
-    <div className="flex h-[284px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+    <div className="flex h-[260px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
       <div className="flex items-start justify-between gap-2">
         <CardIcon name={name} iconUrl={entry.icon_url} />
-        {/* The popularity marker sits where the raw install count used to,
-            opposite the app tile. The number itself is gone from the card on
-            purpose: 126196 against a median of 1001 is a figure nobody can
-            place, and it belongs on the detail page. A percentile can be read
-            at a glance and cannot be misread as a rating.
-
-            Gold is `text-amber`, the existing token, not a new one: it is
-            #F5B544 in the dark theme and #C77E14 in the light one, both
-            gold-family and both legible on their own background, which a
-            hardcoded gold would not be. Sizes are 1.3x their baselines, per
-            the sizing request: the icon from Icon's own default of 18 (23.4,
-            rounded to 23) and the label from the 11px the old count used
-            (14.3, rounded to 14). */}
-        {band === 'top10' && (
-          <span
-            className="flex shrink-0 items-center gap-1 text-[14px] text-amber"
-            title="Among the top 10% of these scripts by install runs recorded in community-scripts telemetry, finished attempts rather than downloads."
-          >
-            <Icon name="star_shine" size={23} />
-            Top 10%
-          </span>
+        {entry.popularity != null && (
+          <InstallCount count={entry.popularity} syncedAt={entry.popularity_synced_at} />
         )}
       </div>
-      {/* NO NESTED INTERACTIVES. The card is not itself a link: it already
-          contains a real Install button, and an <a> wrapping a <button> is
-          invalid HTML that breaks keyboard and screen-reader behaviour. The
-          title and an explicit "Read more" are the two links instead, so
-          every control here is a sibling of the others and each one is
-          reachable by Tab in reading order. Truncated to one line with the
-          full name in `title`, since a wrapping name would eat into the
-          fixed height. */}
-      <Link {...detail} title={name}
-        className="mt-2 block truncate text-[14px] font-semibold text-text hover:text-amber hover:underline">
+      {/* NO NESTED INTERACTIVES. The card is not itself a control: it already
+          contains a real Install button, and a control wrapping another
+          control is invalid HTML that breaks keyboard and screen-reader
+          behaviour. The title and "Read more" are two sibling buttons
+          instead, so every control here is a sibling of the others and each
+          is reachable by Tab in reading order.
+          Both open the detail popup rather than navigating: buttons, not
+          links, because they no longer go anywhere. Truncated to one line
+          with the full name in `title`, since a wrapping name would eat into
+          the fixed height. */}
+      <button type="button" title={name} onClick={() => onOpenDetail(entry.slug)}
+        className="mt-2 block cursor-pointer truncate text-left text-[14px] font-semibold text-text hover:text-amber hover:underline">
         {name}
-      </Link>
+      </button>
       <div className="font-mono text-[11px] text-text-3">{entry.category ?? 'Uncategorized'}</div>
       {/* Exactly three lines, always, whether the text needs them or not:
           a fixed box is what makes the rows line up.
@@ -179,10 +234,10 @@ export function StoreCard({ entry, onInstall, installed, band }: {
           asked for it unconditionally, for visual consistency, and it is
           honest even on those rows because the detail page still carries
           their availability, resource defaults and popularity. */}
-      <Link {...detail}
-        className="mt-1 shrink-0 self-start text-[11.5px] text-amber hover:underline">
+      <button type="button" onClick={() => onOpenDetail(entry.slug)}
+        className="mt-1 shrink-0 cursor-pointer self-start text-[11.5px] text-amber hover:underline">
         Read more
-      </Link>
+      </button>
       {/* Absorbs the leftover height so the two rows below sit at the same
           offset on every card, whatever the description did. */}
       <div className="flex-1" />
@@ -212,22 +267,48 @@ export function StoreCard({ entry, onInstall, installed, band }: {
           </span>
         )}
       </div>
-      <div className="mt-3 border-t border-line-soft pt-3">
+      {/* One line, right-aligned, no separator rule. All THREE states of this
+          branch sit on that single line at the card's fixed height, which is
+          what decides the shape:
+
+          - installable      the Install button, pushed right with ml-auto.
+          - installed        the same slot, disabled.
+          - NOT installable  the reason, which is the hard one. These strings
+            are long ("install script requires interactive input, no
+            non-interactive entrypoint" is 66 characters and is the reason on
+            six rows), so it truncates to one line with the FULL text in
+            `title`, and the popup carries it complete and unclipped in its
+            Availability section. Truncating text whose full form is one click
+            away is honest; wrapping it would make this card taller than every
+            other card in its row, which is the thing a fixed height exists to
+            prevent.
+
+          The upstream link stays. It is the only outward affordance a
+          non-installable app has, it costs one shrink-0 element, and dropping
+          it would be a capability removal dressed up as a layout change. */}
+      <div className="mt-3 flex items-center gap-2">
         {entry.installable === false ? (
-          <div className="text-[12px] text-text-3">
-            Not installable, {entry.unsupported_reason}
+          <>
+            <span className="min-w-0 truncate text-[11.5px] text-text-3"
+              title={reason ? `Not installable, ${reason}` : 'Not installable'}>
+              Not installable, {entry.unsupported_reason}
+            </span>
             {entry.website && (
-              <>
-                {' '}
-                <a href={entry.website} target="_blank" rel="noreferrer"
-                  className="text-amber hover:underline">upstream</a>
-              </>
+              <a href={entry.website} target="_blank" rel="noreferrer"
+                className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
             )}
-          </div>
+          </>
         ) : installed ? (
-          <Button variant="ghost" disabled>Installed</Button>
+          <Button className="ml-auto" variant="ghost" size="xs" disabled>Installed</Button>
         ) : (
-          <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>
+          /* size="xs" is the small size in ui/button.tsx: roughly 25px tall
+             against md's ~35px, by request. Worth knowing: that is still well
+             under the ~44px normally recommended for a touch target, so it is
+             a deliberately small control on a touch screen. The LABEL is
+             untouched: e2e/journey.spec.ts clicks
+             getByRole('button', { name: 'Install', exact: true }). */
+          <Button className="ml-auto" variant="primary" size="xs"
+            onClick={() => onInstall(entry.slug)}>Install</Button>
         )}
       </div>
     </div>

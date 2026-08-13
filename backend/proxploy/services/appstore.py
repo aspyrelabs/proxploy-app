@@ -16,7 +16,7 @@ import shlex
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, AppScript, CatalogEntry, Host, Job, utcnow
-from proxploy.services.catalog import raw_url
+from proxploy.services.catalog import pinned_payload_script, raw_url
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 
@@ -93,7 +93,9 @@ def _resolve(app, catalog_slug: str, host_id: int):
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
-        install_script = (entry.raw or {}).get("install_script", "")
+        # Whatever shape upstream ships the payload in: five apps carry it
+        # under "addon_script" instead (services/catalog.py).
+        install_script = pinned_payload_script(entry) or ""
         return entry, host, install_script
 
 
@@ -268,7 +270,7 @@ def _resolve_update(app, app_id: int):
              "fingerprint": host.ssh_host_key_fingerprint},
             {"slug": entry.slug, "sha": entry.upstream_sha,
              "script_path": entry.script_path,
-             "install_script": (entry.raw or {}).get("install_script", ""),
+             "install_script": pinned_payload_script(entry) or "",
              "from_ref": from_ref},
         )
 

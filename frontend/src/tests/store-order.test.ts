@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CatalogRow } from '../api/catalog'
-import {
-  DEFAULT_SORT, STORE_SORTS, isStoreSort, popularityBand, popularityThreshold, sortEntries,
-} from '../lib/store-order'
+import { DEFAULT_SORT, STORE_SORTS, isStoreSort, sortEntries } from '../lib/store-order'
 
 const BASE: CatalogRow = {
   slug: 'base', name: 'Base', category: 'Databases', type: 'ct', description: null,
@@ -96,33 +94,5 @@ describe('sortEntries', () => {
     const sorted = sortEntries(rows, 'name')
     expect(slugs(rows)).toEqual(['z', 'a'])
     expect(slugs(sorted)).toEqual(['a', 'z'])
-  })
-})
-
-describe('popularity band', () => {
-  it('takes the threshold from the corpus rather than a hardcoded number', () => {
-    // 100 values, 1..100. The 90th percentile lands on 91, so exactly the top
-    // tenth clears it.
-    const rows = Array.from({ length: 100 }, (_, i) => row({ slug: `s${i}`, popularity: i + 1 }))
-    const threshold = popularityThreshold(rows)
-    expect(threshold).toBe(91)
-    expect(rows.filter((r) => popularityBand(r.popularity, threshold) === 'top10')).toHaveLength(10)
-  })
-
-  it('excludes nulls from the population instead of counting them as zero', () => {
-    // Counting "no measurement" as 0 would drag the threshold down and hand
-    // the band to rows that did not earn it.
-    const measured = Array.from({ length: 10 }, (_, i) => row({ slug: `s${i}`, popularity: (i + 1) * 10 }))
-    const unmeasured = Array.from({ length: 90 }, (_, i) => row({ slug: `n${i}`, popularity: null }))
-    expect(popularityThreshold([...measured, ...unmeasured])).toBe(100)
-  })
-
-  it('gives a null popularity no band at all', () => {
-    expect(popularityBand(null, 50)).toBeNull()
-  })
-
-  it('gives no band when there is no measured population to rank against', () => {
-    expect(popularityThreshold([row({ slug: 'a', popularity: null })])).toBeNull()
-    expect(popularityBand(9999, null)).toBeNull()
   })
 })

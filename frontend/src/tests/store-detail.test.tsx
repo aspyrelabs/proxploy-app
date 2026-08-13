@@ -181,6 +181,14 @@ describe('StoreDetailPage, a fully covered app', () => {
     // popularity_synced_at is served but not declared on CatalogRow; the page
     // reads it defensively, and this is what proves it actually arrives.
     expect(screen.getByText(/^As of /)).toBeInTheDocument()
+    // Date format pinned to en-US with a worded month, identically to
+    // components/StoreCard.tsx, which shows the same "as of" beside the same
+    // count. Asserted as a literal, with both numeric renderings asserted
+    // absent, so the two files cannot drift apart unnoticed on a machine
+    // whose locale happens to match one of them.
+    expect(screen.getByText(/^As of /)).toHaveTextContent('Aug 13, 2026')
+    expect(document.body.textContent).not.toContain('13/8/2026')
+    expect(document.body.textContent).not.toContain('8/13/2026')
   })
 
   it('renders the changelog as text, never as HTML', async () => {

@@ -35,8 +35,93 @@ GUARD_LINE_RE = re.compile(r"\$\{[A-Za-z_]\w*:[-=?]|-[nz]\s+\"?\$")
 GUARD_VAR_RE = re.compile(r"\$\{?([A-Za-z_]\w*)")
 IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 
+# A ct script that delegates its in-container step to tools/addon/<slug>.sh
+# instead of shipping install/<slug>-install.sh. Anchored on the real path
+# structure and a captured slug, NOT on the word "addon" appearing somewhere:
+# these scripts print "has been migrated to an addon script" in a msg_warn, so
+# a loose match would fire on prose, and the captured slug is what gets
+# fetched. The character class deliberately excludes "/" so the capture cannot
+# walk out of tools/addon/.
+ADDON_DELEGATION_RE = re.compile(r"tools/addon/([A-Za-z0-9][A-Za-z0-9._-]*)\.sh\b")
+
 UNSUPPORTED_MULTI_CT = "multi-CT / docker-compose pattern"
+# An addon-delegating ct script is ALWAYS unsupported, whatever its addon
+# script contains. Not a judgement about the addon script's content: a
+# judgement about what `build_container` actually runs. See the long note on
+# `addon_delegation_slug` and services/catalog.py::ensure_classified.
+UNSUPPORTED_ADDON_DELEGATED = (
+    "no install script upstream; it installs via an addon script "
+    "run inside the container")
 UNSUPPORTED_INTERACTIVE = "install script requires interactive input, no non-interactive entrypoint"
+
+
+def addon_delegation_slug(ct_script: str) -> str | None:
+    """The addon slug a ct script delegates its in-container step to, or None
+    if this is an ordinary app.
+
+    WHAT THIS PATTERN IS. Five apps (coolify, dockge, dokploy, komodo,
+    runtipi) ship a complete standard LXC builder in ct/<slug>.sh (APP=,
+    var_cpu/ram/disk/os, then `start`, `build_container`, `description`) but
+    have NO install/<slug>-install.sh. Where a normal app sources its install
+    script, these delegate:
+
+        ADDON_SCRIPT="https://raw.githubusercontent.com/.../tools/addon/dockge.sh"
+        ...
+        type=update bash <(curl -fsSL "${ADDON_SCRIPT}")
+
+    The addon script IS the payload. Verified at pinned SHA
+    a222d32a318e3463bcde935bf52fdf5f883fa804 across all five. It also explains
+    why PocketBase types these five "addon" while upstream still ships a ct
+    builder for them, and they are the same five the dual-variant collision
+    logic already knows about (services/catalog.py::_classify_path). Read from
+    script CONTENT rather than from a list of those five slugs, for the reason
+    catalog.py documents on that logic: a fixed allowlist silently missed
+    `runtipi` once already.
+
+    Returns None unless the script is unambiguous, which is the whole point of
+    the two length checks:
+
+    - Exactly one `build_container`, the same test classify_install_feasibility
+      uses to reject the multi-CT/docker-compose shape. A script that builds
+      two containers is not a single-LXC install whatever else it does.
+    - Exactly one DISTINCT addon slug. dockge names tools/addon/dockge.sh four
+      times, which is fine; a script naming two different addon scripts is one
+      we cannot say we understand, and guessing which one is the payload is
+      exactly the kind of guess this module refuses to make.
+
+    RECOGNISING THIS PATTERN MEANS NOT-INSTALLABLE, FULL STOP, and the reason
+    is not the addon script's contents. `build_container` (misc/build.func,
+    the framework every ct script sources) installs the app by doing
+
+        _install_script="$(curl -fsSL ".../main/install/${var_install}.sh")"
+        lxc-attach -n "$CTID" -- bash -c "$_install_script"
+
+    and the comment three lines above it reads "Error handling already
+    disabled above", so `set -Eeuo` is off. For all five of these apps that
+    URL is a 404: curl exits 56, the failure is swallowed, `_install_script`
+    is the empty string, and `bash -c ""` exits 0. Upstream's own ct script
+    therefore builds a container, installs NOTHING into it, and reports
+    success. The addon script is referenced only inside `update_script()` and
+    is never reached on the install path at all.
+
+    So the addon script is real and worth fetching, for its resource defaults
+    and as the pinned `raw` payload, but it is NOT what an install runs, and a
+    verdict derived from it would be a verdict about the wrong file. An
+    earlier version of this module ran the feasibility check against it and
+    would have marked such a row installable had its addon script been
+    non-interactive; the result would have been an empty container filed as a
+    successful install, since run_install's "exited 0 but no CT" guard cannot
+    fire when the CT genuinely exists. The verdict is fixed at the call site
+    (services/catalog.py::ensure_classified) precisely so it cannot depend on
+    the interactive-input finding, which is true today but is not the thing
+    that makes these unsafe.
+    """
+    if len(BUILD_CONTAINER_RE.findall(ct_script)) != 1:
+        return None
+    slugs = set(ADDON_DELEGATION_RE.findall(ct_script))
+    if len(slugs) != 1:
+        return None
+    return slugs.pop()
 
 
 def _unquoted(line: str) -> str:

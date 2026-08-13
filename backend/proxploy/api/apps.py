@@ -15,6 +15,7 @@ from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User
 from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
+from proxploy.services.catalog import pinned_payload_script
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
@@ -240,7 +241,7 @@ def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
     entry = db.query(CatalogEntry).filter_by(slug=app_row.catalog_slug).one_or_none()
     if entry is None or not entry.raw:
         return None
-    upstream = entry.raw.get("install_script")
+    upstream = pinned_payload_script(entry)
     if upstream is None or upstream == pinned_content:
         return None
     diff = difflib.unified_diff(
@@ -336,10 +337,10 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
     if not entry.upstream_sha:
         raise HTTPException(409, f"{a.catalog_slug} has no pinned upstream commit; "
                                  f"refresh the catalog before reverting")
-    content = (entry.raw or {}).get("install_script")
+    content = pinned_payload_script(entry)
     if not content:
         raise HTTPException(409, f"{a.catalog_slug}'s catalog entry has no "
-                                 f"install_script to revert to")
+                                 f"pinned script to revert to")
     latest = (db.query(AppScript).filter_by(app_id=app_id)
              .order_by(AppScript.version.desc()).first())
     next_version = (latest.version + 1) if latest else 1

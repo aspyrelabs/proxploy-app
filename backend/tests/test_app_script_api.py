@@ -254,8 +254,8 @@ def test_revert_409s_when_the_catalog_entry_has_no_upstream_sha(client, csrf_hea
     assert "upstream commit" in r.text.lower()
 
 
-def test_revert_409s_when_the_catalog_entry_has_no_install_script(client, csrf_header,
-                                                                  bootstrap_admin):
+def test_revert_409s_when_the_catalog_entry_has_no_pinned_script(client, csrf_header,
+                                                                 bootstrap_admin):
     bootstrap_admin(client)
     from proxploy.models import CatalogEntry
     with client.app.state.sessionmaker() as db:
@@ -265,7 +265,7 @@ def test_revert_409s_when_the_catalog_entry_has_no_install_script(client, csrf_h
         db.commit()
     r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
     assert r.status_code == 409
-    assert "install_script" in r.text.lower()
+    assert "no pinned script to revert to" in r.text.lower()
 
 
 def test_revert_requires_admin(tmp_path, csrf_header, bootstrap_admin):
@@ -338,3 +338,82 @@ def test_an_operator_may_read_the_script_but_not_write_it(client, csrf_header,
     assert client.post(f"/api/v1/apps/{app_id}/script/revert",
                        json={"version": 1},
                        headers=csrf_header(client)).status_code == 403
+
+
+# --- the payload script is read whatever key upstream's shape lands under ---
+#
+# Five apps (coolify, dockge, dokploy, komodo, runtipi) delegate their
+# in-container step to tools/addon/<slug>.sh, so their pinned payload lives in
+# raw["addon_script"] rather than raw["install_script"]. Every reader of that
+# pair goes through services/catalog.py::pinned_payload_script; these pin the
+# two routes that read it.
+
+ADDON_PAYLOAD = "msg_info \"Installing via addon\"\n$STD docker compose up -d\n"
+
+
+def test_pinned_payload_script_reads_both_shapes():
+    from proxploy.models import CatalogEntry
+    from proxploy.services.catalog import pinned_payload_script
+
+    normal = CatalogEntry(slug="redis", raw={"install_script": "a"})
+    addon = CatalogEntry(slug="dockge", raw={"ct_script": "x",
+                                             "addon_script": ADDON_PAYLOAD})
+    assert pinned_payload_script(normal) == "a"
+    assert pinned_payload_script(addon) == ADDON_PAYLOAD
+    # install_script wins when both are present: the more specific key.
+    both = CatalogEntry(slug="x", raw={"install_script": "a",
+                                       "addon_script": ADDON_PAYLOAD})
+    assert pinned_payload_script(both) == "a"
+    # Nothing pinned yet stays None, which is what the callers branch on.
+    assert pinned_payload_script(CatalogEntry(slug="y", raw=None)) is None
+    assert pinned_payload_script(CatalogEntry(slug="z", raw={})) is None
+    assert pinned_payload_script(
+        CatalogEntry(slug="w", raw={"install_script": ""})) is None
+
+
+def test_revert_pins_the_addon_script_when_that_is_the_payload(client, csrf_header,
+                                                               bootstrap_admin):
+    """Without this the route 409s "no pinned script to revert to" for an app
+    whose script we have sitting right there."""
+    import hashlib
+
+    from proxploy.models import CatalogEntry
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db, content="edited by hand\n").id
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha="c" * 40,
+                            raw={"ct_script": "...", "addon_script": ADDON_PAYLOAD}))
+        db.commit()
+
+    r = client.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(client))
+
+    assert r.status_code == 200, r.text
+    with client.app.state.sessionmaker() as db:
+        latest = (db.query(AppScript).filter_by(app_id=app_id)
+                  .order_by(AppScript.version.desc()).first())
+        assert latest.content == ADDON_PAYLOAD
+        assert latest.content_sha256 == hashlib.sha256(
+            ADDON_PAYLOAD.encode()).hexdigest()
+        assert latest.source == "upstream"
+
+
+def test_the_config_tab_diffs_against_the_addon_script_too(client, csrf_header,
+                                                           bootstrap_admin):
+    """_diff_vs_upstream compares the pinned app_scripts row against the
+    catalog's current payload. Reading only install_script meant no diff was
+    ever shown for these apps, which reads as "no drift" rather than as "we
+    did not look"."""
+    from proxploy.models import CatalogEntry
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        app_id = _seed_app_with_script(db, content="pinned old\n").id
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True,
+                            upstream_sha="c" * 40,
+                            raw={"ct_script": "...", "addon_script": ADDON_PAYLOAD}))
+        db.commit()
+
+    body = client.get(f"/api/v1/apps/{app_id}/script").json()
+
+    assert body["diff_vs_upstream"] is not None
+    assert "docker compose up -d" in body["diff_vs_upstream"]

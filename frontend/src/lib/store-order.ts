@@ -77,34 +77,3 @@ export function sortEntries(rows: readonly CatalogRow[], sort: StoreSort): Catal
     return av < bv ? 1 : -1    // descending
   })
 }
-
-/** The one band the card shows. A tier list of one, deliberately: a marker on
- *  a quarter of the grid is decoration, a marker on a tenth is information. */
-export type PopularityBand = 'top10'
-
-/**
- * The 90th percentile of the popularity values actually present, computed from
- * the corpus rather than hardcoded.
- *
- * A fixed threshold would be a claim with a shelf life: these are cumulative
- * upstream install counts that only ever grow, so any number baked in today
- * turns "Top 10%" into a lie about a different population later. Measured
- * spread at the time of writing, over 556 store-visible ct rows: median ~1001,
- * p90 ~9186, max 126196 (docker). Nulls are excluded from the population
- * rather than counted as zero, so they cannot drag the threshold down.
- */
-export function popularityThreshold(rows: readonly CatalogRow[]): number | null {
-  const values = rows.map((r) => r.popularity).filter((p): p is number => p != null)
-  if (values.length === 0) return null
-  values.sort((a, b) => a - b)
-  return values[Math.floor(values.length * 0.9)] ?? null
-}
-
-/** Null popularity gets NO band, the same rule the tag chips follow for their
- *  own nulls: an app nobody has measured is not an unpopular app. */
-export function popularityBand(
-  popularity: number | null, threshold: number | null,
-): PopularityBand | null {
-  if (popularity == null || threshold == null) return null
-  return popularity >= threshold ? 'top10' : null
-}

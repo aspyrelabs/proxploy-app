@@ -8,9 +8,11 @@ import { useEntitlements } from '../api/hooks'
 import type { AppRow } from '../api/hooks'
 import { TERMINAL, useJob } from '../api/jobs'
 import { InstallDialog } from '../components/InstallDialog'
+import { StoreDetailContent } from '../components/StoreDetailContent'
 import { StoreCard } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { Dialog } from '../components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import {
   Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
@@ -21,7 +23,7 @@ import {
 import { Progress, ProgressLabel, ProgressValue } from '../components/ui/progress'
 import { fmtUptime } from '../lib/format'
 import {
-  DEFAULT_SORT, STORE_SORTS, isStoreSort, popularityBand, popularityThreshold, sortEntries,
+  DEFAULT_SORT, STORE_SORTS, isStoreSort, sortEntries,
 } from '../lib/store-order'
 import type { StoreSort } from '../lib/store-order'
 import { shellRoute } from './shell'
@@ -31,6 +33,13 @@ import { shellRoute } from './shell'
 // validateSearch), so the common case keeps a clean /store link.
 const PAGE_SIZES = [15, 25, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 25
+
+/** The popup's title. Read off the list the grid already has rather than
+ *  waiting on the detail fetch, so the dialog has a name from the moment it
+ *  opens instead of flashing the slug and then correcting itself. */
+function entryName(entries: CatalogRow[] | undefined, slug: string): string {
+  return entries?.find((e) => e.slug === slug)?.name ?? slug
+}
 
 /** The router's own parse yields a number, a hand-typed URL yields a string,
  *  and anything else is not a number at all. */
@@ -56,9 +65,9 @@ function toPageSize(v: unknown): number | undefined {
 // emulate by hand. The virtualizer earned its keep when this rendered all
 // ~556 LXC entries at once; a page is at most 100 cards, so the DOM cost is
 // bounded by the page size and the measurement plumbing is just overhead.
-function StoreGrid({ entries, installedSlugs, onInstall, popularThreshold }: {
+function StoreGrid({ entries, installedSlugs, onInstall, onOpenDetail }: {
   entries: CatalogRow[]; installedSlugs: Set<string>; onInstall: (slug: string) => void
-  popularThreshold: number | null
+  onOpenDetail: (slug: string) => void
 }) {
   /**
    * ONE auto-fill rule, no hand-written breakpoints, anchored so a 1080p
@@ -90,8 +99,7 @@ function StoreGrid({ entries, installedSlugs, onInstall, popularThreshold }: {
     <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
       {entries.map((e) => (
         <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
-          band={popularityBand(e.popularity, popularThreshold)}
-          onInstall={onInstall} />
+          onOpenDetail={onOpenDetail} onInstall={onInstall} />
       ))}
     </div>
   )
@@ -102,6 +110,9 @@ export function StorePage() {
     { category?: string; page?: number; pageSize?: number; sort?: StoreSort }
   const navigate = useNavigate()
   const [installing, setInstalling] = useState<string | null>(null)
+  // The detail popup. Same shape as `installing` above, and deliberately
+  // never open at the same time: see the handoff in the Dialog below.
+  const [detailSlug, setDetailSlug] = useState<string | null>(null)
   const gridTop = useRef<HTMLDivElement>(null)
   // The Store is LXC-only (catalog expansion plan: non-LXC entries stay in
   // the catalog table, tagged by type, and never render here), so this
@@ -177,12 +188,6 @@ export function StorePage() {
   // order. NULLS LAST lives in sortEntries; see lib/store-order.ts for why
   // this is client-side at all.
   const ordered = useMemo(() => sortEntries(filtered, sort), [filtered, sort])
-
-  // The percentile is computed over the whole ct corpus, not the filtered
-  // view: a claim of "top 10%" has to mean the same thing on every card, and
-  // recomputing it per filter would let a category chip promote a card into a
-  // band it is not in.
-  const popularThreshold = useMemo(() => popularityThreshold(entries ?? []), [entries])
 
   const setSearch = (patch: Partial<typeof search>) =>
     navigate({ to: '/store' as never, search: { ...search, ...patch } as never, replace: true })
@@ -357,7 +362,7 @@ export function StorePage() {
         {() => (
           <>
             <StoreGrid entries={pageEntries} installedSlugs={installedSlugs}
-                      popularThreshold={popularThreshold}
+                      onOpenDetail={(slug) => setDetailSlug(slug)}
                       onInstall={(slug) => setInstalling(slug)} />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
@@ -409,6 +414,27 @@ export function StorePage() {
           </>
         )}
       </QueryState>
+
+      {/* "Read more" opens the detail content HERE, in a dialog, rather than
+          navigating. The same component backs routes/store-detail.tsx, so a
+          palette result or a pasted /store/<slug> link still renders the page
+          and the two can never drift apart.
+
+          Install inside the popup CLOSES the popup and then opens
+          InstallDialog. Sequential, never nested: InstallDialog is itself a
+          Dialog, so stacking them would mount two overlays with two focus
+          traps, and would put two buttons named "Install" on screen at once,
+          which e2e/journey.spec.ts explicitly scopes around. Exactly one
+          dialog is mounted at any moment. */}
+      {detailSlug && (
+        <Dialog title={entryName(entries, detailSlug)} width={720}
+                onClose={() => setDetailSlug(null)}>
+          <StoreDetailContent slug={detailSlug} onInstall={(slug) => {
+            setDetailSlug(null)
+            setInstalling(slug)
+          }} />
+        </Dialog>
+      )}
 
       {installing && (
         <InstallDialog slug={installing} onClose={() => setInstalling(null)} />
