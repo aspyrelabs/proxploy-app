@@ -1,0 +1,6 @@
+/* The app's real stylesheet, plus explicit source globs so Tailwind generates
+   every utility this harness needs: the ones StoreCard uses (src/) and the
+   ones the harness page itself uses to reproduce the shell lane. */
+@import "../../src/styles/tokens.css";
+@source "../../src";
+@source ".";

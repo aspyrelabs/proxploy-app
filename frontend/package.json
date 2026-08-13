@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "harness:cards": "vite build --config e2e/harness/vite.config.ts && node ../.claude/skills/run-proxploy/driver.mjs overflow e2e/harness/dist .rounded-card 1280,1920,2560,3840,375"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

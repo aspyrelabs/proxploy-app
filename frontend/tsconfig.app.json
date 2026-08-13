@@ -28,5 +28,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  // e2e/harness is typechecked but never bundled: the app entry
+  // (frontend/index.html) does not import it. Including it here is what
+  // makes the geometry harness fail LOUDLY if StoreCard's props change
+  // under it, instead of quietly rendering nothing and reporting a clean
+  // run.
+  "include": ["src", "e2e/harness"]
 }

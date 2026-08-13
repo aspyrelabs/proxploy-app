@@ -7,11 +7,15 @@
 //   node .claude/skills/run-proxploy/driver.mjs shot /tmp/x.png [/onboarding]
 //   node .claude/skills/run-proxploy/driver.mjs measure aside 'aside svg' [/path]
 //   node .claude/skills/run-proxploy/driver.mjs text [/path]
+//   node .claude/skills/run-proxploy/driver.mjs overflow <dir-or-url> <sel> [w,w]
 //
 // Deliberately imports Playwright by absolute path out of frontend/: this file
 // sits in .claude/skills/, which has no node_modules of its own and is not part
 // of any package. A bare `import 'playwright'` does not resolve from here.
 
+import { createServer } from 'node:http'
+import { createReadStream, statSync } from 'node:fs'
+import { extname } from 'node:path'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -94,7 +98,102 @@ async function text() {
   })
 }
 
-const commands = { smoke, shot, measure, text }
+/**
+ * Fixed-height overflow check, across viewport widths, for an ARBITRARY url.
+ *
+ * `measure` above cannot do this job and should not be bent into it: it
+ * prepends WEB to a path (so it only reaches the dev app, which is behind
+ * login), it takes one bounding box per selector (so it cannot compare a row
+ * of cards), and it runs at a single fixed viewport. This takes a full url
+ * (file:// included), measures EVERY match, and reports the two properties a
+ * fixed-height component has to satisfy:
+ *
+ *   scrollHeight > clientHeight   content overflows its own box, which is the
+ *                                 failure that shipped as text-over-text
+ *   offsetHeight all equal        the other half of what a fixed height buys
+ *
+ * The label comes from the nearest [data-state] ancestor, so output names the
+ * state rather than an index.
+ */
+const MIME = {
+  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.json': 'application/json',
+  '.svg': 'image/svg+xml', '.png': 'image/png',
+}
+
+/**
+ * Serve a directory on an EPHEMERAL port, and hand back its url.
+ *
+ * A built page cannot simply be opened over file://: its entry is an ES
+ * module, and Chromium refuses module and stylesheet loads from a null origin
+ * under CORS, so the page renders blank and every measurement silently comes
+ * back empty. Port 0 lets the OS pick, which is also what keeps this away from
+ * the dev servers on 5173 and 8000.
+ */
+function serveDir(dir) {
+  const server = createServer((req, res) => {
+    const rel = decodeURIComponent(req.url.split('?')[0])
+    const file = resolve(dir, '.' + (rel === '/' ? '/index.html' : rel))
+    if (!file.startsWith(dir)) { res.writeHead(403).end(); return }
+    try {
+      statSync(file)
+    } catch {
+      res.writeHead(404).end(); return
+    }
+    res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' })
+    createReadStream(file).pipe(res)
+  })
+  return new Promise(ok => {
+    server.listen(0, '127.0.0.1', () =>
+      ok({ url: `http://127.0.0.1:${server.address().port}/`, close: () => server.close() }))
+  })
+}
+
+async function overflow() {
+  const [target, selector = '.rounded-card', widths = '1280,1920,2560,3840,375'] = args
+  if (!target) { console.error('usage: overflow <dir-or-url> [selector] [w,w,w]'); process.exit(2) }
+  const served = target.startsWith('http') ? null : await serveDir(resolve(target))
+  const url = served ? served.url : target
+  const browser = await chromium.launch()
+  try {
+    const out = {}
+    for (const w of widths.split(',').map(Number)) {
+      const page = await browser.newPage({ viewport: { width: w, height: 1200 } })
+      await page.goto(url, { waitUntil: 'networkidle' })
+      // Webfonts change line boxes; measuring before they land measures the
+      // fallback font instead of the real one.
+      await page.evaluate(() => document.fonts.ready)
+      out[w] = await page.evaluate(sel => {
+        const cards = [...document.querySelectorAll(sel)]
+        const lane = document.querySelector('main')
+        return {
+          lane: lane ? Math.round(lane.getBoundingClientRect().width) : null,
+          columns: new Set(cards.map(c => Math.round(c.getBoundingClientRect().x))).size,
+          cards: cards.map(el => ({
+            state: el.closest('[data-state]')?.getAttribute('data-state') ?? '?',
+            offsetHeight: el.offsetHeight,
+            clientHeight: el.clientHeight,
+            scrollHeight: el.scrollHeight,
+            // scrollHeight > clientHeight is the failure. It is not a headroom
+            // gauge though: a flex-1 spacer child grows to fill, so the two
+            // stay equal right up until content overflows and then jump. The
+            // spacer's OWN height is the number that shrinks toward zero, so
+            // that is what is reported as slack, and it is what to watch.
+            overflow: Math.max(0, el.scrollHeight - el.clientHeight),
+            slack: el.querySelector(':scope > .flex-1')?.offsetHeight ?? null,
+          })),
+        }
+      }, selector)
+      await page.close()
+    }
+    console.log(JSON.stringify(out, null, 2))
+  } finally {
+    await browser.close()
+    served?.close()
+  }
+}
+
+const commands = { smoke, shot, measure, text, overflow }
 
 if (!commands[cmd]) {
   console.error(`usage: driver.mjs <${Object.keys(commands).join('|')}> [args]`)
