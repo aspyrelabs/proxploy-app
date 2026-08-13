@@ -131,9 +131,31 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # TERM must be a real terminal type. A non-PTY ssh session lands on
     # TERM=dumb, where build.func's early `clear` exits 1 and its error trap
     # aborts the run ("in line 1018: exit code 1").
-    env = {"TERM": "xterm", "mode": "default", "PHS_SILENT": "1"}
+    #
+    # `mode` is also `generated`, not `default`. Both branches of build.func's
+    # case statement are byte-identical apart from METHOD (which reaches
+    # nothing but the telemetry payload) EXCEPT that `default` also runs
+    # `defaults_target="$(ensure_global_default_vars_file)"`, and that is what
+    # reaches ensure_storage_selection_for_vars_file at build.func:3533. On a
+    # host with two or more pools for a content type that function calls
+    # select_storage, whiptail cannot run without a TTY, `|| exit_script`
+    # fires, and exit_script does `exit 0`: a container is never created and
+    # the script reports success. This is the same failure shape as the
+    # uppercase-MODE bug documented above, in a second place. Do not revert
+    # this to `mode=default`: that silently reintroduces the exit 0.
+    env = {"TERM": "xterm", "mode": "generated", "PHS_SILENT": "1"}
     for key, val in overrides.items():
         env[f"var_{key}"] = str(val)
+
+    # Sent on EVERY install, Default included. build.func only auto-picks when
+    # exactly one candidate exists for the content type; with two or more it
+    # asks, and we can never let it ask. See resolve_storage_pools: it refuses
+    # rather than picking when the operator has not chosen.
+    container_pool, template_pool = await asyncio.to_thread(
+        resolve_storage_pools, app, host_id, overrides)
+    env["var_container_storage"] = container_pool
+    env["var_template_storage"] = template_pool
+
     # Set last so it always wins over an `overrides` entry: the App row below
     # records this ctid as fact, so the container has to actually land there.
     # misc/build.func honours it (`local requested_id="${var_ctid:-$NEXTID}"`);

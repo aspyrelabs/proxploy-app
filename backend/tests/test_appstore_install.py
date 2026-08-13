@@ -39,6 +39,20 @@ def _ssh_that_builds(fake_pve, ctid, *, creates=True, exit_status=0,
         on_create_process=_on_create_process))
 
 
+def _seed_single_storage(pve, node="pve1"):
+    """One candidate per content type: matches every real single-pool dev
+    host today, so resolve_storage_pools takes its "sole candidate" branch
+    instead of refusing. Task 4 made run_install call resolve_storage_pools
+    on EVERY install, so any test whose scenario reaches the SSH step now
+    needs a storage list here or it fails on "host has no storage carrying
+    'rootdir'" before ever composing a command.
+    """
+    pve.storages_by_node[node] = [
+        {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+        {"storage": "local-lvm", "content": "rootdir", "enabled": 1, "active": 1},
+    ]
+
+
 def _seed_job(db, job_id=1):
     # run_install is called directly here (not via backend.enqueue), but
     # ctx.log/ctx.progress still write job_events rows with a real FK to
@@ -80,6 +94,7 @@ def _seed_installable_host(app, db, raw=None):
 def test_install_pins_script_and_creates_app_row(tmp_path):
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host = seed_host_row(db)
@@ -121,6 +136,7 @@ def test_install_sends_var_ctid_and_overrides_inline_on_the_command(tmp_path):
     """
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host_id = _seed_installable_host(app, db)
@@ -154,8 +170,16 @@ def test_install_sends_var_ctid_and_overrides_inline_on_the_command(tmp_path):
         # never MODE, and a TERM=dumb session fails its `clear`. With the old
         # uppercase spelling this assertion passed while every real install
         # showed a menu and quietly did nothing.
-        assert cmd.startswith("TERM=xterm mode=default PHS_SILENT=1 "
-                              "var_cpu=2 var_ram=2048 var_ctid=150 bash -c ")
+        #
+        # `mode` is `generated`, not `default`: `default` is the one branch
+        # that reaches build.func's interactive storage picker, and both
+        # storage variables are sent on every install, never left for
+        # build.func to auto-pick or ask about.
+        assert cmd.startswith("TERM=xterm mode=generated PHS_SILENT=1 "
+                              "var_cpu=2 var_ram=2048 "
+                              "var_container_storage=local-lvm "
+                              "var_template_storage=local "
+                              "var_ctid=150 bash -c ")
         # Critical #2: pinned commit, never the moving `main` ref.
         assert (f"https://raw.githubusercontent.com/community-scripts/ProxmoxVE/"
                 f"{SHA}/ct/redis.sh") in cmd
@@ -208,6 +232,7 @@ def test_install_refuses_an_unsupported_catalog_entry(tmp_path):
 def test_install_fails_without_an_enrolled_ssh_key(tmp_path):
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host = seed_host_row(db)
@@ -240,6 +265,7 @@ def test_install_fails_when_the_script_exits_zero_without_building_the_ct(tmp_pa
     """
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host_id = _seed_installable_host(app, db)
@@ -263,6 +289,7 @@ def test_install_refuses_a_ctid_that_already_exists(tmp_path):
     container Proxploy does not own, and then file an App row claiming it."""
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         pve.add_ct(150, node="pve1", name="somebody-elses", status="running")
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
@@ -298,6 +325,7 @@ ADDON_PAYLOAD = "msg_info \"Installing via addon\"\n$STD docker compose up -d\n"
 def test_install_records_the_addon_script_when_that_is_the_payload(tmp_path):
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host_id = _seed_installable_host(
@@ -326,6 +354,7 @@ def test_install_still_records_a_normal_install_script_unchanged(tmp_path):
     wins if both keys are somehow present."""
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host_id = _seed_installable_host(
@@ -353,6 +382,7 @@ def test_the_executed_command_is_the_ct_script_either_way(tmp_path):
     runtime. We never curl the addon script ourselves."""
     async def scenario():
         pve = FakePVE()
+        _seed_single_storage(pve)
         app = make_job_app(tmp_path, fake=pve)
         with app.state.sessionmaker() as db:
             host_id = _seed_installable_host(

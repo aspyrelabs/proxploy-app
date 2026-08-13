@@ -1,16 +1,22 @@
 """Task 1: _storage_pools resolves the enabled and active pools on a host's
 node that carry a given content type, the API-side equivalent of build.func's
 `pvesm status -content "$content"` picker that Tasks 3/4 will use to avoid
-that picker going interactive on a host with more than one candidate pool."""
+that picker going interactive on a host with more than one candidate pool.
+
+Task 4 adds the two tests at the bottom of this file: they drive run_install
+itself (not just resolve_storage_pools) to prove the command that actually
+reaches the wire carries mode=generated and both storage variables."""
 import asyncio
 
 import pytest
 
-from proxploy.jobs import JobFailed
+from proxploy.jobs import JobBackend, JobContext, JobFailed
 from proxploy.models import Host
-from proxploy.services.appstore import _storage_pools, resolve_storage_pools
+from proxploy.services.appstore import _storage_pools, resolve_storage_pools, run_install
 from tests.fakes.pve import FakePVE
+from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
 from tests.support import make_db, make_job_app, seed_host_row
+from tests.test_appstore_install import _seed_installable_host
 
 
 def _seed_host_with_token(app, db, **host_kwargs):
@@ -209,5 +215,80 @@ def test_supplied_pool_invalid_for_the_node_is_refused(tmp_path):
         with pytest.raises(JobFailed) as e:
             resolve_storage_pools(app, host_id, {"container_storage": "nope"})
         assert "nope" in str(e.value)
+
+    asyncio.run(scenario())
+
+
+# --- Task 4: run_install itself must send mode=generated and both pools -----
+
+
+def _run_a_default_install(tmp_path, pve, *, ctid=150):
+    """Drives run_install exactly like test_appstore_install.py's own tests
+    do, and hands back the FakeSSHConnection so a test can read
+    `.last_command`. `pve.storages_by_node["pve1"]` must already be set by
+    the caller before this runs.
+    """
+    app = make_job_app(tmp_path, fake=pve)
+    with app.state.sessionmaker() as db:
+        host_id = _seed_installable_host(app, db)
+
+    def _on_create_process(command):
+        pve.add_ct(ctid, node="pve1", name="redis", status="running")
+
+    fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=[],
+                             stderr_lines=[], exit_status=0,
+                             on_create_process=_on_create_process)
+    app.state.ssh_connect_factory = make_fake_connect_factory(fake)
+
+    ctx = JobContext(JobBackend(app), job_id=1)
+    return app, host_id, ctx, fake
+
+
+def test_default_install_with_no_user_input_sends_both_storage_vars(tmp_path):
+    """NAMED REGRESSION TEST. The future change this exists to stop is a
+    tidy-up that omits storage when the operator did not touch it. That looks
+    like sending less noise, reintroduces build.func's interactive picker, and
+    fails ONLY on hosts with two or more candidates, so it passes on any
+    single-storage development box.
+    """
+    async def scenario():
+        pve = FakePVE()
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "local-lvm", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+        _, host_id, ctx, fake = _run_a_default_install(tmp_path, pve)
+
+        await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                "name": "Redis", "ctid": 150, "overrides": {}})
+
+        cmd = fake.last_command
+        assert "var_container_storage=local-lvm" in cmd
+        assert "var_template_storage=local" in cmd
+
+    asyncio.run(scenario())
+
+
+def test_mode_is_generated_never_default(tmp_path):
+    """mode=default is the ONLY branch that runs
+    defaults_target=$(ensure_global_default_vars_file), which is what reaches
+    the interactive storage picker at build.func:3533. The generated branch is
+    byte-identical apart from METHOD, which only reaches telemetry. Reverting
+    this silently reintroduces the silent exit 0.
+    """
+    async def scenario():
+        pve = FakePVE()
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "local-lvm", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+        _, host_id, ctx, fake = _run_a_default_install(tmp_path, pve)
+
+        await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                "name": "Redis", "ctid": 150, "overrides": {}})
+
+        cmd = fake.last_command
+        assert "mode=generated" in cmd
+        assert "mode=default" not in cmd
 
     asyncio.run(scenario())
