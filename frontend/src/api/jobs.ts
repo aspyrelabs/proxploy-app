@@ -41,6 +41,37 @@ export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
   })
 }
 
+/**
+ * One job by id, kept live off the plumbing that already exists.
+ *
+ * The global SSE stream carries a `job` delta for every state change AND for
+ * every ctx.progress() call (backend/proxploy/jobs/backend.py::JobContext.
+ * progress fans out to both the per-job stream and the global bus), and
+ * api/live.ts::applyJob patches the ['jobs', id] entry this hook creates,
+ * detail shape included (tests/jobs.test.ts covers that patch). So a caller
+ * watching a job it just enqueued needs no EventSource of its own:
+ * JobLog's per-job stream exists for the transcript, and a second connection
+ * for a number already arriving on the shared one would be a duplicate
+ * subscription, not a second source of truth.
+ *
+ * The 2s poll is the fallback LiveProvider documents ("query polling is the
+ * fallback if SSE dies"), same cadence as useRunningJobOfKind. It stops
+ * itself once the job is terminal, so a finished job costs nothing, and
+ * `retry: false` means a job that cannot be read (404, a revoked
+ * jobs.history entitlement) fails fast into isError rather than leaving a
+ * caller's "still running" state hanging for three retries.
+ */
+export function useJob(id: number | null) {
+  return useQuery({
+    queryKey: ['jobs', id],
+    enabled: id != null,
+    retry: false,
+    refetchInterval: (q) =>
+      q.state.data && TERMINAL.includes(q.state.data.status) ? false : 2_000,
+    queryFn: () => api<JobRow>(`/jobs/${id}`),
+  })
+}
+
 /** Archived transcript. The live tail is the SSE stream in JobLog. */
 export function useJobEvents(id: number | null) {
   return useQuery({

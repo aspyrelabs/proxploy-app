@@ -259,9 +259,46 @@ class CatalogEntry(TimestampMixin, Base):
     # turnkey, mechanical per the repo's own layout (services/catalog.py's
     # discover_tree). Only "ct" is ever installable or shown in the Store.
     entry_type: Mapped[str] = mapped_column(Text, nullable=False, default="ct")
-    # Set only by the best-effort community-scripts.org enrichment pass
-    # (services/community_scripts_scrape.py); None if never enriched.
-    scraped_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Provenance for the presentation-only fields (name, description,
+    # category, icon_url, website, docs_url) that
+    # services/catalog_metadata.py syncs from upstream. "pocketbase" for the
+    # live source, "archive" for the frozen cold-start fallback.
+    #
+    # Both timestamps null is a NORMAL state, not an error: it means no
+    # upstream record matched this slug, which is true for 37 of our ct/ rows
+    # (mostly alpine-* variants plus mysql). Such a row keeps its
+    # discovery-derived name and its catalog_categories.py heuristic category
+    # and simply renders without a description or icon.
+    metadata_source: Mapped[str | None] = mapped_column(Text)
+    metadata_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Upstream's own last-modified stamp for the matched record, naive UTC.
+    # Distinct from metadata_synced_at, which is when WE last read it.
+    upstream_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # How upstream's catalog answers for this slug, resolved by the metadata
+    # sync (services/catalog_metadata.py::resolve_upstream_state). Our
+    # discovery makes one row per ct/*.sh file; upstream's PocketBase is the
+    # catalog of what they consider an APP, and the two disagree in ways the
+    # Store has to render differently:
+    #
+    #   "listed"   matched a live upstream record. The normal case.
+    #   "delisted" upstream still HAS the record but flagged is_deleted, so it
+    #              keeps a real name/description/logo and stays installable;
+    #              the Store badges it as retired rather than hiding it.
+    #   "unlisted" no upstream record at all and not a variant: the script is
+    #              still in the repo but upstream dropped the app. Also badged.
+    #   "variant"  an alpine-<parent> row whose parent exists upstream and
+    #              which has no upstream record of its own, i.e. upstream
+    #              models it as an install METHOD of the parent app rather
+    #              than its own app. Kept in the catalog and installable, but
+    #              hidden from the Store grid so Syncthing is one card, not
+    #              two, one of them blank.
+    #
+    # NULL means never synced. This is deliberately NOT the `deprecated`
+    # column: that one is written nowhere and read nowhere, and overloading a
+    # boolean with four states would lose the distinction the badge needs.
+    # Visibility only: nothing here ever implies a type or an installability
+    # decision, both of which belong to discovery and the classifier.
+    upstream_state: Mapped[str | None] = mapped_column(Text)
 
 
 # --- Jobs & scheduling -----------------------------------------------------

@@ -210,7 +210,7 @@ def _upsert_skeleton(db, d: dict, sha: str) -> None:
         # sha rather than silently keep serving a stale classification.
         row.installable = None
         row.unsupported_reason = None
-        row.raw = None
+        row.raw = _keep_metadata(row, None)
     row.upstream_sha = sha
     row.synced_at = datetime.now(timezone.utc)
 
@@ -229,6 +229,38 @@ def parse_ct_script(content: str) -> dict:
 
 def _already_classified(row: CatalogEntry) -> bool:
     return row.installable is not None and row.raw is not None
+
+
+def _keep_metadata(row: CatalogEntry, new_raw: dict | None) -> dict | None:
+    """`raw` carries two independent payloads with two different lifecycles:
+    the pinned ct/install script pair this module fetches per upstream commit,
+    and the upstream record snapshot services/catalog_metadata.py writes under
+    "metadata" on its own 6-hourly schedule. Classification rewrites the
+    former, so it has to carry the latter through rather than blow it away on
+    every backlog pass and leave the snapshot alive only in the window between
+    a metadata sync and the next classification."""
+    snapshot = (row.raw or {}).get("metadata")
+    if snapshot is None:
+        return new_raw
+    return {**(new_raw or {}), "metadata": snapshot}
+
+
+def _apply_script_presentation(row: CatalogEntry, meta: dict) -> None:
+    """The ct script's own `APP="..."` and `# Source:` lines, applied only
+    where upstream metadata has not already spoken.
+
+    Presentation fields belong to services/catalog_metadata.py when a slug
+    matched an upstream record (the ownership split in the design doc), and
+    classification runs AFTER the metadata sync in a refresh, so writing these
+    unconditionally would quietly hand the last word back to the script parse
+    for every matched row. An unmatched row has no upstream record to defer
+    to, and `APP="Redis"` beats the slug-derived fallback name every time, so
+    it still gets the script's version.
+    """
+    if row.metadata_source is None:
+        if meta.get("name"):
+            row.name = meta["name"]
+        row.website = meta.get("website") or row.website
 
 
 def ensure_classified(db, slug: str) -> CatalogEntry | None:
@@ -262,20 +294,16 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
         # retry at the same commit is a no-op, and report it honestly rather
         # than crash the caller.
         meta = parse_ct_script(ct_resp.text)
-        if meta.get("name"):
-            row.name = meta["name"]
-        row.website = meta.get("website") or row.website
+        _apply_script_presentation(row, meta)
         row.installable = False
         row.unsupported_reason = "no install script found upstream"
-        row.raw = {"ct_script": ct_resp.text}
+        row.raw = _keep_metadata(row, {"ct_script": ct_resp.text})
         db.commit()
         return row
 
     meta = parse_ct_script(ct_resp.text)
     installable, reason = classify_install_feasibility(ct_resp.text, install_resp.text)
-    if meta.get("name"):
-        row.name = meta["name"]
-    row.website = meta.get("website") or row.website
+    _apply_script_presentation(row, meta)
     row.default_cpu = meta.get("default_cpu")
     row.default_ram_mb = meta.get("default_ram_mb")
     row.default_disk_gb = meta.get("default_disk_gb")
@@ -283,7 +311,8 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
     row.default_os_version = meta.get("default_os_version")
     row.installable = installable
     row.unsupported_reason = reason
-    row.raw = {"ct_script": ct_resp.text, "install_script": install_resp.text}
+    row.raw = _keep_metadata(row, {"ct_script": ct_resp.text,
+                                   "install_script": install_resp.text})
     db.commit()
     return row
 
@@ -327,31 +356,63 @@ async def classify_many(sessionmaker, slugs: list[str], concurrency: int = 8) ->
     return {"done": done, "failed": failed}
 
 
+# Phase boundaries for the refresh's progress bar. Weighted by real relative
+# cost, not split evenly, and emitted only where a phase genuinely ends: no
+# timers, no interpolation, so a bar that sits still is a phase that is still
+# working. Discovery (2 api.github.com calls plus a skeleton upsert for every
+# one of ~668 entries) and the metadata sync (one ~1.9 MB fetch, ~1.6 s
+# measured, plus ~616 matched upserts each writing a raw JSON snapshot) are
+# the two heavy phases and are close in cost, with discovery slightly ahead
+# because it writes every row rather than the matched subset. The last two
+# phases are DB-only and near-instant, so they share the final 15 points
+# instead of the half of the bar an even split would hand them.
+PCT_DISCOVERED = 45
+PCT_METADATA_SYNCED = 85
+PCT_UPDATES_MARKED = 95
+
+
 async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     from proxploy.services.appstore import mark_updates_available
-    from proxploy.services.community_scripts_scrape import (
-        apply_enrichment, fetch_enrichment,
-    )
+    from proxploy.services.catalog_metadata import sync_metadata
 
     app = ctx.backend.app
     with app.state.sessionmaker() as db:
         result = await asyncio.to_thread(run_discovery, db)
     ctx.log(f"discovered {result['total']} entries: {result['counts']}")
     ctx.log(f"pinned to upstream commit {result['upstream_sha']}")
+    ctx.progress(PCT_DISCOVERED)
 
-    # Best-effort enrichment (decision 1): an undocumented scrape of another
-    # site's internals. Wrapped so that a 403, a timeout, or a shape change
-    # never fails this job; the catalog is fully usable from discovery alone.
-    def _enrich() -> int:
+    # Upstream presentation metadata (names, descriptions, categories, icons):
+    # services/catalog_metadata.py, PocketBase with a cold-start-only fallback
+    # to the frozen frontend archive. Best-effort by design and wrapped twice
+    # over: sync_metadata already turns an upstream failure into an outcome
+    # dict rather than an exception, and this catch covers a genuine bug in
+    # it. Either way the catalog stays exactly as discovery left it, which is
+    # a usable store, and the job carries on to 100 rather than stalling here.
+    def _sync_metadata() -> dict:
         with app.state.sessionmaker() as db:
-            mapping = fetch_enrichment()
-            return apply_enrichment(db, mapping)
+            return sync_metadata(db)
 
     try:
-        enriched = await asyncio.to_thread(_enrich)
-        ctx.log(f"community-scripts.org enrichment applied to {enriched} entries")
-    except Exception as e:  # noqa: BLE001 - see module docstring: best-effort only
-        ctx.log(f"community-scripts.org enrichment skipped: {e}", stream="stderr")
+        meta = await asyncio.to_thread(_sync_metadata)
+    except Exception as e:  # noqa: BLE001 - metadata never fails a refresh
+        meta = {"ok": False, "source": None, "matched": 0, "unmatched": 0,
+                "states": {}, "reason": str(e)}
+    if meta["ok"]:
+        # Counts, once, not per slug: an unmatched row in either direction is
+        # the steady state (37 of our ct/ rows, 85 upstream slugs), so naming
+        # them individually would be a wall of noise describing normality.
+        # The upstream_state tally rides along for the same reason it exists:
+        # a jump in "unlisted" or "variant" is the signal that upstream
+        # reshaped its catalog, and it is invisible in matched/unmatched.
+        states = ", ".join(f"{n} {s}" for s, n in sorted(meta.get("states", {}).items()))
+        ctx.log(f"metadata synced from {meta['source']}: {meta['matched']} matched, "
+                f"{meta['unmatched']} unmatched" + (f" ({states})" if states else ""))
+    else:
+        ctx.log(f"metadata sync skipped, kept the last good rows: {meta['reason']}",
+                stream="stderr")
+    result["metadata"] = meta
+    ctx.progress(PCT_METADATA_SYNCED)
 
     # A refresh is the ONLY moment `update_available` can change, so it is the
     # only place this has to run: no separate sweep, no separate schedule.
@@ -365,6 +426,7 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"{counts['marked']} app(s) have an update available")
     if counts["marked"] or counts["cleared"]:
         app.state.bus.publish("resource", {"type": "app", "change": "list"})
+    ctx.progress(PCT_UPDATES_MARKED)
 
     # Low-priority background pass (decision 2): queued, not awaited. The
     # store is already usable (names, types, categories from discovery

@@ -77,13 +77,19 @@ body {
 @keyframes pp-in-fwd    { from { opacity: 0; transform: translateX(8px) } to { opacity: 1; transform: none } }
 @keyframes pp-in-back   { from { opacity: 0; transform: translateX(-8px) } to { opacity: 1; transform: none } }
 
+/* ui/progress.tsx's indeterminate mode: a sliver that sweeps the track,
+   the linear equivalent of ui/loading.tsx's spinning quarter arc. It claims
+   no figure, only that something is still happening. */
+@keyframes pp-progress-sweep { from { transform: translateX(-100%) } to { transform: translateX(300%) } }
+
 .pp-rail-fill { animation: pp-rail-fill .35s ease-out both }
 .pp-tick      { animation: pp-tick .25s cubic-bezier(.2,.9,.3,1.4) both; display: inline-block }
 .pp-in-fwd    { animation: pp-in-fwd .22s ease-out both }
 .pp-in-back   { animation: pp-in-back .22s ease-out both }
+.pp-progress-sweep { animation: pp-progress-sweep 1.4s ease-in-out infinite }
 
 @media (prefers-reduced-motion: reduce) {
-  .pp-rail-fill, .pp-tick, .pp-in-fwd, .pp-in-back { animation: none }
+  .pp-rail-fill, .pp-tick, .pp-in-fwd, .pp-in-back, .pp-progress-sweep { animation: none }
 }
 
 /* ThemeToggle's circular wipe (components/ThemeToggle.tsx), ported from

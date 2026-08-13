@@ -6,16 +6,43 @@ import { api } from './client'
 // Store). "ct" is the only type the Store ever requests.
 export type CatalogEntryType = 'ct' | 'vm' | 'pve' | 'addon' | 'turnkey'
 
+/**
+ * How this slug stands in upstream's own catalog, which is a separate question
+ * from whether we can install it.
+ *
+ *  - "listed"   upstream carries it today. The ordinary case.
+ *  - "delisted" upstream soft-deleted it, so its metadata still arrives and
+ *               the card is fully populated.
+ *  - "unlisted" upstream dropped it entirely, so there is no metadata to have
+ *               and the card renders bare.
+ *  - "variant"  not an app of its own: the install script implements an
+ *               existing app's Alpine variant (ct/alpine-syncthing.sh IS
+ *               Syncthing's alpine install_method), so upstream shows one
+ *               card where we discovered two. The store grid never receives
+ *               these: list_catalog excludes them server-side for
+ *               entry_type=ct, which is why nothing here filters on it. The
+ *               value is typed because the API can still return it on other
+ *               routes, not because the Store acts on it.
+ *  - null       not yet classified, e.g. rows written before the metadata
+ *               sync first ran.
+ */
+export type UpstreamState = 'listed' | 'delisted' | 'unlisted' | 'variant' | null
+
 export type CatalogRow = {
   slug: string; name: string | null; category: string | null; type: CatalogEntryType
   description: string | null; icon_url: string | null; popularity: number | null
-  website: string | null
+  // Both come from upstream metadata now (its `website` and `documentation`).
+  // Null on either is normal and ambiguous by design: the row matched no
+  // upstream record, or upstream simply has no such link for it. Nothing
+  // renders docs_url yet; it is typed because the API serves it.
+  website: string | null; docs_url: string | null
   default_cpu: number | null; default_ram_mb: number | null; default_disk_gb: number | null
   default_os: string | null; default_os_version: string | null
   // Tri-state: null means "discovered, not yet classified" (catalog expansion
   // plan decision 2 - classification is lazy, on card-open or install-attempt,
   // or the low-priority background pass, never during discovery/refresh).
   installable: boolean | null; unsupported_reason: string | null
+  upstream_state: UpstreamState
   synced_at: string | null
 }
 

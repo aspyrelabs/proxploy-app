@@ -11,6 +11,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
+from sqlalchemy import or_
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
@@ -41,7 +42,24 @@ def _serialize(r: CatalogEntry) -> dict:
     return {
         "slug": r.slug, "name": r.name, "category": r.category, "type": r.entry_type,
         "description": r.description, "icon_url": r.icon_url,
-        "popularity": r.popularity, "website": r.website,
+        # `docs_url` rides alongside `website` because they are the same kind
+        # of thing and now come from the same place (upstream's `website` and
+        # `documentation`, services/catalog_metadata.py). Serving one and
+        # withholding the other would mean a card that links the vendor site
+        # while silently sitting on the docs link for the ~616 matched rows
+        # that have one. The provenance columns (metadata_source,
+        # metadata_synced_at, upstream_updated_at) deliberately stay
+        # unserved: they are sync bookkeeping, and the freshness signal the UI
+        # actually shows already has its own route in /catalog/status.
+        "popularity": r.popularity, "website": r.website, "docs_url": r.docs_url,
+        # "listed" | "delisted" | "unlisted" | "variant" | null. The one
+        # metadata-sync column that IS served, because it changes what the
+        # card says rather than how fresh it is: "delisted" and "unlisted"
+        # both mean upstream retired the app while the script is still in the
+        # repo, which the Store badges. "variant" rows never reach the grid
+        # (see list_catalog), so the value is only ever visible on the
+        # unfiltered full-catalog call and on a direct by-slug lookup.
+        "upstream_state": r.upstream_state,
         "default_cpu": r.default_cpu, "default_ram_mb": r.default_ram_mb,
         "default_disk_gb": r.default_disk_gb, "default_os": r.default_os,
         "default_os_version": r.default_os_version,
@@ -57,7 +75,13 @@ def list_catalog(category: str | None = None, q: str | None = None,
                  db=Depends(get_db), user: User = Depends(_read)):
     """Backs both the Store grid (always `entry_type=ct`, decision: non-LXC
     entries never appear there) and, unfiltered, the full catalog table every
-    discovered entry lands in regardless of type."""
+    discovered entry lands in regardless of type.
+
+    Both surfaces are real, which is why the variant exclusion below hangs off
+    the `entry_type=ct` filter and not off the query as a whole: the grid must
+    not show 28 blank duplicate cards, and the full catalog table must still
+    account for every row discovery created.
+    """
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
@@ -65,6 +89,17 @@ def list_catalog(category: str | None = None, q: str | None = None,
         query = query.filter(CatalogEntry.name.ilike(f"%{q}%"))
     if entry_type:
         query = query.filter(CatalogEntry.entry_type == entry_type)
+        if entry_type == "ct":
+            # An alpine-<parent> row upstream models as an install METHOD of
+            # its parent app rather than as its own app
+            # (services/catalog_metadata.py::resolve_upstream_state). It stays
+            # a ct row and stays installable; it just is not a card, because
+            # upstream shows one Syncthing, not Syncthing plus a blank Alpine
+            # Syncthing. Written as an explicit NULL branch rather than `!=`:
+            # in SQL, `upstream_state != 'variant'` is NULL for a never-synced
+            # row, which would empty the entire Store on a fresh install.
+            query = query.filter(or_(CatalogEntry.upstream_state.is_(None),
+                                     CatalogEntry.upstream_state != "variant"))
     return [_serialize(r) for r in query.order_by(CatalogEntry.name).all()]
 
 

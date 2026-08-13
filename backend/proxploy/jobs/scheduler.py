@@ -220,7 +220,7 @@ def tick(app, now: datetime | None = None) -> list[dict]:
 # an auto-update window would never see a new upstream commit.
 SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Catalog refresh", "job_kind": "catalog.refresh",
-     "cron": "0 4 * * *", "timezone": "UTC", "params": {}},
+     "cron": "0 */6 * * *", "timezone": "UTC", "params": {}},
     {"name": "Metrics maintenance", "job_kind": "metrics.maintain",
      "cron": "7 * * * *", "timezone": "UTC", "params": {}},
 )

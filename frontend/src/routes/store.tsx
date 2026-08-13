@@ -7,10 +7,12 @@ import type { CatalogRow } from '../api/catalog'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import type { AppRow } from '../api/hooks'
+import { TERMINAL, useJob } from '../api/jobs'
 import { InstallDialog } from '../components/InstallDialog'
 import { StoreCard } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { Progress, ProgressLabel, ProgressValue } from '../components/ui/progress'
 import { fmtUptime } from '../lib/format'
 import { shellRoute } from './shell'
 
@@ -100,6 +102,32 @@ export function StorePage() {
   // !has() alone would grey the button out for every plan during load (same
   // guard AttachmentMap uses in routes/network.tsx).
   const refreshDenied = ent.data != null && !ent.has('store.refresh')
+  // POST /catalog/refresh only ENQUEUES the job, so the mutation's isPending
+  // covers the enqueue and nothing else. The work itself is the job, followed
+  // here through useJob: its ['jobs', id] cache entry is patched live by the
+  // one SSE stream the app already has (api/live.ts::applyJob), which carries
+  // a delta for every ctx.progress() the handler emits.
+  const [refreshJobId, setRefreshJobId] = useState<number | null>(null)
+  const refreshJob = useJob(refreshJobId)
+  const refreshJobStatus = refreshJob.data?.status
+  useEffect(() => {
+    // Terminal is terminal, succeeded or failed alike: let go of the job so
+    // the bar disappears instead of parking forever at whatever percentage
+    // the run died on. A job row we cannot read at all is treated the same.
+    if ((refreshJobStatus && TERMINAL.includes(refreshJobStatus)) || refreshJob.isError) {
+      setRefreshJobId(null)
+    }
+  }, [refreshJobStatus, refreshJob.isError])
+  // Both Refresh buttons drive this one job, so neither can start a second
+  // one while the first is still running, and there is only ever one bar.
+  const refreshBusy = refresh.isPending || refreshJobId != null
+  // No bar for a refresh the plan does not include: that POST is going to
+  // 403 and there will be no job behind it to report on.
+  const showRefreshBar = refreshBusy && !refreshDenied
+  const startRefresh = () => {
+    if (refreshBusy) return
+    refresh.mutate(undefined, { onSuccess: (r) => setRefreshJobId(r.job.id) })
+  }
   // Same query key as cluster.tsx's unfiltered /apps fetch, so this shares one
   // cache entry rather than adding a second request. Drives the real
   // `installed` prop below, it used to be hardcoded false, which made
@@ -127,8 +155,14 @@ export function StorePage() {
     }
     if (search.q) {
       const needle = search.q.toLowerCase()
+      // Description is part of the haystack now that upstream metadata
+      // actually fills it: searching "media server" should find Plex rather
+      // than nothing. Slug stays in it because the ct rows with no upstream
+      // match have nothing but a name and a slug to be found by.
       rows = rows.filter((e) =>
-        (e.name ?? e.slug).toLowerCase().includes(needle) || e.slug.toLowerCase().includes(needle))
+        (e.name ?? e.slug).toLowerCase().includes(needle)
+        || e.slug.toLowerCase().includes(needle)
+        || (e.description ?? '').toLowerCase().includes(needle))
     }
     return rows
   }, [entries, search.category, search.q])
@@ -138,7 +172,7 @@ export function StorePage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
+      <div className="relative mb-5 flex items-center justify-between">
         <div>
           <h1 className="font-display text-[22px] font-semibold">App Store</h1>
           <div className="text-[12px] text-text-3">
@@ -147,9 +181,34 @@ export function StorePage() {
             {pendingCount > 0 ? `, ${pendingCount} checking` : ''})
           </div>
         </div>
-        <Button variant="ghost" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+        <Button variant="ghost" onClick={startRefresh} disabled={refreshBusy}>
           Refresh
         </Button>
+        {/* Absolutely positioned, so it is out of flow and appearing or
+            vanishing cannot move the header, the banner or the grid by a
+            pixel. Anchored under the button that started it, with its own
+            opaque panel background because it floats over whatever status
+            line happens to be underneath.
+
+            services/catalog.py::refresh_catalog reports four values and no
+            others: 45 once discovery has returned, 85 once the upstream
+            metadata sync has (on its failure path too, so a source that is
+            down cannot strand the bar), 95 after mark_updates_available, and
+            100 at the end. So this jumps in four steps rather than sweeping,
+            and sits indeterminate for the couple of seconds before the first
+            one lands. That is honest: the job publishes nothing in between,
+            and inventing motion to fill the gap would be a lie about
+            progress. Nothing here hardcodes those numbers; they are simply
+            what the bar will be handed. */}
+        {showRefreshBar && (
+          <Progress
+            value={refreshJob.data?.progress_pct}
+            className="absolute right-0 top-full z-10 w-60 rounded-ctl border border-line-soft bg-panel px-2.5 pb-2 pt-1.5"
+          >
+            <ProgressLabel>Refreshing the catalog</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+        )}
       </div>
 
       {status.data?.stale && (
@@ -162,9 +221,9 @@ export function StorePage() {
           </span>{' '}
           Installable apps and their default sizing may be out of date.{' '}
           <Button variant="ghost" className="ml-1 px-2 py-1 text-[11px]"
-                  disabled={refresh.isPending || refreshDenied}
+                  disabled={refreshBusy || refreshDenied}
                   title={refreshDenied ? 'Not included in your plan' : undefined}
-                  onClick={() => refresh.mutate()}>
+                  onClick={startRefresh}>
             Refresh
           </Button>
         </p>

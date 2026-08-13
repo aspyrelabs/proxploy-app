@@ -11,12 +11,33 @@ const TYPE_LABEL: Record<CatalogRow['type'], string> = {
   ct: 'LXC', vm: 'VM', pve: 'Host', addon: 'Add-on', turnkey: 'Turnkey',
 }
 
+// "delisted" (upstream soft-deleted it, so its metadata still arrives and the
+// card is fully populated) and "unlisted" (upstream dropped it outright, so
+// the card is bare) are two different facts about upstream's data and exactly
+// one fact to whoever is reading the card: community-scripts does not list
+// this app any more. So they share one badge here while staying distinct in
+// the row itself.
+//
+// What the badge is careful NOT to say: that the app is deprecated, abandoned,
+// broken or unsafe. We know one thing, that upstream stopped listing it. Its
+// install script is still in the repo and still runs, which is why this is
+// neutral chrome next to the type badge rather than a warning colour, and why
+// it does not gate the Install button. Two of these are genuinely
+// discontinued projects (readarr, overseerr) and the rest are not, and the
+// card has no way to tell them apart, so it does not try.
+const UNLISTED_TITLE =
+  'community-scripts no longer lists this app. Its install script is still in '
+  + 'the repository and still installs. This is about the upstream catalog, '
+  + 'not a judgement about the app itself.'
+
 // A card must render cleanly with just name, type and an initial tile when
-// the community-scripts.org enrichment scrape has nothing for this slug, or
-// hasn't run yet, or the <img> itself fails to load: scripts are the source
-// of truth, the scrape is best-effort decoration only (catalog expansion
-// plan, decision 1). Never let a broken image or a missing logo_url break
-// the card.
+// upstream metadata has no record for this slug (37 of the 584 ct rows have
+// none, and that is normal, never an error), or the sync hasn't run yet, or
+// the <img> itself fails to load: scripts are the source of truth, upstream
+// metadata is presentation-only decoration (catalog expansion plan, decision
+// 1). Icons are rendered straight from upstream's CDN with no local binary
+// cache, so a URL that 404s or is blocked is an expected case, not a bug.
+// Never let a broken image or a missing icon_url break the card.
 function CardIcon({ name, iconUrl }: { name: string; iconUrl: string | null }) {
   const [broken, setBroken] = useState(false)
   if (iconUrl && !broken) {
@@ -42,6 +63,7 @@ export function StoreCard({ entry, onInstall, installed }: {
   entry: CatalogRow; onInstall: (slug: string) => void; installed: boolean
 }) {
   const name = entry.name ?? entry.slug
+  const unlisted = entry.upstream_state === 'delisted' || entry.upstream_state === 'unlisted'
   return (
     <div className="rounded-card border border-line-soft bg-panel p-4">
       <div className="flex items-start justify-between">
@@ -55,9 +77,17 @@ export function StoreCard({ entry, onInstall, installed }: {
       <div className="mt-1 min-h-[34px] text-[12px] text-text-2">
         {entry.description ?? ''}
       </div>
-      <span className="mt-2 inline-block rounded bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-3">
-        {TYPE_LABEL[entry.type]}
-      </span>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="inline-block rounded bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-3">
+          {TYPE_LABEL[entry.type]}
+        </span>
+        {unlisted && (
+          <span title={UNLISTED_TITLE}
+            className="inline-block rounded border border-line bg-panel-2 px-1.5 py-0.5 text-[10px] text-text-2">
+            Not listed upstream
+          </span>
+        )}
+      </div>
       <div className="mt-3 border-t border-line-soft pt-3">
         {entry.installable === false ? (
           <div className="text-[12px] text-text-3">

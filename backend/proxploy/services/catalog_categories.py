@@ -14,9 +14,13 @@ Two mechanical sources, in priority order:
    "postgres"). Anything it doesn't recognize honestly falls back to
    "Uncategorized" rather than a guess, exactly as the decision allows.
 
-A scraped category from community-scripts.org (services/community_scripts_
-scrape.py) is a bonus layered on top when present; this module never depends
-on it and produces a complete, defensible answer with zero network access.
+This is now the FALLBACK, not the primary: services/catalog_metadata.py syncs
+upstream's own 26-category vocabulary onto every slug that matches an upstream
+record, and discovery only calls this for a row that has no category yet
+(services/catalog.py::_upsert_skeleton). What is left for this module is the
+37-odd ct/ rows upstream has never heard of, mostly alpine-* variants plus
+mysql, which would otherwise render with no category at all. It stays
+deliberately network-free so a cold, offline install still groups sensibly.
 """
 
 TYPE_CATEGORY = {
@@ -78,10 +82,7 @@ _KEYWORD_CATEGORIES: list[tuple[str, str]] = [
 ]
 
 
-def category_for(slug: str, entry_type: str = "ct",
-                 scraped_category: str | None = None) -> str:
-    if scraped_category:
-        return scraped_category
+def category_for(slug: str, entry_type: str = "ct") -> str:
     if entry_type != "ct":
         return TYPE_CATEGORY.get(entry_type, "Uncategorized")
     low = slug.lower()

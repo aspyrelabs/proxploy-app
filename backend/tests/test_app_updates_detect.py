@@ -147,8 +147,9 @@ def test_catalog_refresh_marks_updates_when_it_finishes(tmp_path, monkeypatch):
 
         monkeypatch.setattr(catalog, "run_discovery", fake_discovery)
         monkeypatch.setattr(
-            "proxploy.services.community_scripts_scrape.fetch_enrichment",
-            lambda: None)
+            "proxploy.services.catalog_metadata.sync_metadata",
+            lambda db: {"ok": False, "source": None, "matched": 0,
+                        "unmatched": 0, "reason": "stubbed out"})
         ctx = JobContext(app.state.jobs, job_id)
         out = await catalog.refresh_catalog(ctx, {})
         assert out["updates_marked"] == 1

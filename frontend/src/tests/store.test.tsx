@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCatalog, type CatalogRow, type CatalogStatus } from '../api/catalog'
@@ -117,10 +117,10 @@ describe('cache invalidation keys', () => {
 
 const REDIS: CatalogRow = {
   slug: 'redis', name: 'Redis', category: 'Databases', type: 'ct', description: null,
-  icon_url: null, popularity: 42, website: 'https://redis.io/',
+  icon_url: null, popularity: 42, website: 'https://redis.io/', docs_url: null,
   default_cpu: 1, default_ram_mb: 1024, default_disk_gb: 4,
   default_os: 'debian', default_os_version: '13',
-  installable: true, unsupported_reason: null, synced_at: null,
+  installable: true, unsupported_reason: null, upstream_state: 'listed', synced_at: null,
 }
 
 describe('StoreCard', () => {
@@ -170,6 +170,22 @@ describe('StoreCard', () => {
     expect(screen.queryByText(/Not installable/)).toBeNull()
   })
 
+  it('renders the real upstream icon and description when metadata matched', () => {
+    // 547 of the 584 ct rows get real upstream metadata, so this is the
+    // common card, not the exotic one: the icon is upstream's own CDN URL
+    // rendered directly (no local binary cache) and the description block
+    // finally has something in it.
+    const enriched = { ...REDIS,
+      icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/redis.webp',
+      description: 'Redis is an open source, in-memory data structure store.' }
+    render(<StoreCard entry={enriched} onInstall={vi.fn()} installed={false} />)
+    const img = screen.getByRole('img')
+    expect(img).toHaveAttribute('src', enriched.icon_url)
+    expect(img).toHaveAttribute('alt', 'Redis')
+    expect(screen.queryByText('RE')).toBeNull()  // the initials tile stays out of the way
+    expect(screen.getByText(/in-memory data structure store/)).toBeInTheDocument()
+  })
+
   it('falls back to the initials tile when the scraped logo fails to load', () => {
     const withLogo = { ...REDIS, icon_url: 'https://example.com/redis.webp' }
     render(<StoreCard entry={withLogo} onInstall={vi.fn()} installed={false} />)
@@ -177,6 +193,63 @@ describe('StoreCard', () => {
     fireEvent.error(img)
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByText('RE')).toBeInTheDocument()
+  })
+
+  const BADGE = 'Not listed upstream'
+
+  it('badges nothing for a row upstream still lists, or has not classified', () => {
+    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} installed={false} />)
+    expect(screen.queryByText(BADGE)).toBeNull()
+    // null is the pre-sync state, not a signal: it must not badge either.
+    rerender(<StoreCard entry={{ ...REDIS, upstream_state: null }}
+                        onInstall={vi.fn()} installed={false} />)
+    expect(screen.queryByText(BADGE)).toBeNull()
+  })
+
+  it('badges an unlisted row, and still lets you install it', () => {
+    // The 9 rows upstream dropped outright: no metadata to have, so the card
+    // is bare apart from the badge. The script is still in the repo, so the
+    // badge is a fact about upstream, never a block on installing.
+    const gone = { ...REDIS, upstream_state: 'unlisted' as const,
+      name: null, description: null, icon_url: null, category: null, popularity: null }
+    render(<StoreCard entry={gone} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByText(BADGE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+    expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no icon to show
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge keeps its place
+    // Honest about what we actually know, and never the word "deprecated".
+    expect(screen.getByTitle(/no longer lists this app/i)).toBeInTheDocument()
+    expect(screen.queryByText(/deprecated/i)).toBeNull()
+  })
+
+  it('badges a delisted row that still has all its metadata', () => {
+    // The 5 soft-deleted upstream rows arrive fully populated, so the badge
+    // has to read correctly next to a real icon and description too, not just
+    // on a blank card.
+    const soft = { ...REDIS, upstream_state: 'delisted' as const,
+      icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/minio.webp',
+      name: 'MinIO', description: 'S3 compatible object storage.' }
+    render(<StoreCard entry={soft} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByText(BADGE)).toBeInTheDocument()
+    expect(screen.getByRole('img')).toHaveAttribute('src', soft.icon_url)
+    expect(screen.getByText('S3 compatible object storage.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  it('reads coherently when a row is both unlisted and not installable', () => {
+    // Two different facts, kept in two different places rather than argued
+    // out on one line: the badge sits with the type chip and speaks about
+    // upstream's catalog, the note sits in the action row and speaks about
+    // whether we can run the script unattended. The existing upstream link
+    // still works.
+    const both = { ...REDIS, upstream_state: 'unlisted' as const, installable: false,
+      unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
+    render(<StoreCard entry={both} onInstall={vi.fn()} installed={false} />)
+    expect(screen.getByText(BADGE)).toBeInTheDocument()
+    expect(screen.getByText(/Not installable/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
   })
 })
 
@@ -292,6 +365,57 @@ describe('StorePage', () => {
     expect(screen.getByText('Gitea')).toBeInTheDocument()
   })
 
+  it('searches descriptions too, not just the name and slug', async () => {
+    // Descriptions are populated now, so the thing an operator actually
+    // remembers about an app ("the one that organizes your media") has to be
+    // findable. A row with a null description must not blow up the filter.
+    const { useCatalog } = await import('../api/catalog')
+    const plex = { ...REDIS, slug: 'plex', name: 'Plex Media Server',
+      description: 'Plex magically scans and organizes your files.' }
+    vi.mocked(useCatalog).mockReturnValue({ data: [REDIS, plex] } as any)
+    withQuery(<StorePage />)
+
+    fireEvent.change(screen.getByPlaceholderText(/search the store/i),
+                     { target: { value: 'organizes' } })
+
+    expect(screen.getByText('Plex Media Server')).toBeInTheDocument()
+    expect(screen.queryByText('Redis')).not.toBeInTheDocument()
+  })
+
+  it('handles the real upstream category vocabulary in the chips and the filter', async () => {
+    // The upstream vocabulary of 26 is longer and more punctuated than the
+    // slug heuristic it replaces: a leading asterisk, slashes, commas and
+    // ampersands all have to survive chip rendering, the default sort and
+    // the client-side equality filter.
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({
+      data: [
+        { ...REDIS, slug: 'plex', name: 'Plex', category: 'Media & Streaming' },
+        { ...REDIS, slug: 'sonarr', name: 'Sonarr', category: '*Arr Suite' },
+        { ...REDIS, slug: 'ollama', name: 'Ollama', category: 'AI / Coding & Dev-Tools' },
+        { ...REDIS, slug: 'z2m', name: 'Zigbee2MQTT', category: 'ZigBee, Z-Wave & Matter' },
+      ],
+    } as any)
+    withQuery(<StorePage />)
+
+    const chips = ['All', '*Arr Suite', 'AI / Coding & Dev-Tools',
+                   'Media & Streaming', 'ZigBee, Z-Wave & Matter']
+    for (const c of chips) expect(screen.getByRole('button', { name: c })).toBeInTheDocument()
+    // "All" stays pinned first and the rest sort lexicographically, which puts
+    // the asterisk ahead of the letters rather than anywhere surprising.
+    const rendered = screen.getAllByRole('button')
+      .map((b) => b.textContent ?? '').filter((t) => chips.includes(t))
+    expect(rendered).toEqual(chips)
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI / Coding & Dev-Tools' }))
+    expect(screen.getByText('Ollama')).toBeInTheDocument()
+    expect(screen.queryByText('Plex')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '*Arr Suite' }))
+    expect(screen.getByText('Sonarr')).toBeInTheDocument()
+    expect(screen.queryByText('Ollama')).not.toBeInTheDocument()
+  })
+
   it('derives category chips from the real data rather than a fixed list', async () => {
     const { useCatalog } = await import('../api/catalog')
     vi.mocked(useCatalog).mockReturnValue({
@@ -355,5 +479,151 @@ describe('Store catalog staleness banner', () => {
     withQuery(<StorePage />)
     const banner = await screen.findByRole('alert')
     expect(within(banner).getByRole('button', { name: 'Refresh' })).toBeDisabled()
+  })
+})
+
+import { applyJob } from '../api/live'
+
+/**
+ * The Refresh button's progress bar. POST /catalog/refresh only enqueues
+ * `catalog.refresh`, so the bar is driven by the job itself: useJob's
+ * ['jobs', id] cache entry, patched live by api/live.ts::applyJob from the
+ * one SSE stream LiveProvider already runs. These tests drive applyJob
+ * directly for exactly that reason, it is the real production path, not a
+ * stand-in for one.
+ */
+describe('Store refresh progress', () => {
+  const FRESH_STATUS: CatalogStatus = {
+    synced_at: '2026-08-13T00:00:00Z', age_s: 30, entries: 1,
+    stale_after_s: 172_800, stale: false,
+  }
+  let jobRow: Record<string, unknown>
+  let refreshResponse: () => Promise<unknown>
+
+  beforeEach(async () => {
+    mockSearch = {}
+    const { useCatalog } = await import('../api/catalog')
+    vi.mocked(useCatalog).mockReturnValue({ data: [REDIS] } as any)
+    jobRow = { id: 7, kind: 'catalog.refresh', status: 'running', progress_pct: null }
+    refreshResponse = () => Promise.resolve({ job: { id: 7, kind: 'catalog.refresh' } })
+  })
+
+  const mockApi = async (
+    features: Record<string, boolean> = { 'store.refresh': true },
+    status: CatalogStatus = FRESH_STATUS,
+  ) => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/refresh') return refreshResponse()
+      if (path === '/jobs/7') return Promise.resolve(jobRow)
+      if (path === '/catalog/status') return Promise.resolve(status)
+      if (path === '/entitlements') {
+        return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
+      }
+      return Promise.resolve(null)
+    })
+  }
+
+  const renderStore = () => {
+    const qc = new QueryClient()
+    render(<QueryClientProvider client={qc}><StorePage /></QueryClientProvider>)
+    return qc
+  }
+
+  const clickHeaderRefresh = () =>
+    fireEvent.click(screen.getAllByRole('button', { name: 'Refresh' })[0])
+
+  it('goes indeterminate first, then follows the job\'s real progress', async () => {
+    await mockApi()
+    const qc = renderStore()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+
+    clickHeaderRefresh()
+
+    const bar = await screen.findByRole('progressbar', { name: /refreshing the catalog/i })
+    // Queued with progress_pct null, and services/catalog.py publishes nothing
+    // at all until discovery returns: there is no number yet, so the bar
+    // claims none rather than animating up from a made-up zero.
+    expect(bar).toHaveAttribute('aria-busy', 'true')
+    expect(bar).not.toHaveAttribute('aria-valuenow')
+    await waitFor(() => expect(qc.getQueryData(['jobs', 7])).toBeDefined())
+
+    // 45 then 85 are the first two values refresh_catalog actually emits
+    // (discovery done, upstream metadata sync done).
+    act(() => applyJob(qc, { id: 7, kind: 'catalog.refresh', status: 'running', progress_pct: 45 }))
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '45'))
+    expect(screen.getByText('45%')).toBeInTheDocument()
+
+    act(() => applyJob(qc, { id: 7, kind: 'catalog.refresh', status: 'running', progress_pct: 85 }))
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '85'))
+  })
+
+  it('drops the bar when the job succeeds, and re-arms the button', async () => {
+    await mockApi()
+    const qc = renderStore()
+    clickHeaderRefresh()
+    await screen.findByRole('progressbar')
+    await waitFor(() => expect(qc.getQueryData(['jobs', 7])).toBeDefined())
+
+    jobRow = { ...jobRow, status: 'succeeded', progress_pct: 100 }
+    act(() => applyJob(qc, { id: 7, kind: 'catalog.refresh', status: 'succeeded', progress_pct: 100 }))
+
+    await waitFor(() => expect(screen.queryByRole('progressbar')).toBeNull())
+    expect(screen.getAllByRole('button', { name: 'Refresh' })[0]).toBeEnabled()
+  })
+
+  it('drops the bar when the job fails rather than parking it at a percentage', async () => {
+    await mockApi()
+    const qc = renderStore()
+    clickHeaderRefresh()
+    await screen.findByRole('progressbar')
+    await waitFor(() => expect(qc.getQueryData(['jobs', 7])).toBeDefined())
+
+    act(() => applyJob(qc, { id: 7, kind: 'catalog.refresh', status: 'running', progress_pct: 45 }))
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '45'))
+
+    jobRow = { ...jobRow, status: 'failed', progress_pct: 45 }
+    act(() => applyJob(qc, { id: 7, kind: 'catalog.refresh', status: 'failed', progress_pct: 45 }))
+
+    await waitFor(() => expect(screen.queryByRole('progressbar')).toBeNull())
+  })
+
+  it('starts one job and one bar however many Refresh buttons are clicked', async () => {
+    // Both the header control and the staleness banner's own Refresh drive
+    // the same job, so a second click while one is in flight must not enqueue
+    // a second refresh or draw a second bar.
+    await mockApi({ 'store.refresh': true },
+                  { synced_at: null, age_s: null, entries: 0, stale_after_s: 172_800, stale: true })
+    const { api } = await import('../api/client')
+    renderStore()
+    const banner = await screen.findByRole('alert')
+
+    clickHeaderRefresh()
+    await screen.findByRole('progressbar')
+    fireEvent.click(within(banner).getByRole('button', { name: 'Refresh' }))
+
+    expect(screen.getAllByRole('progressbar')).toHaveLength(1)
+    expect(vi.mocked(api).mock.calls.filter((c) => c[0] === '/catalog/refresh')).toHaveLength(1)
+    for (const b of screen.getAllByRole('button', { name: 'Refresh' })) expect(b).toBeDisabled()
+  })
+
+  it('shows no bar at all for a refresh the plan does not include', async () => {
+    // The POST is going to 403, so there will be no job to report on. The
+    // in-flight mutation alone must not put a bar on screen.
+    refreshResponse = () => new Promise(() => {})  // never settles: still in flight
+    await mockApi({ 'store.refresh': false },
+                  { synced_at: null, age_s: null, entries: 0, stale_after_s: 172_800, stale: true })
+    renderStore()
+    const banner = await screen.findByRole('alert')
+    await waitFor(() =>
+      expect(within(banner).getByRole('button', { name: 'Refresh' })).toBeDisabled())
+
+    clickHeaderRefresh()
+
+    await waitFor(() => expect(screen.getByText(/never synced/i)).toBeInTheDocument())
+    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 })
