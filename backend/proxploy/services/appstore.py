@@ -326,6 +326,78 @@ def _storage_pools(app, host_id: int, content: str) -> list[str]:
     return sorted(out)
 
 
+_STORAGE_CLASSES = (
+    # (overrides key, Host column, build.func content type)
+    ("container_storage", "default_container_storage", "rootdir"),
+    ("template_storage", "default_template_storage", "vztmpl"),
+)
+
+
+def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
+    """The container and template pools for this install, or JobFailed.
+
+    THIS FUNCTION NEVER PICKS. Which pool a container's disk lands on is a
+    question, and choosing one on the operator's behalf is exactly the
+    interactive-picker problem this design exists to refuse: build.func asks
+    that question itself with `pvesm status -content "$content"` whenever it
+    finds more than one candidate, and over a non-interactive SSH session that
+    picker cannot be answered, so the run hangs. The order tried here is:
+
+      1. what the operator supplied for this install (`supplied`)
+      2. what the operator previously chose for this host, if it is still
+         valid (Host.default_*_storage)
+      3. the sole candidate, if the node has exactly one. This is not a pick:
+         there is nothing to choose between.
+      4. refuse, naming the candidates so the operator can choose
+
+    Every value taken from (1) or (2), including a remembered one, is
+    revalidated against the node's current content list before use. A pool
+    name that is stale or was never valid reaches build.func's
+    resolve_storage_preselect, whose failure branch returns 238 and then spins
+    in a `while true` with an empty body: a real hang that our 1800 s SSH
+    timeout would surface as an opaque `TimeoutError: ` with no message.
+    Sending an unvalidated name is worse than sending none, so nothing here
+    is ever trusted without being checked against `_storage_pools` first.
+    """
+    resolved = []
+    for key, column, content in _STORAGE_CLASSES:
+        candidates = _storage_pools(app, host_id, content)
+        if not candidates:
+            raise JobFailed(f"host has no storage carrying {content!r}")
+
+        chosen = (supplied.get(key) or "").strip() or None
+        if chosen:
+            if chosen not in candidates:
+                raise JobFailed(
+                    f"storage {chosen!r} does not carry {content!r} on this host; "
+                    f"available: {', '.join(candidates)}")
+            resolved.append(chosen)
+            continue
+
+        with app.state.sessionmaker() as db:
+            host = db.get(Host, host_id)
+            remembered = getattr(host, column, None) if host else None
+        if remembered:
+            # A remembered choice that no longer carries this content is
+            # NEVER quietly swapped for another pool: that would move
+            # someone's container without telling them. Re-ask instead.
+            if remembered in candidates:
+                resolved.append(remembered)
+                continue
+            raise JobFailed(
+                f"this host's saved {content!r} storage {remembered!r} is no longer "
+                f"available; choose one of: {', '.join(candidates)}")
+
+        if len(candidates) == 1:
+            resolved.append(candidates[0])
+            continue
+
+        raise JobFailed(
+            f"this host has {len(candidates)} pools for {content!r} and none has "
+            f"been chosen: {', '.join(candidates)}. Choose one in the install form.")
+    return resolved[0], resolved[1]
+
+
 # Job kinds that build a new guest (Task 5 review B1). JobBackend runs up to
 # MAX_CONCURRENT jobs at once, so an id appearing in `after` that wasn't in
 # `before` may belong to one of these running concurrently, not to this

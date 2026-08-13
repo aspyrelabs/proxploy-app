@@ -7,7 +7,8 @@ import asyncio
 import pytest
 
 from proxploy.jobs import JobFailed
-from proxploy.services.appstore import _storage_pools
+from proxploy.models import Host
+from proxploy.services.appstore import _storage_pools, resolve_storage_pools
 from tests.fakes.pve import FakePVE
 from tests.support import make_db, make_job_app, seed_host_row
 
@@ -99,3 +100,114 @@ def test_host_storage_defaults_start_null(tmp_path):
 
     assert host.default_container_storage is None
     assert host.default_template_storage is None
+
+
+def test_sole_candidate_is_not_a_pick(tmp_path):
+    """One candidate is not a choice, so using it answers nothing on the
+    operator's behalf."""
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "local-lvm", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        assert resolve_storage_pools(app, host_id, {}) == ("local-lvm", "local")
+
+    asyncio.run(scenario())
+
+
+def test_refuses_rather_than_picking_when_ambiguous(tmp_path):
+    """THE RULE OF THIS SPEC. Which pool a container lives on is a question,
+    and picking one is answering it for the operator. Never auto-pick, not by
+    free space, not by name, not by order."""
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+            {"storage": "lvm-b", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        with pytest.raises(JobFailed) as e:
+            resolve_storage_pools(app, host_id, {})
+        assert "lvm-a" in str(e.value) and "lvm-b" in str(e.value)
+
+    asyncio.run(scenario())
+
+
+def test_supplied_beats_remembered(tmp_path):
+    """A remembered default is only a fallback; whatever the operator picked
+    for this particular install wins over it."""
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+            host = db.get(Host, host_id)
+            host.default_container_storage = "lvm-a"
+            db.commit()
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+            {"storage": "lvm-b", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        got = resolve_storage_pools(app, host_id, {"container_storage": "lvm-b"})
+        assert got[0] == "lvm-b"
+
+    asyncio.run(scenario())
+
+
+def test_stale_remembered_pool_reasks_rather_than_substituting(tmp_path):
+    """A remembered pool that no longer carries rootdir must not be silently
+    replaced with another one. Sending it anyway hits build.func's
+    resolve_storage_preselect 238 path, where it spins in an empty while true."""
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+            host = db.get(Host, host_id)
+            host.default_container_storage = "retired-pool"
+            db.commit()
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+            {"storage": "lvm-b", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        with pytest.raises(JobFailed) as e:
+            resolve_storage_pools(app, host_id, {})
+        assert "retired-pool" in str(e.value)
+
+    asyncio.run(scenario())
+
+
+def test_supplied_pool_invalid_for_the_node_is_refused(tmp_path):
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        with pytest.raises(JobFailed) as e:
+            resolve_storage_pools(app, host_id, {"container_storage": "nope"})
+        assert "nope" in str(e.value)
+
+    asyncio.run(scenario())
