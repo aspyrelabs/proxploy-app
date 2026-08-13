@@ -151,6 +151,20 @@ def _seed_pve():
          "disk": 5_000_000_000, "maxdisk": 100_000_000_000, "status": "available"},
     ])
     fake.add_ct(101, node=NODE, name="demo-ct", status="running")
+    # Mirrors the two "storage" resource rows above into storages_by_node,
+    # which is the ONLY list resolve_storage_pools reads (ProxmoxClient.storages
+    # -> _NodeStorageFactory.get() -> storages_by_node, never the resources
+    # list). Without this an app-store install correctly refuses: it can no
+    # longer proceed against a host whose storage is unknown, and an unseeded
+    # fake node is exactly such a host. This is the feature working as
+    # designed, not a defect in the fake, so do not simplify this away; that
+    # will silently break the app-store install step of journey.spec.ts.
+    fake.storages_by_node[NODE] = [
+        {"storage": ISO_STORAGE, "content": "iso,vztmpl,backup",
+         "enabled": 1, "active": 1},
+        {"storage": IMAGES_STORAGE, "content": "images,rootdir",
+         "enabled": 1, "active": 1},
+    ]
     fake.content_by_storage[ISO_STORAGE] = [
         {"volid": f"{ISO_STORAGE}:iso/ubuntu-24.04-live-server-amd64.iso",
          "content": "iso", "format": "iso", "size": 1_500_000_000},

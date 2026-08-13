@@ -200,6 +200,42 @@ def test_stale_remembered_pool_reasks_rather_than_substituting(tmp_path):
     asyncio.run(scenario())
 
 
+def test_remembered_pool_wins_when_nothing_supplied(tmp_path):
+    """Positive coverage for the remembered-wins branch (`if remembered in
+    candidates: resolved.append(remembered)`), which until now was only
+    exercised by its failure sibling
+    (test_stale_remembered_pool_reasks_rather_than_substituting) and by
+    test_supplied_beats_remembered, whose `got[0] == "lvm-b"` assertion would
+    pass identically even if Host.default_container_storage were never read
+    at all, because the operator's own override already forces "lvm-b".
+
+    Nothing in Part A ever WRITES that column (Part B does), so until this
+    test existed the only LIVE branch of the remembered-value logic was the
+    refusal. This proves the pick-it-back-up branch actually reads the
+    column, and that a valid memory does not spuriously trip the never-pick
+    refusal even though the node has two rootdir candidates.
+    """
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+            host = db.get(Host, host_id)
+            host.default_container_storage = "lvm-a"
+            db.commit()
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+            {"storage": "lvm-b", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        got = resolve_storage_pools(app, host_id, {})
+        assert got[0] == "lvm-a"
+
+    asyncio.run(scenario())
+
+
 def test_supplied_pool_invalid_for_the_node_is_refused(tmp_path):
     async def scenario():
         pve = FakePVE()
@@ -215,6 +251,33 @@ def test_supplied_pool_invalid_for_the_node_is_refused(tmp_path):
         with pytest.raises(JobFailed) as e:
             resolve_storage_pools(app, host_id, {"container_storage": "nope"})
         assert "nope" in str(e.value)
+
+    asyncio.run(scenario())
+
+
+def test_non_string_override_value_is_coerced_not_a_crash(tmp_path):
+    """The API validator (catalog.py) constrains override KEYS to a
+    shell-identifier pattern but never checks value types, so
+    {"overrides": {"container_storage": 5}} reaches resolve_storage_pools as
+    a bare int. Before coercing with str(...) this raised AttributeError from
+    `(5).strip()` instead of one of this function's deliberately-written
+    JobFailed messages: fails closed either way, but this proves it fails
+    closed with the readable message, not an opaque crash.
+    """
+    async def scenario():
+        pve = FakePVE()
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_host_with_token(app, db)
+
+        pve.storages_by_node["pve1"] = [
+            {"storage": "local", "content": "vztmpl", "enabled": 1, "active": 1},
+            {"storage": "lvm-a", "content": "rootdir", "enabled": 1, "active": 1},
+        ]
+
+        with pytest.raises(JobFailed) as e:
+            resolve_storage_pools(app, host_id, {"container_storage": 5})
+        assert "5" in str(e.value)
 
     asyncio.run(scenario())
 

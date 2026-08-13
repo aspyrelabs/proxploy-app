@@ -387,7 +387,12 @@ def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
         if not candidates:
             raise JobFailed(f"host has no storage carrying {content!r}")
 
-        chosen = (supplied.get(key) or "").strip() or None
+        # str(...) first: the API validator constrains override KEYS to a
+        # shell-identifier pattern but not value types, so a non-string value
+        # (e.g. {"container_storage": 5}) reaches here and `.strip()` on a
+        # bare int raises AttributeError instead of one of this function's
+        # deliberately-written JobFailed messages.
+        chosen = str(supplied.get(key) or "").strip() or None
         if chosen:
             if chosen not in candidates:
                 raise JobFailed(
