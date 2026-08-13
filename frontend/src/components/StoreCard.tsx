@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { MouseEvent } from 'react'
 import type { CatalogRow } from '../api/catalog'
 import { Button } from './ui/button'
 import { Icon } from './ui/icon'
@@ -161,6 +162,41 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
    *  from here it opens in a Dialog. */
   onOpenDetail: (slug: string) => void
 }) {
+  // Where the pointer went down, so a DRAG can be told from a CLICK. Without
+  // this, selecting the description text and releasing opens the popup, which
+  // is a small thing that is very irritating when it happens.
+  const pressAt = useRef<{ x: number; y: number } | null>(null)
+
+  /**
+   * Clicking the card body opens the detail popup, the same as Read more.
+   *
+   * This is mouse convenience on the container and real semantics on the
+   * children, DELIBERATELY split that way. The container gets no
+   * `role="button"` and no `tabIndex`: that would add a redundant tab stop
+   * whose accessible name is the entire card read out as one control, and it
+   * would nest the Install button inside an interactive element in the
+   * accessibility tree even though the DOM stays valid. The keyboard path
+   * already exists and is better, because the title and Read more are real
+   * buttons. Please do not "fix" this by adding a tabIndex.
+   *
+   * Every genuine control inside stops propagation, so exactly one thing
+   * happens per click: Install installs without also opening the popup behind
+   * its own dialog, and the upstream link leaves for upstream without opening
+   * anything here.
+   */
+  const openFromCardBody = (e: MouseEvent<HTMLDivElement>): void => {
+    const from = pressAt.current
+    pressAt.current = null
+    // A pointer that travelled is a text selection, not a click. 4px of slop
+    // covers the hand tremor in an ordinary click.
+    if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 4) return
+    // Modifier and middle clicks: `click` does not fire for the middle button
+    // at all (that is `auxclick`), and a ctrl/cmd click gets the same popup as
+    // a plain one. There is no URL behind this, so there is no new tab to
+    // offer and nothing surprising to suppress.
+    onOpenDetail(entry.slug)
+  }
+
   const name = entry.name ?? entry.slug
   const unlisted = entry.upstream_state === 'delisted' || entry.upstream_state === 'unlisted'
   const reason = entry.unsupported_reason
@@ -173,17 +209,40 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
      * "Read more" swallows whatever is left, which is what pins the chip row
      * and the action row to the same baseline on every card in a row.
      *
-     * 224px, down from 260px, and 284px before that. This round came from
-     * putting Install on the "Read more" row: that deletes a whole row and
-     * its margin (37px), and the spacer that used to hold ~34px of dead space
-     * now holds ~3px, because the height is finally sized to the content
-     * rather than to the padding. The budget:
+     * 240px, down from 284px originally, via a wrong 224px that shipped an
+     * overlap. The saving is real (Install moved onto the "Read more" row,
+     * deleting a whole row and its margin) but the first budget for it was
+     * arithmetic, not measurement, and it was WRONG: it counted the name as
+     * 20px and forgot the `mt-2` above it entirely, then rounded the category
+     * and chip rows down. That left 3px of nominal slack against a true
+     * requirement of ~231px, so five compressible children shrank to fit and
+     * squeezed their line boxes into each other. `overflow-hidden` then hid
+     * the evidence at the card edge instead of showing it.
      *
-     *   32 padding + 40 icon + 20 name + 16 category + 57 description block
-     *   + 29 read-more/action row + 27 chip row = 221
+     * Re-derived from the built stylesheet rather than from memory
+     * (--spacing is .25rem, body line-height is the unitless 1.45):
      *
-     * leaving roughly 3px in the spacer for font-metric drift, rather than
-     * sizing this to the exact sum and hoping every glyph agrees.
+     *   32.00  p-4, top and bottom
+     *   40.00  header row: max(h-10 icon tile 40, install count 23)
+     *   28.30  name: mt-2 8 + 14px * 1.45 line box   <- the 8 that was missed
+     *   15.95  category: 11px * 1.45
+     *   57.00  description: mt-1 4 + the fixed h-[53px] box
+     *   29.05  action row: mt-1 4 + xs Button (py-1.5 12 + 9px * 1.45)
+     *   28.50  chip row: mt-2 8 + bordered chip (border 2 + py-0.5 4 + 14.5)
+     *   ------
+     *   230.80 worst case, which is the Install/Installed state
+     *
+     * These are CSS-determined, not glyph-determined: a unitless line-height
+     * times a px font size is exact, and the icon carries an explicit 23px
+     * box, so the figures are firm to the sub-pixel rather than estimates.
+     * The one I would least defend is the chip row, since a future chip with
+     * different padding moves it. The not-installable state is SHORTER
+     * (~20.7px action row, being text rather than a control), which the
+     * spacer below absorbs.
+     *
+     * 240 leaves ~9px of genuine headroom. Every child above the spacer is
+     * now shrink-0, so if a future change does exceed the budget the result
+     * is honest clipping at the card edge, never text drawn over text.
      *
      * overflow-hidden is a guard, not a plan. The chip row cannot actually
      * wrap: the three tag chips and the unlisted badge are mutually exclusive
@@ -194,8 +253,11 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
      * future chip breaks that arithmetic, this clips instead of pushing the
      * action row out of alignment across the row.
      */
-    <div className="flex h-[224px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
-      <div className="flex items-start justify-between gap-2">
+    <div
+      onPointerDown={(e) => { pressAt.current = { x: e.clientX, y: e.clientY } }}
+      onClick={openFromCardBody}
+      className="flex h-[240px] cursor-pointer flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+      <div className="flex shrink-0 items-start justify-between gap-2">
         <CardIcon name={name} iconUrl={entry.icon_url} />
         {entry.popularity != null && (
           <InstallCount count={entry.popularity} syncedAt={entry.popularity_synced_at} />
@@ -211,11 +273,12 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
           links, because they no longer go anywhere. Truncated to one line
           with the full name in `title`, since a wrapping name would eat into
           the fixed height. */}
-      <button type="button" title={name} onClick={() => onOpenDetail(entry.slug)}
-        className="mt-2 block cursor-pointer truncate text-left text-[14px] font-semibold text-text hover:text-amber hover:underline">
+      <button type="button" title={name}
+        onClick={(e) => { e.stopPropagation(); onOpenDetail(entry.slug) }}
+        className="mt-2 block shrink-0 cursor-pointer truncate text-left text-[14px] font-semibold text-text hover:text-amber hover:underline">
         {name}
       </button>
-      <div className="font-mono text-[11px] text-text-3">{entry.category ?? 'Uncategorized'}</div>
+      <div className="shrink-0 font-mono text-[11px] text-text-3">{entry.category ?? 'Uncategorized'}</div>
       {/* Exactly three lines, always, whether the text needs them or not:
           a fixed box is what makes the rows line up.
 
@@ -263,8 +326,9 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
           The upstream link stays. It is the only outward affordance a
           non-installable app has, it costs one shrink-0 element, and dropping
           it would be a capability removal dressed up as a layout change. */}
-      <div className="mt-1 flex items-center gap-2">
-        <button type="button" onClick={() => onOpenDetail(entry.slug)}
+      <div className="mt-1 flex shrink-0 items-center gap-2">
+        <button type="button"
+          onClick={(e) => { e.stopPropagation(); onOpenDetail(entry.slug) }}
           className="shrink-0 cursor-pointer text-[11.5px] text-amber hover:underline">
           Read more
         </button>
@@ -276,6 +340,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
             </span>
             {entry.website && (
               <a href={entry.website} target="_blank" rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
             )}
           </>
@@ -289,10 +354,10 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
              untouched: e2e/journey.spec.ts clicks
              getByRole('button', { name: 'Install', exact: true }). */
           <Button className="ml-auto" variant="primary" size="xs"
-            onClick={() => onInstall(entry.slug)}>Install</Button>
+            onClick={(e) => { e.stopPropagation(); onInstall(entry.slug) }}>Install</Button>
         )}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5">
         <span className="inline-block rounded bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-3">
           {TYPE_LABEL[entry.type]}
         </span>

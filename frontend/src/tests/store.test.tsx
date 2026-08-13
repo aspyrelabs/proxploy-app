@@ -280,6 +280,78 @@ describe('StoreCard', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
+  it('opens the popup from a click anywhere on the card body', () => {
+    const onOpenDetail = vi.fn()
+    const { container } = render(
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installed={false} />)
+
+    // The description is card body, not a control.
+    fireEvent.click(screen.getByText('Databases'))
+    expect(onOpenDetail).toHaveBeenCalledWith('redis')
+
+    // Mouse convenience only: the container is deliberately NOT a control, so
+    // it adds no tab stop and no accessibility-tree nesting around Install.
+    const card = container.querySelector('.rounded-card')!
+    expect(card).not.toHaveAttribute('role')
+    expect(card).not.toHaveAttribute('tabindex')
+  })
+
+  it('installs without also opening the popup', () => {
+    // The one that would actually bite: click Install, get the install dialog
+    // AND the detail popup behind it.
+    const onOpenDetail = vi.fn()
+    const onInstall = vi.fn()
+    render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={onOpenDetail}
+                      installed={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    expect(onInstall).toHaveBeenCalledWith('redis')
+    expect(onOpenDetail).not.toHaveBeenCalled()
+  })
+
+  it('leaves for upstream without opening the popup too', () => {
+    const onOpenDetail = vi.fn()
+    const unsupported = { ...REDIS, installable: false, unsupported_reason: 'x' }
+    render(<StoreCard entry={unsupported} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
+                      installed={false} />)
+
+    fireEvent.click(screen.getByRole('link', { name: /upstream/i }))
+
+    expect(onOpenDetail).not.toHaveBeenCalled()
+  })
+
+  it('fires once per click, not twice, from the title and Read more', () => {
+    // Both are inside the clickable container, so without stopPropagation each
+    // click would run the child handler and then the container's.
+    const onOpenDetail = vi.fn()
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
+                      installed={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
+    expect(onOpenDetail).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Redis' }))
+    expect(onOpenDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a drag across the card as a text selection, not a click', () => {
+    // Select the description, release, and the popup must not open.
+    const onOpenDetail = vi.fn()
+    const { container } = render(
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installed={false} />)
+    const card = container.querySelector('.rounded-card')!
+
+    fireEvent.pointerDown(card, { clientX: 100, clientY: 100 })
+    fireEvent.click(card, { clientX: 180, clientY: 100 })
+    expect(onOpenDetail).not.toHaveBeenCalled()
+
+    // A click that stays put still opens it, including a little slop.
+    fireEvent.pointerDown(card, { clientX: 100, clientY: 100 })
+    fireEvent.click(card, { clientX: 102, clientY: 101 })
+    expect(onOpenDetail).toHaveBeenCalledWith('redis')
+  })
+
   it('shows Read more even on a row with no description to read', () => {
     // The user chose this explicitly, for visual consistency, knowing it puts
     // the control on cards with nothing more to show. It is still defensible:
@@ -1056,7 +1128,7 @@ describe('Store grid sizing', () => {
     const { container } = withQuery(<StorePage />)
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[224px]')
+    for (const card of cards) expect(card.className).toContain('h-[240px]')
   })
 
   it('keeps that one height across all three action states', async () => {
@@ -1082,7 +1154,7 @@ describe('Store grid sizing', () => {
       expect(screen.getByRole('button', { name: 'Installed' })).toBeInTheDocument())
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[224px]')
+    for (const card of cards) expect(card.className).toContain('h-[240px]')
     // and the three states really are all present
     expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
@@ -1101,7 +1173,7 @@ describe('Store grid sizing', () => {
     const note = screen.getByText(/Not installable/)
     expect(note.className).toContain('truncate')
     expect(note).toHaveAttribute('title', `Not installable, ${reason}`)
-    expect(container.querySelector('.rounded-card')?.className).toContain('h-[224px]')
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[240px]')
     // no Install control on a row that cannot be installed, and the way out
     // to upstream survives
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
@@ -1130,7 +1202,7 @@ describe('Store grid sizing', () => {
       expect(chipRow).toContainElement(screen.getByText(chip))
     }
     expect(chipRow).not.toContainElement(install)
-    expect(container.querySelector('.rounded-card')?.className).toContain('h-[224px]')
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[240px]')
   })
 
   it('drops the separator rule that used to divide the action row', async () => {
