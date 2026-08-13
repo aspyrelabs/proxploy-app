@@ -17,6 +17,13 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [name, setName] = useState('')
   const [ctid, setCtid] = useState('')
   const [consent, setConsent] = useState(false)
+  // Default asks nothing that has an honest default; Advanced expands the
+  // container-customization block Tasks 9-11 fill in. CTID has an honest
+  // default too (blank -> node assigns the next free id) but stays in the
+  // base section: unlike vCPU/RAM/disk, operators commonly want to pick it
+  // even on an otherwise-default install, and Task 12 hangs its collision
+  // check off this same field.
+  const [mode, setMode] = useState<'default' | 'advanced'>('default')
   const [jobId, setJobId] = useState<number | null>(null)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
@@ -25,12 +32,17 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
   if (!entry) return null
 
-  const canSubmit = consent && hostId != null && name.trim() !== '' && ctid.trim() !== ''
+  // CTID is no longer required: blank means the node assigns the next free
+  // id (InstallIn.ctid, backend/proxploy/api/catalog.py). Host consent is
+  // still asked here every time; the catalog/host payloads this dialog can
+  // see do not yet expose Host.install_consent_at, so there is no way to
+  // tell from here whether this host already acknowledged.
+  const canSubmit = consent && hostId != null && name.trim() !== ''
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
     install.mutate(
-      { slug, host_id: hostId, name, ctid: Number(ctid), overrides: {}, consent },
+      { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides: {}, consent },
       { onSuccess: (r) => { setJobId(r.job.id); setProgress(r.job.progress_pct) } },
     )
   }
@@ -53,6 +65,28 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     ) : (
       <>
         <div className="mt-4 space-y-3">
+          <div className="space-y-2">
+            <label className="flex items-start gap-2 text-[13px] text-text-2">
+              <input type="radio" name="install-mode" className="mt-0.5" checked={mode === 'default'}
+                onChange={() => setMode('default')} />
+              <span>
+                <span className="text-text">Default</span>
+                <span className="block text-[12px] text-text-3">
+                  Installs with {entry.name ?? slug}&rsquo;s own defaults.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-[13px] text-text-2">
+              <input type="radio" name="install-mode" className="mt-0.5" checked={mode === 'advanced'}
+                onChange={() => setMode('advanced')} />
+              <span>
+                <span className="text-text">Advanced</span>
+                <span className="block text-[12px] text-text-3">
+                  Customize vCPU, RAM, disk, storage and more before install.
+                </span>
+              </span>
+            </label>
+          </div>
           <select className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             value={hostId ?? ''} disabled={hosts.isError}
             onChange={(e) => setHostId(Number(e.target.value) || null)}>
@@ -70,6 +104,14 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             {entry.default_cpu} vCPU · {entry.default_ram_mb}MB RAM · {entry.default_disk_gb}GB disk ·{' '}
             {entry.default_os} {entry.default_os_version}
           </div>
+          {mode === 'advanced' && (
+            <div className="rounded-ctl border border-dashed border-line-soft p-3 text-[12px] text-text-3">
+              <span className="text-text">Container customization</span>
+              <span className="block mt-1">
+                Storage, resource and OS options land here in a later task.
+              </span>
+            </div>
+          )}
           <div className="text-[12px] text-text-2">
             This installs and executes a community-scripts.org script on the target node,
             exactly as if you ran it yourself.

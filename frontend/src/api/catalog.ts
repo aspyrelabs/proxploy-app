@@ -142,7 +142,9 @@ export function useRefreshCatalog() {
 }
 
 export type InstallVars = {
-  slug: string; host_id: number; name: string; ctid: number
+  // Optional: blank/null means the node assigns the next free id
+  // (InstallIn.ctid, backend/proxploy/api/catalog.py).
+  slug: string; host_id: number; name: string; ctid: number | null
   overrides: Record<string, string | number>; consent: boolean
 }
 

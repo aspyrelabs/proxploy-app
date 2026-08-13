@@ -60,6 +60,52 @@ describe('InstallDialog', () => {
     })))
   })
 
+  it('opens on Default, and Advanced reveals the container customization block', async () => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve({
+        slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+        default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      return Promise.resolve(null)
+    })
+
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('radio', { name: /default/i })).toBeInTheDocument())
+
+    // Default asks nothing that has an honest default: no expanded block yet.
+    expect(screen.getByRole('radio', { name: /default/i })).toBeChecked()
+    expect(screen.queryByText('Container customization')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+    expect(screen.getByText('Container customization')).toBeInTheDocument()
+  })
+
+  it('does not require a CTID to submit', async () => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve({
+        slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+        default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      return Promise.resolve(null)
+    })
+
+    renderDialog()
+    await waitFor(() => expect(screen.getByText(/runs as root on/i)).toBeInTheDocument())
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+
+    // No CTID typed, and Install is still enabled: blank means the node
+    // assigns the next free id (InstallIn.ctid).
+    expect(screen.getByPlaceholderText('Container ID (CTID)')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
   // services/appstore.py::run_install only calls ctx.progress(80) then (100):
   // progress_pct is null on the freshly-enqueued job this mutation returns,
   // so no ring should appear until the job actually reports something.
