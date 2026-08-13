@@ -173,15 +173,16 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
      * "Read more" swallows whatever is left, which is what pins the chip row
      * and the action row to the same baseline on every card in a row.
      *
-     * 260px, down from 284px. 13px of that came from deleting the action
-     * row's separator rule and the padding it carried (border-t plus pt-3),
-     * and the other 11px came out of the flex spacer, which had been holding
-     * about 34px of slack. The budget now:
+     * 224px, down from 260px, and 284px before that. This round came from
+     * putting Install on the "Read more" row: that deletes a whole row and
+     * its margin (37px), and the spacer that used to hold ~34px of dead space
+     * now holds ~3px, because the height is finally sized to the content
+     * rather than to the padding. The budget:
      *
      *   32 padding + 40 icon + 20 name + 16 category + 57 description block
-     *   + 21 read-more + 27 chip row + 37 action row = 250
+     *   + 29 read-more/action row + 27 chip row = 221
      *
-     * leaving roughly 10px in the spacer for font-metric drift, rather than
+     * leaving roughly 3px in the spacer for font-metric drift, rather than
      * sizing this to the exact sum and hoping every glyph agrees.
      *
      * overflow-hidden is a guard, not a plan. The chip row cannot actually
@@ -193,7 +194,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
      * future chip breaks that arithmetic, this clips instead of pushing the
      * action row out of alignment across the row.
      */
-    <div className="flex h-[260px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+    <div className="flex h-[224px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
       <div className="flex items-start justify-between gap-2">
         <CardIcon name={name} iconUrl={entry.icon_url} />
         {entry.popularity != null && (
@@ -234,13 +235,63 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
           asked for it unconditionally, for visual consistency, and it is
           honest even on those rows because the detail page still carries
           their availability, resource defaults and popularity. */}
-      <button type="button" onClick={() => onOpenDetail(entry.slug)}
-        className="mt-1 shrink-0 cursor-pointer self-start text-[11.5px] text-amber hover:underline">
-        Read more
-      </button>
-      {/* Absorbs the leftover height so the two rows below sit at the same
-          offset on every card, whatever the description did. */}
-      <div className="flex-1" />
+      {/* Read more and the action share ONE row, which is where the height
+          came from: it deletes a whole row plus its margin, and moves Install
+          up, which is what was asked for.
+
+          It does NOT go on the chip row, and that was measured rather than
+          assumed. The widest real chip combination (type + Privileged + x86
+          only + No in-place update) is ~281px, and an xs Install is ~53px
+          plus an 8px gap. Against the chip lane that is 342 vs 365 at four
+          columns (fits), 342 vs 343 at three (fits by one pixel, which is
+          inside the error of these estimates), and 342 vs 295 on a
+          single-column phone card, where it WRAPS. A wrapped chip row is the
+          one thing a fixed height cannot absorb, so the chip row keeps the
+          full width it needs to stay on one line, and the button sits here
+          instead. On this row the same worst case is Read more (~54px) plus
+          the control (~53px), which is 115px against that same 295px lane.
+
+          All three action states share this row and it stays one line in each:
+          - installable      the Install button, pushed right with ml-auto.
+          - installed        the same slot, disabled.
+          - NOT installable  the reason, which is the hard one. These strings
+            are long, so it truncates with the FULL text in `title`, and the
+            popup carries it complete in its Availability section. Truncating
+            text whose full form is one click away is honest; wrapping it
+            would make this card taller than every other card in its row.
+
+          The upstream link stays. It is the only outward affordance a
+          non-installable app has, it costs one shrink-0 element, and dropping
+          it would be a capability removal dressed up as a layout change. */}
+      <div className="mt-1 flex items-center gap-2">
+        <button type="button" onClick={() => onOpenDetail(entry.slug)}
+          className="shrink-0 cursor-pointer text-[11.5px] text-amber hover:underline">
+          Read more
+        </button>
+        {entry.installable === false ? (
+          <>
+            <span className="min-w-0 truncate text-[11.5px] text-text-3"
+              title={reason ? `Not installable, ${reason}` : 'Not installable'}>
+              Not installable, {entry.unsupported_reason}
+            </span>
+            {entry.website && (
+              <a href={entry.website} target="_blank" rel="noreferrer"
+                className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
+            )}
+          </>
+        ) : installed ? (
+          <Button className="ml-auto" variant="ghost" size="xs" disabled>Installed</Button>
+        ) : (
+          /* size="xs" is the small size in ui/button.tsx: roughly 25px tall
+             against md's ~35px, by request. Worth knowing: that is still well
+             under the ~44px normally recommended for a touch target, so it is
+             a deliberately small control on a touch screen. The LABEL is
+             untouched: e2e/journey.spec.ts clicks
+             getByRole('button', { name: 'Install', exact: true }). */
+          <Button className="ml-auto" variant="primary" size="xs"
+            onClick={() => onInstall(entry.slug)}>Install</Button>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className="inline-block rounded bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-3">
           {TYPE_LABEL[entry.type]}
@@ -267,50 +318,13 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
           </span>
         )}
       </div>
-      {/* One line, right-aligned, no separator rule. All THREE states of this
-          branch sit on that single line at the card's fixed height, which is
-          what decides the shape:
-
-          - installable      the Install button, pushed right with ml-auto.
-          - installed        the same slot, disabled.
-          - NOT installable  the reason, which is the hard one. These strings
-            are long ("install script requires interactive input, no
-            non-interactive entrypoint" is 66 characters and is the reason on
-            six rows), so it truncates to one line with the FULL text in
-            `title`, and the popup carries it complete and unclipped in its
-            Availability section. Truncating text whose full form is one click
-            away is honest; wrapping it would make this card taller than every
-            other card in its row, which is the thing a fixed height exists to
-            prevent.
-
-          The upstream link stays. It is the only outward affordance a
-          non-installable app has, it costs one shrink-0 element, and dropping
-          it would be a capability removal dressed up as a layout change. */}
-      <div className="mt-3 flex items-center gap-2">
-        {entry.installable === false ? (
-          <>
-            <span className="min-w-0 truncate text-[11.5px] text-text-3"
-              title={reason ? `Not installable, ${reason}` : 'Not installable'}>
-              Not installable, {entry.unsupported_reason}
-            </span>
-            {entry.website && (
-              <a href={entry.website} target="_blank" rel="noreferrer"
-                className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
-            )}
-          </>
-        ) : installed ? (
-          <Button className="ml-auto" variant="ghost" size="xs" disabled>Installed</Button>
-        ) : (
-          /* size="xs" is the small size in ui/button.tsx: roughly 25px tall
-             against md's ~35px, by request. Worth knowing: that is still well
-             under the ~44px normally recommended for a touch target, so it is
-             a deliberately small control on a touch screen. The LABEL is
-             untouched: e2e/journey.spec.ts clicks
-             getByRole('button', { name: 'Install', exact: true }). */
-          <Button className="ml-auto" variant="primary" size="xs"
-            onClick={() => onInstall(entry.slug)}>Install</Button>
-        )}
-      </div>
+      {/* Whatever is left over, which is now a few pixels rather than the ~34
+          this used to hold. It stays because it is the drift absorber that
+          keeps all three action states at one height: the not-installable arm
+          is text (~17px) where the other two are a ~25px control, and this
+          swallows that 8px difference instead of letting it reach the card
+          edge. */}
+      <div className="flex-1" />
     </div>
   )
 }

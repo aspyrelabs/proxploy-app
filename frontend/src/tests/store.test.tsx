@@ -1056,7 +1056,7 @@ describe('Store grid sizing', () => {
     const { container } = withQuery(<StorePage />)
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[260px]')
+    for (const card of cards) expect(card.className).toContain('h-[224px]')
   })
 
   it('keeps that one height across all three action states', async () => {
@@ -1082,7 +1082,7 @@ describe('Store grid sizing', () => {
       expect(screen.getByRole('button', { name: 'Installed' })).toBeInTheDocument())
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[260px]')
+    for (const card of cards) expect(card.className).toContain('h-[224px]')
     // and the three states really are all present
     expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
@@ -1101,11 +1101,36 @@ describe('Store grid sizing', () => {
     const note = screen.getByText(/Not installable/)
     expect(note.className).toContain('truncate')
     expect(note).toHaveAttribute('title', `Not installable, ${reason}`)
-    expect(container.querySelector('.rounded-card')?.className).toContain('h-[260px]')
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[224px]')
     // no Install control on a row that cannot be installed, and the way out
     // to upstream survives
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByRole('link', { name: /upstream/i })).toBeInTheDocument()
+  })
+
+  it('puts Install on the Read more row, leaving the chip row a full line of its own', async () => {
+    // The height came from deleting a row, not from squeezing content. Install
+    // shares the Read more line; the chip row stays full width because that is
+    // what keeps it to one line. Measured: the widest real chip set is ~281px
+    // and an xs Install is ~53px plus an 8px gap, which is 342 against a
+    // ~295px lane on a single-column card, i.e. it would wrap there. A wrapped
+    // chip row is the one thing the fixed height cannot absorb.
+    await mockEntries([{ ...REDIS, slug: 'a', name: 'A', privileged: true,
+      has_arm: false, updateable: false }])
+    const { container } = withQuery(<StorePage />)
+
+    const install = screen.getByRole('button', { name: 'Install' })
+    const readMore = screen.getByRole('button', { name: 'Read more' })
+    // same row
+    expect(install.parentElement).toBe(readMore.parentElement)
+    // and that row is NOT the chip row: every chip is somewhere else
+    const chipRow = screen.getByText('Privileged').parentElement
+    expect(chipRow).not.toBe(install.parentElement)
+    for (const chip of ['LXC', 'Privileged', 'x86 only', 'No in-place update']) {
+      expect(chipRow).toContainElement(screen.getByText(chip))
+    }
+    expect(chipRow).not.toContainElement(install)
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[224px]')
   })
 
   it('drops the separator rule that used to divide the action row', async () => {
