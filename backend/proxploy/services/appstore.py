@@ -294,6 +294,38 @@ def _lxc_ids(app, host_id: int) -> set[int]:
     return {int(r["vmid"]) for r in rows if r.get("type") == "lxc"}
 
 
+def _storage_pools(app, host_id: int, content: str) -> list[str]:
+    """Blocking: the pool names on this host's node that carry `content`.
+
+    The API-side equivalent of build.func's `pvesm status -content
+    "$content"`, the query whose result becomes an interactive picker when it
+    returns more than one row. Deliberately NOT the poller's cached snapshot,
+    for the same reason `_lxc_ids` gives: this decides where a container's
+    disk lands, and a 30 s stale cache is the wrong input for that.
+
+    Sorted so a caller comparing two candidate lists gets a stable answer, and
+    so an error message naming them reads the same every time.
+    """
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        if host is None:
+            raise JobFailed(f"host {host_id} not found")
+        if not host.node_name:
+            raise JobFailed(f"host {host.name} has no node name recorded")
+        try:
+            client = client_for_host(app, db, host)
+            rows = client.storages(host.node_name)
+        except ProxmoxError as e:
+            raise JobFailed(str(e)) from e
+    out = []
+    for row in rows:
+        if not row.get("enabled", 1) or not row.get("active", 1):
+            continue
+        if content in str(row.get("content") or "").split(","):
+            out.append(str(row["storage"]))
+    return sorted(out)
+
+
 # Job kinds that build a new guest (Task 5 review B1). JobBackend runs up to
 # MAX_CONCURRENT jobs at once, so an id appearing in `after` that wasn't in
 # `before` may belong to one of these running concurrently, not to this
