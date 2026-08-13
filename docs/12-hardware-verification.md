@@ -105,3 +105,21 @@ automated rather than pending.
 What remains unproven in a browser is anything requiring an authenticated
 session: `/store` and every page behind login cannot be reached by the driver,
 which has no way to log in.
+
+## Known bug: SPA deep links 404 in production
+
+`main.py` mounts `StaticFiles(directory=dist, html=True)` at `/`. That serves
+`index.html` for a DIRECTORY, never for a client-side route, and every route in
+this product is client-side. So refreshing on `/settings` or `/store/plex`
+against the backend returns the app's 404 problem+json instead of the page.
+Verified 2026-08-13: `:8000/settings` is 404 while `:5173/settings` is 200,
+because Vite does the fallback in dev and nothing does it in production.
+
+A first attempt at a fix registered a 404 exception handler that returned
+`index.html` for HTML-accepting non-`/api` GETs. It worked for the SPA case and
+broke two tests, because it also replaced the body of every OTHER 404: routes
+that raise `HTTPException(404, {"error": "oidc_not_configured"})` pass a
+structured detail that the replacement flattened away. Reverted.
+
+The fix must leave every non-SPA 404 exactly as it is, which means delegating to
+the app's existing handler rather than re-implementing its shape.
