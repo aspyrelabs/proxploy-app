@@ -271,3 +271,39 @@ here rather than inserted so the inventory keeps its numbering:
 `auth.login.totp_pending` (written by `api/auth.py:109`, unmapped, renders as
 "Auth Login Totp Pending") and `network.guest_config_read` (mapped in
 `ACTION_LABEL` as "Guest Network Read", which is the fix for finding 7).
+
+## Still open, picked up 2026-08-16
+
+The label renames, the ATTEMPT overrides, the two unmapped identifiers and the
+job-backed "Requested" fix all landed in commit 4e96afd. What is left:
+
+1. **The 7 backend copy changes from the 20.** These are not labels, they are
+   user-facing prose in another layer, so they were held back deliberately
+   rather than applied with the rest. Two alert message strings in
+   `services/alerts.py` (the `host_offline` grammar, where "is offline for 5m"
+   reads like a future window, and `backup_failed`), the `job.interrupted`
+   notifier copy, and the HTTP 401, 403 and 502 text in the API routes. The
+   403 rewrite is the one worth a careful read: it proposes distinguishing an
+   entitlement gate from a role gate, which today share one message. Decide
+   whether to take the drafted wording or write it directly.
+
+2. **`app.migrate` now has an entry in both maps.** `ACTION_LABEL` still holds
+   "App Migrated" for a successful row with no job, which should not occur: a
+   migrate that succeeds always enqueues, so it always carries a job_id and
+   takes the Requested branch. Harmless, but it means two answers exist for a
+   case with one truth. Remove it, or keep it as a deliberate fallback and say
+   so in a comment.
+
+Not label work, but open on the same tree:
+
+3. **Hardware checks 7, 8, 9, 11 and 12** in `12-hardware-verification.md`.
+   None are blocked on effort, all are blocked on either disruption or missing
+   infrastructure: 7 needs the nodes unclustered, 8 can cost connectivity to
+   the node running it, 9 needs backups that exist, 11 needs a real IdP, and 12
+   means deliberately breaking quorum. Check 10's hardware half is done.
+
+4. **The two systemic findings from the loading-state audit**, left with
+   another session: the fourteen `isError`-only `<select>` call sites that
+   render an empty dropdown while pending, and `useEntitlements`' fail-closed
+   defaults rendered as fact in `Topbar` and `LiveProvider`. Confirm whether
+   that work happened before starting it again.
