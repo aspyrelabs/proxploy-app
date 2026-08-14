@@ -111,8 +111,18 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // just as flatly on an ambiguous vztmpl (one rootdir pool plus `local` and
   // any NFS/dir storage carrying vztmpl is an ordinary Proxmox layout), and
   // a Default mode with no field for it fails there forever.
-  const asksContainer = !storageUnknown && knownContainer == null && pools.rootdir.length > 1
-  const asksTemplate = !storageUnknown && knownTemplate == null && pools.vztmpl.length > 1
+  //
+  // `length >= 1`, not `> 1`: knownPool returning null no longer implies "0
+  // or 2+ candidates". A remembered value that is no longer a candidate
+  // resolves to null even with exactly one candidate left, because
+  // resolve_storage_pools refuses to quietly swap a remembered pool for the
+  // sole survivor, it re-asks. A `> 1` gate would swallow that one case
+  // (a field never rendering, canSubmit never requiring it, the job failing
+  // on the stale name with no way to fix it in Default mode), while still
+  // correctly asking nothing when there are zero real candidates (an empty
+  // select nobody could ever fill in).
+  const asksContainer = !storageUnknown && knownContainer == null && pools.rootdir.length >= 1
+  const asksTemplate = !storageUnknown && knownTemplate == null && pools.vztmpl.length >= 1
   const storageSummary = [
     knownContainer && `container ${knownContainer}`,
     knownTemplate && `template ${knownTemplate}`,

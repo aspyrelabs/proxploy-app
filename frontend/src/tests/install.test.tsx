@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api as apiMock } from '../api/client'
 import { InstallDialog } from '../components/InstallDialog'
+import { knownPool } from '../components/install/pools'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
 vi.mock('../api/client', () => ({ api: vi.fn() }))
@@ -18,6 +19,7 @@ function renderDialog() {
 
 type StorageRow = {
   host_id: number; node: string; storage: string; content: string[]; status?: string
+  shared?: boolean
 }
 type HostRow = {
   id: number; name: string; node_name?: string
@@ -566,6 +568,77 @@ describe('InstallDialog', () => {
     expect(screen.queryByText(/lvm-gone/)).not.toBeInTheDocument()
   })
 
+  it('offers a shared pool even when its row names a node other than the host\'s own', async () => {
+    // backend/proxploy/api/storage.py::list_storage keys a shared datastore by
+    // (host_id, storage) with no node component and keeps whichever row the
+    // poller snapshot happened to see first, in raw /cluster/resources order.
+    // For a shared pool visible on three nodes that row may legitimately name
+    // a node other than host-01's own ('pve'). The old node filter dropped it
+    // anyway, so no prompt rendered even though this host genuinely has two
+    // rootdir pools.
+    await mockStorage([
+      { host_id: 1, node: 'pve2', storage: 'shared-a', content: ['rootdir'], shared: true },
+      { host_id: 1, node: 'pve3', storage: 'shared-b', content: ['rootdir'], shared: true },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    fireEvent.change(await screen.findByLabelText(/Container storage/i), { target: { value: 'shared-b' } })
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    expect(capturedSubmit().overrides.container_storage).toBe('shared-b')
+  })
+
+  it('does not double-count a shared pool reported more than once', async () => {
+    await mockStorage([
+      { host_id: 1, node: 'pve2', storage: 'shared-a', content: ['rootdir'], shared: true },
+      { host_id: 1, node: 'pve3', storage: 'shared-a', content: ['rootdir'], shared: true },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ])
+    renderDialog()
+    await openAdvanced()
+
+    // One real candidate is not a choice, even though the row appears twice.
+    await waitFor(() => expect(containerOptions()).toEqual(['shared-a']))
+  })
+
+  it('re-asks a stale remembered pool even when exactly one valid candidate remains', async () => {
+    // resolve_storage_pools raises whenever `remembered` is set and is not
+    // among the candidates, REGARDLESS of how many candidates remain: a
+    // remembered choice is never quietly swapped for the sole survivor. The
+    // old knownPool fell through to "sole candidate" here, showing
+    // "Storage: container lvm-b" as settled with no field to change it, and
+    // the job then failed on the stale 'lvm-gone' name it never sent.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ], [{ id: 1, name: 'host-01', node_name: 'pve', default_container_storage: 'lvm-gone' }])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    expect(await screen.findByLabelText(/Container storage/i)).toBeInTheDocument()
+    // Never presented as a settled fact: the surviving pool must not appear
+    // in the "Storage: ..." summary while the question is unanswered.
+    expect(screen.queryByText(/Storage:.*lvm-b/)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    expect(capturedSubmit().overrides.container_storage).toBe('lvm-b')
+  })
+
   it('will not submit while the storage snapshot cannot be read', async () => {
     // GET /storage is served from the poller snapshot, empty until the first
     // poll after a backend restart and absent on a 403. Empty candidate lists
@@ -609,5 +682,26 @@ describe('InstallDialog', () => {
     await waitFor(() =>
       expect(screen.queryByRole('checkbox', { name: /runs as root/i })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+})
+
+describe('knownPool', () => {
+  it('returns the remembered value when it is still a candidate', () => {
+    expect(knownPool('lvm-a', ['lvm-a', 'lvm-b'])).toBe('lvm-a')
+  })
+
+  it('returns null for a remembered value that dropped out of candidates, even with one left', () => {
+    // resolve_storage_pools never quietly swaps a remembered pool for the
+    // sole survivor; it re-asks. `knownPool('lvm-gone', ['lvm-b'])` used to
+    // return 'lvm-b', indistinguishable from the no-memory case.
+    expect(knownPool('lvm-gone', ['lvm-b'])).toBeNull()
+  })
+
+  it('returns the sole candidate when nothing is remembered', () => {
+    expect(knownPool(null, ['lvm-b'])).toBe('lvm-b')
+  })
+
+  it('returns null with no memory and more than one candidate', () => {
+    expect(knownPool(null, ['lvm-a', 'lvm-b'])).toBeNull()
   })
 })

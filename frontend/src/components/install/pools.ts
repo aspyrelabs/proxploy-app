@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 
 export type StorageRow = {
   host_id: number; node: string; storage: string; content: string[]; status: string
+  shared: boolean
 }
 
 export type Pools = {
@@ -23,7 +24,7 @@ export type Pools = {
  * and drops anything not enabled and active. This recreates that same set from
  * GET /storage so the form and the job agree about how many candidates exist,
  * because that count is what decides whether there is a question to ask at
- * all. Three ways the raw rows disagree with it, all of them observed:
+ * all. Ways the raw rows disagree with it, all of them observed:
  *
  *  - GET /storage keys non-shared datastores by (host, node, storage), so a
  *    3-node cluster with the usual identical local names answers `local-lvm`
@@ -31,6 +32,17 @@ export type Pools = {
  *    there is no choice, duplicate React keys) where the backend sees one.
  *    Hence the node filter plus the dedupe, matching VmCreateWizard.tsx's
  *    storeOpts, which filters on `s.node === f.node`.
+ *  - a SHARED datastore is the opposite case: backend/proxploy/api/storage.py
+ *    ::list_storage keys it by (host_id, storage) with no node component,
+ *    because a shared datastore reported once per node is ONE datastore, and
+ *    keeps whichever row the poller snapshot happened to see first, which may
+ *    legitimately name a node other than this host's own. A shared row is
+ *    therefore a candidate for every node of this host, and the node filter
+ *    below exempts it, else a host with real shared pools could see one
+ *    reported under a foreign node and lose it, reintroducing the exact
+ *    "question Default never rendered" failure the node filter exists to
+ *    prevent. The dedupe still applies to shared rows, in case one somehow
+ *    appears more than once.
  *  - the list is not status-filtered, so an inactive pool would be offered,
  *    chosen, remembered on the Host, and every later Default install would
  *    fail on it.
@@ -49,7 +61,7 @@ export function useStoragePools(hostId: number | null,
   const names = (content: string) => [...new Set(
     (q.data ?? [])
       .filter((r) => r.host_id === hostId
-        && (!node || r.node === node)
+        && (!node || r.node === node || r.shared)
         && r.status === 'available'
         && r.content.includes(content))
       .map((r) => r.storage))].sort()
@@ -68,10 +80,14 @@ export function useStoragePools(hostId: number | null,
  * A remembered value that has dropped out of `candidates` (renamed, detached,
  * or gone inactive) deliberately resolves to null rather than being shown as
  * fact: the install would fail on it with "no longer available", and the only
- * place that can be corrected is the question this un-answers.
+ * place that can be corrected is the question this un-answers. This holds no
+ * matter how many candidates remain, including exactly one: matching
+ * resolve_storage_pools (backend/proxploy/services/appstore.py), a remembered
+ * choice is NEVER quietly swapped for another pool, sole survivor or not.
+ * Re-ask instead.
  */
 export function knownPool(remembered: string | null | undefined,
                           candidates: string[]): string | null {
-  if (remembered && candidates.includes(remembered)) return remembered
+  if (remembered) return candidates.includes(remembered) ? remembered : null
   return candidates.length === 1 ? candidates[0] : null
 }
