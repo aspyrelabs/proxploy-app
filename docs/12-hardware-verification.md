@@ -47,11 +47,27 @@ carrying `vztmpl`. A single-storage host cannot exercise any of these. Checks 3a
 and 3b additionally need a *shared* pool (NFS, CIFS, Ceph) attached to a
 multi-node cluster; a standalone host cannot exercise them.
 
-The hardware available on 2026-08-14 does not meet this shape: `node1` and
-`node2` each carry exactly one `rootdir` pool (`local-lvm`) and one `vztmpl`
-pool (`local`), and are standalone rather than clustered. That is enough for
-check 3 and for the remembered-value half of 3b, and not enough for 2, 3a, or
-the status half of 3b.
+The hardware available on 2026-08-14 initially did not meet this shape:
+`node1` and `node2` each carried exactly one `rootdir` pool (`local-lvm`) and
+one `vztmpl` pool (`local`), and were standalone rather than clustered. That
+was enough for check 3 and the remembered-value half of 3b, and nothing else.
+
+Later the same day the two nodes were clustered as `lab-cluster` and an Unraid NFS
+export (`192.168.50.8:/mnt/user/test`) was attached cluster-wide as
+`nfs-shared` carrying `rootdir,vztmpl,images,iso,backup`. That is the shape
+this section asks for, and it is what checks 3a and 3b were finally run
+against. Two notes for anyone rebuilding it:
+
+- Joining a node replaces its `/etc/pve`, so `node2`'s Proxmox API token was
+  destroyed and Proxploy lost it with a 401 until its host row was repointed at
+  the now cluster-wide credentials. Root SSH went the other way and fixed
+  itself: `/root/.ssh/authorized_keys` is a symlink into `/etc/pve/priv/`, so
+  `node2` inherited `node1`'s key on join.
+- The Unraid share is exported "Public", which squashes root to `99:100`.
+  Writes succeed and the pool reads `available`, so it is fine for every
+  picker-level check here, but a container rootfs created on it will be owned
+  by the anonymous uid. Checks 1, 2 and 3a's install half should use
+  `no_root_squash` rather than reading a squash failure as a storage bug.
 
 **Updated 2026-08-14.** The install dialog now recreates the backend's candidate
 set client-side (`frontend/src/components/install/pools.ts`) to decide whether
@@ -115,11 +131,30 @@ because a code review found both cases reachable and neither provable offline.
    Fail: the pool is missing from the picker, or Default installs without asking
    on a host that genuinely has two candidates.
 
-   **NOT EXERCISABLE on the 2026-08-14 hardware.** `node1` and `node2` are two
-   standalone hosts, not a cluster: each `/cluster/resources` reports only its
-   own node, and every storage row comes back `shared: 0`. With no shared pool
-   and no second node in either result set, the node-filter exemption this
-   check exists to prove is never reached. Still open.
+   **PICKER HALF PASSED 2026-08-14, PVE 9.2.10**, on the `lab-cluster` cluster with
+   `nfs-shared` attached. The case arose on its own rather than having to be
+   contrived: `/cluster/resources` reports `nfs-shared` once per node with
+   `shared: 1`, and `GET /storage` collapsed it to a single row naming
+   **node2** for BOTH host rows, including the one whose `node_name` is
+   `node1`. That is precisely the row the node filter would drop. With the
+   `|| r.shared` exemption it is kept, and the dialog for host `node1`:
+
+   - offers `nfs-shared` in both pickers, once, not once per reporting node,
+   - and asks BOTH storage questions in Default mode, `local-lvm` +
+     `nfs-shared` for rootdir and `local` + `nfs-shared` for vztmpl, with an
+     empty settled-storage summary because nothing is settled.
+
+   So the documented failure mode (pool missing from the picker, or Default
+   installing without asking on a host with two real candidates) does not
+   occur. The install half, that a container placed there actually lands on
+   the shared pool, still needs a container create and is open.
+
+   Also newly proven by the same setup, and previously fake-only: with two
+   nodes carrying identically named local pools, `GET /storage` returns
+   `local` and `local-lvm` once per node per host, four rows where the backend
+   sees two candidates. The node filter plus dedupe collapses that to one
+   candidate per content type, and Default correctly asked nothing before
+   `nfs-shared` was attached.
 3b. **A pool the node is not serving is never offered.** The dialog keeps only
    rows whose `status` is exactly `available`, a literal taken from
    `/cluster/resources`. Pass: disable or detach one pool on the node and
@@ -141,11 +176,24 @@ because a code review found both cases reachable and neither provable offline.
      NOT quietly swapped for `local-lvm` despite it being the sole survivor,
      which is the `knownPool` / `resolve_storage_pools` agreement.
 
-   The status half is still open. It needs a pool to go non-`available`, and
-   both hosts carry exactly one `rootdir` pool and one `vztmpl` pool, so
-   disabling either leaves zero candidates rather than the "one of two
-   disappears" shape the check describes. It also cannot be run without
-   mutating live storage on the host.
+   **BEHAVIOURAL HALF PASSED 2026-08-14** on the `lab-cluster` cluster, in the
+   "one of two disappears" shape this check describes. With `nfs-shared`
+   attached and remembered as host `node1`'s `default_container_storage`,
+   running `pvesm set nfs-shared --disable 1` produced exactly the documented
+   pass: the pool left both pickers, and the host re-asked the container
+   question offering `local-lvm` alone rather than presenting the remembered
+   `nfs-shared` as fact. The template question settled back to `local` as the
+   sole survivor. Re-enabling restored all of it.
+
+   **The literal `status === 'available'` filter is still NOT exercised, and
+   the reason is worth recording:** a disabled pool does not come back from
+   `/cluster/resources` with a non-`available` status, it does not come back
+   AT ALL. `--disable 1` removes the row entirely. So the filter is currently
+   dead code against every case reachable by disabling a storage, and what
+   would actually reach it is a pool that stays enabled but goes inactive, an
+   NFS server that stops answering being the obvious one. Until that is run,
+   the comparison against the `available` literal is unproven, even though the
+   user-visible behaviour it protects is not.
 
 ### Install execution, carried from phase 4
 
