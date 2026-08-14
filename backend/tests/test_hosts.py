@@ -341,6 +341,24 @@ def test_host_reads_expose_team_id_so_the_ui_can_show_current_assignment(
     assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id
 
 
+def test_host_list_exposes_the_remembered_storage_pools(client, csrf_header, bootstrap_admin):
+    """InstallDialog's Default mode (Task 13) reads
+    default_container_storage / default_template_storage off GET /hosts to
+    decide whether it already knows this host's pools, and to show them
+    instead of asking again."""
+    bootstrap_admin(client)
+    from proxploy.models import Host
+
+    with client.app.state.sessionmaker() as db:
+        db.add(Host(name="h1", address="https://pve:8006", status="connected",
+                    default_container_storage="lvm-a", default_template_storage="local"))
+        db.commit()
+
+    row = client.get("/api/v1/hosts").json()[0]
+    assert row["default_container_storage"] == "lvm-a"
+    assert row["default_template_storage"] == "local"
+
+
 def test_probe_reports_unreachable_as_a_kind(tmp_path, csrf_header, bootstrap_admin):
     """A closed port and a bad token must not read identically to the wizard."""
     from fastapi.testclient import TestClient

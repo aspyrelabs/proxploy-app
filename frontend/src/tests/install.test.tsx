@@ -17,7 +17,11 @@ function renderDialog() {
 }
 
 type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
-type HostRow = { id: number; name: string }
+type HostRow = {
+  id: number; name: string
+  default_container_storage?: string | null
+  default_template_storage?: string | null
+}
 
 const DEFAULT_HOSTS: HostRow[] = [{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }]
 // host 1 carries a vztmpl-only pool ('local') and a rootdir-only pool
@@ -31,6 +35,33 @@ const DEFAULT_STORAGE: StorageRow[] = [
 
 async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[] = DEFAULT_HOSTS) {
   const { api } = await import('../api/client')
+  vi.mocked(api).mockImplementation((path: string) => {
+    if (path === '/catalog/redis') return Promise.resolve({
+      slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+      default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+    })
+    if (path === '/hosts') return Promise.resolve(hosts)
+    if (path === '/storage') return Promise.resolve(rows)
+    return Promise.resolve(null)
+  })
+}
+
+/** A host that has already answered the storage question once: two real
+ *  rootdir candidates exist, but Host.default_container_storage /
+ *  default_template_storage are already set, so Default must show the
+ *  answer rather than ask again. */
+async function mockHostWithRememberedStorage(remembered: { container: string; template: string }) {
+  const { api } = await import('../api/client')
+  const hosts: HostRow[] = [
+    { id: 1, name: 'host-01', default_container_storage: remembered.container,
+      default_template_storage: remembered.template },
+    { id: 2, name: 'host-02' },
+  ]
+  const rows: StorageRow[] = [
+    { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
+    { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
+  ]
   vi.mocked(api).mockImplementation((path: string) => {
     if (path === '/catalog/redis') return Promise.resolve({
       slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
@@ -319,5 +350,56 @@ describe('InstallDialog', () => {
     // not metadata's 0 (raw.metadata.install_methods[].resources disagrees
     // with the script-parsed columns for this exact slug; see Task 7).
     expect(screen.getByLabelText(/RAM/i)).toHaveValue(2048)
+  })
+
+  it('Default asks the storage question only when there is a real choice', async () => {
+    // host-01 in DEFAULT_STORAGE has exactly one rootdir candidate
+    // ('local-lvm'): one candidate is not a choice, so Default stays one
+    // click. It still shows what it resolved to, per "remembering must
+    // never become deciding silently" -- that applies to a sole candidate
+    // too, not only a remembered value.
+    await mockStorage()
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    await waitFor(() => expect(screen.getByText(/local-lvm/)).toBeInTheDocument())
+    expect(screen.queryByLabelText(/Container storage/i)).not.toBeInTheDocument()
+  })
+
+  it('Default asks when the host has two pools, because there is no honest default', async () => {
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
+    ])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    expect(await screen.findByLabelText(/Container storage/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+
+    // Fill in everything else the button needs; it must stay disabled until
+    // the ambiguous pool is actually chosen -- this is the one question
+    // Default is allowed to ask, and it is not optional.
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  it('shows the pools it will use, so remembering never becomes deciding silently', async () => {
+    await mockHostWithRememberedStorage({ container: 'lvm-a', template: 'local' })
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    // Displayed as text, not asked as a question -- even though this host
+    // genuinely has two rootdir candidates (lvm-a, lvm-b).
+    await waitFor(() => expect(screen.getByText(/lvm-a/)).toBeInTheDocument())
+    expect(screen.queryByLabelText(/Container storage/i)).not.toBeInTheDocument()
   })
 })

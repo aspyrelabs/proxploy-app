@@ -9,11 +9,22 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
 
-type HostRow = { id: number; name: string }
+type HostRow = {
+  id: number; name: string
+  // Set once Default has asked the storage question and the operator has
+  // answered it (Task 13; written back by POST .../install). NULL/absent
+  // means "not chosen yet".
+  default_container_storage?: string | null
+  default_template_storage?: string | null
+}
+type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
 
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: entry } = useCatalogEntry(slug)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  // Same queryKey StorageFields uses, so react-query dedupes this against
+  // Advanced mode's own fetch rather than doubling the request.
+  const storages = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
   const install = useInstall()
   const [hostId, setHostId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -67,12 +78,38 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     unprivileged: coreOverride.unprivileged,
   }
 
+  const host = (hosts.data ?? []).find((h) => h.id === hostId)
+  const rootdirPools = (storages.data ?? [])
+    .filter((r) => r.host_id === hostId && r.content.includes('rootdir'))
+    .map((r) => r.storage)
+  const vztmplPools = (storages.data ?? [])
+    .filter((r) => r.host_id === hostId && r.content.includes('vztmpl'))
+    .map((r) => r.storage)
+
+  // Default asks no question THAT HAS AN HONEST DEFAULT. Two rootdir pools
+  // have no default: build.func has none and we do not invent one, so this
+  // is the one question Default has to ask. One candidate is not a choice,
+  // and a remembered answer (Host.default_container_storage) is shown
+  // rather than re-asked.
+  const needsStoragePrompt =
+    hostId != null && !host?.default_container_storage && rootdirPools.length > 1
+
+  // Remembering must not become deciding silently: once the pool is known
+  // (remembered, or the sole candidate), DISPLAY it rather than asking
+  // again, so the operator can always see which pool an install will use.
+  const showsStorageSummary = hostId != null && !needsStoragePrompt
+  const resolvedContainer = host?.default_container_storage
+    ?? (rootdirPools.length === 1 ? rootdirPools[0] : null)
+  const resolvedTemplate = host?.default_template_storage
+    ?? (vztmplPools.length === 1 ? vztmplPools[0] : null)
+
   // CTID is no longer required: blank means the node assigns the next free
   // id (InstallIn.ctid, backend/proxploy/api/catalog.py). Host consent is
   // still asked here every time; the catalog/host payloads this dialog can
   // see do not yet expose Host.install_consent_at, so there is no way to
   // tell from here whether this host already acknowledged.
   const canSubmit = consent && hostId != null && name.trim() !== ''
+    && (!needsStoragePrompt || storage.container !== '')
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
@@ -169,6 +206,26 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             {entry.default_cpu} vCPU · {entry.default_ram_mb}MB RAM · {entry.default_disk_gb}GB disk ·{' '}
             {entry.default_os} {entry.default_os_version}
           </div>
+          {mode === 'default' && needsStoragePrompt && (
+            <div>
+              <label htmlFor="default-container-storage"
+                className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                Container storage
+              </label>
+              <select id="default-container-storage"
+                className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
+                value={storage.container}
+                onChange={(e) => setStorage({ ...storage, container: e.target.value })}>
+                <option value="">Select a pool…</option>
+                {rootdirPools.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
+          {mode === 'default' && showsStorageSummary && (resolvedContainer || resolvedTemplate) && (
+            <div className="rounded-ctl border border-line-soft bg-elev p-2 text-[11px] text-text-3">
+              Storage: container {resolvedContainer ?? '—'} · template {resolvedTemplate ?? '—'}
+            </div>
+          )}
           {mode === 'advanced' && (
             <div className="rounded-ctl border border-dashed border-line-soft p-3 text-[12px] text-text-3">
               <span className="text-text">Container customization</span>

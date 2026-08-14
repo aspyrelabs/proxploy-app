@@ -346,6 +346,12 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "node_power_missing": h.node_power_missing,
              "team_id": h.team_id,
+             # The install dialog's Default mode reads these to decide
+             # whether it has already learned this host's storage pools
+             # (Task 13): a value here means the question was asked once and
+             # is now shown rather than asked again.
+             "default_container_storage": h.default_container_storage,
+             "default_template_storage": h.default_template_storage,
              "capabilities": _capability_state(kinds.get(h.id, ())),
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]
