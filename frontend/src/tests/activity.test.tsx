@@ -92,8 +92,8 @@ describe('ActivityFeed', () => {
 
   it('renders merged job and audit rows with their actor', async () => {
     wrap(<ActivityFeed />)
-    expect(await screen.findByText('app.start')).toBeInTheDocument()
-    expect(screen.getByText('host.create')).toBeInTheDocument()
+    expect(await screen.findByText('App Started')).toBeInTheDocument()
+    expect(screen.getByText('Host Added')).toBeInTheDocument()
     expect(screen.getAllByText(/admin@example.com/).length).toBe(2)
   })
 
@@ -112,9 +112,9 @@ describe('ActivityFeed', () => {
 
   it('offers Cancel only on the running job row, not the succeeded job or the audit row', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('app.stop')
+    await screen.findByText('App Stopped')
     expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
-    const row = screen.getByText('app.stop').closest('div')!
+    const row = screen.getByText('App Stopped').closest('div')!
     expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
   })
 
@@ -122,8 +122,8 @@ describe('ActivityFeed', () => {
   // a determinate ring may honestly appear on.
   it('shows a progress ring on the running job row', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('app.stop')
-    const row = screen.getByText('app.stop').closest('div')!
+    await screen.findByText('App Stopped')
+    const row = screen.getByText('App Stopped').closest('div')!
     expect(within(row).getByRole('status')).toHaveAttribute(
       'aria-label', expect.stringContaining('40 percent'))
   })
@@ -132,8 +132,8 @@ describe('ActivityFeed', () => {
   // standing in for "no figure" either.
   it('shows no ring on a row with no progress figure', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('host.create')
-    const row = screen.getByText('host.create').closest('div')!
+    await screen.findByText('Host Added')
+    const row = screen.getByText('Host Added').closest('div')!
     expect(within(row).queryByRole('status')).toBeNull()
   })
 
@@ -141,8 +141,8 @@ describe('ActivityFeed', () => {
   // progress_pct: 100. A determinate ring is for a job still running.
   it('shows no ring on a finished job even though it carries a progress figure', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('app.start')
-    const row = screen.getByText('app.start').closest('div')!
+    await screen.findByText('App Started')
+    const row = screen.getByText('App Started').closest('div')!
     expect(within(row).queryByRole('status')).toBeNull()
   })
 

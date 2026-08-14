@@ -166,9 +166,9 @@ describe('BellPopover', () => {
   it('opens from the bell and lists recent jobs', async () => {
     wrap()
     await openBell()
-    expect(await screen.findByText(/app\.start/)).toBeInTheDocument()
-    expect(screen.getByText(/app\.stop/)).toBeInTheDocument()
-    expect(screen.getByText(/vm\.backup/)).toBeInTheDocument()
+    expect(await screen.findByText(/App Started/)).toBeInTheDocument()
+    expect(screen.getByText(/App Stopped/)).toBeInTheDocument()
+    expect(screen.getByText(/VM Backup/)).toBeInTheDocument()
   })
 
   it('says jobs could not be read rather than showing an empty list', async () => {
@@ -212,7 +212,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const running = cards.find((c) => c.textContent?.includes('app.start'))!
+    const running = cards.find((c) => c.textContent?.includes('App Started'))!
     expect(within(running).getByRole('status')).toHaveAttribute(
       'aria-label', expect.stringContaining('40 percent'))
     expect(within(running).queryByText('40%')).toBeNull()
@@ -224,7 +224,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const finished = cards.find((c) => c.textContent?.includes('app.stop'))!
+    const finished = cards.find((c) => c.textContent?.includes('App Stopped'))!
     expect(within(finished).queryByRole('status')).toBeNull()
   })
 
@@ -233,7 +233,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const failed = cards.find((c) => c.textContent?.includes('vm.backup'))!
+    const failed = cards.find((c) => c.textContent?.includes('VM Backup'))!
     expect(within(failed).queryByRole('status')).toBeNull()
   })
 
@@ -260,14 +260,14 @@ describe('BellPopover', () => {
     jobsResult = 'many'
     wrap()
     await openBell()
-    await screen.findByText('bulk.job0 #100')
+    await screen.findByText('Bulk Job0 #100')
     expect(screen.getAllByRole('alert')).toHaveLength(15)
     // #115 is the 16th, so it is queued behind the visible fifteen.
-    expect(screen.queryByText('bulk.job15 #115')).not.toBeInTheDocument()
+    expect(screen.queryByText('Bulk Job15 #115')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
 
-    await waitFor(() => expect(screen.getByText('bulk.job15 #115')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Bulk Job15 #115')).toBeInTheDocument())
     expect(screen.getAllByRole('alert')).toHaveLength(15)
   })
 
@@ -311,18 +311,18 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const failed = cards.find((c) => c.textContent?.includes('vm.backup'))!
+    const failed = cards.find((c) => c.textContent?.includes('VM Backup'))!
     fireEvent.click(within(failed).getByRole('button', { name: /view log/i }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('vm.backup #12')).toBeInTheDocument()
+    expect(within(dialog).getByText('VM Backup #12')).toBeInTheDocument()
     // The archived transcript is fetched for THAT job, not whichever was first.
     await waitFor(() => expect(screen.getByText(/reading superblock/)).toBeInTheDocument())
 
     // It shipped with Escape and the scrim and nothing to click, unlike every
     // other dialog that mounts a JobLog. A visible way out is not optional.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
-    await waitFor(() => expect(screen.queryByText('vm.backup #12')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('VM Backup #12')).not.toBeInTheDocument())
   })
 
   // Icon-only controls: the aria-label is the accessible name whether or not
@@ -394,7 +394,7 @@ describe('BellPopover', () => {
     wrap()
     const trigger = await screen.findByRole('button', { name: 'Activity' })
     fireEvent.click(trigger)
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
@@ -402,21 +402,21 @@ describe('BellPopover', () => {
   it('closes on Escape', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Started/)).not.toBeInTheDocument())
   })
 
   it('closes on an outside click', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     // Radix's DismissableLayer defers a left-button pointerdown outside until
     // the matching click fires (so a drag-selection that starts outside and
     // ends inside doesn't dismiss the layer); both events are needed here.
     fireEvent.pointerDown(document.body, { button: 0 })
     fireEvent.click(document.body)
-    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Started/)).not.toBeInTheDocument())
   })
 
   // Radix's Popover.Content legitimately carries role="dialog" (a non-modal
@@ -427,7 +427,7 @@ describe('BellPopover', () => {
   it('renders no scrim and no aria-modal', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     expect(document.querySelector('[aria-modal]')).toBeNull()
   })
 
@@ -439,7 +439,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const forJob11 = cards.filter((c) => c.textContent?.includes('app.stop'))
+    const forJob11 = cards.filter((c) => c.textContent?.includes('App Stopped'))
     expect(forJob11).toHaveLength(1)
   })
 
@@ -481,9 +481,9 @@ describe('BellPopover', () => {
     // JOBS 10 and 11 are covered by the watermark; only 12 remains.
     expect(await screen.findByText('1')).toBeInTheDocument()
     await openBell()
-    expect(await screen.findByText(/vm\.backup/)).toBeInTheDocument()
-    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
+    expect(screen.queryByText(/App Started/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
   })
 
   // The watermark only covers ids at or below it; an id dismissed on its
@@ -492,15 +492,15 @@ describe('BellPopover', () => {
     dismissedState = { cleared_through_job_id: null, dismissed_job_ids: [11] }
     wrap()
     await openBell()
-    expect(await screen.findByText(/app\.start/)).toBeInTheDocument()
-    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
-    expect(await screen.findByText(/vm\.backup/)).toBeInTheDocument()
+    expect(await screen.findByText(/App Started/)).toBeInTheDocument()
+    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
   })
 
   it('clear all writes through to the server', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
@@ -511,7 +511,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const jobCard = cards.find((c) => c.textContent?.includes('app.start'))!
+    const jobCard = cards.find((c) => c.textContent?.includes('App Started'))!
     fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
@@ -540,14 +540,14 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const jobCard = cards.find((c) => c.textContent?.includes('app.start'))!
+    const jobCard = cards.find((c) => c.textContent?.includes('App Started'))!
     fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
-    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Started/)).not.toBeInTheDocument())
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
     ).toBe(true))
     // Gave the rejected mutation a full turn to settle; it did not come back.
-    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Started/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })
 
@@ -559,15 +559,15 @@ describe('BellPopover', () => {
     dismissWriteFails = true
     wrap()
     await openBell()
-    await screen.findByText(/app\.start/)
+    await screen.findByText(/App Started/)
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
-    await waitFor(() => expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Started/)).not.toBeInTheDocument())
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
     ).toBe(true))
-    expect(screen.queryByText(/app\.start/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/app\.stop/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/vm\.backup/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Started/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/VM Backup/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })
 })

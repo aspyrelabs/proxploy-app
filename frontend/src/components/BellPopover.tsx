@@ -3,7 +3,7 @@ import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { Icon } from './ui/icon'
 import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
-import { ago } from './activityDisplay'
+import { actionLabel, ago } from './activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
@@ -296,7 +296,7 @@ export function BellPopover() {
   const toJobItem = (j: JobRow): TrayItem => ({
     id: `job:${j.id}`,
     severity: severityOf(j.status),
-    title: `${j.kind} #${j.id}`,
+    title: `${actionLabel(j.kind)} #${j.id}`,
     description: messageOf(j),
     footer: footerOf(j),
     progress: progressOf(j),
@@ -471,7 +471,7 @@ export function BellPopover() {
           keeps it out of the flexbox shrinking that the transcript above it
           absorbs. */}
       {logJob && (
-        <Dialog title={`${logJob.kind} #${logJob.id}`}
+        <Dialog title={`${actionLabel(logJob.kind)} #${logJob.id}`}
                 description={logJob.error ?? undefined}
                 fit
                 onClose={() => setLogJob(null)}>

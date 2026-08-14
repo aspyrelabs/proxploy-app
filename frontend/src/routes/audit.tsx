@@ -6,6 +6,7 @@ import type { AuditFilters } from '../api/audit'
 import { useEntitlements } from '../api/hooks'
 import { inputCls } from '../components/LoginForm'
 import { LockVeil } from '../components/LockVeil'
+import { actionLabel } from '../components/activityDisplay'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
 
@@ -101,7 +102,14 @@ export function AuditPage() {
                         <td className="font-mono text-text-2">
                           {r.actor_type}{r.actor_id != null ? ` #${r.actor_id}` : ''}
                         </td>
-                        <td className="font-mono text-text">{r.action}</td>
+                        {/* Friendly name on top, raw identifier under it: the
+                            filter, the export and the API all still speak the
+                            stored value, so hiding it would make this page
+                            unusable for filtering and for debugging. */}
+                        <td className="py-2 text-text">
+                          {actionLabel(r.action)}
+                          <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
+                        </td>
                         <td className="font-mono text-[12px] text-text-3">
                           {r.target_type ?? ''}{r.target_id != null ? ` #${r.target_id}` : ''}
                         </td>

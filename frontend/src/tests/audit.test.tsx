@@ -134,6 +134,30 @@ describe('AuditPage pagination boundary', () => {
       .not.toBeDisabled()
   })
 
+  // The friendly name is what the row is read by; the raw identifier stays
+  // visible because it is what the Action filter and the exports match on.
+  it('shows the friendly name and keeps the raw action beside it', async () => {
+    await serve(1)
+    wrap()
+    expect(await screen.findByText('Host Synced')).toBeInTheDocument()
+    expect(screen.getByText('host.sync')).toBeInTheDocument()
+  })
+
+  it('still names an action the label map has never seen', async () => {
+    const { api } = await import('../api/client')
+    ;(api as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path === '/entitlements') {
+        return Promise.resolve({ tier: 'pro', features: { 'audit.log': true }, grace: null, clock_skew: false })
+      }
+      if (path.startsWith('/audit')) {
+        return Promise.resolve([{ ...row(1), action: 'gizmo.self_test' }])
+      }
+      return Promise.resolve(null)
+    })
+    wrap()
+    expect(await screen.findByText('Gizmo Self Test')).toBeInTheDocument()
+  })
+
   it('never renders the probe row', async () => {
     await serve(51)
     wrap()
