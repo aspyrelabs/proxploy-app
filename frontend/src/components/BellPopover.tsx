@@ -313,7 +313,23 @@ export function BellPopover() {
   const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem)
   const undismissed = merged.filter((m) => !dismissed.has(m.id)
     && !(m.jobId != null && isPersistedDismissed(dismissedQuery.data, m.jobId)))
-  const count = undismissed.length
+  // Fail open on the LIST, hold on the FILTER. isPersistedDismissed answers
+  // false for every id until GET /dismissed lands, which is the right default
+  // for a request that FAILED (better to show a notification twice than to
+  // swallow one), and the wrong one while it is merely in flight: for that
+  // moment the tray and the badge bring back everything the operator has
+  // already cleared, then take it away again on the next paint.
+  //
+  // The distinction the original reasoning missed is that fail-open on
+  // jobsQuery and fail-open here are not the same choice. An unloaded job list
+  // showing nothing is incomplete. An unloaded dismissal list showing cleared
+  // items is WRONG: it is news the operator already dealt with, presented as
+  // current. Incomplete beats wrong, so the count waits.
+  //
+  // Only `isPending`. A dismissal query that has errored keeps the old
+  // fail-open behaviour, deliberately, because then the state is not coming.
+  const dismissalsUnknown = dismissedQuery.isPending
+  const count = dismissalsUnknown ? 0 : undismissed.length
   // The fit loop needs to know how many cards COULD be shown, or it would keep
   // trying to grow past the end of the list on a tall window with few jobs.
   const visible = useFittingCount(listRef, open, undismissed.length)
@@ -416,7 +432,8 @@ export function BellPopover() {
           {undismissed.length === 0 && jobsQuery.isError ? (
             <TrayEmptyState title="Notifications not readable"
                             note="Proxploy could not reach the backend." />
-          ) : undismissed.length === 0 && (jobsQuery.isPending || jobsQuery.data === undefined) ? (
+          ) : (undismissed.length === 0 || dismissalsUnknown)
+              && (dismissalsUnknown || jobsQuery.isPending || jobsQuery.data === undefined) ? (
             <LoadingBlock />
           ) : undismissed.length === 0 ? (
             <TrayEmptyState title="Nothing to report."

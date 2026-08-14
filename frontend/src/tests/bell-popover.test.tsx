@@ -104,6 +104,20 @@ vi.mock('../api/client', () => ({
 
 import { BellPopover } from '../components/BellPopover'
 
+/** Holds GET /notifications/dismissed open so the pending window can be
+ *  observed. Everything else answers normally. */
+const withDismissedPending = async () => {
+  const { api } = await import('../api/client')
+  const real = vi.mocked(api).getMockImplementation()!
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => { release = r })
+  vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) =>
+    path === '/notifications/dismissed' && (opts?.method ?? 'GET') === 'GET'
+      ? gate.then(() => real(path, opts)) as never
+      : real(path, opts) as never)
+  return { release: () => { release(); vi.mocked(api).mockImplementation(real as never) } }
+}
+
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}><BellPopover /></QueryClientProvider>)
@@ -571,5 +585,39 @@ describe('BellPopover', () => {
     expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
     expect(screen.queryByText(/VM Backup/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
+  })
+
+  // Cleared notifications used to come BACK for the length of the
+  // GET /notifications/dismissed fetch, badge included, because
+  // isPersistedDismissed answers false for every id until that state lands.
+  // Fail open on a failed read is right; fail open while it is merely in
+  // flight showed the operator news they had already dealt with.
+  it('does not resurrect cleared notifications while the dismissal state loads', async () => {
+    dismissedState = { cleared_through_job_id: 99, dismissed_job_ids: [] }
+    const gate = await withDismissedPending()
+    wrap()
+    // Every fixture job is at or below the watermark, so once the state lands
+    // the tray is empty. While it is pending the badge must not claim
+    // otherwise.
+    const bell = await screen.findByRole('button', { name: 'Activity' })
+    fireEvent.click(bell)
+
+    // The job list resolves while the dismissal state is still held, which is
+    // the exact window this is about: jobs are KNOWN, what has been cleared is
+    // NOT. Every fixture job is at or below the watermark, so once both have
+    // landed the tray is empty. Before the fix, this window listed all of them
+    // and badged the count, then took them away on the next paint.
+    //
+    // Asserting through a job title rather than the badge, because the badge
+    // reads zero while jobs are loading too, which made an earlier version of
+    // this test pass with the fix reverted.
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
+    expect(screen.queryByText(/App Start/)).not.toBeInTheDocument()
+    expect(within(bell).queryByText(/^[0-9]+$/)).not.toBeInTheDocument()
+
+    gate.release()
+    // and once it lands they are still gone, because they really were cleared
+    await waitFor(() => expect(screen.getByText(/Nothing to report/i)).toBeInTheDocument())
+    expect(within(bell).queryByText(/^[0-9]+$/)).not.toBeInTheDocument()
   })
 })

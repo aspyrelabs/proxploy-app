@@ -704,4 +704,31 @@ describe('knownPool', () => {
   it('returns null with no memory and more than one candidate', () => {
     expect(knownPool(null, ['lvm-a', 'lvm-b'])).toBeNull()
   })
+
+  // pools.ts carries a `state` alongside the lists precisely because an empty
+  // list is indistinguishable from "this host has no storage" until the
+  // snapshot has been read. StorageFields destructured it away, so during the
+  // fetch the Advanced block showed two pickers offering nothing, directly
+  // under InstallDialog's own notice saying the pools were still being read.
+  it('does not offer empty pool pickers while the pools are still being read', async () => {
+    const { api } = await import('../api/client')
+    const real = vi.mocked(api).getMockImplementation()!
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => { release = r })
+    vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) =>
+      path === '/storage' ? gate.then(() => real(path, opts)) as never : real(path, opts) as never)
+
+    renderDialog()
+    await openAdvanced()
+
+    // No control at all beats a control that offers nothing: an empty picker
+    // reads as a host with no pools, which is a different and wrong answer.
+    expect(screen.queryByLabelText('Container storage')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Template storage')).not.toBeInTheDocument()
+
+    release()
+    vi.mocked(api).mockImplementation(real as never)
+    await waitFor(() => expect(screen.getByLabelText('Container storage')).toBeInTheDocument())
+    expect(optionsOf('Container storage')).toContain('local-lvm')
+  })
 })

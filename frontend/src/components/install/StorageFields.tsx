@@ -1,3 +1,4 @@
+import { SkeletonField, SkeletonGroup } from '../ui/skeleton'
 import { useStoragePools } from './pools'
 
 const lbl = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
@@ -31,7 +32,30 @@ export function StorageFields({ hostId, node, container, template, onChange }: {
   template: string
   onChange: (next: { container: string; template: string }) => void
 }) {
-  const { rootdir, vztmpl } = useStoragePools(hostId, node)
+  const { rootdir, vztmpl, state } = useStoragePools(hostId, node)
+
+  // `state`, not just the lists. pools.ts carries it for exactly this reason
+  // and says so: the snapshot is EMPTY until the first poll after a backend
+  // restart and absent entirely on a 403, so an empty list is
+  // indistinguishable from "this host has no storage" unless the load state
+  // travels with it. Destructuring it away, which this component did, put two
+  // pickers reading "Select a pool..." with nothing behind them directly under
+  // InstallDialog's own notice saying the pools were still being read. The
+  // notice was right and the controls contradicted it.
+  //
+  // Placeholders rather than a second message: InstallDialog already explains
+  // WHY above this block, and already blocks Install on the same condition
+  // (storageUnknown), so all that is missing here is for the fields to stop
+  // claiming an answer they do not have.
+  if (state !== 'ok') {
+    return (
+      <SkeletonGroup label="Reading the storage pools for this host"
+                     className="mt-2 space-y-2">
+        <SkeletonField label="w-28" />
+        <SkeletonField label="w-24" />
+      </SkeletonGroup>
+    )
+  }
 
   return (
     <div className="mt-2 space-y-2">
