@@ -63,6 +63,15 @@ against. Two notes for anyone rebuilding it:
   the now cluster-wide credentials. Root SSH went the other way and fixed
   itself: `/root/.ssh/authorized_keys` is a symlink into `/etc/pve/priv/`, so
   `node2` inherited `node1`'s key on join.
+- The two-node cluster runs with `two_node: 1` in `/etc/pve/corosync.conf`
+  (config_version 3, applied 2026-08-14). Without it quorum is 2 of 2, so
+  losing either node puts the survivor's `/etc/pve` into read-only and every
+  Proxploy write against it fails. Corosync enables `wait_for_all` alongside
+  `two_node`, which has its own consequence worth knowing before you debug it
+  at 2am: after a cold start of BOTH nodes, the first one back is NOT quorate
+  until it has seen the other at least once. `pvecm expected 1` is the manual
+  escape. A QDevice would remove both caveats and needs a third host.
+
 - The Unraid share is exported "Public", which squashes root to `99:100`.
   This was expected to break a container rootfs and did NOT: CT 152 was
   created on it, ran, and its disk sat at
@@ -311,6 +320,28 @@ message.
    performing it.
 9. **Whole-storage prune.** Pruning across an entire storage, where the count
    of affected volumes and the time taken both differ materially from a fake.
+
+## Cluster quorum
+
+12. **Proxploy against a cluster that has lost quorum.** Never exercised, and
+    the failure shape is the reason it is worth writing down: quorum loss makes
+    `/etc/pve` read-only, so `pct create`, storage edits and any config write
+    fail, while `/cluster/resources` keeps answering perfectly. The poller
+    would therefore report every host `connected` and every node healthy, and
+    the UI would look entirely normal right up until a write is attempted.
+    That is the "a fake reports too cleanly" pattern this document exists to
+    catch, except here the REAL API reports too cleanly as well.
+
+    Reproduce by stopping corosync on one node of the pair
+    (`systemctl stop corosync`) with `two_node` removed, or on a plain
+    two-node cluster before that setting is applied. Pass: an install or any
+    config write refuses with something an operator can act on, and the host
+    is not presented as healthy while it cannot accept writes. Fail: the job
+    hangs, or fails with a raw Proxmox error about a read-only filesystem that
+    names no cause.
+
+    Deliberately not run on 2026-08-14: it means deliberately breaking the
+    cluster the other checks were using.
 
 ## Privileges and identity
 
