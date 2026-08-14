@@ -153,6 +153,19 @@ def _node_power_missing(client) -> bool | None:
     return NODE_POWER_PRIVILEGE not in granted
 
 
+def _capability_state(kinds) -> dict[str, bool]:
+    """Which capability tokens this host holds. Presence only.
+
+    Never the token, the token id, or any part of the blob: the UI needs to
+    know whether a capability is configured and nothing more. Keyed off
+    CAPABILITIES so a capability added to services/pveum.py appears here
+    with no second list to maintain, and a host with no credential rows
+    reports every capability False rather than omitting the field.
+    """
+    stored = set(kinds)
+    return {c: f"api_token:{c}" in stored for c in CAPABILITIES}
+
+
 def _privilege_note(missing: list[str] | None) -> str | None:
     if not missing:
         return None
@@ -321,12 +334,19 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
 
 @router.get("")
 def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
+    # One query for every host's credential kinds, not one per host: this
+    # route is the hosts table's own fetch and N+1 here is N+1 on every
+    # settings page load.
+    kinds: dict[int, set[str]] = {}
+    for host_id, kind in db.query(HostCredential.host_id, HostCredential.kind):
+        kinds.setdefault(host_id, set()).add(kind)
     return [{"id": h.id, "name": h.name, "address": h.address,
              "node_name": h.node_name, "status": h.status,
              "last_error": h.last_error,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "node_power_missing": h.node_power_missing,
              "team_id": h.team_id,
+             "capabilities": _capability_state(kinds.get(h.id, ())),
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]
 
@@ -337,13 +357,14 @@ def host_detail(host_id: int, db=Depends(get_db),
     h = db.get(Host, host_id)
     if not h:
         raise HTTPException(404, "no such host")
-    creds = db.query(HostCredential).filter_by(host_id=h.id)
+    creds = db.query(HostCredential).filter_by(host_id=h.id).all()
     return {"id": h.id, "name": h.name, "address": h.address,
             "node_name": h.node_name, "status": h.status,
             "last_error": h.last_error,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
             "node_shell_enabled": h.node_shell_enabled,
             "node_power_missing": h.node_power_missing, "team_id": h.team_id,
+            "capabilities": _capability_state(c.kind for c in creds),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": c.last_used_at.isoformat()
                              if c.last_used_at else None} for c in creds]}
