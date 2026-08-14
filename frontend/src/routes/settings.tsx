@@ -9,6 +9,7 @@ import { useSchedules } from '../api/schedules'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
+import { HostCapabilityList } from '../components/HostCapabilityList'
 import { HostForm } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { HostRotateDialog } from '../components/HostRotateDialog'
@@ -23,6 +24,7 @@ import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
+import { Dialog } from '../components/ui/dialog'
 import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
@@ -146,6 +148,23 @@ export function SchedulesCard() {
   )
 }
 
+/** The four capability tokens for one host. Settings is where the docs tell
+ *  operators to add them, and until now it had no control for them at all.
+ *  Separate from HostRotateDialog on purpose: that one is monitoring + the
+ *  SSH key, and merging the two would put two different rotate paths for the
+ *  same token in one card. */
+export function HostTokensDialog({ hostId, hostName, onClose }: {
+  hostId: number; hostName: string; onClose: () => void
+}) {
+  return (
+    <Dialog title={<>Capability tokens, {hostName}</>} width={440} onClose={onClose}>
+      <div className="mt-4">
+        <HostCapabilityList hostId={hostId} />
+      </div>
+    </Dialog>
+  )
+}
+
 export function SettingsPage() {
   const ent = useEntitlements()
   const { tier, grace, clockSkew } = ent
@@ -169,6 +188,7 @@ export function SettingsPage() {
   // comparing the pending mutation's own variables rather than a separate
   // "which host" state.
   const [rotatingHost, setRotatingHost] = useState<HostRow | null>(null)
+  const [tokensHost, setTokensHost] = useState<{ id: number; name: string } | null>(null)
   const [removingHost, setRemovingHost] = useState<HostRow | null>(null)
   const [tasksHostId, setTasksHostId] = useState<number | null>(null)
   const syncHost = useMutation({
@@ -310,6 +330,8 @@ export function SettingsPage() {
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
                             onClick={() => setRotatingHost(h)}>Rotate</Button>
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                            onClick={() => setTokensHost(h)}>Tokens</Button>
+                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
                             onClick={() => setTasksHostId(id => id === h.id ? null : h.id)}>
                             {tasksHostId === h.id ? 'Hide tasks' : 'Tasks'}
                           </Button>
@@ -336,6 +358,10 @@ export function SettingsPage() {
         {rotatingHost && (
           <HostRotateDialog hostId={rotatingHost.id} hostName={rotatingHost.name}
             onClose={() => setRotatingHost(null)} />
+        )}
+        {tokensHost && (
+          <HostTokensDialog hostId={tokensHost.id} hostName={tokensHost.name}
+            onClose={() => setTokensHost(null)} />
         )}
         {removingHost && (
           <HostRemoveDialog hostId={removingHost.id} hostName={removingHost.name}
