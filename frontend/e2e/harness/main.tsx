@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import type { CatalogRow } from '../../src/api/catalog'
-import { StoreCard } from '../../src/components/StoreCard'
+import { StoreCard, StoreCardSkeleton } from '../../src/components/StoreCard'
 import './harness.css'
 
 /**
@@ -92,6 +92,12 @@ function Harness() {
                 onInstall={() => {}} onOpenDetail={() => {}} />
             </div>
           ))}
+          {/* The loading placeholder, measured beside the cards it stands in
+              for. A skeleton whose height differs from the real card makes the
+              grid resize the moment the catalog lands, and that is exactly the
+              failure this page's equal-heights check catches: it is a
+              `.rounded-card` like the rest, so it is held to the same 240px. */}
+          <div data-state="skeleton"><StoreCardSkeleton /></div>
         </div>
       </main>
     </div>

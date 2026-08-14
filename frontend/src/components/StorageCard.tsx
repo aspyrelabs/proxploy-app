@@ -1,5 +1,6 @@
 import type { StorageRow } from '../api/storage'
 import { fmtBytes, fmtPct } from '../lib/format'
+import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { DANGER_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 // doc 06 §a row 43 / §c: violet is storage's reserved accent, red takes over
@@ -41,5 +42,29 @@ export function StorageCard({ row, onOpen }:
         </div>
       </div>
     </button>
+  )
+}
+
+/**
+ * StorageCard's placeholder, classes copied from the card above so the two
+ * measure the same. The type tile is `h-9 w-9 rounded-tile`; the used-percent
+ * pill is `px-2 py-0.5` around a 10.5px line box.
+ */
+export function StorageCardSkeleton() {
+  return (
+    <div className="rounded-card border border-line-soft bg-panel p-5">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-9 w-9 shrink-0 rounded-tile" />
+        <div className="min-w-0 flex-1">
+          <SkeletonLine className="w-28 text-[14px]" />
+          <SkeletonLine className="w-36 text-[11px]" />
+        </div>
+        <Skeleton className="ml-auto h-[19px] w-12 shrink-0 rounded-full" />
+      </div>
+      <div className="mt-3">
+        <Skeleton className="h-1.5 w-full rounded-full" />
+        <SkeletonLine className="mt-1.5 w-32 text-[11px]" />
+      </div>
+    </div>
   )
 }

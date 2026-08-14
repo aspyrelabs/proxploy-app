@@ -6,7 +6,7 @@ import { notify } from '../lib/notify'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
-import { AppCard } from '../components/AppCard'
+import { AppCard, AppCardSkeleton } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
@@ -16,6 +16,7 @@ import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
+import { SkeletonGroup } from '../components/ui/skeleton'
 import { ReconfigureDialog } from '../components/ReconfigureDialog'
 import { UninstallDialog } from '../components/UninstallDialog'
 import { Loading } from '../components/ui/loading'
@@ -28,7 +29,10 @@ import { ScriptPanel } from '../components/ScriptPanel'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
-const inputCls = 'rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
+// Hoisted so the loading placeholder lays out in the SAME grid as the cards it
+// stands in for. Two copies of the string is one copy too many.
+const APP_GRID = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'
+const inputCls ='rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
 type HostRow = { id: number; name: string }
 
@@ -147,12 +151,15 @@ export function AppsPage() {
       </div>
 
       <QueryState query={appsQuery}
+                  loading={<SkeletonGroup label="Loading apps" className={APP_GRID}>
+                    {Array.from({ length: 8 }, (_, i) => <AppCardSkeleton key={i} />)}
+                  </SkeletonGroup>}
                   emptyTitle="No apps match your filter."
                   emptyNote="Install from the App Store (Phase 4) or adopt discovered containers."
                   errorTitle="Apps not readable"
                   errorNote="Proxploy could not reach the backend to list your apps.">
         {(rows) => (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className={APP_GRID}>
             {rows.map((a) => <AppCard key={a.id} app={a} />)}
           </div>
         )}

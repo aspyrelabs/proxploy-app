@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
-import { AppCard } from '../components/AppCard'
+import { AppCard, AppCardSkeleton } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
@@ -14,16 +14,21 @@ import { HardwareTab } from '../components/HardwareTab'
 import { HostActionsMenu } from '../components/HostActionsMenu'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
-import { NodeCard } from '../components/NodeCard'
+import { NodeCard, NodeCardSkeleton } from '../components/NodeCard'
 import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
 import { MetricChart } from '../components/charts/MetricChart'
 import { Ring } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { fmtBps, fmtBytes } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
+// Hoisted because the loading placeholder has to lay out in the SAME grid as
+// the content it replaces; two copies of the string is one copy too many.
+const nodeGrid = 'grid grid-cols-1 gap-4 md:grid-cols-3'
+const appGrid = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'
 
 function useSummary() {
   return useQuery({
@@ -102,7 +107,7 @@ function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
           {down === 0 ? 'all healthy' : `${down} unreachable`}
         </span>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className={nodeGrid}>
         {rows.map((n) => <NodeCard key={`${n.host_id}:${n.node}`} node={n} />)}
       </div>
     </section>
@@ -232,6 +237,9 @@ export function HostsPage() {
       <div className="mt-5">
         <AddHostSection hostCount={new Set((nodes ?? []).map((n) => n.host_id)).size} />
         <QueryState query={nodesQuery}
+                    loading={<SkeletonGroup label="Loading nodes" className={nodeGrid}>
+                      {Array.from({ length: 3 }, (_, i) => <NodeCardSkeleton key={i} />)}
+                    </SkeletonGroup>}
                     emptyTitle="No nodes yet"
                     emptyNote="Proxmox nodes appear here once a host is added."
                     errorTitle="Nodes not readable"
@@ -247,7 +255,7 @@ export function HostsPage() {
                   /* No heading here on purpose: each card already says
                      "standalone" or "in <cluster>", so a group heading would
                      repeat per-card text that is never ambiguous. */
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className={nodeGrid}>
                     {standalone.map((n) => (
                       <NodeCard key={`${n.host_id}:${n.node}`} node={n} />
                     ))}
@@ -269,12 +277,15 @@ export function HostsPage() {
           </div>
         </div>
         <QueryState query={appsQuery}
+                    loading={<SkeletonGroup label="Loading apps" className={appGrid}>
+                      {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
+                    </SkeletonGroup>}
                     emptyTitle="No apps yet"
                     emptyNote="Installed or adopted apps appear here. The App Store lands in Phase 4."
                     errorTitle="Apps not readable"
                     errorNote="Proxploy could not reach the backend to list your apps.">
           {(rows) => (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className={appGrid}>
               {rows.slice(0, 8).map((a) => <AppCard key={a.id} app={a} />)}
             </div>
           )}
@@ -285,6 +296,9 @@ export function HostsPage() {
         <div className={card}>
           <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
           <QueryState query={vmsQuery}
+                      loading={<SkeletonGroup label="Loading virtual machines">
+                        <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
+                      </SkeletonGroup>}
                       emptyTitle="No VMs discovered"
                       emptyNote="QEMU guests on connected hosts appear here."
                       errorTitle="VMs not readable"

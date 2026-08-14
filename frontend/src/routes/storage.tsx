@@ -6,7 +6,8 @@ import type { StorageRow, VolumeRow } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { QueryState } from '../components/QueryState'
-import { StorageCard } from '../components/StorageCard'
+import { SkeletonGroup } from '../components/ui/skeleton'
+import { StorageCard, StorageCardSkeleton } from '../components/StorageCard'
 import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
 import { Button } from '../components/ui/button'
@@ -17,6 +18,9 @@ import { fmtBytes } from '../lib/format'
 import { shellRoute } from './shell'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
+// Hoisted so the loading placeholder lays out in the SAME grid as the cards it
+// stands in for. Two copies of the string is one copy too many.
+const STORAGE_GRID = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'
 
 // PVE's content classes, in the order the browser shows them. The tab strip is
 // filtered against the datastore's own advertised `content` list, so a PBS
@@ -175,12 +179,15 @@ export function StoragePage() {
       </div>
 
       <QueryState query={storageQuery}
+                  loading={<SkeletonGroup label="Loading datastores" className={STORAGE_GRID}>
+                    {Array.from({ length: 6 }, (_, i) => <StorageCardSkeleton key={i} />)}
+                  </SkeletonGroup>}
                   emptyTitle="No datastores yet"
                   emptyNote="Datastores on connected Proxmox hosts appear here after the first poll."
                   errorTitle="Datastores not readable"
                   errorNote="Proxploy could not reach the backend to list your datastores.">
         {(list) => (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className={STORAGE_GRID}>
             {list.map((r) => (
               <StorageCard key={`${r.host_id}:${r.node}:${r.storage}`} row={r} onOpen={setOpen} />
             ))}

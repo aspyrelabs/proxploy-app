@@ -15,6 +15,7 @@ import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { QueryState } from '../components/QueryState'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { SnapshotPanel } from '../components/SnapshotPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
@@ -56,6 +57,10 @@ export function VmsPage() {
         </Button>
       </div>
       <QueryState query={vmsQuery}
+                  loading={<SkeletonGroup label="Loading virtual machines" className={card}>
+                    {/* Name, Node, vCPU / RAM, CPU, Status, actions. */}
+                    <SkeletonTable cols={['w-28', 'w-24', 'w-24', 'w-12', 'w-16', 'w-32']} />
+                  </SkeletonGroup>}
                   emptyTitle="No VMs discovered"
                   emptyNote="QEMU guests on connected hosts are mirrored here by the poller."
                   errorTitle="VMs not readable"

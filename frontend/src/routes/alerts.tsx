@@ -9,6 +9,7 @@ import type { AlertRow, AlertRuleRow } from '../api/alerts'
 import { useEntitlements } from '../api/hooks'
 import { AlertRuleForm } from '../components/AlertRuleForm'
 import { QueryState } from '../components/QueryState'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 
@@ -96,6 +97,10 @@ export function AlertsPage() {
           </Button>
         </div>
         <QueryState query={firing}
+                    loading={<SkeletonGroup label="Loading alerts">
+                      {/* Severity, Alert, Target, Since, acknowledge. */}
+                      <SkeletonTable rows={3} cols={['w-16', 'w-40', 'w-24', 'w-16', 'w-20']} />
+                    </SkeletonGroup>}
                     emptyTitle="Nothing is firing"
                     emptyNote="Rules are checked every poll cycle."
                     errorTitle="Alerts not readable"

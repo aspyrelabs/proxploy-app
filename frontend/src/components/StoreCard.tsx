@@ -4,6 +4,7 @@ import type { CatalogRow } from '../api/catalog'
 import { IconTile } from './IconTile'
 import { Button } from './ui/button'
 import { Icon } from './ui/icon'
+import { Skeleton, SkeletonLine } from './ui/skeleton'
 
 // Every entry the Store ever renders is entry_type "ct" (the API call is
 // pinned to entry_type=ct), so this is really just a label; kept as a lookup
@@ -359,6 +360,50 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
           is text (~17px) where the other two are a ~25px control, and this
           swallows that 8px difference instead of letting it reach the card
           edge. */}
+      <div className="flex-1" />
+    </div>
+  )
+}
+
+/**
+ * StoreCard's placeholder.
+ *
+ * The easiest of the four to get right and the one it matters most for: the
+ * real card is `h-[240px]` and so is this, so the Store grid does not resize
+ * when the catalog lands. e2e/harness/main.tsx renders it beside the real
+ * card at every viewport width, and `npm run harness` fails on unequal
+ * heights among `.rounded-card` matches, so that equality is checked in real
+ * Chromium rather than asserted from a class name.
+ *
+ * The internal rhythm is the card's own budget, block for block: 40px header,
+ * name, category, the fixed 53px three-line description box, the action row
+ * (~25px xs Button), the chip row, and the same `flex-1` spacer soaking up
+ * what is left.
+ */
+export function StoreCardSkeleton() {
+  return (
+    <div className="flex h-[240px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <Skeleton className="h-10 w-10 rounded-tile" />
+        {/* The install count: a 23px glyph beside a 14px figure. */}
+        <Skeleton className="h-[23px] w-16" />
+      </div>
+      <SkeletonLine className="mt-2 w-1/2 shrink-0 text-[14px]" />
+      <SkeletonLine className="w-24 shrink-0 text-[11px]" />
+      <div className="mt-1 h-[53px] shrink-0 overflow-hidden text-[12px]">
+        <SkeletonLine />
+        <SkeletonLine />
+        <SkeletonLine className="w-2/3" />
+      </div>
+      <div className="mt-1 flex shrink-0 items-center gap-2">
+        <SkeletonLine className="w-16 text-[11.5px]" />
+        {/* size="xs" Button: py-1.5 around a 9px line box, ~25px tall. */}
+        <Skeleton className="ml-auto h-[25px] w-14 rounded-ctl" />
+      </div>
+      <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5">
+        <Skeleton className="h-[18.5px] w-10" />
+        <Skeleton className="h-[20.5px] w-24" />
+      </div>
       <div className="flex-1" />
     </div>
   )

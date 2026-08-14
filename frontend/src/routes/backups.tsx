@@ -21,6 +21,7 @@ import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
 import { Dialog } from '../components/ui/dialog'
 import { Loading } from '../components/ui/loading'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
@@ -254,7 +255,7 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
 
 export function BackupsPage() {
   const ent = useEntitlements()
-  const { data, isError } = useBackups()
+  const { data, isError, isPending } = useBackups()
   // services/backupjobs.py::sync_backups is the only genuinely granular
   // progress in the product (per-host, not a fixed handful of steps), and
   // this stale banner is the one place `backup.sync` is ever displayed:
@@ -361,7 +362,18 @@ export function BackupsPage() {
 
       <div className={`${card} mt-4`}>
         <h2 className="mb-3 font-display text-[16px] font-semibold">Recent backups</h2>
-        {isError ? (
+        {isPending ? (
+          /* Ordered BEFORE the empty check on purpose. `data?.backups.length
+             ?? 0` is 0 while the first fetch is still in flight, so without
+             this the page opened on "No backups yet" -- the UI stating you
+             have nothing when it has not looked yet. Same failure
+             components/QueryState.tsx exists to prevent on the routes that
+             use it; this page predates that wrapper. */
+          <SkeletonGroup label="Loading backups">
+            {/* Guest, Host, When, Size, Status, actions. */}
+            <SkeletonTable cols={['w-32', 'w-24', 'w-28', 'w-16', 'w-20', 'w-24']} />
+          </SkeletonGroup>
+        ) : isError ? (
           <EmptyState title="Backups not readable"
             note="Proxploy mirrors archives from each host's backup datastores, check that the host is connected." />
         ) : (data?.backups.length ?? 0) === 0 ? (

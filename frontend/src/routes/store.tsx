@@ -9,8 +9,9 @@ import type { AppRow } from '../api/hooks'
 import { TERMINAL, useJob } from '../api/jobs'
 import { InstallDialog } from '../components/InstallDialog'
 import { InstallAction, StoreDetailContent } from '../components/StoreDetailContent'
-import { StoreCard } from '../components/StoreCard'
+import { StoreCard, StoreCardSkeleton } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
+import { SkeletonGroup } from '../components/ui/skeleton'
 import { Button } from '../components/ui/button'
 import { Dialog } from '../components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -65,6 +66,11 @@ function toPageSize(v: unknown): number | undefined {
 // emulate by hand. The virtualizer earned its keep when this rendered all
 // ~556 LXC entries at once; a page is at most 100 cards, so the DOM cost is
 // bounded by the page size and the measurement plumbing is just overhead.
+// The auto-fill rule is derived at length inside StoreGrid below. It lives out
+// here because the loading placeholder must lay out in the same grid, and a
+// second copy of that string would be free to drift from the reasoning.
+const STORE_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4'
+
 function StoreGrid({ entries, installedSlugs, onInstall, onOpenDetail }: {
   entries: CatalogRow[]; installedSlugs: Set<string>; onInstall: (slug: string) => void
   onOpenDetail: (slug: string) => void
@@ -96,7 +102,7 @@ function StoreGrid({ entries, installedSlugs, onInstall, onOpenDetail }: {
    * which is the opposite of the fixed-size cards this is here to give.
    */
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
+    <div className={STORE_GRID}>
       {entries.map((e) => (
         <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
           onOpenDetail={onOpenDetail} onInstall={onInstall} />
@@ -361,6 +367,9 @@ export function StorePage() {
       <div ref={gridTop} />
 
       <QueryState query={catalogQuery}
+                  loading={<SkeletonGroup label="Loading the app catalog" className={STORE_GRID}>
+                    {Array.from({ length: 8 }, (_, i) => <StoreCardSkeleton key={i} />)}
+                  </SkeletonGroup>}
                   empty={() => filtered.length === 0}
                   emptyTitle="No store entries match your filter."
                   emptyNote=""

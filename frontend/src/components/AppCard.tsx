@@ -5,6 +5,7 @@ import { IconTile } from './IconTile'
 import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { Button } from './ui/button'
+import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
 
 export function AppCard({ app }: { app: AppRow }) {
@@ -52,6 +53,40 @@ export function AppCard({ app }: { app: AppRow }) {
           onClick={() => navigate({ to: '/apps/$appId/console' as never, params: { appId: String(app.id) } as never })}>
           Console
         </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * AppCard's placeholder, kept in this file so the two are edited together:
+ * every wrapper class, margin and font size below is copied from the card
+ * above, which is the only way the placeholder ends up the same height as the
+ * thing it stands in for. If you change the card, change this.
+ *
+ * The one thing it does not reproduce is the `update` badge, which is
+ * conditional on the real card too, so the header row is the icon tile's 40px
+ * either way.
+ */
+export function AppCardSkeleton() {
+  return (
+    <div className="rounded-card border border-line-soft bg-panel p-4">
+      <div className="flex items-start justify-between">
+        <Skeleton className="h-10 w-10 rounded-tile" />
+      </div>
+      <SkeletonLine className="mt-2 w-28 text-[14px]" />
+      <SkeletonLine className="w-36 text-[11px]" />
+      {/* StatusPill: px-2 py-0.5 around a 10.5px line box. */}
+      <div className="mt-2"><Skeleton className="h-[19px] w-20 rounded-full" /></div>
+      <div className="mt-3 space-y-2">
+        <SkeletonMeterRow />
+        <SkeletonMeterRow />
+      </div>
+      {/* LifecycleActions + Console, both `px-2 py-1 text-[11px]` ghosts, so
+          ~24px tall. */}
+      <div className="mt-3 flex items-center gap-2 border-t border-line-soft pt-3">
+        <Skeleton className="h-6 w-16 rounded-ctl" />
+        <Skeleton className="h-6 w-20 rounded-ctl" />
       </div>
     </div>
   )

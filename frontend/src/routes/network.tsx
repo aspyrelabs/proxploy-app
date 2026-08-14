@@ -13,6 +13,7 @@ import { LockVeil } from '../components/LockVeil'
 import { NicForm } from '../components/NicForm'
 import { Sparkline } from '../components/charts/Sparkline'
 import { Button } from '../components/ui/button'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { fmtBps } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -45,13 +46,22 @@ function portsLabel(i: Iface): string {
   return i.bridge_ports || i.slaves || 'unknown'
 }
 
-function BridgesCard({ nodes }: { nodes: NodeIfaces[] }) {
+function BridgesCard({ nodes, pending }: { nodes: NodeIfaces[]; pending: boolean }) {
   const rows = nodes.flatMap((n) =>
     n.interfaces.filter((i) => i.type === 'bridge').map((i) => ({ node: n, iface: i })))
   return (
     <div className={`${card} lg:col-span-2`}>
       <h2 className="mb-3 font-display text-[16px] font-semibold">Bridges</h2>
-      {rows.length === 0 ? (
+      {pending ? (
+        /* Checked BEFORE `rows.length === 0`. Bridges are read live from every
+           node, so the first fetch is slow, and without this the card claimed
+           "No bridges reported yet" for the whole of it -- an answer, given
+           before anyone had looked. */
+        <SkeletonGroup label="Loading bridges">
+          {/* Bridge, Node, Subnet, Zone, Ports. */}
+          <SkeletonTable rows={4} cols={['w-20', 'w-24', 'w-28', 'w-20', 'w-24']} />
+        </SkeletonGroup>
+      ) : rows.length === 0 ? (
         <p className="text-[12.5px] text-text-3">
           No bridges reported yet, Proxploy reads them live from each node on every load.
         </p>
@@ -338,7 +348,7 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
 }
 
 export function NetworkPage() {
-  const { data, isError } = useBridges()
+  const { data, isError, isPending } = useBridges()
   const nodes = data?.nodes ?? []
   const errors = data?.errors ?? []
   const bridgeCount = nodes.reduce(
@@ -374,7 +384,7 @@ export function NetworkPage() {
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <BridgesCard nodes={nodes} />
+            <BridgesCard nodes={nodes} pending={isPending} />
             <ThroughputCard />
           </div>
           <AttachmentMap attachments={data?.attachments ?? []} nodes={nodes} />

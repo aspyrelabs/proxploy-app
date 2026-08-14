@@ -2,6 +2,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import type { NodeRow } from '../api/hooks'
 import { fmtPct, fmtUptime } from '../lib/format'
 import { StatusPill } from './StatusPill'
+import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 /** One NODE, not one host: a Host is a single Proxmox API endpoint and the
@@ -115,6 +116,38 @@ export function NodeCard({ node }: {
           <div className="flex-1"><UsageBar pct={node.disk_pct} gradient={STORAGE_GRADIENT} /></div>
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.disk_pct)}</span>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * NodeCard's placeholder. Same rule as AppCardSkeleton: the classes are copied
+ * from the card above so the two are the same height, and the two live in one
+ * file so a change to either is visible from the other.
+ *
+ * The unreachable-endpoints line is not reproduced. It is conditional on the
+ * real card and usually absent, and a placeholder that reserved space for a
+ * warning would make the layout settle downward when the good case arrives.
+ */
+export function NodeCardSkeleton() {
+  return (
+    <div className="rounded-card border border-line-soft bg-panel p-4">
+      <div className="flex items-center justify-between">
+        <SkeletonLine className="w-24 text-[13px]" />
+        {/* StatusPill: px-2 py-0.5 around a 10.5px line box. */}
+        <Skeleton className="h-[19px] w-20 rounded-full" />
+      </div>
+      <SkeletonLine className="mt-1 w-28 text-[11px]" />
+      <div className="mt-3 flex gap-4 text-[11px]">
+        <SkeletonLine className="w-12" />
+        <SkeletonLine className="w-12" />
+        <SkeletonLine className="w-16" />
+      </div>
+      <div className="mt-3 space-y-2">
+        <SkeletonMeterRow />
+        <SkeletonMeterRow />
+        <SkeletonMeterRow />
       </div>
     </div>
   )
