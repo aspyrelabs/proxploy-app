@@ -289,6 +289,21 @@ the FILE regardless of the variable's value. Adding `DIAGNOSTICS=no` next to
 the config file itself, before the script runs and only when it is absent, so
 an operator who opted in from the node's own shell keeps their answer.
 
+**VERIFIED END TO END 2026-08-15, PVE 9.2.10.** The opt-out was previously
+only unit tested, with the shell command tested separately on hardware; the two
+had never run together. Deleting
+`/usr/local/community-scripts/diagnostics` from node2 to make it look like a
+fresh node, then installing through the App Store:
+
+- the file came back **15 bytes containing exactly `DIAGNOSTICS=no`**, which is
+  Proxploy's `printf`. `diagnostics_check()` writes a 628 byte version with a
+  comment block, so the size alone says which of the two got there first.
+- the job transcript contains no "TELEMETRY" and no "share anonymous data"
+  anywhere, against 41 events. The first install of 2026-08-14 had the entire
+  whiptail dialog rendered into its log.
+
+So the prompt is not merely survived now, it is never reached.
+
 **The standing lesson is bigger than telemetry.** `misc/build.func` is fetched
 live from `main` at execution time (see the residual limitation recorded in
 `services/appstore.py`), so upstream can introduce a NEW interactive prompt at
