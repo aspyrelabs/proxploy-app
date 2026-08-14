@@ -5,6 +5,7 @@ import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { HostCapabilityList } from './HostCapabilityList'
 
 export type HostSummary = { name: string; address: string }
 
@@ -141,6 +142,12 @@ export function HostEditDialog({ hostId, host, onClose }: {
           </label>
           <input id="edit-token-secret" type="password" className={inputCls} value={tokenSecret}
             onChange={(e) => setTokenSecret(e.target.value)} />
+        </div>
+        {/* The dialog's own two token fields rotate monitoring, which is what
+            Save has always done. The other three capabilities have their own
+            rows here, each verified individually by the same route. */}
+        <div className="border-t border-line-soft pt-3">
+          <HostCapabilityList hostId={hostId} />
         </div>
         {halfFilled && (
           <p className="text-[12px] text-red">

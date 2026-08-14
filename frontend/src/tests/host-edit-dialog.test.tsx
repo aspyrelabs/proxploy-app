@@ -125,8 +125,11 @@ describe('HostEditDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
     await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/test')).toBe(true))
     expect(await screen.findByText(/connected, pve 8\.4\.1/i)).toBeInTheDocument()
-    // Nothing was changed, so nothing else was called.
-    expect(calls).toHaveLength(1)
+    // Nothing was changed, so nothing was saved or rotated. (The dialog's own
+    // HostCapabilityList does a harmless GET /hosts/1 of its own on mount to
+    // show capability state -- that read is not a save and is not what this
+    // assertion is about.)
+    expect(calls.some((c) => c.method === 'PATCH' || c.path === '/hosts/1/credentials')).toBe(false)
   })
 
   it('verifies again after a successful save, and closes once that connects', async () => {
@@ -153,10 +156,14 @@ describe('HostEditDialog', () => {
   })
 
   it('surfaces a PATCH failure without attempting the credentials call', async () => {
+    wrap()
+    // Let the dialog's own HostCapabilityList finish its harmless mount GET
+    // of /hosts/1 first, so mockImplementationOnce below lands on the PATCH
+    // call it's meant for rather than being consumed by that unrelated read.
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0))
     const { api } = await import('../api/client')
     vi.mocked(api).mockImplementationOnce(() =>
       Promise.reject(new ApiError(409, { detail: 'a host with that name already exists' })))
-    wrap()
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'taken-name' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     expect(await screen.findByText(/a host with that name already exists/i)).toBeInTheDocument()
