@@ -352,6 +352,11 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              # is now shown rather than asked again.
              "default_container_storage": h.default_container_storage,
              "default_template_storage": h.default_template_storage,
+             # Same reason (Task 6): the install dialog asks the root-execution
+             # tick only while this is null. Re-asking a host that already
+             # acknowledged surfaces no new information, it is just friction.
+             "install_consent_at": (h.install_consent_at.isoformat()
+                                    if h.install_consent_at else None),
              "capabilities": _capability_state(kinds.get(h.id, ())),
              "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
             for h in db.query(Host).order_by(Host.id)]

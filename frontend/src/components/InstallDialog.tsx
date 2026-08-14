@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import { useCatalogEntry, useInstall } from '../api/catalog'
 import { CoreFields, type CoreFieldsValue } from './install/CoreFields'
+import { knownPool, useStoragePools } from './install/pools'
 import { StorageFields } from './install/StorageFields'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
@@ -11,20 +12,23 @@ import { Loading } from './ui/loading'
 
 type HostRow = {
   id: number; name: string
+  // The node whose datastores an install on this host lands on: the same
+  // host.node_name _storage_pools queries (services/appstore.py).
+  node_name?: string | null
   // Set once Default has asked the storage question and the operator has
   // answered it (Task 13; written back by POST .../install). NULL/absent
   // means "not chosen yet".
   default_container_storage?: string | null
   default_template_storage?: string | null
+  // Non-null once this host has acknowledged that installs run a
+  // community-scripts.org script as root (api/catalog.py). Asking again
+  // surfaces no new information, so the tick is only shown while this is null.
+  install_consent_at?: string | null
 }
-type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
 
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: entry } = useCatalogEntry(slug)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
-  // Same queryKey StorageFields uses, so react-query dedupes this against
-  // Advanced mode's own fetch rather than doubling the request.
-  const storages = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
   const install = useInstall()
   const [hostId, setHostId] = useState<number | null>(null)
   const [name, setName] = useState('')
@@ -48,18 +52,27 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // 7): NOT raw.metadata.install_methods[].resources, which disagrees for
   // some slugs (dockge is 2/2048/18 in the script and 0/0/0 in that
   // metadata). hostname derives from the app name typed above instead,
-  // since there is no script-parsed default for it. unprivileged has no
-  // per-entry default at all: every community-scripts install script
-  // defaults var_unprivileged to 1, so the checkbox starts checked.
+  // since there is no script-parsed default for it. unprivileged is null
+  // until toggled and stays null: MOST community-scripts install scripts
+  // default var_unprivileged to 1, but not all (a ct script declaring
+  // var_unprivileged="0" disagrees), and Proxploy has no parsed column for
+  // it. Inventing 1 and then sending it would overrule those scripts merely
+  // because the operator opened Advanced.
   const [coreOverride, setCoreOverride] = useState<{
     cpu: string | null; ram: string | null; disk: string | null; os: string | null
-    version: string | null; hostname: string | null; unprivileged: boolean
-  }>({ cpu: null, ram: null, disk: null, os: null, version: null, hostname: null, unprivileged: true })
+    version: string | null; hostname: string | null; unprivileged: boolean | null
+  }>({ cpu: null, ram: null, disk: null, os: null, version: null, hostname: null, unprivileged: null })
   const [jobId, setJobId] = useState<number | null>(null)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
   // Seeded from that row rather than assumed zero, in case that ever changes.
   const [progress, setProgress] = useState<number | null>(null)
+
+  const host = (hosts.data ?? []).find((h) => h.id === hostId)
+  // Called above the early return, and with the same queryKey StorageFields
+  // uses, so react-query dedupes it against Advanced mode's own fetch rather
+  // than doubling the request.
+  const pools = useStoragePools(hostId, host?.node_name)
 
   if (!entry) return null
 
@@ -78,38 +91,44 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     unprivileged: coreOverride.unprivileged,
   }
 
-  const host = (hosts.data ?? []).find((h) => h.id === hostId)
-  const rootdirPools = (storages.data ?? [])
-    .filter((r) => r.host_id === hostId && r.content.includes('rootdir'))
-    .map((r) => r.storage)
-  const vztmplPools = (storages.data ?? [])
-    .filter((r) => r.host_id === hostId && r.content.includes('vztmpl'))
-    .map((r) => r.storage)
-
-  // Default asks no question THAT HAS AN HONEST DEFAULT. Two rootdir pools
-  // have no default: build.func has none and we do not invent one, so this
-  // is the one question Default has to ask. One candidate is not a choice,
-  // and a remembered answer (Host.default_container_storage) is shown
-  // rather than re-asked.
-  const needsStoragePrompt =
-    hostId != null && !host?.default_container_storage && rootdirPools.length > 1
+  // Whether the snapshot behind GET /storage has been read at all. Empty
+  // candidate lists mean two opposite things (this host has no such pool /
+  // we have not looked yet) and only this tells them apart, so it gates
+  // submit: a form that cannot see the pools must not look complete.
+  const storageUnknown = hostId != null && pools.state !== 'ok'
 
   // Remembering must not become deciding silently: once the pool is known
-  // (remembered, or the sole candidate), DISPLAY it rather than asking
-  // again, so the operator can always see which pool an install will use.
-  const showsStorageSummary = hostId != null && !needsStoragePrompt
-  const resolvedContainer = host?.default_container_storage
-    ?? (rootdirPools.length === 1 ? rootdirPools[0] : null)
-  const resolvedTemplate = host?.default_template_storage
-    ?? (vztmplPools.length === 1 ? vztmplPools[0] : null)
+  // (remembered and still a candidate, or the sole candidate), DISPLAY it
+  // rather than asking again, so the operator can always see which pool an
+  // install will use.
+  const knownContainer = knownPool(host?.default_container_storage, pools.rootdir)
+  const knownTemplate = knownPool(host?.default_template_storage, pools.vztmpl)
+
+  // Default asks no question THAT HAS AN HONEST DEFAULT. Several candidates
+  // and no remembered answer has no default: build.func has none and we do
+  // not invent one, so these are the questions Default has to ask. BOTH
+  // content types get asked, not just rootdir: resolve_storage_pools refuses
+  // just as flatly on an ambiguous vztmpl (one rootdir pool plus `local` and
+  // any NFS/dir storage carrying vztmpl is an ordinary Proxmox layout), and
+  // a Default mode with no field for it fails there forever.
+  const asksContainer = !storageUnknown && knownContainer == null && pools.rootdir.length > 1
+  const asksTemplate = !storageUnknown && knownTemplate == null && pools.vztmpl.length > 1
+  const storageSummary = [
+    knownContainer && `container ${knownContainer}`,
+    knownTemplate && `template ${knownTemplate}`,
+  ].filter(Boolean).join(' · ')
+
+  // Asked once per host, then remembered on Host.install_consent_at: re-asking
+  // an operator who already acknowledged surfaces no new information. Also
+  // true (so still asked) while no host is selected.
+  const needsConsent = host?.install_consent_at == null
 
   // CTID is no longer required: blank means the node assigns the next free
-  // id (InstallIn.ctid, backend/proxploy/api/catalog.py). Host consent is
-  // still asked here every time; the catalog/host payloads this dialog can
-  // see do not yet expose Host.install_consent_at, so there is no way to
-  // tell from here whether this host already acknowledged.
-  const canSubmit = consent && hostId != null && name.trim() !== ''
-    && (!needsStoragePrompt || storage.container !== '')
+  // id (InstallIn.ctid, backend/proxploy/api/catalog.py).
+  const canSubmit = (consent || !needsConsent) && hostId != null && name.trim() !== ''
+    && !storageUnknown
+    && (!asksContainer || storage.container !== '')
+    && (!asksTemplate || storage.template !== '')
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
@@ -133,7 +152,9 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
       setIfFilled('os', core.os)
       setIfFilled('version', core.version)
       setIfFilled('hostname', core.hostname)
-      overrides.unprivileged = core.unprivileged ? '1' : '0'
+      // Only once the operator actually toggled it: untouched means "whatever
+      // this app's script declares", which is not ours to answer.
+      if (core.unprivileged != null) overrides.unprivileged = core.unprivileged ? '1' : '0'
     }
     install.mutate(
       { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides, consent },
@@ -206,7 +227,15 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             {entry.default_cpu} vCPU · {entry.default_ram_mb}MB RAM · {entry.default_disk_gb}GB disk ·{' '}
             {entry.default_os} {entry.default_os_version}
           </div>
-          {mode === 'default' && needsStoragePrompt && (
+          {storageUnknown && (
+            <div className="rounded-ctl border border-line-soft bg-elev p-2 text-[12px] text-text-3">
+              {pools.state === 'error'
+                ? 'Could not read the storage pools for this host, so there is no way to tell '
+                  + 'which pool an install would land on. Install stays disabled until they load.'
+                : 'Reading the storage pools for this host…'}
+            </div>
+          )}
+          {mode === 'default' && asksContainer && (
             <div>
               <label htmlFor="default-container-storage"
                 className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
@@ -217,34 +246,52 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
                 value={storage.container}
                 onChange={(e) => setStorage({ ...storage, container: e.target.value })}>
                 <option value="">Select a pool…</option>
-                {rootdirPools.map((s) => <option key={s} value={s}>{s}</option>)}
+                {pools.rootdir.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
           )}
-          {mode === 'default' && showsStorageSummary && (resolvedContainer || resolvedTemplate) && (
+          {mode === 'default' && asksTemplate && (
+            <div>
+              <label htmlFor="default-template-storage"
+                className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                Template storage
+              </label>
+              <select id="default-template-storage"
+                className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
+                value={storage.template}
+                onChange={(e) => setStorage({ ...storage, template: e.target.value })}>
+                <option value="">Select a pool…</option>
+                {pools.vztmpl.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
+          {mode === 'default' && storageSummary !== '' && (
             <div className="rounded-ctl border border-line-soft bg-elev p-2 text-[11px] text-text-3">
-              Storage: container {resolvedContainer ?? '—'} · template {resolvedTemplate ?? '—'}
+              Storage: {storageSummary}
             </div>
           )}
           {mode === 'advanced' && (
             <div className="rounded-ctl border border-dashed border-line-soft p-3 text-[12px] text-text-3">
               <span className="text-text">Container customization</span>
               <span className="block mt-1">
-                Network and remaining advanced options land here in a later task.
+                Resources, OS and storage are adjustable here. Networking, tags and SSH keys
+                are not: those use the app script&rsquo;s own defaults.
               </span>
               <CoreFields value={core} onChange={(patch) => setCoreOverride((c) => ({ ...c, ...patch }))} />
-              <StorageFields hostId={hostId} container={storage.container} template={storage.template}
-                onChange={setStorage} />
+              <StorageFields hostId={hostId} node={host?.node_name} container={storage.container}
+                template={storage.template} onChange={setStorage} />
             </div>
           )}
           <div className="text-[12px] text-text-2">
             This installs and executes a community-scripts.org script on the target node,
             exactly as if you ran it yourself.
           </div>
-          <label className="flex items-center gap-2 text-[12px] text-text-2">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            I understand this runs as root on the node
-          </label>
+          {needsConsent && (
+            <label className="flex items-center gap-2 text-[12px] text-text-2">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              I understand this runs as root on the node
+            </label>
+          )}
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

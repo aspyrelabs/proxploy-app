@@ -171,6 +171,11 @@ export function useInstall() {
       // ['apps'] is what goes stale here, including the Store page's own
       // installed-slug lookup.
       qc.invalidateQueries({ queryKey: ['apps'] })
+      // It also writes back onto the Host: install_consent_at, and the two
+      // remembered storage pools (api/catalog.py). InstallDialog reads all
+      // three off GET /hosts to decide what it still has to ask, so a stale
+      // ['hosts'] means the next install re-asks a question already answered.
+      qc.invalidateQueries({ queryKey: ['hosts'] })
     },
   })
 }

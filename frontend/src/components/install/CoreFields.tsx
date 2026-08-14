@@ -3,7 +3,10 @@ const inputCls = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 tex
 
 export type CoreFieldsValue = {
   cpu: string; ram: string; disk: string; os: string; version: string; hostname: string
-  unprivileged: boolean
+  // null = untouched, so nothing is sent and the app script's own
+  // var_unprivileged stands. Rendered indeterminate rather than unchecked,
+  // because an unchecked box would read as a deliberate "privileged".
+  unprivileged: boolean | null
 }
 
 /**
@@ -57,9 +60,13 @@ export function CoreFields({ value, onChange }: {
           onChange={(e) => onChange({ hostname: e.target.value })} />
       </div>
       <label className="col-span-2 flex items-center gap-2 text-[12.5px] text-text-2">
-        <input type="checkbox" checked={value.unprivileged}
+        <input type="checkbox" checked={value.unprivileged ?? false}
+          ref={(el) => { if (el) el.indeterminate = value.unprivileged == null }}
           onChange={(e) => onChange({ unprivileged: e.target.checked })} />
         Unprivileged container
+        {value.unprivileged == null && (
+          <span className="text-text-3">(uses the app script&rsquo;s own setting)</span>
+        )}
       </label>
     </div>
   )

@@ -1,7 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
-import { api } from '../../api/client'
-
-type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
+import { useStoragePools } from './pools'
 
 const lbl = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
 const selectCls = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]'
@@ -20,25 +17,21 @@ const selectCls = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 te
  * filter is only the friendly early path, not the enforcement, and must not
  * try to duplicate that check.
  *
- * Pools are per host (VmCreateWizard.tsx:82's storeOpts follows the same
- * rule), so candidates are recomputed from hostId on every render rather
- * than cached per host. InstallDialog owns clearing any already-picked pool
+ * Candidates come from useStoragePools (pools.ts), the SAME computation
+ * Default mode's prompt counts, so the two modes can never disagree about how
+ * many pools a host has: they are per host AND per node, deduped, and
+ * status-filtered there. InstallDialog owns clearing any already-picked pool
  * name when the target host changes, since a name valid on the old host is
  * not necessarily valid on the new one.
  */
-export function StorageFields({ hostId, container, template, onChange }: {
+export function StorageFields({ hostId, node, container, template, onChange }: {
   hostId: number | null
+  node: string | null | undefined
   container: string
   template: string
   onChange: (next: { container: string; template: string }) => void
 }) {
-  const storages = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
-  const rows = (storages.data ?? []).filter((r) => r.host_id === hostId)
-  const forContent = (content: string) =>
-    rows.filter((r) => r.content.includes(content)).map((r) => r.storage)
-
-  const rootdir = forContent('rootdir')
-  const vztmpl = forContent('vztmpl')
+  const { rootdir, vztmpl } = useStoragePools(hostId, node)
 
   return (
     <div className="mt-2 space-y-2">

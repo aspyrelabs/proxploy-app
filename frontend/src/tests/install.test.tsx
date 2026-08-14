@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api as apiMock } from '../api/client'
 import { InstallDialog } from '../components/InstallDialog'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
@@ -16,14 +16,27 @@ function renderDialog() {
   )
 }
 
-type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
+type StorageRow = {
+  host_id: number; node: string; storage: string; content: string[]; status?: string
+}
 type HostRow = {
-  id: number; name: string
+  id: number; name: string; node_name?: string
   default_container_storage?: string | null
   default_template_storage?: string | null
+  install_consent_at?: string | null
 }
 
-const DEFAULT_HOSTS: HostRow[] = [{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }]
+/** GET /storage always carries `status` (api/storage.py::_row) and the dialog
+ *  only offers available pools, so a fixture row without one would be a row
+ *  the real API never sends. Defaulted here so each test only spells out what
+ *  it is actually about. */
+const withStatus = (rows: StorageRow[]) =>
+  rows.map((r) => ({ status: 'available', ...r }))
+
+const DEFAULT_HOSTS: HostRow[] = [
+  { id: 1, name: 'host-01', node_name: 'pve' },
+  { id: 2, name: 'host-02', node_name: 'pve2' },
+]
 // host 1 carries a vztmpl-only pool ('local') and a rootdir-only pool
 // ('local-lvm'); host 2 carries a single pool good for both, used by the
 // re-query test to prove the candidate list is keyed on the target host.
@@ -41,7 +54,11 @@ async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[
       default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
     })
     if (path === '/hosts') return Promise.resolve(hosts)
-    if (path === '/storage') return Promise.resolve(rows)
+    if (path === '/storage') return Promise.resolve(withStatus(rows))
+    if (path === '/catalog/redis/install') return Promise.resolve({
+      job: { id: 9, kind: 'app.install', progress_pct: null },
+    })
+    if (path === '/jobs/9/events') return Promise.resolve([])
     return Promise.resolve(null)
   })
 }
@@ -53,9 +70,10 @@ async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[
 async function mockHostWithRememberedStorage(remembered: { container: string; template: string }) {
   const { api } = await import('../api/client')
   const hosts: HostRow[] = [
-    { id: 1, name: 'host-01', default_container_storage: remembered.container,
+    { id: 1, name: 'host-01', node_name: 'pve',
+      default_container_storage: remembered.container,
       default_template_storage: remembered.template },
-    { id: 2, name: 'host-02' },
+    { id: 2, name: 'host-02', node_name: 'pve2' },
   ]
   const rows: StorageRow[] = [
     { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
@@ -68,7 +86,7 @@ async function mockHostWithRememberedStorage(remembered: { container: string; te
       default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
     })
     if (path === '/hosts') return Promise.resolve(hosts)
-    if (path === '/storage') return Promise.resolve(rows)
+    if (path === '/storage') return Promise.resolve(withStatus(rows))
     return Promise.resolve(null)
   })
 }
@@ -96,10 +114,17 @@ const containerOptions = () => optionsOf('Container storage')
 const templateOptions = () => optionsOf('Template storage')
 
 /** Reads the args of the last POST to the install endpoint, whatever slug
- *  it targeted, without asserting on the slug itself. */
+ *  it targeted, without asserting on the slug itself.
+ *
+ *  Scanned from the END, and paired with the beforeEach that clears
+ *  mock.calls. Without either, `mock.calls` accumulates for the whole file
+ *  and a `find` from the front returns the FIRST install this suite ever
+ *  made, which belongs to another test entirely: that is how the overrides
+ *  assertions here used to read an unrelated `{}` and pass no matter what
+ *  this dialog sent. */
 function capturedSubmit() {
   const calls = vi.mocked(apiMock).mock.calls
-  const call = calls.find(([path]) => String(path).endsWith('/install'))
+  const call = [...calls].reverse().find(([path]) => String(path).endsWith('/install'))
   if (!call) throw new Error('no install call captured')
   return JSON.parse((call[1] as { body: string }).body)
 }
@@ -139,6 +164,12 @@ async function startInstall() {
 }
 
 describe('InstallDialog', () => {
+  // mock.calls otherwise accumulates across the whole file, and capturedSubmit
+  // would read a request an earlier test made instead of failing when this
+  // dialog sent nothing. Implementations survive clearAllMocks; only the
+  // recorded calls go.
+  beforeEach(() => { vi.clearAllMocks() })
+
   it('disables Install until consent is checked, then submits with consent:true', async () => {
     const { api } = await import('../api/client')
     vi.mocked(api).mockImplementation((path: string) => {
@@ -326,7 +357,37 @@ describe('InstallDialog', () => {
     await openAdvanced()
     await fillEveryField()
     const sent = capturedSubmit().overrides
+    // Asserted as an exact object, not key-by-key against KNOWN: an
+    // `overrides` that lost every answer the operator gave is `{}`, and a
+    // membership loop over `{}` passes while asserting nothing at all.
+    // Storage is absent because fillEveryField leaves both pickers alone.
+    expect(sent).toEqual({
+      cpu: '4', ram: '4096', disk: '20', os: 'ubuntu', version: '24.04',
+      hostname: 'redis-custom', unprivileged: '1',
+    })
     for (const key of Object.keys(sent)) expect(KNOWN.has(key)).toBe(true)
+  })
+
+  it('withholds unprivileged entirely until the operator toggles it', async () => {
+    // Not every ct script declares var_unprivileged="1": one declaring "0"
+    // gets overruled by a checkbox the operator never touched, purely because
+    // they opened Advanced.
+    await mockStorage([])
+    renderDialog()
+    await openAdvanced()
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText('vCPU'), { target: { value: '4' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    // ram/disk/hostname ride along because Advanced sends whatever those
+    // fields DISPLAY, and they display the entry's script-parsed defaults.
+    // `unprivileged` has no such parsed default, so it is the one key that
+    // must be missing.
+    expect(capturedSubmit().overrides).toEqual({
+      cpu: '4', ram: '1024', disk: '4', hostname: 'redis-1',
+    })
   })
 
   it('prefills from the script-parsed defaults', async () => {
@@ -401,5 +462,152 @@ describe('InstallDialog', () => {
     // genuinely has two rootdir candidates (lvm-a, lvm-b).
     await waitFor(() => expect(screen.getByText(/lvm-a/)).toBeInTheDocument())
     expect(screen.queryByLabelText(/Container storage/i)).not.toBeInTheDocument()
+  })
+
+  it('sends the pool the operator picked in Default mode', async () => {
+    // The whole point of the one question Default is allowed to ask: the
+    // answer has to reach the request, or resolve_storage_pools refuses on
+    // exactly the ambiguity the operator just resolved.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
+    ])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    fireEvent.change(await screen.findByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    expect(capturedSubmit().overrides.container_storage).toBe('lvm-b')
+  })
+
+  it('asks about the template pool too, and sends that answer', async () => {
+    // One rootdir pool and two vztmpl pools ('local' plus any NFS/dir storage
+    // carrying vztmpl) is an ordinary Proxmox layout. Default used to have no
+    // field for it at all, so every install on such a host failed in
+    // resolve_storage_pools and Default could never fix itself.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+      { host_id: 1, node: 'pve', storage: 'nas', content: ['vztmpl', 'iso'] },
+    ])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    const templates = await screen.findByLabelText(/Template storage/i)
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    // The rootdir side is settled (one candidate), so this is the only thing
+    // still holding the button.
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+
+    fireEvent.change(templates, { target: { value: 'nas' } })
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    expect(capturedSubmit().overrides.template_storage).toBe('nas')
+  })
+
+  it('counts one pool once, however many nodes report it', async () => {
+    // GET /storage keys non-shared datastores by (host, node, storage), so a
+    // 3-node cluster with the usual identical local names answers 'local-lvm'
+    // three times. The backend queries host.node_name alone and sees one.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'local-lvm', content: ['rootdir'] },
+      { host_id: 1, node: 'pve2', storage: 'local-lvm', content: ['rootdir'] },
+      { host_id: 1, node: 'pve3', storage: 'local-lvm', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    // One candidate is not a choice: shown, not asked.
+    await waitFor(() => expect(screen.getByText(/local-lvm/)).toBeInTheDocument())
+    expect(screen.queryByLabelText(/Container storage/i)).not.toBeInTheDocument()
+  })
+
+  it('never offers a pool the node is not serving', async () => {
+    // _storage_pools drops anything not enabled and active. Offering one here
+    // gets it chosen, remembered on the Host, and then every later Default
+    // install fails with "no longer available", with no UI to clear it.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'], status: 'available' },
+      { host_id: 1, node: 'pve', storage: 'lvm-dead', content: ['rootdir'], status: 'unavailable' },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ])
+    renderDialog()
+    await openAdvanced()
+
+    await waitFor(() => expect(containerOptions()).toEqual(['lvm-a']))
+  })
+
+  it('re-asks when a remembered pool is no longer a candidate', async () => {
+    // A wrong or stale memory is otherwise permanent: the prompt used to be
+    // gated on the column merely being set, and there is no PATCH field and
+    // no other UI that can clear it.
+    await mockStorage([
+      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
+      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
+    ], [{ id: 1, name: 'host-01', node_name: 'pve', default_container_storage: 'lvm-gone' }])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    expect(await screen.findByLabelText(/Container storage/i)).toBeInTheDocument()
+    expect(screen.queryByText(/lvm-gone/)).not.toBeInTheDocument()
+  })
+
+  it('will not submit while the storage snapshot cannot be read', async () => {
+    // GET /storage is served from the poller snapshot, empty until the first
+    // poll after a backend restart and absent on a 403. Empty candidate lists
+    // then look exactly like "no question to ask", and the job fails with
+    // "host has no storage carrying 'rootdir'".
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve({
+        slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+        default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve(DEFAULT_HOSTS)
+      if (path === '/storage') return Promise.reject(new Error('403'))
+      return Promise.resolve(null)
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <InstallDialog slug="redis" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+
+    await screen.findByText(/could not read the storage pools/i)
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
+  })
+
+  it('stops asking for consent once the host has already acknowledged', async () => {
+    // Task 6's whole point: re-asking a host that already acknowledged
+    // surfaces no new information.
+    await mockStorage(DEFAULT_STORAGE,
+      [{ id: 1, name: 'host-01', node_name: 'pve', install_consent_at: '2026-08-01T00:00:00Z' }])
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('checkbox', { name: /runs as root/i })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
 })

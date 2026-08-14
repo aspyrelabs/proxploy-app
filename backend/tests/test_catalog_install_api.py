@@ -230,6 +230,57 @@ def test_install_refused_without_host_consent(client, csrf_header, bootstrap_adm
     assert "consent" in r.json()["detail"].lower()
 
 
+def test_a_request_refused_after_the_consent_tick_records_no_consent(
+        client, csrf_header, bootstrap_admin):
+    """install_consent_at is the operator's acknowledgement that an install ran
+    as root on this node. A request that never installs anything must not
+    leave one behind: this one ticks consent and is then refused by the
+    ssh_key gate below it, and the host stays unacknowledged so the next
+    install still asks."""
+    bootstrap_admin(client)
+    with client.app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)   # deliberately NO ssh_key credential
+        db.commit()
+        host_id = host.id
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 400
+    assert "ssh_key" in r.json()["detail"]
+
+    with client.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, host_id).install_consent_at is None
+
+
+def test_host_list_exposes_the_consent_stamp(client, csrf_header, bootstrap_admin):
+    """The install dialog only shows the root-execution tick while this is
+    null (Task 6). Without it on the payload the dialog cannot tell, and
+    re-asks every single install."""
+    bootstrap_admin(client)
+    from tests.support import seed_host_row
+    with client.app.state.sessionmaker() as db:
+        host = seed_host_row(db)
+        db.add(HostCredential(host_id=host.id, kind="ssh_key",
+                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
+        db.commit()
+        host_id = host.id
+
+    assert client.get("/api/v1/hosts").json()[0]["install_consent_at"] is None
+
+    r = client.post("/api/v1/catalog/redis/install",
+                    json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True},
+                    headers=csrf_header(client))
+    assert r.status_code == 202, r.text
+    assert client.get("/api/v1/hosts").json()[0]["install_consent_at"] is not None
+
+
 def test_install_succeeds_without_consent_once_the_host_has_already_acknowledged(
         client, csrf_header, bootstrap_admin):
     """The first install on a host that ticks consent records
@@ -314,7 +365,10 @@ def test_migration_backfills_consent_only_for_hosts_with_an_enrolled_ssh_key(tmp
             {"hid": with_key_id, "blob": b"\x00\x01"})
     eng.dispose()
 
-    command.upgrade(cfg, "head")
+    # The migration under test by name, NOT "head": a later migration would
+    # otherwise silently become part of what this asserts, and a revert of
+    # this one would still pass.
+    command.upgrade(cfg, "f64ca07332b4")
 
     eng = create_engine(db_url)
     try:

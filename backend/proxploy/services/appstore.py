@@ -463,9 +463,12 @@ def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
     operator at destroying, a legitimate container an unrelated job built at
     the same time.
 
-    Only `app.install`'s target id is knowable without guessing: run_install
-    forces `var_ctid` onto the remote script (above), so `params["ctid"]` is
-    the id it actually built regardless of whether that job has finished yet.
+    Only `app.install`'s target id is knowable without guessing, and only when
+    the operator supplied one: `params["ctid"]` is passed to the remote script
+    as `var_ctid`, so a job that has one built exactly that id, finished or
+    not. A CTID-less install (Task 5 made the field optional; the node then
+    assigns the next free id) contributes NOTHING here, because the id it
+    built is not knowable until it has built it.
     `vm.create`/`vm.clone` are qemu-only (services/guestjobs.py, doc 05) and
     can never produce an LXC row in the first place, so nothing is extracted
     for them, they're queried (per review) alongside app.install for

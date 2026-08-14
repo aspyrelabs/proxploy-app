@@ -391,9 +391,6 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if host.install_consent_at is None and not body.consent:
         raise HTTPException(400, "root-consent required: this installs and runs a "
                                  "community-scripts.org script as root on the node")
-    if host.install_consent_at is None and body.consent:
-        host.install_consent_at = utcnow()
-        db.commit()
     cred = (db.query(HostCredential)
             .filter_by(host_id=body.host_id, kind="ssh_key").one_or_none())
     if cred is None:
@@ -423,21 +420,26 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if (db.query(App).filter_by(host_id=body.host_id, ctid=body.ctid)
             .one_or_none()) is not None:
         raise HTTPException(409, f"CT {body.ctid} on host {body.host_id} is already tracked")
+    # BOTH host writes live here, after every refusal above, so a request that
+    # 400s/404s/409s elsewhere in this route never mutates the host as a side
+    # effect of failing. That matters most for the consent stamp: it is the
+    # operator's acknowledgement that an install ran as root, and a request
+    # that installs nothing must not permanently record one.
+    if host.install_consent_at is None and body.consent:
+        host.install_consent_at = utcnow()
     # Remember the operator's choice so Default asks the storage question at
-    # most once per host (Task 13; InstallDialog.tsx's needsStoragePrompt
-    # reads it back). Placed after every other refusal above so a request
-    # that 400s/404s/409s elsewhere in this route never mutates the host as
-    # a side effect of failing. Only ever written from a value the operator
-    # actually supplied: this never records a pool that Proxploy resolved
-    # for them, because it never resolves one for them
-    # (resolve_storage_pools's docstring, services/appstore.py).
+    # most once per host (Task 13; InstallDialog.tsx's knownPool reads it
+    # back). Only ever written from a value the operator actually supplied:
+    # this never records a pool that Proxploy resolved for them, because it
+    # never resolves one for them (resolve_storage_pools's docstring,
+    # services/appstore.py).
     if body.remember_storage:
         for key, column in (("container_storage", "default_container_storage"),
                             ("template_storage", "default_template_storage")):
             chosen = str(body.overrides.get(key) or "").strip()
             if chosen and getattr(host, column) != chosen:
                 setattr(host, column, chosen)
-        db.commit()
+    db.commit()
     job = request.app.state.jobs.enqueue(
         db, kind="app.install", requested_by=user.id,
         params={"catalog_slug": slug, "host_id": body.host_id, "name": body.name,
