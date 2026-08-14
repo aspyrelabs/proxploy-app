@@ -126,11 +126,11 @@ export function ContentBrowser({ row, onClose, onManage }:
         ['Status', row.status],
         ['Used', fmtBytes(row.used_bytes)],
         ['Free', detail.isPending
-          ? <SkeletonLine className="w-20 text-[13px]" />
+          ? <SkeletonLine key="free" className="w-20 text-[13px]" />
           : fmtBytes(detail.data?.avail_bytes)],
         ['Total', fmtBytes(row.total_bytes)],
         ['Nodes', detail.isPending
-          ? <SkeletonLine className="w-24 text-[13px]" />
+          ? <SkeletonLine key="nodes" className="w-24 text-[13px]" />
           : (detail.data?.nodes ?? [row.node]).join(', ')],
         ['Content', row.content.join(', ') || '; '],
       ]} />

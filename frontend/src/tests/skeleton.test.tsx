@@ -8,7 +8,8 @@ import { QueryState } from '../components/QueryState'
 import { StorageCardSkeleton } from '../components/StorageCard'
 import { StoreCardSkeleton } from '../components/StoreCard'
 import {
-  Skeleton, SkeletonGroup, SkeletonLine, SkeletonMeterRow, SkeletonTable,
+  Skeleton, SkeletonAvatar, SkeletonField, SkeletonGroup, SkeletonLine,
+  SkeletonMeterRow, SkeletonTable,
 } from '../components/ui/skeleton'
 
 const wrap = (ui: React.ReactNode) => {
@@ -73,6 +74,67 @@ describe('SkeletonTable', () => {
     const widths = [...container.querySelectorAll('tbody tr:first-child td > div')]
       .map((d) => [...d.classList].find((c) => c.startsWith('w-')))
     expect(widths).toEqual(['w-28', 'w-24', 'w-16'])
+  })
+
+  it('leaves the header out where the real table has none', () => {
+    // The "Recently resolved" list on routes/alerts.tsx is two columns with no
+    // thead at all. Drawing one would push every row down by a line and then
+    // snap them back when the data landed.
+    const { container } = render(
+      <SkeletonTable rows={2} head={false} cols={['w-2/3', 'w-20']} />)
+    expect(container.querySelectorAll('thead')).toHaveLength(0)
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
+  })
+})
+
+describe('SkeletonAvatar', () => {
+  it('draws the shape the caller names, not a fixed circle', () => {
+    // The icon tiles in this app are rounded-tile at several sizes, so a
+    // hardcoded size-10 rounded-full would be the wrong shape at every one of
+    // the call sites that has one.
+    const { container } = render(
+      <SkeletonAvatar tile="h-14 w-14 rounded-tile"
+                      lines={['w-44 text-[22px]', 'w-64 text-[12px]']} />)
+    const tile = container.querySelector('.animate-pulse')!
+    expect(tile.className).toContain('h-14')
+    expect(tile.className).toContain('rounded-tile')
+    expect(tile.className).toContain('shrink-0')
+  })
+
+  it('gives each line its own width and font size', () => {
+    // A name over a detail, not two identical bars. Same reasoning as
+    // SkeletonTable's per-column widths.
+    const { container } = render(
+      <SkeletonAvatar lines={['w-44 text-[22px]', 'w-64 text-[12px]']} />)
+    const lines = [...container.querySelectorAll('.h-\\[1\\.45em\\]')]
+      .map((d) => d.className)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toContain('text-[22px]')
+    expect(lines[1]).toContain('text-[12px]')
+  })
+
+  it('puts trailing controls after the lines, where the header keeps them', () => {
+    const { container } = render(
+      <SkeletonAvatar lines={['w-44 text-[22px]']}>
+        <span data-testid="actions" />
+      </SkeletonAvatar>)
+    const row = container.firstElementChild!
+    expect(row.lastElementChild).toBe(screen.getByTestId('actions'))
+  })
+})
+
+describe('SkeletonField', () => {
+  it('is this app\'s control, measured, not a guess', () => {
+    // Every form here spells its input `px-3 py-2 text-[13px]` inside a 1px
+    // border: 16 + 2 + (13 * 1.45) = 37. A field placeholder of any other
+    // height shifts every control below it when the real form renders.
+    const { container } = render(<SkeletonField label="w-24" className="sm:col-span-2" />)
+    expect(container.firstElementChild!.className).toContain('sm:col-span-2')
+    const label = container.querySelector('.h-\\[1\\.45em\\]')!
+    expect(label.className).toContain('w-24')
+    expect(label.className).toContain('text-[11.5px]')
+    const control = container.querySelector('.rounded-ctl')!
+    expect(control.className).toContain('h-[37px]')
   })
 })
 

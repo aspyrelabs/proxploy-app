@@ -21,7 +21,7 @@ import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
 import { Dialog } from '../components/ui/dialog'
 import { Loading } from '../components/ui/loading'
-import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
+import { SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
@@ -199,6 +199,26 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
             </p>
           )}
 
+          {/* "Preview retention" had no pending state of any kind: the button
+              did not change, no row appeared, and the only evidence the click
+              had landed was the table showing up a second or two later. This
+              is the one surface on the page where somebody is waiting on a
+              thing they explicitly asked for.
+
+              `params != null` guards it because usePrunePreview is disabled
+              until a preview has been requested, and a disabled query sits at
+              pending for ever, which would put this placeholder under the form
+              from the moment the page opened. */}
+          {params != null && preview.isPending && (
+            <SkeletonGroup label="Previewing retention">
+              <SkeletonLine className="mt-4 w-56 text-[12px]" />
+              {/* Volume, Guest, Created, Mark. */}
+              <div className="mt-2">
+                <SkeletonTable rows={4} cols={['w-56', 'w-20', 'w-24', 'w-16']} />
+              </div>
+            </SkeletonGroup>
+          )}
+
           {rows.length > 0 && (
             <>
               <div className="mt-4 font-mono text-[12px] text-text-3">
@@ -297,11 +317,13 @@ export function BackupsPage() {
         <div>
           <h1 className="font-display text-[22px] font-semibold">Backups</h1>
           <div className="text-[12px] text-text-3">
-            {data
-              ? (biggest
-                  ? `Proxmox Backup Server · ${biggest.storage}`
-                  : 'No backup datastore found yet')
-              : '…'}
+            {isPending
+              ? <SkeletonLine className="w-64 max-w-full text-[12px]" />
+              : data
+                ? (biggest
+                    ? `Proxmox Backup Server · ${biggest.storage}`
+                    : 'No backup datastore found yet')
+                : '…'}
             {data?.stale && (
               <span className="ml-2 inline-flex items-center gap-1.5 text-amber">
                 {/* Only when the sync job has actually reported something:
