@@ -6,7 +6,7 @@ import type { StorageRow, VolumeRow } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
 import { QueryState } from '../components/QueryState'
-import { SkeletonGroup } from '../components/ui/skeleton'
+import { SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { StorageCard, StorageCardSkeleton } from '../components/StorageCard'
 import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
@@ -89,7 +89,7 @@ export function ContentBrowser({ row, onClose, onManage }:
   const tabs = CONTENT_TABS.filter((t) => row.content.includes(t.key))
   const [active, setActive] = useState<string>(tabs[0]?.key ?? 'iso')
   const detail = useStorageDetail(row.host_id, row.storage)
-  const { data: volumes, isError } = useStorageContent(row.host_id, row.storage, active)
+  const { data: volumes, isError, isPending } = useStorageContent(row.host_id, row.storage, active)
 
   return (
     <div className={`${card} mt-5`}>
@@ -115,12 +115,23 @@ export function ContentBrowser({ row, onClose, onManage }:
           contentTypes={row.content} onClose={() => setUploading(false)} />
       )}
 
+      {/* Four of these six come off the row that was already on screen and
+          need no placeholder. Free and Nodes come from GET the datastore's own
+          detail, and both were misreporting during that fetch: Free printed
+          the unknown form, and Nodes claimed the single node this row happens
+          to be listed under, which on a shared datastore is a smaller and
+          wrong answer rather than an absent one. KVGrid values are nodes, so
+          the bar goes straight in the cell and the grid never resizes. */}
       <KVGrid items={[
         ['Status', row.status],
         ['Used', fmtBytes(row.used_bytes)],
-        ['Free', fmtBytes(detail.data?.avail_bytes)],
+        ['Free', detail.isPending
+          ? <SkeletonLine className="w-20 text-[13px]" />
+          : fmtBytes(detail.data?.avail_bytes)],
         ['Total', fmtBytes(row.total_bytes)],
-        ['Nodes', (detail.data?.nodes ?? [row.node]).join(', ')],
+        ['Nodes', detail.isPending
+          ? <SkeletonLine className="w-24 text-[13px]" />
+          : (detail.data?.nodes ?? [row.node]).join(', ')],
         ['Content', row.content.join(', ') || '; '],
       ]} />
 
@@ -148,6 +159,17 @@ export function ContentBrowser({ row, onClose, onManage }:
             {isError ? (
               <EmptyState title="Content listing unavailable"
                 note="Proxploy could not reach this datastore; it may be offline or the node may be down." />
+            ) : isPending ? (
+              // Every tab click is a fresh query key with nothing cached, so
+              // without this each one showed "Nothing stored here yet" first
+              // and the volumes second. Told once about an empty ISO store,
+              // an operator uploads a second copy of an image that was
+              // already there.
+              <SkeletonGroup label="Loading volumes">
+                {/* Volume, Format, Size, Guest, Created, Delete. */}
+                <SkeletonTable rows={4}
+                  cols={['w-56', 'w-16', 'w-20', 'w-12', 'w-28', 'w-14']} />
+              </SkeletonGroup>
             ) : (
               <VolumeTable volumes={volumes ?? []} hostId={row.host_id} node={row.node} storage={row.storage} />
             )}
@@ -172,7 +194,9 @@ export function StoragePage() {
         <div>
           <h1 className="font-display text-[22px] font-semibold">Storage</h1>
           <div className="text-[12px] text-text-3">
-            {rows ? `${rows.length} datastores across the cluster` : '…'}
+            {storageQuery.isPending
+              ? <SkeletonLine className="w-48 text-[12px]" />
+              : rows ? `${rows.length} datastores across the cluster` : '…'}
           </div>
         </div>
         <Button variant="primary" onClick={() => setForm('new')}>Add storage</Button>

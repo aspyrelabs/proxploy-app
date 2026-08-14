@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { NodeRow } from '../api/hooks'
 import { fmtBytes, fmtUptime } from '../lib/format'
+import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 /** GET /hosts/{id}/nodes/{node}/status, normalised by the backend. */
@@ -24,7 +26,17 @@ type Status = {
   rootfs: { total?: number; used?: number }
 }
 
-type Fact = [string, string]
+/** A label and its value. The value is a node, not a string, so that a row
+ *  waiting on /status can put a bar where its figure will be instead of
+ *  leaving the row out and adding it later. */
+type Fact = [string, ReactNode]
+
+/** The value cell for a row whose figure is still in flight. 11px because that
+ *  is what the `dd` beside it is set in, so the bar occupies the same line box
+ *  the text will. Widths are passed in and differ per row for the same reason
+ *  SkeletonTable takes per-column widths: a column of identical bars reads as
+ *  a grey ladder rather than as facts about to arrive. */
+const waiting = (w: string) => <SkeletonLine className={`${w} text-[11px]`} />
 
 const pct = (used?: number | null, total?: number | null) =>
   total ? Math.round(((used ?? 0) / total) * 1000) / 10 : 0
@@ -66,6 +78,15 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
     refetchInterval: 30_000,
   })
   const s = q.data ?? null
+  // Third state, and the rail is the one place in the app where it earns a
+  // branch of its own. `s` is null both while /status is in flight and when
+  // the node refuses it, and those two got the same treatment: the row is
+  // simply not there. That is right for a refusal, which is permanent, and
+  // wrong for a fetch, which meant the rail silently grew by nine rows and two
+  // bars a moment after it was drawn, moving everything the reader was looking
+  // at. So a pending status keeps the rows and puts a placeholder in the value
+  // cell; a refused one still drops them entirely.
+  const waitingOnStatus = q.isPending
 
   // Load normalised by thread count. A raw 14 means nothing until you know
   // the box has 20 threads; the raw triple stays beside it because the
@@ -84,6 +105,8 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
       ['Kernel', s.kernel ?? 'unknown'],
       ['Architecture', s.arch ?? 'unknown'],
     )
+  } else if (waitingOnStatus) {
+    identity.push(['Kernel', waiting('w-28')], ['Architecture', waiting('w-12')])
   }
   identity.push(['Uptime', fmtUptime(snapshot.uptime_s)])
 
@@ -95,6 +118,14 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
       ['Sockets', String(s.cpu.sockets ?? 'unknown')],
       ['Load (1 · 5 · 15)', s.load.map((n) => n.toFixed(2)).join(' · ')],
       ['IO delay', s.io_delay != null ? `${(s.io_delay * 100).toFixed(2)}%` : 'unknown'],
+    )
+  } else if (waitingOnStatus) {
+    processor.push(
+      ['Model', waiting('w-24')],
+      ['Cores', waiting('w-28')],
+      ['Sockets', waiting('w-6')],
+      ['Load (1 · 5 · 15)', waiting('w-24')],
+      ['IO delay', waiting('w-10')],
     )
   }
 
@@ -111,11 +142,15 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
       ['Root filesystem', `${fmtBytes(s.rootfs.used ?? 0)} / ${fmtBytes(s.rootfs.total ?? 0)}`],
       ['Swap', `${fmtBytes(s.swap.used ?? 0)} / ${fmtBytes(s.swap.total ?? 0)}`],
     )
+  } else if (waitingOnStatus) {
+    storage.push(['Root filesystem', waiting('w-28')], ['Swap', waiting('w-24')])
   }
 
   const boot: Fact[] = []
   if (s) {
     boot.push(['Mode', `${s.boot_mode ?? 'unknown'}${s.secure_boot ? ' · secure boot' : ''}`])
+  } else if (waitingOnStatus) {
+    boot.push(['Mode', waiting('w-20')])
   }
 
   const groups: { title: string; items: Fact[] }[] = [
@@ -130,12 +165,16 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
       <div className="space-y-3">
         {/* Load and Root are status-only and stay that way: a node that
             refuses /status shows two bars, not four. */}
-        {s && <Bar label="Load" pct={loadPct} gradient={CPU_GRADIENT} />}
+        {s
+          ? <Bar label="Load" pct={loadPct} gradient={CPU_GRADIENT} />
+          : waitingOnStatus && <BarSkeleton label="Load" />}
         <Bar label="RAM" pct={snapshot.mem_pct ?? pct(snapshot.mem_bytes, snapshot.mem_total_bytes)}
           gradient={RAM_GRADIENT} />
         <Bar label="Storage" pct={snapshot.disk_pct ?? pct(snapshot.disk_bytes, snapshot.disk_total_bytes)}
           gradient={STORAGE_GRADIENT} />
-        {s && <Bar label="Root" pct={pct(s.rootfs.used, s.rootfs.total)} gradient={STORAGE_GRADIENT} />}
+        {s
+          ? <Bar label="Root" pct={pct(s.rootfs.used, s.rootfs.total)} gradient={STORAGE_GRADIENT} />
+          : waitingOnStatus && <BarSkeleton label="Root" />}
       </div>
       {groups.filter((g) => g.items.length > 0).map((g) => (
         <FactGroup key={g.title} title={g.title} items={g.items} />
@@ -161,6 +200,24 @@ function FactGroup({ title, items }: { title: string; items: Fact[] }) {
         ))}
       </dl>
     </section>
+  )
+}
+
+/** The same box as Bar, with the figure and the fill still to come. The label
+ *  is real text: it is not waiting on anything, and "Load" written out is what
+ *  tells the reader which of the four bars is the one still filling. The track
+ *  needs no placeholder of its own, an unfilled UsageBar is already a bg-elev
+ *  rounded bar, so it is drawn for real and pulsed, exactly as
+ *  SkeletonMeterRow does it. */
+function BarSkeleton({ label }: { label: string }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-[.09em] text-text-3">{label}</span>
+        <SkeletonLine className="w-8 text-[11px]" />
+      </div>
+      <div className="mt-1"><Skeleton className="h-1.5 w-full rounded-full" /></div>
+    </div>
   )
 }
 

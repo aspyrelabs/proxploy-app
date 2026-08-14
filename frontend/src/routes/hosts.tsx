@@ -9,7 +9,7 @@ import { AppCard, AppCardSkeleton } from '../components/AppCard'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
-import { GuestList, toGuests } from '../components/GuestList'
+import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
 import { HostActionsMenu } from '../components/HostActionsMenu'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
@@ -19,9 +19,9 @@ import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
 import { MetricChart } from '../components/charts/MetricChart'
-import { Ring } from '../components/StatRings'
+import { Ring, RingSkeleton } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
-import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { fmtBps, fmtBytes } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -209,14 +209,30 @@ export function HostsPage() {
         <div>
           <h1 className="font-display text-[22px] font-semibold">Hosts</h1>
           <div className="text-[12px] text-text-3">
-            {summary
-              ? `${summary.counts.nodes} nodes · ${summary.counts.apps} apps · ${summary.counts.vms} VMs`
-              : '…'}
+            {summaryQuery.isPending
+              ? <SkeletonLine className="w-52 text-[12px]" />
+              : summary
+                ? `${summary.counts.nodes} nodes · ${summary.counts.apps} apps · ${summary.counts.vms} VMs`
+                : '…'}
           </div>
         </div>
       </div>
 
       <div className={`${card} flex justify-around`}>
+        {/* The pending case has exactly the same problem the error case does,
+            one line down: `pct={summary?.cpu.pct ?? 0}` is 0 until the fetch
+            returns, so all three gauges drew a confident empty ring, and the
+            three subs under them read "unknown", for a cluster that was simply
+            not measured yet. `unknown` is the wrong tool for it, that word is
+            an answer, and there is no answer yet. */}
+        {summaryQuery.isPending ? (
+          <SkeletonGroup label="Loading cluster usage" className="flex flex-1 justify-around">
+            <RingSkeleton label="CPU" />
+            <RingSkeleton label="Memory" />
+            <RingSkeleton label="Storage" />
+          </SkeletonGroup>
+        ) : (
+        <>
         {/* summaryQuery.isError -> unknown: a failed /cluster/summary must not
             draw a calm 0% gauge, which reads as "nothing is being used"
             rather than "we could not check". */}
@@ -232,6 +248,8 @@ export function HostsPage() {
           sub={summaryQuery.isError ? 'unknown'
             : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : 'unknown'}
           stops={['#A78BFA', '#6D5AE6']} />
+        </>
+        )}
       </div>
 
       <div className="mt-5">
@@ -327,10 +345,29 @@ export function HostsPage() {
         </div>
         <div className={card}>
           <h2 className="mb-1 font-display text-[16px] font-semibold">Network</h2>
-          <div className="mb-2 font-mono text-[12px] text-text-2">
-            ↓ {fmtBps(summary?.net.in_bps)} · ↑ {fmtBps(summary?.net.out_bps)}
-          </div>
-          <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
+          {/* Two queries, one answer. The figures come from /cluster/summary
+              and the chart from the first host's series, and either one still
+              in flight leaves this half of the card silent: fmtBps(undefined)
+              prints the unknown form, and Sparkline with no samples renders an
+              empty div of its own height. Together that reads as a host moving
+              no traffic. `nodesQuery.isPending` is in the test because `net`
+              is `enabled: !!target` and a disabled query never leaves pending,
+              so the first host has to be known before net's own state means
+              anything. */}
+          {summaryQuery.isPending || nodesQuery.isPending || (firstHost != null && net.isPending) ? (
+            <SkeletonGroup label="Loading network throughput">
+              <SkeletonLine className="mb-2 w-40 text-[12px]" />
+              {/* 52px is Sparkline's default height. */}
+              <Skeleton className="h-[52px] w-full" />
+            </SkeletonGroup>
+          ) : (
+            <>
+              <div className="mb-2 font-mono text-[12px] text-text-2">
+                ↓ {fmtBps(summary?.net.in_bps)} · ↑ {fmtBps(summary?.net.out_bps)}
+              </div>
+              <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
+            </>
+          )}
           <div className="mt-4 border-t border-line-soft pt-3">
             <div className="mb-1 text-[13px] uppercase text-text-3">Recent activity</div>
             <ActivityFeed />
@@ -410,15 +447,21 @@ function useNodeContext() {
   const { hostId, node: nodeName } = useParams({ strict: false }) as
     { hostId: string; node?: string }
   const id = Number(hostId)
-  const { data: nodes } = useNodes()
+  const nodesQuery = useNodes()
+  const nodes = nodesQuery.data
   const forHost = nodes?.filter((n) => n.host_id === id)
   const node = nodeName
     ? forHost?.find((n) => n.node === nodeName)
     : forHost?.find((n) => n.is_entry) ?? forHost?.[0]
   // The page needs to NAME the entry node, not just know it is not this one.
   const entry = forHost?.find((n) => n.is_entry)
-  const { data: host } = useHostDetail(id)
-  return { id, node, host, entry }
+  const hostQuery = useHostDetail(id)
+  // Both lookups are undefined until their query lands, so "no node and no
+  // host" is true on every cold navigation to this URL before it is true of
+  // any missing node. Callers need to tell those two apart, see the top of
+  // NodeDetailPage.
+  const pending = nodesQuery.isPending || hostQuery.isPending
+  return { id, node, host: hostQuery.data, entry, pending }
 }
 
 const TABS = [
@@ -429,7 +472,40 @@ const TABS = [
 /** The host page's frame: who this machine is, where to open it, and the
  *  tabs. The body is a routed child, matching the app and VM detail pages. */
 export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
-  const { id, node, host } = useNodeContext()
+  const { id, node, host, pending } = useNodeContext()
+  // Before this check, a cold load of /hosts/1/pve showed "Node not found, it
+  // may have been removed" for as long as /nodes took to answer, and then the
+  // node appeared. Of the four answers, that was the page picking the most
+  // alarming one while it still had none.
+  //
+  // Returning early also keeps the Outlet from mounting, so NodeOverview and
+  // NodeHardware, which both bail to `null` on the same missing lookups, do
+  // not need a placeholder of their own; the frame is the whole page until
+  // there is a node to hang a body on.
+  if (pending) {
+    return (
+      <SkeletonGroup label="Loading node">
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <SkeletonLine className="w-40 text-[20px]" />
+            <SkeletonLine className="w-56 text-[12px]" />
+          </div>
+          {/* Node shell, the Proxmox link, the StatusPill, the actions menu. */}
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-[30px] w-24 rounded-ctl" />
+            <Skeleton className="h-[27px] w-44 rounded-ctl" />
+            <Skeleton className="h-[19px] w-20 rounded-full" />
+            <Skeleton className="h-[30px] w-10 rounded-ctl" />
+          </div>
+        </div>
+        <div className="mb-5 flex gap-1 border-b border-line-soft">
+          {TABS.map((t) => (
+            <SkeletonLine key={t.path} className="mx-3 my-2 w-16 text-[13px]" />
+          ))}
+        </div>
+      </SkeletonGroup>
+    )
+  }
   if (!node && !host) {
     return <EmptyState title="Node not found" note="It may have been removed." />
   }
@@ -664,11 +740,11 @@ export function NodeOverview() {
             Guests on this host ({guestCount})
           </h2>
           {guestsState.kind === 'loading' && (
-            <div role="status" aria-live="polite"
-                 className="grid place-items-center rounded-card border border-dashed
-                           border-line py-20 text-[12.5px] text-text-3">
-              Loading…
-            </div>
+            // Was a dashed 200px box with the word "Loading…" in the middle of
+            // it, which is neither the size nor the shape of the list that
+            // replaced it, so the page jumped every time. GuestListSkeleton is
+            // the real list box with three rows in it.
+            <SkeletonGroup label="Loading guests"><GuestListSkeleton /></SkeletonGroup>
           )}
           {guestsState.kind === 'error' && (
             <EmptyState title={guestsState.title} note={guestsState.note} />

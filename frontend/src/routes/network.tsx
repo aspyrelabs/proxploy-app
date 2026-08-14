@@ -13,7 +13,7 @@ import { LockVeil } from '../components/LockVeil'
 import { NicForm } from '../components/NicForm'
 import { Sparkline } from '../components/charts/Sparkline'
 import { Button } from '../components/ui/button'
-import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { fmtBps } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -105,7 +105,7 @@ function BridgesCard({ nodes, pending }: { nodes: NodeIfaces[]; pending: boolean
 
 function ThroughputCard() {
   // 1h window, matching the cluster page's network card.
-  const { data } = useThroughput(1)
+  const { data, isPending } = useThroughput(1)
   const hosts = data?.hosts ?? []
   const total = (pick: (h: HostThroughput) => NetSeries) =>
     hosts.length ? hosts.reduce((a, h) => a + (lastValue(pick(h)) ?? 0), 0) : null
@@ -113,6 +113,29 @@ function ThroughputCard() {
   // simplification cluster.tsx made for its network card, the ↓/↑ figures above
   // them are already fleet-wide. Summed series when a real fleet shows it matters.
   const first = hosts[0]
+  if (isPending) {
+    // Sparkline with no samples renders an empty div of its own height
+    // (charts/Sparkline.tsx), so without this the card was two silent gaps
+    // under a pair of "unknown" figures, which reads as a host that moves no
+    // traffic rather than as a fetch in flight. 52px is Sparkline's default
+    // height, so nothing moves when the series arrive.
+    return (
+      <div className={card}>
+        <h2 className="mb-1 font-display text-[16px] font-semibold">Throughput</h2>
+        {/* The card keeps its own heading and its In/Out captions: those are
+            already on screen and are not waiting for anything. Only the two
+            figures and the two charts are. */}
+        <SkeletonGroup label="Loading throughput">
+          <SkeletonLine className="mb-3 w-44 text-[13px]" />
+          <div className="text-[11px] uppercase tracking-wide text-text-3">In</div>
+          <Skeleton className="h-[52px] w-full" />
+          <div className="mt-3 text-[11px] uppercase tracking-wide text-text-3">Out</div>
+          <Skeleton className="h-[52px] w-full" />
+        </SkeletonGroup>
+      </div>
+    )
+  }
+
   return (
     <div className={card}>
       <h2 className="mb-1 font-display text-[16px] font-semibold">Throughput</h2>
@@ -132,8 +155,8 @@ function ThroughputCard() {
   )
 }
 
-function AttachmentMap({ attachments, nodes }: {
-  attachments: Attachment[]; nodes: NodeIfaces[]
+function AttachmentMap({ attachments, nodes, pending }: {
+  attachments: Attachment[]; nodes: NodeIfaces[]; pending: boolean
 }) {
   const ent = useEntitlements()
   // has() is false until the first fetch resolves, gating on !has() alone
@@ -148,7 +171,18 @@ function AttachmentMap({ attachments, nodes }: {
     <div className={`${card} mt-4`}>
       <h2 className="mb-1 font-display text-[16px] font-semibold">Guest attachments</h2>
       <p className="mb-3 text-[12.5px] text-text-3">Which guest sits on which bridge.</p>
-      {attachments.length === 0 ? (
+      {/* Ordered exactly as BridgesCard is, and for the same reason: the
+          attachments arrive on the same slow per-node read the bridges do, so
+          "No guest NICs found on this host" was being stated while the read
+          was still running. One card on this page cannot claim to be loading
+          while the card under it claims to be empty of the same fetch. */}
+      {pending ? (
+        <SkeletonGroup label="Loading guest attachments">
+          {/* Guest, NIC, Bridge, VLAN, Firewall, MAC, and the Edit button. */}
+          <SkeletonTable rows={4}
+            cols={['w-32', 'w-16', 'w-20', 'w-12', 'w-16', 'w-32', 'w-12']} />
+        </SkeletonGroup>
+      ) : attachments.length === 0 ? (
         <p className="text-[12.5px] text-text-3">No guest NICs found on this host.</p>
       ) : (
         <table aria-label="Guest attachments" className="w-full text-left text-[13px]">
@@ -387,7 +421,7 @@ export function NetworkPage() {
             <BridgesCard nodes={nodes} pending={isPending} />
             <ThroughputCard />
           </div>
-          <AttachmentMap attachments={data?.attachments ?? []} nodes={nodes} />
+          <AttachmentMap attachments={data?.attachments ?? []} nodes={nodes} pending={isPending} />
           <HostNetworkSection nodes={nodes} />
         </>
       )}

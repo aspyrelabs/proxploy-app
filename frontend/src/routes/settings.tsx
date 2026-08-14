@@ -25,6 +25,7 @@ import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
@@ -87,6 +88,10 @@ export function SchedulesCard() {
             </Button>
           )}>
       <QueryState query={schedules}
+                  loading={<SkeletonGroup label="Loading schedules">
+                    {/* Name, Runs, Cron, Next, State, and the row actions. */}
+                    <SkeletonTable rows={3} cols={['w-28', 'w-24', 'w-20', 'w-36', 'w-16', 'w-28']} />
+                  </SkeletonGroup>}
                   emptyTitle="No schedules yet"
                   emptyNote="Add one for nightly backups or an auto-update window."
                   errorTitle="Schedules not readable"
@@ -265,6 +270,18 @@ export function SettingsPage() {
 
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
         <QueryState query={hosts}
+                    // Wrapped in the same overflow-x-auto the loaded branch
+                    // uses, and the same min-w: seven columns do not fit a
+                    // narrow card either way, and a placeholder that fits
+                    // where the table will not is a placeholder of the wrong
+                    // width.
+                    loading={<SkeletonGroup label="Loading hosts" className="overflow-x-auto">
+                      <div className="min-w-[620px]">
+                        {/* Host, Address, PVE, Status, Node shell, Team, actions. */}
+                        <SkeletonTable rows={2}
+                          cols={['w-24', 'w-32', 'w-16', 'w-20', 'w-24', 'w-24', 'w-40']} />
+                      </div>
+                    </SkeletonGroup>}
                     emptyTitle="No hosts yet."
                     emptyNote=""
                     errorTitle="Hosts not readable"

@@ -11,7 +11,7 @@ import { InstallDialog } from '../components/InstallDialog'
 import { InstallAction, StoreDetailContent } from '../components/StoreDetailContent'
 import { StoreCard, StoreCardSkeleton } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
-import { SkeletonGroup } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { Button } from '../components/ui/button'
 import { Dialog } from '../components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -249,10 +249,24 @@ export function StorePage() {
       <div className="relative mb-5 flex items-center justify-between">
         <div>
           <h1 className="font-display text-[22px] font-semibold">App Store</h1>
+          {/* The counts are all derived from `entries ?? []`, so before the
+              catalog lands this line read "0 of 0 scripts installable (0
+              unsupported)" directly above a grid of eight card placeholders:
+              the page saying "there is nothing here" and "something is coming"
+              at the same time. The source attribution is not waiting on
+              anything and stays. */}
           <div className="text-[12px] text-text-3">
-            Sourced from community-scripts/ProxmoxVE · {installableCount} of{' '}
-            {entries?.length ?? 0} scripts installable ({unsupportedCount} unsupported
-            {pendingCount > 0 ? `, ${pendingCount} checking` : ''})
+            {catalogQuery.isPending ? (
+              <SkeletonGroup label="Loading the catalog summary">
+                <SkeletonLine className="w-96 max-w-full text-[12px]" />
+              </SkeletonGroup>
+            ) : (
+              <>
+                Sourced from community-scripts/ProxmoxVE · {installableCount} of{' '}
+                {entries?.length ?? 0} scripts installable ({unsupportedCount} unsupported
+                {pendingCount > 0 ? `, ${pendingCount} checking` : ''})
+              </>
+            )}
           </div>
         </div>
         <Button variant="ghost" onClick={startRefresh} disabled={refreshBusy}>
@@ -302,6 +316,17 @@ export function StorePage() {
           </Button>
         </p>
       )}
+      {/* Held open while /catalog/status answers. This line is only one 11px
+          row, but it sits directly above the chip block and the grid, so its
+          arrival pushed the whole page down a moment after it had settled.
+          The stale banner above is not held open the same way: it is an
+          exception that usually does not appear, and reserving room for
+          something that probably is not coming is its own kind of jump. */}
+      {status.isPending && (
+        <SkeletonGroup label="Checking when the catalog last synced" className="mb-3">
+          <SkeletonLine className="w-44 text-[11px]" />
+        </SkeletonGroup>
+      )}
       {status.data && !status.data.stale && (
         <div className="mb-3 text-[11px] text-text-3">
           {status.data.age_s != null && status.data.age_s < 60
@@ -323,6 +348,19 @@ export function StorePage() {
           is the only way it lands under the last wrapped line instead of
           floating beside the first. */}
       <div className="mb-4">
+        {/* `categories` is ['All'] until the catalog lands and 27 chips after
+            it, which is three or four wrapped lines appearing at once and
+            shoving the grid down. Eight is a deliberate under-estimate: the
+            chips wrap, so a short placeholder settles UP into the real row
+            rather than leaving a gap, and reserving all 27 would over-claim a
+            vocabulary this page does not know yet. */}
+        {catalogQuery.isPending ? (
+          <SkeletonGroup label="Loading categories" className="flex flex-wrap gap-2">
+            {['w-10', 'w-20', 'w-16', 'w-24', 'w-14', 'w-20', 'w-16', 'w-28'].map((w) => (
+              <Skeleton key={w} className={`h-[26.5px] rounded-full ${w}`} />
+            ))}
+          </SkeletonGroup>
+        ) : (
         <div className="flex flex-wrap gap-2">
           {categories.map((c) => (
             <button
@@ -335,6 +373,7 @@ export function StorePage() {
             </button>
           ))}
         </div>
+        )}
         {/* Right-aligned to the content lane, which is the same right edge the
             grid below uses, so the two line up. flex-wrap so a narrow viewport
             drops it to its own line rather than squeezing or overflowing.

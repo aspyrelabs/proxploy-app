@@ -6,6 +6,7 @@ import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 type PowerResult = { job: { id: number; kind: string; status: string }; is_self: boolean }
 
@@ -71,6 +72,33 @@ export function HostPowerDialog({ hostId, node, command, onClose }: {
           <JobLog jobId={jobId} />
           <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
         </div>
+      </Dialog>
+    )
+  }
+
+  // Held until /status answers, and this one is not cosmetic.
+  //
+  // `isSelf` falls back to false while the query is in flight, so for the
+  // length of that fetch this dialog rendered the ORDINARY warning: complete
+  // looking, quietly missing the sentence that says powering this node off can
+  // end Proxploy with no way back in. An operator who reads fast and types the
+  // node name has then confirmed a destructive action against a warning that
+  // was still loading. A placeholder is the honest answer: the reader can see
+  // that something is still being established, rather than being shown a
+  // partial warning as though it were the whole one.
+  //
+  // Deliberately NOT solved by defaulting isSelf to true: that would put the
+  // scariest possible warning on every ordinary node reboot for a moment and
+  // then take it away, which trains people to ignore it.
+  if (statusQuery.isPending) {
+    return (
+      <Dialog title={`${verb} ${node}?`} onClose={onClose}>
+        <SkeletonGroup label="Checking whether this is the node Proxploy runs on"
+                       className="mt-4 space-y-2">
+          <SkeletonLine className="w-full text-[13px]" />
+          <SkeletonLine className="w-4/5 text-[13px]" />
+        </SkeletonGroup>
+        <Button className="mt-3" variant="ghost" onClick={onClose}>Cancel</Button>
       </Dialog>
     )
   }

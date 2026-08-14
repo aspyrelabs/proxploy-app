@@ -9,6 +9,7 @@ import { JobLog } from './JobLog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
+import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 type HostRow = {
   id: number; name: string
@@ -27,7 +28,7 @@ type HostRow = {
 }
 
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
-  const { data: entry } = useCatalogEntry(slug)
+  const { data: entry, isError: entryFailed } = useCatalogEntry(slug)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
   const install = useInstall()
   const [hostId, setHostId] = useState<number | null>(null)
@@ -74,7 +75,57 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // than doubling the request.
   const pools = useStoragePools(hostId, host?.node_name)
 
-  if (!entry) return null
+  // `return null` here meant the operator pressed Install on a store card and
+  // the screen did nothing at all until the entry arrived, with no way to tell
+  // a slow catalog from a click that missed. The dialog opens immediately
+  // instead, titled with the slug it was opened for, which is already known
+  // from the props and needs nothing fetched.
+  //
+  // The failure branch is here because the placeholder created the need for
+  // it: `!entry` is also true forever after a failed fetch, and a dialog that
+  // pulses for ever is worse than the blank it replaced. Cancel stays live in
+  // both, so a dialog that cannot fill itself in can still be closed.
+  if (!entry) {
+    return (
+      <Dialog title={<>Install {slug}</>} width={520} onClose={onClose}>
+        {entryFailed ? (
+          <p className="mt-4 text-[12.5px] text-text-3">
+            Proxploy could not read this catalog entry, so there is nothing to install from
+            yet. Close this and try again.
+          </p>
+        ) : (
+          <SkeletonGroup label="Loading install options" className="mt-4 space-y-3">
+            {/* Default and Advanced, each a radio beside a name and a line of
+                explanation. */}
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <Skeleton className="mt-0.5 h-3.5 w-3.5 rounded-full" />
+                  <div className="min-w-0 flex-1">
+                    <SkeletonLine className="w-20 text-[13px]" />
+                    <SkeletonLine className="w-64 max-w-full text-[12px]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Host, App name, CTID. `px-3 py-1.5` around a 13px line box
+                inside a 1px border is 33px, which is this dialog's control
+                height and not the 37px the settings forms use. */}
+            <Skeleton className="h-[33px] w-full rounded-ctl" />
+            <Skeleton className="h-[33px] w-full rounded-ctl" />
+            <Skeleton className="h-[33px] w-full rounded-ctl" />
+            {/* The derived-defaults strip: p-2 around one 11px mono line. */}
+            <Skeleton className="h-[34px] w-full rounded-ctl" />
+            <SkeletonLine className="w-full text-[12px]" />
+            <SkeletonLine className="w-2/3 text-[12px]" />
+          </SkeletonGroup>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </div>
+      </Dialog>
+    )
+  }
 
   // The values CoreFields actually displays: whatever the operator typed,
   // else the derived default. Computed here rather than stored directly so

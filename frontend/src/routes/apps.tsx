@@ -16,7 +16,7 @@ import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
-import { SkeletonGroup } from '../components/ui/skeleton'
+import { Skeleton, SkeletonAvatar, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { ReconfigureDialog } from '../components/ReconfigureDialog'
 import { UninstallDialog } from '../components/UninstallDialog'
 import { Loading } from '../components/ui/loading'
@@ -190,6 +190,32 @@ export function AppDetail() {
   })
   return (
     <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
+                // The header and the tab strip, which is the whole page
+                // frame; the tab body below draws its own placeholder off its
+                // own query. Getting here means a cold navigation straight to
+                // an app URL, since arriving from the grid finds this row
+                // already cached and never shows a wait at all.
+                loading={<SkeletonGroup label="Loading app">
+                  <SkeletonLine className="w-14 text-[12px]" />
+                  <SkeletonAvatar className="mt-2 mb-4 items-center gap-4"
+                                  tile="h-14 w-14 rounded-tile"
+                                  lines={['w-44 text-[22px]', 'w-64 text-[12px]']}>
+                    {/* Lifecycle, Migrate, Reconfigure, Uninstall, then the
+                        StatusPill: four md buttons at 35px and a 19px pill,
+                        the same figures AppCardSkeleton derives. */}
+                    <div className="flex shrink-0 items-center gap-3">
+                      {['w-28', 'w-24', 'w-28', 'w-24'].map((w) => (
+                        <Skeleton key={w} className={`h-[35px] rounded-ctl ${w}`} />
+                      ))}
+                      <Skeleton className="h-[19px] w-20 rounded-full" />
+                    </div>
+                  </SkeletonAvatar>
+                  <div className="mb-5 flex gap-1 border-b border-line-soft">
+                    {TABS.map((t) => (
+                      <SkeletonLine key={t.path} className="mx-3 my-2 w-16 text-[13px]" />
+                    ))}
+                  </div>
+                </SkeletonGroup>}
                 errorTitle="This app could not be loaded"
                 errorNote="Proxploy could not reach the backend, or the app no longer exists.">
       {(app) => {

@@ -8,6 +8,7 @@ import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 
 // self_deactivate/self_delete/last_owner are the three 409s an admin will
 // actually hit while managing their own team, name them plainly instead of
@@ -112,6 +113,13 @@ export function UsersCard() {
         <h2 className="font-display text-[15px] font-semibold">Users</h2>
       </div>
       <QueryState query={users}
+                  // Three rows, not five: this is a self-hosted admin's own
+                  // team, so a placeholder the size of a page of results
+                  // would collapse to one line on nearly every install.
+                  loading={<SkeletonGroup label="Loading users">
+                    {/* Email, Name, State, and the Reset password button. */}
+                    <SkeletonTable rows={3} cols={['w-44', 'w-28', 'w-20', 'w-24']} />
+                  </SkeletonGroup>}
                   emptyTitle="No users yet."
                   emptyNote=""
                   errorTitle="Users not readable"

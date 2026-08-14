@@ -12,6 +12,7 @@ import { HostForm, type HostCreated } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { Button } from '../components/ui/button'
 import { Loading } from '../components/ui/loading'
+import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { OnboardingRail, type RailStep } from '../components/OnboardingRail'
 
 export const onboardingRoute = createRoute({
@@ -200,7 +201,24 @@ export function Wizard() {
           // exists and surface as "your password is bad", which is exactly the
           // confusion stepFrom() was written to kill.
           ob.data?.admin_exists && !me.data ? (
-            me.isPending ? null : (
+            // While /auth/me is in flight `!me.data` is true, so this branch
+            // is the one that renders, and it used to render nothing at all:
+            // the setup pane went blank between the rail and the Back link
+            // for the length of that fetch. Which panel wins is not known yet
+            // (a live session goes to AdminAccountStep instead), so this is
+            // deliberately the shape both share, a heading over a short
+            // paragraph over one control, and nothing more specific than that.
+            me.isPending ? (
+              <SkeletonGroup label="Checking your session" className="space-y-3">
+                <SkeletonLine className="w-56 text-[15px]" />
+                <div>
+                  <SkeletonLine className="w-full text-[12.5px]" />
+                  <SkeletonLine className="w-full text-[12.5px]" />
+                  <SkeletonLine className="w-2/3 text-[12.5px]" />
+                </div>
+                <Skeleton className="h-[35px] w-32 rounded-ctl" />
+              </SkeletonGroup>
+            ) : (
               <div className="space-y-3">
                 <h1 className="text-[15px] font-semibold text-text">You are signed out</h1>
                 <p className="text-[12.5px] text-text-2">

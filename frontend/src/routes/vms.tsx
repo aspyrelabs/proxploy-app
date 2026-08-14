@@ -15,7 +15,7 @@ import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
 import { QueryState } from '../components/QueryState'
-import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { SnapshotPanel } from '../components/SnapshotPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
@@ -216,6 +216,29 @@ export function VmDetail() {
   })
   return (
     <QueryState query={vmQuery} emptyTitle="" emptyNote="" empty={() => false}
+                // The same page frame as the app detail header, minus the
+                // icon tile: a VM has no logo to draw, so this is a plain
+                // title stack rather than the Avatar shape.
+                loading={<SkeletonGroup label="Loading virtual machine">
+                  <SkeletonLine className="w-32 text-[12px]" />
+                  <div className="mt-2 mb-4 flex items-center gap-4">
+                    <div>
+                      <SkeletonLine className="w-44 text-[22px]" />
+                      <SkeletonLine className="w-72 text-[12px]" />
+                    </div>
+                    {/* Lifecycle, Destroy, then the StatusPill. */}
+                    <div className="ms-auto flex shrink-0 items-center gap-3">
+                      <Skeleton className="h-[35px] w-28 rounded-ctl" />
+                      <Skeleton className="h-[35px] w-24 rounded-ctl" />
+                      <Skeleton className="h-[19px] w-20 rounded-full" />
+                    </div>
+                  </div>
+                  <div className="mb-5 flex gap-1 border-b border-line-soft">
+                    {TABS.map((t) => (
+                      <SkeletonLine key={t.path} className="mx-3 my-2 w-16 text-[13px]" />
+                    ))}
+                  </div>
+                </SkeletonGroup>}
                 errorTitle="This VM could not be loaded"
                 errorNote="Proxploy could not reach the backend, or the VM no longer exists.">
       {(vm) => (

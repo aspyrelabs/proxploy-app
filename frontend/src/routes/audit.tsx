@@ -9,6 +9,7 @@ import { LockVeil } from '../components/LockVeil'
 import { actionLabel } from '../components/activityDisplay'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'text-[10.5px] uppercase tracking-wide text-text-3'
@@ -77,6 +78,15 @@ export function AuditPage() {
           </div>
 
           <QueryState query={audit}
+                      // The filters above stay live and the table below is
+                      // the only thing that changes, so the wait reads as
+                      // "these rows are being fetched" rather than as the
+                      // page going away. Every re-filter and every page turn
+                      // comes back through here.
+                      loading={<SkeletonGroup label="Loading audit events">
+                        {/* When, Actor, Action, Target, Result, IP. */}
+                        <SkeletonTable cols={['w-32', 'w-20', 'w-28', 'w-20', 'w-12', 'w-24']} />
+                      </SkeletonGroup>}
                       emptyTitle="No audit events match."
                       emptyNote="Try widening the filters."
                       errorTitle="Audit log not readable"

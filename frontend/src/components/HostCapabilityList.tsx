@@ -5,6 +5,7 @@ import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 import { QueryState } from './QueryState'
+import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 /**
  * Every capability the backend knows about, with its state: stored (rotate)
@@ -235,6 +236,23 @@ export function HostCapabilityList({ hostId }: { hostId: number }) {
   })
   return (
     <QueryState query={host}
+                // This list is the whole body of the Tokens dialog, so the
+                // wait is the dialog appearing to be empty. Four rows,
+                // because services/pveum.py::CAPABILITIES has four and the
+                // count has not moved; it is a placeholder, not a promise.
+                loading={<SkeletonGroup label="Loading capability tokens">
+                  <SkeletonLine className="mb-1 w-32 text-[11px]" />
+                  <SkeletonLine className="mb-2 w-full text-[11.5px]" />
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <div key={i} className="border-t border-line-soft py-2 first:border-t-0">
+                      <div className="flex items-center justify-between gap-3">
+                        <SkeletonLine className="w-24 text-[13px]" />
+                        {/* The welded Add/Rotate pair, two size="sm" buttons. */}
+                        <Skeleton className="h-[30px] w-32 rounded-ctl" />
+                      </div>
+                    </div>
+                  ))}
+                </SkeletonGroup>}
                 emptyTitle="No capabilities reported"
                 emptyNote="This host has no capability tokens to show."
                 empty={(d) => !d.capabilities || Object.keys(d.capabilities).length === 0}

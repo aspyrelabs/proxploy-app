@@ -6,6 +6,7 @@ import { actionLabel, ago, TINT } from './activityDisplay'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { Loading } from './ui/loading'
+import { SkeletonAvatar, SkeletonGroup } from './ui/skeleton'
 
 const BADGE: Record<string, string> = { job: 'JOB', audit: 'AUD', alert: 'ALT' }
 
@@ -78,6 +79,19 @@ export function ActivityFeed({ limit = 8 }: { limit?: number }) {
   const activity = useActivity(limit)
   return (
     <QueryState query={activity}
+                // `limit` rows, not a fixed number: this feed is 8 rows on
+                // the dashboard and a longer one on the Hosts page, and a
+                // placeholder of the wrong length moves whatever sits under
+                // it when the real rows arrive.
+                loading={<SkeletonGroup label="Loading activity" className="divide-y divide-line-soft">
+                  {Array.from({ length: limit }, (_, i) => (
+                    // The kind badge (JOB/AUD/ALT) is a 28px tile, then the
+                    // title line and the quieter status line under it, which
+                    // is the Avatar arrangement exactly.
+                    <SkeletonAvatar key={i} className="py-2" tile="h-7 w-7 rounded-tile"
+                                    lines={['w-2/5 text-[12.5px]', 'w-3/5 text-[11px]']} />
+                  ))}
+                </SkeletonGroup>}
                 emptyTitle="Nothing has happened yet."
                 emptyNote="Lifecycle actions, installs and backups land here."
                 errorTitle="Activity not readable"

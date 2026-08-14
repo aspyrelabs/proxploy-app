@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' | 'twoEndpoints'
@@ -450,7 +450,11 @@ describe('NodeOverview', () => {
     // disk_pct only began recording on this install recently, so "no samples"
     // is a real, common state and not an error.
     withQuery(<NodeOverview />)
-    expect(await screen.findAllByText(/no data yet/i)).toHaveLength(3)
+    // waitFor on the COUNT, not findAllByText, which resolves as soon as one
+    // match exists. Each chart now shows a placeholder until its own query
+    // settles, so the three arrive independently and the first one through
+    // would otherwise satisfy the assertion on its own.
+    await waitFor(() => expect(screen.getAllByText(/no data yet/i)).toHaveLength(3))
   })
 
   it('shows the hardware facts when the node will report them', async () => {
@@ -470,8 +474,13 @@ describe('NodeOverview', () => {
     // A token too narrow for /nodes/{n}/status must cost the strip, not the page.
     nodeStatus = null
     withQuery(<NodeOverview />)
+    // Two waits, and both are load bearing. The first proves the rail rendered
+    // at all: this figure comes from the poller snapshot, not from /status.
+    // The second waits for /status to SETTLE, because a pending status still
+    // shows placeholder rows, so asserting Processor's absence on its own
+    // would also pass against a rail that had not rendered yet.
     expect(await screen.findByText('2.0 GiB / 32.0 GiB')).toBeInTheDocument()
-    expect(screen.queryByText(/Processor/)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Processor/)).not.toBeInTheDocument())
   })
 
   it('says where the metrics live instead of silently dropping the charts', async () => {

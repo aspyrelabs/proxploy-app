@@ -54,6 +54,35 @@ const wrap = (command: 'reboot' | 'shutdown', onClose = vi.fn()) => {
 
 describe('HostPowerDialog', () => {
   beforeEach(() => { isSelf = false; powerFails = false; calls.length = 0; toastSuccess.mockClear(); toastError.mockClear() })
+
+  // The reason this is a skeleton and not a nicety. `is_self` falls back to
+  // false while /status is in flight, so the dialog used to render its
+  // ORDINARY warning first: complete looking, and quietly missing the sentence
+  // saying this can end Proxploy with no way back in. Anyone who reads fast
+  // and types the node name has confirmed a destructive action against a
+  // warning that had not finished loading.
+  it('does not show a warning it cannot yet stand behind', async () => {
+    isSelf = true
+    let release: (v: unknown) => void = () => {}
+    const gate = new Promise((r) => { release = r })
+    const { api } = await import('../api/client')
+    const real = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) =>
+      path.endsWith('/status')
+        ? gate.then(() => ({ is_self: true }))
+        : real(path, opts) as never)
+
+    wrap('shutdown')
+    // Nothing to confirm against yet, so there is nothing to confirm with.
+    expect(screen.queryByRole('button', { name: /power off|shutdown/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toBeInTheDocument()
+
+    release(null)
+    // and once it answers, the warning that arrives is the FULL one
+    expect(await screen.findByText(/no in-band way back/i)).toBeInTheDocument()
+    vi.mocked(api).mockImplementation(real as never)
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('names the node and the action in the dialog', async () => {

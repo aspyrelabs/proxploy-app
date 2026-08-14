@@ -92,6 +92,86 @@ export function SkeletonGroup({ label, className = '', children }: {
 }
 
 /**
+ * The Avatar pattern from the shadcn page: a round placeholder with the lines
+ * of text that sit beside it. Upstream is
+ *
+ *   <Skeleton className="size-10 shrink-0 rounded-full" />
+ *   <div className="grid gap-2"><Skeleton .../><Skeleton .../></div>
+ *
+ * and it is worth having as a shape because this app draws that arrangement
+ * everywhere: the IconTile on an app card, a Store entry or an app detail
+ * header, and the three-letter kind badge on an ActivityFeed row are all "a
+ * small square-ish thing, then a name, then a quieter line under the name".
+ *
+ * `tile` rather than a boolean, because the round part is only round half the
+ * time here. IconTile is `rounded-tile` (9px), the ActivityFeed badge is the
+ * same, and a genuine avatar would be `rounded-full`; the caller names the one
+ * it is standing in for, and its SIZE with it, since a 28px badge and a 56px
+ * logo are not interchangeable. `rounded-full` is the default only because
+ * that is what upstream draws.
+ *
+ * `lines` is one class per line of text, so the widths and the font sizes are
+ * the caller's: the same reasoning as SkeletonTable's `cols`, a stack of
+ * identical bars reads as a grey block rather than as a name above a detail.
+ * Pass the same `text-[Npx]` the real line uses and SkeletonLine will claim
+ * exactly its line box.
+ *
+ * `children` land after the lines, which is where the detail headers put their
+ * trailing controls (the app page's Migrate/Reconfigure/Uninstall row, the
+ * Store page's Install button). The text column is `flex-1`, so they sit hard
+ * against the end edge without a second wrapper, which is the arrangement the
+ * loaded header uses too.
+ */
+export function SkeletonAvatar({ tile = 'h-10 w-10 rounded-full', lines, className = '', children }: {
+  tile?: string
+  lines: string[]
+  className?: string
+  children?: ReactNode
+}) {
+  return (
+    <div aria-hidden className={`flex items-start gap-3 ${className}`}>
+      <Skeleton className={`shrink-0 ${tile}`} />
+      <div className="min-w-0 flex-1">
+        {lines.map((cls, i) => <SkeletonLine key={i} className={cls} />)}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * The Form pattern from the same page: one label above one control.
+ *
+ * The numbers are this app's field, not upstream's `h-4` over `h-8`. Every
+ * form in here spells its input the same way (AlertRuleForm, ScheduleForm,
+ * LoginForm's `inputCls`, HostForm): `px-3 py-2 text-[13px]` inside a 1px
+ * border, which is 16px of padding + 2px of border + one 13px line box
+ * (13 * 1.45 = 18.85px), so 37px, and `rounded-ctl` to match. The label is the
+ * 11.5px uppercase caption those forms share, with its `mb-1`.
+ *
+ * A field placeholder that guessed at those would shift every control on the
+ * form when the real one landed, which is the one thing a skeleton must not
+ * do. `label` is a width class because labels differ ("Name" against "For at
+ * least (seconds)") and a column of equal-length caption bars is furniture.
+ *
+ * There is deliberately no `SkeletonForm` wrapping several of these: the forms
+ * here carry their own grid ("grid grid-cols-1 gap-3 sm:grid-cols-2", with the
+ * odd `sm:col-span-2`), and that layout belongs on the SkeletonGroup at the
+ * call site, exactly as the card placeholders do it.
+ */
+export function SkeletonField({ label = 'w-20', className = '' }: {
+  label?: string
+  className?: string
+}) {
+  return (
+    <div aria-hidden className={className}>
+      <SkeletonLine className={`mb-1 ${label} text-[11.5px]`} />
+      <Skeleton className="h-[37px] w-full rounded-ctl" />
+    </div>
+  )
+}
+
+/**
  * One CPU/RAM/Disk row, matching components/UsageBar.tsx in its two call
  * sites (AppCard, NodeCard): a fixed-width label, the 6px track, a fixed-width
  * figure. The track needs no skeleton of its own -- an unfilled UsageBar IS a
@@ -118,17 +198,29 @@ export function SkeletonMeterRow() {
  * the widths ARE the shape: a Name column and a Status column are not the same
  * size, and a table of identical bars reads as a grey grid rather than as the
  * table about to replace it.
+ *
+ * `head` is there because a handful of these tables have no header row at all
+ * (the "Recently resolved" list on routes/alerts.tsx is message-then-when,
+ * captioned by the heading above it instead). Drawing a header they do not
+ * have would push every row down by one line and then snap them back up when
+ * the data landed, which is the exact jump this component exists to avoid.
  */
-export function SkeletonTable({ cols, rows = 5 }: { cols: string[]; rows?: number }) {
+export function SkeletonTable({ cols, rows = 5, head = true }: {
+  cols: string[]
+  rows?: number
+  head?: boolean
+}) {
   return (
     <table className="w-full text-left text-[13px]">
-      <thead>
-        <tr className="text-[11px] uppercase text-text-3">
-          {cols.map((w, i) => (
-            <th key={i} scope="col" className="pb-2 font-medium"><SkeletonLine className={w} /></th>
-          ))}
-        </tr>
-      </thead>
+      {head && (
+        <thead>
+          <tr className="text-[11px] uppercase text-text-3">
+            {cols.map((w, i) => (
+              <th key={i} scope="col" className="pb-2 font-medium"><SkeletonLine className={w} /></th>
+            ))}
+          </tr>
+        </thead>
+      )}
       <tbody>
         {Array.from({ length: rows }, (_, r) => (
           <tr key={r} className="border-t border-line-soft">

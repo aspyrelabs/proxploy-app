@@ -5,6 +5,7 @@ import { useSessions } from '../api/account'
 import type { SessionRow } from '../api/account'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
+import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 
 const detailOf = (e: unknown) =>
   e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
@@ -41,6 +42,12 @@ export function SessionsCard() {
         )}
       </div>
       <QueryState query={sessions}
+                  // Two rows: whoever is reading this page is one of them, so
+                  // the list is never empty and is rarely long.
+                  loading={<SkeletonGroup label="Loading sessions">
+                    {/* IP, Device, Started, Last seen, and the Sign out button. */}
+                    <SkeletonTable rows={2} cols={['w-28', 'w-40', 'w-32', 'w-32', 'w-16']} />
+                  </SkeletonGroup>}
                   emptyTitle="No sessions."
                   emptyNote=""
                   errorTitle="Sessions not readable"

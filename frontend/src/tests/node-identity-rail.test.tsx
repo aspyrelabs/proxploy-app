@@ -1,6 +1,6 @@
 /** The host page's identity rail: what this machine is, in four groups. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let status: unknown = null
@@ -90,11 +90,14 @@ describe('NodeIdentityRail', () => {
     // On a real node these differ by orders of magnitude. Collapsing them into
     // one "Storage" row would answer neither question honestly.
     wrap()
-    expect(await screen.findByText('Root filesystem')).toBeInTheDocument()
+    // Awaits a VALUE, not the label. Rows now render while /status is still in
+    // flight, with a placeholder in the value cell, so the label appearing no
+    // longer proves the figure behind it has arrived.
+    expect(await screen.findByText('6.0 GiB / 93.9 GiB')).toBeInTheDocument()  // rootfs
+    expect(screen.getByText('Root filesystem')).toBeInTheDocument()
     // 'Storage' names both the fact row and the bar above it, hence getAllBy.
     expect(screen.getAllByText('Storage').length).toBeGreaterThan(0)
     expect(screen.getByText('6.0 GiB / 1.8 TiB')).toBeInTheDocument()      // datastores
-    expect(screen.getByText('6.0 GiB / 93.9 GiB')).toBeInTheDocument()     // rootfs
   })
 
   it('costs the status-only rows, not the rail, when the node refuses to be read', async () => {
@@ -102,7 +105,12 @@ describe('NodeIdentityRail', () => {
     // facts the poller already had.
     fails = true
     wrap()
-    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    // Waits for /status to SETTLE, not just for the rail to render. A pending
+    // status now keeps these rows with a placeholder in the value cell, so
+    // asserting their absence on the first paint would pass or fail on timing
+    // rather than on the refusal this test is about.
+    await waitFor(() => expect(screen.queryByText('Processor')).not.toBeInTheDocument())
+    expect(screen.getByText('Identity')).toBeInTheDocument()
     expect(screen.getByText('Node')).toBeInTheDocument()
     expect(screen.getByText('9.2.10')).toBeInTheDocument()
     expect(screen.getByText('6h 57m')).toBeInTheDocument()
@@ -121,7 +129,8 @@ describe('NodeIdentityRail', () => {
   it('renders no heading for a group whose rows all vanished', async () => {
     fails = true
     wrap()
-    expect(await screen.findByText('Identity')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Processor')).not.toBeInTheDocument())
+    expect(screen.getByText('Identity')).toBeInTheDocument()
     expect(screen.getByText('Memory & storage')).toBeInTheDocument()
     expect(screen.queryByText('Processor')).not.toBeInTheDocument()
     expect(screen.queryByText('Boot')).not.toBeInTheDocument()

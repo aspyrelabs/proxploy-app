@@ -8,6 +8,7 @@ import type { MemberRow, TeamRow, UserRow } from '../api/teams'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
+import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 
 const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
 
@@ -54,6 +55,15 @@ function TeamMembers({ team, users, usersError, onRemove }: {
   return (
     <div className="py-3">
       <QueryState query={members}
+                  // The card's CardLoadingOverlay covers the teams list's
+                  // first fetch, not this one: expanding a team row fires a
+                  // fresh per-team query long after that veil has gone, and
+                  // the "Add member" controls under this table stay usable
+                  // throughout, so this wait belongs to the table alone.
+                  loading={<SkeletonGroup label="Loading team members">
+                    {/* Email, Role, and the Remove button. */}
+                    <SkeletonTable rows={2} cols={['w-44', 'w-24', 'w-16']} />
+                  </SkeletonGroup>}
                   emptyTitle="No members yet."
                   emptyNote=""
                   errorTitle="Members not readable"

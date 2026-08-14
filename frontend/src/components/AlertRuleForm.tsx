@@ -5,6 +5,7 @@ import { useAlertMetrics } from '../api/alerts'
 import { notify } from '../lib/notify'
 import type { AppRow, VmRow } from '../api/hooks'
 import { Button } from './ui/button'
+import { Skeleton, SkeletonField, SkeletonGroup } from './ui/skeleton'
 
 const input = 'w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13px] text-text'
 const label = 'mb-1 block text-[11.5px] uppercase tracking-wide text-text-3'
@@ -18,6 +19,14 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   const qc = useQueryClient()
   const metrics = useAlertMetrics()
   const specs = metrics.data?.metrics ?? []
+  // Not "the metric list is slow", but "this form does not exist yet".
+  // GET /alert-rules/metrics decides which metrics can be picked at all,
+  // whether the Threshold pair is shown (needs_threshold) and which targets
+  // the Target select offers, so rendering before it lands puts up a form with
+  // an empty Metric box and fields that appear and disappear underneath the
+  // reader's cursor a moment later. This is the case the Form pattern is for:
+  // the shape is known, the values are not.
+  const loadingSpecs = metrics.isPending
 
   const [name, setName] = useState('')
   const [metric, setMetric] = useState('cpu_pct')
@@ -84,6 +93,24 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
     } else if (targetType !== 'any' && !kinds.includes(targetType)) {
       setTargetType('any')
     }
+  }
+
+  if (loadingSpecs) {
+    return (
+      <SkeletonGroup label="Loading the alert rule form"
+                     className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <SkeletonField className="sm:col-span-2" label="w-12" />
+        <SkeletonField label="w-14" />
+        <SkeletonField label="w-14" />
+        <SkeletonField label="w-20" />
+        <SkeletonField label="w-20" />
+        <SkeletonField label="w-40" />
+        <SkeletonField label="w-16" />
+        <div className="sm:col-span-2">
+          <Skeleton className="h-[35px] w-28 rounded-ctl" />
+        </div>
+      </SkeletonGroup>
+    )
   }
 
   return (

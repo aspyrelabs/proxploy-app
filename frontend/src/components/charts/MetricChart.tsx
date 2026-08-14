@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useMetrics } from '../../api/hooks'
+import { Skeleton, SkeletonGroup, SkeletonLine } from '../ui/skeleton'
 import { TimeChart, type ChartAccent, type ChartUnit } from './TimeChart'
+
+/** TimeChart's own `height` default. Repeated here rather than exported from
+ *  there, because the placeholder has to reserve the plot's height before
+ *  TimeChart is rendered at all, and a placeholder of a different height is
+ *  the layout jump this whole file is trying to avoid. */
+const DEFAULT_HEIGHT = 168
 
 /** A chart that owns its own time range.
  *
@@ -58,6 +65,26 @@ export function MetricChart({
           ))}
         </div>
       </div>
+      {/* `target != null` as well as isPending: useMetrics is `enabled:
+          !!target`, and a disabled query sits at pending forever, so keying on
+          isPending alone would pulse an empty chart on a page that has no
+          target to chart at all.
+
+          Why this branch exists: TimeChart draws its dashed "No data yet" box
+          whenever `ts` is empty, and `ts` is empty for the whole of the first
+          fetch. So a chart that had samples said it had none, which is a
+          different and wrong answer, and it said it again on every range
+          button, since each range is a fresh query key with nothing cached.
+          The range group above stays live throughout, this is only the plot. */}
+      {q.isPending && target != null ? (
+        <SkeletonGroup label={`Loading ${label}`}>
+          {/* TimeChart's own figure line ("47% · peak 61% · axis to 80%"). */}
+          <SkeletonLine className="w-40 text-[11px]" />
+          <div style={{ height: height ?? DEFAULT_HEIGHT }}>
+            <Skeleton className="h-full w-full rounded-tile" />
+          </div>
+        </SkeletonGroup>
+      ) : (
       <TimeChart
         ts={q.data?.ts ?? []}
         values={q.data?.value ?? []}
@@ -69,6 +96,7 @@ export function MetricChart({
         // that rather than showing an empty frame the reader has to interpret.
         emptyNote={`No samples in the last ${range}.`}
       />
+      )}
     </div>
   )
 }

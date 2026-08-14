@@ -4,6 +4,7 @@ import { fmtBytes, fmtPct } from '../lib/format'
 import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { Button } from './ui/button'
+import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, UsageBar } from './UsageBar'
 
 export type Guest = {
@@ -56,6 +57,39 @@ export function GuestList({ guests }: { guests: Guest[] }) {
   return (
     <div role="list" className="rounded-card border border-line-soft bg-panel">
       {guests.map((g) => <GuestRow key={`${g.kind}-${g.id}`} guest={g} />)}
+    </div>
+  )
+}
+
+/** The same list box with the same row rhythm, for the moment before
+ *  /apps?host= and /vms?host= have both answered. Co-located with GuestRow so
+ *  the two move together: this mirrors the row's OUTER box (px-4 py-3 between
+ *  border-t rules) and the pieces tall enough to set its height, which is what
+ *  decides whether the page below shifts when the guests land. */
+export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="rounded-card border border-line-soft bg-panel">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-2
+                                border-t border-line-soft px-4 py-3 first:border-t-0">
+          <SkeletonLine className="w-28 basis-full text-[13px] sm:basis-auto" />
+          {/* The kind chip: px-2 py-0.5 around a 10px line box. */}
+          <Skeleton className="h-[20.5px] w-11 rounded-full" />
+          <SkeletonLine className="w-14 text-[11px]" />
+          {/* StatusPill, the same 19px AppCardSkeleton derives. */}
+          <Skeleton className="h-[19px] w-20 rounded-full" />
+          <div className="flex w-28 items-center gap-2">
+            <div className="flex-1"><Skeleton className="h-1.5 w-full rounded-full" /></div>
+            <SkeletonLine className="w-9 text-[11px]" />
+          </div>
+          <SkeletonLine className="w-24 text-[11px]" />
+          {/* LifecycleActions at size="sm", then the Console ghost. */}
+          <div className="ms-auto flex items-center gap-2">
+            <Skeleton className="h-[30px] w-24 rounded-ctl" />
+            <Skeleton className="h-6 w-16 rounded-ctl" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

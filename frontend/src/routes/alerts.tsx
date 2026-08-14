@@ -126,6 +126,14 @@ export function AlertsPage() {
               Recently resolved
             </h3>
             <QueryState query={history}
+                        // Only reached once "Recently resolved" is expanded,
+                        // and that click starts the fetch, so this is the one
+                        // moment on the page where somebody is waiting on a
+                        // section they just asked for.
+                        loading={<SkeletonGroup label="Loading resolved alerts">
+                          {/* Message, and how long ago it resolved. */}
+                          <SkeletonTable rows={3} head={false} cols={['w-2/3', 'w-20']} />
+                        </SkeletonGroup>}
                         empty={(rows) => rows.filter((a) => a.state === 'resolved').length === 0}
                         emptyTitle="No resolved alerts yet."
                         emptyNote=""

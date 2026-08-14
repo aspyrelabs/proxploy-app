@@ -7,6 +7,7 @@ import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { EmptyState } from './EmptyState'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 import { fmtBytes } from '../lib/format'
 import { notify } from '../lib/notify'
 
@@ -34,7 +35,7 @@ function fmtWhen(t: number | null | undefined): string {
  */
 export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }) {
   const ent = useEntitlements()
-  const { data, isError } = useSnapshots(vmId)
+  const { data, isError, isPending } = useSnapshots(vmId)
   const run = useSnapshotAction()
   const [guard, setGuard] = useState<Guard | null>(null)
   const [name, setName] = useState('')
@@ -126,7 +127,18 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
       </div>
 
       <div className={`${card} mt-4`}>
-        {rows.length === 0 ? (
+        {/* Checked BEFORE `rows.length === 0`, the same ordering BridgesCard
+            uses and for the same reason: `data` is undefined until the list
+            comes back from PVE, so `rows` is empty during the fetch and this
+            card was answering "No snapshots" before anyone had looked. That
+            is the wrong answer to give about a VM whose rollback points
+            somebody is here to check. */}
+        {isPending ? (
+          <SkeletonGroup label="Loading snapshots">
+            {/* Name, Created, Size, and the Rollback/Delete pair. */}
+            <SkeletonTable rows={3} cols={['w-32', 'w-32', 'w-16', 'w-36']} />
+          </SkeletonGroup>
+        ) : rows.length === 0 ? (
           <EmptyState title="No snapshots" note="Snapshots taken here and in Proxmox both show up in this list." />
         ) : (
           <table className="w-full text-left text-[13px]">

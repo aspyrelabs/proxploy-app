@@ -23,7 +23,9 @@ const Markdown = lazy(() => import('../components/ui/markdown'))
 import { KVGrid } from '../components/KVGrid'
 import { Button } from '../components/ui/button'
 
-import { LoadingBlock } from '../components/ui/loading'
+import {
+  Skeleton, SkeletonAvatar, SkeletonGroup, SkeletonLine,
+} from '../components/ui/skeleton'
 import { fmtBytes } from '../lib/format'
 
 /**
@@ -673,7 +675,38 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
       </div>
     )
   }
-  if (entryQuery.isPending || entryQuery.data === undefined) return <LoadingBlock />
+  if (entryQuery.isPending || entryQuery.data === undefined) {
+    // The header, then the first two of the stacked cards below it. Not all
+    // nine: the sections drop themselves when the entry has nothing to put in
+    // them (an unlisted row renders a much shorter page), so a placeholder
+    // that promised nine would be a promise this component cannot keep. Two
+    // is what every entry has.
+    //
+    // This runs in two frames: the page at /store/$slug, and the popup over
+    // the Store grid, which is why the header action is drawn only when the
+    // caller says it renders one. The popup pins its own Install button in
+    // the dialog title row, outside this component.
+    return (
+      <SkeletonGroup label="Loading catalog entry">
+        <SkeletonAvatar className="mt-2 mb-5 gap-4" tile="h-14 w-14 rounded-tile"
+                        lines={['w-48 text-[22px]', 'mt-0.5 w-56 text-[12px]',
+                                'mt-2 w-full max-w-3xl text-[13px]']}>
+          {showHeaderAction && (
+            <div className="shrink-0"><Skeleton className="h-[35px] w-24 rounded-ctl" /></div>
+          )}
+        </SkeletonAvatar>
+        <div className="space-y-4">
+          {[0, 1].map((i) => (
+            <div key={i} className={card}>
+              <SkeletonLine className="w-40 text-[13px]" />
+              <SkeletonLine className="mt-2 w-full text-[12.5px]" />
+              <SkeletonLine className="w-2/3 text-[12.5px]" />
+            </div>
+          ))}
+        </div>
+      </SkeletonGroup>
+    )
+  }
 
   const entry = entryQuery.data
   const meta = readUpstreamMetadata(entry.raw)

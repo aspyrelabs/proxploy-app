@@ -4,6 +4,7 @@ import { api, ApiError } from '../api/client'
 import { useApplyUpdate, useUpdateStatus } from '../api/account'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
+import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 // Matches backend/proxploy/config.py's update_timeout_s default. The updater
 // restarts the very server that would otherwise report success, so the
@@ -65,9 +66,20 @@ export function UpdateCard() {
     return (
       <section className="rounded-card border border-line-soft bg-panel p-5">
         <h2 className="font-display text-[15px] font-semibold">Updates</h2>
-        <p className="mt-2 text-[12.5px] text-text-3">
-          {status.isError ? 'Could not load update status.' : 'Loading…'}
-        </p>
+        {status.isError ? (
+          <p className="mt-2 text-[12.5px] text-text-3">Could not load update status.</p>
+        ) : (
+          // The word "Loading…" was doing a skeleton's job badly: it is a
+          // 12.5px line where a 13px line is about to be, so the card shifted
+          // by a pixel and by a whole button's height the moment the status
+          // arrived. These are the two things that always land, the current
+          // version and either "You're up to date." or the update button, so
+          // the card is already its final size before the answer comes back.
+          <SkeletonGroup label="Loading update status">
+            <SkeletonLine className="mt-2 w-48 text-[13px]" />
+            <Skeleton className="mt-3 h-[35px] w-40 rounded-ctl" />
+          </SkeletonGroup>
+        )}
       </section>
     )
   }

@@ -9,6 +9,7 @@ import { inputCls } from '../components/LoginForm'
 import { SessionsCard } from '../components/SessionsCard'
 import { TotpCard } from '../components/TotpCard'
 import { Button } from '../components/ui/button'
+import { SkeletonLine } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const label = 'mb-1 block text-[10.5px] uppercase tracking-wide text-text-3'
@@ -19,7 +20,7 @@ const label = 'mb-1 block text-[10.5px] uppercase tracking-wide text-text-3'
  *  inside Settings, next to fleet-wide admin controls. This is the page the
  *  avatar menu points at: your account, not the installation's. */
 export function ProfilePage() {
-  const { data: me } = useMe()
+  const { data: me, isPending: mePending } = useMe()
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [pw, setPw] = useState('')
@@ -70,8 +71,12 @@ export function ProfilePage() {
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <span className={label}>Email</span>
+            {/* Both readouts print "unknown" for anything falsy, which during
+                the /auth/me fetch is a statement about the reader's own
+                account rather than a wait. Same box either way, so nothing
+                moves when the answer lands. */}
             <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13.5px] text-text-2">
-              {me?.email ?? 'unknown'}
+              {mePending ? <SkeletonLine className="w-48 max-w-full text-[13.5px]" /> : me?.email ?? 'unknown'}
             </p>
             <p className="mt-1 text-[11.5px] text-text-3">
               The email cannot be changed after the account is created.
@@ -80,7 +85,7 @@ export function ProfilePage() {
           <div>
             <span className={label}>Role</span>
             <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-text-2">
-              {me?.role ?? 'unknown'}
+              {mePending ? <SkeletonLine className="w-20 text-[13px]" /> : me?.role ?? 'unknown'}
             </p>
           </div>
         </div>
