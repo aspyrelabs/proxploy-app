@@ -172,7 +172,7 @@ describe('HostForm', () => {
   it('asks only for the capabilities left ticked', async () => {
     render(<HostForm onCreated={() => {}} />)
     // Doc 08: monitoring is mandatory, the rest are the operator's choice.
-    fireEvent.click(screen.getByLabelText(/lifecycle/i))
+    fireEvent.click(screen.getByLabelText(/^Lifecycle$/))
     fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
     await screen.findByText(/pveum role add ProxployAudit/)
     expect(scriptCalls.at(-1)?.capabilities).not.toContain('lifecycle')

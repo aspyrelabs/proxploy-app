@@ -42,6 +42,13 @@ const TOKEN_DOCS = 'https://docs.proxploy.com/getting-started/proxmox-token/'
 // Monitoring is deliberately absent: it is mandatory and the generator emits
 // it whether or not it is asked for, so offering it as a checkbox would be
 // offering a choice that does not exist.
+//
+// This stays a hand-written list rather than being derived from the
+// backend's capability map. That map (GET /hosts, GET /hosts/{id}) describes
+// *state* for a host that already exists -- stored vs missing -- and this
+// form has no host yet to read state from. There is also no route that
+// lists capabilities without also generating a script, so deriving from one
+// would be a second backend addition the spec does not ask for.
 const CAPABILITY_CHOICES = [
   { key: 'lifecycle', label: 'Lifecycle' },
   { key: 'console', label: 'Console' },
@@ -109,6 +116,20 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   // §2/§9, services/pveum.py NODE_POWER_PRIVILEGE) -- Reboot/Power off is
   // offered on every host regardless of which capabilities were chosen.
   const [nodePower, setNodePower] = useState(false)
+  // One token per capability the operator ticked above, because the pveum
+  // script prints one per capability and until now three of them had nowhere
+  // to go. Keyed by capability so the retry path can tell which one the node
+  // rejected.
+  const [capTokens, setCapTokens] = useState<Record<string, { id: string; secret: string }>>({})
+  // The host, once POST /hosts has succeeded. Non-null means a retry must NOT
+  // create it again (409 host name already exists).
+  const [created, setCreated] = useState<HostCreated | null>(null)
+  const [storedCaps, setStoredCaps] = useState<string[]>([])
+  const [capErrors, setCapErrors] = useState<Record<string, string>>({})
+  const setCapToken = (key: string, field: 'id' | 'secret', v: string) =>
+    setCapTokens(s => ({ ...s, [key]: { id: '', secret: '', ...s[key], [field]: v } }))
+  const labelOf = (key: string) =>
+    CAPABILITY_CHOICES.find(c => c.key === key)?.label ?? key
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -146,9 +167,31 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError('')
     try {
-      onCreated(await api<HostCreated>('/hosts', {
+      // `created` non-null is the retry path: the host already exists and
+      // works for the capabilities that verified, so re-creating it would
+      // 409 and rolling it back would throw away a working enrolment.
+      const h = created ?? await api<HostCreated>('/hosts', {
         method: 'POST',
-        body: JSON.stringify({ ...f, ssh_consent: f.ssh_enroll }) }))
+        body: JSON.stringify({ ...f, ssh_consent: f.ssh_enroll }) })
+      setCreated(h)
+      // Each token is verified against the node individually by
+      // POST /hosts/{id}/credentials, so one rejection is one capability's
+      // failure, not the enrolment's.
+      const done = [...storedCaps]
+      const failed: Record<string, string> = {}
+      for (const key of caps) {
+        const t = capTokens[key]
+        if (done.includes(key) || !t?.id || !t?.secret) continue
+        try {
+          await api(`/hosts/${h.id}/credentials`, {
+            method: 'POST',
+            body: JSON.stringify({ token_id: t.id, token_secret: t.secret,
+                                  capability: key }) })
+          done.push(key)
+        } catch (err) { failed[key] = `${labelOf(key)}: ${errText(err)}` }
+      }
+      setStoredCaps(done); setCapErrors(failed)
+      if (!Object.keys(failed).length) onCreated(h)
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
 
@@ -206,6 +249,50 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </label>
           ))}
         </div>
+        {/* A field only for capabilities still ticked, not all four always
+            visible: an unticked capability got no role and no token from the
+            script, so a field for it would be a field nobody can fill. All
+            four become visible, stored vs missing, once the host exists (see
+            the edit dialog) -- there is no state to show before that. */}
+        {caps.length > 0 && (
+          <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
+            <p className="text-[11.5px] text-text-3">
+              The script prints one token per capability. Paste them here, or
+              leave a pair blank and add it later from the host's Edit dialog.
+            </p>
+            {CAPABILITY_CHOICES.filter(c => caps.includes(c.key)).map(({ key, label }) => (
+              <div key={key} className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label htmlFor={`cap-${key}-id`}
+                    className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                    {label} token id
+                  </label>
+                  <input id={`cap-${key}-id`} className={inputCls}
+                    placeholder={`proxploy@pve!${key}`}
+                    disabled={storedCaps.includes(key)}
+                    value={capTokens[key]?.id ?? ''}
+                    onChange={e => setCapToken(key, 'id', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor={`cap-${key}-secret`}
+                    className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+                    {label} token secret
+                  </label>
+                  <input id={`cap-${key}-secret`} type="password" className={inputCls}
+                    disabled={storedCaps.includes(key)}
+                    value={capTokens[key]?.secret ?? ''}
+                    onChange={e => setCapToken(key, 'secret', e.target.value)} />
+                </div>
+                {storedCaps.includes(key) && (
+                  <p className="text-[11.5px] text-green sm:col-span-2">{label} token stored.</p>
+                )}
+                {capErrors[key] && (
+                  <p className="text-[12px] text-red sm:col-span-2">{capErrors[key]}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {/* Independent of the capability row above on purpose (doc 08 §2/§9):
             Sys.PowerMgmt gets its own role and token, not a widening of
             Lifecycle's, and Reboot/Power off is offered on every host
@@ -253,6 +340,23 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         </div>
       )}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
+      {created && Object.keys(capErrors).length > 0 && (
+        <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+          <p className="text-[12.5px] text-amber">
+            {created.name} was added and is working. Proxmox rejected the token for{' '}
+            {Object.keys(capErrors).map(labelOf).join(', ')}, so that capability is
+            not configured yet. Everything else was stored.
+          </p>
+          <p className="mt-1.5 text-[11.5px] text-text-3">
+            Correct the token above and retry just that one, or continue and add it
+            later from the host's Edit dialog.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button type="button" variant="ghost"
+              onClick={() => onCreated(created)}>Continue without it</Button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         {/* Neither call has a progress signal: connecting either succeeds or
             it doesn't, and adding the host is one POST. Ring, not a number. */}
@@ -262,7 +366,10 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         <Button type="button" variant="ghost" onClick={testConnection} disabled={testing}>
           Test connection
         </Button>
-        <Button type="submit" disabled={busy}>{busy ? 'Adding…' : 'Add host'}</Button>
+        <Button type="submit" disabled={busy}>
+          {busy ? (created ? 'Retrying…' : 'Adding…')
+                : (created ? 'Retry rejected token' : 'Add host')}
+        </Button>
       </div>
     </form>
   )
