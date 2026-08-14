@@ -64,10 +64,12 @@ against. Two notes for anyone rebuilding it:
   itself: `/root/.ssh/authorized_keys` is a symlink into `/etc/pve/priv/`, so
   `node2` inherited `node1`'s key on join.
 - The Unraid share is exported "Public", which squashes root to `99:100`.
-  Writes succeed and the pool reads `available`, so it is fine for every
-  picker-level check here, but a container rootfs created on it will be owned
-  by the anonymous uid. Checks 1, 2 and 3a's install half should use
-  `no_root_squash` rather than reading a squash failure as a storage bug.
+  This was expected to break a container rootfs and did NOT: CT 152 was
+  created on it, ran, and its disk sat at
+  `/mnt/pve/nfs-shared/images/152/vm-152-disk-0.raw` owned `99:100`. Root
+  writes are remapped to the anonymous uid rather than refused, and that uid
+  owns the file it just created, so an unprivileged LXC works. Recorded
+  because the opposite was assumed here first.
 
 **Updated 2026-08-14.** The install dialog now recreates the backend's candidate
 set client-side (`frontend/src/components/install/pools.ts`) to decide whether
@@ -81,11 +83,34 @@ because a code review found both cases reachable and neither provable offline.
    Install an app in Default mode without touching the form. Pass: the container
    is created and the job completes. Fail: the job hangs, times out, or logs a
    storage prompt.
+
+   **PASSED 2026-08-14, PVE 9.2.10**, and on the harder shape than the one
+   this check was written for: `node1` had TWO `rootdir` candidates at the
+   time (`local-lvm` and the shared `nfs-shared`), which is exactly the case
+   that sends bare `build.func` into its interactive picker. The transcript
+   shows it resolved without asking:
+
+       Storage 'local-lvm' (lvmthin) validated
+       Template storage 'local' validated
+       Container ID: 150
+
+   No storage prompt, no hang, job `succeeded`, CT running.
 2. **An explicitly chosen non-default storage is honoured.** In Advanced,
    select a container storage that is NOT the one a single-storage host would
    have auto-picked. Pass: `pct config <ctid>` shows the rootfs on the pool that
    was chosen. Sending the variable is not the claim; the container landing
    there is.
+
+   **PASSED 2026-08-14, PVE 9.2.10.** Installed to `nfs-shared` rather than
+   the local default. `pct config 152` reported
+   `rootfs: nfs-shared:152/vm-152-disk-0.raw,size=1G`, and the backing file
+   was present on the NFS export itself. The container landed there, which is
+   the claim; the variable being sent was never in doubt.
+
+   This install doubles as **3a's install half**: it was made against host
+   `node1`, whose `node_name` is `node1`, using the shared pool whose collapsed
+   `GET /storage` row named `node2`. So the pool a foreign-node row exempted
+   from the node filter is one an install can actually use.
 3. **A `vztmpl`-only pool is not offered as rootfs.** In Advanced, confirm the
    container storage picker excludes pools whose content lacks `rootdir`. Pass:
    the pool is absent from that control. This one is client-side and provable in
@@ -214,15 +239,43 @@ because a code review found both cases reachable and neither provable offline.
 
 ### Install execution, carried from phase 4
 
-4. **A container is created at a chosen CTID on a real node.** Currently proven
-   only as far as the command string. Pass: the CT exists at exactly the CTID
-   requested.
+4. **A container is created at a chosen CTID on a real node.**
+   **PASSED 2026-08-14, PVE 9.2.10.** Requested 150, got 150: `pct list` showed
+   `150 running alpine` and `pct config 150` confirmed it. No longer proven
+   only as far as the command string.
 5. **Blank CTID lands on the node's next available ID**, via
    `${var_ctid:-$NEXTID}`, with `var_ctid` absent from the environment.
+   **PASSED 2026-08-14, PVE 9.2.10**, and the result is more convincing than a
+   sequential one would have been: with 150 already taken, the node assigned
+   **100**, its genuinely lowest free id, not 151. Nothing in Proxploy could
+   have produced that number, which is the point of the check.
 6. **`AcceptEnv` behaviour against a real `sshd`.** Env vars are inlined into
    the command string precisely because a real server's `AcceptEnv` config
    makes asyncssh's `env=` silently no-op. The fix is safer either way, but the
    original behaviour was never reproduced against a live `sshd`.
+
+### Two things the first real install surfaced
+
+Neither is a storage finding, and both were invisible to every fake.
+
+**`build.func` now renders an interactive whiptail dialog mid-install.** A
+"TELEMETRY & DIAGNOSTICS" menu with `<Confirm>` / `<Exit>` buttons drew itself
+into the job transcript on 2026-08-14, in a non-TTY SSH session. It did not
+block this run, but an interactive prompt reaching a session with no terminal
+on the other end is precisely the failure class the storage work exists to
+prevent, and it arrived from upstream without us changing anything. Worth a
+standing check: nothing in `misc/build.func` should be able to ask a question
+during a Proxploy install, and only reading the real transcript catches a new
+one appearing.
+
+**A node that cannot resolve `download.proxmox.com` fails at exit 223 with a
+misleading message.** The install reported `Template ... not available in
+storage local after download` right after claiming `Template download
+successful.`, which reads as a storage fault. It was DNS: the node's resolver
+timed out on that name (while resolving others fine), so `pveam download`
+never fetched anything. If a template-download failure is ever reported
+against a storage pool, check name resolution on the node before believing the
+message.
 
 ## Migration, networking and storage operations
 
