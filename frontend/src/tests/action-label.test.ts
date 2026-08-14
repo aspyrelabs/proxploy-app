@@ -7,11 +7,17 @@ describe('actionLabel', () => {
     expect(actionLabel('apps.adopt')).toBe('Apps Adopted')
   })
 
-  // The word "reaped" means nothing outside the codebase; the label has to
-  // say what actually happened to the app.
-  it('explains the self-removals rather than title-casing their jargon', () => {
-    expect(actionLabel('app.reaped')).toBe('App Removed (container gone)')
-    expect(actionLabel('app.forget')).toBe('App Forgotten (container kept)')
+  // The word "reaped" means nothing outside the codebase. "App Removed" also
+  // has to stay DISTINCT from "App Uninstalled": an uninstall is Proxploy
+  // destroying the container, a removal is Proxploy dropping its own row for a
+  // container someone else already destroyed. Collapsing them would make the
+  // audit log claim a destroy that never happened, so this asserts they differ
+  // rather than just asserting each string.
+  it('separates removing our record from destroying the container', () => {
+    expect(actionLabel('app.reaped')).toBe('App Removed')
+    expect(actionLabel('app.forget')).toBe('App Forgotten')
+    expect(actionLabel('app.uninstall')).toBe('App Uninstalled')
+    expect(actionLabel('app.reaped')).not.toBe(actionLabel('app.uninstall'))
   })
 
   // Backend actions get added without this map being updated; a new one must
