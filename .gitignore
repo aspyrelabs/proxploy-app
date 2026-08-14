@@ -3,3 +3,6 @@ packaging/tests/DEV_ONLY_release_key.pem
 pve-testing.env
 .superpowers/
 node_modules/
+
+# macOS Finder metadata. Tracked by accident, dirty in every git status.
+.DS_Store
