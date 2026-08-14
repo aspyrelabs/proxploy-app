@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy } from 'react'
 import type { ReactNode } from 'react'
 import type { CatalogEntryDetail } from '../api/catalog'
 import { useCatalogEntry } from '../api/catalog'
@@ -12,6 +12,7 @@ import {
   asList, figure, plainText, readServed, readUpstreamMetadata, text,
 } from '../api/catalogMetadata'
 import { EmptyState } from '../components/EmptyState'
+import { IconTile } from '../components/IconTile'
 
 // Code-split: react-markdown plus its unified/micromark tree is 35.7 kB
 // gzipped, and it is needed only when someone opens an app that has release
@@ -23,7 +24,6 @@ import { KVGrid } from '../components/KVGrid'
 import { Button } from '../components/ui/button'
 
 import { LoadingBlock } from '../components/ui/loading'
-import { STORE_GRADIENT } from '../components/UsageBar'
 import { fmtBytes } from '../lib/format'
 
 /**
@@ -117,28 +117,6 @@ function Section({ title, children, className = '' }: {
       <h2 className="mb-3 text-[13px] uppercase tracking-wide text-text-3">{title}</h2>
       {children}
     </section>
-  )
-}
-
-/** The same 40px-tile-or-initials contract StoreCard's CardIcon has, at page
- *  size. Upstream icons are hotlinked from a CDN with no local cache, so a URL
- *  that 404s or is blocked is an expected case, not a bug, and the initials
- *  tile is the fallback for both that and a row with no icon_url at all. */
-function DetailIcon({ name, iconUrl }: { name: string; iconUrl: string | null }) {
-  const [broken, setBroken] = useState(false)
-  if (iconUrl && !broken) {
-    return (
-      <img src={iconUrl} alt={name} width={56} height={56}
-        className="h-14 w-14 rounded-card object-contain"
-        onError={() => setBroken(true)} />
-    )
-  }
-  return (
-    <div className="flex h-14 w-14 items-center justify-center rounded-card font-display
-                    text-[18px] font-semibold text-white"
-      style={{ background: STORE_GRADIENT }}>
-      {name.slice(0, 2).toUpperCase()}
-    </div>
   )
 }
 
@@ -711,7 +689,7 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
   return (
     <div>
       <div className="mt-2 mb-5 flex items-start gap-4">
-        <DetailIcon name={name} iconUrl={entry.icon_url} />
+        <IconTile name={name} iconUrl={entry.icon_url} size={56} />
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-[22px] font-semibold">{name}</h1>
           <div className="mt-0.5 font-mono text-[12px] text-text-3">

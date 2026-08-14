@@ -307,6 +307,29 @@ def sync_icons(db, data_dir: Path) -> dict:
             "reason": None}
 
 
+def served_icon_url(entry: CatalogEntry | None) -> str | None:
+    """The URL an icon is SERVED at: ours when a local copy exists, upstream's
+    when it does not, None when there is nothing to show.
+
+    A serve-time swap and nothing else. `icon_url` on the row always holds
+    upstream's URL (the metadata sync owns that column, this module owns the
+    mirror), so which of the two a caller should hand the browser is decided
+    here, once. It is shared by the Store's catalog rows and by installed apps
+    resolving the entry they were installed from, because "which URL" has
+    exactly one right answer and so is not a decision to distribute across
+    callers, let alone down to the frontend.
+
+    None covers both honest absences: no entry at all (an app whose catalog
+    slug no longer resolves) and an entry upstream has no logo for. Both are
+    the initials tile the UI already falls back to when an <img> fails, not an
+    error.
+    """
+    if entry is None:
+        return None
+    return (f"/api/v1/catalog/{entry.slug}/icon" if entry.icon_cache_path
+            else entry.icon_url)
+
+
 def attribution_headers(source_url: str | None) -> dict[str, str]:
     """CC BY 4.0 attribution, discharged at the point of redistribution.
 

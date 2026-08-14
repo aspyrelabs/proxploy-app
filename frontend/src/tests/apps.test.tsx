@@ -11,6 +11,9 @@ const APP = {
 }
 
 let appsResult: 'ok' | 'empty' | 'error' = 'ok'
+// What the backend resolved for this app's catalog entry: its icon, or null
+// when the entry is gone or has none.
+let appIcon: string | null = null
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
@@ -20,7 +23,7 @@ vi.mock('../api/client', () => ({
     }
     if (path.startsWith('/apps?') || path === '/apps') {
       if (appsResult === 'error') return Promise.reject(new Error('boom'))
-      return Promise.resolve(appsResult === 'empty' ? [] : [APP])
+      return Promise.resolve(appsResult === 'empty' ? [] : [{ ...APP, icon_url: appIcon }])
     }
     if (path.startsWith('/hosts')) {
       return Promise.resolve([{ id: 1, name: 'host-01' }])
@@ -45,7 +48,24 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 describe('AppsPage', () => {
-  beforeEach(() => { appsResult = 'ok' })
+  beforeEach(() => { appsResult = 'ok'; appIcon = null })
+
+  it('shows the icon of the catalog entry the app was installed from', async () => {
+    appIcon = '/api/v1/catalog/immich/icon'
+    withQuery(<AppsPage />)
+    expect(await screen.findByRole('img', { name: 'Immich' }))
+      .toHaveAttribute('src', '/api/v1/catalog/immich/icon')
+  })
+
+  it('falls back to the initials tile when there is no catalog icon', async () => {
+    // Null is what the backend serves for an app whose catalog entry no longer
+    // exists, and for one whose entry has no logo. Both are the tile, not an
+    // empty box and not a broken image.
+    appIcon = null
+    withQuery(<AppsPage />)
+    expect(await screen.findByText('IM')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Immich' })).not.toBeInTheDocument()
+  })
 
   it('renders the grid, the shown-count and the discovered panel', async () => {
     withQuery(<AppsPage />)

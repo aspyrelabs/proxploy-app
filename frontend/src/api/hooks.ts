@@ -68,6 +68,11 @@ export type AppRow = {
   id: number; name: string; slug: string; host_id: number; host_name: string
   node: string; ctid: number; category: string | null; catalog_slug: string | null
   icon_initials: string | null; icon_colors: { c1: string; c2: string } | null
+  // The icon of the catalog entry this app was installed from, resolved by the
+  // backend through the Store's own pipeline (services/catalog_icons.py). Null
+  // whenever there is nothing to show -- no catalog slug, a slug the catalog no
+  // longer has, or an entry with no logo -- which is the initials tile.
+  icon_url: string | null
   web_port: number | null; web_protocol: string | null; web_path: string | null
   status: string; ip: string | null; cpu_pct: number | null
   mem_bytes: number | null; mem_total_bytes: number | null

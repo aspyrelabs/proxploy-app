@@ -64,6 +64,37 @@ def test_app_detail_and_404(tmp_path, csrf_header, bootstrap_admin):
         assert c.get("/api/v1/apps/99999").status_code == 404
 
 
+def test_apps_carry_their_catalog_entrys_icon(tmp_path, csrf_header, bootstrap_admin):
+    """An installed app shows the icon of the Store entry it came from, and the
+    two absences that are normal rather than errors both serve null so the card
+    falls back to its initials tile: a slug the catalog no longer has, and an
+    entry upstream has no logo for."""
+    from proxploy.models import App, CatalogEntry
+
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        hid = seed()
+        with app.state.sessionmaker() as db:
+            db.add(CatalogEntry(slug="immich", name="Immich",
+                                icon_url="https://cdn.example/immich.webp",
+                                icon_cache_path="immich.webp"))
+            db.add(CatalogEntry(slug="paperless", name="Paperless"))
+            for a in db.query(App).all():
+                a.catalog_slug = a.slug
+            db.add(App(host_id=hid, ctid=152, name="Gone", slug="gone",
+                       catalog_slug="removed-from-upstream"))
+            db.commit()
+        rows = {r["slug"]: r["icon_url"] for r in c.get("/api/v1/apps").json()}
+        assert rows["immich"] == "/api/v1/catalog/immich/icon"
+        assert rows["paperless"] is None
+        assert rows["gone"] is None
+        # The detail route resolves it too, and must agree with the grid.
+        aid = next(r["id"] for r in c.get("/api/v1/apps").json()
+                   if r["slug"] == "immich")
+        assert c.get(f"/api/v1/apps/{aid}").json()["icon_url"] == rows["immich"]
+
+
 def test_discovered_lists_unadopted_cts(tmp_path, csrf_header, bootstrap_admin):
     app, c, seed = _seeded(tmp_path)
     with c:

@@ -1,14 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtPct } from '../lib/format'
+import { IconTile } from './IconTile'
 import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { Button } from './ui/button'
 import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
-
-function initials(app: AppRow): string {
-  return app.icon_initials ?? app.name.slice(0, 2).toUpperCase()
-}
 
 export function AppCard({ app }: { app: AppRow }) {
   const navigate = useNavigate()
@@ -21,16 +18,11 @@ export function AppCard({ app }: { app: AppRow }) {
       onClick={() => navigate({ to: '/apps/$appId' as never, params: { appId: String(app.id) } as never })}
     >
       <div className="flex items-start justify-between">
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-tile font-display text-[14px] font-semibold text-white"
-          style={{
-            background: app.icon_colors
-              ? `linear-gradient(135deg, ${app.icon_colors.c1}, ${app.icon_colors.c2})`
-              : 'linear-gradient(135deg,#F5B544,#E0862B)',
-          }}
-        >
-          {initials(app)}
-        </div>
+        {/* The same tile the Store card draws, so an installed app wears the
+            logo of the entry it was installed from. `icon_url` is null when
+            that entry is gone or has none, and the initials tile takes over. */}
+        <IconTile name={app.name} iconUrl={app.icon_url} size={40}
+                  initials={app.icon_initials} colors={app.icon_colors} />
         {app.update_available && (
           <span className="rounded bg-amber-dim px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-amber">
             update

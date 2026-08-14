@@ -1,9 +1,9 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import type { MouseEvent } from 'react'
 import type { CatalogRow } from '../api/catalog'
+import { IconTile } from './IconTile'
 import { Button } from './ui/button'
 import { Icon } from './ui/icon'
-import { STORE_GRADIENT } from './UsageBar'
 
 // Every entry the Store ever renders is entry_type "ct" (the API call is
 // pinned to entry_type=ct), so this is really just a label; kept as a lookup
@@ -57,36 +57,6 @@ const UNLISTED_TITLE =
   'community-scripts no longer lists this app. Its install script is still in '
   + 'the repository and still installs. This is about the upstream catalog, '
   + 'not a judgement about the app itself.'
-
-// A card must render cleanly with just name, type and an initial tile when
-// upstream metadata has no record for this slug (7 of the 556 store-visible
-// ct rows have none, and that is normal, never an error), or the sync has
-// not run yet, or
-// the <img> itself fails to load: scripts are the source of truth, upstream
-// metadata is presentation-only decoration (catalog expansion plan, decision
-// 1). Icons are rendered straight from upstream's CDN with no local binary
-// cache, so a URL that 404s or is blocked is an expected case, not a bug.
-// Never let a broken image or a missing icon_url break the card.
-function CardIcon({ name, iconUrl }: { name: string; iconUrl: string | null }) {
-  const [broken, setBroken] = useState(false)
-  if (iconUrl && !broken) {
-    return (
-      <img
-        src={iconUrl} alt={name} loading="lazy" width={40} height={40}
-        className="h-10 w-10 rounded-tile object-contain"
-        onError={() => setBroken(true)}
-      />
-    )
-  }
-  return (
-    <div
-      className="flex h-10 w-10 items-center justify-center rounded-tile font-display text-[14px] font-semibold text-white"
-      style={{ background: STORE_GRADIENT }}
-    >
-      {name.slice(0, 2).toUpperCase()}
-    </div>
-  )
-}
 
 /**
  * The install count, shown as the number it actually is.
@@ -258,7 +228,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
       onClick={openFromCardBody}
       className="flex h-[240px] cursor-pointer flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
       <div className="flex shrink-0 items-start justify-between gap-2">
-        <CardIcon name={name} iconUrl={entry.icon_url} />
+        <IconTile name={name} iconUrl={entry.icon_url} size={40} />
         {entry.popularity != null && (
           <InstallCount count={entry.popularity} syncedAt={entry.popularity_synced_at} />
         )}

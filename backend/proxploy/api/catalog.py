@@ -20,7 +20,8 @@ from proxploy.models import App, CatalogEntry, Host, HostCredential, User, utcno
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
 from proxploy.services.catalog_icons import (CONTENT_TYPES,
-                                             attribution_headers, icon_dir)
+                                             attribution_headers, icon_dir,
+                                             served_icon_url)
 from proxploy.services.catalog_metadata import store_visible
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -73,9 +74,9 @@ def _serialize(r: CatalogEntry) -> dict:
         "slug": r.slug, "name": r.name, "category": r.category, "type": r.entry_type,
         "description": r.description,
         # OUR endpoint when a local copy exists, upstream's URL when it does
-        # not. The DB column always keeps upstream's URL
-        # (services/catalog_icons.py owns the mirror, the metadata sync owns
-        # the column), so this is a serve-time swap and nothing else.
+        # not. services/catalog_icons.py::served_icon_url owns that swap, and
+        # api/apps.py resolves an installed app's icon through the same call,
+        # so a card and the app installed from it can never disagree.
         #
         # Chosen because it needs NO frontend change: StoreCard already
         # renders `entry.icon_url` and already falls back to an initials tile
@@ -83,8 +84,7 @@ def _serialize(r: CatalogEntry) -> dict:
         # already work. The alternative, a second `icon_local_url` field, would
         # have made every consumer decide which to prefer, which is a decision
         # with exactly one right answer and therefore not one to distribute.
-        "icon_url": (f"/api/v1/catalog/{r.slug}/icon" if r.icon_cache_path
-                     else r.icon_url),
+        "icon_url": served_icon_url(r),
         # `docs_url` rides alongside `website` because they are the same kind
         # of thing and now come from the same place (upstream's `website` and
         # `documentation`, services/catalog_metadata.py). Serving one and

@@ -16,6 +16,7 @@ from proxploy.models import App, AppScript, CatalogEntry, Host, User
 from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
+from proxploy.services.catalog_icons import served_icon_url
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
@@ -42,7 +43,12 @@ _migrate = authorize("app", "migrate", scope_of=scope_app())
 _remove = authorize("app", "remove", scope_of=scope_app())
 
 
-def _app_out(a: App, host: Host, snapshots) -> dict:
+def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
+    """`entry` is the catalog row this app was installed from, or None when it
+    has no catalog slug or that slug no longer resolves. Deliberately a
+    required argument with no default: it is only ever used for the icon, and a
+    default of None would let a future caller silently serve every app without
+    one."""
     snap = snapshots.get(a.host_id)
     g = snap.guests.get(("lxc", a.ctid)) if snap else None
     return {
@@ -50,6 +56,17 @@ def _app_out(a: App, host: Host, snapshots) -> dict:
         "host_id": a.host_id, "host_name": host.name, "node": host.node_name,
         "ctid": a.ctid, "category": a.category, "catalog_slug": a.catalog_slug,
         "icon_initials": a.icon_initials, "icon_colors": a.icon_colors,
+        # The icon of the Store entry this app was installed from, resolved
+        # through the Store's own pipeline rather than copied onto the app row.
+        # A column here would be a second copy of a logo that changes whenever
+        # upstream rebrands, and it would go stale the moment a catalog refresh
+        # moved on without it; resolving it per request costs one lookup and
+        # cannot disagree with the card the operator installed from.
+        #
+        # Null is normal and is NOT an error: no catalog slug, a slug upstream
+        # has dropped, or an entry with no logo all land here, and all three
+        # are the icon_initials/icon_colors tile the card already draws.
+        "icon_url": served_icon_url(entry),
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
         "status": a.status_cached or "unknown", "ip": a.ip_cached,
@@ -74,11 +91,17 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
             continue
         if status and (a.status_cached or "unknown") != status:
             continue
-        h = hosts.get(a.host_id)
-        if h is None:
-            continue
-        rows.append(_app_out(a, h, request.app.state.poller.snapshots))
-    return rows
+        if a.host_id in hosts:
+            rows.append(a)
+    # One query for the whole page rather than one per card. A grid of 40 apps
+    # is 40 rows out of the same small table, and the icon is the only thing
+    # any of them wants from it.
+    slugs = {a.catalog_slug for a in rows if a.catalog_slug}
+    entries = {e.slug: e for e in db.query(CatalogEntry)
+               .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
+    return [_app_out(a, hosts[a.host_id], request.app.state.poller.snapshots,
+                     entries.get(a.catalog_slug))
+            for a in rows]
 
 
 @router.get("/discovered")
@@ -212,7 +235,9 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     if a is None:
         raise HTTPException(404, "app not found")
     host = db.get(Host, a.host_id)
-    return _app_out(a, host, request.app.state.poller.snapshots)
+    entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
+             if a.catalog_slug else None)
+    return _app_out(a, host, request.app.state.poller.snapshots, entry)
 
 
 @router.get("/{app_id}/logs")

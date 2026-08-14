@@ -10,6 +10,7 @@ import { AppCard } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
+import { IconTile } from '../components/IconTile'
 import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { LifecycleActions } from '../components/LifecycleActions'
@@ -194,16 +195,8 @@ export function AppDetail() {
           <div>
             <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
             <div className="mt-2 mb-4 flex items-center gap-4">
-              <div
-                className="flex h-14 w-14 items-center justify-center rounded-card font-display text-[18px] font-semibold text-white"
-                style={{
-                  background: app.icon_colors
-                    ? `linear-gradient(135deg, ${app.icon_colors.c1}, ${app.icon_colors.c2})`
-                    : 'linear-gradient(135deg,#F5B544,#E0862B)',
-                }}
-              >
-                {app.icon_initials ?? app.name.slice(0, 2).toUpperCase()}
-              </div>
+              <IconTile name={app.name} iconUrl={app.icon_url} size={56}
+                        initials={app.icon_initials} colors={app.icon_colors} />
               <div>
                 <h1 className="font-display text-[22px] font-semibold">
                   {app.name}
