@@ -185,15 +185,32 @@ because a code review found both cases reachable and neither provable offline.
    `nfs-shared` as fact. The template question settled back to `local` as the
    sole survivor. Re-enabling restored all of it.
 
-   **The literal `status === 'available'` filter is still NOT exercised, and
-   the reason is worth recording:** a disabled pool does not come back from
+   **STATUS HALF PASSED 2026-08-14**, but only after finding that the obvious
+   way to run it does not work. A DISABLED pool does not come back from
    `/cluster/resources` with a non-`available` status, it does not come back
-   AT ALL. `--disable 1` removes the row entirely. So the filter is currently
-   dead code against every case reachable by disabling a storage, and what
-   would actually reach it is a pool that stays enabled but goes inactive, an
-   NFS server that stops answering being the obvious one. Until that is run,
-   the comparison against the `available` literal is unproven, even though the
-   user-visible behaviour it protects is not.
+   AT ALL: `--disable 1` removes the row entirely. Nothing reachable by
+   disabling a storage ever reaches the `status` comparison.
+
+   What does reach it is a pool that stays ENABLED and goes INACTIVE. The
+   cheapest way to produce one, with no dead NFS mount to hang `pvestatd` on,
+   is a `dir` storage with `is_mountpoint` set on a path that is not a mount:
+
+       pvesm add dir stale-test --path /mnt/stale-test --content rootdir,vztmpl
+       pvesm set stale-test --is_mountpoint 1
+
+   Two steps, not one, because `pvesm add` refuses to create a storage it
+   cannot immediately activate.
+
+   **The literal that came back is `unknown`, not `unavailable` or
+   `inactive`.** `/cluster/resources` reported
+   `"storage":"stale-test","status":"unknown"` with `content` of
+   `rootdir,vztmpl`, and `GET /storage` passed it through unfiltered, exactly
+   as its docstring says it does. The pool was absent from both pickers on
+   both hosts while `local-lvm`, `local` and `nfs-shared` remained. So the
+   positive match on `available` is now proven against real hardware, and it
+   is also the reason this works: a filter written as a blocklist of known-bad
+   statuses would have had to guess `unknown`, and would have offered an
+   unmountable pool as a rootfs candidate.
 
 ### Install execution, carried from phase 4
 
