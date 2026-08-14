@@ -16,7 +16,35 @@ export const dialogOverlayClass =
  * asks for. The widths themselves range 380 to 560, so they stay a number
  * rather than a name that would fit none of them.
  */
-export const dialogPanelClass = 'max-w-[92vw] rounded-card border border-line bg-panel p-5'
+const dialogPanelChrome = 'rounded-card border border-line bg-panel p-5'
+
+export const dialogPanelClass = `max-w-[92vw] ${dialogPanelChrome}`
+
+/**
+ * The other sizing model: no width at all, take the content's, and stop at 80%
+ * of the window in BOTH axes.
+ *
+ * For the job log there is no honest number to pass as `width`. The panel holds
+ * a transcript, and a two-line "storage is full" and a 400-line install run are
+ * the same component; a fixed 720 was too wide for the first and too narrow for
+ * the second. `w-fit` hands the decision to the content: the panel comes out as
+ * wide as the longest log line and as tall as the transcript, and shrinks below
+ * both when there is less to show.
+ *
+ * 80vw/80vh is the ceiling, and it is a ceiling rather than a size: it only
+ * bites once the content asks for more than that. It is tighter than the shared
+ * 92vw because this panel can be pushed to it by one long line, and a dialog
+ * flush to the window edge stops reading as a dialog. The height cap earns its
+ * place for the same reason 70vh does above: `place-items-center` cannot centre
+ * a panel taller than the viewport, so an uncapped one overhangs the top with
+ * no way to scroll back to it.
+ *
+ * flex-col is what makes the cap survivable. The body child carries min-h-0 and
+ * its own overflow (TerminalPanel already does), so when the transcript is
+ * taller than 80vh the flexbox shrinks that child and it scrolls, while the
+ * heading and the Close button stay put.
+ */
+export const dialogFitPanelClass = `flex w-fit max-h-[80vh] max-w-[80vw] flex-col ${dialogPanelChrome}`
 
 /**
  * Opt-in height cap and scroll container, for a dialog whose body is long

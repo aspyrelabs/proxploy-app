@@ -15,7 +15,8 @@ import { TerminalPanel } from './TerminalPanel'
  * line. Kept in a ref so passing an unmemoized inline callback cannot itself
  * cause a reconnect; the effect below still only depends on `jobId`.
  */
-export function JobLog({ jobId, onProgress }: { jobId: number; onProgress?: (pct: number) => void }) {
+export function JobLog({ jobId, onProgress, height }:
+  { jobId: number; onProgress?: (pct: number) => void; height?: number | 'fill' }) {
   const archived = useJobEvents(jobId)
   const [live, setLive] = useState<TermLine[]>([])
   const onProgressRef = useRef(onProgress)
@@ -56,5 +57,8 @@ export function JobLog({ jobId, onProgress }: { jobId: number; onProgress?: (pct
     : archived.isError
       ? [{ stream: 'status', message: "Could not load this job's transcript." }]
       : (archived.data ?? []).map((e) => ({ stream: e.stream, message: e.message }))
-  return <TerminalPanel lines={lines} />
+  // `height` is passed straight through rather than defaulted here, so the one
+  // caller that renders inside a content-sized dialog can say 'fill' and every
+  // other caller keeps TerminalPanel's own 260.
+  return <TerminalPanel lines={lines} height={height} />
 }

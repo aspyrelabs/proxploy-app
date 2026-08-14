@@ -318,6 +318,11 @@ describe('BellPopover', () => {
     expect(within(dialog).getByText('vm.backup #12')).toBeInTheDocument()
     // The archived transcript is fetched for THAT job, not whichever was first.
     await waitFor(() => expect(screen.getByText(/reading superblock/)).toBeInTheDocument())
+
+    // It shipped with Escape and the scrim and nothing to click, unlike every
+    // other dialog that mounts a JobLog. A visible way out is not optional.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByText('vm.backup #12')).not.toBeInTheDocument())
   })
 
   // Icon-only controls: the aria-label is the accessible name whether or not

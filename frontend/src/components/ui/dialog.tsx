@@ -2,8 +2,8 @@ import type { ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 
 import {
-  dialogOverlayClass, dialogPanelClass, dialogScrollBodyClass, dialogScrollPanelClass,
-  paletteOverlayClass, palettePanelClass, useRadixClose,
+  dialogFitPanelClass, dialogOverlayClass, dialogPanelClass, dialogScrollBodyClass,
+  dialogScrollPanelClass, paletteOverlayClass, palettePanelClass, useRadixClose,
 } from './overlay'
 
 /**
@@ -27,6 +27,7 @@ export function Dialog({
   variant = 'center',
   headerRight,
   scrollBody = false,
+  fit = false,
   onClose,
   children,
 }: {
@@ -48,13 +49,21 @@ export function Dialog({
    *  this renders exactly as it did before the prop existed. The cap itself
    *  lives in overlay.ts, so a call site cannot pick its own. */
   scrollBody?: boolean
+  /** Drops `width` entirely and sizes the panel to its content, capped at
+   *  80vw/80vh (dialogFitPanelClass). For the job log, whose size is whatever
+   *  the transcript turned out to be. Unlike scrollBody this does NOT wrap the
+   *  children in a scroller: the body child owns the scrolling, because the
+   *  thing that has to stay scrolled to the newest line is TerminalPanel
+   *  itself. A `fit` child must therefore carry min-h-0 and its own overflow,
+   *  which is what `<JobLog height="fill">` passes down. */
+  fit?: boolean
   onClose: () => void
   children: ReactNode
 }) {
   const { open, requestClose, onCloseAutoFocus } = useRadixClose(onClose)
-  // Empty string unless scrolling, so a dialog that does not opt in emits the
-  // exact same class strings it did before.
-  const shrink = scrollBody ? ' shrink-0' : ''
+  // Empty string unless the panel is a capped flex column, so a dialog that
+  // opts into neither emits the exact same class strings it did before.
+  const shrink = scrollBody || fit ? ' shrink-0' : ''
   return (
     <DialogPrimitive.Root open={open} onOpenChange={requestClose}>
       <DialogPrimitive.Portal>
@@ -67,8 +76,11 @@ export function Dialog({
             // an auditor both expect to find.
             aria-modal="true"
             className={variant === 'palette' ? palettePanelClass
+              : fit ? dialogFitPanelClass
               : scrollBody ? `${dialogPanelClass} ${dialogScrollPanelClass}` : dialogPanelClass}
-            style={{ width }}
+            // No inline width when fitting: a stated width would win over
+            // w-fit and there would be nothing left for the content to decide.
+            style={fit ? undefined : { width }}
             // Radix wires aria-describedby itself when a Description is
             // rendered, and warns when one is missing. Most of these dialogs
             // carry a whole form rather than one describing sentence, so opt

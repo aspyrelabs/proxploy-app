@@ -110,6 +110,7 @@ function useFittingCount(
 
   return count
 }
+import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { JobLog } from './JobLog'
 import { LoadingBlock } from './ui/loading'
@@ -458,12 +459,25 @@ export function BellPopover() {
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+      {/* `fit` instead of a width: the panel is a transcript viewer and the
+          transcript decides how big it wants to be, up to 80vw/80vh. The 720
+          it used to state was a guess that a one-line failure overshot and a
+          long install run could not use.
+
+          The Close button is the same ghost button every other JobLog dialog
+          ends with (InstallDialog, MigrateDialog, HostPowerDialog, the VM
+          wizard). This one shipped without it, so a log opened from the tray
+          had Escape and the scrim and no visible way out at all. shrink-0
+          keeps it out of the flexbox shrinking that the transcript above it
+          absorbs. */}
       {logJob && (
         <Dialog title={`${logJob.kind} #${logJob.id}`}
                 description={logJob.error ?? undefined}
-                width={720}
+                fit
                 onClose={() => setLogJob(null)}>
-          <JobLog jobId={logJob.id} />
+          <JobLog jobId={logJob.id} height="fill" />
+          <Button className="mt-3 shrink-0" variant="ghost"
+                  onClick={() => setLogJob(null)}>Close</Button>
         </Dialog>
       )}
     </>

@@ -158,6 +158,38 @@ describe('Dialog scrollBody', () => {
   })
 })
 
+describe('Dialog fit', () => {
+  // Same limitation as above: jsdom has no layout engine, so it cannot tell
+  // how wide the panel came out. What it can hold is the contract that makes
+  // the width content-driven and bounded -- both caps present, no stated width
+  // to beat w-fit -- which is exactly what a regression here would break.
+  it('sizes to its content and caps at 80% of the window in both axes', () => {
+    render(<Dialog title="app.install #7" fit onClose={vi.fn()}><p>body</p></Dialog>)
+    const panel = screen.getByRole('dialog')
+    expect(panel.className).toContain('w-fit')
+    expect(panel.className).toContain('max-w-[80vw]')
+    expect(panel.className).toContain('max-h-[80vh]')
+    // an inline width would win over w-fit and there would be nothing left for
+    // the content to decide
+    expect(panel.style.width).toBe('')
+    // the 92vw default must not ride along: two max-widths on one element is a
+    // coin toss decided by stylesheet order, not by the call site
+    expect(panel.className).not.toContain('92vw')
+  })
+
+  it('leaves the body unwrapped, because the body owns the scrolling', () => {
+    render(<Dialog title="app.install #7" fit onClose={vi.fn()}><p>body</p></Dialog>)
+    const panel = screen.getByRole('dialog')
+    // Unlike scrollBody: TerminalPanel is the scroller and has to stay one, or
+    // it stops following the newest line.
+    expect(panel.querySelector('.overflow-y-auto')).toBeNull()
+    expect(screen.getByText('body').parentElement).toBe(panel)
+    expect(panel.className).toContain('flex-col')
+    // the heading cannot be part of what flexbox shrinks to honour the cap
+    expect(screen.getByText('app.install #7').className).toContain('shrink-0')
+  })
+})
+
 describe('AlertDialog', () => {
   it('marks the panel as a modal alertdialog with an accessible name', async () => {
     render(<AlertHarness />)
