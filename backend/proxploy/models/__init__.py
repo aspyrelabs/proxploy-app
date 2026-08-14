@@ -207,6 +207,13 @@ class App(TimestampMixin, Base):
     uptime_s_cached: Mapped[int | None] = mapped_column(Integer)
     update_available: Mapped[str | None] = mapped_column(Text)
     adopted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When the poller first failed to find this app's CT in a cycle it was
+    # willing to trust (pollers._absence_is_trustworthy). NULL is the normal
+    # state and means "last seen present". Non-NULL is a countdown, not a
+    # verdict: the row is only reaped once the absence has survived
+    # APP_REAP_AFTER_S of further trustworthy cycles, and any cycle that finds
+    # the CT again clears it back to NULL.
+    missing_since: Mapped[datetime | None] = mapped_column(DateTime)
     # Table-level constraints name the *physical* column, hence "ct_id".
     __table_args__ = (UniqueConstraint("host_id", "ct_id", name="ux_apps_host_ctid"),)
 

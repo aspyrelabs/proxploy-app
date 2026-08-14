@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, utcnow
+from proxploy.services.audit import write_audit
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
@@ -74,9 +75,51 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
+# How long an app's CT must stay absent from cycles we are willing to trust
+# before the App row is deleted. 15 minutes is ~15 default poll intervals: far
+# longer than any burst of bad reads, short enough that `pct destroy 150`
+# clears the app out of the UI while the operator who ran it is still looking.
+APP_REAP_AFTER_S = 900
+
+
+def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
+    """Can this cycle's guest list be used as PROOF that a CT is gone?
+
+    Usually the honest answer is no, and getting this wrong deletes a user's
+    app records because a node rebooted. "Not in /cluster/resources" has at
+    least four causes and only one of them is "somebody destroyed it":
+
+      * the host was unreachable. That case cannot reach here at all:
+        _poll_once raises before ingest_cycle, and _host_loop turns the raise
+        into status=unreachable without ever calling us.
+      * the cycle was degraded (a read 403'd, timed out, or came back short).
+        A half-answer is not evidence of anything, so we hold what we have.
+      * a CLUSTER MEMBER is down. This is the dangerous one, because nothing
+        else about the cycle looks wrong: the endpoint we asked answered
+        fine, the host is "connected", the cycle is not degraded -- and an
+        entire node's worth of guests has silently dropped out of
+        /cluster/resources. App rows carry host_id + ctid and no node, so we
+        cannot tell "this app lived on the node that just went down" from
+        "this app was destroyed"; the only safe move is to distrust the whole
+        cycle unless every node in it reports online.
+      * an empty or truncated response. A resource list with no node rows in
+        it is a broken read, never a genuinely empty cluster.
+
+    Clearing all of that makes ONE cycle trustworthy, which is still not
+    enough to delete anything: the caller additionally requires the absence to
+    persist across trustworthy cycles for APP_REAP_AFTER_S, so even a
+    plausible-looking bad read has to repeat for a quarter of an hour before a
+    single row is removed. Restarting the backend does not shorten that
+    window either -- the countdown lives in apps.missing_since, in the DB.
+    """
+    return (bool(node_rows) and not degraded
+            and all(r.get("status") == "online" for r in node_rows))
+
+
 def ingest_cycle(db, host: Host, resources: list[dict],
                  rrd_by_node: dict[str, list[dict]], now: datetime,
-                 version: str | None = None) -> CycleResult:
+                 version: str | None = None,
+                 degraded: bool = False) -> CycleResult:
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
     targets: list[dict] = []
@@ -162,16 +205,29 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         }
 
     # apps cache refresh (identity is ours; state is cached: doc 04) ----------
+    trustworthy = _absence_is_trustworthy(node_rows, degraded)
+    reaped: list[App] = []
     mapped_ctids: set[int] = set()
     for a in db.query(App).filter_by(host_id=host.id).all():
         mapped_ctids.add(a.ctid)
         g = guests.get(("lxc", a.ctid))
         if g is None:
+            if trustworthy:
+                if a.missing_since is None:
+                    a.missing_since = now
+                elif (now - a.missing_since).total_seconds() >= APP_REAP_AFTER_S:
+                    reaped.append(a)
+                    continue
+            # An untrustworthy cycle leaves missing_since exactly as it was:
+            # it neither starts nor advances the countdown, and it must not
+            # reset one either, or a host that flaps between good and degraded
+            # cycles would never reap anything.
             if a.status_cached != "unknown":
                 a.status_cached = "unknown"
                 events.append(("resource", {"type": "app", "id": a.id,
                                             "change": "status", "status": "unknown"}))
             continue
+        a.missing_since = None
         if a.status_cached != g["status"]:
             events.append(("resource", {"type": "app", "id": a.id,
                                         "change": "status", "status": g["status"]}))
@@ -258,6 +314,34 @@ def ingest_cycle(db, host: Host, resources: list[dict],
          "status": r.get("status") or "unknown"}
         for r in storage_rows
     ]
+
+    # Reaping: the CT behind these apps is gone, so the app is gone. The row is
+    # DELETED rather than flagged, which is what makes it disappear everywhere
+    # at once (GET /apps, the host page's app list, and the per-host app counts
+    # on /cluster/nodes all read the apps table directly, so there is nothing
+    # to teach about a new "orphaned" state). A re-created CT with the same
+    # ctid comes back as a `discovered` container and can be adopted, which is
+    # the recovery path that already exists.
+    for a in reaped:
+        log.warning("host %s (%s): CT %s behind app '%s' has been absent since "
+                    "%s; removing the app record", host.id, host.name, a.ctid,
+                    a.name, a.missing_since)
+        # Audited because this is Proxploy deleting a user's record on its own
+        # initiative; write_audit commits, which is why the reap block sits
+        # here rather than inside the apps loop above.
+        write_audit(db, actor_type="system", action="app.reaped",
+                    target_type="app", target_id=a.id,
+                    params={"ctid": a.ctid, "host_id": host.id,
+                            "missing_since": a.missing_since.isoformat()})
+        events.append(("resource", {"type": "app", "id": a.id,
+                                    "change": "removed"}))
+        db.delete(a)
+    if reaped:
+        # Node cards count apps per host (api/cluster.py::cluster_nodes) and
+        # the hosts page reads those counts; only a `host` resource event
+        # invalidates that cache on the client, an `app` one does not.
+        events.append(("resource", {"type": "host", "id": host.id,
+                                    "change": "apps"}))
 
     write_samples(db, samples)
     db.commit()
@@ -426,7 +510,8 @@ class Poller:
                 version = None
 
             prev = self.snapshots.get(host_id)
-            result = ingest_cycle(db, host, resources, rrd, utcnow(), version=version)
+            result = ingest_cycle(db, host, resources, rrd, utcnow(),
+                                  version=version, degraded=bool(degraded))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.
