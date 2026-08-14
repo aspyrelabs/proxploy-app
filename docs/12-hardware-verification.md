@@ -365,6 +365,32 @@ message.
     `node_power_missing` should be recomputed at enrolment and by
     `POST /hosts/{id}/test`. The tri-state (null meaning "not checked") is
     exactly the kind of thing a fake reports too cleanly.
+
+    **HARDWARE HALF PASSED 2026-08-15, PVE 9.2.10.** Run against a throwaway
+    `pp-probe@pve!probe` token granted only `PVEAuditor` at `/`, then deleted.
+    Calling the real `api/hosts.py` probes against it:
+
+    - `/access/permissions` was readable, 7 privileges, so the tri-state's
+      "could not tell" branch was NOT taken and the answer below is a real one.
+    - `_missing_privileges` returned `[]`. PVEAuditor holds all five of
+      `VM.Audit`, `Datastore.Audit`, `Sys.Audit`, `Pool.Audit`, `SDN.Audit`, so
+      a PVEAuditor token is a legitimate monitoring token.
+    - `_node_power_missing` returned **True**, correctly seeing that the same
+      token has no `Sys.PowerMgmt`.
+
+    That is the part only real hardware could answer: what a genuinely
+    restricted token reports. What is still open is the null branch, which
+    needs a token REFUSED `/access/permissions` and PVE grants that read to
+    everyone for their own permissions, and the UI half, that the warning
+    appears ahead of a power action rather than the action refusing.
+
+    **Worth recording about this lab specifically:** both hosts authenticate as
+    `root@pam!proxploy`, a root token holding every privilege. So in this
+    environment NO privilege-degradation path is ever exercised: not
+    `node_power_missing`, not `_missing_privileges`, not the degraded-poll path
+    that exists because a narrow token can read `/cluster/resources` and still
+    403 on `rrddata`. Those branches are live code that this hardware never
+    reaches, which is worth knowing before reading a green run as coverage.
 11. **OIDC against a real IdP.** Proven against a local mock provider with a
     real discovery document, real PKCE, and RS256 tokens verified against a real
     JWKS endpoint. Everything except a third-party implementation on the wire.
