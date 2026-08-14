@@ -109,16 +109,26 @@ function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
   )
 }
 
+/** Grouped AND sorted, because /cluster/nodes answers in no defined order:
+ *  unsorted, the cards were laid out in whatever order the last poll happened
+ *  to write, so they reshuffled under the operator on every 30s refetch.
+ *
+ *  Sorting the rows first is enough for the nodes: a Map keeps insertion
+ *  order, so each group and the standalone list inherit it, and only the
+ *  cluster headings still need sorting of their own. */
 function groupByCluster(rows: MergedNode[]) {
   const clusters = new Map<string, MergedNode[]>()
   const standalone: MergedNode[] = []
-  for (const n of rows) {
+  for (const n of [...rows].sort((a, b) => (a.node ?? '').localeCompare(b.node ?? ''))) {
     if (!n.cluster) { standalone.push(n); continue }
     const group = clusters.get(n.cluster)
     if (group) group.push(n)
     else clusters.set(n.cluster, [n])
   }
-  return { clusters: [...clusters.entries()], standalone }
+  return {
+    clusters: [...clusters.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    standalone,
+  }
 }
 
 /** "Add host" where the hosts are, not only buried in Settings.

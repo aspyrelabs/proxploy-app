@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' | 'twoEndpoints' = 'ok'
+let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' | 'twoEndpoints'
+  | 'unsorted' = 'ok'
 let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
@@ -89,6 +90,20 @@ vi.mock('../api/client', () => ({
                  is_entry: false, status: 'unreachable' }),
           node({ host_id: 2, name: 'host-02', node: 'n2', cluster: 'lab-cluster',
                  is_entry: true, status: 'unreachable' }),
+        ])
+      }
+      // Deliberately reverse-alphabetical in every dimension, and with a
+      // nameless row (a host whose first poll has not landed) among the
+      // standalone ones, so the ordering test fails without the sort.
+      if (nodesResult === 'unsorted') {
+        return Promise.resolve([
+          node({ host_id: 1, name: 'host-01', node: 'node2', cluster: 'zeta' }),
+          node({ host_id: 1, name: 'host-01', node: 'node1', cluster: 'zeta' }),
+          node({ host_id: 2, name: 'host-02', node: 'beta2', cluster: 'alpha' }),
+          node({ host_id: 2, name: 'host-02', node: 'beta1', cluster: 'alpha' }),
+          node({ host_id: 3, name: 'host-03', node: 'lab2', cluster: null }),
+          node({ host_id: 4, name: 'host-04', node: null, cluster: null }),
+          node({ host_id: 5, name: 'host-05', node: 'lab1', cluster: null }),
         ])
       }
       if (nodesResult === 'noEntry') {
@@ -234,6 +249,19 @@ describe('HostsPage', () => {
     // row collapsed into this card. Saying so is the whole point.
     const card = within((await screen.findByText('n1')).closest('[role="link"]')!)
     expect(card.getByText(/host-02 cannot be reached/i)).toBeInTheDocument()
+  })
+
+  it('orders clusters and their cards by name, whatever order the API answered in', async () => {
+    // Without the sort the cards sit in poll order, so they reshuffle under
+    // the operator on every 30s refetch -- a two-node cluster drew node2 first.
+    nodesResult = 'unsorted'
+    const { container } = withQuery(<HostsPage />)
+    await screen.findByText('node1')
+    const at = (s: string) => container.textContent!.indexOf(s)
+    expect(at('Cluster alpha')).toBeLessThan(at('Cluster zeta'))
+    expect(at('beta1')).toBeLessThan(at('beta2'))
+    expect(at('node1')).toBeLessThan(at('node2'))
+    expect(at('lab1')).toBeLessThan(at('lab2'))
   })
 
   it('leaves a standalone host ungrouped, with no cluster heading', async () => {
