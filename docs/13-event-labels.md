@@ -42,81 +42,81 @@ account and team admin. Ordered to match `ACTION_LABEL`.
 
 | Identifier | Current label | What it actually means | Where it appears | Suggested label |
 |---|---|---|---|---|
-| `alert.ack` | Alert Acknowledged | A user marked a firing alert as seen. The alert keeps firing until the condition actually clears; acknowledging only clears the "new" flag, it does not silence or pin it. | Alerts page, activity feed | |
-| `apikey.create` | API Key Created | A user generated a new personal API key for programmatic access. | Settings, audit log | |
-| `apikey.revoke` | API Key Revoked | A user permanently disabled one of their own API keys; it can no longer authenticate. | Settings, audit log | |
-| `app.forget` | App Forgotten | A user removed Proxploy's record of an app while leaving the underlying container running untouched on Proxmox (the "keep the container" option on uninstall). | Apps page, activity feed, audit log | |
-| `app.install` | App Installed | A community-scripts container was installed onto a host over SSH, pinned to a specific catalog commit. | Activity feed, bell popover, Apps page, audit log | |
-| `app.reconfigure` | App Reconfigured | A user changed an app's stored metadata (name, web port, protocol, or path); if the name changed it also pushes a hostname update to the container on Proxmox. | Activity feed, audit log | |
-| `app.restart` | App Restarted | Proxmox rebooted the container (Proxploy's "restart" is Proxmox's "reboot"). | Activity feed, bell popover, audit log | |
-| `app.shutdown` | App Shut Down | The container was gracefully powered off (Proxmox's ACPI/init shutdown, not a hard kill). | Activity feed, bell popover, audit log | |
-| `app.start` | App Started | The container was started. | Activity feed, bell popover, audit log | |
-| `app.stop` | App Stopped | The container was hard killed (not graceful). | Activity feed, bell popover, audit log | |
-| `app.uninstall` | App Uninstalled | The container was stopped, then destroyed on Proxmox, then Proxploy's record of it was deleted. A stop failure is logged but does not stop the destroy. | Activity feed, bell popover, audit log | |
-| `app.update` | App Updated | The app's install script was re-run over SSH, pinned to the current upstream commit, to bring the container's software forward. | Activity feed, bell popover, Apps page, audit log | |
-| `apps.adopt` | Apps Adopted | A user imported one or more containers that Proxmox already knew about but Proxploy did not, as a single batch, turning them into tracked apps. | Apps page, audit log | |
-| `apps.script_edit` | App Script Edited | A user manually edited the install/update script Proxploy has stored for an app. | Audit log, activity feed | |
-| `apps.script_revert` | App Script Reverted | A user restored a previously saved version of an app's script. | Audit log, activity feed | |
-| `auth.login` | Signed In | A user successfully logged in. | Audit log, activity feed | |
-| `auth.logout` | Signed Out | A user's session ended. | Audit log, activity feed | |
-| `backup.delete` | Backup Deleted | A single backup archive was deleted from Proxmox storage. | Backups page, activity feed, audit log | |
-| `backup.prune` | Backups Pruned | A retention rule was applied to a storage's backups; any archive the rule marks for removal is deleted. Nothing is deleted if the rule keeps everything. | Backups page, activity feed, audit log | |
-| `backup.restore` | Backup Restored | An archive was restored, either back over the original guest (in place, guest stopped, overwritten) or as a brand new guest with a fresh id. | Backups page, activity feed, audit log | |
-| `backup.run` | Backup Taken | A vzdump backup ran against one or more chosen guests, or every guest on the node if none were chosen. | Backups page, activity feed, audit log | |
-| `backup.sync` | Backups Synced | Proxploy re-read the list of backup archives straight from Proxmox storage into its local cache; the cache is a droppable mirror, never the source of truth. | Backups page, activity feed, audit log | |
-| `catalog.classify_backlog` | Catalog Backlog Classified | A low-priority background pass fetched and evaluated whichever catalog entries a refresh discovered but nobody has opened or installed yet, to work out which ones are installable. It is bounded and may not finish the whole backlog in one run. | Activity feed, audit log (self-queued, no direct button) | |
-| `catalog.refresh` | Catalog Refreshed | Proxploy re-read the community-scripts catalog listing from GitHub, updated known entries and icons, recomputed which apps have an update available, and queued the classify backlog job. | App Store page, activity feed, audit log | |
-| `console.open` | Console Opened | A user opened a live terminal or VNC session: an app's container shell, a VM's VNC console, or a Proxmox node's own shell. The target type tells these apart, the label does not. | Activity feed, audit log | |
-| `entitlement.refresh` | Entitlements Refreshed | A user manually forced Proxploy to re-fetch its license/plan entitlements from the licensing service, instead of waiting for the normal refresh. | Settings, audit log | |
-| `host.create` | Host Added | A user connected a new Proxmox host to Proxploy. | Hosts page, activity feed, audit log | |
-| `host.credentials` | Host Credentials Updated | A user rotated the API token and/or SSH key Proxploy stores for reaching a host. | Hosts page, audit log | |
-| `host.reboot` | Host Rebooted | A user told Proxmox to reboot the physical/virtual node itself, not a guest on it. Whether the node actually comes back up is not tracked past Proxmox accepting the command. | Hosts page, activity feed, audit log | |
-| `host.remove` | Host Removed | A user deleted a host record: its stored API token, SSH key, and everything Proxploy cached about it (apps, VMs). The node itself and its guests are never touched. | Hosts page, activity feed, audit log | |
-| `host.shutdown` | Host Shut Down | A user told Proxmox to power off the node itself. | Hosts page, activity feed, audit log | |
-| `host.ssh_verify` | Host SSH Key Verified | A user confirmed/re-validated the SSH host key fingerprint Proxploy trusts for a host. | Hosts page, audit log | |
-| `host.sync` | Host Synced | A user manually forced Proxploy to re-poll a host's inventory right away, instead of waiting for the next 30 second cycle. | Hosts page, activity feed, audit log | |
-| `host.test` | Host Connection Tested | A user checked whether Proxploy can currently reach a host with its stored credentials. | Hosts page, audit log | |
-| `job.cancel` | Job Canceled | A user asked for a still-queued or still-running job to stop. | Activity feed, bell popover, audit log | |
-| `migrate.app` | App Migrated | An app's container was moved to a different host, using Proxmox's native cluster migrate, a shared-storage backup/restore, or (when neither is available) a vzdump plus SFTP transfer plus restore. | Activity feed, audit log | |
-| `network.apply` | Network Changes Applied | A staged network config change on a node (`/etc/network/interfaces.new`) was pushed live. | Activity feed, audit log | |
-| `network.guest_config` | Guest Network Configured | A guest's (app or VM) network interface was edited. Proxmox files this as a pending change; the running guest keeps its old NIC until it reboots. | Activity feed, audit log | |
-| `network.host_config` | Host Network Configured | An interface on a Proxmox node's staged network config was created, edited, or deleted. One label covers all three operations; only the audit row's params say which. | Activity feed, audit log | |
-| `network.revert` | Network Changes Reverted | A node's staged, not-yet-applied network config was discarded. | Activity feed, audit log | |
-| `schedule.create` | Schedule Created | A user created a new recurring job schedule (cron expression plus job kind). | Settings, audit log | |
-| `schedule.delete` | Schedule Deleted | A user deleted a schedule. | Settings, audit log | |
-| `schedule.fire` | Schedule Fired | The scheduler ran a schedule's job on its own, on the schedule's cron trigger, no user involved. | Activity feed, audit log | |
-| `schedule.run` | Schedule Run Manually | A user clicked "run now" to fire a schedule's job immediately, outside its normal cron trigger. | Settings, activity feed, audit log | |
-| `schedule.update` | Schedule Updated | A user changed a schedule's cron expression, timezone, job kind, or its enabled/disabled flag. This is also how a user turns a schedule off; see `schedule.disable` in Errors for the unrelated, system-only meaning of "disabled". | Settings, audit log | |
-| `settings.update` | Settings Updated | A user changed one of Proxploy's global settings (for example the node shell toggle). | Settings, audit log | |
-| `storage.create` | Storage Added | A user attached a new storage pool/target to a host inside Proxploy. | Storage page, audit log | |
-| `storage.delete_volume` | Storage Volume Deleted | A single file (typically an ISO) was deleted from a storage's content list. | Storage page, activity feed, audit log | |
-| `storage.remove` | Storage Removed | A user detached a storage pool from Proxploy. The pool itself is untouched on Proxmox. | Storage page, audit log | |
-| `storage.update` | Storage Updated | A user changed the settings of an already-attached storage pool. | Storage page, audit log | |
-| `storage.upload` | Uploaded To Storage | A file (typically an ISO) was uploaded through Proxploy's own server and forwarded on to a Proxmox storage; the byte transfer happens twice (browser to Proxploy, Proxploy to Proxmox). | Storage page, activity feed, audit log | |
-| `team.create` | Team Created | A user created a new team for grouping hosts and users. | Settings, audit log | |
-| `team.delete` | Team Deleted | A user deleted a team. | Settings, audit log | |
-| `team.update` | Team Updated | A user renamed a team or changed its membership. | Settings, audit log | |
-| `user.create` | User Created | An admin created a new Proxploy user account. | Settings, audit log | |
-| `user.delete` | User Deleted | An admin hard-deleted a user account: the row, its sessions, and its team memberships are all removed and the permission engine is rebuilt. A "deactivate" action is a different thing (see `user.update`), not this one. | Settings, audit log | |
-| `user.password_reset` | User Password Reset | An admin set a new password for another user's account. | Settings, audit log | |
-| `user.update` | User Updated | A user's role, email, active flag, or other profile field was changed by an admin. This is also how a user is deactivated. | Settings, audit log | |
-| `vm.clone` | VM Cloned | A VM was duplicated, full or linked depending on the user's choice, onto a new VM id. | Activity feed, audit log | |
-| `vm.create` | VM Created | A new VM was created from a spec: cores, memory, disk, NIC, optional boot ISO. | Activity feed, audit log | |
-| `vm.delete` | VM Deleted | A VM and its disks were destroyed on Proxmox. | Activity feed, audit log | |
-| `vm.pause` | VM Paused | The VM was suspended (Proxmox's "suspend"). | Activity feed, bell popover, audit log | |
-| `vm.restart` | VM Restarted | The VM was rebooted. | Activity feed, bell popover, audit log | |
-| `vm.resume` | VM Resumed | A previously suspended VM was resumed. | Activity feed, bell popover, audit log | |
-| `vm.shutdown` | VM Shut Down | The VM was gracefully powered off. | Activity feed, bell popover, audit log | |
-| `vm.snapshot_create` | VM Snapshot Created | A point-in-time snapshot of the VM was taken, optionally including its RAM state. | Activity feed, audit log | |
-| `vm.snapshot_delete` | VM Snapshot Deleted | One snapshot was removed; the guest itself is untouched. | Activity feed, audit log | |
-| `vm.snapshot_rollback` | VM Snapshot Rolled Back | The VM's disk (and RAM, if the snapshot carried it) was reverted to a saved snapshot, discarding everything since. | Activity feed, audit log | |
-| `vm.start` | VM Started | The VM was started. | Activity feed, bell popover, audit log | |
-| `vm.stop` | VM Stopped | The VM was hard killed (not graceful). | Activity feed, bell popover, audit log | |
-| job status `queued` | queued (raw text, not label-mapped) | The job has a row in the database but has not started running yet. | Activity feed, bell popover, Jobs page | |
-| job status `running` | running (raw text) | The job's handler is currently executing. | Activity feed, bell popover, Jobs page | |
-| job status `succeeded` | succeeded (raw text) | The job's handler finished and returned a result without raising. | Activity feed, bell popover, Jobs page | |
-| audit result `ok` | ok (raw text, default value) | The default value of every audit row's `result` field; the action described by the row's `action` completed without being blocked or erroring. | Audit log | |
-| alert state `resolved` | Resolved: \<condition\> | A previously firing alert's condition stopped being true on the most recent check (or its rule/target was deleted or disabled, which auto-resolves it). | Alerts page, activity feed, notification channels | |
+| `alert.ack` | Alert Acknowledged | A user marked a firing alert as seen. The alert keeps firing until the condition actually clears; acknowledging only clears the "new" flag, it does not silence or pin it. | Alerts page, activity feed | Alert Acknowledged |
+| `apikey.create` | API Key Created | A user generated a new personal API key for programmatic access. | Settings, audit log | API Key Created |
+| `apikey.revoke` | API Key Revoked | A user permanently disabled one of their own API keys; it can no longer authenticate. | Settings, audit log | API Key Revoked |
+| `app.forget` | App Forgotten | A user removed Proxploy's record of an app while leaving the underlying container running untouched on Proxmox (the "keep the container" option on uninstall). | Apps page, activity feed, audit log | App Forgotten |
+| `app.install` | App Installed | A community-scripts container was installed onto a host over SSH, pinned to a specific catalog commit. | Activity feed, bell popover, Apps page, audit log | App Installed |
+| `app.reconfigure` | App Reconfigured | A user changed an app's stored metadata (name, web port, protocol, or path); if the name changed it also pushes a hostname update to the container on Proxmox. | Activity feed, audit log | App Reconfigured |
+| `app.restart` | App Restarted | Proxmox rebooted the container (Proxploy's "restart" is Proxmox's "reboot"). | Activity feed, bell popover, audit log | App Restarted |
+| `app.shutdown` | App Shut Down | The container was gracefully powered off (Proxmox's ACPI/init shutdown, not a hard kill). | Activity feed, bell popover, audit log | App Shut Down |
+| `app.start` | App Started | The container was started. | Activity feed, bell popover, audit log | App Started |
+| `app.stop` | App Stopped | The container was hard killed (not graceful). | Activity feed, bell popover, audit log | App Stopped |
+| `app.uninstall` | App Uninstalled | The container was stopped, then destroyed on Proxmox, then Proxploy's record of it was deleted. A stop failure is logged but does not stop the destroy. | Activity feed, bell popover, audit log | App Uninstalled |
+| `app.update` | App Updated | The app's install script was re-run over SSH, pinned to the current upstream commit, to bring the container's software forward. | Activity feed, bell popover, Apps page, audit log | App Updated |
+| `apps.adopt` | Apps Adopted | A user imported one or more containers that Proxmox already knew about but Proxploy did not, as a single batch, turning them into tracked apps. | Apps page, audit log | Apps Imported (CHANGE: "adopt" is internal vocabulary, this row's own description says imported) |
+| `apps.script_edit` | App Script Edited | A user manually edited the install/update script Proxploy has stored for an app. | Audit log, activity feed | App Script Edited |
+| `apps.script_revert` | App Script Reverted | A user restored a previously saved version of an app's script. | Audit log, activity feed | App Script Reverted |
+| `auth.login` | Signed In | A user successfully logged in. | Audit log, activity feed | Signed In (also needs an ATTEMPT override: a failed login is audited with `result: error` and currently titles itself "Auth Login Failed") |
+| `auth.logout` | Signed Out | A user's session ended. | Audit log, activity feed | Signed Out |
+| `backup.delete` | Backup Deleted | A single backup archive was deleted from Proxmox storage. | Backups page, activity feed, audit log | Backup Deleted |
+| `backup.prune` | Backups Pruned | A retention rule was applied to a storage's backups; any archive the rule marks for removal is deleted. Nothing is deleted if the rule keeps everything. | Backups page, activity feed, audit log | Backup Retention Applied (CHANGE: "pruned" is jargon, and a run that keeps everything deletes nothing; also needs an ATTEMPT override) |
+| `backup.restore` | Backup Restored | An archive was restored, either back over the original guest (in place, guest stopped, overwritten) or as a brand new guest with a fresh id. | Backups page, activity feed, audit log | Backup Restored |
+| `backup.run` | Backup Taken | A vzdump backup ran against one or more chosen guests, or every guest on the node if none were chosen. | Backups page, activity feed, audit log | Backup Taken |
+| `backup.sync` | Backups Synced | Proxploy re-read the list of backup archives straight from Proxmox storage into its local cache; the cache is a droppable mirror, never the source of truth. | Backups page, activity feed, audit log | Backups Synced |
+| `catalog.classify_backlog` | Catalog Backlog Classified | A low-priority background pass fetched and evaluated whichever catalog entries a refresh discovered but nobody has opened or installed yet, to work out which ones are installable. It is bounded and may not finish the whole backlog in one run. | Activity feed, audit log (self-queued, no direct button) | Catalog Entries Checked (CHANGE: "backlog classified" is internal vocabulary; also needs an ATTEMPT override) |
+| `catalog.refresh` | Catalog Refreshed | Proxploy re-read the community-scripts catalog listing from GitHub, updated known entries and icons, recomputed which apps have an update available, and queued the classify backlog job. | App Store page, activity feed, audit log | Catalog Refreshed |
+| `console.open` | Console Opened | A user opened a live terminal or VNC session: an app's container shell, a VM's VNC console, or a Proxmox node's own shell. The target type tells these apart, the label does not. | Activity feed, audit log | Console Opened |
+| `entitlement.refresh` | Entitlements Refreshed | A user manually forced Proxploy to re-fetch its license/plan entitlements from the licensing service, instead of waiting for the normal refresh. | Settings, audit log | Plan Refreshed (CHANGE: "entitlement" is licensing vocabulary, the user has a plan; also needs an ATTEMPT override) |
+| `host.create` | Host Added | A user connected a new Proxmox host to Proxploy. | Hosts page, activity feed, audit log | Host Added |
+| `host.credentials` | Host Credentials Updated | A user rotated the API token and/or SSH key Proxploy stores for reaching a host. | Hosts page, audit log | Host Credentials Updated (needs an ATTEMPT override: the identifier has no verb, so a failure reads "Host Credentials Failed") |
+| `host.reboot` | Host Rebooted | A user told Proxmox to reboot the physical/virtual node itself, not a guest on it. Whether the node actually comes back up is not tracked past Proxmox accepting the command. | Hosts page, activity feed, audit log | Host Rebooted |
+| `host.remove` | Host Removed | A user deleted a host record: its stored API token, SSH key, and everything Proxploy cached about it (apps, VMs). The node itself and its guests are never touched. | Hosts page, activity feed, audit log | Host Removed |
+| `host.shutdown` | Host Shut Down | A user told Proxmox to power off the node itself. | Hosts page, activity feed, audit log | Host Shut Down |
+| `host.ssh_verify` | Host SSH Key Verified | A user confirmed/re-validated the SSH host key fingerprint Proxploy trusts for a host. | Hosts page, audit log | Host SSH Key Verified (needs an ATTEMPT override: derived failure reads "Host SSH Verify Failed") |
+| `host.sync` | Host Synced | A user manually forced Proxploy to re-poll a host's inventory right away, instead of waiting for the next 30 second cycle. | Hosts page, activity feed, audit log | Host Synced |
+| `host.test` | Host Connection Tested | A user checked whether Proxploy can currently reach a host with its stored credentials. | Hosts page, audit log | Host Connection Tested (needs an ATTEMPT override: a failed test is audited with `result: error` and reads "Host Test Failed") |
+| `job.cancel` | Job Canceled | A user asked for a still-queued or still-running job to stop. | Activity feed, bell popover, audit log | Job Canceled |
+| `migrate.app` | App Migrated | An app's container was moved to a different host, using Proxmox's native cluster migrate, a shared-storage backup/restore, or (when neither is available) a vzdump plus SFTP transfer plus restore. | Activity feed, audit log | App Migrated (needs an ATTEMPT override: this identifier is verb-FIRST, so derive() reverses it to "Migrate App") |
+| `network.apply` | Network Changes Applied | A staged network config change on a node (`/etc/network/interfaces.new`) was pushed live. | Activity feed, audit log | Network Changes Applied |
+| `network.guest_config` | Guest Network Configured | A guest's (app or VM) network interface was edited. Proxmox files this as a pending change; the running guest keeps its old NIC until it reboots. | Activity feed, audit log | Guest Network Configured |
+| `network.host_config` | Host Network Configured | An interface on a Proxmox node's staged network config was created, edited, or deleted. One label covers all three operations; only the audit row's params say which. | Activity feed, audit log | Host Network Configured |
+| `network.revert` | Network Changes Reverted | A node's staged, not-yet-applied network config was discarded. | Activity feed, audit log | Network Changes Reverted |
+| `schedule.create` | Schedule Created | A user created a new recurring job schedule (cron expression plus job kind). | Settings, audit log | Schedule Created |
+| `schedule.delete` | Schedule Deleted | A user deleted a schedule. | Settings, audit log | Schedule Deleted |
+| `schedule.fire` | Schedule Fired | The scheduler ran a schedule's job on its own, on the schedule's cron trigger, no user involved. | Activity feed, audit log | Schedule Ran (CHANGE: "fired" is cron vocabulary) |
+| `schedule.run` | Schedule Run Manually | A user clicked "run now" to fire a schedule's job immediately, outside its normal cron trigger. | Settings, activity feed, audit log | Schedule Ran Manually (CHANGE: past tense, and pairs with the row above) |
+| `schedule.update` | Schedule Updated | A user changed a schedule's cron expression, timezone, job kind, or its enabled/disabled flag. This is also how a user turns a schedule off; see `schedule.disable` in Errors for the unrelated, system-only meaning of "disabled". | Settings, audit log | Schedule Updated |
+| `settings.update` | Settings Updated | A user changed one of Proxploy's global settings (for example the node shell toggle). | Settings, audit log | Settings Updated |
+| `storage.create` | Storage Added | A user attached a new storage pool/target to a host inside Proxploy. | Storage page, audit log | Storage Added |
+| `storage.delete_volume` | Storage Volume Deleted | A single file (typically an ISO) was deleted from a storage's content list. | Storage page, activity feed, audit log | Storage Volume Deleted (needs an ATTEMPT override: derived failure reads "Storage Delete Volume Failed") |
+| `storage.remove` | Storage Removed | A user detached a storage pool from Proxploy. The pool itself is untouched on Proxmox. | Storage page, audit log | Storage Removed |
+| `storage.update` | Storage Updated | A user changed the settings of an already-attached storage pool. | Storage page, audit log | Storage Updated |
+| `storage.upload` | Uploaded To Storage | A file (typically an ISO) was uploaded through Proxploy's own server and forwarded on to a Proxmox storage; the byte transfer happens twice (browser to Proxploy, Proxploy to Proxmox). | Storage page, activity feed, audit log | File Uploaded To Storage (CHANGE: Subject-Verb like every other label, see finding 6) |
+| `team.create` | Team Created | A user created a new team for grouping hosts and users. | Settings, audit log | Team Created |
+| `team.delete` | Team Deleted | A user deleted a team. | Settings, audit log | Team Deleted |
+| `team.update` | Team Updated | A user renamed a team or changed its membership. | Settings, audit log | Team Updated |
+| `user.create` | User Created | An admin created a new Proxploy user account. | Settings, audit log | User Created |
+| `user.delete` | User Deleted | An admin hard-deleted a user account: the row, its sessions, and its team memberships are all removed and the permission engine is rebuilt. A "deactivate" action is a different thing (see `user.update`), not this one. | Settings, audit log | User Deleted |
+| `user.password_reset` | User Password Reset | An admin set a new password for another user's account. | Settings, audit log | User Password Reset |
+| `user.update` | User Updated | A user's role, email, active flag, or other profile field was changed by an admin. This is also how a user is deactivated. | Settings, audit log | User Updated |
+| `vm.clone` | VM Cloned | A VM was duplicated, full or linked depending on the user's choice, onto a new VM id. | Activity feed, audit log | VM Cloned |
+| `vm.create` | VM Created | A new VM was created from a spec: cores, memory, disk, NIC, optional boot ISO. | Activity feed, audit log | VM Created |
+| `vm.delete` | VM Deleted | A VM and its disks were destroyed on Proxmox. | Activity feed, audit log | VM Deleted |
+| `vm.pause` | VM Paused | The VM was suspended (Proxmox's "suspend"). | Activity feed, bell popover, audit log | VM Paused |
+| `vm.restart` | VM Restarted | The VM was rebooted. | Activity feed, bell popover, audit log | VM Restarted |
+| `vm.resume` | VM Resumed | A previously suspended VM was resumed. | Activity feed, bell popover, audit log | VM Resumed |
+| `vm.shutdown` | VM Shut Down | The VM was gracefully powered off. | Activity feed, bell popover, audit log | VM Shut Down |
+| `vm.snapshot_create` | VM Snapshot Created | A point-in-time snapshot of the VM was taken, optionally including its RAM state. | Activity feed, audit log | VM Snapshot Created |
+| `vm.snapshot_delete` | VM Snapshot Deleted | One snapshot was removed; the guest itself is untouched. | Activity feed, audit log | VM Snapshot Deleted |
+| `vm.snapshot_rollback` | VM Snapshot Rolled Back | The VM's disk (and RAM, if the snapshot carried it) was reverted to a saved snapshot, discarding everything since. | Activity feed, audit log | VM Snapshot Rolled Back |
+| `vm.start` | VM Started | The VM was started. | Activity feed, bell popover, audit log | VM Started |
+| `vm.stop` | VM Stopped | The VM was hard killed (not graceful). | Activity feed, bell popover, audit log | VM Stopped |
+| job status `queued` | queued (raw text, not label-mapped) | The job has a row in the database but has not started running yet. | Activity feed, bell popover, Jobs page | queued |
+| job status `running` | running (raw text) | The job's handler is currently executing. | Activity feed, bell popover, Jobs page | running |
+| job status `succeeded` | succeeded (raw text) | The job's handler finished and returned a result without raising. | Activity feed, bell popover, Jobs page | succeeded |
+| audit result `ok` | ok (raw text, default value) | The default value of every audit row's `result` field; the action described by the row's `action` completed without being blocked or erroring. | Audit log | ok |
+| alert state `resolved` | Resolved: \<condition\> | A previously firing alert's condition stopped being true on the most recent check (or its rule/target was deleted or disabled, which auto-resolves it). | Alerts page, activity feed, notification channels | Resolved: \<condition\> |
 
 ---
 
@@ -127,14 +127,14 @@ failures.
 
 | Identifier | Current label | What it actually means | Where it appears | Suggested label |
 |---|---|---|---|---|
-| `app.reaped` | App Removed | System-detected, not user-driven: the poller noticed a container it was tracking has been missing from Proxmox continuously for a while, and deleted Proxploy's local app record on its own initiative. Nobody chose to remove anything through Proxploy; the container may have been deleted outside it, or lost in some other way. | Activity feed, audit log (`actor_type: system`) | |
-| job status `canceled` | canceled (raw text) | A user asked for the job to stop before it finished. The bell popover explains it as "Canceled before it finished on \<target\>." | Activity feed, bell popover, Jobs page | |
-| job status `interrupted` | interrupted (raw text) | Proxploy itself restarted (deploy, crash) while this job was still queued or running. The job cannot be resumed and its real outcome is unknown; the bell popover explains it as "Interrupted on \<target\>; it may not have completed." | Activity feed, bell popover, Jobs page | |
-| `job.interrupted` (notifier event, not a per-job status) | "Proxploy: N job(s) interrupted by restart" | A one-time, cluster-wide notification sent right after Proxploy restarts, summarizing every job that got marked `interrupted` by that restart. Distinct from the per-row status above; this is the aggregate announcement. | Notification channels (email, webhook, etc.), not the activity feed | |
-| alert firing, metric `cpu_pct`/`mem_pct`/`disk_pct` | e.g. "host-02 CPU > 85% for 5m (now 91%)" | A host, app, or VM's CPU/memory/disk percentage has stayed above (or below) the rule's threshold continuously for at least the rule's configured duration. A single dip below threshold resets the clock. | Alerts page, activity feed, SSE stream, notification channels | |
-| alert firing, metric `host_offline` | e.g. "host-02 is offline for 5m" | A host's status has been `unreachable` for at least the rule's configured duration (a brief reconnect blip does not count). | Alerts page, activity feed, SSE stream, notification channels | |
-| alert firing, metric `backup_failed` | e.g. "host-02: last backup run failed" | The most recently finished `backup.run` job for this host ended with status `failed`. An old failure that has since been fixed by a later successful run no longer counts. | Alerts page, activity feed, SSE stream, notification channels | |
-| alert severity | info / warning / critical | Not fixed per metric: the severity shown on an alert is whatever the admin picked when creating that rule (defaults to "warning"). Two rules on the same metric can carry different severities. | Alerts page, rule editor | |
+| `app.reaped` | App Removed | System-detected, not user-driven: the poller noticed a container it was tracking has been missing from Proxmox continuously for a while, and deleted Proxploy's local app record on its own initiative. Nobody chose to remove anything through Proxploy; the container may have been deleted outside it, or lost in some other way. | Activity feed, audit log (`actor_type: system`) | App Removed |
+| job status `canceled` | canceled (raw text) | A user asked for the job to stop before it finished. The bell popover explains it as "Canceled before it finished on \<target\>." | Activity feed, bell popover, Jobs page | canceled |
+| job status `interrupted` | interrupted (raw text) | Proxploy itself restarted (deploy, crash) while this job was still queued or running. The job cannot be resumed and its real outcome is unknown; the bell popover explains it as "Interrupted on \<target\>; it may not have completed." | Activity feed, bell popover, Jobs page | interrupted |
+| `job.interrupted` (notifier event, not a per-job status) | "Proxploy: N job(s) interrupted by restart" | A one-time, cluster-wide notification sent right after Proxploy restarts, summarizing every job that got marked `interrupted` by that restart. Distinct from the per-row status above; this is the aggregate announcement. | Notification channels (email, webhook, etc.), not the activity feed | "Proxploy restarted: 3 jobs interrupted" (CHANGE: leads with the cause and drops "job(s)"; singular case reads "1 job interrupted") |
+| alert firing, metric `cpu_pct`/`mem_pct`/`disk_pct` | e.g. "host-02 CPU > 85% for 5m (now 91%)" | A host, app, or VM's CPU/memory/disk percentage has stayed above (or below) the rule's threshold continuously for at least the rule's configured duration. A single dip below threshold resets the clock. | Alerts page, activity feed, SSE stream, notification channels | no change, e.g. "host-02 CPU > 85% for 5m (now 91%)" |
+| alert firing, metric `host_offline` | e.g. "host-02 is offline for 5m" | A host's status has been `unreachable` for at least the rule's configured duration (a brief reconnect blip does not count). | Alerts page, activity feed, SSE stream, notification channels | "host-02 has been offline for 5m" (CHANGE: grammar, "is offline for 5m" reads like a future window) |
+| alert firing, metric `backup_failed` | e.g. "host-02: last backup run failed" | The most recently finished `backup.run` job for this host ended with status `failed`. An old failure that has since been fixed by a later successful run no longer counts. | Alerts page, activity feed, SSE stream, notification channels | "host-02: last backup failed" (CHANGE: drops "run", which is job vocabulary) |
+| alert severity | info / warning / critical | Not fixed per metric: the severity shown on an alert is whatever the admin picked when creating that rule (defaults to "warning"). Two rules on the same metric can carry different severities. | Alerts page, rule editor | info / warning / critical |
 
 ---
 
@@ -144,19 +144,19 @@ Failures: job failures, unreachable hosts, and refusals.
 
 | Identifier | Current label | What it actually means | Where it appears | Suggested label |
 |---|---|---|---|---|
-| `app.migrate` | App Migrated | Only ever logged when a migrate attempt was refused, either the user's role does not have migrate permission, or the target is the container Proxploy itself runs in and the user did not type the confirmation phrase. A completed migration is logged under the separate identifier `migrate.app` instead, which carries the exact same label text. This identifier never represents a migration that actually happened. | Activity feed, audit log (`result: denied`) | |
-| `schedule.disable` | Schedule Disabled | Always a system action, never a user clicking a toggle: the scheduler automatically turns a schedule off because it could not run it (its job kind has no registered handler anymore, most likely after a downgrade, or computing its next run time failed). Logged with `result: error`. A user turning a schedule off intentionally is logged as `schedule.update` instead, not this. | Activity feed, audit log (`actor_type: system`, `result: error`) | |
-| audit result `denied` (general pattern, many identifiers) | reuses whichever label the attempted action normally carries, e.g. "Host Removed", "VM Deleted", "Backup Restored", "Job Canceled", "VM Snapshot Rolled Back", "App Uninstalled" | A user attempted a destructive action but was blocked, either their role lacks permission, or a required typed confirmation (type the host/app/VM name back) did not match, and nothing happened. The identifier and label are identical to a successful completion; only the small grey status word underneath ("denied") and a red tint mark the difference. | Activity feed (red tint), audit log | |
-| job status `failed` | failed (raw text) | The job's handler raised partway through, either an expected `JobFailed` with a specific reason, or an unexpected exception. The job's own `error` field carries the real reason and is what the bell popover shows. | Activity feed, bell popover, Jobs page | |
-| host status `unreachable` | unreachable | Proxploy's last poll of this host's Proxmox API failed: network error, expired or revoked token, or Proxmox itself is down. Drives the `host_offline` alert metric. | Hosts page, cluster overview, alerts | |
-| HTTP 401, "authentication required" / "invalid credentials" / "invalid or expired code" | raw text, shown verbatim | The session cookie or API key is missing, expired, or wrong (including a bad two-factor code); the request never got past login. | Toast, redirect to login | |
-| HTTP 403, entitlement gate | `{"error": "entitlement_required", "feature": "<key>"}` plus a caller-written toast, e.g. "Not included in your plan.", "Node shells are part of the Pro plan." | The account's current license/plan does not include this feature. Each call site writes its own toast text rather than a shared one, so wording is inconsistent across features. | Toast | |
-| HTTP 403, role gate | "forbidden" / "key scope does not allow this" | The signed-in user's role, or the scopes on the API key used, does not permit this action. | Toast (often shown as the generic `detailOf(e)` text) | |
-| HTTP 409, confirm required | e.g. "Type the name to confirm." (with `confirm_phrase`) | A destructive action (remove host, uninstall app, roll back a snapshot, migrate or restore over Proxploy's own container) needs the target's exact name typed back before Proxploy will proceed; nothing has happened yet. | Inline confirmation dialog | |
-| HTTP 409, self-target guard | e.g. "\<name\> is the container Proxploy itself runs in. Migrating it can strand its own recovery path." | A destructive action targets the host, app, or VM that Proxploy itself is currently running on/in, and for some operations (in-place restore over itself) is refused outright with no way to confirm past it. | Inline dialog / toast | |
-| HTTP 502, Proxmox call failed | e.g. "cannot resolve \<host\>", or Proxmox's own error text passed through verbatim | Proxploy could not complete a call to Proxmox's API: the host is unreachable, the stored token lacks the needed privilege, or Proxmox itself returned an error. | Toast, and the same text becomes a `JobFailed` message when it happens inside a job | |
-| `JobFailed` messages (representative sample, free text, not identifiers) | e.g. "host 12 not found", "no active storage on pve1 accepts rootdir content; choose a target storage for this restore", "\<volid\> carries no guest id to restore over" | A job handler hit a specific, expected problem (a row it needed is gone, no storage pool can hold the guest, bad input) and stopped cleanly with a named reason rather than crashing. | Jobs page, bell popover, job log stream | |
-| `notify.error` toasts (representative sample, free text, not identifiers) | e.g. "Could not save that notification as cleared.", "Proxploy cannot power this node yet.", "Could not cancel that job." | Hardcoded UI copy shown when a mutation's API call fails. Not derived from a raw identifier, so it is not subject to the title-casing problem this document is mostly about, listed here for completeness since it is error text a user reads. | Toast | |
+| `app.migrate` | App Migrated | Only ever logged when a migrate attempt was refused, either the user's role does not have migrate permission, or the target is the container Proxploy itself runs in and the user did not type the confirmation phrase. A completed migration is logged under the separate identifier `migrate.app` instead, which carries the exact same label text. This identifier never represents a migration that actually happened. | Activity feed, audit log (`result: denied`) | App Migration Started (CHANGE: the `result: ok` row is written when the migrate job is ENQUEUED, `api/apps.py:602`, so "App Migrated" asserts a finish that has not happened; the completed migration is the separate `migrate.app` row. Note this row's "What it actually means" text still carries the claim withdrawn in finding 2) |
+| `schedule.disable` | Schedule Disabled | Always a system action, never a user clicking a toggle: the scheduler automatically turns a schedule off because it could not run it (its job kind has no registered handler anymore, most likely after a downgrade, or computing its next run time failed). Logged with `result: error`. A user turning a schedule off intentionally is logged as `schedule.update` instead, not this. | Activity feed, audit log (`actor_type: system`, `result: error`) | Schedule Disabled Automatically (already the label in the code; this row is stale twice over, `jobs/scheduler.py::_disable` now writes the default `result: ok`, not `error`, precisely so the row stops reading "Schedule Disable Failed") |
+| audit result `denied` (general pattern, many identifiers) | reuses whichever label the attempted action normally carries, e.g. "Host Removed", "VM Deleted", "Backup Restored", "Job Canceled", "VM Snapshot Rolled Back", "App Uninstalled" | A user attempted a destructive action but was blocked, either their role lacks permission, or a required typed confirmation (type the host/app/VM name back) did not match, and nothing happened. The identifier and label are identical to a successful completion; only the small grey status word underneath ("denied") and a red tint mark the difference. | Activity feed (red tint), audit log | \<Attempt\> Denied, e.g. "VM Delete Denied", "Host Remove Denied" (already shipped: OUTCOME plus derive(); this row's Current label describes the old behaviour) |
+| job status `failed` | failed (raw text) | The job's handler raised partway through, either an expected `JobFailed` with a specific reason, or an unexpected exception. The job's own `error` field carries the real reason and is what the bell popover shows. | Activity feed, bell popover, Jobs page | failed |
+| host status `unreachable` | unreachable | Proxploy's last poll of this host's Proxmox API failed: network error, expired or revoked token, or Proxmox itself is down. Drives the `host_offline` alert metric. | Hosts page, cluster overview, alerts | unreachable |
+| HTTP 401, "authentication required" / "invalid credentials" / "invalid or expired code" | raw text, shown verbatim | The session cookie or API key is missing, expired, or wrong (including a bad two-factor code); the request never got past login. | Toast, redirect to login | "Sign in again to continue." when a session expired, keeping "Invalid credentials" and "Invalid or expired code" on the login form (CHANGE: an expired session is not the user mistyping) |
+| HTTP 403, entitlement gate | `{"error": "entitlement_required", "feature": "<key>"}` plus a caller-written toast, e.g. "Not included in your plan.", "Node shells are part of the Pro plan." | The account's current license/plan does not include this feature. Each call site writes its own toast text rather than a shared one, so wording is inconsistent across features. | Toast | "Node shells are not included in your plan." one shared sentence with the feature name filled in (CHANGE: one wording instead of one per call site) |
+| HTTP 403, role gate | "forbidden" / "key scope does not allow this" | The signed-in user's role, or the scopes on the API key used, does not permit this action. | Toast (often shown as the generic `detailOf(e)` text) | "Your role does not allow this." / "This API key does not allow this." (CHANGE: "forbidden" and "scope" are HTTP and internal vocabulary) |
+| HTTP 409, confirm required | e.g. "Type the name to confirm." (with `confirm_phrase`) | A destructive action (remove host, uninstall app, roll back a snapshot, migrate or restore over Proxploy's own container) needs the target's exact name typed back before Proxploy will proceed; nothing has happened yet. | Inline confirmation dialog | "Type the name to confirm." |
+| HTTP 409, self-target guard | e.g. "\<name\> is the container Proxploy itself runs in. Migrating it can strand its own recovery path." | A destructive action targets the host, app, or VM that Proxploy itself is currently running on/in, and for some operations (in-place restore over itself) is refused outright with no way to confirm past it. | Inline dialog / toast | no change, the sentence already says what and why |
+| HTTP 502, Proxmox call failed | e.g. "cannot resolve \<host\>", or Proxmox's own error text passed through verbatim | Proxploy could not complete a call to Proxmox's API: the host is unreachable, the stored token lacks the needed privilege, or Proxmox itself returned an error. | Toast, and the same text becomes a `JobFailed` message when it happens inside a job | "Proxmox could not do this: \<error text\>" (CHANGE: says whose side failed, since the passed-through text alone reads like a Proxploy bug) |
+| `JobFailed` messages (representative sample, free text, not identifiers) | e.g. "host 12 not found", "no active storage on pve1 accepts rootdir content; choose a target storage for this restore", "\<volid\> carries no guest id to restore over" | A job handler hit a specific, expected problem (a row it needed is gone, no storage pool can hold the guest, bad input) and stopped cleanly with a named reason rather than crashing. | Jobs page, bell popover, job log stream | no change, each one already names its own reason |
+| `notify.error` toasts (representative sample, free text, not identifiers) | e.g. "Could not save that notification as cleared.", "Proxploy cannot power this node yet.", "Could not cancel that job." | Hardcoded UI copy shown when a mutation's API call fails. Not derived from a raw identifier, so it is not subject to the title-casing problem this document is mostly about, listed here for completeness since it is error text a user reads. | Toast | no change |
 
 ---
 
@@ -229,3 +229,45 @@ Failures: job failures, unreachable hosts, and refusals.
    `result: error` when Proxploy fails to even *read* a guest's current NIC
    list, which happens before any edit is attempted, not only when a write
    fails partway through.
+
+---
+
+## Identifiers that need an ATTEMPT override as well as a label
+
+Two edits each, not one, and the second is easy to miss. `ACTION_LABEL` only
+titles a row that SUCCEEDED. A denied, failed, canceled or interrupted row is
+titled by `derive()` plus a verdict word, so the identifier itself has to read
+as an attempt. `metrics.maintain` is the precedent: renaming it to "Usage
+Cleanup" in `ACTION_LABEL` left failures reading "Metrics Maintain Failed"
+until `ATTEMPT` got the same string.
+
+`ATTEMPT` is meant to stay an exceptions list, so these are ordered worst
+first. Suggested override string in the second column.
+
+| Identifier | Suggested ATTEMPT string | Why the derived phrase is wrong |
+|---|---|---|
+| `migrate.app` | App Migration | Verb-first identifier, so derive() reverses it: "Migrate App Failed". |
+| `host.credentials` | Host Credentials Update | No verb in the identifier: "Host Credentials Failed" says nothing happened to the credentials. |
+| `auth.login` | Sign In | Real, reachable case: a bad password is audited `result: error`, so the most common failure in the log reads "Auth Login Failed". |
+| `auth.logout` | Sign Out | Same jargon prefix, for consistency with the row above. |
+| `storage.delete_volume` | Storage Volume Delete | Word order: "Storage Delete Volume Failed". |
+| `catalog.classify_backlog` | Catalog Entry Check | Jargon plus word order: "Catalog Classify Backlog Failed". |
+| `alert.ack` | Alert Acknowledge | "Ack" is jargon: "Alert Ack Denied". |
+| `host.ssh_verify` | Host SSH Key Check | "Host SSH Verify Failed" reads as a broken sentence, and drops the word "key". |
+| `host.test` | Host Connection Test | Reachable: a failed test writes `result: error`, and "Host Test Failed" is ambiguous about whether the test or the host failed. |
+| `backup.prune` | Backup Retention | Only if the rename above is accepted, otherwise the jargon comes straight back on failure. |
+| `entitlement.refresh` | Plan Refresh | Same, only if the rename above is accepted. |
+| `apps.adopt` | App Import | Same, and the derived plural ("Apps Adopt Failed") is ungrammatical either way. |
+
+Lower priority, listed so nobody has to rediscover them: `network.apply` and
+`network.revert` derive to "Network Apply Failed" and "Network Revert Failed",
+`network.guest_config` and `network.host_config` derive to "... Config Failed",
+and `apps.script_edit` / `apps.script_revert` carry the identifier's plural
+"Apps" into a phrase about one app. All are readable, none are wrong enough to
+be worth growing the exceptions list over.
+
+Two identifiers exist in the code but have no row in the tables above, noted
+here rather than inserted so the inventory keeps its numbering:
+`auth.login.totp_pending` (written by `api/auth.py:109`, unmapped, renders as
+"Auth Login Totp Pending") and `network.guest_config_read` (mapped in
+`ACTION_LABEL` as "Guest Network Read", which is the fix for finding 7).
