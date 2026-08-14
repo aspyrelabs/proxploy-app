@@ -126,7 +126,7 @@ describe('ActivityFeed', () => {
   it('does not title a refused action or a failed job as though it went through', async () => {
     activityResult = 'refused'
     wrap(<ActivityFeed />)
-    expect(await screen.findByText('App Migrate Denied')).toBeInTheDocument()
+    expect(await screen.findByText('App Migration Denied')).toBeInTheDocument()
     expect(screen.getByText('VM Delete Failed')).toBeInTheDocument()
     expect(screen.queryByText('App Migrated')).not.toBeInTheDocument()
     expect(screen.queryByText('VM Deleted')).not.toBeInTheDocument()

@@ -4,7 +4,7 @@ import { ACTION_LABEL, actionLabel } from '../components/activityDisplay'
 describe('actionLabel', () => {
   it('names a mapped identifier in words', () => {
     expect(actionLabel('app.uninstall')).toBe('App Uninstalled')
-    expect(actionLabel('apps.adopt')).toBe('Apps Adopted')
+    expect(actionLabel('apps.adopt')).toBe('Apps Imported')
   })
 
   // The word "reaped" means nothing outside the codebase. "App Removed" also
@@ -35,7 +35,10 @@ describe('actionLabel', () => {
   // something that never happened.
   it('never titles a denied or failed row with its success label', () => {
     expect(actionLabel('vm.delete', 'denied')).toBe('VM Delete Denied')
-    expect(actionLabel('app.migrate', 'denied')).toBe('App Migrate Denied')
+    // "App Migration Denied", not "App Migrate Denied": app.migrate now has an
+    // ATTEMPT override, which is what makes the same phrase read correctly as
+    // both "... Denied" and "... Requested".
+    expect(actionLabel('app.migrate', 'denied')).toBe('App Migration Denied')
     expect(actionLabel('host.remove', 'error')).toBe('Host Remove Failed')
     expect(actionLabel('app.uninstall', 'failed')).toBe('App Uninstall Failed')
     expect(actionLabel('app.install', 'canceled')).toBe('App Install Canceled')
@@ -109,4 +112,34 @@ it('keeps a renamed label consistent when the job did not succeed', () => {
   expect(actionLabel('metrics.maintain', 'succeeded')).toBe('Usage Cleanup')
   expect(actionLabel('metrics.maintain', 'failed')).toBe('Usage Cleanup Failed')
   expect(actionLabel('metrics.maintain', 'running')).toBe('Usage Cleanup')
+})
+
+// enqueue_and_audit writes its audit row the moment the job is QUEUED, with
+// result ok, because what succeeded is the REQUEST. The activity feed hides
+// these rows (api/cluster.py filters on job_id, since the job row beside them
+// carries the real outcome), so the audit log is the only place the
+// past-tense label claimed a finish that had not happened.
+describe('job-backed audit rows', () => {
+  it('says a job was requested, not that it finished', () => {
+    expect(actionLabel('app.install', 'ok', true)).toBe('App Install Requested')
+    expect(actionLabel('app.migrate', 'ok', true)).toBe('App Migration Requested')
+    // Same ATTEMPT phrase serves both endings, which is why the overrides are
+    // worth having: "App Migration" reads as Requested and as Failed, where
+    // "App Migrated" reads as neither.
+    expect(actionLabel('app.migrate', 'denied')).toBe('App Migration Denied')
+  })
+
+  it('leaves rows with no job alone', () => {
+    // A denied request never enqueued anything, so it carries no job_id and
+    // must keep its verdict rather than becoming "Requested".
+    expect(actionLabel('app.install', 'denied', false)).toBe('App Install Denied')
+    expect(actionLabel('app.install', 'ok', false)).toBe('App Installed')
+    expect(actionLabel('app.install', 'ok')).toBe('App Installed')
+  })
+
+  it('does not let a job-backed row outrank a failure', () => {
+    // If a job-linked row ever carries a failing result, the failure wins:
+    // "Requested" would be the less alarming of the two readings.
+    expect(actionLabel('app.install', 'failed', true)).toBe('App Install Failed')
+  })
 })

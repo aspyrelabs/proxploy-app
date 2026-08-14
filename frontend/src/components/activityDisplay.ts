@@ -62,20 +62,22 @@ export const ACTION_LABEL: Record<string, string> = {
   'app.stop': 'App Stopped',
   'app.uninstall': 'App Uninstalled',
   'app.update': 'App Updated',
-  'apps.adopt': 'Apps Adopted',
+  'apps.adopt': 'Apps Imported',
   'apps.script_edit': 'App Script Edited',
   'apps.script_revert': 'App Script Reverted',
   'auth.login': 'Signed In',
+  // api/auth.py:109, between a correct password and the TOTP code.
+  'auth.login.totp_pending': 'Two-Factor Prompted',
   'auth.logout': 'Signed Out',
   'backup.delete': 'Backup Deleted',
-  'backup.prune': 'Backups Pruned',
+  'backup.prune': 'Backup Retention Applied',
   'backup.restore': 'Backup Restored',
   'backup.run': 'Backup Taken',
   'backup.sync': 'Backups Synced',
-  'catalog.classify_backlog': 'Catalog Backlog Classified',
+  'catalog.classify_backlog': 'Catalog Entries Checked',
   'catalog.refresh': 'Catalog Refreshed',
   'console.open': 'Console Opened',
-  'entitlement.refresh': 'Entitlements Refreshed',
+  'entitlement.refresh': 'Plan Refreshed',
   'host.create': 'Host Added',
   'host.credentials': 'Host Credentials Updated',
   'host.reboot': 'Host Rebooted',
@@ -104,15 +106,15 @@ export const ACTION_LABEL: Record<string, string> = {
   // handler for its job kind). "Schedule Disabled" made the automatic
   // give-up look like somebody's decision, so the label says who did it.
   'schedule.disable': 'Schedule Disabled Automatically',
-  'schedule.fire': 'Schedule Fired',
-  'schedule.run': 'Schedule Run Manually',
+  'schedule.fire': 'Schedule Ran',
+  'schedule.run': 'Schedule Ran Manually',
   'schedule.update': 'Schedule Updated',
   'settings.update': 'Settings Updated',
   'storage.create': 'Storage Added',
   'storage.delete_volume': 'Storage Volume Deleted',
   'storage.remove': 'Storage Removed',
   'storage.update': 'Storage Updated',
-  'storage.upload': 'Uploaded To Storage',
+  'storage.upload': 'File Uploaded To Storage',
   'team.create': 'Team Created',
   'team.delete': 'Team Deleted',
   'team.update': 'Team Updated',
@@ -153,6 +155,25 @@ const WORDS: Record<string, string> = {
 // would otherwise fail as "Metrics Maintain Failed", reintroducing the exact
 // wording the success label was renamed to remove.
 const ATTEMPT: Record<string, string> = {
+  // Verb-first, so derive() reverses it into "Migrate App".
+  'migrate.app': 'App Migration',
+  'app.migrate': 'App Migration',
+  // No verb in the identifier at all, so the derivation has nothing to say.
+  'host.credentials': 'Host Credentials Update',
+  // These two are the reachable ones, not hypothetical: api/auth.py:101 audits
+  // result error on every wrong password, so "Auth Login Failed" is a title
+  // real users see today.
+  'auth.login': 'Sign In',
+  'auth.logout': 'Sign Out',
+  // api/hosts.py:415 audits result error on every failed connection test.
+  'host.test': 'Host Connection Test',
+  'host.ssh_verify': 'Host SSH Key Check',
+  'storage.delete_volume': 'Storage Volume Delete',
+  'catalog.classify_backlog': 'Catalog Entry Check',
+  'alert.ack': 'Alert Acknowledgement',
+  'backup.prune': 'Backup Retention',
+  'entitlement.refresh': 'Plan Refresh',
+  'apps.adopt': 'App Import',
   'metrics.maintain': 'Usage Cleanup',
 }
 
@@ -234,7 +255,8 @@ export function jobKindLabel(kind: string | null | undefined): string {
  * exists: without it this can only state that the action happened.
  */
 export function actionLabel(raw: string | null | undefined,
-                            status?: string | null): string {
+                            status?: string | null,
+                            jobLinked = false): string {
   if (!raw) return 'Unknown'
   // Success is an ALLOWLIST, failure is not. Keying off OUTCOME alone would
   // mean any status this file has not heard of falls through to the past-tense
@@ -250,6 +272,20 @@ export function actionLabel(raw: string | null | undefined,
       ? `${derive(raw)} ${OUTCOME[status]}`
       : derive(raw)
   }
+  // A job-backed audit row is written by enqueue_and_audit the moment the job
+  // is QUEUED, with result ok, because what succeeded is the request. So in
+  // the audit log "App Installed" meant "an install was asked for", and the
+  // install itself might still be running, or have failed minutes later.
+  //
+  // The activity feed never showed this, which is why it went unnoticed: it
+  // filters audit rows that carry a job_id (api/cluster.py) precisely because
+  // the JOB row beside them already reports the real outcome. The audit log
+  // shows both, so only there did the row assert a finish.
+  //
+  // Same ATTEMPT phrases as the failure branch above, and that is the point of
+  // them: "App Migration" reads correctly as both "... Requested" and
+  // "... Failed", where a past-tense label reads as neither.
+  if (jobLinked) return `${derive(raw)} Requested`
   // hasOwn here for the same reason as above, not just on OUTCOME: this is a
   // plain object literal, so `ACTION_LABEL['toString']` answers with a
   // function rather than undefined, and `?? derive(raw)` does not catch it

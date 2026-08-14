@@ -121,7 +121,14 @@ export function AuditPage() {
                             Result column beside it is a second glance, and
                             this column is the one people read. */}
                         <td className="py-2 text-text">
-                          {actionLabel(r.action, r.result)}
+                          {/* job_id matters here and nowhere else: it marks a
+                              row that recorded a REQUEST, written when the job
+                              was queued, so the past-tense label would claim a
+                              finish the job may not have reached. The activity
+                              feed drops these rows entirely, the audit log
+                              keeps them, so this is the only surface that has
+                              to say which it is. */}
+                          {actionLabel(r.action, r.result, r.job_id != null)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>
                         <td className="font-mono text-[12px] text-text-3">
