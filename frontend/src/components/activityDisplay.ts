@@ -39,6 +39,10 @@ export function ago(iso: string): string {
  * of things that already happened. Two entries carry a parenthetical because
  * the bare verb would mislead: those two removals are not the ordinary ones.
  *
+ * Every label here is therefore only usable on a row that SUCCEEDED. A denied
+ * or failed row is titled by actionLabel from the identifier plus the verdict
+ * instead; see OUTCOME below.
+ *
  * Covers every `action=` written by write_audit and every key registered in
  * HANDLERS; anything newer falls through to actionLabel()'s derivation, which
  * is why a missing entry degrades rather than breaks.
@@ -85,11 +89,21 @@ export const ACTION_LABEL: Record<string, string> = {
   'migrate.app': 'App Migrated',
   'network.apply': 'Network Changes Applied',
   'network.guest_config': 'Guest Network Configured',
+  // Distinct from the line above on purpose: this one is only ever written
+  // when READING the guest's current NIC config failed, before anything was
+  // sent to the guest, so it must not read as a configuration attempt.
+  'network.guest_config_read': 'Guest Network Read',
   'network.host_config': 'Host Network Configured',
   'network.revert': 'Network Changes Reverted',
   'schedule.create': 'Schedule Created',
   'schedule.delete': 'Schedule Deleted',
-  'schedule.disable': 'Schedule Disabled',
+  // Not the same event as a person switching a schedule off: THAT is written
+  // by api/schedules.py as `schedule.update`. This identifier is written from
+  // exactly one place, jobs/scheduler.py::_disable, when the scheduler gives
+  // up on a row it cannot run at all (unparseable cron, unknown timezone, no
+  // handler for its job kind). "Schedule Disabled" made the automatic
+  // give-up look like somebody's decision, so the label says who did it.
+  'schedule.disable': 'Schedule Disabled Automatically',
   'schedule.fire': 'Schedule Fired',
   'schedule.run': 'Schedule Run Manually',
   'schedule.update': 'Schedule Updated',
@@ -120,19 +134,97 @@ export const ACTION_LABEL: Record<string, string> = {
   'vm.stop': 'VM Stopped',
 }
 
-/** Words the naive title-caser below would otherwise mangle into 'Vm', 'Api'. */
-const ACRONYMS = new Set(['vm', 'api', 'apikey', 'ssh', 'ip', 'tls', 'vnc', 'cpu', 'lxc', 'ct'])
+/** Words the naive title-caser below would otherwise mangle into 'Vm', 'Api'.
+ *  A map rather than a set of acronyms because 'apikey' is one identifier word
+ *  but two English ones, and derived phrases are now shown for every failed or
+ *  denied action (see OUTCOME), not just for identifiers nobody mapped. */
+const WORDS: Record<string, string> = {
+  vm: 'VM', api: 'API', apikey: 'API Key', ssh: 'SSH', ip: 'IP',
+  tls: 'TLS', vnc: 'VNC', cpu: 'CPU', lxc: 'LXC', ct: 'CT',
+}
+
+/** 'vm.snapshot_delete' -> 'VM Snapshot Delete'. Identifiers in this codebase
+ *  are verb-final, so the derivation reads as the ATTEMPT ("VM Delete"), not
+ *  as the accomplished fact ("VM Deleted") the map above states. */
+function derive(raw: string): string {
+  return raw.split(/[._\-:]/).filter(Boolean)
+    // hasOwn, not `WORDS[w] ?? ...`: WORDS is a plain object literal, so a
+    // word like "constructor" or "toString" answers with the function on
+    // Object.prototype, and `??` does not fall through because a function is
+    // neither null nor undefined. The title then renders as JS source. Same
+    // guard as OUTCOME and ACTION_LABEL below, and this one is the reachable
+    // case, since it applies per WORD rather than per identifier.
+    .map((w) => {
+      const key = w.toLowerCase()
+      return Object.hasOwn(WORDS, key) ? WORDS[key] : w[0].toUpperCase() + w.slice(1)
+    })
+    .join(' ')
+}
+
+/**
+ * Verdict word for an audit `result` or job `status` that did NOT succeed.
+ *
+ * Every label in ACTION_LABEL is an ASSERTION: "VM Deleted" says the VM is
+ * gone, "Host Removed" says the host is out. write_audit records `ok`,
+ * `denied` or `error`, and jobs finish `failed`/`canceled`/`interrupted`, so
+ * titling a refused migration "App Migrated" makes the audit log claim a
+ * destructive thing that never happened: the worst failure available to a
+ * compliance surface. A non-success row is therefore titled from the attempt
+ * plus the verdict, "App Migrate Denied" / "VM Delete Failed".
+ *
+ * Keyed by result, never by action: one rule covers every action and job kind
+ * that exists or gets added later, instead of a second map to keep in sync.
+ * Statuses absent from here (`ok`, `succeeded`, `resolved`) keep the plain
+ * past-tense label, and so do the in-flight `queued`/`running`, whose status
+ * every surface that shows them prints right next to the title.
+ */
+// The only statuses that entitle a row to its past-tense label. Everything
+// else, known failure or not, is treated as "did not necessarily succeed".
+// Note what is NOT here: `queued` and `running`. A job still in flight has
+// not started the app yet, so titling its row "App Started" asserts an
+// outcome that has not happened, which is the same defect as "VM Deleted" on
+// a denied row. The argument that the status prints beside the title applies
+// equally to both, so it cannot justify one without the other. In-flight rows
+// therefore read "App Start" next to their `running` status.
+const SUCCESS = new Set(['ok', 'succeeded', 'resolved'])
+
+const OUTCOME: Record<string, string> = {
+  denied: 'Denied',
+  error: 'Failed',
+  failed: 'Failed',
+  canceled: 'Canceled',
+  interrupted: 'Interrupted',
+}
 
 /**
  * Friendly name for a raw identifier, deriving one when the map has no entry.
  * New actions and job kinds get added backend-side all the time and must never
  * render as a blank title, so an unmapped `foo.bar_baz` still reads as
  * 'Foo Bar Baz' rather than as nothing.
+ *
+ * `status` is the row's audit result or job status. Pass it wherever one
+ * exists: without it this can only state that the action happened.
  */
-export function actionLabel(raw: string | null | undefined): string {
+export function actionLabel(raw: string | null | undefined,
+                            status?: string | null): string {
   if (!raw) return 'Unknown'
-  return ACTION_LABEL[raw] ?? raw.split(/[._\-:]/).filter(Boolean)
-    .map((w) => (ACRONYMS.has(w.toLowerCase())
-      ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)))
-    .join(' ')
+  // Success is an ALLOWLIST, failure is not. Keying off OUTCOME alone would
+  // mean any status this file has not heard of falls through to the past-tense
+  // label, so the day the backend adds `timed_out` every timed-out row starts
+  // asserting "VM Deleted" again, which is the whole bug this argument exists
+  // to prevent. Unknown statuses therefore get the neutral derivation: it
+  // names the attempt and claims nothing about how it ended.
+  //
+  // hasOwn, not `OUTCOME[status]`: a status of 'constructor' or 'toString'
+  // would otherwise hit Object.prototype and render as source code.
+  if (status != null && !SUCCESS.has(status)) {
+    return Object.hasOwn(OUTCOME, status)
+      ? `${derive(raw)} ${OUTCOME[status]}`
+      : derive(raw)
+  }
+  // hasOwn here for the same reason as above, not just on OUTCOME: this is a
+  // plain object literal, so `ACTION_LABEL['toString']` answers with a
+  // function rather than undefined, and `?? derive(raw)` does not catch it
+  // because a function is neither null nor undefined.
+  return Object.hasOwn(ACTION_LABEL, raw) ? ACTION_LABEL[raw] : derive(raw)
 }

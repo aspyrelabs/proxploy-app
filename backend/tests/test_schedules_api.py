@@ -136,6 +136,30 @@ def test_patch_audits_the_new_job_kind(client, csrf_header, bootstrap_admin):
         assert event.params["job_kind"] == "metrics.maintain"
 
 
+def test_a_person_switching_a_schedule_off_is_not_the_schedulers_give_up(
+        client, csrf_header, bootstrap_admin):
+    """Two different events, two different rows.
+
+    `schedule.disable` belongs to jobs/scheduler.py::_disable alone: the
+    scheduler abandoning a row it cannot run. A deliberate human switch-off is
+    an ordinary edit and stays `schedule.update`, by a user with an id, so
+    nobody reading the log has to guess which of the two happened.
+    """
+    h = _admin(client, csrf_header, bootstrap_admin)
+    sid = _create(client, h).json()["id"]
+    assert client.patch(f"/api/v1/schedules/{sid}", json={"enabled": False},
+                        headers=h).status_code == 200
+
+    with client.app.state.sessionmaker() as db:
+        assert db.get(Schedule, sid).enabled is False
+        assert db.query(AuditEvent).filter_by(action="schedule.disable").count() == 0
+        event = (db.query(AuditEvent)
+                 .filter_by(action="schedule.update", target_id=sid)
+                 .order_by(AuditEvent.id.desc()).first())
+        assert event.actor_type == "user" and event.actor_id is not None
+        assert event.params["enabled"] is False
+
+
 def test_run_now_enqueues_the_schedules_job_and_stamps_last_run(
         client, csrf_header, bootstrap_admin):
     h = _admin(client, csrf_header, bootstrap_admin)

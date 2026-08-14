@@ -243,7 +243,10 @@ def test_fire_one_still_returns_the_dict_if_the_row_breaks_right_after_firing(
             disable_row = (db.query(AuditEvent)
                            .filter_by(action="schedule.disable", target_id=s.id)
                            .one())
-            assert disable_row.result == "error"
+            # "ok": the disable is what this row records and it worked. The
+            # broken part is the schedule, and it is named in `reason`.
+            assert disable_row.result == "ok"
+            assert "tz dropped" in disable_row.params["reason"]
 
     asyncio.run(go())
 
@@ -263,8 +266,34 @@ def test_fire_one_disables_a_schedule_whose_handler_vanished(tmp_path):
             assert s.enabled is False
             row = (db.query(AuditEvent)
                    .filter_by(action="schedule.disable", target_id=s.id).one())
-            assert row.result == "error"
+            assert row.result == "ok"
             assert db.query(Job).count() == 0
+
+    asyncio.run(go())
+
+
+def test_automatic_disable_is_recorded_as_the_scheduler_not_as_a_person(tmp_path):
+    """The give-up must not be mistakable for somebody switching the schedule
+    off. A person doing that goes through api/schedules.py and lands in the
+    log as `schedule.update` by an actor with an id (the other half of this
+    pair lives in test_schedules_api.py); this row is the scheduler's own,
+    and it says so.
+    """
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        now = datetime(2026, 8, 1, 12, 0)
+        with app.state.sessionmaker() as db:
+            s = _sched(db, job_kind="gone.forever", next_run_at=now)
+            fire_one(app, db, s, now)
+            row = (db.query(AuditEvent)
+                   .filter_by(action="schedule.disable", target_id=s.id).one())
+            assert row.actor_type == "system" and row.actor_id is None
+            # Why it gave up, not just that it did.
+            assert "gone.forever" in row.params["reason"]
+            # Never the human identifier, whatever else changes here.
+            assert db.query(AuditEvent).filter_by(action="schedule.update").count() == 0
 
     asyncio.run(go())
 

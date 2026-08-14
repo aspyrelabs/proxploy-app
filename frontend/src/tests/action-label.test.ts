@@ -29,9 +29,76 @@ describe('actionLabel', () => {
     expect(actionLabel(null)).toBe('Unknown')
   })
 
+  // The whole point of the second argument. A row's title is what people
+  // scan, and every label in the map is an assertion of a completed fact, so
+  // a refused or blown-up action wearing one makes the audit log claim
+  // something that never happened.
+  it('never titles a denied or failed row with its success label', () => {
+    expect(actionLabel('vm.delete', 'denied')).toBe('VM Delete Denied')
+    expect(actionLabel('app.migrate', 'denied')).toBe('App Migrate Denied')
+    expect(actionLabel('host.remove', 'error')).toBe('Host Remove Failed')
+    expect(actionLabel('app.uninstall', 'failed')).toBe('App Uninstall Failed')
+    expect(actionLabel('app.install', 'canceled')).toBe('App Install Canceled')
+    expect(actionLabel('backup.run', 'interrupted')).toBe('Backup Run Interrupted')
+
+    // One rule, not a list of special cases: no mapped label may survive a
+    // non-success result, whichever action it belongs to.
+    for (const raw of Object.keys(ACTION_LABEL)) {
+      for (const bad of ['denied', 'error', 'failed', 'canceled', 'interrupted']) {
+        expect(actionLabel(raw, bad), `${raw} @ ${bad}`).not.toBe(ACTION_LABEL[raw])
+      }
+    }
+  })
+
+  it('states the plain fact when the action actually succeeded', () => {
+    expect(actionLabel('vm.delete', 'ok')).toBe('VM Deleted')
+    expect(actionLabel('app.install', 'succeeded')).toBe('App Installed')
+    // No status to go on (alerts, older callers): unchanged behaviour.
+    expect(actionLabel('vm.delete')).toBe('VM Deleted')
+    expect(actionLabel('vm.delete', null)).toBe('VM Deleted')
+    // A status that is not a known SUCCESS value does not earn the past-tense
+    // label, even when it is not a known failure either. 'constructor' is not
+    // a status at all, and neither is a status this file has not heard of yet.
+    expect(actionLabel('vm.delete', 'constructor')).toBe('VM Delete')
+  })
+
+  // The scheduler's automatic give-up (jobs/scheduler.py::_disable, the only
+  // writer of schedule.disable) must not read like a person's decision; a
+  // person switching a schedule off is logged as schedule.update.
+  it('says the scheduler disabled a schedule, not that somebody did', () => {
+    expect(actionLabel('schedule.disable')).toBe('Schedule Disabled Automatically')
+    expect(actionLabel('schedule.disable')).not.toBe(actionLabel('schedule.update'))
+  })
+
+  // A failed READ of the guest's NIC config is not an attempted write.
+  it('keeps a failed guest network read out of the configuration wording', () => {
+    expect(actionLabel('network.guest_config_read')).toBe('Guest Network Read')
+    expect(actionLabel('network.guest_config_read', 'error'))
+      .toBe('Network Guest Config Read Failed')
+    expect(actionLabel('network.guest_config_read', 'error'))
+      .not.toBe(actionLabel('network.guest_config'))
+  })
+
   it('never renders a mapped label as blank', () => {
     for (const [raw, label] of Object.entries(ACTION_LABEL)) {
       expect(label.trim(), raw).not.toBe('')
     }
   })
 })
+
+// Both lookups are plain object literals, so an identifier that collides with
+// something on Object.prototype must not be answered with that. Asserted for
+// ACTION_LABEL as well as OUTCOME: guarding only one of the two reads as an
+// oversight the next time somebody looks.
+it('does not answer prototype keys out of either lookup table', () => {
+  // 'ToString' rather than 'To String' is right: derive() splits on . _ - :
+  // and there is no separator here. What matters is that neither call answers
+  // with the function living on Object.prototype.
+  expect(actionLabel('toString')).toBe('ToString')
+  expect(actionLabel('constructor')).toBe('Constructor')
+  // An unrecognised status must NOT fall through to the success label: it
+  // names the attempt instead, so a status added backend-side later cannot
+  // silently start asserting a delete that may not have happened.
+  expect(actionLabel('vm.delete', 'timed_out')).toBe('VM Delete')
+})
+

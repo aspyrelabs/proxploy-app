@@ -332,15 +332,48 @@ def test_guest_network_read_failure_is_a_502(tmp_path, csrf_header, bootstrap_ad
         assert c.get(f"/api/v1/vms/{vm_id}/network").status_code == 502
 
 
-def test_guest_nic_edit_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
-                                                                 bootstrap_admin):
-    """BLOCKING 3: set_guest_nic() is a mutation with no ProxmoxError handling, 
-    a failed write must still leave an audit trace, matching storage.py."""
+def test_a_failed_read_is_not_recorded_as_a_configuration_attempt(tmp_path, csrf_header,
+                                                                  bootstrap_admin):
+    """The read half of set_guest_nic()'s read-modify-write failing means
+    NOTHING was sent to the guest, so it must not land in the log under the
+    action that means "this guest's network was configured". Its own
+    identifier, and the config one absent entirely."""
     from tests.support import make_app
 
     fake = _fake()
-    fake.fail = True
+    fake.fail = True          # fails guest_config(), i.e. the read
     app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, _, vm_id = _seed(app)
+        r = c.put(f"/api/v1/vms/{vm_id}/network/net0", json={"bridge": "vmbr9"},
+                  headers=csrf_header(c))
+        assert r.status_code == 502
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(
+                action="network.guest_config_read").one()
+            assert row.result == "error"
+            assert row.target_type == "vm" and row.target_id == vm_id
+            assert db.query(AuditEvent).filter_by(
+                action="network.guest_config").count() == 0
+        assert fake.config_updates == []   # nothing reached the guest
+
+
+def test_guest_nic_write_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_header,
+                                                                  bootstrap_admin,
+                                                                  monkeypatch):
+    """BLOCKING 3: set_guest_nic() is a mutation with no ProxmoxError handling, 
+    a failed write must still leave an audit trace, matching storage.py. The
+    read succeeds here, so this is the real write path, and it keeps the
+    `network.guest_config` identifier the successful write uses."""
+    from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
+    from tests.support import make_app
+
+    def boom(*a, **kw):
+        raise ProxmoxError("fake PVE refused the write")
+
+    monkeypatch.setattr(ProxmoxClient, "guest_config_update", boom)
+    app = make_app(tmp_path, fake=_fake())
     with TestClient(app) as c:
         bootstrap_admin(c)
         _, _, vm_id = _seed(app)
@@ -350,6 +383,7 @@ def test_guest_nic_edit_failure_is_a_502_with_an_error_audit_row(tmp_path, csrf_
         with app.state.sessionmaker() as db:
             row = db.query(AuditEvent).filter_by(action="network.guest_config").one()
             assert row.result == "error"
+            assert row.params["bridge"] == "vmbr9"
 
 
 def test_missing_session_is_401_not_403(tmp_path, csrf_header):

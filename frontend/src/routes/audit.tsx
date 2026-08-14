@@ -105,15 +105,23 @@ export function AuditPage() {
                         {/* Friendly name on top, raw identifier under it: the
                             filter, the export and the API all still speak the
                             stored value, so hiding it would make this page
-                            unusable for filtering and for debugging. */}
+                            unusable for filtering and for debugging. The
+                            result is passed in so a denied or errored row is
+                            never titled as though it went through; the
+                            Result column beside it is a second glance, and
+                            this column is the one people read. */}
                         <td className="py-2 text-text">
-                          {actionLabel(r.action)}
+                          {actionLabel(r.action, r.result)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>
                         <td className="font-mono text-[12px] text-text-3">
                           {r.target_type ?? ''}{r.target_id != null ? ` #${r.target_id}` : ''}
                         </td>
-                        <td className={r.result === 'error' ? 'text-red' : 'text-green'}>{r.result}</td>
+                        {/* Green is for `ok` and nothing else. Keyed on
+                            failure before ("error" only) it painted `denied`
+                            green, i.e. the one result that most needs to
+                            stand out was styled as the happy path. */}
+                        <td className={r.result === 'ok' ? 'text-green' : 'text-red'}>{r.result}</td>
                         <td className="font-mono text-[11.5px] text-text-3">{r.ip ?? ''}</td>
                       </tr>
                     ))}

@@ -104,11 +104,28 @@ def _target(job_kind: str, params: dict | None) -> tuple[str, int | None]:
 
 
 def _disable(db, s: Schedule, reason: str) -> None:
+    """The scheduler giving up on a row it cannot run at all.
+
+    `actor_type="system"` and this action identifier belong to the AUTOMATIC
+    give-up only. A person switching a schedule off goes through
+    api/schedules.py and lands in the log as `schedule.update`, so the two are
+    never confused in the record. The frontend labels this one "Schedule
+    Disabled Automatically" for the same reason.
+
+    `result="ok"`, not "error", and the distinction is not pedantry: `result`
+    is the outcome of THIS action, and this action, disabling the row, is the
+    thing that worked. What failed is the schedule itself, and that failure is
+    `params["reason"]`, which is the part an operator actually needs (an
+    unparseable cron reads differently from a job kind that vanished across an
+    upgrade). Recording "error" also made every surface that titles a row from
+    its result announce "Schedule Disable Failed", i.e. exactly the opposite
+    of what happened: the row IS disabled.
+    """
     s.enabled = False
     s.next_run_at = None
     db.commit()
     write_audit(db, actor_type="system", action="schedule.disable",
-                target_type="schedule", target_id=s.id, result="error",
+                target_type="schedule", target_id=s.id,
                 params={"name": s.name, "reason": reason})
 
 

@@ -43,9 +43,12 @@ function Item({ row }: { row: ActivityRow }) {
       </span>
       <span className="min-w-0 flex-1">
         {/* An alert's title is the rule's own name, already written for a
-            person; only job kinds and audit actions are raw identifiers. */}
+            person; only job kinds and audit actions are raw identifiers.
+            The status goes in as well as under: a denied or failed row must
+            not be titled "VM Deleted" just because that is what was asked
+            for. */}
         <span className="block text-[12.5px] text-text">
-          {row.kind === 'alert' ? row.title : actionLabel(row.title)}
+          {row.kind === 'alert' ? row.title : actionLabel(row.title, row.status)}
         </span>
         <span className="block font-mono text-[11px] text-text-3">
           {row.status ?? 'unknown'}

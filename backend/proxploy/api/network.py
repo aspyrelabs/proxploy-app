@@ -101,7 +101,15 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         client = client_for_host(request.app, db, host, capability="lifecycle")
         cfg = client.guest_config(kind, node, vmid)
     except ProxmoxError as e:
-        write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
+        # A DIFFERENT action from the two below, and the reason is the whole
+        # point of an audit log: nothing has been sent to the guest at this
+        # point. This is the read half of the read-modify-write failing, so
+        # the operator reading the log must not see a row that says a network
+        # configuration was attempted on that guest. Same identifier for both
+        # halves is what made a plain unreachable-host read look like a
+        # half-applied NIC change.
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="network.guest_config_read",
                     target_type=target_type, target_id=target_id,
                     params={"iface": iface}, result="error", ip=ip)
         raise HTTPException(502, str(e))

@@ -12,7 +12,7 @@ const { ApiError } = vi.hoisted(() => ({
   },
 }))
 
-let activityResult: 'ok' | 'empty' | 'error' = 'ok'
+let activityResult: 'ok' | 'empty' | 'error' | 'refused' = 'ok'
 let jobEventsError = false
 let cancelResult: 'ok' | 'forbidden' | 'conflict' = 'ok'
 const cancelCalls: Array<{ path: string; method?: string }> = []
@@ -37,6 +37,16 @@ vi.mock('../api/client', () => ({
     if (path.startsWith('/cluster/activity')) {
       if (activityResult === 'error') return Promise.reject(new Error('boom'))
       if (activityResult === 'empty') return Promise.resolve([])
+      // Two rows that did NOT happen: a migration the backend refused
+      // (write_audit result 'denied') and a delete job that blew up.
+      if (activityResult === 'refused') return Promise.resolve([
+        { kind: 'audit', id: 7, at: '2026-07-29T09:00:00Z', title: 'app.migrate',
+          status: 'denied', target_type: 'app', target_id: 1,
+          actor: 'admin@example.com', job_id: null, progress_pct: null },
+        { kind: 'job', id: 14, at: '2026-07-29T08:58:00Z', title: 'vm.delete',
+          status: 'failed', target_type: 'vm', target_id: 3,
+          actor: 'admin@example.com', job_id: 14, progress_pct: null },
+      ])
       return Promise.resolve([
         { kind: 'job', id: 12, at: '2026-07-29T09:00:00Z', title: 'app.start',
           status: 'succeeded', target_type: 'app', target_id: 1,
@@ -110,11 +120,23 @@ describe('ActivityFeed', () => {
     expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument()
   })
 
+  // The feed prints the result underneath, but the title is what gets read,
+  // and a refused migration titled "App Migrated" is the feed asserting a
+  // thing that never happened.
+  it('does not title a refused action or a failed job as though it went through', async () => {
+    activityResult = 'refused'
+    wrap(<ActivityFeed />)
+    expect(await screen.findByText('App Migrate Denied')).toBeInTheDocument()
+    expect(screen.getByText('VM Delete Failed')).toBeInTheDocument()
+    expect(screen.queryByText('App Migrated')).not.toBeInTheDocument()
+    expect(screen.queryByText('VM Deleted')).not.toBeInTheDocument()
+  })
+
   it('offers Cancel only on the running job row, not the succeeded job or the audit row', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('App Stopped')
+    await screen.findByText('App Stop')
     expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
-    const row = screen.getByText('App Stopped').closest('div')!
+    const row = screen.getByText('App Stop').closest('div')!
     expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
   })
 
@@ -122,8 +144,8 @@ describe('ActivityFeed', () => {
   // a determinate ring may honestly appear on.
   it('shows a progress ring on the running job row', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('App Stopped')
-    const row = screen.getByText('App Stopped').closest('div')!
+    await screen.findByText('App Stop')
+    const row = screen.getByText('App Stop').closest('div')!
     expect(within(row).getByRole('status')).toHaveAttribute(
       'aria-label', expect.stringContaining('40 percent'))
   })

@@ -296,7 +296,10 @@ export function BellPopover() {
   const toJobItem = (j: JobRow): TrayItem => ({
     id: `job:${j.id}`,
     severity: severityOf(j.status),
-    title: `${actionLabel(j.kind)} #${j.id}`,
+    // Status in the title too, not only in severityOf's colour: a card headed
+    // "App Uninstalled #12" over a red icon is still telling the reader the
+    // container is gone when the job failed halfway.
+    title: `${actionLabel(j.kind, j.status)} #${j.id}`,
     description: messageOf(j),
     footer: footerOf(j),
     progress: progressOf(j),
@@ -471,7 +474,7 @@ export function BellPopover() {
           keeps it out of the flexbox shrinking that the transcript above it
           absorbs. */}
       {logJob && (
-        <Dialog title={`${actionLabel(logJob.kind)} #${logJob.id}`}
+        <Dialog title={`${actionLabel(logJob.kind, logJob.status)} #${logJob.id}`}
                 description={logJob.error ?? undefined}
                 fit
                 onClose={() => setLogJob(null)}>
