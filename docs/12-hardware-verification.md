@@ -47,6 +47,12 @@ carrying `vztmpl`. A single-storage host cannot exercise any of these. Checks 3a
 and 3b additionally need a *shared* pool (NFS, CIFS, Ceph) attached to a
 multi-node cluster; a standalone host cannot exercise them.
 
+The hardware available on 2026-08-14 does not meet this shape: `node1` and
+`node2` each carry exactly one `rootdir` pool (`local-lvm`) and one `vztmpl`
+pool (`local`), and are standalone rather than clustered. That is enough for
+check 3 and for the remembered-value half of 3b, and not enough for 2, 3a, or
+the status half of 3b.
+
 **Updated 2026-08-14.** The install dialog now recreates the backend's candidate
 set client-side (`frontend/src/components/install/pools.ts`) to decide whether
 there is a question worth asking. That computation is the thing these checks
@@ -75,6 +81,30 @@ because a code review found both cases reachable and neither provable offline.
    PVE's raw comma string (`pollers/__init__.py:256`), and
    `api/storage.py::_content_list` accepts either that or a list. A real
    `/cluster/resources` row is the only thing that proves the spelling matches.
+
+   **PASSED 2026-08-14, PVE 9.2.10**, against two standalone hosts
+   (`node1` 192.168.50.199, `node2` 192.168.50.200). Both endpoints the code
+   reads return `content` as a comma string, and the spelling matches the
+   literals the filters compare against:
+
+   - `/cluster/resources` (poller): `local-lvm` -> `"rootdir,images"`,
+     `local` -> `"import,backup,iso,vztmpl"`.
+   - `/nodes/{node}/storage` (`appstore.py::_storage_pools`, the install-time
+     authority): same values, plus `enabled: 1` and `active: 1` present as
+     ints on every row, so the `row.get("enabled", 1)` defaults are a fallback
+     and not the live path.
+
+   Order is NOT stable between nodes (`"rootdir,images"` on node1,
+   `"images,rootdir"` on node2), which the membership tests are already
+   indifferent to. Backend and client-side candidate sets agree exactly on both
+   hosts: rootdir `["local-lvm"]`, vztmpl `["local"]`.
+
+   In the browser, on the real `/store` install dialog for each host: the
+   Container storage picker offers `local-lvm` only, so `local` (vztmpl, no
+   `rootdir`) is absent, and the Template storage picker offers `local` only,
+   so `local-lvm` (rootdir, no `vztmpl`) is absent. Default mode asked nothing
+   and showed `Storage: container local-lvm · template local`. No console
+   errors.
 3a. **A shared pool is offered on every node of the cluster.** `GET /storage`
    collapses a shared datastore to ONE row keyed by `(host_id, storage)`, keeping
    whichever node the poller saw first, so its `node` may name a node other than
@@ -84,6 +114,12 @@ because a code review found both cases reachable and neither provable offline.
    `node_name` is NOT the node on the row, and an install to it lands there.
    Fail: the pool is missing from the picker, or Default installs without asking
    on a host that genuinely has two candidates.
+
+   **NOT EXERCISABLE on the 2026-08-14 hardware.** `node1` and `node2` are two
+   standalone hosts, not a cluster: each `/cluster/resources` reports only its
+   own node, and every storage row comes back `shared: 0`. With no shared pool
+   and no second node in either result set, the node-filter exemption this
+   check exists to prove is never reached. Still open.
 3b. **A pool the node is not serving is never offered.** The dialog keeps only
    rows whose `status` is exactly `available`, a literal taken from
    `/cluster/resources`. Pass: disable or detach one pool on the node and
@@ -91,6 +127,25 @@ because a code review found both cases reachable and neither provable offline.
    that pool asks the storage question again instead of showing it as settled.
    Fail: the pool is still offered, or the remembered value is presented as
    fact and the job then refuses with "no longer available".
+
+   **HALF PASSED 2026-08-14, PVE 9.2.10.** The remembered-value half was run
+   against the real pool list on `node1` by varying
+   `Host.default_container_storage` only, with nothing changed on the node:
+
+   - `local-lvm` (a live candidate): settled, no question, summary reads
+     `Storage: container local-lvm · template local`.
+   - `nvme-gone` (a name no pool carries): the Container storage question is
+     re-asked with `local-lvm` offered, and the summary drops to
+     `Storage: template local` rather than presenting the stale name as fact.
+   - `local` (a real pool, but not a `rootdir` candidate): also re-asked, and
+     NOT quietly swapped for `local-lvm` despite it being the sole survivor,
+     which is the `knownPool` / `resolve_storage_pools` agreement.
+
+   The status half is still open. It needs a pool to go non-`available`, and
+   both hosts carry exactly one `rootdir` pool and one `vztmpl` pool, so
+   disabling either leaves zero candidates rather than the "one of two
+   disappears" shape the check describes. It also cannot be run without
+   mutating live storage on the host.
 
 ### Install execution, carried from phase 4
 
