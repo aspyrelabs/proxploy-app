@@ -85,7 +85,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'host.sync': 'Host Synced',
   'host.test': 'Host Connection Tested',
   'job.cancel': 'Job Canceled',
-  'metrics.maintain': 'Metrics Maintained',
+  'metrics.maintain': 'Usage Cleanup',
   'migrate.app': 'App Migrated',
   'network.apply': 'Network Changes Applied',
   'network.guest_config': 'Guest Network Configured',
@@ -146,7 +146,19 @@ const WORDS: Record<string, string> = {
 /** 'vm.snapshot_delete' -> 'VM Snapshot Delete'. Identifiers in this codebase
  *  are verb-final, so the derivation reads as the ATTEMPT ("VM Delete"), not
  *  as the accomplished fact ("VM Deleted") the map above states. */
+// Overrides for identifiers whose derived phrase is wrong or is the jargon we
+// are trying to get rid of. Kept deliberately tiny: derive() is right for
+// almost everything because the identifiers are verb-final, so this is an
+// exceptions list, NOT a second copy of ACTION_LABEL. `metrics.maintain`
+// would otherwise fail as "Metrics Maintain Failed", reintroducing the exact
+// wording the success label was renamed to remove.
+const ATTEMPT: Record<string, string> = {
+  'metrics.maintain': 'Usage Cleanup',
+}
+
+
 function derive(raw: string): string {
+  if (Object.hasOwn(ATTEMPT, raw)) return ATTEMPT[raw]
   return raw.split(/[._\-:]/).filter(Boolean)
     // hasOwn, not `WORDS[w] ?? ...`: WORDS is a plain object literal, so a
     // word like "constructor" or "toString" answers with the function on

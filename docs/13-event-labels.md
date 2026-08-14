@@ -162,13 +162,31 @@ Failures: job failures, unreachable hosts, and refusals.
 
 ## Labels that look wrong to me
 
-1. **`metrics.maintain` -> "Metrics Maintained"**. Tells nobody anything. It
-   is the hourly housekeeping job that rolls raw metric samples into 5
-   minute/1 hour summaries and deletes samples and rollups past the
-   retention window (48h raw, 14d for 5m rollups, 400d for 1h rollups). (The
-   example given for this exercise.)
+1. **RESOLVED. `metrics.maintain` was "Metrics Maintained", now "Usage
+   Cleanup"** (chosen by the maintainer, 2026-08-14). It is the hourly
+   housekeeping job that rolls raw metric samples into 5 minute/1 hour
+   summaries and deletes samples and rollups past the retention window (48h
+   raw, 14d for 5m rollups, 400d for 1h rollups).
 
-2. **`app.migrate` -> "App Migrated"**. This is never true. The identifier
+   Two notes for anyone renaming another label after this one. "Dashboard
+   cleanup" was considered and rejected: this product has no page called
+   Dashboard (the nav reads Overview and Infrastructure), and the same
+   samples feed the cpu_pct/mem_pct/disk_pct alert rules in
+   `services/alerts.py`, so naming one screen would teach the wrong blast
+   radius. And renaming the entry in ACTION_LABEL was NOT sufficient on its
+   own: failure titles are derived from the identifier, so a failed run went
+   on reading "Metrics Maintain Failed" until an ATTEMPT override was added
+   alongside it. Check both when you rename.
+
+2. **WITHDRAWN, this finding was wrong. `app.migrate` -> "App Migrated"**.
+   `api/apps.py:602` writes this action for the SUCCESSFUL enqueue too, via
+   `enqueue_and_audit(kind="migrate.app", ..., action="app.migrate")`;
+   `migrate.app` is the job kind, not a rival audit action. The row was
+   misleading only because a denied result reused the success label, which is
+   finding 5 below, now fixed. Kept here rather than deleted so nobody
+   rediscovers the same wrong conclusion.
+
+   The original, incorrect claim follows. The identifier
    is only ever written when a migrate attempt was refused (missing
    permission, or the self-target guard blocked an unconfirmed migrate of
    Proxploy's own container). A real, completed migration is logged under a

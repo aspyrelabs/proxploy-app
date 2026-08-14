@@ -102,3 +102,11 @@ it('does not answer prototype keys out of either lookup table', () => {
   expect(actionLabel('vm.delete', 'timed_out')).toBe('VM Delete')
 })
 
+// Renaming a success label is not enough on its own: failure titles come from
+// the identifier, so "metrics.maintain" would have gone on failing as
+// "Metrics Maintain Failed" long after the success label stopped saying it.
+it('keeps a renamed label consistent when the job did not succeed', () => {
+  expect(actionLabel('metrics.maintain', 'succeeded')).toBe('Usage Cleanup')
+  expect(actionLabel('metrics.maintain', 'failed')).toBe('Usage Cleanup Failed')
+  expect(actionLabel('metrics.maintain', 'running')).toBe('Usage Cleanup')
+})
