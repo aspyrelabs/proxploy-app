@@ -155,3 +155,29 @@ def test_metrics_loop_is_gone():
     runs as scheduled system jobs, visible in the activity feed")."""
     from proxploy.services import metrics
     assert not hasattr(metrics, "metrics_loop")
+
+
+def test_renaming_a_system_schedule_needs_a_migration_not_just_the_constant(tmp_path):
+    """seed_system_schedules keys on `name` and only ever inserts, so a renamed
+    constant reads as a schedule that does not exist yet.
+
+    Left to itself that seeds a SECOND row for the same job kind and both fire
+    on the same cron. Migration c7a1e4f80b93 renames the existing row instead,
+    and this pins the property that makes the migration necessary, so nobody
+    renames another system schedule by editing SYSTEM_SCHEDULES alone.
+    """
+    db = make_db(tmp_path)
+    seed_system_schedules(db)
+    row = db.query(Schedule).filter_by(job_kind="metrics.maintain").one()
+    assert row.name == "Usage cleanup"
+
+    # Stand in for the pre-migration database: the row exists under its old
+    # name, which is exactly the state a running install is in.
+    row.name = "Metrics maintenance"
+    db.commit()
+    assert seed_system_schedules(db) == 1
+
+    kinds = [s.job_kind for s in db.query(Schedule).all()]
+    assert kinds.count("metrics.maintain") == 2, (
+        "seeding duplicated the job rather than renaming it, which is the "
+        "outcome the migration exists to prevent")

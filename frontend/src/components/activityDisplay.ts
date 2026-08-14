@@ -209,6 +209,22 @@ const OUTCOME: Record<string, string> = {
 }
 
 /**
+ * The job a schedule RUNS, named as the thing it does rather than as a thing
+ * that already happened.
+ *
+ * Deliberately NOT actionLabel(): ACTION_LABEL is past tense by design, so
+ * `backup.run` reads "Backup Taken" there, which is right above a finished
+ * job and wrong in a column headed "Runs". A schedule does not run a Backup
+ * Taken. derive() gives the attempt phrasing the column actually wants, and
+ * it consults ATTEMPT on the way, so a kind whose derived name is jargon
+ * (metrics.maintain) still gets its override.
+ */
+export function jobKindLabel(kind: string | null | undefined): string {
+  return kind ? derive(kind) : 'Unknown'
+}
+
+
+/**
  * Friendly name for a raw identifier, deriving one when the map has no entry.
  * New actions and job kinds get added backend-side all the time and must never
  * render as a blank title, so an unmapped `foo.bar_baz` still reads as

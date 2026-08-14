@@ -132,6 +132,13 @@ describe('SchedulesCard', () => {
     wrap(<SchedulesCard />)
     await waitFor(() => expect(screen.getByText('Nightly backup')).toBeInTheDocument())
     expect(screen.getByText('0 2 * * *')).toBeInTheDocument()
+    // The Runs column names the job, it does not print its identifier. This
+    // is the surface that went on saying "metrics.maintain" after the label
+    // for that kind had already been renamed everywhere else.
+    // "Backup Run", not ACTION_LABEL's past-tense "Backup Taken": the column
+    // says what this schedule runs, not what has already happened.
+    expect(screen.getByText('Backup Run')).toBeInTheDocument()
+    expect(screen.queryByText('backup.run')).not.toBeInTheDocument()
   })
 
   it('runs a schedule now', async () => {

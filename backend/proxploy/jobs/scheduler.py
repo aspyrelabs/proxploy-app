@@ -238,7 +238,11 @@ def tick(app, now: datetime | None = None) -> list[dict]:
 SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Catalog refresh", "job_kind": "catalog.refresh",
      "cron": "0 */6 * * *", "timezone": "UTC", "params": {}},
-    {"name": "Metrics maintenance", "job_kind": "metrics.maintain",
+    # Renamed from "Metrics maintenance" (migration c7a1e4f80b93 carries the
+    # existing row across). seed_system_schedules keys on `name` and only ever
+    # inserts, so changing this string without that migration would seed a
+    # SECOND row running the same job kind rather than rename the first.
+    {"name": "Usage cleanup", "job_kind": "metrics.maintain",
      "cron": "7 * * * *", "timezone": "UTC", "params": {}},
 )
 
