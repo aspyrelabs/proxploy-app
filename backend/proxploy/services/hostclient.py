@@ -65,3 +65,40 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
                          verify_tls=host.verify_tls,
                          tls_fingerprint=host.tls_fingerprint,
                          factory=app.state.proxmox_factory)
+
+
+def cluster_identity(client) -> tuple[str | None, str | None]:
+    """(node name, cluster name) for this address.
+
+    `/cluster/status` is the only honest answer: on a cluster it marks the node
+    you are talking to with `local: 1`, which a `/nodes` listing cannot tell
+    you. A standalone node returns exactly one node row. Anything unexpected
+    leaves it NULL and the poller fills it in as before, so a surprising
+    cluster shape can never block enrolment.
+
+    The SAME response carries cluster membership, in its `{"type": "cluster"}`
+    row (a standalone node has no such row -> None), so recording
+    `hosts.cluster_name` costs no extra round trip beyond this one call.
+
+    Lives here rather than in api/hosts.py because BOTH the enrolment route and
+    the poll loop need it, and the poll loop must not import from the API
+    layer. Takes a client rather than a Host so the caller decides which
+    capability's client to spend.
+
+    RAISES rather than swallowing, and that is load-bearing now that the poll
+    loop calls it every cycle. A swallowed failure returns cluster=None, which
+    is indistinguishable from "this node is standalone", so a single probe
+    hiccup would clear a real cluster name and every node card would claim
+    standalone until something else happened to fix it. Enrolment still cannot
+    fail on a probe hiccup; it catches this itself.
+    """
+    rows = client.cluster_status()
+    cluster = next((r.get("name") for r in rows
+                    if r.get("type") == "cluster"), None)
+    nodes = [r for r in rows if r.get("type") == "node"]
+    if len(nodes) == 1:
+        return nodes[0].get("name"), cluster
+    for r in nodes:
+        if r.get("local"):
+            return r.get("name"), cluster
+    return None, cluster

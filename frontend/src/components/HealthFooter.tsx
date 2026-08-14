@@ -4,6 +4,7 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import { api } from '../api/client'
 import { useFiringAlerts } from '../api/alerts'
 import type { NodeRow } from '../api/hooks'
+import { dedupeNodes } from '../lib/nodes'
 
 /** Doc 06 §(b) `HealthFooter`: `.side-foot`, "All systems healthy", green dot,
  *  "3 nodes · 0 alerts". Bound to `/alerts?state=firing` + host status; the dot
@@ -51,7 +52,12 @@ export function HealthFooter({ collapsed = false }: { collapsed?: boolean }) {
   }
 
   const firing = alerts.data?.length ?? 0
-  const rows = nodes.data ?? []
+  // Deduped for the same reason the Hosts page is: /cluster/nodes answers one
+  // row per (host, node), so two endpoints enrolled into one cluster made this
+  // footer count every node once per endpoint and report "4 nodes" for a
+  // two-node cluster. `down` was inflated the same way, which mattered more:
+  // one unreachable endpoint counted once per node behind it.
+  const rows = dedupeNodes(nodes.data ?? [])
   const down = rows.filter((n) => n.status !== 'connected').length
   const critical = (alerts.data ?? []).some((a) => a.severity === 'critical')
   const unhealthy = firing > 0 || down > 0

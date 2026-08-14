@@ -12,10 +12,28 @@ import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageB
  *  was the only card in the product that opened something other than the thing
  *  it depicts. The apps filter survives as its own affordance on the "N Apps"
  *  meta item. */
-export function NodeCard({ node }: { node: NodeRow }) {
+export function NodeCard({ node }: {
+  node: NodeRow & { endpoints?: { host_id: number; name: string; status: string }[] }
+}) {
   const navigate = useNavigate()
   // A host with no snapshot yet has no node name to route on; /hosts/$hostId
   // still resolves (it redirects to the entry node once one is known).
+  // `endpoints` is optional so the card still renders from a bare NodeRow;
+  // absent, the card describes the one endpoint it came from, which is exactly
+  // what an undeduped row means.
+  const endpoints = node.endpoints ?? [
+    { host_id: node.host_id, name: node.name, status: node.status },
+  ]
+  const unreachable = endpoints.filter((e) => e.status !== 'connected')
+  // Named only when there is exactly ONE, because only then is "the endpoint
+  // this node is reached through" a fact about the node. Once a cluster is
+  // enrolled through several endpoints they ALL see every node, so a count
+  // ("via 2 endpoints") described Proxploy's own plumbing rather than
+  // anything about the machine on the card -- unreadable to the person
+  // looking at it, and the same jargon failure as the old bare "entry" badge.
+  // The case where it genuinely matters is an endpoint being DOWN, and the
+  // amber line below says that in words.
+  const via = endpoints.length === 1 ? endpoints[0].name : null
   const open = () => (node.node
     ? navigate({ to: '/hosts/$hostId/$node' as never,
                  params: { hostId: String(node.host_id), node: node.node } as never })
@@ -39,17 +57,35 @@ export function NodeCard({ node }: { node: NodeRow }) {
           onClick={(e) => e.stopPropagation()}
           className="font-mono text-[13px] text-text hover:text-amber"
         >
-          {node.name}
+          {/* The NODE leads, not the host. This card depicts one node, and
+              titling it with the host name meant a cluster drew several cards
+              under the same title, each with a different node in the subline
+              -- so the card that showed node2's gauges was headed
+              "node1.example.com". The endpoint moved to the meta row below,
+              which is where "how do we reach this" belongs. */}
+          {node.node ?? 'node unknown'}
         </Link>
         <StatusPill status={node.status} />
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-text-3">
-        <span className="font-mono">{node.node ?? 'node unknown'}</span>
-        {node.is_entry && (
-          <span title="The node Proxploy connects through for this host">entry</span>
-        )}
-        <span>· {node.cluster ?? 'standalone'}</span>
+        {/* The cluster's own name, not "in <name>": these cards already sit
+            under a "Cluster <name>" heading, so the preposition just said the
+            same thing twice. Standalone nodes have no heading above them,
+            which is why they still say so here. */}
+        <span>{node.cluster ?? 'standalone'}</span>
+        {via && <span>· {via}</span>}
       </div>
+      {unreachable.length > 0 && (
+        /* Deduping the cards removed the only place a dead endpoint used to be
+           visible: its rows collapsed into the surviving node's card and its
+           StatusPill went with them. The node itself may be perfectly healthy
+           and still be one enrolled endpoint down, so it is said in words. */
+        <div className="mt-1 text-[11px] text-amber">
+          {unreachable.length === 1
+            ? `${unreachable[0].name} cannot be reached`
+            : `${unreachable.length} endpoints cannot be reached`}
+        </div>
+      )}
       <div className="mt-3 flex gap-4 font-mono text-[11px] text-text-2">
         {/* Plain text, not a link: /vms takes no host filter (unlike /apps),
             and inventing one here would be a link to a page that ignores it. */}

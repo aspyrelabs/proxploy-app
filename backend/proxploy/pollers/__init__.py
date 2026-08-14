@@ -16,6 +16,7 @@ from datetime import datetime
 
 from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, utcnow
 from proxploy.services.audit import write_audit
+from proxploy.services.hostclient import cluster_identity
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
@@ -75,6 +76,14 @@ def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
+# `None` is a real, meaningful cluster_name: it means "standalone". So a
+# cycle that could not read cluster status needs a THIRD value, or a single
+# hiccup would clear a live cluster name and every node card would fall back
+# to claiming standalone. Same hazard the `version` handling calls out below,
+# except there None was safely reusable as "not read" and here it is not.
+UNREAD = object()
+
+
 # How long an app's CT must stay absent from cycles we are willing to trust
 # before the App row is deleted. 15 minutes is ~15 default poll intervals: far
 # longer than any burst of bad reads, short enough that `pct destroy 150`
@@ -119,6 +128,7 @@ def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
 def ingest_cycle(db, host: Host, resources: list[dict],
                  rrd_by_node: dict[str, list[dict]], now: datetime,
                  version: str | None = None,
+                 cluster_name: str | None | object = UNREAD,
                  degraded: bool = False) -> CycleResult:
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
@@ -187,6 +197,15 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # true-but-stale version with "unknown", which is strictly worse.
     if version and version != host.pve_version:
         host.pve_version = version
+
+    # Cluster membership was written at enrolment and by nothing else, so
+    # clustering two standalone hosts (or splitting a cluster) never reached
+    # this column: both nodes went on reporting whatever they were when they
+    # were added. Refreshed every cycle for the same reason pve_version is,
+    # and guarded by UNREAD rather than a falsy check because standalone is a
+    # legitimate value to write.
+    if cluster_name is not UNREAD and cluster_name != host.cluster_name:
+        host.cluster_name = cluster_name
 
     # guests map ----------------------------------------------------------------
     guests: dict[tuple[str, int], dict] = {}
@@ -509,9 +528,18 @@ class Poller:
             except ProxmoxError:
                 version = None
 
+            # Optional in exactly the way version() above is: one extra
+            # constant-cost call per host per cycle, which the doc 02 section 3
+            # budget allows (it forbids per-GUEST calls, not per-host ones).
+            try:
+                _, cluster_name = cluster_identity(client)
+            except ProxmoxError:
+                cluster_name = UNREAD
+
             prev = self.snapshots.get(host_id)
             result = ingest_cycle(db, host, resources, rrd, utcnow(),
-                                  version=version, degraded=bool(degraded))
+                                  version=version, cluster_name=cluster_name,
+                                  degraded=bool(degraded))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.

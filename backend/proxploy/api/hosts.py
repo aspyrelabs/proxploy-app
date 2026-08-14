@@ -12,7 +12,7 @@ from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        token_public_meta)
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, cluster_identity
 from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
 
@@ -224,42 +224,6 @@ def probe(request: Request, body: ProbeIn,
             "node_power_missing": _node_power_missing(client)}
 
 
-def _cluster_identity(client) -> tuple[str | None, str | None]:
-    """(node name, cluster name) for this address, asked at enrolment time.
-
-    Without the node name the column stayed NULL until the poller's first cycle
-    landed, and every job handler reads `host.node_name or ""`, so anything
-    started in that window sent an EMPTY node name to PVE and failed for a
-    reason the operator could not act on. Enrolling a host and immediately
-    installing something is not an exotic sequence; it is the obvious one.
-
-    `/cluster/status` is the only honest answer: on a cluster it marks the node
-    you are talking to with `local: 1`, which a `/nodes` listing cannot tell
-    you. A standalone node returns exactly one node row. Anything unexpected
-    leaves it NULL and the poller fills it in as before, so a surprising
-    cluster shape can never block enrolment.
-
-    The SAME response carries cluster membership, in its `{"type": "cluster"}`
-    row (a standalone node has no such row -> None), so recording
-    `hosts.cluster_name` here costs no extra round trip. Before this, that
-    column was written by nothing but migration preflight, and every node card
-    claimed "standalone" no matter how big the cluster was.
-    """
-    try:
-        rows = client.cluster_status()
-    except Exception:  # noqa: BLE001  (enrolment must survive a probe hiccup)
-        return None, None
-    cluster = next((r.get("name") for r in rows
-                    if r.get("type") == "cluster"), None)
-    nodes = [r for r in rows if r.get("type") == "node"]
-    if len(nodes) == 1:
-        return nodes[0].get("name"), cluster
-    for r in nodes:
-        if r.get("local"):
-            return r.get("name"), cluster
-    return None, cluster
-
-
 @router.post("", status_code=201)
 def create_host(request: Request, body: HostIn, db=Depends(get_db),
                 user: User = Depends(_manage_global)):
@@ -289,7 +253,10 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     # host at the final step is the worse failure.
     missing = _missing_privileges(client)
     node_power_missing = _node_power_missing(client)
-    node_name, cluster_name = _cluster_identity(client)
+    try:
+        node_name, cluster_name = cluster_identity(client)
+    except ProxmoxError:  # enrolment must survive a probe hiccup
+        node_name = cluster_name = None
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=body.tls_fingerprint, status="connected",
                 node_name=node_name, cluster_name=cluster_name,

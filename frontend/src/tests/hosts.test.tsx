@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' = 'ok'
+let nodesResult: 'ok' | 'empty' | 'error' | 'cluster' | 'noEntry' | 'twoEndpoints' = 'ok'
 let summaryResult: 'ok' | 'error' = 'ok'
 let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
@@ -76,6 +76,21 @@ vi.mock('../api/client', () => ({
       // No row for this host claims is_entry: the entry node dropped out of
       // /cluster/nodes (or the host was never fully enrolled), so nothing
       // here can be named or linked to.
+      if (nodesResult === 'twoEndpoints') {
+        // The shape two clustered hosts really produce: a Host is one API
+        // ENDPOINT, so each of them reports BOTH nodes and GET /cluster/nodes
+        // answers 2x2. host-02's endpoint is down, while the nodes behind it
+        // are fine -- the case that makes deduping lossy if nothing carries
+        // endpoint health.
+        return Promise.resolve([
+          node({ host_id: 1, name: 'host-01', node: 'n1', cluster: 'lab-cluster', is_entry: true }),
+          node({ host_id: 1, name: 'host-01', node: 'n2', cluster: 'lab-cluster', is_entry: false }),
+          node({ host_id: 2, name: 'host-02', node: 'n1', cluster: 'lab-cluster',
+                 is_entry: false, status: 'unreachable' }),
+          node({ host_id: 2, name: 'host-02', node: 'n2', cluster: 'lab-cluster',
+                 is_entry: true, status: 'unreachable' }),
+        ])
+      }
       if (nodesResult === 'noEntry') {
         return Promise.resolve([node({ is_entry: false })])
       }
@@ -155,7 +170,7 @@ describe('HostsPage', () => {
 
   it('renders rings, counts and node cards from the API', async () => {
     withQuery(<HostsPage />)
-    expect(await screen.findByText('host-01')).toBeInTheDocument()
+    expect(await screen.findByText('pve1')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
     expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
   })
@@ -191,13 +206,34 @@ describe('HostsPage', () => {
   it('groups cluster nodes under the cluster name, with its aggregate health', async () => {
     nodesResult = 'cluster'
     withQuery(<HostsPage />)
-    expect(await screen.findByRole('heading', { name: 'prod' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /prod/ })).toBeInTheDocument()
     // one card per node, not one per host
     expect(screen.getByText('pve1')).toBeInTheDocument()
     expect(screen.getByText('pve2')).toBeInTheDocument()
     expect(screen.getByText('pve3')).toBeInTheDocument()
     // and the group says how the cluster as a whole is doing
     expect(screen.getByText(/3 nodes · 1 unreachable/i)).toBeInTheDocument()
+  })
+
+  it('draws one card per node, not one per endpoint that can see it', async () => {
+    nodesResult = 'twoEndpoints'
+    withQuery(<HostsPage />)
+    // Four rows in, two nodes out. Undeduped this rendered n1 and n2 twice
+    // each, with duplicate gauges and a "4 nodes" count for a 2-node cluster.
+    expect(await screen.findByText('n1')).toBeInTheDocument()
+    expect(screen.getAllByText('n1')).toHaveLength(1)
+    expect(screen.getAllByText('n2')).toHaveLength(1)
+    expect(screen.getByText(/2 nodes/i)).toBeInTheDocument()
+  })
+
+  it('still reports an endpoint that is down after its duplicate card is gone', async () => {
+    nodesResult = 'twoEndpoints'
+    withQuery(<HostsPage />)
+    // n1 survives via host-01, which is connected, so its own StatusPill says
+    // nothing is wrong -- but host-02 is enrolled, cannot be reached, and its
+    // row collapsed into this card. Saying so is the whole point.
+    const card = within((await screen.findByText('n1')).closest('[role="link"]')!)
+    expect(card.getByText(/host-02 cannot be reached/i)).toBeInTheDocument()
   })
 
   it('leaves a standalone host ungrouped, with no cluster heading', async () => {
@@ -249,7 +285,7 @@ describe('NodeCard', () => {
     // It used to navigate to /apps, the only card in the product that opened
     // something other than the thing it depicts.
     withQuery(<HostsPage />)
-    const card = (await screen.findByText('host-01')).closest('[role="link"]')!
+    const card = (await screen.findByText('pve1')).closest('[role="link"]')!
     fireEvent.click(card)
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
       to: '/hosts/$hostId/$node', params: { hostId: '1', node: 'pve1' },
@@ -258,8 +294,8 @@ describe('NodeCard', () => {
 
   it('is reachable from the keyboard', async () => {
     withQuery(<HostsPage />)
-    await screen.findByText('host-01')
-    fireEvent.keyDown(screen.getByRole('link', { name: /host-01/ }), { key: 'Enter' })
+    await screen.findByText('pve1')
+    fireEvent.keyDown(screen.getByRole('link', { name: /pve1/ }), { key: 'Enter' })
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
       to: '/hosts/$hostId/$node',
     }))
@@ -268,7 +304,7 @@ describe('NodeCard', () => {
   it('shows storage next to CPU and RAM: three bars, three labels', async () => {
     withQuery(<HostsPage />)
     // scoped to the card: the summary rings above it are also labelled CPU
-    const card = within((await screen.findByText('host-01')).closest('[role="link"]')!)
+    const card = within((await screen.findByText('pve1')).closest('[role="link"]')!)
     expect(card.getByText('CPU')).toBeInTheDocument()
     expect(card.getByText('RAM')).toBeInTheDocument()
     expect(card.getByText('Disk')).toBeInTheDocument()

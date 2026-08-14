@@ -15,6 +15,7 @@ import { HostActionsMenu } from '../components/HostActionsMenu'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
 import { HostForm } from '../components/HostForm'
 import { NodeCard } from '../components/NodeCard'
+import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
 import { Sparkline } from '../components/charts/Sparkline'
 import { MetricChart } from '../components/charts/MetricChart'
@@ -85,12 +86,17 @@ export function UpdateAllButton() {
  *  Hosts enrolled from the same cluster are two API endpoints into ONE
  *  cluster, so they collapse into a single group instead of drawing the same
  *  cluster twice. */
-function ClusterGroup({ name, rows }: { name: string; rows: NodeRow[] }) {
+function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
   const down = rows.filter((n) => n.status !== 'connected').length
   return (
     <section className="mb-5">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="font-display text-[15px] font-semibold">{name}</h2>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h2 className="font-display text-[15px] font-semibold">
+          {/* The cluster's name alone is not self-describing: "lab-cluster" as a
+              bare heading reads as a section title, not as the thing these
+              nodes are members OF. */}
+          <span className="text-text-3">Cluster </span>{name}
+        </h2>
         <span className="text-[11px] text-text-3">
           {rows.length} node{rows.length === 1 ? '' : 's'} ·{' '}
           {down === 0 ? 'all healthy' : `${down} unreachable`}
@@ -103,9 +109,9 @@ function ClusterGroup({ name, rows }: { name: string; rows: NodeRow[] }) {
   )
 }
 
-function groupByCluster(rows: NodeRow[]) {
-  const clusters = new Map<string, NodeRow[]>()
-  const standalone: NodeRow[] = []
+function groupByCluster(rows: MergedNode[]) {
+  const clusters = new Map<string, MergedNode[]>()
+  const standalone: MergedNode[] = []
   for (const n of rows) {
     if (!n.cluster) { standalone.push(n); continue }
     const group = clusters.get(n.cluster)
@@ -221,13 +227,16 @@ export function HostsPage() {
                     errorTitle="Nodes not readable"
                     errorNote="Proxploy could not reach the backend to list your nodes.">
           {(rows) => {
-            const { clusters, standalone } = groupByCluster(rows)
+            const { clusters, standalone } = groupByCluster(dedupeNodes(rows))
             return (
               <>
                 {clusters.map(([name, group]) => (
                   <ClusterGroup key={name} name={name} rows={group} />
                 ))}
                 {standalone.length > 0 && (
+                  /* No heading here on purpose: each card already says
+                     "standalone" or "in <cluster>", so a group heading would
+                     repeat per-card text that is never ambiguous. */
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {standalone.map((n) => (
                       <NodeCard key={`${n.host_id}:${n.node}`} node={n} />
