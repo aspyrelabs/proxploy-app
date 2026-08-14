@@ -43,7 +43,17 @@ gap that produced the "storage is not optional" finding in
 `docs/superpowers/specs/2026-08-13-app-install-modes-design.md`.
 
 **Host shape required:** at least two pools carrying `rootdir`, and at least two
-carrying `vztmpl`. A single-storage host cannot exercise any of these.
+carrying `vztmpl`. A single-storage host cannot exercise any of these. Checks 3a
+and 3b additionally need a *shared* pool (NFS, CIFS, Ceph) attached to a
+multi-node cluster; a standalone host cannot exercise them.
+
+**Updated 2026-08-14.** The install dialog now recreates the backend's candidate
+set client-side (`frontend/src/components/install/pools.ts`) to decide whether
+there is a question worth asking. That computation is the thing these checks
+exercise, and every input it depends on comes from a fake today: which pools
+exist, which node reports them, whether a pool is `shared`, whether its status
+is `available`, and how its `content` is spelled. Checks 3a and 3b are new
+because a code review found both cases reachable and neither provable offline.
 
 1. **Default install, no user input, does not reach `select_storage`.**
    Install an app in Default mode without touching the form. Pass: the container
@@ -58,6 +68,29 @@ carrying `vztmpl`. A single-storage host cannot exercise any of these.
    container storage picker excludes pools whose content lacks `rootdir`. Pass:
    the pool is absent from that control. This one is client-side and provable in
    a browser against a real host's storage list, without an install.
+
+   The filtering itself is now covered by unit tests, so what is left to prove
+   here is narrower and worth stating exactly: that a real node's `content`
+   field parses into the strings the filter compares against. The poller splits
+   PVE's raw comma string (`pollers/__init__.py:256`), and
+   `api/storage.py::_content_list` accepts either that or a list. A real
+   `/cluster/resources` row is the only thing that proves the spelling matches.
+3a. **A shared pool is offered on every node of the cluster.** `GET /storage`
+   collapses a shared datastore to ONE row keyed by `(host_id, storage)`, keeping
+   whichever node the poller saw first, so its `node` may name a node other than
+   the host being installed to. The dialog exempts shared rows from its node
+   filter for exactly this reason. Pass: with a shared `rootdir` pool attached
+   to several nodes, that pool appears in the picker for a host whose
+   `node_name` is NOT the node on the row, and an install to it lands there.
+   Fail: the pool is missing from the picker, or Default installs without asking
+   on a host that genuinely has two candidates.
+3b. **A pool the node is not serving is never offered.** The dialog keeps only
+   rows whose `status` is exactly `available`, a literal taken from
+   `/cluster/resources`. Pass: disable or detach one pool on the node and
+   confirm it disappears from the picker, and that a host which had remembered
+   that pool asks the storage question again instead of showing it as settled.
+   Fail: the pool is still offered, or the remembered value is presented as
+   fact and the job then refuses with "no longer available".
 
 ### Install execution, carried from phase 4
 
