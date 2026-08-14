@@ -27,6 +27,11 @@ const sizes = {
   // stays a deliberately small control on a touch screen; see the note at the
   // call site in components/StoreCard.tsx.
   xs: 'px-[9px] py-1.5 text-[9px]',
+  // xs plus 20%, rounded to whole pixels for the same blurry-text reason:
+  //   px  9px -> 11px   py 6px -> 7px   text 9px -> 11px
+  // Its own entry rather than a bump to xs, because xs is load bearing for
+  // the App Store card, whose 240px height the geometry harness pins.
+  sm: 'px-[11px] py-[7px] text-[11px]',
   'icon-xs': 'h-6 w-6 p-0',
 } as const
 

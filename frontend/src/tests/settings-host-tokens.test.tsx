@@ -47,6 +47,11 @@ describe('Settings host tokens', () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Tokens' }))
     expect(await screen.findByText('Lifecycle')).toBeInTheDocument()
-    expect(screen.getByLabelText('Lifecycle token id')).toBeInTheDocument()
+    // The dialog opens with its fields closed on every row now, so what proves
+    // the list rendered is the control that would reveal them, not the field.
+    // Four capabilities left open would have unrolled eight inputs on open.
+    expect(screen.queryByLabelText('Lifecycle token id')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',
+      { name: 'Add Lifecycle token, show fields' })).toBeInTheDocument()
   })
 })

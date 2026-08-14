@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { inputCls } from './LoginForm'
@@ -36,10 +36,21 @@ function CapabilityRow({ hostId, name, stored }: {
 }) {
   const qc = useQueryClient()
   const label = labelOf(name)
-  // A missing capability opens straight into its field: the gap IS the
-  // prompt. A stored one stays behind Rotate so replacing a working token is
-  // never one stray keystroke away.
-  const [open, setOpen] = useState(!stored)
+  // Closed on both sides now, stored or not.
+  //
+  // This file used to open a missing capability straight into its fields, on
+  // the reasoning that the gap IS the prompt. That held while the row's only
+  // control was a Rotate that appeared once a token existed: with nothing
+  // stored there was no button to press, so the fields had to be the
+  // invitation. Add is that invitation now, so the open fields were saying
+  // the same thing a second time, and four capabilities meant a dialog that
+  // opened with eight inputs already unrolled.
+  //
+  // Both buttons therefore reveal, and neither state shows a field until
+  // asked. Replacing a working token is still never one stray keystroke
+  // away, which was the other half of the original reasoning and is
+  // unchanged.
+  const [open, setOpen] = useState(false)
   const [tokenId, setTokenId] = useState('')
   const [tokenSecret, setTokenSecret] = useState('')
   const [error, setError] = useState('')
@@ -68,7 +79,14 @@ function CapabilityRow({ hostId, name, stored }: {
   // capabilities, eight inputs deep, it is a useful one. When the fields are
   // closed the ref is null and the click just opens them, which is feedback
   // enough on its own.
-  const reveal = () => { setOpen(true); idRef.current?.focus() }
+  // Focus in an effect, not inside the click handler. `setOpen(true)` does not
+  // render synchronously, so focusing on the next line reached for an input
+  // that did not exist yet and silently did nothing. That went unnoticed while
+  // an unstored row started open, because then the ref happened to be live
+  // already, and the one state that still needed it (Rotate on a stored row)
+  // was the one state nobody focus-tested.
+  useEffect(() => { if (open) idRef.current?.focus() }, [open])
+  const reveal = () => setOpen(true)
 
   const save = useMutation({
     mutationFn: () => api(`/hosts/${hostId}/credentials`, {
@@ -103,6 +121,9 @@ function CapabilityRow({ hostId, name, stored }: {
           * any more, because it said the same thing twice as soon as Add
           * started reading "Stored".
           *
+          * Both reveal the same fields; which one you get is decided by
+          * whether a token exists, not by what the fields do.
+          *
           * ROTATE IS DISABLED WITH NOTHING STORED. There is no credential to
           * replace on an unconfigured capability, so a live Rotate could only
           * open the very fields Add already opens: two buttons, one outcome,
@@ -120,7 +141,7 @@ function CapabilityRow({ hostId, name, stored }: {
           * and it is the same green the status text used before it.
           */}
         <ButtonGroup>
-          <Button type="button" variant="ghost" size="xs" disabled={stored}
+          <Button type="button" variant="ghost" size="sm" disabled={stored}
             /* `text-green!`, with the important modifier, and it is not
              * belt-and-braces. Button composes `${variants[variant]}
              * ${className}`, so this lands after ghost's `text-text` in the
@@ -135,7 +156,7 @@ function CapabilityRow({ hostId, name, stored }: {
               : `Add ${label} token, show fields`}
             onClick={reveal}>{stored ? 'Stored' : 'Add'}</Button>
           <ButtonGroupSeparator />
-          <Button type="button" variant="ghost" size="xs" disabled={!stored}
+          <Button type="button" variant="ghost" size="sm" disabled={!stored}
             aria-label={`Rotate ${label} token, show fields`}
             onClick={reveal}>Rotate</Button>
         </ButtonGroup>
@@ -166,7 +187,7 @@ function CapabilityRow({ hostId, name, stored }: {
           )}
           {error && <p className="text-[12px] text-red">{error}</p>}
           {/*
-            * `size="xs"`, not the default md, is the "make the Add button 30%
+            * `size="sm"`, not the default md, is the "make the Add button 30%
             * smaller" ask. This submit is the only Add button that existed
             * before the group above, so it is the one that shrank.
             *
@@ -184,14 +205,21 @@ function CapabilityRow({ hostId, name, stored }: {
             */}
           <div className="flex justify-end gap-2">
             {stored && (
-              <Button type="button" variant="ghost" size="xs"
+              <Button type="button" variant="ghost" size="sm"
                 onClick={() => { setOpen(false); setError('') }}>Cancel</Button>
             )}
-            <Button type="button" size="xs"
-              aria-label={`${stored ? 'Rotate' : 'Add'} ${label} token`}
+            {/* "Save", not "Add"/"Rotate" any more. Those two words now name
+              * the buttons that OPEN this form, and repeating one of them on
+              * the control that commits it made the same word mean "show me
+              * the fields" and "write this token" in one row. This button has
+              * one job either way, which is to save what was typed. The
+              * aria-label keeps the capability, since several of these forms
+              * can be open at once. */}
+            <Button type="button" size="sm"
+              aria-label={`Save ${label} token`}
               disabled={!tokenId || !tokenSecret || save.isPending}
               onClick={() => save.mutate()}>
-              {save.isPending ? 'Verifying…' : stored ? 'Rotate' : 'Add'}
+              {save.isPending ? 'Verifying…' : 'Save'}
             </Button>
           </div>
         </div>

@@ -36,6 +36,14 @@ vi.mock('../api/client', () => ({
 
 import { HostCapabilityList } from '../components/HostCapabilityList'
 
+/** Fields are closed for stored AND unstored capabilities now, so a test that
+ *  wants the form has to ask for it the way an operator does. */
+const openFields = async (label: string, via: 'Add' | 'Rotate' = 'Add') => {
+  await screen.findByText(label)
+  fireEvent.click(screen.getByRole('button',
+    { name: `${via} ${label} token, show fields` }))
+}
+
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: {
     queries: { retry: false }, mutations: { retry: false } } })
@@ -78,12 +86,12 @@ describe('HostCapabilityList', () => {
 
   it('shows a missing capability as an open field, and stores it with its own key', async () => {
     wrap()
-    await screen.findByText('Lifecycle')
+    await openFields('Lifecycle')
     fireEvent.change(screen.getByLabelText('Lifecycle token id'),
                      { target: { value: 'proxploy@pve!lifecycle' } })
     fireEvent.change(screen.getByLabelText('Lifecycle token secret'),
                      { target: { value: 'lc' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Lifecycle token' }))
 
     await waitFor(() => expect(calls.at(-1)).toEqual({
       path: '/hosts/3/credentials',
@@ -95,18 +103,18 @@ describe('HostCapabilityList', () => {
   it('names the capability when the node rejects its token', async () => {
     reject = true
     wrap()
-    await screen.findByText('Backup')
+    await openFields('Backup')
     fireEvent.change(screen.getByLabelText('Backup token id'), { target: { value: 'x' } })
     fireEvent.change(screen.getByLabelText('Backup token secret'), { target: { value: 'y' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add Backup token' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Backup token' }))
     expect(await screen.findByText(/Backup: .*did not work/i)).toBeInTheDocument()
   })
 
   it('never submits half a token pair', async () => {
     wrap()
-    await screen.findByText('Console')
+    await openFields('Console')
     fireEvent.change(screen.getByLabelText('Console token id'), { target: { value: 'only-id' } })
-    const btn = screen.getByRole('button', { name: 'Add Console token' })
+    const btn = screen.getByRole('button', { name: 'Save Console token' })
     expect(btn).toBeDisabled()
     // Finding #11: clicking a disabled button can't fire onClick, so
     // asserting no call followed made that half of this test tautological.
@@ -119,12 +127,12 @@ describe('HostCapabilityList', () => {
   // invalidates ['hosts'] with exact: true. Neither half was tested.
   it('flips the row to stored and closes its fields on a successful Add', async () => {
     wrap()
-    await screen.findByText('Lifecycle')
+    await openFields('Lifecycle')
     fireEvent.change(screen.getByLabelText('Lifecycle token id'),
                      { target: { value: 'proxploy@pve!lifecycle' } })
     fireEvent.change(screen.getByLabelText('Lifecycle token secret'),
                      { target: { value: 'lc' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Lifecycle token' }))
 
     const row = (await screen.findByText('Lifecycle')).closest('.border-t') as HTMLElement
     await waitFor(() => expect(
@@ -136,12 +144,12 @@ describe('HostCapabilityList', () => {
   it('patches the cached host detail in place, preserving its other fields, and invalidates the hosts list by exact key', async () => {
     const { qc } = wrap()
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
-    await screen.findByText('Lifecycle')
+    await openFields('Lifecycle')
     fireEvent.change(screen.getByLabelText('Lifecycle token id'),
                      { target: { value: 'proxploy@pve!lifecycle' } })
     fireEvent.change(screen.getByLabelText('Lifecycle token secret'),
                      { target: { value: 'lc' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Lifecycle token' }))
 
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['hosts'], exact: true }))
     const cached = qc.getQueryData<{ id: number; name: string; capabilities: Record<string, boolean> }>(
@@ -207,12 +215,14 @@ describe('HostCapabilityList', () => {
       expect(within(group).getByRole('button', { name: /^Rotate Backup token/ })).toBeDisabled()
     })
 
-    it('puts the caret in the token id field when Add is pressed on an open row', async () => {
+    it('opens the fields and puts the caret in them when Add is pressed', async () => {
       wrap()
       await screen.findByText('Console')
-      // The row is already open (the gap is the prompt), so this click is the
-      // one that would otherwise appear to do nothing.
+      // Closed until asked, on an unstored capability as much as a stored one.
+      expect(screen.queryByLabelText('Console token id')).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'Add Console token, show fields' }))
+      // Revealing without focusing would leave the operator hunting for the
+      // field that just appeared, in a dialog with four of these rows.
       expect(screen.getByLabelText('Console token id')).toHaveFocus()
     })
 
@@ -222,9 +232,10 @@ describe('HostCapabilityList', () => {
       expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'Rotate Monitoring token, show fields' }))
       expect(screen.getByLabelText('Monitoring token id')).toBeInTheDocument()
-      // The submit that appears is the row's other Rotate, and it is named
-      // apart from the group's so neither is ambiguous while both are on screen.
-      expect(screen.getByRole('button', { name: 'Rotate Monitoring token' })).toBeInTheDocument()
+      // The submit that appears says Save: Rotate names the button that opened
+      // this form, so reusing it on the one that commits the form would make
+      // one word mean both "show me the fields" and "write this token".
+      expect(screen.getByRole('button', { name: 'Save Monitoring token' })).toBeInTheDocument()
     })
   })
 })
