@@ -9,11 +9,11 @@ import { useSchedules } from '../api/schedules'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
-import { HostCapabilityList } from '../components/HostCapabilityList'
 import { HostForm } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { HostRotateDialog } from '../components/HostRotateDialog'
 import { HostTasksPanel } from '../components/HostTasksPanel'
+import { HostTokensDialog } from '../components/HostTokensDialog'
 import { QueryState } from '../components/QueryState'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
@@ -24,7 +24,6 @@ import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
-import { Dialog } from '../components/ui/dialog'
 import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
@@ -145,23 +144,6 @@ export function SchedulesCard() {
         <ScheduleForm onSaved={() => setAdding(false)} />
       </div>}
     </Card>
-  )
-}
-
-/** The four capability tokens for one host. Settings is where the docs tell
- *  operators to add them, and until now it had no control for them at all.
- *  Separate from HostRotateDialog on purpose: that one is monitoring + the
- *  SSH key, and merging the two would put two different rotate paths for the
- *  same token in one card. */
-export function HostTokensDialog({ hostId, hostName, onClose }: {
-  hostId: number; hostName: string; onClose: () => void
-}) {
-  return (
-    <Dialog title={<>Capability tokens, {hostName}</>} width={440} onClose={onClose}>
-      <div className="mt-4">
-        <HostCapabilityList hostId={hostId} />
-      </div>
-    </Dialog>
   )
 }
 

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { QueryState } from './QueryState'
 
 /**
  * Every capability the backend knows about, with its state: stored (rotate)
@@ -19,7 +20,9 @@ import { Button } from './ui/button'
 type HostCapabilities = { capabilities?: Record<string, boolean> }
 
 // Title-case beats a label table, which would be exactly the second list the
-// spec forbids.
+// spec forbids. Ceiling: this only capitalizes the first character, so a
+// future multi-word key (e.g. "node_power") would render as "Node_power".
+// Fine for the four keys that exist today; revisit if one lands.
 const labelOf = (key: string) => key.charAt(0).toUpperCase() + key.slice(1)
 
 const detailOf = (e: unknown) =>
@@ -132,23 +135,30 @@ export function HostCapabilityList({ hostId }: { hostId: number }) {
     queryKey: ['hosts', hostId],
     queryFn: () => api<HostCapabilities>(`/hosts/${hostId}`),
   })
-  const caps = host.data?.capabilities
-  if (!caps) return null
   return (
-    <div>
-      <p className="mb-1 text-[11px] uppercase tracking-wide text-text-3">
-        Capability tokens
-      </p>
-      <p className="mb-2 text-[11.5px] text-text-3">
-        The setup script prints one token per capability. A capability with no
-        token fails the first time you use the feature, not here.
-      </p>
-      {Object.entries(caps).map(([name, stored]) => (
-        <CapabilityRow key={name} hostId={hostId} name={name}
-          // monitoring is required=True and the host cannot exist without it,
-          // so it is rotate-only and never shown as a gap.
-          stored={stored || name === 'monitoring'} />
-      ))}
-    </div>
+    <QueryState query={host}
+                emptyTitle="No capabilities reported"
+                emptyNote="This host has no capability tokens to show."
+                empty={(d) => !d.capabilities || Object.keys(d.capabilities).length === 0}
+                errorTitle="Capabilities not readable"
+                errorNote="Proxploy could not reach the backend to check this host's tokens.">
+      {(data) => (
+        <div>
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-text-3">
+            Capability tokens
+          </p>
+          <p className="mb-2 text-[11.5px] text-text-3">
+            The setup script prints one token per capability. A capability with no
+            token fails the first time you use the feature, not here.
+          </p>
+          {Object.entries(data.capabilities ?? {}).map(([name, stored]) => (
+            <CapabilityRow key={name} hostId={hostId} name={name}
+              // monitoring is required=True and the host cannot exist without it,
+              // so it is rotate-only and never shown as a gap.
+              stored={stored || name === 'monitoring'} />
+          ))}
+        </div>
+      )}
+    </QueryState>
   )
 }

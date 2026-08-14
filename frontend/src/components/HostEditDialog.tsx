@@ -108,7 +108,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
   }
 
   return (
-    <Dialog title={<>Edit {host.name}</>} width={440} onClose={onClose}>
+    <Dialog title={<>Edit {host.name}</>} width={440} scrollBody onClose={onClose}>
       <div className="mt-4 space-y-3">
         <div>
           <label htmlFor="edit-host-name"
@@ -129,7 +129,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
         <div>
           <label htmlFor="edit-token-id"
             className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-            New API token id
+            New monitoring token id
           </label>
           <input id="edit-token-id" className={inputCls} value={tokenId}
             onChange={(e) => setTokenId(e.target.value)}
@@ -138,14 +138,19 @@ export function HostEditDialog({ hostId, host, onClose }: {
         <div>
           <label htmlFor="edit-token-secret"
             className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-            New API token secret
+            New monitoring token secret
           </label>
           <input id="edit-token-secret" type="password" className={inputCls} value={tokenSecret}
             onChange={(e) => setTokenSecret(e.target.value)} />
         </div>
-        {/* The dialog's own two token fields rotate monitoring, which is what
-            Save has always done. The other three capabilities have their own
-            rows here, each verified individually by the same route. */}
+        {/* HostCapabilityList below renders all FOUR capabilities, monitoring
+            included -- it is not "the other three". The fields above are a
+            second, independent way to rotate monitoring specifically: they
+            run through save(), which does the PATCH (name/address) before the
+            credentials POST, so a changed address and a changed token verify
+            together against the NEW address. HostCapabilityList's per-row
+            POST has no such ordering, which is why monitoring's own row below
+            stays rotate-only rather than replacing these fields. */}
         <div className="border-t border-line-soft pt-3">
           <HostCapabilityList hostId={hostId} />
         </div>

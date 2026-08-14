@@ -16,6 +16,11 @@ const { ApiError } = vi.hoisted(() => ({
 
 let testResult: 'connected' | 'unreachable' = 'connected'
 const calls: { path: string; method?: string; body: unknown }[] = []
+// Finding #9: left undefined (as it always was before this fix), the mount
+// GET HostCapabilityList fires renders an empty list in every test in this
+// file, so Task 3's wiring only had accidental coverage. One test below sets
+// this to exercise the real thing.
+let hostCapabilities: Record<string, boolean> | undefined
 
 vi.mock('../api/client', () => ({
   ApiError,
@@ -27,6 +32,10 @@ vi.mock('../api/client', () => ({
     }
     if (path.endsWith('/credentials')) {
       return Promise.resolve({ id: 1, rotated: ['api_token'] })
+    }
+    if (path === '/hosts/1' && !opts?.method) {
+      // HostCapabilityList's own mount GET.
+      return Promise.resolve({ id: 1, name: 'pve1', capabilities: hostCapabilities })
     }
     // PATCH /hosts/{id}
     return Promise.resolve({ id: 1, node_shell_enabled: false })
@@ -47,7 +56,7 @@ const wrap = (onClose = vi.fn()) => {
 }
 
 describe('HostEditDialog', () => {
-  beforeEach(() => { testResult = 'connected'; calls.length = 0; toastSuccess.mockClear() })
+  beforeEach(() => { testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined })
   afterEach(() => vi.restoreAllMocks())
 
   it('starts pre-filled with the current name and address', () => {
@@ -78,8 +87,8 @@ describe('HostEditDialog', () => {
   // (HostRotateDialog's own endpoint) rather than a second credential path.
   it('reuses POST /hosts/{id}/credentials for the token id and secret', async () => {
     wrap()
-    fireEvent.change(screen.getByLabelText(/api token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/api token secret/i), { target: { value: 'newsecret' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
     const cred = calls.find((c) => c.path === '/hosts/1/credentials')!
@@ -89,8 +98,8 @@ describe('HostEditDialog', () => {
 
   it('does not call PATCH at all when only credentials changed', async () => {
     wrap()
-    fireEvent.change(screen.getByLabelText(/api token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/api token secret/i), { target: { value: 'newsecret' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
     expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
@@ -99,8 +108,8 @@ describe('HostEditDialog', () => {
   it('saves the address before rotating credentials, so the new token is checked against the new address', async () => {
     wrap()
     fireEvent.change(screen.getByLabelText(/^address$/i), { target: { value: 'https://10.0.0.9:8006' } })
-    fireEvent.change(screen.getByLabelText(/api token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/api token secret/i), { target: { value: 'newsecret' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
     const patchIndex = calls.findIndex((c) => c.method === 'PATCH')
@@ -111,7 +120,7 @@ describe('HostEditDialog', () => {
 
   it('refuses a half-filled token pair the same way HostRotateDialog does', async () => {
     wrap()
-    fireEvent.change(screen.getByLabelText(/api token id/i), { target: { value: 'proxploy@pve!new' } })
+    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
   })
 
@@ -157,15 +166,28 @@ describe('HostEditDialog', () => {
 
   it('surfaces a PATCH failure without attempting the credentials call', async () => {
     wrap()
-    // Let the dialog's own HostCapabilityList finish its harmless mount GET
-    // of /hosts/1 first, so mockImplementationOnce below lands on the PATCH
-    // call it's meant for rather than being consumed by that unrelated read.
-    await waitFor(() => expect(calls.length).toBeGreaterThan(0))
+    // Finding #8: reject by path+method instead of "the next call after the
+    // mount GET resolves" -- that depended on call ordering and on there
+    // being exactly one mount GET, neither of which this test needs to know.
     const { api } = await import('../api/client')
-    vi.mocked(api).mockImplementationOnce(() =>
-      Promise.reject(new ApiError(409, { detail: 'a host with that name already exists' })))
+    const original = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) => {
+      if (path === '/hosts/1' && opts?.method === 'PATCH') {
+        return Promise.reject(new ApiError(409, { detail: 'a host with that name already exists' }))
+      }
+      return original(path, opts)
+    })
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'taken-name' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     expect(await screen.findByText(/a host with that name already exists/i)).toBeInTheDocument()
+    vi.mocked(api).mockImplementation(original)
+  })
+
+  // Finding #9: exercise HostCapabilityList's real wiring inside this dialog
+  // instead of relying on it always rendering empty here.
+  it('renders a capability row when the host reports capabilities', async () => {
+    hostCapabilities = { monitoring: true, lifecycle: false, console: false, backup: false }
+    wrap()
+    expect(await screen.findByText('Lifecycle')).toBeInTheDocument()
   })
 })

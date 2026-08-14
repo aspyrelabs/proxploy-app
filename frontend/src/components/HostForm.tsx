@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { Button } from './ui/button'
 import { inputCls } from './LoginForm'
@@ -97,6 +98,7 @@ function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
 }
 
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
+  const qc = useQueryClient()
   const [f, setF] = useState({ name: '', address: 'https://', token_id: '',
     // Off by default, deliberately diverging from doc 08 §"TLS to Proxmox"
     // ("verification on by default"). A stock Proxmox node serves a
@@ -120,7 +122,8 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   // script prints one per capability and until now three of them had nowhere
   // to go. Keyed by capability so the retry path can tell which one the node
   // rejected.
-  const [capTokens, setCapTokens] = useState<Record<string, { id: string; secret: string }>>({})
+  const [capTokens, setCapTokens] =
+    useState<Record<string, { id: string; secret: string } | undefined>>({})
   // The host, once POST /hosts has succeeded. Non-null means a retry must NOT
   // create it again (409 host name already exists).
   const [created, setCreated] = useState<HostCreated | null>(null)
@@ -170,9 +173,18 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
       // `created` non-null is the retry path: the host already exists and
       // works for the capabilities that verified, so re-creating it would
       // 409 and rolling it back would throw away a working enrolment.
-      const h = created ?? await api<HostCreated>('/hosts', {
-        method: 'POST',
-        body: JSON.stringify({ ...f, ssh_consent: f.ssh_enroll }) })
+      let h = created
+      if (!h) {
+        h = await api<HostCreated>('/hosts', {
+          method: 'POST',
+          body: JSON.stringify({ ...f, ssh_consent: f.ssh_enroll }) })
+        // Invalidate as soon as the host exists on the server, not only in
+        // onCreated: if the operator abandons this panel after a rejected
+        // token (below) instead of clicking Retry or Continue, the host must
+        // still show up in the list -- otherwise re-opening the form and
+        // submitting the same name 409s with no visible reason why.
+        qc.invalidateQueries({ queryKey: ['hosts'] })
+      }
       setCreated(h)
       // Each token is verified against the node individually by
       // POST /hosts/{id}/credentials, so one rejection is one capability's

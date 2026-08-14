@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -34,6 +35,11 @@ vi.mock('../api/client', () => ({
 
 import { HostForm } from '../components/HostForm'
 
+const withQuery = (ui: React.ReactNode) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return { ...render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>), qc }
+}
+
 const fill = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
@@ -51,7 +57,7 @@ describe('HostForm capability tokens', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('offers a token field for each capability still ticked, and none for the unticked', () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     expect(screen.getByLabelText('Lifecycle token id')).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText(/^Lifecycle$/))
     expect(screen.queryByLabelText('Lifecycle token id')).not.toBeInTheDocument()
@@ -60,7 +66,7 @@ describe('HostForm capability tokens', () => {
 
   it('creates the host, then stores one capability token per filled pair', async () => {
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fill('Lifecycle token id', 'proxploy@pve!lifecycle')
     fill('Lifecycle token secret', 'lc-secret')
@@ -77,7 +83,7 @@ describe('HostForm capability tokens', () => {
 
   it('skips a capability whose token pair was left blank', async () => {
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fill('Console token id', 'proxploy@pve!console')  // secret left empty
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
@@ -88,7 +94,7 @@ describe('HostForm capability tokens', () => {
   it('names the rejected capability, keeps the host, and does not advance', async () => {
     reject = 'console'
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fill('Lifecycle token id', 'proxploy@pve!lifecycle')
     fill('Lifecycle token secret', 'lc-secret')
@@ -106,7 +112,7 @@ describe('HostForm capability tokens', () => {
   it('retries only the rejected capability, without re-creating the host', async () => {
     reject = 'console'
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fill('Lifecycle token id', 'proxploy@pve!lifecycle')
     fill('Lifecycle token secret', 'lc-secret')
@@ -128,7 +134,7 @@ describe('HostForm capability tokens', () => {
   it('lets the operator continue with the capability still missing', async () => {
     reject = 'backup'
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fill('Backup token id', 'proxploy@pve!backup')
     fill('Backup token secret', 'bad')
@@ -141,10 +147,47 @@ describe('HostForm capability tokens', () => {
 
   it('behaves exactly as before when no capability token is filled in', async () => {
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
     expect(calls.map(c => c.path)).toEqual(['/hosts'])
+  })
+
+  // Finding #12: unticking every capability box (monitoring stays mandatory
+  // and off-screen) must behave exactly as onboarding did before this
+  // feature existed -- one POST, nothing else, and no token-pair block.
+  it('makes exactly one call, to POST /hosts, when every capability is unticked', async () => {
+    const onCreated = vi.fn()
+    withQuery(<HostForm onCreated={onCreated} />)
+    fillHost()
+    for (const label of ['Lifecycle', 'Console', 'Backup']) {
+      fireEvent.click(screen.getByLabelText(new RegExp(`^${label}$`)))
+    }
+    expect(screen.queryByText(/The script prints one token per capability/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
+    expect(calls).toHaveLength(1)
+    expect(calls[0].path).toBe('/hosts')
+  })
+
+  // Finding #6: abandoning the form after the host is created (before Retry
+  // or Continue) must not strand it -- invalidation happens at the point of
+  // truth (POST /hosts resolving), not only inside onCreated. Proven with the
+  // rejected-token flow, where onCreated is deliberately never called: the
+  // old code only invalidated from the caller's onCreated, so this is the
+  // one case that tells the two apart.
+  it('invalidates the hosts list on host creation even when a rejected token means onCreated never fires', async () => {
+    reject = 'console'
+    const onCreated = vi.fn()
+    const { qc } = withQuery(<HostForm onCreated={onCreated} />)
+    const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
+    fillHost()
+    fill('Console token id', 'proxploy@pve!console')
+    fill('Console token secret', 'bad')
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+    await screen.findByText(/Console: .*did not work/i)
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['hosts'] })
+    expect(onCreated).not.toHaveBeenCalled()
   })
 })

@@ -106,7 +106,7 @@ const renderWizard = () => withQuery(<Wizard />)
 
 describe('HostForm', () => {
   it('shows the honest root-consent copy with the SSH checkbox', () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     expect(screen.getByLabelText(/address/i)).toBeDefined()
     // Exact, not /token id/i: the field's info button is labelled "What is the
     // API token id?" and a loose match now finds both.
@@ -119,7 +119,7 @@ describe('HostForm', () => {
   // has to go and create elsewhere, with no hint of what it is or where it
   // comes from.
   it('explains the API token id and links to the docs', () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     const toggle = screen.getByRole('button', { name: /what is the api token id/i })
     expect(screen.queryByText(/user@realm!name/)).not.toBeInTheDocument()
 
@@ -139,7 +139,7 @@ describe('HostForm', () => {
     // host got enrolled broken and then reported as unreachable minutes later.
     probeResult = { version: '9.2.10', release: '9.2',
                     missing_privileges: ['Sys.Audit', 'Pool.Audit'] }
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
     expect(await screen.findByText(/Sys\.Audit/)).toBeInTheDocument()
     expect(screen.getByText(/Pool\.Audit/)).toBeInTheDocument()
@@ -147,14 +147,14 @@ describe('HostForm', () => {
 
   it('says plainly when the token has everything it needs', async () => {
     probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
     expect(await screen.findByText(/Connected, PVE 9\.2\.10/)).toBeInTheDocument()
     expect(screen.queryByText(/missing/i)).not.toBeInTheDocument()
   })
 
   it('offers the pveum script so the operator never invents the privileges', async () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
     expect(await screen.findByText(/pveum role add ProxployAudit/)).toBeInTheDocument()
   })
@@ -162,7 +162,7 @@ describe('HostForm', () => {
   it('copies exactly the script it displays', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
     await screen.findByText(/pveum role add ProxployAudit/)
     fireEvent.click(screen.getByRole('button', { name: /copy script/i }))
@@ -170,7 +170,7 @@ describe('HostForm', () => {
   })
 
   it('asks only for the capabilities left ticked', async () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     // Doc 08: monitoring is mandatory, the rest are the operator's choice.
     fireEvent.click(screen.getByLabelText(/^Lifecycle$/))
     fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
@@ -180,7 +180,7 @@ describe('HostForm', () => {
   })
 
   it('asks for Sys.Console only when node shells are opted into', async () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
     await screen.findByText(/pveum role add ProxployAudit/)
     const calls = scriptCalls.at(-1)
@@ -188,7 +188,7 @@ describe('HostForm', () => {
   })
 
   it('asks for node power only when explicitly ticked, independent of capabilities', async () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
     await screen.findByText(/pveum role add ProxployAudit/)
     // Off by default: the same "never widen a scope the operator did not
@@ -204,18 +204,18 @@ describe('HostForm', () => {
   it('leaves TLS verification off by default', () => {
     // A stock Proxmox node serves a self-signed certificate, so verifying by
     // default failed the very first connection for almost everyone.
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     expect(screen.getByLabelText(/verify tls certificate/i)).not.toBeChecked()
   })
 
   it('warns that the token secret is shown only once', () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /what is the api token secret/i }))
     expect(screen.getByText(/only once/i)).toBeInTheDocument()
   })
 
   it('collapses an open explanation again', () => {
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     const toggle = screen.getByRole('button', { name: /what is the api token id/i })
     fireEvent.click(toggle)
     fireEvent.click(toggle)
@@ -225,7 +225,7 @@ describe('HostForm', () => {
 
   it('shows the indeterminate ring while testing the connection, no percentage', async () => {
     probeHeld = true
-    render(<HostForm onCreated={() => {}} />)
+    withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
 
     const status = await screen.findByRole('status')
@@ -239,7 +239,7 @@ describe('HostForm', () => {
   it('shows the indeterminate ring while adding the host, no percentage', async () => {
     addHeld = true
     const onCreated = vi.fn()
-    render(<HostForm onCreated={onCreated} />)
+    withQuery(<HostForm onCreated={onCreated} />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'pve-01' } })
     fireEvent.change(screen.getByLabelText(/address/i), { target: { value: 'https://10.0.0.5:8006' } })
     fireEvent.change(screen.getByLabelText('API token id'), { target: { value: 'proxploy@pve!x' } })

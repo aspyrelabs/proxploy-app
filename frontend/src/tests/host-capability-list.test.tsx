@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { ApiError } = vi.hoisted(() => ({
@@ -39,9 +39,10 @@ import { HostCapabilityList } from '../components/HostCapabilityList'
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: {
     queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={qc}>
+  const view = render(<QueryClientProvider client={qc}>
     <HostCapabilityList hostId={3} />
   </QueryClientProvider>)
+  return { ...view, qc }
 }
 
 describe('HostCapabilityList', () => {
@@ -106,7 +107,48 @@ describe('HostCapabilityList', () => {
     fireEvent.change(screen.getByLabelText('Console token id'), { target: { value: 'only-id' } })
     const btn = screen.getByRole('button', { name: 'Add Console token' })
     expect(btn).toBeDisabled()
-    fireEvent.click(btn)
-    expect(calls.filter(c => c.path.endsWith('/credentials'))).toHaveLength(0)
+    // Finding #11: clicking a disabled button can't fire onClick, so
+    // asserting no call followed made that half of this test tautological.
+    // Assert the actual warning copy instead.
+    expect(screen.getByText('Token id and secret must both be filled in.')).toBeInTheDocument()
+  })
+
+  // Finding #5: the onSuccess handler deliberately deviates from the plan's
+  // prefix invalidate -- it patches ['hosts', hostId] directly and
+  // invalidates ['hosts'] with exact: true. Neither half was tested.
+  it('flips the row to stored and closes its fields on a successful Add', async () => {
+    wrap()
+    await screen.findByText('Lifecycle')
+    fireEvent.change(screen.getByLabelText('Lifecycle token id'),
+                     { target: { value: 'proxploy@pve!lifecycle' } })
+    fireEvent.change(screen.getByLabelText('Lifecycle token secret'),
+                     { target: { value: 'lc' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
+
+    const row = (await screen.findByText('Lifecycle')).closest('.border-t') as HTMLElement
+    await waitFor(() => expect(within(row).getByText('stored')).toBeInTheDocument())
+    expect(within(row).queryByLabelText('Lifecycle token id')).not.toBeInTheDocument()
+  })
+
+  it('patches the cached host detail in place, preserving its other fields, and invalidates the hosts list by exact key', async () => {
+    const { qc } = wrap()
+    const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
+    await screen.findByText('Lifecycle')
+    fireEvent.change(screen.getByLabelText('Lifecycle token id'),
+                     { target: { value: 'proxploy@pve!lifecycle' } })
+    fireEvent.change(screen.getByLabelText('Lifecycle token secret'),
+                     { target: { value: 'lc' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
+
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['hosts'], exact: true }))
+    const cached = qc.getQueryData<{ id: number; name: string; capabilities: Record<string, boolean> }>(
+      ['hosts', 3])
+    // The fields that were already in the cache (id, name) survive the
+    // patch -- it's a merge, not a replacement.
+    expect(cached?.id).toBe(3)
+    expect(cached?.name).toBe('pve-01')
+    expect(cached?.capabilities).toEqual({
+      monitoring: true, lifecycle: true, console: false, backup: false,
+    })
   })
 })
