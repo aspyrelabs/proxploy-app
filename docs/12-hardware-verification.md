@@ -258,15 +258,38 @@ because a code review found both cases reachable and neither provable offline.
 
 Neither is a storage finding, and both were invisible to every fake.
 
-**`build.func` now renders an interactive whiptail dialog mid-install.** A
-"TELEMETRY & DIAGNOSTICS" menu with `<Confirm>` / `<Exit>` buttons drew itself
-into the job transcript on 2026-08-14, in a non-TTY SSH session. It did not
-block this run, but an interactive prompt reaching a session with no terminal
-on the other end is precisely the failure class the storage work exists to
-prevent, and it arrived from upstream without us changing anything. Worth a
-standing check: nothing in `misc/build.func` should be able to ask a question
-during a Proxploy install, and only reading the real transcript catches a new
-one appearing.
+**`build.func` renders an interactive whiptail dialog mid-install, and we only
+survived it by accident.** A "TELEMETRY & DIAGNOSTICS" radiolist with
+`<Confirm>` / `<Exit>` buttons drew itself into the job transcript on
+2026-08-14, in a non-TTY SSH session.
+
+Why it did not block: `diagnostics_check()` prompts whenever
+`/usr/local/community-scripts/diagnostics` is missing, and its whiptail call
+ends in `|| result="no"`. A session with no terminal falls through that
+fallback to "no" and then WRITES the file, so only the FIRST install on a node
+ever saw the dialog. The file on `node1` is stamped 20:06, the first install of
+the day. That is error handling we happened to land in, not a supported
+non-interactive path, and it is one upstream edit away from being a hang.
+
+There is no environment variable for it, which is worth recording because the
+obvious fix does not work: `variables()` does a hard `DIAGNOSTICS="no"`
+assignment rather than `${DIAGNOSTICS:-no}`, so anything exported is
+overwritten before `diagnostics_check()` runs, and that function branches on
+the FILE regardless of the variable's value. Adding `DIAGNOSTICS=no` next to
+`PHS_SILENT` would look like protection and provide none. Proxploy now writes
+the config file itself, before the script runs and only when it is absent, so
+an operator who opted in from the node's own shell keeps their answer.
+
+**The standing lesson is bigger than telemetry.** `misc/build.func` is fetched
+live from `main` at execution time (see the residual limitation recorded in
+`services/appstore.py`), so upstream can introduce a NEW interactive prompt at
+any moment, with no change on our side and no version bump to notice. Two of
+these are now known, `select_storage` and `diagnostics_check`, and both were
+found by reading a real transcript rather than by any test. Every fake in this
+repo answers as though no question was asked. So: after any real install,
+read the transcript for whiptail output, and treat a new prompt as a
+regression in Proxploy even though nothing here changed. There is no automated
+check that can replace this, which is exactly why it belongs in this document.
 
 **A node that cannot resolve `download.proxmox.com` fails at exit 223 with a
 misleading message.** The install reported `Template ... not available in

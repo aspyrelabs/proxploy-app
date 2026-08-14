@@ -508,3 +508,64 @@ def test_install_without_a_ctid_fails_when_the_script_exits_zero_without_buildin
             assert db.query(App).count() == 0
 
     asyncio.run(scenario())
+
+
+def test_install_declines_telemetry_before_the_script_can_ask(tmp_path):
+    """build.func's diagnostics_check() draws an interactive whiptail radiolist
+    ("TELEMETRY & DIAGNOSTICS") whenever /usr/local/community-scripts/diagnostics
+    is absent. That is the select_storage failure shape again, in a third
+    place, and it arrived from upstream with no change on our side.
+
+    There is no environment variable to assert on here, and that is the point:
+    variables() does a hard `DIAGNOSTICS="no"` assignment rather than
+    `${DIAGNOSTICS:-no}`, so an exported value is overwritten before
+    diagnostics_check() runs, and that function branches on the FILE, not the
+    variable. So the only thing that can be proved is that the file is put in
+    place first, and that it is created rather than overwritten.
+
+    It must also be its own SSH command: `env` is inlined as a `KEY=value ...`
+    prefix, and those assignments apply only to the first simple command, so a
+    guard glued onto the install with `;` would strip mode/PHS_SILENT/var_*
+    off the install itself. Asserting on the ORDER and the SEPARATION is what
+    stops a future refactor from folding them together.
+    """
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        cmds: list[str] = []
+
+        def _on_create_process(command):
+            cmds.append(command)
+            pve.add_ct(150, node="pve1", name="redis", status="running")
+
+        fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=[],
+                                 stderr_lines=[], exit_status=0,
+                                 on_create_process=_on_create_process)
+        app.state.ssh_connect_factory = make_fake_connect_factory(fake)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                "name": "Redis", "ctid": 150, "overrides": {}})
+
+        assert len(cmds) == 2, f"expected opt-out then install, got {cmds}"
+        opt_out, install = cmds
+
+        # First, and before anything can prompt.
+        assert "/usr/local/community-scripts/diagnostics" in opt_out
+        assert "DIAGNOSTICS=no" in opt_out
+        # Created only when absent: an operator who opted IN from the node's
+        # own shell keeps their answer. This refuses to be ASKED the question
+        # in a session with no terminal, it does not answer it for them.
+        assert "[ -e /usr/local/community-scripts/diagnostics ]" in opt_out
+
+        # Separate commands, and the install keeps its inlined env.
+        assert "bash -c " not in opt_out
+        assert install.startswith("TERM=xterm mode=generated PHS_SILENT=1 ")
+        assert "/usr/local/community-scripts" not in install
+
+    asyncio.run(scenario())

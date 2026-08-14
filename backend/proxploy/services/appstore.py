@@ -186,6 +186,51 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
+    # Decline community-scripts telemetry BEFORE the install runs, because
+    # build.func's diagnostics_check() draws an interactive whiptail radiolist
+    # ("TELEMETRY & DIAGNOSTICS") whenever its config file is absent. That is
+    # the same failure shape as select_storage, and it arrived from upstream
+    # with no change on our side.
+    #
+    # There is NO environment variable for this, and adding a DIAGNOSTICS=no
+    # to `env` above would be theatre: variables() does a hard
+    # `DIAGNOSTICS="no"` assignment, not `${DIAGNOSTICS:-no}`, so anything we
+    # export is overwritten before diagnostics_check() is reached, and that
+    # function ignores the variable's value anyway when the file is missing.
+    # The file is the only control surface upstream offers.
+    #
+    # Why we are not already broken: the whiptail call ends in
+    # `|| result="no"`, so a non-TTY session falls through to "no" and then
+    # WRITES the file, which is why only the first install on a node ever saw
+    # the dialog. That is a fallback on failure, not a supported
+    # non-interactive path, and it is one upstream edit away from becoming a
+    # hang. Do not rely on it.
+    #
+    # Written only when absent, so an operator who opted IN from the node's
+    # own shell keeps their choice; this refuses to answer a question on their
+    # behalf, it only refuses to be ASKED one in a session with no terminal.
+    #
+    # A separate SSH call rather than a prefix on the install command below:
+    # `env` is inlined as a `KEY=value ...` prefix by executor/ssh.py, and
+    # those assignments only apply to the FIRST simple command, so gluing a
+    # guard on with `;` would silently strip mode/PHS_SILENT/every var_* from
+    # the install itself. Not worth reshaping that command to save a
+    # connection.
+    telemetry_dir = "/usr/local/community-scripts"
+    opt_out = (f"mkdir -p {telemetry_dir} && "
+               f"{{ [ -e {telemetry_dir}/diagnostics ] || "
+               f"printf 'DIAGNOSTICS=no\n' > {telemetry_dir}/diagnostics; }}")
+    try:
+        await executor.run_for_host(
+            app.state.sessionmaker, app.state.secretstore, host_id, host.address,
+            opt_out, pinned_fingerprint=host.ssh_host_key_fingerprint,
+            on_new_fingerprint=on_new_fingerprint, timeout_s=60)
+    except Exception as e:  # noqa: BLE001
+        # Never fails the install: the worst case is the state we were already
+        # in before this existed, and an install that works is worth more than
+        # a guarantee we could not get.
+        ctx.log(f"could not pre-set the telemetry preference: {e}", stream="stderr")
+
     # Pinned to the exact commit that was ingested, classified and diffed; 
     # not to `main`, which would be a fresh, possibly-different fetch at
     # execution time and would make the app_scripts pin decorative.
