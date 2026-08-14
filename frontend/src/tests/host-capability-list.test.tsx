@@ -69,7 +69,8 @@ describe('HostCapabilityList', () => {
   it('offers monitoring as rotate-only, never missing or removable', async () => {
     wrap()
     await screen.findByText('Monitoring')
-    expect(screen.getByRole('button', { name: 'Rotate Monitoring token' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rotate Monitoring token, show fields' }))
+      .toBeEnabled()
     expect(screen.queryByRole('button', { name: /remove monitoring/i })).not.toBeInTheDocument()
     // Its fields are behind the rotate control, not open as an unfilled gap.
     expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
@@ -126,7 +127,9 @@ describe('HostCapabilityList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Lifecycle token' }))
 
     const row = (await screen.findByText('Lifecycle')).closest('.border-t') as HTMLElement
-    await waitFor(() => expect(within(row).getByText('stored')).toBeInTheDocument())
+    await waitFor(() => expect(
+      within(row).getByRole('button', { name: 'Lifecycle token already stored' }),
+    ).toBeDisabled())
     expect(within(row).queryByLabelText('Lifecycle token id')).not.toBeInTheDocument()
   })
 
@@ -149,6 +152,79 @@ describe('HostCapabilityList', () => {
     expect(cached?.name).toBe('pve-01')
     expect(cached?.capabilities).toEqual({
       monitoring: true, lifecycle: true, console: false, backup: false,
+    })
+  })
+
+  // The Add/Rotate pair. Exactly one of the two is live per row, and which
+  // one is the only thing that reports whether the capability has a token,
+  // now that the separate "stored" / "not configured" text is gone.
+  describe('the Add and Rotate group', () => {
+    const rowOf = (label: string) =>
+      screen.getByText(label).closest('.border-t') as HTMLElement
+
+    it('gives every capability its own group, not just the configured ones', async () => {
+      wrap()
+      await screen.findByText('Monitoring')
+      for (const label of ['Monitoring', 'Lifecycle', 'Console', 'Backup']) {
+        const group = within(rowOf(label)).getByRole('group')
+        expect(within(group).getAllByRole('button')).toHaveLength(2)
+      }
+    })
+
+    it('reads Stored in green and offers Rotate when a token is already held', async () => {
+      wrap()
+      await screen.findByText('Monitoring')
+      const group = within(rowOf('Monitoring')).getByRole('group')
+
+      const stored = within(group).getByRole('button', { name: 'Monitoring token already stored' })
+      expect(stored).toHaveTextContent('Stored')
+      expect(stored).toBeDisabled()
+      // The same green the status text used before the button absorbed it,
+      // and undimmed, since it is a readout rather than a withheld control.
+      // `text-green!`, not `text-green`. jsdom applies no stylesheet, so this
+      // cannot assert the rendered colour; what it CAN pin is the important
+      // modifier, whose absence let ghost's `text-text` win on stylesheet
+      // order and render Stored the same near-white as Add, with the plain
+      // class present and this assertion passing. Verified green in a real
+      // browser separately.
+      expect(stored).toHaveClass('text-green!')
+      expect(stored.className).not.toMatch(/(^|\s)text-green(\s|$)/)
+      expect(stored).toHaveClass('disabled:opacity-100')
+
+      expect(within(group).getByRole('button', { name: /^Rotate Monitoring token/ })).toBeEnabled()
+    })
+
+    it('offers Add, and refuses Rotate, while a capability has no token', async () => {
+      wrap()
+      await screen.findByText('Backup')
+      const group = within(rowOf('Backup')).getByRole('group')
+
+      const add = within(group).getByRole('button', { name: 'Add Backup token, show fields' })
+      expect(add).toHaveTextContent('Add')
+      expect(add).toBeEnabled()
+      // Nothing to rotate, so the control says so rather than opening the
+      // very fields Add opens and leaving the operator to guess.
+      expect(within(group).getByRole('button', { name: /^Rotate Backup token/ })).toBeDisabled()
+    })
+
+    it('puts the caret in the token id field when Add is pressed on an open row', async () => {
+      wrap()
+      await screen.findByText('Console')
+      // The row is already open (the gap is the prompt), so this click is the
+      // one that would otherwise appear to do nothing.
+      fireEvent.click(screen.getByRole('button', { name: 'Add Console token, show fields' }))
+      expect(screen.getByLabelText('Console token id')).toHaveFocus()
+    })
+
+    it('opens the fields from Rotate on a stored capability', async () => {
+      wrap()
+      await screen.findByText('Monitoring')
+      expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Rotate Monitoring token, show fields' }))
+      expect(screen.getByLabelText('Monitoring token id')).toBeInTheDocument()
+      // The submit that appears is the row's other Rotate, and it is named
+      // apart from the group's so neither is ambiguous while both are on screen.
+      expect(screen.getByRole('button', { name: 'Rotate Monitoring token' })).toBeInTheDocument()
     })
   })
 })
