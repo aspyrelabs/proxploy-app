@@ -61,7 +61,12 @@ export const ACTION_LABEL: Record<string, string> = {
   // with app.forget or app.uninstall. Unlink means the container is still on
   // Proxmox and only Proxploy stopped tracking it; vanished means it is gone
   // and Proxploy cleaned up after it.
-  'app.reaped': 'App Vanished',
+  // Deliberately the SAME label as app.forget, decided by the product owner
+  // and overriding doc 13's "Collisions this pass removed" section, which
+  // argued these must differ so the feed says whether the container still
+  // exists. It does not: both read App Unlink. Do not "fix" this back from
+  // the doc without asking.
+  'app.reaped': 'App Unlink',
   'app.reconfigure': 'App Reconfigure',
   'app.restart': 'App Restart',
   'app.shutdown': 'App Shutdown',
@@ -93,7 +98,9 @@ export const ACTION_LABEL: Record<string, string> = {
   'host.ssh_verify': 'Fingerprint Verify',
   'host.sync': 'Host Sync',
   'host.test': 'Connection Test',
-  'job.cancel': 'Task Cancel',
+  // "Job", not doc 13's "Task": every other surface says job, including the
+  // Cancel button, the bell tray, the failure toast and the /jobs API.
+  'job.cancel': 'Job Cancel',
   'metrics.maintain': 'Usage Cleanup',
   // Doc 13 asks for "Migration Refused" here, on the premise that app.migrate
   // is only ever written for a refusal and that a real migration is logged
@@ -111,14 +118,19 @@ export const ACTION_LABEL: Record<string, string> = {
   'app.migrate': 'App Migrate',
   'migrate.app': 'App Migrate',
   'network.apply': 'Network Apply',
-  'network.guest_config': 'Guest Network',
-  // Distinct from the line above on purpose: this one is only ever written
-  // when READING the guest's current NIC config failed (api/network.py:112),
-  // before anything was sent to the guest, so it must not read as a
-  // configuration attempt. Doc 13 item 7 claims both halves now share one
-  // identifier; they do not, so this entry stays.
-  'network.guest_config_read': 'Guest Network Read',
-  'network.host_config': 'Host Network',
+  // All three network config identifiers read "Network Edit". Doc 13's "Guest
+  // Network" and "Host Network" carried no verb, so a failure read "Guest
+  // Network Failed", which sounds like the network went down rather than the
+  // edit being refused. Guest vs host comes from the target column.
+  //
+  // guest_config_read is folded in here too, by product decision, even though
+  // it is written only when READING the guest's current NIC list failed
+  // (api/network.py:112) before anything was sent. The known cost: a failed
+  // read now reads as a failed edit, which overstates what was attempted.
+  // Doc 13 item 7 is also wrong that this case shares the write identifier.
+  'network.guest_config': 'Network Edit',
+  'network.guest_config_read': 'Network Edit',
+  'network.host_config': 'Network Edit',
   'network.revert': 'Network Revert',
   'schedule.create': 'Schedule Create',
   'schedule.delete': 'Schedule Delete',
@@ -166,14 +178,21 @@ export const ACTION_LABEL: Record<string, string> = {
  * Keyed on the raw value the API sends, same as TINT above, so one map serves
  * the activity feed's status line, the audit log's Result column and the
  * StatusPill on hosts and guests. Anything absent falls through to the raw
- * value: `denied` and `error` have no entry because doc 13 gives none, it
- * spends its denied row on the "Blocked" prefix instead.
+ * value.
+ *
+ * `denied` and `error` are not in doc 13, which spends its denied row on the
+ * "Blocked" title prefix and never names the Result cell. Without them the
+ * audit log printed a polished "Complete" in one row and a bare lowercase
+ * "denied" in the next. Refused and Error were chosen so the column says
+ * something the title does not already say.
  */
 export const STATUS_LABEL: Record<string, string> = {
   queued: 'Waiting',
   running: 'Running',
   succeeded: 'Done',
   ok: 'Complete',
+  denied: 'Refused',
+  error: 'Error',
   resolved: 'Cleared',
   canceled: 'Canceled',
   interrupted: 'Interrupted',

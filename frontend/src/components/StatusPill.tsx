@@ -1,4 +1,4 @@
-import { statusLabel } from './activityDisplay'
+import { statusLabel } from '../lib/activityDisplay'
 
 const STYLES: Record<string, string> = {
   running: 'bg-green-dim text-green',

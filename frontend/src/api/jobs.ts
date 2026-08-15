@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type { ApiError } from './client'
-import { actionLabel, statusLabel } from '../components/activityDisplay'
+import { actionLabel, statusLabel } from '../lib/activityDisplay'
 
 export type JobStatus =
   | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted'

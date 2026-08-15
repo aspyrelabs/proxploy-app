@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACTION_LABEL, actionLabel, statusLabel } from '../components/activityDisplay'
+import { ACTION_LABEL, actionLabel, statusLabel } from '../lib/activityDisplay'
 
 describe('actionLabel', () => {
   it('names a mapped identifier in words', () => {
@@ -7,18 +7,20 @@ describe('actionLabel', () => {
     expect(actionLabel('apps.adopt')).toBe('App Import')
   })
 
-  // The word "reaped" means nothing outside the codebase, and the label has to
-  // stay DISTINCT from both real removals: an uninstall is Proxploy destroying
-  // the container, a forget is Proxploy dropping its own row for a container
-  // that is still running, a reap is Proxploy cleaning up after a container
-  // somebody else already destroyed. Collapsing them would hide the one thing
-  // the user cares about, whether their container still exists.
-  it('separates removing our record from destroying the container', () => {
-    expect(actionLabel('app.reaped')).toBe('App Vanished')
+  // The word "reaped" means nothing outside the codebase. Both it and
+  // app.forget read App Unlink, decided by the product owner on the grounds
+  // that they are two ends of one coin: Proxploy stops tracking the app
+  // either way. This deliberately overrides doc 13, which argued they must
+  // differ so the feed says whether the container still exists.
+  //
+  // What must still hold is that neither collides with app.uninstall, which
+  // is the one that DESTROYS the container.
+  it('separates dropping our record from destroying the container', () => {
+    expect(actionLabel('app.reaped')).toBe('App Unlink')
     expect(actionLabel('app.forget')).toBe('App Unlink')
     expect(actionLabel('app.uninstall')).toBe('App Uninstall')
     expect(actionLabel('app.reaped')).not.toBe(actionLabel('app.uninstall'))
-    expect(actionLabel('app.reaped')).not.toBe(actionLabel('app.forget'))
+    expect(actionLabel('app.forget')).not.toBe(actionLabel('app.uninstall'))
   })
 
   // Backend actions get added without this map being updated; a new one must
@@ -91,14 +93,16 @@ describe('actionLabel', () => {
     expect(actionLabel('schedule.disable')).not.toBe(actionLabel('schedule.update'))
   })
 
-  // A failed READ of the guest's NIC config is not an attempted write.
-  // api/network.py:112 writes this identifier, and only on the read half.
-  it('keeps a failed guest network read out of the configuration wording', () => {
-    expect(actionLabel('network.guest_config_read')).toBe('Guest Network Read')
-    expect(actionLabel('network.guest_config_read', 'error'))
-      .toBe('Guest Network Read Failed')
-    expect(actionLabel('network.guest_config_read'))
-      .not.toBe(actionLabel('network.guest_config'))
+  // All three network config identifiers share one label by product decision,
+  // including the read half (api/network.py:112), which is written when
+  // Proxploy could not even read the guest's NIC list. The accepted cost is
+  // that a failed read reads as a failed edit. Pinned so the tradeoff is a
+  // visible test change if anyone revisits it.
+  it('gives the three network config identifiers one label', () => {
+    expect(actionLabel('network.guest_config')).toBe('Network Edit')
+    expect(actionLabel('network.host_config')).toBe('Network Edit')
+    expect(actionLabel('network.guest_config_read')).toBe('Network Edit')
+    expect(actionLabel('network.guest_config_read', 'error')).toBe('Network Edit Failed')
   })
 
   it('never renders a mapped label as blank', () => {
@@ -107,11 +111,11 @@ describe('actionLabel', () => {
     }
   })
 
-  // Doc 13 rule 1. The API Key pair is the stated exception, and
-  // Guest Network Read is api/network.py's read-half identifier, which doc 13
-  // does not list (its item 7 assumes the identifier no longer exists).
-  it('keeps every label to two words bar the documented exceptions', () => {
-    const allowed = new Set(['apikey.create', 'apikey.revoke', 'network.guest_config_read'])
+  // Doc 13 rule 1. The API Key pair is the only stated exception, and after
+  // folding the network read into Network Edit it is now the ONLY exception
+  // of any kind: every other label in the map is exactly two words.
+  it('keeps every label to two words bar the documented exception', () => {
+    const allowed = new Set(['apikey.create', 'apikey.revoke'])
     for (const [raw, label] of Object.entries(ACTION_LABEL)) {
       if (allowed.has(raw)) continue
       expect(label.split(' ').length, `${raw}: ${label}`).toBe(2)
@@ -154,12 +158,20 @@ describe('statusLabel', () => {
     expect(statusLabel('unreachable')).toBe('Host Unreachable')
   })
 
-  // Doc 13 gives no word for these two; it spends its denied row on the
-  // "Blocked" prefix instead. Passing the raw value through beats inventing
-  // one here, and this pins that decision so it is noticed, not inherited.
-  it('passes through a status the doc does not name', () => {
-    expect(statusLabel('denied')).toBe('denied')
-    expect(statusLabel('error')).toBe('error')
+  // Doc 13 names neither of these: it spends its denied row on the "Blocked"
+  // title prefix and never covers the Result cell, which left the audit log
+  // printing "Complete" in one row and a bare lowercase "denied" in the next.
+  // Refused and Error were chosen so the column says something the title does
+  // not already repeat.
+  it('names the two results the doc left out', () => {
+    expect(statusLabel('denied')).toBe('Refused')
+    expect(statusLabel('error')).toBe('Error')
+  })
+
+  // Anything genuinely unheard-of still passes through rather than being
+  // guessed at, so a new backend status is visibly unstyled instead of
+  // silently mislabelled.
+  it('passes through a status nothing has named', () => {
     expect(statusLabel('stopped')).toBe('stopped')
     expect(statusLabel(null)).toBe('unknown')
   })

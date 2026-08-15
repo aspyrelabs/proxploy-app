@@ -3,7 +3,7 @@ import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { Icon } from './ui/icon'
 import { useJobs } from '../api/jobs'
 import type { JobRow } from '../api/jobs'
-import { actionLabel, ago } from './activityDisplay'
+import { actionLabel, ago } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
