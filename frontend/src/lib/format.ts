@@ -24,6 +24,18 @@ export function fmtPct(n?: number | null): string {
   return n == null ? UNKNOWN : `${Math.round(n)}%`
 }
 
+/** Seconds remaining → a short duration ("45s", "3m 20s"), for an ETA that
+ *  needs second-level precision fmtUptime's minute floor does not give
+ *  (UploadDialog: a 30s ISO upload would otherwise read as "0m"). */
+export function fmtEta(s?: number | null): string {
+  if (s == null || !Number.isFinite(s) || s < 0) return UNKNOWN
+  const r = Math.round(s)
+  const m = Math.floor(r / 60)
+  const sec = r % 60
+  if (m === 0) return `${sec}s`
+  return sec > 0 ? `${m}m ${sec}s` : `${m}m`
+}
+
 /** bytes/s → bit-rate display (network cards, doc 06 Network/throughput).
  *
  *  Scales its own unit. It used to be hard-wired to Mbps, which reports a real

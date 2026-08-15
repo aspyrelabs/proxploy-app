@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBps, fmtBytes, fmtPct, fmtUptime } from '../lib/format'
+import { fmtBps, fmtBytes, fmtEta, fmtPct, fmtUptime } from '../lib/format'
 
 describe('format helpers', () => {
   it('formats bytes with binary units', () => {
@@ -29,5 +29,12 @@ describe('format helpers', () => {
     expect(fmtUptime(undefined)).not.toBe(', ')
     expect(fmtPct(undefined)).not.toBe(', ')
     expect(fmtBps(undefined)).not.toBe(', ')
+  })
+  it('formats an ETA down to the second, unlike fmtUptime which is minute-coarse', () => {
+    expect(fmtEta(45)).toBe('45s')
+    expect(fmtEta(90)).toBe('1m 30s')
+    expect(fmtEta(120)).toBe('2m')
+    expect(fmtEta(null)).toBe('unknown')
+    expect(fmtEta(-1)).toBe('unknown')
   })
 })

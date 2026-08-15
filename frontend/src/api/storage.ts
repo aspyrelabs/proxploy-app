@@ -1,6 +1,7 @@
 // api/storage.ts, read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
 // Same shape as api/catalog.ts: plain useQuery wrappers, no client-side state.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
 import { ApiError, api } from './client'
 
 export type StorageRow = {
@@ -75,6 +76,14 @@ export function useStorageContent(hostId: number | null, name: string | null,
 
 export type JobResponse = { job: { id: number; kind: string } }
 
+export type UploadProgress = {
+  /** Bytes sent so far. */
+  loaded: number
+  /** Total bytes the browser will send, or null when the progress event was
+   *  not `lengthComputable`: no honest percentage can be derived then. */
+  total: number | null
+}
+
 /**
  * The ONE place in this codebase that must NOT go through `api()`.
  *
@@ -84,28 +93,48 @@ export type JobResponse = { job: { id: number; kind: string } }
  * and FastAPI's UploadFile parse 422s before a byte of the ISO is read.
  *
  * Everything else `api()` does is reproduced here verbatim, the /api/v1
- * prefix, credentials: 'include', the X-CSRF-Token header read from the
- * pp_csrf cookie, ApiError(status, body) on non-ok; so this stays an
- * exemption exactly one header wide. DO NOT "fix" it back to api().
+ * prefix, credentials (`xhr.withCredentials`, XHR's form of `include`), the
+ * X-CSRF-Token header read from the pp_csrf cookie, ApiError(status, body) on
+ * non-ok; so this stays an exemption exactly one header wide. DO NOT "fix" it
+ * back to api().
  *
- * ponytail: fetch fires no upload-progress events, so the dialog shows an
- * indeterminate "Uploading…" for the browser→Proxploy leg; the
- * Proxploy→PVE leg is a real JobLog with real percentages the moment this
- * resolves. Swap to XMLHttpRequest + upload.onprogress if a multi-GB ISO ever
- * makes that first leg feel dead.
+ * XMLHttpRequest rather than fetch, on purpose: fetch has no upload-progress
+ * event and no way to cancel a request already sent, and a multi-GB ISO can
+ * sit on the browser→Proxploy leg for minutes. `xhr.upload.onprogress` is
+ * what lets UploadDialog show real bytes/speed/ETA there, and `xhr.abort()`
+ * is what lets its Cancel button actually stop the transfer instead of just
+ * closing the dialog on top of it.
  */
-async function postForm<T>(path: string, form: FormData): Promise<T> {
+function uploadForm<T>(path: string, form: FormData, onProgress: (p: UploadProgress) => void,
+): { promise: Promise<T>; xhr: XMLHttpRequest } {
+  const xhr = new XMLHttpRequest()
   const csrf = document.cookie.split('; ')
     .find((c) => c.startsWith('pp_csrf='))?.split('=')[1] ?? ''
-  const r = await fetch('/api/v1' + path, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRF-Token': csrf },
-    body: form,
+  const promise = new Promise<T>((resolve, reject) => {
+    xhr.open('POST', '/api/v1' + path)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('X-CSRF-Token', csrf)
+    xhr.upload.onprogress = (e) => {
+      onProgress({ loaded: e.loaded, total: e.lengthComputable ? e.total : null })
+    }
+    xhr.onload = () => {
+      let body: unknown = null
+      if (xhr.status !== 204 && xhr.responseText) {
+        try { body = JSON.parse(xhr.responseText) } catch { body = null }
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T)
+      else reject(new ApiError(xhr.status, body))
+    }
+    // A network failure never reaches onload; same fallback shape as
+    // fetch's rejected promise, `body: null` reads as "Upload failed" below.
+    xhr.onerror = () => reject(new ApiError(0, null))
+    // Cancel's abort() lands here, not onerror: UploadDialog reads the name
+    // to tell "the operator stopped this" apart from a real failure and
+    // skip the error toast for it.
+    xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'))
+    xhr.send(form)
   })
-  const body = r.status === 204 ? null : await r.json().catch(() => null)
-  if (!r.ok) throw new ApiError(r.status, body)
-  return body as T
+  return { promise, xhr }
 }
 
 export type UploadVars = {
@@ -123,24 +152,40 @@ export type VolumeExists = {
 
 export function useUploadContent() {
   const qc = useQueryClient()
-  return useMutation<JobResponse, ApiError, UploadVars>({
+  const xhrRef = useRef<XMLHttpRequest | null>(null)
+  const [progress, setProgress] = useState<UploadProgress | null>(null)
+  const mutation = useMutation<JobResponse, ApiError, UploadVars>({
     mutationFn: (v) => {
+      setProgress(null)
       const form = new FormData()
       form.append('file', v.file)
       form.append('content', v.content)
       form.append('node', v.node)
       if (v.overwrite) form.append('overwrite', 'true')
-      return postForm<JobResponse>(`/storage/${v.hostId}/${v.storage}/content`, form)
+      const { promise, xhr } = uploadForm<JobResponse>(
+        `/storage/${v.hostId}/${v.storage}/content`, form, setProgress,
+      )
+      xhrRef.current = xhr
+      return promise
     },
     // Same rule as api/jobs.ts::useLifecycle, the resource key is NOT
     // invalidated here. The volume does not exist until the job succeeds, and
     // the SSE `resource` event applyResource now routes to ['storage'] is what
     // refreshes the browser at exactly the right moment (Task 12).
     onSettled: () => {
+      xhrRef.current = null
       qc.invalidateQueries({ queryKey: ['jobs'] })
       qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
+  return {
+    ...mutation,
+    /** Bytes sent so far, or null before the first upload progress event
+     *  (or once a new attempt has reset it). */
+    progress,
+    /** Aborts the in-flight upload. A no-op once it has already settled. */
+    abort: () => xhrRef.current?.abort(),
+  }
 }
 
 export type AttachVars = {

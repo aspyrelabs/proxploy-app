@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const LOCAL = {
@@ -68,8 +68,16 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   useSearch: () => ({}),
 }))
 
+// Same reason as vms.test.tsx: notify.error pushes into notificationStore,
+// which this file has no need to exercise for real, only to assert it was
+// (or was not, for a deliberate Cancel) called.
+vi.mock('../lib/notify', () => ({
+  notify: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+
 import { StorageForm } from '../components/StorageForm'
 import { UploadDialog } from '../components/UploadDialog'
+import { notify } from '../lib/notify'
 import { StoragePage } from '../routes/storage'
 
 const withQuery = (ui: React.ReactNode) => {
@@ -77,76 +85,158 @@ const withQuery = (ui: React.ReactNode) => {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
+/**
+ * UploadDialog now sends the upload through XMLHttpRequest, not fetch, the
+ * only way to get real `onprogress` events for the bytes going out. This
+ * stands in for the browser one: records what the component sent, and lets
+ * a test drive it exactly like the real network would,
+ * `xhr.upload.onprogress(...)` then one of `respond`/`onerror`/`abort`.
+ */
+class FakeXHR {
+  static instances: FakeXHR[] = []
+  method = ''
+  url = ''
+  headers: Record<string, string> = {}
+  withCredentials = false
+  body: unknown = null
+  status = 0
+  responseText = ''
+  aborted = false
+  upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } =
+    { onprogress: null }
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onabort: (() => void) | null = null
+
+  constructor() { FakeXHR.instances.push(this) }
+  open(method: string, url: string) { this.method = method; this.url = url }
+  setRequestHeader(k: string, v: string) { this.headers[k] = v }
+  send(body: unknown) { this.body = body }
+  abort() { this.aborted = true; this.onabort?.() }
+
+  /** Simulates the server's response arriving. */
+  respond(status: number, body: unknown) {
+    this.status = status
+    this.responseText = body == null ? '' : JSON.stringify(body)
+    this.onload?.()
+  }
+}
+
 beforeEach(() => {
   calls.length = 0
   features = { 'storage.manage': true }
   document.cookie = 'pp_csrf=csrf-token-abc'
+  FakeXHR.instances.length = 0
+  vi.stubGlobal('XMLHttpRequest', FakeXHR)
 })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('UploadDialog', () => {
-  it('POSTs multipart with credentials + CSRF and no Content-Type override', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true, status: 202, json: () => Promise.resolve({ job: { id: 9, kind: 'storage.upload' } }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
+  const start = async (file = new File(['x'], 'a.iso', { type: 'application/octet-stream' })) => {
     withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
-      contentTypes={['iso', 'vztmpl', 'backup']} onClose={vi.fn()} />)
-
-    const input = screen.getByLabelText('File') as HTMLInputElement
-    const file = new File(['iso-bytes'], 'ubuntu.iso', { type: 'application/octet-stream' })
-    fireEvent.change(input, { target: { files: [file] } })
+      contentTypes={['iso']} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('File'), { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1))
+    return FakeXHR.instances[0]
+  }
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    const [url, opts] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/v1/storage/1/local/content')
-    expect(opts.method).toBe('POST')
-    expect(opts.credentials).toBe('include')
-    expect(opts.headers['X-CSRF-Token']).toBe('csrf-token-abc')
+  it('POSTs multipart with credentials + CSRF and no Content-Type override', async () => {
+    const file = new File(['iso-bytes'], 'ubuntu.iso', { type: 'application/octet-stream' })
+    const xhr = await start(file)
+
+    expect(xhr.method).toBe('POST')
+    expect(xhr.url).toBe('/api/v1/storage/1/local/content')
+    // credentials: 'include' for fetch, the XHR equivalent is this flag
+    expect(xhr.withCredentials).toBe(true)
+    expect(xhr.headers['X-CSRF-Token']).toBe('csrf-token-abc')
     // the whole reason this is not api(): a Content-Type here kills the boundary
-    expect(opts.headers['Content-Type']).toBeUndefined()
-    expect(opts.body).toBeInstanceOf(FormData)
-    expect((opts.body as FormData).get('content')).toBe('iso')
-    expect((opts.body as FormData).get('node')).toBe('pve1')
-    expect((opts.body as FormData).get('file')).toBe(file)
+    expect(xhr.headers['Content-Type']).toBeUndefined()
+    expect(xhr.body).toBeInstanceOf(FormData)
+    expect((xhr.body as FormData).get('content')).toBe('iso')
+    expect((xhr.body as FormData).get('node')).toBe('pve1')
+    expect((xhr.body as FormData).get('file')).toBe(file)
   })
 
   it('swaps the body for the job log once the upload returns a job', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true, status: 202, json: () => Promise.resolve({ job: { id: 9, kind: 'storage.upload' } }),
-    }))
-    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
-      contentTypes={['iso']} onClose={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('File'),
-      { target: { files: [new File(['x'], 'a.iso')] } })
-    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    const xhr = await start()
+    act(() => xhr.respond(202, { job: { id: 9, kind: 'storage.upload' } }))
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull()
   })
 
-  it('shows the indeterminate ring while the byte stream is in flight, no percentage', async () => {
-    // fetch() here is not XMLHttpRequest, there is no onUploadProgress, so
-    // there is no honest byte count to show while this awaits.
-    let releaseFetch: (v: unknown) => void = () => {}
-    const held = new Promise((resolve) => { releaseFetch = resolve })
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(held))
+  it('progress events drive the bar\'s value', async () => {
+    const xhr = await start()
+    act(() => xhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 200 }))
 
+    const bar = await screen.findByRole('progressbar')
+    expect(bar).toHaveAttribute('aria-valuenow', '25')
+    expect(bar).toHaveAttribute('aria-busy', 'false')
+  })
+
+  it('shows the file size, bytes sent, speed and time remaining once there is enough data', async () => {
+    const file = new File([new Uint8Array(2_000_000)], 'ubuntu.iso')
+    const xhr = await start(file)
+
+    vi.useFakeTimers()
+    try {
+      act(() => xhr.upload.onprogress?.({ lengthComputable: true, loaded: 500_000, total: 2_000_000 }))
+      await vi.advanceTimersByTimeAsync(1000)
+      act(() => xhr.upload.onprogress?.({ lengthComputable: true, loaded: 1_000_000, total: 2_000_000 }))
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // Total size (from the File itself) and bytes sent so far.
+    expect(screen.getByText(/976\.6 KiB of 1\.9 MiB/)).toBeInTheDocument()
+    // 500,000 B/s over the smoothing window: a real figure, not "unknown".
+    expect(document.body.textContent).toMatch(/KiB\/s|MiB\/s/)
+    expect(document.body.textContent).toMatch(/left/)
+    expect(document.body.textContent).not.toMatch(/unknown/)
+  })
+
+  it('does not render a percentage when the progress event is not lengthComputable', async () => {
+    const xhr = await start()
+    act(() => xhr.upload.onprogress?.({ lengthComputable: false, loaded: 50, total: 0 }))
+
+    const bar = await screen.findByRole('progressbar')
+    expect(bar).not.toHaveAttribute('aria-valuenow')
+    expect(bar).toHaveAttribute('aria-busy', 'true')
+    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
+  })
+
+  it('shows the unknown placeholder before there is enough data to estimate speed', async () => {
+    const xhr = await start()
+    act(() => xhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 200 }))
+
+    // One sample only, no elapsed span to derive a rate from yet.
+    expect(document.body.textContent).toMatch(/unknown/)
+  })
+
+  it('Cancel aborts the in-flight upload instead of leaving it running in the background, and does not toast an error for it', async () => {
+    const onClose = vi.fn()
     withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
-      contentTypes={['iso']} onClose={vi.fn()} />)
+      contentTypes={['iso']} onClose={onClose} />)
     fireEvent.change(screen.getByLabelText('File'),
       { target: { files: [new File(['x'], 'a.iso')] } })
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1))
 
-    const status = await screen.findByRole('status')
-    expect(status).toHaveAttribute('aria-busy', 'true')
-    expect(document.body.textContent).not.toMatch(/\d+ ?%/)
-
-    releaseFetch({
-      ok: true, status: 202, json: () => Promise.resolve({ job: { id: 9, kind: 'storage.upload' } }),
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      // The abort rejects the mutation's promise on a microtask; give it one
+      // before asserting nothing toasted.
+      await Promise.resolve()
     })
-    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+    expect(FakeXHR.instances[0].aborted).toBe(true)
+    expect(onClose).toHaveBeenCalled()
+    expect(notify.error).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failed upload the same way a rejected fetch did', async () => {
+    const xhr = await start()
+    act(() => xhr.respond(500, { detail: 'disk full on pve1' }))
+    await waitFor(() => expect(notify.error).toHaveBeenCalledWith('disk full on pve1'))
   })
 })
 
@@ -266,17 +356,12 @@ describe('UploadDialog name collision', () => {
   }
 
   it('offers Replace or Cancel instead of a typed phrase, and does not upload until asked', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 409, json: () => Promise.resolve(collision) })
-      .mockResolvedValueOnce({
-        ok: true, status: 202, json: () => Promise.resolve({ job: { id: 12, kind: 'storage.upload' } }),
-      })
-    vi.stubGlobal('fetch', fetchMock)
-
     withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
       contentTypes={['iso']} onClose={vi.fn()} />)
     pick()
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1))
+    act(() => FakeXHR.instances[0].respond(409, collision))
 
     // The prompt names the file and the volid, and asks for a click.
     await screen.findByText('ubuntu.iso already exists')
@@ -284,26 +369,26 @@ describe('UploadDialog name collision', () => {
     expect(screen.queryByLabelText(/type/i)).toBeNull()   // no typed confirmation
 
     // First attempt carried no overwrite flag: the SERVER detects the clash.
-    expect((fetchMock.mock.calls[0][1].body as FormData).get('overwrite')).toBeNull()
+    expect((FakeXHR.instances[0].body as FormData).get('overwrite')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect((fetchMock.mock.calls[1][1].body as FormData).get('overwrite')).toBe('true')
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(2))
+    act(() => FakeXHR.instances[1].respond(202, { job: { id: 12, kind: 'storage.upload' } }))
+    expect((FakeXHR.instances[1].body as FormData).get('overwrite')).toBe('true')
+    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 
   it('Cancel backs out and uploads nothing', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 409, json: () => Promise.resolve(collision) })
-    vi.stubGlobal('fetch', fetchMock)
-
     withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
       contentTypes={['iso']} onClose={vi.fn()} />)
     pick()
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1))
+    act(() => FakeXHR.instances[0].respond(409, collision))
     await screen.findByText('ubuntu.iso already exists')
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByText('ubuntu.iso already exists')).toBeNull())
-    expect(fetchMock).toHaveBeenCalledTimes(1)   // nothing was replaced
+    expect(FakeXHR.instances).toHaveLength(1)   // nothing was replaced
   })
 })
