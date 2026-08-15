@@ -13,7 +13,7 @@ import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { Button } from '../components/ui/button'
 import { Loading } from '../components/ui/loading'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
-import { OnboardingRail, type RailStep } from '../components/OnboardingRail'
+import { StepRail, type RailStep } from '../components/StepRail'
 
 export const onboardingRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -183,7 +183,7 @@ export function Wizard() {
           <p className="mb-4 mt-1.5 text-[9px] uppercase tracking-wide text-text-3 md:mb-5">
             Setup · {Math.min(step + 1, STEPS.length)} of {STEPS.length}
           </p>
-          <OnboardingRail steps={railSteps} view={step} onSelect={go} />
+          <StepRail steps={railSteps} view={step} onSelect={go} />
         </aside>
 
         <main className="min-w-0 flex-1 p-7">

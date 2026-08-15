@@ -5,6 +5,7 @@ import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
 import { KVGrid } from './KVGrid'
 import { inputCls } from './LoginForm'
+import { StepRail, type RailStep } from './StepRail'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
@@ -42,9 +43,10 @@ function Field({ id, label, children }: { id: string; label: string; children: R
 
 /**
  * Doc 06 §(a) row 42's "New VM". Mirrors routes/onboarding.tsx's wizard shape
- * on purpose, a step index, a STEPS chip row, `{step === N && (…)}` blocks; 
- * rather than becoming a reusable <Wizard/>: there are exactly two multi-step
- * flows in this app and they share no fields.
+ * on purpose, a step index, a StepRail down the side, `{step === N && (…)}`
+ * blocks; rather than becoming a reusable <Wizard/>: there are exactly two
+ * multi-step flows in this app and they share no fields, only the rail's
+ * presentation (see StepRail.tsx), which they now both import.
  *
  * On submit it follows InstallDialog: fire the mutation, keep the job id, swap
  * the body for <JobLog/> + Close.
@@ -112,6 +114,20 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
     true,
   ]
 
+  // Back to any visited step is always allowed. Forward is only allowed up to
+  // the first not-yet-valid step in between, the same gate Next already uses,
+  // so the rail can never open a step Next would have refused to reach.
+  const reachable = (i: number) => {
+    if (i <= step) return true
+    for (let j = step; j < i; j++) if (!ok[j]) return false
+    return true
+  }
+  const railSteps: RailStep[] = STEPS.map((label, i) => ({
+    label,
+    status: i < step ? 'done' : i === step ? 'current' : 'todo',
+    reachable: reachable(i),
+  }))
+
   const submit = () => {
     setError('')
     create.mutate(undefined, {
@@ -126,20 +142,14 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="New VM"
-      width={560}
+      width={760}
       onClose={onClose}
-      headerRight={(
-        <div className="flex gap-1.5">
-          {STEPS.map((s, i) => (
-            <span key={s}
-              className={`rounded-full border px-2 py-0.5 font-mono text-[9.5px] ${i === step ? 'border-amber text-amber' : 'border-line text-text-3'}`}>
-              {i + 1} {s}
-            </span>
-          ))}
-        </div>
-      )}
     >
-
+    <div className="flex flex-col gap-4 md:flex-row">
+      <aside className="shrink-0 border-b border-line pb-4 md:w-[160px] md:border-b-0 md:border-r md:pb-0 md:pr-4">
+        <StepRail steps={railSteps} view={step} onSelect={setStep} />
+      </aside>
+      <div className="min-w-0 flex-1">
     {jobId ? (
       <div>
         <JobLog jobId={jobId} />
@@ -311,6 +321,8 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
         </div>
       </>
   )}
+      </div>
+    </div>
 </Dialog>
   )
 }

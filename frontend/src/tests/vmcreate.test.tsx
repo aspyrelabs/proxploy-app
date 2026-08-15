@@ -157,6 +157,54 @@ describe('VmCreateWizard', () => {
   })
 })
 
+// The rail replaced the old row of step chips (VmCreateWizard.tsx). It is the
+// same StepRail component onboarding uses, so these only check the wiring
+// this wizard is responsible for: one entry per step, the current one marked,
+// and reachability following ok[step] rather than a separate source of truth.
+describe('VmCreateWizard rail', () => {
+  beforeEach(() => {
+    calls.length = 0
+    features = { 'vms.create': true, 'vms.clone': true }
+  })
+
+  it('renders one rail entry per step', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    for (const label of ['Target', 'OS', 'Resources', 'Network', 'Confirm']) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') })).toBeInTheDocument()
+    }
+  })
+
+  it('marks the current step with aria-current="step" and no other step', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    expect(screen.getByRole('button', { name: /^target$/i }).getAttribute('aria-current')).toBe('step')
+    expect(screen.getByRole('button', { name: /^os$/i }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('does not navigate to a step that is not yet valid', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    // Target is still empty, so ok[0] is false and OS is not reachable yet.
+    fireEvent.click(screen.getByRole('button', { name: /^os$/i }))
+    expect(screen.getByLabelText(/^host$/i)).toBeInTheDocument()
+  })
+
+  it('navigates back to a completed step, the same as Back', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
+    await screen.findByRole('option', { name: 'pve1' })
+    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve1' } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
+    next()
+
+    await screen.findByLabelText(/iso storage/i)
+    fireEvent.click(screen.getByRole('button', { name: /^target$/i }))
+    expect(screen.getByLabelText(/^host$/i)).toBeInTheDocument()
+  })
+})
+
 describe('VmsPage create/clone affordances', () => {
   beforeEach(() => {
     calls.length = 0

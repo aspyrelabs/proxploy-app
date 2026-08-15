@@ -24,7 +24,7 @@ const label: Record<StepStatus, string> = {
   skipped: 'text-text-3',
 }
 
-export function OnboardingRail({ steps, view, onSelect }: {
+export function StepRail({ steps, view, onSelect }: {
   steps: RailStep[]; view: number; onSelect: (index: number) => void
 }) {
   return (

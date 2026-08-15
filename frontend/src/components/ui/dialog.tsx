@@ -45,8 +45,8 @@ export function Dialog({
   /** 'palette' sits high and hides its heading (the command palette names
    *  itself through its input). */
   variant?: 'center' | 'palette'
-  /** Sits on the title's row, pushed right. The VM wizard's step pills use it
-   *  so converting did not have to move them below the heading. */
+  /** Sits on the title's row, pushed right. The store's detail dialog uses it
+   *  for a status tag so converting did not have to move it below the heading. */
   headerRight?: ReactNode
   /** Caps the panel height and scrolls the BODY, leaving the heading in place.
    *  Opt-in on purpose: this is shared by InstallDialog, the VM create wizard,
@@ -135,9 +135,8 @@ export function Dialog({
                   {title}
                 </DialogPrimitive.Title>
                 {/* headerRight and the X share this row so they can never
-                    overlap: headerRight (e.g. the VM wizard's step pills)
-                    stays exactly where it was, with the X pushed to its
-                    right. */}
+                    overlap: headerRight stays exactly where it was, with the
+                    X pushed to its right. */}
                 <div className="flex shrink-0 items-center gap-2">
                   {headerRight}
                   {closeButton}
