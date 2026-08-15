@@ -98,6 +98,7 @@ export function NodeIdentityRail({ hostId, node, snapshot }: {
   // that the row does not move or empty when /status is refused.
   const identity: Fact[] = [
     ['Node', snapshot.node ?? 'unknown'],
+    ['Cluster', snapshot.cluster ? `Yes (${snapshot.cluster})` : 'No'],
     ['PVE version', s ? shortPve(s.pve_version) : snapshot.pve_version ?? 'unknown'],
   ]
   if (s) {

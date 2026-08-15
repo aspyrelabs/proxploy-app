@@ -86,6 +86,25 @@ describe('NodeIdentityRail', () => {
     expect(await screen.findByText('9.2.10')).toBeInTheDocument()
   })
 
+  it('names the cluster when the node is in one', async () => {
+    wrap(snapshot({ cluster: 'lab-cluster' }))
+    expect(await screen.findByText('Yes (lab-cluster)')).toBeInTheDocument()
+  })
+
+  it('shows No for a standalone node, not unknown', async () => {
+    wrap(snapshot({ cluster: null }))
+    expect(await screen.findByText('Cluster')).toBeInTheDocument()
+    expect(screen.getByText('No')).toBeInTheDocument()
+  })
+
+  it('places Cluster between Node and PVE version', async () => {
+    const { container } = wrap()
+    await screen.findByText('9.2.10')
+    const labels = [...container.querySelectorAll('dt')].map((dt) => dt.textContent)
+    expect(labels.indexOf('Node')).toBeLessThan(labels.indexOf('Cluster'))
+    expect(labels.indexOf('Cluster')).toBeLessThan(labels.indexOf('PVE version'))
+  })
+
   it('keeps the datastore total and the root filesystem apart', async () => {
     // On a real node these differ by orders of magnitude. Collapsing them into
     // one "Storage" row would answer neither question honestly.
