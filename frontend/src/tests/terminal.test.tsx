@@ -84,6 +84,45 @@ describe('AppConsole', () => {
   })
 })
 
+describe('TerminalPanel', () => {
+  it('strips ANSI escape codes instead of showing the raw bracket codes', async () => {
+    // The exact payload one line of a community-scripts install arrives as:
+    // the API forwards the raw ANSI bytes it received (correct, a real
+    // terminal renders them as color), but the browser does not interpret
+    // ESC, so left alone the bracket codes show up as literal text.
+    const raw = '  🛠️  \x1b[m\x1b[1m\x1b[32mRAM Size: \x1b[4;92m2048 MiB\x1b[m'
+    const apiMock = vi.mocked((await import('../api/client')).api)
+    apiMock.mockResolvedValue([{ stream: 'stdout', message: raw }])
+    const { AppLogs } = await import('../routes/apps')
+    const qc = new QueryClient()
+    render(<QueryClientProvider client={qc}><AppLogs appId={42} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByText(/RAM Size: 2048 MiB/)).toBeInTheDocument())
+    // The emoji and the words survive; only the escape noise is gone.
+    expect(document.body.textContent).toContain('🛠️')
+    expect(document.body.textContent).not.toMatch(/\[m|\[1m|\[32m|\[4;92m/)
+  })
+
+  it('leaves ordinary bracketed log text alone -- no ESC in front means it is not ANSI', async () => {
+    // community-scripts logs are full of plain `[TAG]` text with no ESC byte
+    // in front of it. A regex that treats `[` alone as the start of a color
+    // code (an optional ESC) eats the bracket and mangles these lines.
+    const lines = [
+      '[INFO] installing packages',
+      '[OK] done',
+      'see [A] and [B] below',
+      'msg_ok [ERROR] failed',
+    ]
+    const apiMock = vi.mocked((await import('../api/client')).api)
+    apiMock.mockResolvedValue(lines.map((message) => ({ stream: 'stdout', message })))
+    const { AppLogs } = await import('../routes/apps')
+    const qc = new QueryClient()
+    render(<QueryClientProvider client={qc}><AppLogs appId={42} /></QueryClientProvider>)
+    for (const line of lines) {
+      await waitFor(() => expect(screen.getByText(line)).toBeInTheDocument())
+    }
+  })
+})
+
 describe('AppLogs', () => {
   it('renders the logs tail in a static TerminalPanel', async () => {
     const apiMock = vi.mocked((await import('../api/client')).api)

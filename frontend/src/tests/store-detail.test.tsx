@@ -343,6 +343,35 @@ describe('StoreDetailPage, a fully covered app', () => {
 
 })
 
+describe('StoreDetailPage, duplicate values in upstream arrays', () => {
+  it('never warns about two children with the same key, and never shows a chip twice', async () => {
+    // Real finding: navigating to /store/2fauth logged "Encountered two
+    // children with the same key" three times. Upstream's architectures/
+    // platforms arrays are third-party data and not guaranteed unique.
+    const dup = {
+      ...rich,
+      raw: {
+        ...(rich.raw as Record<string, unknown>),
+        metadata: {
+          ...((rich.raw as { metadata: Record<string, unknown> }).metadata),
+          architectures: ['amd64', 'amd64', 'arm64'],
+          platforms: ['pve', 'pve'],
+        },
+      },
+    }
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mount(dup)
+    await screen.findByRole('heading', { name: '2FAuth', level: 1 })
+    // A duplicate array entry is not shown as two identical chips.
+    expect(screen.getAllByText('amd64')).toHaveLength(1)
+    expect(screen.getAllByText('arm64')).toHaveLength(1)
+    for (const call of errorSpy.mock.calls) {
+      expect(String(call[0])).not.toMatch(/same key/i)
+    }
+    errorSpy.mockRestore()
+  })
+})
+
 describe('StoreDetailPage, a row with no upstream metadata', () => {
   it('renders a usable page from discovery alone and omits every empty section', async () => {
     slug = 'mysql'

@@ -125,3 +125,33 @@ describe('ProfilePage password change', () => {
     expect(vi.mocked(api).mock.calls.some(([p]) => p === '/auth/login')).toBe(false)
   })
 })
+
+describe('ProfilePage loading state', () => {
+  beforeEach(() => {
+    vi.mocked(api).mockReset()
+  })
+
+  it('never nests a div (SkeletonLine) inside a p while /auth/me is pending', async () => {
+    // React's own console error, from the real running app: "In HTML, <div>
+    // cannot be a descendant of <p>." The Email and Role readouts wrapped
+    // their loading SkeletonLine (a div) in a <p>.
+    let resolveMe!: (v: typeof ME) => void
+    const mePromise = new Promise<typeof ME>((r) => { resolveMe = r })
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/auth/me') return mePromise as Promise<never>
+      if (path === '/entitlements') return Promise.resolve(ENTITLEMENTS) as Promise<never>
+      if (path === '/auth/sessions') return Promise.resolve(SESSIONS) as Promise<never>
+      return Promise.resolve({ ok: true }) as Promise<never>
+    })
+    const { container } = renderProfile()
+
+    // Pending: the skeleton is up, which is the state that used to nest a div in a p.
+    await waitFor(() => expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0))
+    for (const p of Array.from(container.querySelectorAll('p'))) {
+      expect(p.querySelector('div')).toBeNull()
+    }
+
+    resolveMe(ME)
+    await waitFor(() => expect(screen.getByText(ME.email)).toBeInTheDocument())
+  })
+})

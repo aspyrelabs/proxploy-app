@@ -534,9 +534,14 @@ function Capabilities({ meta, served }: { meta: UpstreamMetadata; served: Served
   const hasArm = pick(served.has_arm, meta.has_arm)
   const privileged = pick(served.privileged, meta.privileged)
   const updateable = pick(served.updateable, meta.updateable)
-  const architectures = asList(pick(served.architectures, meta.architectures))
-    .map((a) => text(a)).filter((a): a is string => a != null)
-  const platforms = asList(meta.platforms).map((p) => text(p)).filter((p): p is string => p != null)
+  // Deduplicated: upstream's arrays are third-party data and not guaranteed
+  // unique (a repeated "amd64" has shown up in the wild), and a chip row
+  // repeating the same word is redundant even before the repeat collides
+  // with itself as a React key.
+  const architectures = [...new Set(asList(pick(served.architectures, meta.architectures))
+    .map((a) => text(a)).filter((a): a is string => a != null))]
+  const platforms = [...new Set(asList(meta.platforms)
+    .map((p) => text(p)).filter((p): p is string => p != null))]
   const chips: ReactNode[] = []
   if (hasArm === true) chips.push(<Chip key="arm">Runs on ARM</Chip>)
   if (hasArm === false) chips.push(<Chip key="arm">x86 only</Chip>)

@@ -11,6 +11,27 @@ const STREAM_CLASS: Record<string, string> = {
   status: 'text-amber',
 }
 
+/** Strips ANSI color/cursor escape sequences before a line is rendered.
+ *
+ *  community-scripts installs print raw ANSI (color codes, spinner cursor
+ *  moves); the API forwards those bytes as-is, correctly, because a real
+ *  terminal would render them as color. The browser does not interpret ESC,
+ *  so left alone a line like `\x1b[m\x1b[1m\x1b[32mRAM Size: \x1b[4;92m2048
+ *  MiB\x1b[m` shows the bracket codes as literal text. This is the one place
+ *  every log consumer (JobLog, AppLogs) renders a line through, so the strip
+ *  happens once here rather than at each call site.
+ *
+ *  The ESC is REQUIRED, not optional: community-scripts logs are full of
+ *  ordinary bracketed text with no ESC in front of it -- `[INFO] installing
+ *  packages`, `[OK] done`, `msg_ok [ERROR] failed`. A leading `\x1b?` would
+ *  eat the `[` of that real content as if it were a color code, mangling
+ *  lines that were never ANSI. Requiring the ESC gives the same result on
+ *  the real ANSI case above and leaves every plain `[...]` line untouched. */
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex -- the ESC (0x1b) IS what this matches
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+}
+
 /** Static-mode log panel (doc 06 `TerminalPanel`). Live mode = xterm.js, Phase 5.
  *
  *  `height` is a maxHeight: the box is already as short as its content and only
@@ -47,7 +68,7 @@ export function TerminalPanel({ lines, height = 260 }:
       ) : (
         lines.map((l, i) => (
           <div key={i} className={STREAM_CLASS[l.stream] ?? 'text-text-2'}>
-            {l.message}
+            {stripAnsi(l.message)}
           </div>
         ))
       )}

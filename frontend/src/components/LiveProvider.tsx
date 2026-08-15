@@ -45,7 +45,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       // Keyed by jobId, not a fresh push: notificationStore.pushJobEvent and
       // notificationMerge.ts are what keep this job from ever rendering
       // twice once GET /jobs carries the same terminal delta.
-      pushJobEvent(t.jobId, jobToastSeverity(t.kind), t.text, `job #${t.jobId}`)
+      //
+      // `t.detail` is the backend's own reason a failed job failed; falling
+      // back to "job #N" is only for the case that carries none (success,
+      // or a failure the backend gave no message for).
+      pushJobEvent(t.jobId, jobToastSeverity(t.kind), t.text, t.detail ?? `job #${t.jobId}`)
     }))
     wire('alert', (d) => applyAlert(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data

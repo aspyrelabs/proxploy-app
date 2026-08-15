@@ -100,18 +100,22 @@ export function ProfilePage() {
                 the /auth/me fetch is a statement about the reader's own
                 account rather than a wait. Same box either way, so nothing
                 moves when the answer lands. */}
-            <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13.5px] text-text-2">
+            {/* A div, not a <p>: SkeletonLine renders a div (its pulse box is
+                one too), and a div cannot legally nest inside a <p> -- React
+                warned about exactly that in the loading state. Tailwind's
+                preflight zeroes margin on both tags, so nothing moves. */}
+            <div className="rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13.5px] text-text-2">
               {mePending ? <SkeletonLine className="w-48 max-w-full text-[13.5px]" /> : me?.email ?? 'unknown'}
-            </p>
+            </div>
             <p className="mt-1 text-[11.5px] text-text-3">
               The email cannot be changed after the account is created.
             </p>
           </div>
           <div>
             <span className={label}>Role</span>
-            <p className="rounded-ctl border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-text-2">
+            <div className="rounded-ctl border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-text-2">
               {mePending ? <SkeletonLine className="w-20 text-[13px]" /> : me?.role ?? 'unknown'}
-            </p>
+            </div>
           </div>
         </div>
 

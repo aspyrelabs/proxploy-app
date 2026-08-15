@@ -100,6 +100,44 @@ describe('applyJob, Phase 6 target types', () => {
   })
 })
 
+describe('applyJob, failure toast detail', () => {
+  // A failed job's toast used to say only "App Stop Failed" / "job #95",
+  // discarding the backend's own reason (job.error). This is the fix: the
+  // backend's words reach the toast payload as `detail`.
+  it('carries the backend error text as the toast detail', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    applyJob(qc, {
+      id: 95, kind: 'app.stop', status: 'failed', target_type: 'app',
+      error: 'node2.lab.local has no lifecycle API token configured; '
+        + 'add one in Settings -> Hosts before this operation can run.',
+    }, (t) => seen.push(t))
+    expect(seen).toHaveLength(1)
+    expect(seen[0].kind).toBe('err')
+    expect(seen[0].detail).toBe(
+      'node2.lab.local has no lifecycle API token configured; '
+      + 'add one in Settings -> Hosts before this operation can run.')
+  })
+
+  it('has no detail when the backend gave no error', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    applyJob(qc, { id: 1, kind: 'app.start', status: 'succeeded', target_type: 'app' },
+      (t) => seen.push(t))
+    expect(seen[0].detail).toBeUndefined()
+  })
+
+  it('truncates an unusually long error rather than blowing out the card', () => {
+    const qc = new QueryClient()
+    const seen: any[] = []
+    const long = 'x'.repeat(500)
+    applyJob(qc, { id: 2, kind: 'app.stop', status: 'failed', target_type: 'app', error: long },
+      (t) => seen.push(t))
+    expect(seen[0].detail.length).toBeLessThan(long.length)
+    expect(seen[0].detail.endsWith('…')).toBe(true)
+  })
+})
+
 describe('applyAlert', () => {
   it('invalidates the firing-alerts query and the activity feed', () => {
     const qc = new QueryClient()

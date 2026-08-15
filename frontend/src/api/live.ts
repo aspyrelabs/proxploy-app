@@ -90,9 +90,9 @@ export function jobToastSeverity(kind: 'ok' | 'err' | 'info'): ToastSeverity {
 
 type JobDelta = {
   id: number; kind?: string; status?: string
-  progress_pct?: number; target_type?: string | null
+  progress_pct?: number; target_type?: string | null; error?: string | null
 }
-type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number }) => void
+type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number; detail?: string }) => void
 
 /** SSE `job` event → patch ['jobs'] (list AND detail shapes), and on a
  *  terminal state invalidate the affected resource + activity feed and raise
@@ -130,6 +130,13 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
     kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
     text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),
     jobId: d.id,
+    // The backend's own reason a job failed ("node2 has no lifecycle API
+    // token configured...") used to never reach the toast, which showed only
+    // the kind and status ("App Stop Failed") with nothing actionable in it.
+    // Capped well short of the description's own wrap width: notification-
+    // card.tsx has no line-clamp there, so an unusually long error would
+    // otherwise stretch the card rather than read as a short reason.
+    detail: d.error ? (d.error.length > 200 ? `${d.error.slice(0, 200)}…` : d.error) : undefined,
   })
 }
 
