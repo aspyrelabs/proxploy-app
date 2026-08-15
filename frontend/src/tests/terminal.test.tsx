@@ -12,10 +12,17 @@ class FakeWebSocket {
   onclose: (() => void) | null = null
   sent: string[] = []
   url: string
+  closeCalls = 0
   constructor(url: string) { this.url = url; FakeWebSocket.instances.push(this) }
   send(data: string) { this.sent.push(data) }
-  close() { this.onclose?.() }
+  close() { this.closeCalls += 1; this.onclose?.() }
 }
+
+// Real setTimeout(0) (Terminal.tsx defers opening the socket by one tick so
+// StrictMode's replayed mount can cancel it, see Terminal.tsx) plus real
+// timers in this file (no vi.useFakeTimers()), so give any timer a moment to
+// actually fire before asserting on its effect.
+const flushDeferredOpen = () => new Promise((r) => setTimeout(r, 20))
 
 beforeEach(() => {
   FakeWebSocket.instances = []
@@ -67,6 +74,40 @@ describe('Terminal', () => {
     ws.onmessage?.({ data: JSON.stringify({ type: 'exit', code: 1, error: 'termproxy rejected the handshake' }) })
     ws.onclose?.()
     expect(onDrop).toHaveBeenCalledWith({ fatal: true })
+    // fatal:true is exactly what tells the caller (useReconnectingTicket's
+    // giveUp) to stop retrying instead of reconnecting -- covered directly
+    // in consoles-api.test.tsx's giveUp() tests; this only has to prove
+    // Terminal itself still reports the flag correctly.
+  })
+
+  it('unmount closes the socket instead of leaking it', async () => {
+    const { unmount } = render(<Terminal wsUrl="ws://test/console" />)
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const ws = FakeWebSocket.instances[0]
+    expect(ws.closeCalls).toBe(0)
+    unmount()
+    expect(ws.closeCalls).toBe(1)
+  })
+
+  it('opens exactly one socket for one ticket even when mount/cleanup/mount replays synchronously, as StrictMode does', async () => {
+    // Regression test: wsUrl carries a single-use ticket (consoletickets.py's
+    // redeem_ticket). React StrictMode double-invokes effects on mount --
+    // mount, cleanup, mount again, synchronously -- to surface exactly this
+    // kind of non-idempotent effect. Before the fix, each mount opened a
+    // WebSocket immediately, so the replay opened two sockets against the
+    // same ticket: the server correctly refuses the second, and that refusal
+    // used to tear down the first, working one as if it had dropped.
+    //
+    // This simulates the replay the way the task describes it (mount,
+    // cleanup, mount again with the same wsUrl) rather than rendering inside
+    // <StrictMode>, so it also catches a naive "only skip if it's literally
+    // the same component instance" fix that wouldn't hold up here.
+    const { unmount } = render(<Terminal wsUrl="ws://test/console?ticket=tix" />)
+    unmount()
+    render(<Terminal wsUrl="ws://test/console?ticket=tix" />)
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0))
+    await flushDeferredOpen()
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 })
 

@@ -65,4 +65,19 @@ describe('VncConsole', () => {
     unmount()
     expect(onDisconnect).not.toHaveBeenCalled()
   })
+
+  it('opens exactly one RFB connection for one ticket even when mount/cleanup/mount replays synchronously, as StrictMode does', async () => {
+    // Same defect as Terminal.tsx (see terminal.test.tsx's matching test):
+    // wsUrl carries a single-use console ticket, and RFB opens its own
+    // websocket in this effect, so StrictMode's synchronous mount, cleanup,
+    // mount replay used to open two RFB connections against the same
+    // ticket. The server refuses the second, tearing down the first.
+    const { VncConsole } = await import('../components/console/VncConsole')
+    const { unmount } = render(<VncConsole wsUrl="wss://test/vnc?ticket=tix" />)
+    unmount()
+    render(<VncConsole wsUrl="wss://test/vnc?ticket=tix" />)
+    await waitFor(() => expect(rfbInstances.length).toBeGreaterThan(0))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(rfbInstances).toHaveLength(1)
+  })
 })

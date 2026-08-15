@@ -15,7 +15,12 @@ export default defineConfig({
   // resolve it the same way. Purely additive: every import this app already
   // had is relative and none of them were touched.
   resolve: { alias: { '@': join(here, 'src') } },
-  server: { proxy: { '/api': 'http://127.0.0.1:8000' } },
+  // ws: true is load-bearing, not decoration. The console and node shell
+  // open ws://<vite host>/api/v1/... and Vite's proxy does NOT forward an
+  // upgrade without it: the ticket POST succeeds over plain HTTP, the
+  // socket is then dropped here and never reaches uvicorn, and the
+  // terminal renders as an open but permanently blank panel.
+  server: { proxy: { '/api': { target: 'http://127.0.0.1:8000', ws: true } } },
   // e2e/ is Playwright's; it imports @playwright/test, which Vitest cannot
   // collect. Without this exclude the two runners' default globs overlap and
   // `npm test` reports a failed file even when every test passes.

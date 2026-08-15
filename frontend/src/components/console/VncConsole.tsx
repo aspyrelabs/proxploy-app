@@ -8,11 +8,25 @@ export function VncConsole({ wsUrl, onDisconnect }: { wsUrl: string; onDisconnec
 
   useEffect(() => {
     if (!box.current) return
+    const target = box.current
     let unmounting = false
-    const conn = new RFB(box.current, wsUrl)
-    conn.addEventListener('disconnect', () => { if (!unmounting) onDisconnect?.() })
-    rfb.current = conn
-    return () => { unmounting = true; conn.disconnect() }
+    let conn: InstanceType<typeof RFB> | null = null
+
+    // wsUrl carries a single-use ticket, same as Terminal.tsx: a second RFB
+    // opened against it is refused by the server and tears down the first,
+    // working one. StrictMode's synchronous mount/cleanup/mount replay in dev
+    // opens the socket a tick late so the throwaway invocation's cleanup can
+    // cancel it before it ever redeems the ticket.
+    const openTimer = setTimeout(() => {
+      conn = new RFB(target, wsUrl)
+      conn.addEventListener('disconnect', () => { if (!unmounting) onDisconnect?.() })
+      rfb.current = conn
+    }, 0)
+    return () => {
+      unmounting = true
+      clearTimeout(openTimer)
+      conn?.disconnect()
+    }
   }, [wsUrl])
 
   return (
