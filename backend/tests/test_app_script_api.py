@@ -288,7 +288,7 @@ def test_revert_requires_admin(tmp_path, csrf_header, bootstrap_admin):
                                            "password": "correct-horse-battery"},
                headers=csrf_header(c))
         r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
-        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+        assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
 
 
 def test_revert_entitlement_gates_the_route(tmp_path, csrf_header, bootstrap_admin):

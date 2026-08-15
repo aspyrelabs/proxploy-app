@@ -68,7 +68,7 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
                headers=csrf_header(c))
         for url in (f"/api/v1/apps/{app_id}/start", f"/api/v1/vms/{vm_id}/start"):
             r = c.post(url, headers=csrf_header(c))
-            assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+            assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
 
 
 def test_app_start_returns_202_with_a_job_and_audits(tmp_path, csrf_header,

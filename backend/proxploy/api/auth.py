@@ -217,7 +217,7 @@ def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
     else:
         ok = totp.verify_login(db, request.app.state.secretstore, user, body.password)
     if not ok:
-        raise HTTPException(403, "re-authentication required")
+        raise HTTPException(403, "Confirm your identity to continue.")
     totp.disable(db, user)
     write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.disable")
     return {"ok": True}
@@ -236,7 +236,7 @@ def totp_regenerate_recovery_codes(request: Request, body: TotpDisableIn, db=Dep
     else:
         ok = totp.verify_login(db, request.app.state.secretstore, user, body.password)
     if not ok:
-        raise HTTPException(403, "re-authentication required")
+        raise HTTPException(403, "Confirm your identity to continue.")
     codes = totp.regenerate_recovery_codes(db, request.app.state.secretstore, user)
     if codes is None:
         raise HTTPException(409, "enable two-factor first")
@@ -305,9 +305,9 @@ def create_user(request: Request, body: UserIn, db=Depends(get_db)):
         raw = request.cookies.get(request.app.state.settings.session_cookie)
         actor = authn.resolve_session(db, raw) if raw else None
         if not actor:
-            raise HTTPException(401, "authentication required")
+            raise HTTPException(401, "Sign in again to continue.")
         if not enforce(request.app.state.authz, db, actor, "user", "manage"):
-            raise HTTPException(403, "forbidden")
+            raise HTTPException(403, "Your role does not allow this.")
         if body.role == "owner" and user_role(db, actor) != "owner":
             raise HTTPException(403, "only an owner may grant owner")
         role = body.role

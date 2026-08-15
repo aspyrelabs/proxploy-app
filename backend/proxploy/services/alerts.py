@@ -72,11 +72,11 @@ def render_message(rule_name: str, label: str, metric: str, operator: str,
                    state: str) -> str:
     """Doc 05's SSE example: "host-02 CPU > 85% for 5m"."""
     if metric == "host_offline":
-        body = f"{label} is offline"
+        body = f"{label} has been offline"
         if duration_s:
             body += f" for {_human_duration(duration_s)}"
     elif metric == "backup_failed":
-        body = f"{label}: last backup run failed"
+        body = f"{label}: last backup failed"
     else:
         unit = "%" if metric.endswith("_pct") else ""
         body = (f"{label} {_METRIC_LABEL.get(metric, metric)} "

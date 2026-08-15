@@ -195,7 +195,7 @@ def test_create_requires_admin(tmp_path, csrf_header, bootstrap_admin):
                                            "password": "correct-horse-battery"},
                headers=csrf_header(c))
         r = c.post("/api/v1/vms", json=_spec(ids), headers=csrf_header(c))
-        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+        assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
 
 
 # --- job handlers ----------------------------------------------------------
@@ -432,7 +432,7 @@ def test_delete_requires_owner_role(tmp_path, csrf_header, bootstrap_admin):
                       headers=csrf_header(c)).status_code == 202
         r = c.request("DELETE", f"/api/v1/vms/{ids['vm_id']}",
                       json={"confirm": "win11"}, headers=csrf_header(c))
-        assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+        assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
 
 
 def test_vm_mutations_require_auth(tmp_path, csrf_header):

@@ -40,7 +40,7 @@ async def events_stream(request: Request):
 
     user = await asyncio.to_thread(check)
     if user is None:
-        raise HTTPException(401, "authentication required")
+        raise HTTPException(401, "Sign in again to continue.")
 
     bus = request.app.state.bus
 

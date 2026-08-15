@@ -157,8 +157,9 @@ class JobBackend:
             db.commit()
         if orphans:
             kinds = ", ".join(sorted({kind for _, kind in orphans}))
-            title = f"Proxploy: {n} job(s) interrupted by restart"
-            body = f"{n} job(s) interrupted by restart: {kinds}"
+            job_word = "job" if n == 1 else "jobs"
+            title = f"Proxploy restarted: {n} {job_word} interrupted"
+            body = f"Proxploy restarted. {n} {job_word} interrupted: {kinds}"
             self._notify_async("job.interrupted", title, body)
         return n
 

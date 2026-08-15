@@ -155,7 +155,7 @@ async def job_stream(request: Request, job_id: int, last_event_id: int | None = 
         with request.app.state.sessionmaker() as db:
             user = resolve_session(db, raw) if raw else None
             if user is None:
-                raise HTTPException(401, "authentication required")
+                raise HTTPException(401, "Sign in again to continue.")
             _read(request, db, user)
             require_entitlement("jobs.stream")(request)
             if db.get(Job, job_id) is None:

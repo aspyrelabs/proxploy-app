@@ -26,21 +26,21 @@ def get_current_user(request: Request, db=Depends(get_db)) -> User:
     if auth.startswith("Bearer "):
         raw = auth[7:]
         if not raw.startswith("ppk_"):
-            raise HTTPException(401, "authentication required")
+            raise HTTPException(401, "This API key is not valid.")
         if not request.app.state.entitlements.enabled("api.tokens"):
             # feature off = no bearer auth, and a 403 here would leak flag
             # state to an anonymous caller
-            raise HTTPException(401, "authentication required")
+            raise HTTPException(401, "This API key is not valid.")
         row = (db.query(ApiKey)
                .filter_by(key_hash=hashlib.sha256(raw.encode()).hexdigest())
                .one_or_none())
         now = utcnow()
         if (row is None or row.revoked_at
                 or (row.expires_at and row.expires_at < now)):
-            raise HTTPException(401, "authentication required")
+            raise HTTPException(401, "This API key is not valid.")
         user = db.get(User, row.user_id)
         if not user or not user.is_active:
-            raise HTTPException(401, "authentication required")
+            raise HTTPException(401, "This API key is not valid.")
         if row.last_used_at is None or (now - row.last_used_at).total_seconds() > 60:
             row.last_used_at = now      # rate-limited write, one per key-minute
             db.commit()
@@ -49,7 +49,7 @@ def get_current_user(request: Request, db=Depends(get_db)) -> User:
     raw = request.cookies.get(request.app.state.settings.session_cookie)
     user = resolve_session(db, raw) if raw else None
     if not user:
-        raise HTTPException(401, "authentication required")
+        raise HTTPException(401, "Sign in again to continue.")
     return user
 
 
@@ -158,7 +158,7 @@ def authorize(resource: str, action: str, *, scope_of=None):
                 write_audit(db, actor_type="api_key", actor_id=key.id,
                             action=f"{resource}.{action}", result="denied",
                             ip=request.client.host if request.client else None)
-                raise HTTPException(403, "key scope does not allow this")
+                raise HTTPException(403, "This API key does not allow this.")
 
         team_id = scope_of(db, request.path_params) if scope_of else None
         if not _enforce(request.app.state.authz, db, user, resource, action,
@@ -166,7 +166,7 @@ def authorize(resource: str, action: str, *, scope_of=None):
             write_audit(db, actor_type="user", actor_id=user.id,
                         action=f"{resource}.{action}", result="denied",
                         ip=request.client.host if request.client else None)
-            raise HTTPException(403, "forbidden")
+            raise HTTPException(403, "Your role does not allow this.")
         return user
 
     dep.__proxploy_authz__ = (resource, action)   # Task 7's meta-test marker
