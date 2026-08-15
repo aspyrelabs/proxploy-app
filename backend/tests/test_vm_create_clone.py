@@ -174,6 +174,35 @@ def test_create_mints_a_vmid_from_cluster_nextid(tmp_path, csrf_header,
             assert db.query(Vm).count() == 1
 
 
+def test_create_without_a_lifecycle_token_is_a_409_not_a_bare_500(tmp_path, csrf_header,
+                                                                   bootstrap_admin):
+    """client_for_host(capability="lifecycle") raises CapabilityNotConfigured
+    when the host has no lifecycle token; before main.py registered a handler
+    for it, this escaped unhandled and the request bare-500'd. It must come
+    back as the 409 the exception's own message already describes."""
+    from tests.support import make_app, seed_snapshot
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    c = TestClient(app)
+    c.__enter__()
+    bootstrap_admin(c)
+    with app.state.sessionmaker() as db:
+        host = Host(name="host-02", address="https://10.0.0.8:8006", node_name="pve1",
+                    status="connected", pve_version="8.4.1")
+        db.add(host)
+        db.commit()
+        host_id = host.id
+    seed_snapshot(app, host_id, nodes=[{"node": "pve1"}])
+    with c:
+        r = c.post("/api/v1/vms", json=_spec({"host_id": host_id}), headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        assert r.headers["content-type"] == "application/problem+json"
+        body = r.json()
+        assert "host-02" in body["detail"]
+        assert "lifecycle" in body["detail"]
+
+
 def test_create_accepts_an_explicit_vmid(tmp_path, csrf_header, bootstrap_admin):
     app, c, fake, ids = _authed(tmp_path, bootstrap_admin)
     with c:

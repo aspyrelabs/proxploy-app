@@ -238,6 +238,26 @@ def create_app(
         return JSONResponse(status_code=422, content=jsonable_encoder({
             "detail": [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]}))
 
+    from proxploy.services.hostclient import CapabilityNotConfigured
+
+    @app.exception_handler(CapabilityNotConfigured)
+    async def capability_not_configured_handler(request, exc):
+        # Every request-path call site (api/vms.py, api/consoles.py,
+        # api/network.py, api/apps.py, api/backups.py) calls client_for_host
+        # outside its `except ProxmoxError` block, so this used to escape
+        # unhandled into a bare 500. One handler here fixes all of them
+        # instead of wrapping each call site individually. 409, not 500 or
+        # 502: this is a configuration gap caught before any Proxmox call,
+        # not an upstream failure. Only CapabilityNotConfigured, not the
+        # broader ProxmoxError: a genuine upstream failure should stay a 502.
+        status_code = 409
+        return JSONResponse(
+            {"type": "about:blank",
+             "title": http.client.responses.get(status_code, "Error"),
+             "status": status_code, "detail": str(exc)},
+            status_code=status_code, media_type="application/problem+json",
+        )
+
     @app.exception_handler(StarletteHTTPException)
     async def problem_handler(request, exc):
         body = {
