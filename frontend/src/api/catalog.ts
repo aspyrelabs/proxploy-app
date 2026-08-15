@@ -131,11 +131,11 @@ export function useRefreshCatalog() {
     mutationFn: () => api<{ job: { id: number; kind: string } }>('/catalog/refresh', { method: 'POST' }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      // A refresh is what actually rewrites catalog_entries, so this is the
-      // mutation that has to drop the ['catalog'] cache. Invalidating on
-      // settle (i.e. once the job is enqueued, not finished) is deliberate:
-      // the refetch that follows the job's completion event picks up the new
-      // rows, and this at least clears the 5-minute staleTime immediately.
+      // Clears the 5-minute staleTime straight away so the grid is not pinned
+      // to rows the refresh is about to replace. This fires when the job is
+      // ENQUEUED, so it cannot be the invalidation that picks up the new
+      // rows; api/live.ts::applyJob does that on the completion event, keyed
+      // on the job kind because this job carries no target_type.
       qc.invalidateQueries({ queryKey: ['catalog'] })
     },
   })

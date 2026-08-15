@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ApiError } from '../api/client'
+import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useLifecycle } from '../api/jobs'
+import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { Button } from './ui/button'
 
@@ -51,7 +52,14 @@ export function LifecycleActions({ target, id, name, status, size = 'md' }: {
         if (body?.error === 'self_target') {
           setGuard({ phrase: String(body.confirm_phrase ?? name),
                      detail: String(body.detail ?? ''), action })
+          return
         }
+        // Everything that is not self_target used to fall out of here in
+        // silence: the optimistic "Working…" reverted on invalidation and
+        // nothing said the action had been refused, so an unreachable node
+        // looked identical to a button that did not register the click.
+        notify.error(`Could not ${action} ${name}.`,
+                     { description: apiErrorDetail(e, 'No reason was given, try again.') })
       },
       onSuccess: () => setGuard(null),
     })

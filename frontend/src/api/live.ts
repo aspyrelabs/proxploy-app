@@ -119,6 +119,13 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   // ['vms', id, 'snapshots'] here for free; Task 16 adds no wiring.
   const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
   if (resourceKey) qc.invalidateQueries({ queryKey: [resourceKey] })
+  // catalog.refresh is enqueued with no target_type, because it is not about
+  // one resource, so RESOURCE_KEY above can never reach it. It is keyed on
+  // kind here instead. Without it the only ['catalog'] invalidation happened
+  // when the job was ENQUEUED, and the refetch that followed re-armed the
+  // 5-minute staleTime with the pre-refresh rows: the banner flipped to
+  // "synced just now" over a grid that stayed unchanged for five minutes.
+  if (d.kind === 'catalog.refresh') qc.invalidateQueries({ queryKey: ['catalog'] })
   toast?.({
     kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
     text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),

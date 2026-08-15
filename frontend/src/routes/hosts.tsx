@@ -74,6 +74,11 @@ export function UpdateAllButton() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
+      // The toast says to follow them in Recent activity, which is on this
+      // same page and reads ['cluster','activity']. Without this it does not
+      // move until its own 30s poll, so the toast points at a feed that shows
+      // nothing new. Every other job-firing mutation pairs these two.
+      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
   return (

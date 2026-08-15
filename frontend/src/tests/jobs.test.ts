@@ -87,3 +87,24 @@ describe('applyJob', () => {
     expect(toasts).toHaveLength(1)
   })
 })
+
+describe('applyJob, the catalog refresh', () => {
+  it('invalidates the catalog when the refresh job finishes', () => {
+    // catalog.refresh is enqueued with no target_type, so RESOURCE_KEY cannot
+    // reach it and nothing dropped the grid's cache on completion. The only
+    // ['catalog'] invalidation happened when the job was enqueued, and the
+    // refetch that followed re-armed a 5 minute staleTime with the rows the
+    // refresh was about to replace.
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyJob(qc, { id: 9, kind: 'catalog.refresh', status: 'succeeded' })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['catalog'] })
+  })
+
+  it('leaves the catalog alone for unrelated jobs', () => {
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyJob(qc, { id: 10, kind: 'app.start', status: 'succeeded', target_type: 'app' })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['catalog'] })
+  })
+})
