@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { notify } from '../lib/notify'
-import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
+import { consoleFailure, consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { api, ApiError, apiErrorDetail } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
@@ -344,6 +344,10 @@ function VmConsole() {
   const id = Number(vmId)
   const { ticket, failed, start, reconnect } = useReconnectingTicket('vm', id)
   useEffect(() => { start() }, [id])
+  if (ticket.isError) {
+    const { title, note } = consoleFailure(ticket.error)
+    return <EmptyState title={title} note={note} />
+  }
   if (failed) {
     return <EmptyState title="Console connection failed"
       note="Gave up after repeated attempts. Reload the page to try again." />

@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
-import { api } from './client'
+import { ApiError, api, apiErrorDetail } from './client'
 
 export type ConsoleTicket = { ticket: string; expires_at: string }
 export type ConsoleKind = 'app' | 'host' | 'vm'
@@ -37,6 +37,34 @@ export function consoleWsUrl(kind: ConsoleKind, id: number, ticket: string): str
 // rather than duplicated three times.
 const MAX_RECONNECT_ATTEMPTS = 3
 const BACKOFF_MS = [1000, 2000, 4000]
+
+/**
+ * Why a ticket request failed, in words, for the three console panes.
+ *
+ * `failed` on useReconnectingTicket only ever comes from a WebSocket drop, so
+ * it cannot describe a ticket POST that never succeeded: no socket was opened
+ * to drop. Without this the pane sat on "Opening console…" forever, with no
+ * error and no way out, which is what an unreachable host or a plan without
+ * the entitlement actually looked like.
+ *
+ * The entitlement 403 is checked first because its body carries the reason in
+ * `error` and leaves `detail` generic; every other case reads better as the
+ * backend's own sentence, including the 502 prefix apiErrorDetail adds.
+ */
+export function consoleFailure(e: unknown): { title: string; note: string } {
+  if (e instanceof ApiError && (e.body as { error?: string } | null)?.error
+      === 'entitlement_required') {
+    return {
+      title: 'Console is not included in your plan',
+      note: 'Everything else on this page works without it.',
+    }
+  }
+  return {
+    title: 'Could not open the console',
+    note: apiErrorDetail(e, 'No reason was given. Reload the page to try again.'),
+  }
+}
+
 
 export function useReconnectingTicket(kind: ConsoleKind, id: number) {
   const ticket = useConsoleTicket(kind, id)
