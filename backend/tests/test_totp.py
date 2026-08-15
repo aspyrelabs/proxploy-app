@@ -321,3 +321,26 @@ def test_disable_via_oidc_only_account_accepts_a_totp_code(tmp_path, csrf_header
         code = pyotp.TOTP(result["secret"]).now()
         r = c.request("DELETE", "/api/v1/auth/totp", json={"password": code}, headers=h)
         assert r.status_code == 200 and r.json() == {"ok": True}
+
+
+def test_verify_login_accepts_a_totp_code_exactly_once(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    """RFC 6238 section 5.2. verify_login is the check behind both the login
+    second factor and the confirm-your-identity gate on disabling two-factor,
+    so a replayable code lets one captured six digits sign in AND immediately
+    turn two-factor off inside the same ~90s window."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        db, ss, user = _enrolled_user(c, app)
+        result = totp.start_enrollment(db, ss, user)
+        totp.confirm(db, ss, user, pyotp.TOTP(result["secret"]).now())
+
+        code = pyotp.TOTP(result["secret"]).now()
+        assert totp.verify_login(db, ss, user, code) is True
+        assert totp.verify_login(db, ss, user, code) is False
+
+        # A recovery code still works afterwards: the watermark is per-step,
+        # it does not lock the account out of its other factor.
+        codes = totp.regenerate_recovery_codes(db, ss, user)
+        assert totp.verify_login(db, ss, user, codes[0]) is True

@@ -37,6 +37,9 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(Text)
     totp_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Time step of the last code accepted for this user, so the same code
+    # cannot be presented twice inside its validity window (RFC 6238 5.2).
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
     oidc_issuer: Mapped[str | None] = mapped_column(Text)
     oidc_sub: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

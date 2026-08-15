@@ -22,9 +22,12 @@ atomic-redeem pattern) -- never a decrypt/mutate/re-encrypt of a shared
 blob, so two requests racing to redeem the same code can't both win: only
 one UPDATE matches the WHERE clause.
 """
+import hmac
 import secrets
+import time
 
 import pyotp
+import sqlalchemy as sa
 
 from proxploy.models import TotpRecoveryCode, User, utcnow
 from proxploy.services.authn import hash_password, verify_password
@@ -103,15 +106,43 @@ def confirm(db, secretstore, user: User, code: str) -> bool:
     return True
 
 
+def _matched_step(secret: str, code: str, window: int = 1) -> int | None:
+    """The time step whose code equals `code`, or None. pyotp.verify() only
+    answers yes/no, and single use needs to know WHICH step matched."""
+    totp = pyotp.TOTP(secret)
+    step = int(time.time()) // totp.interval
+    for offset in range(-window, window + 1):
+        candidate = step + offset
+        if hmac.compare_digest(totp.at(candidate * totp.interval), code):
+            return candidate
+    return None
+
+
 def verify_login(db, secretstore, user: User, code: str) -> bool:
     """Accepts a current TOTP code (valid_window=1, ~±30s) or an unused
-    recovery code. A matched recovery code is burned atomically before this
-    returns True, so it can never be replayed."""
+    recovery code. Both are single use: a matched recovery code is burned
+    atomically, and a matched TOTP step is recorded so the same code cannot
+    be presented again while it is still inside its window (RFC 6238 5.2).
+    That matters because this one function is the check behind the login
+    second factor AND the confirm-your-identity gate on disabling two-factor,
+    so without it one captured code does both."""
     if not user.totp_enabled or not user.totp_secret_enc:
         return False
     secret = secretstore.decrypt(user.totp_secret_enc).decode()
-    if pyotp.TOTP(secret).verify(code, valid_window=1):
-        return True
+    step = _matched_step(secret, code)
+    if step is not None:
+        # Same atomicity boundary as the recovery-code UPDATE below: two
+        # concurrent requests can both match, only one can move the watermark
+        # forward, and the loser's rowcount is 0.
+        if user.totp_last_step is not None and step <= user.totp_last_step:
+            return False
+        burned = (db.query(User)
+                  .filter(User.id == user.id,
+                          sa.or_(User.totp_last_step.is_(None),
+                                 User.totp_last_step < step))
+                  .update({"totp_last_step": step}))
+        db.commit()
+        return burned > 0
     for row in (db.query(TotpRecoveryCode)
                 .filter_by(user_id=user.id, used_at=None)
                 .order_by(TotpRecoveryCode.id)):
