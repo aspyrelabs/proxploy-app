@@ -129,6 +129,29 @@ describe('SettingsPage, node shell toggle', () => {
   })
 })
 
+describe('SettingsPage, hosts row actions', () => {
+  beforeEach(() => {
+    calls.length = 0
+    notifyChannels = true
+    hostRows = [{ id: 5, name: 'pve1', address: 'https://10.0.0.9:8006', status: 'connected',
+                 pve_version: '8.4.1', node_shell_enabled: false }]
+  })
+
+  it('renders Sync, Edit, Tasks and Remove, and not Rotate or Tokens', async () => {
+    // Tokens was merged into one Edit dialog and renamed; Rotate (SSH key
+    // regeneration) moved into that same dialog. Neither is its own row
+    // button any more.
+    wrap()
+    await screen.findByText('pve1')
+    expect(screen.getByRole('button', { name: 'Sync' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Tokens' })).not.toBeInTheDocument()
+  })
+})
+
 describe('SettingsPage, host team assignment', () => {
   beforeEach(() => {
     calls.length = 0

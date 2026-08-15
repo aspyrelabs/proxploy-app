@@ -109,8 +109,8 @@ describe('HostForm', () => {
     withQuery(<HostForm onCreated={() => {}} />)
     expect(screen.getByLabelText(/address/i)).toBeDefined()
     // Exact, not /token id/i: the field's info button is labelled "What is the
-    // API token id?" and a loose match now finds both.
-    expect(screen.getByLabelText('API token id')).toBeDefined()
+    // Monitoring token id?" and a loose match now finds both.
+    expect(screen.getByLabelText('Monitoring token id')).toBeDefined()
     expect(screen.getByText(/root shell on the node/i)).toBeDefined()
     expect(screen.getByRole('button', { name: /test connection/i })).toBeDefined()
   })
@@ -118,9 +118,9 @@ describe('HostForm', () => {
   // The two token fields were the only ones asking for something the operator
   // has to go and create elsewhere, with no hint of what it is or where it
   // comes from.
-  it('explains the API token id and links to the docs', () => {
+  it('explains the monitoring token id and links to the docs', () => {
     withQuery(<HostForm onCreated={() => {}} />)
-    const toggle = screen.getByRole('button', { name: /what is the api token id/i })
+    const toggle = screen.getByRole('button', { name: /what is the monitoring token id/i })
     expect(screen.queryByText(/user@realm!name/)).not.toBeInTheDocument()
 
     fireEvent.click(toggle)
@@ -210,13 +210,13 @@ describe('HostForm', () => {
 
   it('warns that the token secret is shown only once', () => {
     withQuery(<HostForm onCreated={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: /what is the api token secret/i }))
+    fireEvent.click(screen.getByRole('button', { name: /what is the monitoring token secret/i }))
     expect(screen.getByText(/only once/i)).toBeInTheDocument()
   })
 
   it('collapses an open explanation again', () => {
     withQuery(<HostForm onCreated={() => {}} />)
-    const toggle = screen.getByRole('button', { name: /what is the api token id/i })
+    const toggle = screen.getByRole('button', { name: /what is the monitoring token id/i })
     fireEvent.click(toggle)
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -242,8 +242,8 @@ describe('HostForm', () => {
     withQuery(<HostForm onCreated={onCreated} />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'pve-01' } })
     fireEvent.change(screen.getByLabelText(/address/i), { target: { value: 'https://10.0.0.5:8006' } })
-    fireEvent.change(screen.getByLabelText('API token id'), { target: { value: 'proxploy@pve!x' } })
-    fireEvent.change(screen.getByLabelText('API token secret'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Monitoring token id'), { target: { value: 'proxploy@pve!x' } })
+    fireEvent.change(screen.getByLabelText('Monitoring token secret'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
 
     const status = await screen.findByRole('status')
@@ -262,7 +262,7 @@ describe('onboarding wizard', () => {
     // told the user their password was bad.
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
-    expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Monitoring token id')).toBeInTheDocument()
     expect(screen.queryByLabelText('Password (12+ chars)')).not.toBeInTheDocument()
   })
 
@@ -383,7 +383,7 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     // Lands on the host step, per the resume behaviour above.
-    expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Monitoring token id')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
     expect(await screen.findByText(/cannot be changed/i)).toBeInTheDocument()
   })
@@ -392,7 +392,7 @@ describe('onboarding wizard', () => {
     const { api } = await import('../api/client')
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
-    await screen.findByLabelText('API token id')
+    await screen.findByLabelText('Monitoring token id')
     fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
 
     fireEvent.change(await screen.findByLabelText('New password'),
@@ -416,13 +416,13 @@ describe('onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Host/ }))
     expect(await screen.findByRole('button', { name: /remove and re-add/i })).toBeInTheDocument()
     // The add form must NOT be offered while a host still exists.
-    expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
   })
 
   it('keeps a skipped host step clickable', async () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
-    await screen.findByLabelText('API token id')
+    await screen.findByLabelText('Monitoring token id')
     fireEvent.click(screen.getByRole('button', { name: /skip for now/i }))
     const host = await screen.findByRole('button', { name: /^Host/ })
     expect(host.getAttribute('data-status')).toBe('skipped')
@@ -488,7 +488,7 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     mockSignedOut()
     renderWizard()
-    await screen.findByLabelText('API token id')
+    await screen.findByLabelText('Monitoring token id')
     fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
     expect(await screen.findByText(/signed out/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create admin account/i })).not.toBeInTheDocument()
@@ -497,7 +497,7 @@ describe('onboarding wizard', () => {
   it('does not let you jump forward past the step the server is on', async () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
-    await screen.findByLabelText('API token id')
+    await screen.findByLabelText('Monitoring token id')
     expect(screen.getByRole('button', { name: /^Install/ })).toBeDisabled()
   })
 })

@@ -59,7 +59,7 @@ describe('HostEditDialog', () => {
     expect(screen.getByLabelText(/^address$/i)).toHaveValue('https://10.0.0.5:8006')
   })
 
-  it('PATCHes only the changed name and address, not the token fields', async () => {
+  it('PATCHes only the changed name and address', async () => {
     wrap()
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'pve1-renamed' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
@@ -75,47 +75,6 @@ describe('HostEditDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
     expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ address: 'https://10.0.0.9:8006' })
-  })
-
-  // The composition this dialog exists for: reuse POST /{id}/credentials
-  // (HostRotateDialog's own endpoint) rather than a second credential path.
-  it('reuses POST /hosts/{id}/credentials for the token id and secret', async () => {
-    wrap()
-    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
-    const cred = calls.find((c) => c.path === '/hosts/1/credentials')!
-    expect(cred.method).toBe('POST')
-    expect(cred.body).toEqual({ token_id: 'proxploy@pve!new', token_secret: 'newsecret', rotate_ssh: false })
-  })
-
-  it('does not call PATCH at all when only credentials changed', async () => {
-    wrap()
-    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
-    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
-  })
-
-  it('saves the address before rotating credentials, so the new token is checked against the new address', async () => {
-    wrap()
-    fireEvent.change(screen.getByLabelText(/^address$/i), { target: { value: 'https://10.0.0.9:8006' } })
-    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
-    fireEvent.change(screen.getByLabelText(/monitoring token secret/i), { target: { value: 'newsecret' } })
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/credentials')).toBe(true))
-    const patchIndex = calls.findIndex((c) => c.method === 'PATCH')
-    const credIndex = calls.findIndex((c) => c.path === '/hosts/1/credentials')
-    expect(patchIndex).toBeGreaterThanOrEqual(0)
-    expect(patchIndex).toBeLessThan(credIndex)
-  })
-
-  it('refuses a half-filled token pair the same way HostRotateDialog does', async () => {
-    wrap()
-    fireEvent.change(screen.getByLabelText(/monitoring token id/i), { target: { value: 'proxploy@pve!new' } })
-    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
   })
 
   it('disables Save when nothing changed', () => {
@@ -158,7 +117,7 @@ describe('HostEditDialog', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('surfaces a PATCH failure without attempting the credentials call', async () => {
+  it('surfaces a PATCH failure', async () => {
     wrap()
     // Finding #8: reject by path+method instead of "the next call after the
     // mount GET resolves" -- that depended on call ordering and on there
@@ -183,5 +142,20 @@ describe('HostEditDialog', () => {
     hostCapabilities = { monitoring: true, lifecycle: false, console: false, backup: false }
     wrap()
     expect(await screen.findByText('Lifecycle')).toBeInTheDocument()
+  })
+
+  // Regression: the dialog used to show a standalone "New monitoring token
+  // id/secret" pair above the Capabilities list, duplicating monitoring's own
+  // row there. Both checks run with the monitoring row actually present and
+  // open, so a re-added standalone pair could not hide behind it: the
+  // capability row's own fields are labelled "Monitoring token id/secret"
+  // (no "New" prefix), which is a different string.
+  it('has no standalone monitoring token fields, only the Capabilities row', async () => {
+    hostCapabilities = { monitoring: true, lifecycle: false, console: false, backup: false }
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: /rotate monitoring token, show fields/i }))
+    expect(await screen.findByLabelText(/^monitoring token id$/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^new monitoring token id$/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^new monitoring token secret$/i)).not.toBeInTheDocument()
   })
 })

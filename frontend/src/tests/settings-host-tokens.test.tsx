@@ -35,6 +35,10 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 // Tokens button, the tokensHost state, or the dialog render from
 // routes/settings.tsx would have left this green. Go through SettingsPage,
 // same setup as settings.test.tsx, and click the real button.
+//
+// The Tokens dialog was merged into HostEditDialog and its button renamed to
+// Edit (routes/settings.tsx), so this now covers that Edit opens the merged
+// dialog showing name, address and the capability rows in one place.
 import { SettingsPage } from '../routes/settings'
 
 const wrap = () => {
@@ -43,9 +47,11 @@ const wrap = () => {
 }
 
 describe('Settings host tokens', () => {
-  it('opens the capability list for a host from the Tokens button', async () => {
+  it('opens the merged Edit dialog for a host, with name, address and the capability list', async () => {
     wrap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Tokens' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(await screen.findByLabelText(/name/i)).toHaveValue('pve-01')
+    expect(screen.getByLabelText(/^address$/i)).toHaveValue('https://10.0.0.5:8006')
     expect(await screen.findByText('Lifecycle')).toBeInTheDocument()
     // The dialog opens with its fields closed on every row now, so what proves
     // the list rendered is the control that would reveal them, not the field.

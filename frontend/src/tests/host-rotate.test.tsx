@@ -2,8 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
-vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
+// Retargeted from the now-deleted HostRotateDialog, which HostEditDialog
+// absorbed. Only the SSH-key-regeneration coverage survives here: the token
+// id/secret rotation this file used to cover no longer exists as a standalone
+// control, that capability already lives in HostCapabilityList's monitoring
+// row (see host-edit-dialog.test.tsx's "no standalone monitoring token
+// fields" regression test), and duplicating it here was the exact bug
+// reported. rotate_ssh is the one thing HostCapabilityList has no handling
+// for at all, so it is the part that moved.
 
 const calls: { path: string; method?: string; body: unknown }[] = []
 let rotateResult: 'ok' | 'rejected' = 'ok'
@@ -12,71 +18,75 @@ vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     calls.push({ path, method: opts?.method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
-    if (rotateResult === 'rejected') {
-      return Promise.reject(new ApiError(502, { error: 'token_rejected', detail: 'nope' }))
+    if (path === '/hosts/5' && !opts?.method) {
+      return Promise.resolve({ id: 5, name: 'pve1', capabilities: { monitoring: true } })
     }
-    return Promise.resolve({ id: 5, rotated: ['api_token'] })
+    if (path.endsWith('/credentials')) {
+      if (rotateResult === 'rejected') {
+        return Promise.reject(new ApiError(502, { error: 'token_rejected', detail: 'nope' }))
+      }
+      return Promise.resolve({ id: 5, rotated: ['ssh_key'], public_key: 'ssh-ed25519 AAAA...',
+                               consent_note: 'Install this key on the node to finish rotating.' })
+    }
+    return Promise.resolve({})
   }),
 }))
 
 import { ApiError } from '../api/client'
-import { HostRotateDialog } from '../components/HostRotateDialog'
+import { HostEditDialog } from '../components/HostEditDialog'
+
+const host = { name: 'pve1', address: 'https://10.0.0.5:8006' }
 
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(<QueryClientProvider client={qc}>
-    <HostRotateDialog hostId={5} hostName="pve1" onClose={() => {}} />
+    <HostEditDialog hostId={5} host={host} onClose={() => {}} />
   </QueryClientProvider>)
 }
 
-describe('HostRotateDialog', () => {
-  beforeEach(() => { calls.length = 0; notifyError.mockClear(); rotateResult = 'ok' })
+describe('HostEditDialog, SSH key regeneration', () => {
+  beforeEach(() => { calls.length = 0; rotateResult = 'ok' })
   afterEach(() => vi.restoreAllMocks())
 
-  it('disables Rotate and never calls the API when only the token id is filled in', () => {
+  it('carries the checkbox and its explanatory text into the merged dialog', async () => {
     wrap()
-    fireEvent.change(screen.getByLabelText('New API token id'), { target: { value: 'proxploy@pve!x' } })
-    const rotateBtn = screen.getByRole('button', { name: 'Rotate' })
-    expect(rotateBtn).toBeDisabled()
-    fireEvent.click(rotateBtn)
-    expect(calls.length).toBe(0)
-    expect(screen.getByText(/must both be filled in/i)).toBeInTheDocument()
+    expect(await screen.findByText(
+      'Regenerate SSH key (the new key still needs installing on the node)')).toBeInTheDocument()
   })
 
-  it('disables Rotate and never calls the API when only the token secret is filled in', () => {
+  it('does not call the API just from checking the box, only from Regenerate', async () => {
     wrap()
-    fireEvent.change(screen.getByLabelText('New API token secret'), { target: { value: 'shh' } })
-    expect(screen.getByRole('button', { name: 'Rotate' })).toBeDisabled()
-    expect(calls.length).toBe(0)
+    fireEvent.click(await screen.findByLabelText(
+      /regenerate ssh key \(the new key still needs installing on the node\)/i))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(calls.some((c) => c.path === '/hosts/5/credentials')).toBe(false)
   })
 
-  it('disables Rotate when nothing is filled in at all', () => {
+  it('sends rotate_ssh: true and only that, no token id or secret', async () => {
     wrap()
-    expect(screen.getByRole('button', { name: 'Rotate' })).toBeDisabled()
-  })
-
-  it('sends the full pair once both fields are filled in', async () => {
-    wrap()
-    fireEvent.change(screen.getByLabelText('New API token id'), { target: { value: 'proxploy@pve!x' } })
-    fireEvent.change(screen.getByLabelText('New API token secret'), { target: { value: 'shh' } })
-    const rotateBtn = screen.getByRole('button', { name: 'Rotate' })
-    expect(rotateBtn).not.toBeDisabled()
-    fireEvent.click(rotateBtn)
+    fireEvent.click(await screen.findByLabelText(
+      /regenerate ssh key \(the new key still needs installing on the node\)/i))
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
     await waitFor(() => expect(calls.some((c) =>
       c.path === '/hosts/5/credentials' && c.method === 'POST'
-      && JSON.stringify(c.body) === JSON.stringify({ token_id: 'proxploy@pve!x', token_secret: 'shh', rotate_ssh: false })
-    )).toBe(true))
+      && JSON.stringify(c.body) === JSON.stringify({ rotate_ssh: true }))).toBe(true))
   })
 
-  it('surfaces a 502 token_rejected as a toast, the old credential stays in place', async () => {
+  it('shows the returned public key once rotated', async () => {
+    wrap()
+    fireEvent.click(await screen.findByLabelText(
+      /regenerate ssh key \(the new key still needs installing on the node\)/i))
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    expect(await screen.findByText('ssh-ed25519 AAAA...')).toBeInTheDocument()
+    expect(screen.getByText('Install this key on the node to finish rotating.')).toBeInTheDocument()
+  })
+
+  it('surfaces a 502 token_rejected without pretending the key rotated', async () => {
     rotateResult = 'rejected'
     wrap()
-    fireEvent.change(screen.getByLabelText('New API token id'), { target: { value: 'proxploy@pve!x' } })
-    fireEvent.change(screen.getByLabelText('New API token secret'), { target: { value: 'shh' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }))
-    // A 502 means Proxploy could not complete the call to Proxmox itself, so
-    // the toast says whose side failed rather than passing the text through
-    // bare (see apiErrorDetail in api/client.ts).
-    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Proxmox could not do this: nope'))
+    fireEvent.click(await screen.findByLabelText(
+      /regenerate ssh key \(the new key still needs installing on the node\)/i))
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    expect(await screen.findByText('Proxmox could not do this: nope')).toBeInTheDocument()
   })
 })

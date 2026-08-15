@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { ApiError } = vi.hoisted(() => ({
@@ -46,8 +46,8 @@ const fill = (label: string, value: string) =>
 const fillHost = () => {
   fill('Name', 'pve-01')
   fill('Address', 'https://10.0.0.5:8006')
-  fill('API token id', 'proxploy@pve!monitoring')
-  fill('API token secret', 'mon-secret')
+  fill('Monitoring token id', 'proxploy@pve!monitoring')
+  fill('Monitoring token secret', 'mon-secret')
 }
 
 const credentialCalls = () => calls.filter(c => c.path.endsWith('/credentials'))
@@ -64,6 +64,39 @@ describe('HostForm capability tokens', () => {
     expect(screen.getByLabelText('Backup token id')).toBeInTheDocument()
   })
 
+  // The bug this relocation fixes: monitoring's token pair used to sit above
+  // the box under a generic "API token" label, reading as a stray duplicate
+  // of the capability tokens below it. Now all four collect in one place.
+  it('collects the monitoring token in the same box as the other capability tokens, with no standalone API token field left at the top', () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('API token secret')).not.toBeInTheDocument()
+
+    // .p-3, not .rounded-ctl: Button itself carries rounded-ctl, so that
+    // selector matches the button before it reaches the surrounding box.
+    const box = screen.getByRole('button', { name: 'Generate setup script' }).closest('.p-3')
+    expect(box).not.toBeNull()
+    const group = within(box as HTMLElement)
+    expect(group.getByLabelText('Monitoring token id')).toBeInTheDocument()
+    expect(group.getByLabelText('Monitoring token secret')).toBeInTheDocument()
+    expect(group.getByLabelText('Lifecycle token id')).toBeInTheDocument()
+    expect(group.getByLabelText('Console token id')).toBeInTheDocument()
+    expect(group.getByLabelText('Backup token id')).toBeInTheDocument()
+  })
+
+  // Monitoring is mandatory, not another capability: it must render even
+  // with every optional capability unticked, and stay a plain field, never a
+  // checkbox.
+  it('always shows the monitoring token fields, even with every capability unticked', () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    for (const label of ['Lifecycle', 'Console', 'Backup']) {
+      fireEvent.click(screen.getByLabelText(new RegExp(`^${label}$`)))
+    }
+    expect(screen.getByLabelText('Monitoring token id')).toBeInTheDocument()
+    expect(screen.getByLabelText('Monitoring token secret')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /monitoring/i })).not.toBeInTheDocument()
+  })
+
   it('creates the host, then stores one capability token per filled pair', async () => {
     const onCreated = vi.fn()
     withQuery(<HostForm onCreated={onCreated} />)
@@ -74,6 +107,12 @@ describe('HostForm capability tokens', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
     expect(calls[0].path).toBe('/hosts')
+    // The relocation moved where the monitoring token is collected, not what
+    // POST /hosts sends: it still creates the host with token_id/token_secret
+    // in the body, not as a fifth capability posted afterwards.
+    expect(calls[0].body).toMatchObject({
+      token_id: 'proxploy@pve!monitoring', token_secret: 'mon-secret',
+    })
     expect(credentialCalls()).toEqual([{
       path: '/hosts/7/credentials',
       body: { token_id: 'proxploy@pve!lifecycle', token_secret: 'lc-secret',

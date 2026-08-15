@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 // intent was previously unrecorded anywhere; this list is where it lives now.
 const INTENTIONALLY_DARK = [
   'components/ScriptPanel.tsx',
+  'components/HostScriptPanel.tsx',
   'components/TerminalPanel.tsx',
   'components/terminal/Terminal.tsx',
   'components/console/VncConsole.tsx',

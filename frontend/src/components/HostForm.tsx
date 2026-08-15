@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { Button } from './ui/button'
+import { HostScriptPanel } from './HostScriptPanel'
 import { inputCls } from './LoginForm'
 import { Loading } from './ui/loading'
 
@@ -110,7 +111,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     token_secret: '', verify_tls: false, ssh_enroll: false })
   const [probe, setProbe] = useState('')
   const [missing, setMissing] = useState<string[] | null>(null)
-  const [script, setScript] = useState<string | null>(null)
   const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
   // Off by default, same reasoning as Sys.Console/node_shell just below:
   // Sys.PowerMgmt can take the whole node down, so it is never on unless the
@@ -152,20 +152,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
     } catch (e) { setError(errText(e)) } finally { setTesting(false) }
   }
 
-  // Doc 08 §2: the operator runs this in a node shell they already own, so
-  // Proxploy never asks for root credentials, even transiently. node_shell
-  // tracks the SSH consent checkbox, because Sys.Console is the privilege that
-  // makes a node shell possible and it is not granted otherwise.
-  async function generateScript() {
-    setError('')
-    try {
-      const r = await api<{ script: string }>('/hosts/token-script', {
-        method: 'POST',
-        body: JSON.stringify({ capabilities: caps, node_shell: f.ssh_enroll,
-                              node_power: nodePower }) })
-      setScript(r.script)
-    } catch (e) { setError(errText(e)) }
-  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError('')
@@ -209,19 +195,13 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      {([['name', 'Name', 'pve-01'], ['address', 'Address', 'https://10.0.0.5:8006'],
-         ['token_id', 'API token id', 'proxploy@pve!monitoring'],
-         ['token_secret', 'API token secret', '']] as const).map(([k, label, ph]) => (
+      {([['name', 'Name', 'pve-01'], ['address', 'Address', 'https://10.0.0.5:8006']] as const)
+        .map(([k, label, ph]) => (
         <div key={k}>
-          {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
-              it drops onto its own line under the label. Without wrapping it
-              squeezes alongside and the label collapses into a column. */}
           <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <label htmlFor={k} className="block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
-            {FIELD_HELP[k] && <FieldInfo label={label} body={FIELD_HELP[k]} />}
           </div>
           <input id={k} required placeholder={ph} className={inputCls}
-            type={k === 'token_secret' ? 'password' : 'text'}
             value={f[k]} onChange={e => set(k, e.target.value)} />
         </div>
       ))}
@@ -238,15 +218,13 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           </span>
         </span>
       </label>
-      {/* Sits above the token fields on purpose: this is where the values they
-          are asking for come from, and finding it afterwards is too late. */}
+      {/* One box for all four capability tokens, monitoring included: it used
+          to sit alone above this box under a generic "API token" label, which
+          read as an unrelated, duplicate field. Monitoring is mandatory and
+          creates the host, so its row always renders here; the other three
+          are optional and only appear once ticked. */}
       <div className="rounded-ctl border border-line bg-panel-2 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[12.5px] text-text-2">Don't have a token yet?</p>
-          <Button type="button" variant="ghost" onClick={generateScript}>
-            Generate setup script
-          </Button>
-        </div>
+        <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
         {/* Doc 08 §2 step 1: monitoring is mandatory, the rest are the
             operator's call. Anything left unticked gets no role and no token
             at all, rather than a broad one it never uses. */}
@@ -261,13 +239,41 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </label>
           ))}
         </div>
-        {/* A field only for capabilities still ticked, not all four always
-            visible: an unticked capability got no role and no token from the
-            script, so a field for it would be a field nobody can fill. All
-            four become visible, stored vs missing, once the host exists (see
-            the edit dialog) -- there is no state to show before that. */}
-        {caps.length > 0 && (
-          <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
+        {/* Monitoring's row always renders below, it is mandatory and creates
+            the host, so it is bound to f.token_id/f.token_secret, not
+            capTokens. These three are optional: a field only for capabilities
+            still ticked, not all three always visible, since an unticked
+            capability got no role and no token from the script. All four
+            become visible, stored vs missing, once the host exists (see the
+            edit dialog) -- there is no state to show before that. */}
+        <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
+          {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
+              it drops onto its own line under the label. Without wrapping it
+              squeezes alongside and the label collapses into a column. */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                <label htmlFor="token_id" className="block text-[11px] uppercase tracking-wide text-text-3">
+                  Monitoring token id
+                </label>
+                {FIELD_HELP.token_id && <FieldInfo label="Monitoring token id" body={FIELD_HELP.token_id} />}
+              </div>
+              <input id="token_id" required placeholder="proxploy@pve!monitoring" className={inputCls}
+                value={f.token_id} onChange={e => set('token_id', e.target.value)} />
+            </div>
+            <div>
+              <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                <label htmlFor="token_secret" className="block text-[11px] uppercase tracking-wide text-text-3">
+                  Monitoring token secret
+                </label>
+                {FIELD_HELP.token_secret && <FieldInfo label="Monitoring token secret" body={FIELD_HELP.token_secret} />}
+              </div>
+              <input id="token_secret" required type="password" className={inputCls}
+                value={f.token_secret} onChange={e => set('token_secret', e.target.value)} />
+            </div>
+          </div>
+          {caps.length > 0 && (
+            <>
             <p className="text-[11.5px] text-text-3">
               The script prints one token per capability. Paste them here, or
               leave a pair blank and add it later from the host's Edit dialog.
@@ -303,8 +309,9 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
                 )}
               </div>
             ))}
-          </div>
-        )}
+            </>
+          )}
+        </div>
         {/* Independent of the capability row above on purpose (doc 08 §2/§9):
             Sys.PowerMgmt gets its own role and token, not a widening of
             Lifecycle's, and Reboot/Power off is offered on every host
@@ -318,21 +325,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </span>
           </span>
         </label>
-        {script && (
-          <>
-            <p className="mt-2 text-[11.5px] text-text-3">
-              Run this in a shell on the node. It creates a dedicated user with
-              only the privileges Proxploy needs, and prints one token secret per
-              capability. Proxploy never sees your root credentials.
-            </p>
-            {/* Dark in both themes on purpose, like ScriptPanel and the
-                authorized_keys block in onboarding: this is shell text, and
-                shell text that follows a light theme stops reading as shell. */}
-            <pre className="mt-2 max-h-64 overflow-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11px] leading-[1.6] text-text-2">{script}</pre>
-            <Button type="button" variant="ghost" className="mt-2"
-              onClick={() => navigator.clipboard.writeText(script)}>Copy script</Button>
-          </>
-        )}
       </div>
 
       {probe && (

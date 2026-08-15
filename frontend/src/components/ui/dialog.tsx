@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 
+import { Button } from './button'
+import { Icon } from './icon'
 import {
   dialogFitPanelClass, dialogOverlayClass, dialogPanelClass, dialogScrollBodyClass,
   dialogScrollPanelClass, paletteOverlayClass, palettePanelClass, useRadixClose,
@@ -16,8 +18,12 @@ import {
  * look, which is the existing tokens unchanged.
  *
  * Mounting model matches the call sites it replaces: render it when it should
- * be open, unmount it to close. onClose fires for Escape and for a click on
- * the scrim.
+ * be open, unmount it to close. onClose fires for Escape, for the X in a
+ * standard dialog, and (for the palette only, see below) for an outside
+ * click. A standard dialog no longer closes on an outside click: a stray
+ * click on browser UI that has nothing to do with the app, such as a
+ * password manager's save prompt, used to dismiss the dialog and lose
+ * whatever had been typed into it.
  */
 
 export function Dialog({
@@ -64,18 +70,48 @@ export function Dialog({
   // Empty string unless the panel is a capped flex column, so a dialog that
   // opts into neither emits the exact same class strings it did before.
   const shrink = scrollBody || fit ? ' shrink-0' : ''
+  const isPalette = variant === 'palette'
+  // The palette is a deliberate exception, not an oversight: it hides its
+  // heading and names itself through its input, and a command palette
+  // conventionally dismisses on an outside click, the way this one always
+  // has. It also has no header row to hang an X on. Every other dialog gets
+  // the new behaviour: outside clicks are blocked, and the X is the only
+  // pointer-driven way out.
+  const closeButton = isPalette ? null : (
+    // DialogPrimitive.Close rather than an onClick calling onClose directly,
+    // so this goes through the same context.onOpenChange -> requestClose path
+    // Escape already used, preserving the close animation/focus-restore
+    // contract useRadixClose sets up.
+    <DialogPrimitive.Close asChild>
+      {/* "Close dialog" rather than the shorter "Close": several dialogs also
+          show their own in-body "Close" button once a job finishes (the
+          JobLog done state), and two controls both named "Close" in the same
+          dialog is a real ambiguity for a screen reader user, not only a
+          test-query collision. */}
+      <Button variant="ghost" size="icon-xs" aria-label="Close dialog" className="shrink-0">
+        <Icon name="close" size={16} />
+      </Button>
+    </DialogPrimitive.Close>
+  )
   return (
     <DialogPrimitive.Root open={open} onOpenChange={requestClose}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className={variant === 'palette' ? paletteOverlayClass : dialogOverlayClass}>
+        <DialogPrimitive.Overlay className={isPalette ? paletteOverlayClass : dialogOverlayClass}>
           <DialogPrimitive.Content
             onCloseAutoFocus={onCloseAutoFocus}
-            // Radix hides the rest of the tree with aria-hidden rather than
-            // emitting this, which is a valid way to do it. We state it too:
-            // role="dialog" plus aria-modal is what a screen reader user and
-            // an auditor both expect to find.
+            // Radix runs a pointer-down-outside or a focus-outside interaction
+            // through onInteractOutside right after its own more specific
+            // callback, using the SAME event object, and only dismisses if
+            // that event is still not defaultPrevented (see
+            // @radix-ui/react-dismissable-layer's usePointerDownOutside and
+            // useFocusOutside). Preventing default here therefore blocks both
+            // outside pointer and outside focus, not only one of them. The
+            // palette is left wired to the default (dismiss), on purpose.
+            onInteractOutside={isPalette ? undefined : (event) => event.preventDefault()}
+            // Escape is untouched: onEscapeKeyDown is not set, so Radix's
+            // default (call onDismiss) still runs.
             aria-modal="true"
-            className={variant === 'palette' ? palettePanelClass
+            className={isPalette ? palettePanelClass
               : fit ? dialogFitPanelClass
               : scrollBody ? `${dialogPanelClass} ${dialogScrollPanelClass}` : dialogPanelClass}
             // No inline width when fitting: a stated width would win over
@@ -88,7 +124,7 @@ export function Dialog({
             // in every test run.
             {...(description ? {} : { 'aria-describedby': undefined })}
           >
-            {variant === 'palette' ? (
+            {isPalette ? (
               // Radix requires a Title. The palette has never shown one, and
               // adding a visible heading above the search field would be a
               // change to the design, not to the accessibility.
@@ -98,12 +134,22 @@ export function Dialog({
                 <DialogPrimitive.Title className="font-display text-[16px] font-semibold text-text">
                   {title}
                 </DialogPrimitive.Title>
-                {headerRight}
+                {/* headerRight and the X share this row so they can never
+                    overlap: headerRight (e.g. the VM wizard's step pills)
+                    stays exactly where it was, with the X pushed to its
+                    right. */}
+                <div className="flex shrink-0 items-center gap-2">
+                  {headerRight}
+                  {closeButton}
+                </div>
               </div>
             ) : (
-              <DialogPrimitive.Title className={`font-display text-[16px] font-semibold text-text${shrink}`}>
-                {title}
-              </DialogPrimitive.Title>
+              <div className={`flex items-center justify-between${shrink}`}>
+                <DialogPrimitive.Title className={`font-display text-[16px] font-semibold text-text${shrink}`}>
+                  {title}
+                </DialogPrimitive.Title>
+                {closeButton}
+              </div>
             )}
             {description && (
               <DialogPrimitive.Description className={`mt-2 text-[13px] text-text-2${shrink}`}>

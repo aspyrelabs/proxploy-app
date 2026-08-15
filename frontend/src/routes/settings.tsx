@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { createRoute, Link } from '@tanstack/react-router'
+import { createRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { shellRoute } from './shell'
 import { api, apiErrorDetail } from '../api/client'
@@ -10,11 +10,10 @@ import { actionLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
+import { HostEditDialog } from '../components/HostEditDialog'
 import { HostForm } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
-import { HostRotateDialog } from '../components/HostRotateDialog'
 import { HostTasksPanel } from '../components/HostTasksPanel'
-import { HostTokensDialog } from '../components/HostTokensDialog'
 import { QueryState } from '../components/QueryState'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
@@ -185,8 +184,7 @@ export function SettingsPage() {
   // (it runs a poller cycle inline and can take a while), tracked per host by
   // comparing the pending mutation's own variables rather than a separate
   // "which host" state.
-  const [rotatingHost, setRotatingHost] = useState<HostRow | null>(null)
-  const [tokensHost, setTokensHost] = useState<{ id: number; name: string } | null>(null)
+  const [editingHost, setEditingHost] = useState<HostRow | null>(null)
   const [removingHost, setRemovingHost] = useState<HostRow | null>(null)
   const [tasksHostId, setTasksHostId] = useState<number | null>(null)
   const syncHost = useMutation({
@@ -368,9 +366,7 @@ export function SettingsPage() {
                             {syncHost.isPending && syncHost.variables?.id === h.id ? 'Syncing…' : 'Sync'}
                           </Button>
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                            onClick={() => setRotatingHost(h)}>Rotate</Button>
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                            onClick={() => setTokensHost(h)}>Tokens</Button>
+                            onClick={() => setEditingHost(h)}>Edit</Button>
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
                             onClick={() => setTasksHostId(id => id === h.id ? null : h.id)}>
                             {tasksHostId === h.id ? 'Hide tasks' : 'Tasks'}
@@ -395,13 +391,9 @@ export function SettingsPage() {
         {adding && <div className="mt-4 border-t border-line-soft pt-4">
           <HostForm onCreated={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['hosts'] }) }} />
         </div>}
-        {rotatingHost && (
-          <HostRotateDialog hostId={rotatingHost.id} hostName={rotatingHost.name}
-            onClose={() => setRotatingHost(null)} />
-        )}
-        {tokensHost && (
-          <HostTokensDialog hostId={tokensHost.id} hostName={tokensHost.name}
-            onClose={() => setTokensHost(null)} />
+        {editingHost && (
+          <HostEditDialog hostId={editingHost.id} host={editingHost}
+            onClose={() => setEditingHost(null)} />
         )}
         {removingHost && (
           <HostRemoveDialog hostId={removingHost.id} hostName={removingHost.name}
@@ -489,14 +481,6 @@ export function SettingsPage() {
       <SessionsCard />
 
       <UpdateCard />
-
-      <Card title="General">
-        <p className="text-[12.5px] text-text-3">
-          Auto-update windows, scheduled backups and catalog sync are all
-          schedules, add them above. Alert rules live on the{' '}
-          <Link to={'/alerts' as never} className="text-amber">Alerts</Link> page.
-        </p>
-      </Card>
     </div>
   )
 }

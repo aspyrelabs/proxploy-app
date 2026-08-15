@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel } from '../components/ui/alert-dialog'
@@ -52,6 +52,53 @@ describe('Dialog', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  // The bug this whole change exists for: a click on something outside the
+  // app entirely (the reported case was a browser password manager's save
+  // prompt) used to dismiss the dialog and lose whatever had been typed.
+  it('does not close on an outside pointer interaction', async () => {
+    const onClose = vi.fn()
+    render(<DialogHarness onClose={onClose} />)
+    // Grabbed before opening: Radix aria-hides the rest of the tree once the
+    // dialog is up, so a role query could not find this afterwards.
+    const outside = screen.getByRole('button', { name: 'Outside button' })
+    fireEvent.click(screen.getByRole('button', { name: 'Open dialog' }))
+    await screen.findByRole('dialog')
+
+    // Dialog defers a left-button pointerdown outside until the matching
+    // click (so a drag-selection that starts outside and ends inside does
+    // not dismiss it), same as the popover in bell-popover.test.tsx: both
+    // events are needed to reach the code path this test is guarding.
+    fireEvent.pointerDown(outside, { button: 0 })
+    fireEvent.click(outside)
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('closes when the X is clicked, and the X has an accessible name', async () => {
+    const onClose = vi.fn()
+    render(<DialogHarness onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open dialog' }))
+    await screen.findByRole('dialog')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('renders the X alongside headerRight, replacing neither', async () => {
+    render(
+      <Dialog title="Create VM" headerRight={<span>Step 2 of 4</span>} onClose={vi.fn()}>
+        <p>body</p>
+      </Dialog>,
+    )
+    const panel = screen.getByRole('dialog')
+    expect(within(panel).getByText('Step 2 of 4')).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Close dialog' })).toBeInTheDocument()
+    expect(within(panel).getByText('Create VM')).toBeInTheDocument()
+  })
+
   it('moves focus into the panel when it opens', async () => {
     render(<DialogHarness />)
     fireEvent.click(screen.getByRole('button', { name: 'Open dialog' }))
@@ -98,6 +145,47 @@ describe('Dialog', () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
 
     await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+})
+
+function PaletteHarness({ onClose = () => {} }: { onClose?: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open palette</button>
+      <button type="button">Outside button</button>
+      {open && (
+        <Dialog title="Command palette" variant="palette" onClose={() => { setOpen(false); onClose() }}>
+          <input aria-label="Search" />
+        </Dialog>
+      )}
+    </>
+  )
+}
+
+describe('Dialog palette variant', () => {
+  // The one deliberate exception to "no outside close": a command palette
+  // conventionally dismisses on an outside click, and this one always has.
+  // Locked down so the exception stays a decision, not a silent regression.
+  it('still closes on an outside interaction, unlike a standard dialog', async () => {
+    const onClose = vi.fn()
+    render(<PaletteHarness onClose={onClose} />)
+    const outside = screen.getByRole('button', { name: 'Outside button' })
+    fireEvent.click(screen.getByRole('button', { name: 'Open palette' }))
+    await screen.findByRole('dialog')
+
+    fireEvent.pointerDown(outside, { button: 0 })
+    fireEvent.click(outside)
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('has no X, because it has no header row to hang one on', async () => {
+    render(<PaletteHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open palette' }))
+    const panel = await screen.findByRole('dialog')
+    expect(within(panel).queryByRole('button', { name: 'Close dialog' })).not.toBeInTheDocument()
   })
 })
 
