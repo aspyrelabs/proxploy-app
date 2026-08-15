@@ -55,7 +55,9 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
   // for its "Connect PBS datastore" affordance (doc 10's Phase 6 Backups
   // deliverable), connecting PBS *is* attaching a storage of type pbs, so it
   // reuses this form rather than growing a second, near-identical one.
-  const [type, setType] = useState<string>(existing?.type ?? defaultType)
+  // Editing keeps whatever Proxmox reported, including nothing: `?? defaultType`
+  // turned "this datastore reports no type" into a confident "dir".
+  const [type, setType] = useState<string>(existing ? existing.type ?? '' : defaultType)
   const [cfg, setCfg] = useState<Record<string, string>>({
     content: existing?.content.join(',') ?? '',
   })
@@ -142,6 +144,16 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
           <select id="sf-type" className={inputCls} value={type} disabled={editing}
             onChange={(e) => setType(e.target.value)}>
             {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            {/* TYPES is the four plugins this form can ATTACH. Edit opens on
+                ANY row the Storage page lists, and a real cluster is full of
+                lvmthin, zfspool and rbd, none of which is here. With no
+                option matching, the browser selects the first one instead, so
+                editing local-lvm read "dir": not a missing answer, a wrong one
+                about a datastore the caller already knew the type of. Same
+                escape hatch NicForm.tsx keeps for a bridge the node no longer
+                reports. */}
+            {!TYPES.some((t) => t === type) &&
+              <option value={type}>{type === '' ? 'unknown' : type}</option>}
           </select>
         </div>
         {fields.map(([k, label, inputType]) => (

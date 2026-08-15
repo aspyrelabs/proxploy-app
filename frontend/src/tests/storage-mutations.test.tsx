@@ -179,6 +179,26 @@ describe('StorageForm', () => {
     expect(await screen.findByText('Unlock Pro')).toBeInTheDocument()
   })
 
+  // TYPES is the four plugins this form can ATTACH, but Edit opens on ANY row
+  // the Storage page lists, and a real cluster is full of lvmthin, zfspool and
+  // rbd. With no option matching, the browser fell back to the first one and
+  // the box read "dir" for local-lvm: not a missing answer, a wrong one, about
+  // a datastore whose type the caller already knew.
+  it('names the datastore\'s real type in edit mode, not the first attachable one', async () => {
+    withQuery(<StorageForm existing={LOCAL_LVM} onClose={vi.fn()} />)
+    const type = await screen.findByLabelText('Type') as HTMLSelectElement
+    expect(type.value).toBe('lvmthin')
+    expect(type.selectedOptions[0].textContent).toBe('lvmthin')
+  })
+
+  // Same claim from the other direction: GET /storage types are nullable, and
+  // `?? defaultType` turned "Proxmox did not say" into a confident "dir".
+  it('says the type is unknown when the datastore reports none', async () => {
+    withQuery(<StorageForm existing={{ ...LOCAL, type: null }} onClose={vi.fn()} />)
+    const type = await screen.findByLabelText('Type') as HTMLSelectElement
+    expect(type.selectedOptions[0].textContent).toBe('unknown')
+  })
+
   it('PATCHes only the fields the operator filled in edit mode', async () => {
     withQuery(<StorageForm existing={LOCAL} onClose={vi.fn()} />)
     fireEvent.change(await screen.findByLabelText('Content'), { target: { value: 'iso,backup' } })
