@@ -132,3 +132,62 @@ def test_node_power_token_is_privilege_separated_like_every_other():
     s = generate_script([], node_power=True)
     assert "-token 'proxploy@pve!nodepower'" in s
     assert "pveum user token add proxploy@pve nodepower --privsep 1" in s
+
+
+# --- Re-running the script must converge, not just create -----------------
+#
+# Confirmed against a live cluster: an operator generated the script without
+# node shell, ran it, got ProxployConsole with only VM.Console. They later
+# turned on node shell in Proxploy and node shell failed, because that needs
+# Sys.Console and the role never got it. Re-running the old script did not
+# fix this: `pveum role add X -privs '...'` dies with "role already exists"
+# on a node that has been set up before, so the privilege list is never
+# updated. Only `pveum role modify X -privs '...'` (no -append, so it
+# replaces the set) repairs it.
+
+def test_every_role_converges_its_privileges_on_a_rerun():
+    """Every role the generator can emit must both create the role (fresh
+    node) and update it to the same privilege list (node set up before),
+    driven from CAPABILITIES so this does not hardcode role names."""
+    s = generate_script(list(CAPABILITIES))
+    for cap in CAPABILITIES.values():
+        privs = ",".join(cap.privileges)
+        assert f"pveum role add {cap.role} -privs '{privs}'" in s
+        assert f"pveum role modify {cap.role} -privs '{privs}'" in s
+        # The modify must be the fallback that actually runs when add fails
+        # because the role already exists, not just present somewhere else.
+        assert (f"pveum role add {cap.role} -privs '{privs}' 2>/dev/null || "
+                f"pveum role modify {cap.role} -privs '{privs}'") in s
+
+
+def test_console_role_converges_to_add_sys_console_on_a_rerun():
+    """The exact bug: node shell turned on after the first run must widen
+    an already-existing ProxployConsole role to include Sys.Console, not
+    silently leave it at VM.Console only."""
+    role = CAPABILITIES["console"].role
+    s = generate_script(["console"], node_shell=True)
+    assert f"pveum role add {role} -privs 'VM.Console,Sys.Console' 2>/dev/null || " \
+           f"pveum role modify {role} -privs 'VM.Console,Sys.Console'" in s
+
+
+def test_token_add_lines_stay_create_only():
+    """Re-adding a token mints a brand new secret and would silently
+    invalidate the copy Proxploy already stored for a working host, so
+    these must never grow a `|| pveum ... token ... modify/regenerate`
+    fallback the way role lines did."""
+    s = generate_script(["console"])
+    assert "pveum user token add proxploy@pve console --privsep 1" in s
+    for line in s.splitlines():
+        if "user token add" in line:
+            assert "||" not in line
+
+
+def test_script_explains_a_token_add_failure_is_expected_and_safe():
+    """An operator re-running the script on an already-provisioned node
+    will see the token-add line fail. The script text must say plainly
+    that this means the token already exists and their stored secret is
+    still valid, so they do not delete/re-add it and break a working host."""
+    s = generate_script(["console"])
+    lowered = s.lower()
+    assert "already exists" in lowered
+    assert "still valid" in lowered or "still works" in lowered

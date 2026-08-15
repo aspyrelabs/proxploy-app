@@ -116,6 +116,23 @@ _HEADER = """\
 #
 # Proxploy never asks for your root credentials. You run this yourself, and
 # hand back only the tokens.
+#
+# Safe to run again, for example after you turn on a capability in Proxploy
+# that this node did not have before. Each role line sets that role's
+# privileges to the exact list shown, whether the role is new or already
+# exists, so a role from an earlier run is brought up to date, not left as
+# it was.
+#
+# The user line only creates {user} once. If it fails saying the user
+# already exists, that is expected and fine, the rest of the script still
+# runs.
+#
+# Each `user token add` line only creates that token once, on purpose: it
+# never regenerates one, because that would print a new secret and quietly
+# make the one Proxploy already stored for this host stop working. If a
+# token-add line fails saying the token already exists, that is expected
+# and safe, the token you already gave Proxploy is still valid, leave it
+# alone.
 """
 
 
@@ -154,7 +171,13 @@ def generate_script(capabilities: list[str], *, path: str = "/",
         token_id = f"{PVE_USER}!{cap.token}"
         lines += [
             f"# {cap.label}: {cap.why}",
-            f"pveum role add {cap.role} -privs '{privs}'",
+            # Create-only would leave an existing role's privileges stale
+            # (pveum role add dies with "role already exists"); fall back to
+            # modify, which replaces the role's privileges with this exact
+            # list, so re-running repairs a role set up before this
+            # capability's privileges changed.
+            f"pveum role add {cap.role} -privs '{privs}' 2>/dev/null || "
+            f"pveum role modify {cap.role} -privs '{privs}'",
             f"pveum acl modify {path} -user {PVE_USER} -role {cap.role}",
             f"pveum user token add {PVE_USER} {cap.token} --privsep 1",
             # A privsep token's effective rights are the intersection of its
@@ -170,7 +193,9 @@ def generate_script(capabilities: list[str], *, path: str = "/",
             f"# Node power: reboot/power off the host itself. Separate from "
             f"Lifecycle on purpose -- powering off the hypervisor is a very "
             f"different blast radius than restarting one guest on it.",
-            f"pveum role add {NODE_POWER_ROLE} -privs '{NODE_POWER_PRIVILEGE}'",
+            f"pveum role add {NODE_POWER_ROLE} -privs '{NODE_POWER_PRIVILEGE}' "
+            f"2>/dev/null || pveum role modify {NODE_POWER_ROLE} "
+            f"-privs '{NODE_POWER_PRIVILEGE}'",
             f"pveum acl modify {path} -user {PVE_USER} -role {NODE_POWER_ROLE}",
             f"pveum user token add {PVE_USER} {NODE_POWER_TOKEN} --privsep 1",
             f"pveum acl modify {path} -token '{token_id}' -role {NODE_POWER_ROLE}",
