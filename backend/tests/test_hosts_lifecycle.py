@@ -81,6 +81,32 @@ def test_removal_drops_the_host_its_cache_and_its_credentials(
         assert audit and audit[0]["params"]["name"] == "host-01"
 
 
+def test_removal_audit_names_every_credential_kind_that_was_removed(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Credentials disappear only via host removal (CASCADE). "My token
+    vanished" needs to be answerable from the audit log, not database
+    forensics: name each kind that went with the host."""
+    from proxploy.models import utcnow
+
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        with app.state.sessionmaker() as db:
+            blob, ver = app.state.secretstore.encrypt(b"ssh-priv")
+            db.add(HostCredential(host_id=host_id, kind="ssh_key",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="ssh-ed25519 X",
+                                  ssh_verified_at=utcnow()))
+            db.commit()
+        r = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                      json={"confirm": "host-01"}, headers=csrf_header(c))
+        assert r.status_code == 200
+        audit = c.get("/api/v1/audit", params={"action": "host.remove"}).json()
+        assert set(audit[0]["params"]["kinds_removed"]) == {
+            "api_token:monitoring", "ssh_key"}
+
+
 def test_forget_apps_removes_the_records_and_leaves_the_containers(
         tmp_path, csrf_header, bootstrap_admin):
     """Destroying a container is app uninstall's job, never a side effect of
@@ -133,12 +159,15 @@ def test_rotating_the_api_token_replaces_it_after_verifying(
     with c:
         bootstrap_admin(c)
         host_id = seed()
+        # `capability` given explicitly: the default only covers a host with
+        # no monitoring credential yet (first enrolment). Once one exists,
+        # rotating it back needs the caller to say so, the same guard that
+        # stops a lifecycle/console/backup write from silently landing here.
         r = c.post(f"/api/v1/hosts/{host_id}/credentials",
-                   json={"token_id": "proxploy@pve!new", "token_secret": "new"},
+                   json={"token_id": "proxploy@pve!new", "token_secret": "new",
+                        "capability": "monitoring"},
                    headers=csrf_header(c))
         assert r.status_code == 200
-        # No `capability` in the request body: default "monitoring" preserves
-        # every caller written before per-capability tokens existed.
         assert r.json()["rotated"] == ["api_token:monitoring"]
         with app.state.sessionmaker() as db:
             cred = db.query(HostCredential).filter_by(
@@ -146,6 +175,55 @@ def test_rotating_the_api_token_replaces_it_after_verifying(
             assert "new" in cred.public_meta
             tok = json.loads(app.state.secretstore.decrypt(cred.encrypted_blob))
             assert tok["token_secret"] == "new"
+
+
+def test_omitting_capability_is_fine_on_first_enrolment(
+        tmp_path, csrf_header, bootstrap_admin):
+    """No capability, no monitoring row yet: the pre-capability-era default
+    still works, exactly as documented on CredentialRotateIn.capability."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app, seed_host_row
+
+    fake = FakePVE()
+    app = make_app(tmp_path, fake=fake)
+    from fastapi.testclient import TestClient
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            host_id = seed_host_row(db).id
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!new", "token_secret": "new"},
+                   headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["rotated"] == ["api_token:monitoring"]
+
+
+def test_omitting_capability_when_monitoring_already_exists_does_not_overwrite_it(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The exact trap the two deleted dialogs fell into: a token posted with
+    no `capability` used to land in the monitoring slot even when the caller
+    meant lifecycle/console/backup. Once a monitoring credential is already
+    stored, an omitted capability must be refused, not guessed."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        with app.state.sessionmaker() as db:
+            before = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one()
+            before_blob = before.encrypted_blob
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!new", "token_secret": "new"},
+                   headers=csrf_header(c))
+        assert 400 <= r.status_code < 500
+        with app.state.sessionmaker() as db:
+            after = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one()
+            assert after.encrypted_blob == before_blob
+            assert after.public_meta == "proxploy@pve!old"
 
 
 def test_rotating_a_named_capability_touches_only_that_kind_row(
@@ -176,6 +254,53 @@ def test_rotating_a_named_capability_touches_only_that_kind_row(
             lc = db.query(HostCredential).filter_by(
                 host_id=host_id, kind="api_token:lifecycle").one()
             assert lc.public_meta == "proxploy@pve!lifecycle"
+
+
+def test_rotating_a_named_capability_leaves_monitoring_byte_for_byte_unchanged(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Stronger than the public_meta check above: the encrypted blob itself,
+    not just its label, must be untouched."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        with app.state.sessionmaker() as db:
+            before_blob = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one().encrypted_blob
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!lifecycle",
+                        "token_secret": "new-lc", "capability": "lifecycle"},
+                   headers=csrf_header(c))
+        assert r.status_code == 200
+        with app.state.sessionmaker() as db:
+            after_blob = db.query(HostCredential).filter_by(
+                host_id=host_id, kind="api_token:monitoring").one().encrypted_blob
+            assert after_blob == before_blob
+
+
+def test_credential_rotation_audit_names_the_capability_written(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A future dispute ("I configured lifecycle, monitoring got wiped") needs
+    the audit row to say which capability the write was for."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    app, c, seed = _seeded(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        host_id = seed()
+        r = c.post(f"/api/v1/hosts/{host_id}/credentials",
+                   json={"token_id": "proxploy@pve!lifecycle",
+                        "token_secret": "new-lc", "capability": "lifecycle"},
+                   headers=csrf_header(c))
+        assert r.status_code == 200
+        audit = c.get("/api/v1/audit", params={"action": "host.credentials"}).json()
+        row = audit[0]
+        assert row["params"]["capability"] == "lifecycle"
+        assert "api_token:lifecycle" in row["params"]["rotated"]
 
 
 def test_rotating_an_unknown_capability_is_422(tmp_path, csrf_header, bootstrap_admin):

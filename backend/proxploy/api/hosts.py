@@ -519,13 +519,19 @@ class CredentialRotateIn(BaseModel):
     # credentials for you.
     token_id: str | None = None
     token_secret: str | None = None
-    # Which capability's token this is. Defaults to "monitoring" so every
-    # caller written before per-capability tokens existed (the single-token
-    # model) keeps rotating the same row it always did with no request
-    # change required. Validated against CAPABILITIES the same place
-    # token_script's `capabilities` list already is (ValueError -> 422),
-    # not against a separate hand-kept list that could drift from it.
-    capability: str = "monitoring"
+    # Which capability's token this is. None (the default, meaning the field
+    # was left out entirely) falls back to "monitoring" ONLY when the host has
+    # no monitoring credential yet, so a pre-capability-era caller's first
+    # write still lands where it always did with no request change required.
+    # Once a monitoring credential exists, an omitted capability is refused
+    # rather than guessed: two frontend dialogs once posted a token with no
+    # `capability` at all and silently overwrote whatever was in the
+    # monitoring slot, convincing an operator they had configured lifecycle
+    # or backup when they had only ever rewritten monitoring. Validated
+    # against CAPABILITIES the same place token_script's `capabilities` list
+    # already is (ValueError -> 422), not against a separate hand-kept list
+    # that could drift from it.
+    capability: str | None = None
     # Regenerate the SSH keypair in-process. The new public key has to be
     # authorized on the node before installs work again, which is why the
     # response hands it back with the same consent note onboarding uses.
@@ -533,8 +539,8 @@ class CredentialRotateIn(BaseModel):
 
     @field_validator("capability")
     @classmethod
-    def _known_capability(cls, v: str) -> str:
-        if v not in CAPABILITIES:
+    def _known_capability(cls, v: str | None) -> str | None:
+        if v is not None and v not in CAPABILITIES:
             raise ValueError(f"capability must be one of "
                              f"{', '.join(sorted(CAPABILITIES))}")
         return v
@@ -589,10 +595,16 @@ def remove_host(request: Request, host_id: int,
     except (TypeError, ValueError):
         is_own_host = False  # malformed setting fails open, as in selfguard
 
+    # One query before the delete: credentials only ever disappear via a host
+    # removal (CASCADE, no route deletes a single credential), so this is the
+    # only place "my token vanished" can ever be answered from.
+    kinds_removed = sorted(c.kind for c in
+                           db.query(HostCredential).filter_by(host_id=h.id).all())
     write_audit(db, actor_type="user", actor_id=user.id, action="host.remove",
                 target_type="host", target_id=h.id,
                 params={"name": h.name, "forgot_apps": len(apps),
-                        "was_own_host": is_own_host}, ip=ip)
+                        "was_own_host": is_own_host,
+                        "kinds_removed": kinds_removed}, ip=ip)
     for a in apps:
         db.delete(a)          # RESTRICT: must go before the host
     db.flush()
@@ -915,6 +927,7 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
     if bool(body.token_id) != bool(body.token_secret):
         raise HTTPException(422, "token_id and token_secret must be given together")
 
+    capability = body.capability
     if body.token_id and body.token_secret:
         try:
             ProxmoxClient(h.address, body.token_id, body.token_secret,
@@ -926,9 +939,26 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
                 "error": "token_rejected",
                 "detail": f"the new token did not work against {h.address}, "
                           f"the old one is still in place: {e}"}) from e
+        if capability is None:
+            # The default only covers a host with no monitoring credential
+            # yet. Once one exists, guessing "monitoring" for an unlabelled
+            # write is exactly how a lifecycle/console/backup token silently
+            # overwrote it before, so the caller now has to say which slot.
+            has_monitoring = (db.query(HostCredential)
+                              .filter_by(host_id=h.id, kind="api_token:monitoring")
+                              .one_or_none() is not None)
+            if has_monitoring:
+                raise HTTPException(422, {
+                    "error": "capability_required",
+                    "detail": (f"{h.name} already has a monitoring token stored. "
+                               f"Say which capability this new token is for "
+                               f"(one of {', '.join(sorted(CAPABILITIES))}), so it "
+                               f"cannot overwrite monitoring by accident."),
+                })
+            capability = "monitoring"
         blob, ver = request.app.state.secretstore.encrypt(jsonlib.dumps(
             {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
-        kind = f"api_token:{body.capability}"
+        kind = f"api_token:{capability}"
         cred = (db.query(HostCredential)
                 .filter_by(host_id=h.id, kind=kind).one_or_none())
         if cred is None:
@@ -937,7 +967,7 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
         cred.encrypted_blob, cred.key_version = blob, ver
         cred.public_meta = token_public_meta(body.token_id)
         cred.last_used_at = utcnow()
-        if body.capability == "monitoring":
+        if capability == "monitoring":
             # Only monitoring's own connectivity/last_seen bookkeeping: a
             # lifecycle/console/backup rotation proves that ONE capability's
             # token works (the version() check above), not that the host's
@@ -969,9 +999,15 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
         raise HTTPException(422, "nothing to rotate")
 
     db.commit()
+    audit_params: dict = {"rotated": rotated}
+    if body.token_id and body.token_secret:
+        # Which slot the token landed in, named explicitly rather than left
+        # for a future reader to parse out of the "api_token:<capability>"
+        # string in `rotated`.
+        audit_params["capability"] = capability
     write_audit(db, actor_type="user", actor_id=user.id, action="host.credentials",
                 target_type="host", target_id=h.id,
-                params={"rotated": rotated}, ip=ip)
+                params=audit_params, ip=ip)
     out["rotated"] = rotated
     return out
 
