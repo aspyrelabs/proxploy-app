@@ -10,6 +10,13 @@ it should carry.
 2. Neutral, not past tense. A label must read correctly whether the row is
    waiting, running, done, failed or blocked. "App Install" plus "failed" reads
    right; "App Installed" plus "failed" contradicts itself.
+
+   Exception: an event with exactly one possible state, which never carries a
+   verdict word, may be past tense. "Backup Failed" and "Job Interrupted" have
+   already happened by the time anything renders them, so there is no second
+   state for a neutral label to serve, and "Backup Fail" is stilted English
+   for a thing that definitely occurred. The test of the exception is whether
+   a verdict word can ever be appended: if one can, the label must be neutral.
 3. Bare verb, not the -ion form. "VM Create", not "VM Creation". Applied
    everywhere so the list reads as one voice.
 4. No brackets, no parentheses, no asides.
@@ -232,11 +239,10 @@ the error text underneath them. HTTP 502 keeps Proxmox's own message under the
    meeting that confusion again should know it is a known, accepted one and
    not a fresh finding.
 
-2. **Four labels are past tense, against rule 2.** "App Vanished" is gone, but
-   "Backup Failed" (alert), "Jobs Interrupted" (restart notifier) and the two
-   status words "Canceled" and "Interrupted" remain. All describe events with
-   exactly one possible state that never carry a verdict word, so rule 2 should
-   probably carve that out explicitly rather than be quietly broken.
+2. **Past tense labels: settled, rule 2 now carves them out.** "App Vanished"
+   became "App Unlink". "Backup Failed", "Job Interrupted" and the status words
+   "Canceled" and "Interrupted" stay past tense, and rule 2 above now says when
+   that is allowed instead of being quietly broken by four labels.
 
 3. **Rule 1 now has exactly one exception.** After folding the network read
    into "Network Edit", the API Key pair is the only label longer or shorter
