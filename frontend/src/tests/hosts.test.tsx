@@ -137,6 +137,23 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ id: 1, name: 'host-01', address: 'https://10.0.0.5:8006',
                                node_shell_enabled: false })
     }
+    // GET /hosts/capabilities, the catalog HostForm's checkboxes read
+    // labels and the "why" explanation from. Without this case it fell
+    // through to the generic /hosts handler below and resolved [], an
+    // empty catalog that would leave the add-host form with none of the
+    // three optional capability checkboxes.
+    if (path === '/hosts/capabilities') {
+      return Promise.resolve([
+        { key: 'monitoring', label: 'Read-only monitoring', required: true,
+          why: 'Pollers, dashboard, metrics, and every read view. Always required.' },
+        { key: 'lifecycle', label: 'Lifecycle', required: false,
+          why: 'Start/stop/restart, resource edits, snapshots, clone, migration, VM create/destroy, '
+             + 'and node-level network/storage config (bridges, storage pools, storage content).' },
+        { key: 'console', label: 'Console', required: false, why: 'Console tickets for containers and VMs.' },
+        { key: 'backup', label: 'Backup', required: false,
+          why: 'vzdump/PBS backup and restore jobs, and backup listing.' },
+      ])
+    }
     if (path.startsWith('/hosts')) return Promise.resolve([])
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'host:1', metric: 'net_in_bps', resolution: 'raw', ts: [], value: [] })

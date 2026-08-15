@@ -46,6 +46,21 @@ export function useHostCapabilities(hostId: number | null) {
   }
 }
 
+// One row per capability a host can be given a token for, monitoring first
+// and always `required: true` (backend/proxploy/api/hosts.py). Static and
+// server-declared, so HostForm reads labels and the `why` explanation from
+// here instead of duplicating them, and a generous staleTime means it is
+// fetched at most once per session.
+export type HostCapabilityInfo = { key: string; label: string; why: string; required: boolean }
+
+export function useHostCapabilityCatalog() {
+  return useQuery({
+    queryKey: ['hosts', 'capabilities'],
+    queryFn: () => api<HostCapabilityInfo[]>('/hosts/capabilities'),
+    staleTime: Infinity,
+  })
+}
+
 export function useHostTaskLog(hostId: number | null, upid: string | null) {
   // Encoded outside the template literal: a UPID is full of characters that
   // must not reach the path raw, and the cast this used to need inline is

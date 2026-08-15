@@ -12,12 +12,37 @@ const { ApiError } = vi.hoisted(() => ({
 const calls: { path: string; body: any }[] = []
 // Which capability the fake node rejects, by capability key.
 let reject: string | null = null
+// Controls what GET /hosts/capabilities does: 'ok' is the normal case, the
+// other two are what the resilience tests below exercise.
+let capsOutcome: 'ok' | 'error' | 'pending' = 'ok'
+
+// The real shape of GET /hosts/capabilities (backend/proxploy/api/hosts.py),
+// monitoring first and always required. The consequence-text tests below
+// assert against this fixture's own `why` strings, not a literal repeated
+// in the test, so they only pass if the component renders what the server
+// actually sent.
+const CAPABILITIES_CATALOG = [
+  { key: 'monitoring', label: 'Read-only monitoring', required: true,
+    why: 'Pollers, dashboard, metrics, and every read view. Always required.' },
+  { key: 'lifecycle', label: 'Lifecycle', required: false,
+    why: 'Start/stop/restart, resource edits, snapshots, clone, migration, VM create/destroy, '
+       + 'and node-level network/storage config (bridges, storage pools, storage content).' },
+  { key: 'console', label: 'Console', required: false,
+    why: 'Console tickets for containers and VMs.' },
+  { key: 'backup', label: 'Backup', required: false,
+    why: 'vzdump/PBS backup and restore jobs, and backup listing.' },
+]
 
 vi.mock('../api/client', () => ({
   ApiError,
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, body })
+    if (path === '/hosts/capabilities') {
+      if (capsOutcome === 'error') return Promise.reject(new ApiError(500, { detail: 'boom' }))
+      if (capsOutcome === 'pending') return new Promise(() => {})
+      return Promise.resolve(CAPABILITIES_CATALOG)
+    }
     if (path === '/hosts') return Promise.resolve({ id: 7, name: body.name })
     if (path.endsWith('/credentials')) {
       if (body.capability === reject) {
@@ -51,9 +76,13 @@ const fillHost = () => {
 }
 
 const credentialCalls = () => calls.filter(c => c.path.endsWith('/credentials'))
+// Every assertion below that counts or indexes into `calls` cares about the
+// host/credential requests HostForm's submit makes, not the capability
+// catalog fetched on mount, so this is what those assertions filter on.
+const hostCalls = () => calls.filter(c => c.path !== '/hosts/capabilities')
 
 describe('HostForm capability tokens', () => {
-  beforeEach(() => { calls.length = 0; reject = null })
+  beforeEach(() => { calls.length = 0; reject = null; capsOutcome = 'ok' })
   afterEach(() => vi.restoreAllMocks())
 
   it('offers a token field for each capability still ticked, and none for the unticked', () => {
@@ -106,11 +135,11 @@ describe('HostForm capability tokens', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
-    expect(calls[0].path).toBe('/hosts')
+    expect(hostCalls()[0].path).toBe('/hosts')
     // The relocation moved where the monitoring token is collected, not what
     // POST /hosts sends: it still creates the host with token_id/token_secret
     // in the body, not as a fifth capability posted afterwards.
-    expect(calls[0].body).toMatchObject({
+    expect(hostCalls()[0].body).toMatchObject({
       token_id: 'proxploy@pve!monitoring', token_secret: 'mon-secret',
     })
     expect(credentialCalls()).toEqual([{
@@ -190,13 +219,14 @@ describe('HostForm capability tokens', () => {
     fillHost()
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
-    expect(calls.map(c => c.path)).toEqual(['/hosts'])
+    expect(hostCalls().map(c => c.path)).toEqual(['/hosts'])
   })
 
   // Finding #12: unticking every capability box (monitoring stays mandatory
   // and off-screen) must behave exactly as onboarding did before this
-  // feature existed -- one POST, nothing else, and no token-pair block.
-  it('makes exactly one call, to POST /hosts, when every capability is unticked', async () => {
+  // feature existed -- one POST and nothing else beyond the capability
+  // catalog fetched once on mount, and no token-pair block.
+  it('makes exactly one host-related call, to POST /hosts, when every capability is unticked', async () => {
     const onCreated = vi.fn()
     withQuery(<HostForm onCreated={onCreated} />)
     fillHost()
@@ -206,8 +236,8 @@ describe('HostForm capability tokens', () => {
     expect(screen.queryByText(/The script prints one token per capability/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
-    expect(calls).toHaveLength(1)
-    expect(calls[0].path).toBe('/hosts')
+    expect(hostCalls()).toHaveLength(1)
+    expect(hostCalls()[0].path).toBe('/hosts')
   })
 
   // Finding #6: abandoning the form after the host is created (before Retry
@@ -228,5 +258,79 @@ describe('HostForm capability tokens', () => {
     await screen.findByText(/Console: .*did not work/i)
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['hosts'] })
     expect(onCreated).not.toHaveBeenCalled()
+  })
+})
+
+// The "there is a section that says 'Don't have a token yet?'" request:
+// unticking Lifecycle, Console, or Backup used to be silent about what that
+// gives up. These assert against CAPABILITIES_CATALOG's own `why` strings,
+// not a copy of them written into the test, so they only pass if the
+// component is rendering what the server actually sent, not a paraphrase.
+describe('HostForm capability consequence text', () => {
+  beforeEach(() => { calls.length = 0; reject = null; capsOutcome = 'ok' })
+  afterEach(() => vi.restoreAllMocks())
+
+  const why = (key: string) => CAPABILITIES_CATALOG.find(c => c.key === key)!.why
+  const untick = async (label: string) => {
+    fireEvent.click(await screen.findByLabelText(new RegExp(`^${label}$`)))
+  }
+
+  it('names what stops working when Lifecycle is unticked', async () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    await untick('Lifecycle')
+    expect(await screen.findByText((t) => t.includes(why('lifecycle')))).toBeInTheDocument()
+  })
+
+  it('names what stops working when Console is unticked', async () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    await untick('Console')
+    expect(await screen.findByText((t) => t.includes(why('console')))).toBeInTheDocument()
+  })
+
+  it('names what stops working when Backup is unticked', async () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    await untick('Backup')
+    expect(await screen.findByText((t) => t.includes(why('backup')))).toBeInTheDocument()
+  })
+
+  it('removes the consequence text once the capability is ticked again', async () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    await untick('Lifecycle')
+    await screen.findByText((t) => t.includes(why('lifecycle')))
+    fireEvent.click(screen.getByLabelText(new RegExp('^Lifecycle')))
+    expect(screen.queryByText((t) => t.includes(why('lifecycle')))).not.toBeInTheDocument()
+  })
+
+  it('never renders monitoring as a checkbox and never shows its consequence text', async () => {
+    withQuery(<HostForm onCreated={() => {}} />)
+    await untick('Lifecycle')  // wait for the catalog so `why` text is possible at all
+    expect(screen.queryByRole('checkbox', { name: /monitoring/i })).not.toBeInTheDocument()
+    expect(screen.queryByText((t) => t.includes(why('monitoring')))).not.toBeInTheDocument()
+  })
+
+  // The important one: an operator must never be blocked from adding a host
+  // because this descriptive endpoint is slow or broken.
+  it('still renders every checkbox and can add a host while the capabilities query is loading', async () => {
+    capsOutcome = 'pending'
+    const onCreated = vi.fn()
+    withQuery(<HostForm onCreated={onCreated} />)
+    fillHost()
+    expect(screen.getByLabelText(/^Lifecycle$/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Console$/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Backup$/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
+  })
+
+  it('still renders every checkbox and can add a host when the capabilities query fails', async () => {
+    capsOutcome = 'error'
+    const onCreated = vi.fn()
+    withQuery(<HostForm onCreated={onCreated} />)
+    fillHost()
+    expect(screen.getByLabelText(/^Lifecycle$/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Console$/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Backup$/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: 7, name: 'pve-01' }))
   })
 })

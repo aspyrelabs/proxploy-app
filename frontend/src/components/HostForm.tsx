@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
+import { useHostCapabilityCatalog } from '../api/hosts'
 import { Button } from './ui/button'
 import { HostScriptPanel } from './HostScriptPanel'
 import { inputCls } from './LoginForm'
@@ -45,17 +46,17 @@ const TOKEN_DOCS = 'https://docs.proxploy.com/getting-started/proxmox-token/'
 // it whether or not it is asked for, so offering it as a checkbox would be
 // offering a choice that does not exist.
 //
-// This stays a hand-written list rather than being derived from the
-// backend's capability map. That map (GET /hosts, GET /hosts/{id}) describes
-// *state* for a host that already exists -- stored vs missing -- and this
-// form has no host yet to read state from. There is also no route that
-// lists capabilities without also generating a script, so deriving from one
-// would be a second backend addition the spec does not ask for.
-const CAPABILITY_CHOICES = [
+// Labels and the "why" explanation normally come from GET /hosts/capabilities
+// (useHostCapabilityCatalog), the same list the setup script is generated
+// from. This hand-written copy is only the fallback while that request is
+// still loading or has failed: an operator must be able to add a host
+// without it, so the checkboxes fall back to this rather than disappearing
+// or blocking the form.
+const CAPABILITY_FALLBACK: { key: string; label: string; why?: string }[] = [
   { key: 'lifecycle', label: 'Lifecycle' },
   { key: 'console', label: 'Console' },
   { key: 'backup', label: 'Backup' },
-] as const
+]
 
 // Only the two fields that ask for something the operator must go and create
 // somewhere else. Name and Address explain themselves.
@@ -131,8 +132,14 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   const [capErrors, setCapErrors] = useState<Record<string, string>>({})
   const setCapToken = (key: string, field: 'id' | 'secret', v: string) =>
     setCapTokens(s => ({ ...s, [key]: { id: '', secret: '', ...s[key], [field]: v } }))
+  // Never gates the form: capCatalog.data is undefined both while loading
+  // and after a failed request, and CAPABILITY_FALLBACK covers both the
+  // same way, so the checkboxes and submit always work.
+  const capCatalog = useHostCapabilityCatalog()
+  const capChoices: { key: string; label: string; why?: string }[] =
+    capCatalog.data ? capCatalog.data.filter(c => !c.required) : CAPABILITY_FALLBACK
   const labelOf = (key: string) =>
-    CAPABILITY_CHOICES.find(c => c.key === key)?.label ?? key
+    capChoices.find(c => c.key === key)?.label ?? key
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -227,17 +234,34 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
         {/* Doc 08 §2 step 1: monitoring is mandatory, the rest are the
             operator's call. Anything left unticked gets no role and no token
-            at all, rather than a broad one it never uses. */}
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          <span className="text-[11.5px] text-text-3">Read-only monitoring (always)</span>
-          {CAPABILITY_CHOICES.map(({ key, label }) => (
-            <label key={key} className="flex items-center gap-1.5 text-[11.5px] text-text-2">
-              <input type="checkbox" checked={caps.includes(key)}
-                onChange={e => setCaps(cs => e.target.checked
-                  ? [...cs, key] : cs.filter(c => c !== key))} />
-              {label}
-            </label>
-          ))}
+            at all, rather than a broad one it never uses. Unticking one
+            shows what it would have covered, right under it, so the
+            trade-off is visible while deciding instead of discovered later
+            as something that quietly does not work. */}
+        <div className="mt-2 space-y-1.5">
+          <p className="text-[11.5px] text-text-3">Read-only monitoring is always included.</p>
+          {capChoices.map(({ key, label, why }) => {
+            const ticked = caps.includes(key)
+            return (
+              <label key={key} className="flex items-start gap-1.5 text-[11.5px] text-text-2">
+                <input type="checkbox" className="mt-0.5" checked={ticked}
+                  onChange={e => setCaps(cs => e.target.checked
+                    ? [...cs, key] : cs.filter(c => c !== key))} />
+                <span>
+                  {label}
+                  {/* `why` only exists once the catalog has loaded; while it
+                      is still the fallback there is nothing to show, which
+                      is why this is a plain checkbox with no text below it
+                      in that state. */}
+                  {!ticked && why && (
+                    <span className="block text-[11px] text-text-3">
+                      Without a token for {label}, this will not work: {why}
+                    </span>
+                  )}
+                </span>
+              </label>
+            )
+          })}
         </div>
         {/* Monitoring's row always renders below, it is mandatory and creates
             the host, so it is bound to f.token_id/f.token_secret, not
@@ -278,7 +302,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
               The script prints one token per capability. Paste them here, or
               leave a pair blank and add it later from the host's Edit dialog.
             </p>
-            {CAPABILITY_CHOICES.filter(c => caps.includes(c.key)).map(({ key, label }) => (
+            {capChoices.filter(c => caps.includes(c.key)).map(({ key, label }) => (
               <div key={key} className="grid gap-2 sm:grid-cols-2">
                 <div>
                   <label htmlFor={`cap-${key}-id`}

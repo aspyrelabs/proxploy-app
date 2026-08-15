@@ -28,6 +28,19 @@ const scriptResult = { script: "# Proxploy\npveum role add ProxployAudit -privs 
                          { key: 'lifecycle', label: 'Lifecycle', why: 'Start/stop.', required: false, role: 'ProxployLifecycle' },
                        ] }
 let scriptCalls: { capabilities: string[]; node_shell: boolean; node_power: boolean }[] = []
+// GET /hosts/capabilities, the same shape host-form-capabilities.test.tsx
+// exercises. Nothing in this file asserts on it directly; it just has to
+// resolve so HostForm's checkboxes render from the real catalog here too.
+const capabilitiesCatalog = [
+  { key: 'monitoring', label: 'Read-only monitoring', required: true,
+    why: 'Pollers, dashboard, metrics, and every read view. Always required.' },
+  { key: 'lifecycle', label: 'Lifecycle', required: false,
+    why: 'Start/stop/restart, resource edits, snapshots, clone, migration, VM create/destroy, '
+       + 'and node-level network/storage config (bridges, storage pools, storage content).' },
+  { key: 'console', label: 'Console', required: false, why: 'Console tickets for containers and VMs.' },
+  { key: 'backup', label: 'Backup', required: false,
+    why: 'vzdump/PBS backup and restore jobs, and backup listing.' },
+]
 
 function mockOnboarding(ob: Onboarding) { onboarding = ob }
 // Simulates the reload case: no in-session host object, only what the
@@ -66,6 +79,7 @@ vi.mock('../api/client', () => {
           : Promise.reject(new ApiErrorImpl(401, { detail: 'authentication required' }))
       }
       if (path === '/hosts/token-script') return Promise.resolve(scriptResult)
+      if (path === '/hosts/capabilities') return Promise.resolve(capabilitiesCatalog)
       if (path === '/hosts/probe') {
         if (probeHeld) return new Promise((resolve) => { releaseProbe = resolve })
         return Promise.resolve(probeResult)
