@@ -269,7 +269,13 @@ export function StorePage() {
             )}
           </div>
         </div>
-        <Button variant="ghost" onClick={startRefresh} disabled={refreshBusy}>
+        {/* Same refreshDenied guard as the banner's Refresh below. Without
+            it this button 403'd in silence: useRefreshCatalog has no onError,
+            and showRefreshBar is deliberately false for a denied refresh, so
+            nothing on screen changed however many times it was clicked. */}
+        <Button variant="ghost" onClick={startRefresh}
+                disabled={refreshBusy || refreshDenied}
+                title={refreshDenied ? 'Not included in your plan' : undefined}>
           Refresh
         </Button>
         {/* Absolutely positioned, so it is out of flow and appearing or

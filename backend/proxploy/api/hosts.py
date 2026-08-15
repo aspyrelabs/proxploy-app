@@ -359,8 +359,13 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
     if body.node_shell_enabled is not None:
         h.node_shell_enabled = body.node_shell_enabled
         audit_params["node_shell_enabled"] = h.node_shell_enabled
-    if body.team_id is not None:
-        if not db.get(Team, body.team_id):
+    # model_fields_set, not `is not None`: null is the only way to say "no
+    # team" and this is a partial update, so an omitted field and an explicit
+    # null have to mean different things. Without it the Settings picker's
+    # "Unassigned" option was unimplementable, and a host could be moved
+    # between teams but never out of one.
+    if "team_id" in body.model_fields_set:
+        if body.team_id is not None and not db.get(Team, body.team_id):
             raise HTTPException(404, "team not found")
         h.team_id = body.team_id
         audit_params["team_id"] = body.team_id

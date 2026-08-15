@@ -200,10 +200,15 @@ export function SettingsPage() {
   const teamsAllowed = ent.data != null && ent.has('teams.rbac')
   const teams = useTeams(teamsAllowed)
   const assignTeam = useMutation({
-    mutationFn: ({ host, teamId }: { host: HostRow; teamId: number }) => api(`/hosts/${host.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled, team_id: teamId }),
-    }),
+    mutationFn: ({ host, teamId }: { host: HostRow; teamId: number | null }) =>
+      api(`/hosts/${host.id}`, {
+        method: 'PATCH',
+        // teamId null is sent, not dropped: the route reads model_fields_set,
+        // so an explicit null is what unassigns and an omitted key means
+        // "leave the team alone".
+        body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled,
+                               team_id: teamId }),
+      }),
     onError: () => notify.error('Could not assign that host to a team, try again.'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
@@ -316,7 +321,7 @@ export function SettingsPage() {
                             disabled={assignTeam.isPending}
                             onChange={(e) => {
                               const v = e.target.value
-                              if (v) assignTeam.mutate({ host: h, teamId: Number(v) })
+                              assignTeam.mutate({ host: h, teamId: v ? Number(v) : null })
                             }}
                             className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
                             <option value="">Unassigned</option>

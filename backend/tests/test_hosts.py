@@ -417,3 +417,35 @@ def test_error_kind_never_leaks_the_token_secret(tmp_path, csrf_header, bootstra
             "address": "https://10.0.0.5:8006", "token_id": "u@pve!t",
             "token_secret": "super-secret-value", "verify_tls": True})
     assert "super-secret-value" not in r.text
+
+
+def test_a_host_can_be_moved_out_of_a_team_not_just_between_teams(
+        client, csrf_header, bootstrap_admin):
+    """team_id was read with `is not None`, so an explicit null looked exactly
+    like an omitted field and the only way out of a team was deleting the team.
+    The Settings picker offered "Unassigned" the whole time and it silently did
+    nothing."""
+    bootstrap_admin(client)
+    from proxploy.models import Host, Team
+
+    with client.app.state.sessionmaker() as db:
+        team_id = db.query(Team).filter_by(slug="default").one().id
+        db.add(Host(name="h-unassign", address="https://pve:8006", status="connected"))
+        db.commit()
+        host_id = db.query(Host).filter_by(name="h-unassign").one().id
+
+    assert client.patch(f"/api/v1/hosts/{host_id}", json={"team_id": team_id},
+                        headers=csrf_header(client)).status_code == 200
+    assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id
+
+    r = client.patch(f"/api/v1/hosts/{host_id}", json={"team_id": None},
+                     headers=csrf_header(client))
+    assert r.status_code == 200, r.text
+    assert client.get("/api/v1/hosts").json()[0]["team_id"] is None
+
+    # An omitted team_id still means "leave it alone", not "unassign".
+    assert client.patch(f"/api/v1/hosts/{host_id}", json={"team_id": team_id},
+                        headers=csrf_header(client)).status_code == 200
+    assert client.patch(f"/api/v1/hosts/{host_id}", json={"name": "h-renamed"},
+                        headers=csrf_header(client)).status_code == 200
+    assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id
