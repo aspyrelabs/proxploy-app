@@ -25,7 +25,8 @@ router = APIRouter(prefix="/hosts", tags=["hosts"])
 # and that no plan added them. They exist now (see the bottom of this file,
 # PXP-17); host.console is elsewhere, on the node-shell ticket route in
 # api/consoles.py.
-_read = authorize("host", "read")
+_read = authorize("host", "read")                      # no host id yet (list)
+_read_scoped = authorize("host", "read", scope_of=scope_host())
 _manage = authorize("host", "manage", scope_of=scope_host())
 _manage_global = authorize("host", "manage")          # no host id yet (probe, create)
 
@@ -331,7 +332,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
 
 @router.get("/{host_id}")
 def host_detail(host_id: int, db=Depends(get_db),
-                user: User = Depends(_read)):
+                user: User = Depends(_read_scoped)):
     h = db.get(Host, host_id)
     if not h:
         raise HTTPException(404, "no such host")
@@ -595,7 +596,7 @@ def _loadavg(raw) -> list[float]:
 
 @router.get("/{host_id}/nodes/{node}/status")
 def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
-                user: User = Depends(_read)):
+                user: User = Depends(_read_scoped)):
     """The node's own view of itself, for the host page.
 
     On demand, never from the poll loop: doc 02 §3 caps a cycle at O(nodes),
@@ -810,7 +811,7 @@ def _dns_row(d: dict) -> dict:
 
 @router.get("/{host_id}/nodes/{node}/hardware")
 def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
-                  user: User = Depends(_read)):
+                  user: User = Depends(_read_scoped)):
     """Everything the node will say about itself that is not already on the
     Overview strip: disks, network interfaces, PCI devices, systemd services,
     and the subscription/DNS/time facts.
@@ -990,7 +991,7 @@ async def sync_host(request: Request, host_id: int, db=Depends(get_db),
 
 @router.get("/{host_id}/tasks")
 def host_tasks(request: Request, host_id: int, limit: int = 50,
-               db=Depends(get_db), user: User = Depends(_read)):
+               db=Depends(get_db), user: User = Depends(_read_scoped)):
     """The node's own task list, including work Proxploy did not start.
 
     Read-level on purpose: this is the same information the Proxmox UI shows
@@ -1018,7 +1019,7 @@ def host_tasks(request: Request, host_id: int, limit: int = 50,
 @router.get("/{host_id}/tasks/{upid}/log")
 def host_task_log(request: Request, host_id: int, upid: str, start: int = 0,
                   limit: int = 500, db=Depends(get_db),
-                  user: User = Depends(_read)):
+                  user: User = Depends(_read_scoped)):
     """Passthrough of one PVE task log, the missing half of the task feature.
 
     Proxploy already archives the logs of tasks IT started, in job_events.

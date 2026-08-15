@@ -211,3 +211,35 @@ def test_deleting_a_team_drops_its_grants_even_if_the_id_comes_back(app_client,
                             headers=csrf_header(app_client)).status_code == 403
     assert app_client.delete(f"/api/v1/hosts/{host_id}",
                              headers=csrf_header(app_client)).status_code == 403
+
+
+def test_a_host_in_another_team_does_not_hand_over_its_pve_token_id(app_client,
+                                                                   csrf_header):
+    """GET /hosts/{id} is the only host read that returns credentials[], and
+    public_meta carries the PVE API token id. hosts.py scoped its writes with
+    scope_host() from the start but left every id-carrying read global, so a
+    viewer in any team could read another team's host detail, node hardware
+    (disk serials) and full PVE task logs."""
+    r = app_client.post("/api/v1/teams", json={"name": "TeamA"},
+                        headers=csrf_header(app_client))
+    team_a = r.json()["id"]
+    with app_client.app.state.sessionmaker() as db:
+        h = Host(name="a-host", address="https://10.0.0.9:8006", node_name="pve1",
+                 team_id=team_a)
+        db.add(h)
+        db.commit()
+        host_id = h.id
+
+    r = app_client.post("/api/v1/teams", json={"name": "TeamB"},
+                        headers=csrf_header(app_client))
+    team_b = r.json()["id"]
+    v = _mk_user(app_client, csrf_header, "b@x.io", "viewer")
+    app_client.put(f"/api/v1/teams/{team_b}/members/{v['id']}", json={"role": "admin"},
+                   headers=csrf_header(app_client))
+
+    _logout(app_client, csrf_header)
+    _login(app_client, csrf_header, "b@x.io")
+    for path in (f"/api/v1/hosts/{host_id}",
+                 f"/api/v1/hosts/{host_id}/nodes/pve1/hardware",
+                 f"/api/v1/hosts/{host_id}/tasks"):
+        assert app_client.get(path).status_code == 403, path

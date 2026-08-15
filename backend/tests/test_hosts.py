@@ -323,11 +323,13 @@ def test_host_reads_expose_team_id_so_the_ui_can_show_current_assignment(
     from proxploy.models import Host, Team
 
     with client.app.state.sessionmaker() as db:
-        team = Team(name="Ops", slug="ops")
-        db.add(team)
+        # The caller's own team. GET /hosts/{id} is team-scoped, so reassigning
+        # the host to a team this admin is not in would (correctly) make the
+        # detail read a 403 and prove nothing about the field being exposed.
+        team_id = db.query(Team).filter_by(slug="default").one().id
         db.add(Host(name="h1", address="https://pve:8006", status="connected"))
         db.commit()
-        team_id, host_id = team.id, db.query(Host).one().id
+        host_id = db.query(Host).one().id
 
     assert client.get("/api/v1/hosts").json()[0]["team_id"] is None
     assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] is None
