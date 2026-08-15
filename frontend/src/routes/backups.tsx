@@ -83,11 +83,13 @@ function RunDialog({ onClose }: { onClose: () => void }) {
           default backup datastore.
         </p>
         <select className={`${inputCls} mt-4`} value={hostId ?? ''}
-                aria-label="Host" disabled={hosts.isError}
+                aria-label="Host" disabled={hosts.isError || hosts.isLoading}
                 onChange={(e) => setPicked(Number(e.target.value) || null)}>
           {hosts.isError
             ? <option value="">Could not load hosts</option>
-            : <option value="">Select a host…</option>}
+            : hosts.isLoading
+              ? <option value="">Loading hosts…</option>
+              : <option value="">Select a host…</option>}
           {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
         </select>
         <div className="mt-4 flex justify-end gap-2">
@@ -133,7 +135,13 @@ const MARK_CLS: Record<string, string> = {
  * with the very same PruneParams the preview was computed from, not a
  * second, separately-typed form.
  */
-function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
+// `pending` is drilled in beside `data` because `data` alone cannot tell the
+// two apart: `stats.datastores` is an empty list both when a host really has no
+// backup datastore and while GET /backups is still in flight, and this select
+// had no third branch at all, so a cold page opened on an empty Datastore box.
+function RetentionSection({ data, pending }: {
+  data: BackupsResponse | undefined; pending: boolean
+}) {
   const ent = useEntitlements()
   const locked = ent.data != null && !ent.has('backups.retention')
   const stores = data?.stats.datastores ?? []
@@ -184,7 +192,9 @@ function RetentionSection({ data }: { data: BackupsResponse | undefined }) {
               <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3"
                      htmlFor="rt-store">Datastore</label>
               <select id="rt-store" className={inputCls} value={chosen}
+                      disabled={pending}
                       onChange={(e) => setStorage(e.target.value)}>
+                {pending && <option value="">Loading datastores…</option>}
                 {stores.map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
               </select>
             </div>
@@ -472,7 +482,7 @@ export function BackupsPage() {
         )}
       </div>
 
-      <RetentionSection data={data} />
+      <RetentionSection data={data} pending={isPending} />
 
       {running && <RunDialog onClose={() => setRunning(false)} />}
       {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} />}

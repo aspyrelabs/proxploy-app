@@ -265,7 +265,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
           </div>
           <select className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             aria-label="Host"
-            value={hostId ?? ''} disabled={hosts.isError}
+            value={hostId ?? ''} disabled={hosts.isError || hosts.isLoading}
             onChange={(e) => {
               setHostId(Number(e.target.value) || null)
               // Storage pools are per host (StorageFields): a pool picked on
@@ -276,7 +276,9 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             }}>
             {hosts.isError
               ? <option value="">Could not load hosts</option>
-              : <option value="">Select a host…</option>}
+              : hosts.isLoading
+                ? <option value="">Loading hosts…</option>
+                : <option value="">Select a host…</option>}
             {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
           </select>
           <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"

@@ -87,12 +87,17 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
             <label htmlFor="clone-storage" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
               Target storage
             </label>
+            {/* Third branch, not two: while GET /storage is in flight this read
+                "Same as source" over an empty list, which is the same sentence
+                a host with no image datastores would produce. */}
             <select id="clone-storage" className={inputCls} value={storage}
-              disabled={storages.isError}
+              disabled={storages.isError || storages.isLoading}
               onChange={(e) => setStorage(e.target.value)}>
               {storages.isError
                 ? <option value="">Could not load datastores</option>
-                : <option value="">Same as source</option>}
+                : storages.isLoading
+                  ? <option value="">Loading datastores…</option>
+                  : <option value="">Same as source</option>}
               {storeOpts.map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
             </select>
           </div>

@@ -119,11 +119,13 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
             <label htmlFor="sf-host"
               className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Host</label>
             <select id="sf-host" className={inputCls} value={hostId ?? ''}
-              disabled={hosts.isError}
+              disabled={hosts.isError || hosts.isLoading}
               onChange={(e) => setHostId(Number(e.target.value) || null)}>
               {hosts.isError
                 ? <option value="">Could not load hosts</option>
-                : <option value="">Select a host…</option>}
+                : hosts.isLoading
+                  ? <option value="">Loading hosts…</option>
+                  : <option value="">Select a host…</option>}
               {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
             </select>
           </div>

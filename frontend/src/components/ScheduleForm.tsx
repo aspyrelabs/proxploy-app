@@ -92,12 +92,18 @@ export function ScheduleForm({ jobKind, onSaved }:
           <label className={label} htmlFor="sc-target">
             {needs === 'app' ? 'App' : 'Host'}
           </label>
+          {/* `isLoading` rather than `isPending`: the query is enabled-gated on
+              `needs`, and a disabled query stays pending for ever. This block
+              only renders when `needs` is set, so here the two agree, but the
+              gated spelling is the one that stays correct if that changes. */}
           <select id="sc-target" className={input} value={effectiveTargetId}
-                  disabled={targets.isError}
+                  disabled={targets.isError || targets.isLoading}
                   onChange={(e) => setTargetId(e.target.value)}>
             {targets.isError
               ? <option value="">Could not load {needs === 'app' ? 'apps' : 'hosts'}</option>
-              : <option value="">Select…</option>}
+              : targets.isLoading
+                ? <option value="">Loading {needs === 'app' ? 'apps' : 'hosts'}…</option>
+                : <option value="">Select…</option>}
             {(targets.data ?? []).map((t) =>
               <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>

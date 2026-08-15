@@ -339,14 +339,23 @@ export function SettingsPage() {
                       </td>
                       <td className="pr-4">
                         {teamsAllowed ? (
+                          // Until GET /teams lands there is no option matching a
+                          // host's team_id, so the browser falls back to the
+                          // first one and this column read "Unassigned" for
+                          // every host, including the assigned ones. `isLoading`
+                          // rather than `isPending` because useTeams is
+                          // entitlement-gated and a disabled query stays pending
+                          // for ever.
                           <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
-                            disabled={assignTeam.isPending}
+                            disabled={assignTeam.isPending || teams.isLoading}
                             onChange={(e) => {
                               const v = e.target.value
                               assignTeam.mutate({ host: h, teamId: v ? Number(v) : null })
                             }}
                             className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
-                            <option value="">Unassigned</option>
+                            {teams.isLoading
+                              ? <option value="">Loading teams…</option>
+                              : <option value="">Unassigned</option>}
                             {(teams.data ?? []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
                         ) : <span className="text-text-3">n/a</span>}

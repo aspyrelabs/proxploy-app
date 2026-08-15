@@ -17,8 +17,12 @@ const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px]
 // those straight in body.detail. Surface them verbatim rather than a canned
 // message: they're the whole point of the two backend behaviors this card
 // has to be honest about.
-function TeamMembers({ team, users, usersError, onRemove }: {
-  team: TeamRow; users: UserRow[]; usersError: boolean
+// `usersLoading` travels down beside `usersError` because `users` alone cannot
+// tell the two apart: an empty array is what this component gets both when
+// every user is already a member and while GET /users is still in flight, and
+// only the second of those must not read as "there is nobody to add".
+function TeamMembers({ team, users, usersError, usersLoading, onRemove }: {
+  team: TeamRow; users: UserRow[]; usersError: boolean; usersLoading: boolean
   onRemove: (team: TeamRow, m: MemberRow) => void
 }) {
   const qc = useQueryClient()
@@ -96,11 +100,14 @@ function TeamMembers({ team, users, usersError, onRemove }: {
             className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
             Add member
           </label>
-          <select id={`add-user-${team.id}`} value={pickUserId} disabled={usersError}
+          <select id={`add-user-${team.id}`} value={pickUserId}
+            disabled={usersError || usersLoading}
             onChange={(e) => setPickUserId(e.target.value)} className={selectCls}>
             {usersError
               ? <option value="">Could not load users</option>
-              : <option value="">Select user…</option>}
+              : usersLoading
+                ? <option value="">Loading users…</option>
+                : <option value="">Select user…</option>}
             {candidates.map((u) => <option key={u.id} value={u.id}>{u.email}</option>)}
           </select>
         </div>
@@ -232,8 +239,12 @@ export function TeamsCard() {
                       {expanded === t.id && (
                         <tr className="border-t border-line-soft bg-panel-2/40">
                           <td colSpan={4}>
+                            {/* `isLoading`, not `isPending`: useUsers is
+                                entitlement-gated, and a disabled query stays
+                                pending for ever. */}
                             <TeamMembers team={t} users={users.data ?? []}
-                              usersError={users.isError} onRemove={confirmRemove} />
+                              usersError={users.isError} usersLoading={users.isLoading}
+                              onRemove={confirmRemove} />
                           </td>
                         </tr>
                       )}

@@ -141,12 +141,19 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
       {targetType === 'host' && (
         <div>
           <label className={label} htmlFor="ar-host">Host</label>
+          {/* `isLoading`, not `isPending`: these three queries are enabled-gated
+              on the target kind above, and a disabled query sits at isPending
+              for ever, so isPending would put "Loading…" on a select that is
+              simply not being asked yet. isLoading is isPending && isFetching,
+              which is exactly "the first fetch is in flight". */}
           <select id="ar-host" className={input} value={targetId}
-                  disabled={hosts.isError}
+                  disabled={hosts.isError || hosts.isLoading}
                   onChange={(e) => setTargetId(e.target.value)}>
             {hosts.isError
               ? <option value="">Could not load hosts</option>
-              : <option value="">Select…</option>}
+              : hosts.isLoading
+                ? <option value="">Loading hosts…</option>
+                : <option value="">Select…</option>}
             {(hosts.data ?? []).map((h) =>
               <option key={h.id} value={h.id}>{h.name}</option>)}
           </select>
@@ -157,11 +164,13 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         <div>
           <label className={label} htmlFor="ar-app">App</label>
           <select id="ar-app" className={input} value={targetId}
-                  disabled={apps.isError}
+                  disabled={apps.isError || apps.isLoading}
                   onChange={(e) => setTargetId(e.target.value)}>
             {apps.isError
               ? <option value="">Could not load apps</option>
-              : <option value="">Select…</option>}
+              : apps.isLoading
+                ? <option value="">Loading apps…</option>
+                : <option value="">Select…</option>}
             {(apps.data ?? []).map((a) =>
               <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
@@ -172,11 +181,13 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         <div>
           <label className={label} htmlFor="ar-vm">VM</label>
           <select id="ar-vm" className={input} value={targetId}
-                  disabled={vms.isError}
+                  disabled={vms.isError || vms.isLoading}
                   onChange={(e) => setTargetId(e.target.value)}>
             {vms.isError
               ? <option value="">Could not load VMs</option>
-              : <option value="">Select…</option>}
+              : vms.isLoading
+                ? <option value="">Loading VMs…</option>
+                : <option value="">Select…</option>}
             {(vms.data ?? []).map((v) =>
               <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>

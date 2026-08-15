@@ -150,22 +150,33 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
         {step === 0 && (
           <div className="space-y-3">
             <Field id="vm-host" label="Host">
+              {/* `isLoading` throughout this wizard, never `isPending`: `isos`
+                  and `bridges` are enabled-gated on a host (and a datastore)
+                  being picked first, and a disabled query sits at isPending for
+                  ever, so isPending would label a select that is waiting on the
+                  step before it as "loading" and never stop. isLoading is
+                  isPending && isFetching, so it is true only while a request is
+                  actually out. */}
               <select id="vm-host" className={inputCls} value={f.host_id}
-                disabled={hosts.isError}
+                disabled={hosts.isError || hosts.isLoading}
                 onChange={(e) => { set('host_id', e.target.value); set('node', ''); set('iso_storage', ''); set('iso', ''); set('storage', ''); set('bridge', '') }}>
                 {hosts.isError
                   ? <option value="">Could not load hosts</option>
-                  : <option value="">Select a host…</option>}
+                  : hosts.isLoading
+                    ? <option value="">Loading hosts…</option>
+                    : <option value="">Select a host…</option>}
                 {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
             </Field>
             <Field id="vm-node" label="Node">
               <select id="vm-node" className={inputCls} value={f.node}
-                disabled={nodes.isError}
+                disabled={nodes.isError || nodes.isLoading}
                 onChange={(e) => set('node', e.target.value)}>
                 {nodes.isError
                   ? <option value="">Could not load nodes</option>
-                  : <option value="">Select a node…</option>}
+                  : nodes.isLoading
+                    ? <option value="">Loading nodes…</option>
+                    : <option value="">Select a node…</option>}
                 {nodeOpts.map((n) => <option key={n.node} value={n.node}>{n.node}</option>)}
               </select>
             </Field>
@@ -180,21 +191,25 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
           <div className="space-y-3">
             <Field id="vm-isostore" label="ISO storage">
               <select id="vm-isostore" className={inputCls} value={f.iso_storage}
-                disabled={storages.isError}
+                disabled={storages.isError || storages.isLoading}
                 onChange={(e) => { set('iso_storage', e.target.value); set('iso', '') }}>
                 {storages.isError
                   ? <option value="">Could not load datastores</option>
-                  : <option value="">Select a datastore…</option>}
+                  : storages.isLoading
+                    ? <option value="">Loading datastores…</option>
+                    : <option value="">Select a datastore…</option>}
                 {storeOpts('iso').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
               </select>
             </Field>
             <Field id="vm-iso" label="ISO image">
               <select id="vm-iso" className={inputCls} value={f.iso}
-                disabled={isos.isError}
+                disabled={isos.isError || isos.isLoading}
                 onChange={(e) => set('iso', e.target.value)}>
                 {isos.isError
                   ? <option value="">Could not load ISOs</option>
-                  : <option value="">Select an ISO…</option>}
+                  : isos.isLoading
+                    ? <option value="">Loading ISOs…</option>
+                    : <option value="">Select an ISO…</option>}
                 {(isos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
               </select>
             </Field>
@@ -227,11 +242,13 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
             </Field>
             <Field id="vm-storage" label="Target storage">
               <select id="vm-storage" className={inputCls} value={f.storage}
-                disabled={storages.isError}
+                disabled={storages.isError || storages.isLoading}
                 onChange={(e) => set('storage', e.target.value)}>
                 {storages.isError
                   ? <option value="">Could not load datastores</option>
-                  : <option value="">Select a datastore…</option>}
+                  : storages.isLoading
+                    ? <option value="">Loading datastores…</option>
+                    : <option value="">Select a datastore…</option>}
                 {storeOpts('images').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
               </select>
             </Field>
@@ -242,11 +259,13 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
           <div className="space-y-3">
             <Field id="vm-bridge" label="Bridge">
               <select id="vm-bridge" className={inputCls} value={f.bridge}
-                disabled={bridges.isError}
+                disabled={bridges.isError || bridges.isLoading}
                 onChange={(e) => set('bridge', e.target.value)}>
                 {bridges.isError
                   ? <option value="">Could not load bridges</option>
-                  : <option value="">Select a bridge…</option>}
+                  : bridges.isLoading
+                    ? <option value="">Loading bridges…</option>
+                    : <option value="">Select a bridge…</option>}
                 {bridgeOpts.map((i) => <option key={i.iface} value={i.iface}>{i.iface}</option>)}
               </select>
             </Field>
