@@ -582,6 +582,10 @@ class Backup(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("host_id", "volid", name="ux_backups"),
         Index("ix_backups_guest", "guest_type", "guest_vmid"),
+        # api/backups.py reads the newest rows with ORDER BY taken_at DESC
+        # LIMIT. Without this the limit bounds the response and not the work:
+        # the whole table is sorted on every 60s poll.
+        Index("ix_backups_taken_at", "taken_at"),
     )
 
 

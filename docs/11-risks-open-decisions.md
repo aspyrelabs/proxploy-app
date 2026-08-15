@@ -383,6 +383,31 @@ and the checksummed-manifest requirement stands regardless.
 
 ---
 
+## 11. The backups list is capped, and one lookup rides on it
+
+`GET /backups` returns the 200 newest archives, capped after it was found
+returning the whole table on a page that polls every 60s and can be open in
+several tabs. The stats block beside it is computed with aggregates over the
+whole table, so the totals stay true no matter what the list shows.
+
+One caller reads more into the list than it now carries.
+`frontend/src/routes/backups.tsx:149` finds a host id by scanning the returned
+backups for the chosen datastore, so a datastore whose newest archive falls
+outside the 200 newest overall yields null there.
+
+Left as is, deliberately. The field was already nullable, the table is titled
+"Recent backups", and the degradation is honest: a quiet null, not a wrong
+host. Recorded here so it is not rediscovered later and filed as a bug. If it
+ever needs fixing, the fix is a dedicated lookup rather than a bigger cap,
+since raising the cap only moves the boundary.
+
+`backups.taken_at` is indexed (`ix_backups_taken_at`, migration
+b3e8c15a7d42), because the cap bounded what the route returned and not the
+work it did: the ORDER BY sorted the whole table on every poll. A test pins
+the query plan rather than a timing.
+
+---
+
 ## Summary table
 
 | # | Risk | Likelihood | Impact | Posture |
@@ -397,6 +422,7 @@ and the checksummed-manifest requirement stands regardless.
 | 8 | One-CT rule vs. upstream patterns | Medium | Medium | Classify at ingest; exclude honestly; no grouping |
 | 9 | Master-key loss | Medium | High | Backup guidance, rotation, recovery runbook |
 | 10 | Self-update failure | Medium | High | Snapshot + switch-over + rollback; manual path always works |
+| 11 | Backups list cap hides an older datastore's host id | Low | Low | Accepted; nullable already, degrades to null not to a wrong host |
 
 Open decisions carried: admin-approval policy for installs (1), delta
 pre-copy migration (2), agent timing (3), Postgres recommendation threshold

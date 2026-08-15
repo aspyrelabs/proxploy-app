@@ -442,3 +442,39 @@ def test_concurrent_stale_reads_enqueue_only_one_sync(tmp_path, bootstrap_admin)
     finally:
         release.set()
         HANDLERS["backup.sync"] = real
+
+
+def test_the_newest_backups_are_read_from_an_index_not_a_full_sort(tmp_path):
+    """The 200 row cap bounds what the route RETURNS, not the work it does.
+    Without an index on taken_at, `ORDER BY taken_at DESC LIMIT 200` sorts the
+    whole table on a page that polls every 60s and can be open in several
+    tabs, and that cost grows with backup history forever.
+
+    Asserting the query plan rather than a timing: a wall-clock threshold is
+    the flakiest possible way to state this, and the plan is the actual claim.
+    """
+    from datetime import datetime, timedelta
+
+    from proxploy.models import Backup, Host
+    from tests.support import make_db
+
+    db = make_db(tmp_path)
+    db.add(Host(name="h", address="https://pve:8006", node_name="pve1"))
+    db.commit()
+    host_id = db.query(Host).one().id
+    base = datetime(2025, 1, 1)
+    db.bulk_save_objects([
+        Backup(host_id=host_id, volid=f"local:backup/v-{i}.tar.zst",
+               storage="local", taken_at=base + timedelta(minutes=i))
+        for i in range(2000)
+    ])
+    db.commit()
+
+    cur = db.get_bind().raw_connection().cursor()
+    plan = " ".join(
+        r[-1] for r in cur.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT * FROM backups ORDER BY taken_at DESC LIMIT 200"))
+    assert "ix_backups_taken_at" in plan, plan
+    # The tell that the index is doing the ordering, not just being read.
+    assert "USE TEMP B-TREE FOR ORDER BY" not in plan, plan
