@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from proxploy.api.deps import authorize, get_db, require_entitlement
-from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm
+from proxploy.api.deps import authorize, cluster_scope, get_db, require_entitlement
+from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm, to_iso
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
 
@@ -15,10 +15,6 @@ router = APIRouter(prefix="/cluster", tags=["cluster"])
 # FastAPI's dependency cache collapses them into one call that runs first, 
 # ordering fix, doc 10 "auth before entitlement" invariant.
 _read = authorize("host", "read")
-
-
-def _iso(dt):
-    return dt.isoformat() + "Z" if dt else None
 
 
 def _pct(used: float, total: float) -> float:
@@ -63,7 +59,7 @@ def cluster_summary(request: Request, db=Depends(get_db),
     apps = db.query(App).all()
     vms = db.query(Vm).all()
     return {
-        "updated_at": _iso(updated),
+        "updated_at": to_iso(updated),
         "cpu": {"pct": _pct(used_cores, total_cores),
                 "used_cores": round(used_cores, 1), "total_cores": total_cores},
         "mem": {"pct": _pct(mem_used, mem_total),
@@ -112,10 +108,25 @@ def cluster_nodes(request: Request, db=Depends(get_db),
     cluster-wide figure is GET /cluster/summary (name-deduped), and the
     correctly deduped shared-vs-local aggregate is pollers._disk_pct, which is
     what the `disk_pct` metric series and therefore alerting use.
+
+    Two Hosts can be two nodes of the SAME cluster; cluster_resources()
+    returns the whole cluster from either one, so both snapshots list both
+    nodes. A real node must appear once, attributed to the Host actually
+    registered at it (`owner_by_node`); a node nobody is registered at (an
+    unregistered cluster member) is attributed to whichever host's snapshot
+    reports it first, same as before this had multiple hosts to consider.
+    Both are keyed on cluster_scope(h) too: a node name is only unique
+    WITHIN a cluster, so a same-named node on a different cluster (or
+    another standalone host) must not be merged in.
     """
     snaps = request.app.state.poller.snapshots
+    hosts = db.query(Host).order_by(Host.id).all()
+    owner_by_node = {(cluster_scope(h), h.node_name): h
+                     for h in hosts if h.node_name}
+    reported: set[tuple] = set()
     out = []
-    for h in db.query(Host).order_by(Host.id).all():
+    for h in hosts:
+        scope = cluster_scope(h)
         snap = snaps.get(h.id)
         apps = db.query(App).filter_by(host_id=h.id).all()
         vms = db.query(Vm).filter_by(host_id=h.id).all()
@@ -126,13 +137,16 @@ def cluster_nodes(request: Request, db=Depends(get_db),
             "apps_running": sum(1 for a in apps if a.status_cached == "running"),
             "vms": len(vms),
             "vms_running": sum(1 for v in vms if v.status == "running"),
-            "last_seen_at": _iso(h.last_seen_at),
+            "last_seen_at": to_iso(h.last_seen_at),
         }
         nodes = list(snap.nodes) if snap and snap.nodes else []
         if not nodes:
             # No snapshot yet (freshly enrolled, or unreachable): one row from
             # the DB, exactly as before, so a host never disappears from the
             # page just because the poller has not run.
+            if (scope, h.node_name) in reported:
+                continue
+            reported.add((scope, h.node_name))
             out.append(shared | {
                 "node": h.node_name, "is_entry": True, "status": h.status,
                 "cpu_pct": None, "mem_pct": None, "mem_bytes": None,
@@ -153,9 +167,16 @@ def cluster_nodes(request: Request, db=Depends(get_db),
         names = [n["node"] for n in nodes]
         entry = h.node_name if h.node_name in names else names[0]
         for n in nodes:
+            # A node registered as its OWN Host is reported once, by that
+            # Host; a node this snapshot merely sees (another Host's node, or
+            # nobody's) is reported by whichever host gets here first.
+            owner = owner_by_node.get((scope, n["node"]), h)
+            if owner is not h or (scope, n["node"]) in reported:
+                continue
+            reported.add((scope, n["node"]))
             # Host.status is per-ENDPOINT ("can Proxploy talk to this
             # address"), so it is the right answer for every node behind it
-            # -- except a node PVE itself calls offline, which is not up no
+            #, except a node PVE itself calls offline, which is not up no
             # matter how healthy the endpoint is. Only an explicit "offline"
             # downgrades a row: an unfamiliar status must never turn a working
             # host red.
@@ -213,7 +234,7 @@ def activity(limit: int = 20, db=Depends(get_db),
     jobs = (db.query(Job).order_by(Job.created_at.desc(), Job.id.desc())
             .limit(limit).all())
     job_rows = [(j.created_at, {
-        "kind": "job", "id": j.id, "at": j.created_at.isoformat() + "Z",
+        "kind": "job", "id": j.id, "at": to_iso(j.created_at),
         "title": j.kind, "status": j.status, "target_type": j.target_type,
         "target_id": j.target_id, "actor": emails.get(j.requested_by),
         "job_id": j.id, "progress_pct": j.progress_pct,
@@ -223,7 +244,7 @@ def activity(limit: int = 20, db=Depends(get_db),
               .order_by(AuditEvent.ts.desc(), AuditEvent.id.desc())
               .limit(limit).all())
     audit_rows = [(a.ts, {
-        "kind": "audit", "id": a.id, "at": a.ts.isoformat() + "Z",
+        "kind": "audit", "id": a.id, "at": to_iso(a.ts),
         "title": a.action, "status": a.result, "target_type": a.target_type,
         "target_id": a.target_id, "actor": emails.get(a.actor_id),
         "job_id": None, "progress_pct": None,
@@ -238,7 +259,7 @@ def activity(limit: int = 20, db=Depends(get_db),
                   .filter(AlertRule.id.in_({a.rule_id for a in alerts})).all()
                   } if alerts else {}
     alert_rows = [(a.created_at, {
-        "kind": "alert", "id": a.id, "at": a.created_at.isoformat() + "Z",
+        "kind": "alert", "id": a.id, "at": to_iso(a.created_at),
         "title": rule_names.get(a.rule_id, (a.message, "warning"))[0],
         "status": a.state,
         "severity": rule_names.get(a.rule_id, (None, "warning"))[1],

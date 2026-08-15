@@ -24,7 +24,8 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from proxploy.api.deps import authorize, get_db, require_entitlement, scope_host
+from proxploy.api.deps import (authorize, cluster_scope, get_db,
+                               require_entitlement, scope_host)
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
@@ -185,14 +186,32 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
     routine state, not an outage) must not 500 the whole page: it is degraded
     out into `errors` and every other host is still served.
     """
-    hosts = [h for h in db.query(Host).order_by(Host.name).all()
-             if host is None or h.id == host]
+    all_hosts = db.query(Host).order_by(Host.name).all()
+    hosts = [h for h in all_hosts if host is None or h.id == host]
+    # Two Hosts can be two nodes of the SAME cluster; _nodes_of reads
+    # snap.nodes, and cluster_resources() returns the whole cluster from
+    # either one (see pollers/__init__.py), so both snapshots list both
+    # nodes. `owner_by_node` is built from every registered host, not just
+    # the ones in scope for this request, so a real node's interfaces are
+    # reported once, attributed to the host actually registered at that
+    # node, regardless of the ?host= filter. Keyed on cluster_scope(h) too:
+    # a node name is only unique WITHIN a cluster, so a same-named node on a
+    # different cluster (or another standalone host) must not be merged in.
+    owner_by_node = {(cluster_scope(h), h.node_name): h
+                     for h in all_hosts if h.node_name}
     nodes, attachments, errors = [], [], []
+    reported_nodes: set[tuple] = set()
     for h in hosts:
         try:
             client = client_for_host(request.app, db, h)
+            scope = cluster_scope(h)
             for node in _nodes_of(request, h):
-                nodes.append({"host_id": h.id, "host_name": h.name, "node": node,
+                key = (scope, node)
+                if key in reported_nodes:
+                    continue
+                reported_nodes.add(key)
+                owner = owner_by_node.get(key, h)
+                nodes.append({"host_id": owner.id, "host_name": owner.name, "node": node,
                               "interfaces": [_iface_out(r) for r in client.node_networks(node)]})
             node = h.node_name or ""
             guests = ([("app", a.id, a.name, "lxc", a.ctid)

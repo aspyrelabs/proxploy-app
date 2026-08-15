@@ -2,10 +2,25 @@ import hashlib
 
 from fastapi import Depends, HTTPException, Request
 
-from proxploy.models import ApiKey, Team, TeamMember, User, utcnow
+from proxploy.models import ApiKey, Host, Team, TeamMember, User, utcnow
 from proxploy.services.authn import resolve_session
 
 ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}
+
+
+def cluster_scope(host: Host) -> tuple:
+    """Groups Hosts that are genuinely the same Proxmox cluster, for any
+    dedupe/lookup keyed on a node name or a ctid: both are only unique WITHIN
+    a cluster, not across two registered clusters (or two standalone hosts).
+
+    `cluster_name` is None for a standalone host, and None is a real value
+    meaning "not clustered" (pollers/__init__.py's UNREAD comment), not
+    "unknown cluster", two standalone hosts must never merge with each
+    other just because they share that None. Keyed by host.id in that case,
+    since a standalone host is its own one-node cluster and nothing else
+    can legitimately share its scope.
+    """
+    return (host.cluster_name,) if host.cluster_name is not None else ("standalone", host.id)
 
 
 def get_db(request: Request):

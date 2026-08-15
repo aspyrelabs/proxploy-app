@@ -106,6 +106,126 @@ def test_discovered_lists_unadopted_cts(tmp_path, csrf_header, bootstrap_admin):
                          "status": "running", "suggestion": "plex"}]
 
 
+def test_discovered_is_not_duplicated_across_hosts_on_one_cluster(tmp_path, csrf_header,
+                                                                   bootstrap_admin):
+    """Two Hosts can be two nodes of the SAME Proxmox cluster; each one's poll
+    sees the whole cluster's guest list (root cause: cluster_resources()
+    returns every node's guests from any node asked), so both snapshots list
+    the same unadopted CT. It must be offered once, attributed to the node
+    that actually owns it, not the host that happened to poll it."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.support import make_app, seed_host_row, seed_snapshot
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            # Both Hosts are the SAME real cluster (Host.cluster_name, set by
+            # the poller in production); that is what makes their two
+            # snapshots the same cluster-wide view, not two unrelated hosts.
+            db.get(Host, hid1).cluster_name = "lab-cluster"
+            db.get(Host, hid2).cluster_name = "lab-cluster"
+            db.commit()
+        plex = {"ctid": 200, "name": "plex", "node": "pve2",
+               "status": "running", "suggestion": "plex"}
+        seed_snapshot(app, hid1, discovered=[plex])
+        seed_snapshot(app, hid2, discovered=[plex])
+        disc = c.get("/api/v1/apps/discovered").json()
+        assert len(disc) == 1
+        assert disc[0]["host_id"] == hid2  # owning node, not the polling host
+        assert disc[0]["node"] == "pve2"
+
+
+def test_an_already_adopted_ct_is_not_offered_again_from_another_host(tmp_path, csrf_header,
+                                                                       bootstrap_admin):
+    """CT 101 is tracked as an app on host-02. host-01's own poll cycle only
+    checks App rows with host_id == its own id (mapped_ctids is host-scoped),
+    so host-01's snapshot still lists CT 101 as discovered even though it is
+    already adopted. It must not be offered for adoption a second time."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import App, Host
+    from tests.support import make_app, seed_host_row, seed_snapshot
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            db.get(Host, hid1).cluster_name = "lab-cluster"
+            db.get(Host, hid2).cluster_name = "lab-cluster"
+            db.add(App(host_id=hid2, ctid=101, name="2fauth", slug="2fauth-2-101"))
+            db.commit()
+        ct = {"ctid": 101, "name": "2fauth", "node": "pve2",
+             "status": "running", "suggestion": None}
+        seed_snapshot(app, hid1, discovered=[ct])
+        seed_snapshot(app, hid2, discovered=[])
+        assert c.get("/api/v1/apps/discovered").json() == []
+
+
+def test_discovered_does_not_merge_the_same_ctid_across_different_clusters(tmp_path, csrf_header,
+                                                                            bootstrap_admin):
+    """A ctid is only unique WITHIN one cluster. Two different clusters can
+    each have an undiscovered CT 200; both must be offered, attributed to
+    their own cluster's host, and adopting the one on cluster A must not hide
+    cluster B's CT 200."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import App, Host
+    from tests.support import make_app, seed_host_row, seed_snapshot
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid_a = seed_host_row(db, name="host-a", node="pve1").id
+            hid_b = seed_host_row(db, name="host-b", node="pve1").id
+            db.get(Host, hid_a).cluster_name = "cluster-a"
+            db.get(Host, hid_b).cluster_name = "cluster-b"
+            db.commit()
+        ct_a = {"ctid": 200, "name": "plex", "node": "pve1",
+               "status": "running", "suggestion": "plex"}
+        ct_b = {**ct_a}
+        seed_snapshot(app, hid_a, discovered=[ct_a])
+        seed_snapshot(app, hid_b, discovered=[ct_b])
+        disc = c.get("/api/v1/apps/discovered").json()
+        assert len(disc) == 2
+        assert {r["host_id"] for r in disc} == {hid_a, hid_b}
+
+        # Adopting cluster A's CT 200 must not hide cluster B's CT 200.
+        with app.state.sessionmaker() as db:
+            db.add(App(host_id=hid_a, ctid=200, name="plex", slug="plex-a-200"))
+            db.commit()
+        disc = c.get("/api/v1/apps/discovered").json()
+        assert len(disc) == 1
+        assert disc[0]["host_id"] == hid_b
+
+
+def test_discovered_does_not_merge_two_standalone_hosts_with_the_same_ctid(tmp_path, csrf_header,
+                                                                            bootstrap_admin):
+    """cluster_name is None for a standalone host, and None means "not
+    clustered", not "unknown cluster" -- two standalone hosts with the same
+    ctid are not each other and must both be offered."""
+    from fastapi.testclient import TestClient
+    from tests.support import make_app, seed_host_row, seed_snapshot
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id  # standalone
+            hid2 = seed_host_row(db, name="host-02", node="pve1").id  # also standalone
+        ct = {"ctid": 200, "name": "plex", "node": "pve1",
+             "status": "running", "suggestion": "plex"}
+        seed_snapshot(app, hid1, discovered=[dict(ct)])
+        seed_snapshot(app, hid2, discovered=[dict(ct)])
+        disc = c.get("/api/v1/apps/discovered").json()
+        assert len(disc) == 2
+        assert {r["host_id"] for r in disc} == {hid1, hid2}
+
+
 def test_vms_list_and_detail(tmp_path, csrf_header, bootstrap_admin):
     app, c, seed = _seeded(tmp_path)
     with c:

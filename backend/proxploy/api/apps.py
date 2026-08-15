@@ -9,10 +9,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from proxploy.api.deps import authorize, get_db, require_entitlement, scope_app
+from proxploy.api.deps import (authorize, cluster_scope, get_db,
+                               require_entitlement, scope_app)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
-from proxploy.models import App, AppScript, CatalogEntry, Host, User
+from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso
 from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
@@ -107,16 +108,43 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
 @router.get("/discovered")
 def discovered(request: Request, db=Depends(get_db),
                user: User = Depends(_read)):
-    """Pre-existing CTs not yet adopted (doc 05). Read-only until Phase 4."""
+    """Pre-existing CTs not yet adopted (doc 05). Read-only until Phase 4.
+
+    Two Hosts can be two nodes of the SAME cluster; cluster_resources()
+    returns the whole cluster from either one, so every host's snapshot
+    lists the same unadopted CT, each carrying `node`, the CT's real owning
+    node (already correct in the payload; see pollers/__init__.py). Deduped
+    here by (cluster, ctid), a ctid is only unique WITHIN a cluster, so two
+    different clusters (or two standalone hosts, see cluster_scope) can
+    legitimately both have a CT 101 and both must be offered, and
+    attributed to the Host actually registered at that node, not whichever
+    host happened to poll it. An already-tracked App's own poll cycle only
+    checks its own host_id (mapped_ctids is host-scoped), so a CT adopted on
+    one host still shows up as discovered in another host's snapshot of the
+    SAME cluster; checking every App row here, scoped the same way, is what
+    keeps it from being offered for adoption twice.
+    """
     hosts = {h.id: h for h in db.query(Host).all()}
-    out = []
+    by_node = {(cluster_scope(h), h.node_name): h
+               for h in hosts.values() if h.node_name}
+    tracked: dict[tuple, set[int]] = {}
+    for a in db.query(App).all():
+        h = hosts.get(a.host_id)
+        if h is not None:
+            tracked.setdefault(cluster_scope(h), set()).add(a.ctid)
+    seen: dict[tuple, dict] = {}
     for host_id, snap in sorted(request.app.state.poller.snapshots.items()):
         h = hosts.get(host_id)
         if h is None:
             continue
+        scope = cluster_scope(h)
         for d in snap.discovered:
-            out.append({"host_id": host_id, "host_name": h.name, **d})
-    return out
+            key = (scope, d["ctid"])
+            if d["ctid"] in tracked.get(scope, ()) or key in seen:
+                continue
+            owner = by_node.get((scope, d.get("node")), h)
+            seen[key] = {"host_id": owner.id, "host_name": owner.name, **d}
+    return sorted(seen.values(), key=lambda r: (r["ctid"], r["host_id"]))
 
 
 class AdoptItem(BaseModel):
@@ -244,7 +272,7 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
 def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)):
     """Doc 05: 'Recent CT log lines (journal tail via pct exec / console
     channel)'. No such exec/journal channel exists anywhere in this codebase
-    yet -- services/lifecycle.py and executor/ only ever run install/update
+    yet, services/lifecycle.py and executor/ only ever run install/update
     scripts over SSH on the HOST, never a command inside a guest CT, and
     ProxmoxClient has no pct-exec-equivalent call. Rather than fabricate log
     lines, this is a real, deliberate 501 so the frontend can render an honest
@@ -327,7 +355,7 @@ def put_app_script(app_id: int, body: ScriptIn, request: Request, db=Depends(get
 def list_app_script_versions(app_id: int, db=Depends(get_db)):
     rows = (db.query(AppScript).filter_by(app_id=app_id)
            .order_by(AppScript.version.desc()).all())
-    return [{"version": r.version, "source": r.source, "created_at": r.created_at.isoformat()}
+    return [{"version": r.version, "source": r.source, "created_at": to_iso(r.created_at)}
            for r in rows]
 
 

@@ -70,6 +70,84 @@ def test_list_dedupes_shared_storage_but_keeps_local_per_node(tmp_path, csrf_hea
             ("local", "pve1"), ("local", "pve2"), ("pbs-main", "pve1")]
 
 
+def test_list_dedupes_across_hosts_polling_the_same_cluster(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    """Two Hosts can be two nodes of the SAME Proxmox cluster; each one's poll
+    calls cluster_resources() and gets the whole cluster back (root cause:
+    ProxmoxClient.cluster_resources() returns every node's data from any node
+    asked), so both snapshots carry all four datastore rows. A cluster-wide
+    resource must still be reported once, not once per Host that saw it."""
+    from proxploy.models import Host
+    from tests.support import seed_host_row, seed_snapshot
+
+    app, c, hid1 = _seed(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            # Both Hosts are the SAME real cluster (Host.cluster_name, set by
+            # the poller from cluster_identity() in production); that is what
+            # makes their two snapshots the same cluster-wide view, not two
+            # unrelated hosts that both happen to see a node called pve1.
+            db.get(Host, hid1).cluster_name = "lab-cluster"
+            db.get(Host, hid2).cluster_name = "lab-cluster"
+            db.commit()
+        seed_snapshot(app, hid1, storage=[LOCAL_PVE1, LOCAL_PVE2, PBS_PVE1, PBS_PVE2])
+        seed_snapshot(app, hid2, storage=[LOCAL_PVE1, LOCAL_PVE2, PBS_PVE1, PBS_PVE2])
+        rows = c.get("/api/v1/storage").json()
+        assert [(r["storage"], r["node"]) for r in rows] == [
+            ("local", "pve1"), ("local", "pve2"), ("pbs-main", "pve1")]
+
+
+def test_list_does_not_merge_same_named_storage_across_different_clusters(tmp_path, csrf_header,
+                                                                           bootstrap_admin):
+    """A node name and a datastore name are only unique WITHIN one cluster.
+    Two different clusters can each have a node called pve1 with a "local"
+    datastore, and can each have a shared datastore of the same name; neither
+    pair is the same physical object and must not collapse into one row."""
+    from proxploy.models import Host
+    from tests.support import seed_host_row, seed_snapshot
+
+    app, c, hid1 = _seed(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid2 = seed_host_row(db, name="host-02", node="pve1").id
+            db.get(Host, hid1).cluster_name = "cluster-a"
+            db.get(Host, hid2).cluster_name = "cluster-b"
+            db.commit()
+        ceph_a = {"storage": "ceph", "node": "pve1", "used_bytes": 10,
+                 "total_bytes": 100, "type": "rbd", "content": ["images"],
+                 "shared": True, "status": "available"}
+        ceph_b = {**ceph_a, "used_bytes": 20}
+        seed_snapshot(app, hid1, storage=[LOCAL_PVE1, ceph_a])
+        seed_snapshot(app, hid2, storage=[LOCAL_PVE1, ceph_b])
+        rows = c.get("/api/v1/storage").json()
+        assert len([r for r in rows if r["storage"] == "local"]) == 2
+        assert len([r for r in rows if r["storage"] == "ceph"]) == 2
+        assert {r["host_id"] for r in rows if r["storage"] == "ceph"} == {hid1, hid2}
+
+
+def test_list_does_not_merge_two_standalone_hosts_with_the_same_node_name(tmp_path, csrf_header,
+                                                                          bootstrap_admin):
+    """cluster_name is None for a standalone host, and None means "not
+    clustered", not "unknown cluster" -- two standalone hosts, even with the
+    same node name and the same local datastore name, are not each other and
+    must not be deduped together."""
+    from tests.support import seed_host_row, seed_snapshot
+
+    app, c, hid1 = _seed(tmp_path)  # host-01, standalone, node pve1
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid2 = seed_host_row(db, name="host-02", node="pve1").id  # also standalone
+        seed_snapshot(app, hid1, storage=[LOCAL_PVE1])
+        seed_snapshot(app, hid2, storage=[LOCAL_PVE1])
+        rows = c.get("/api/v1/storage").json()
+        assert len(rows) == 2
+        assert {r["host_id"] for r in rows} == {hid1, hid2}
+
+
 def test_detail_is_a_live_passthrough_and_lists_every_serving_node(tmp_path, csrf_header,
                                                                    bootstrap_admin):
     from tests.fakes.pve import FakePVE

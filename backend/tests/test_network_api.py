@@ -118,6 +118,90 @@ def test_bridges_degrades_one_bad_host_instead_of_500ing_the_page(tmp_path, csrf
                                              "Hosts before this operation can run.")}]
 
 
+def test_bridges_reports_each_real_node_once_across_hosts_on_one_cluster(tmp_path, csrf_header,
+                                                                          bootstrap_admin):
+    """Two Hosts can be two nodes of the SAME Proxmox cluster; _nodes_of reads
+    snap.nodes, and each host's poll sees the whole cluster's node list (root
+    cause: cluster_resources() returns every node from any node asked), so
+    both snapshots list both pve1 and pve2. A real node's interfaces must be
+    reported once, attributed to the host actually registered at that node."""
+    from proxploy.models import Host, HostCredential
+    from tests.support import make_app, seed_snapshot
+
+    fake = _fake()
+    fake.networks_by_node["pve2"] = [
+        {"iface": "vmbr0", "type": "bridge", "method": "static",
+         "address": "10.0.0.10", "netmask": "255.255.255.0",
+         "cidr": "10.0.0.10/24", "active": 1, "autostart": 1},
+    ]
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid1, _, _ = _seed(app)
+        with app.state.sessionmaker() as db:
+            h2 = Host(name="host-02", address="https://10.0.0.10:8006",
+                      node_name="pve2", status="connected", pve_version="8.4.1")
+            db.add(h2)
+            db.commit()
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!net2-monitoring",
+                 "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=h2.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            # Both Hosts are the SAME real cluster (Host.cluster_name, set by
+            # the poller in production); that is what makes their two
+            # snapshots the same cluster-wide view, not two unrelated hosts.
+            db.get(Host, hid1).cluster_name = "lab-cluster"
+            h2.cluster_name = "lab-cluster"
+            db.commit()
+            hid2 = h2.id
+        seed_snapshot(app, hid1, nodes=[{"node": "pve1", "status": "online"},
+                                        {"node": "pve2", "status": "online"}])
+        seed_snapshot(app, hid2, nodes=[{"node": "pve1", "status": "online"},
+                                        {"node": "pve2", "status": "online"}])
+        r = c.get("/api/v1/network/bridges")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["nodes"]) == 2
+        by_node = {n["node"]: n for n in body["nodes"]}
+        assert by_node["pve1"]["host_id"] == hid1
+        assert by_node["pve2"]["host_id"] == hid2
+
+
+def test_bridges_does_not_merge_same_named_node_across_different_clusters(tmp_path, csrf_header,
+                                                                          bootstrap_admin):
+    """A node name is only unique WITHIN one cluster. Two different, standalone
+    clusters can each have a node called pve1; both must be reported, one row
+    per Host, not deduped into one."""
+    from proxploy.models import Host, HostCredential
+    from tests.support import make_app, seed_snapshot
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid1, _, _ = _seed(app)  # host-01, standalone, node pve1
+        with app.state.sessionmaker() as db:
+            h2 = Host(name="host-02", address="https://10.0.0.10:8006",
+                      node_name="pve1", status="connected", pve_version="8.4.1")
+            db.add(h2)
+            db.commit()
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!net2-monitoring",
+                 "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=h2.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            hid2 = h2.id  # also standalone: cluster_name left None on both
+        seed_snapshot(app, hid1, nodes=[{"node": "pve1", "status": "online"}])
+        seed_snapshot(app, hid2, nodes=[{"node": "pve1", "status": "online"}])
+        r = c.get("/api/v1/network/bridges")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["nodes"]) == 2
+        assert {n["host_id"] for n in body["nodes"]} == {hid1, hid2}
+
+
 def test_bridges_filters_by_host(tmp_path, csrf_header, bootstrap_admin):
     from tests.support import make_app, seed_snapshot
 

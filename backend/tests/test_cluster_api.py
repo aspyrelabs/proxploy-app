@@ -109,6 +109,69 @@ def test_a_three_node_cluster_is_three_rows_not_one(tmp_path, csrf_header,
         assert [r["is_entry"] for r in rows] == [False, True, False]
 
 
+def test_two_hosts_on_one_cluster_are_two_node_rows_not_four(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """Two Hosts can be two nodes of the SAME Proxmox cluster; each one's poll
+    sees the whole cluster's node list (root cause: cluster_resources()
+    returns every node from any node asked), so both snapshots list both
+    pve1 and pve2. A real node must appear once, attributed to the Host
+    actually registered at that node."""
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from proxploy.models import Host
+        from tests.support import seed_host_row, seed_snapshot
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            # Both Hosts are the SAME real cluster (Host.cluster_name, set by
+            # the poller in production); that is what makes their two
+            # snapshots the same cluster-wide view, not two unrelated hosts.
+            db.get(Host, hid1).cluster_name = "lab-cluster"
+            db.get(Host, hid2).cluster_name = "lab-cluster"
+            db.commit()
+        both_nodes = [
+            {"node": "pve1", "status": "online", "cpu_pct": 10.0, "cpu_cores": 4,
+             "mem_bytes": 1000, "mem_total_bytes": 4000, "uptime_s": 100},
+            {"node": "pve2", "status": "online", "cpu_pct": 20.0, "cpu_cores": 8,
+             "mem_bytes": 2000, "mem_total_bytes": 4000, "uptime_s": 200},
+        ]
+        seed_snapshot(app, hid1, nodes=both_nodes)
+        seed_snapshot(app, hid2, nodes=both_nodes)
+        rows = c.get("/api/v1/cluster/nodes").json()
+        assert {r["node"] for r in rows} == {"pve1", "pve2"}
+        assert len(rows) == 2
+        by_node = {r["node"]: r for r in rows}
+        assert by_node["pve1"]["host_id"] == hid1
+        assert by_node["pve2"]["host_id"] == hid2
+        assert by_node["pve1"]["is_entry"] is True
+        assert by_node["pve2"]["is_entry"] is True
+
+
+def test_two_hosts_on_different_clusters_with_the_same_node_name_are_not_merged(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A node name is only unique WITHIN one cluster. Two different clusters
+    (here: two standalone hosts, cluster_name None) can each have a node
+    called pve1; both rows must survive, one per Host."""
+    app, c = _setup(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        from tests.support import seed_host_row, seed_snapshot
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve1").id  # standalone too
+        node_row = [{"node": "pve1", "status": "online", "cpu_pct": 1.0,
+                    "cpu_cores": 4, "mem_bytes": 1, "mem_total_bytes": 4,
+                    "uptime_s": 1}]
+        seed_snapshot(app, hid1, nodes=node_row)
+        seed_snapshot(app, hid2, nodes=node_row)
+        rows = c.get("/api/v1/cluster/nodes").json()
+        assert len(rows) == 2
+        assert {r["host_id"] for r in rows} == {hid1, hid2}
+        assert all(r["node"] == "pve1" for r in rows)
+        assert all(r["is_entry"] for r in rows)
+
+
 def test_node_rows_carry_that_node_s_storage(tmp_path, csrf_header,
                                              bootstrap_admin):
     """Storage is per NODE, and a shared datastore counts on every node that

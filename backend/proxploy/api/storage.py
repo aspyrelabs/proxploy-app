@@ -25,7 +25,8 @@ from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
 from pydantic import BaseModel
 
-from proxploy.api.deps import authorize, get_db, require_entitlement, scope_host
+from proxploy.api.deps import (authorize, cluster_scope, get_db,
+                               require_entitlement, scope_host)
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, User
 from proxploy.services.audit import write_audit
@@ -135,11 +136,21 @@ def list_storage(request: Request, db=Depends(get_db),
         for st in snap.storage:
             # A shared datastore is reported once per node and is ONE
             # datastore; a local one with the same name on two nodes is two.
-            key = ((host_id, st.get("storage")) if st.get("shared")
-                   else (host_id, st.get("node"), st.get("storage")))
+            # No host_id in the key: two Hosts can be two nodes of the SAME
+            # cluster, and cluster_resources() returns the whole cluster from
+            # either one, so both snapshots carry every datastore. host_id
+            # in the key made each polling host's copy look like a distinct
+            # datastore; the surviving row is just whichever host's poll was
+            # seen first, which is fine since any host in the cluster can
+            # serve it. cluster_scope(host) IS still needed: a node name and
+            # a datastore name are only unique within one cluster, so two
+            # different clusters (or two standalone hosts) with a same-named
+            # node or datastore must not collapse into one row.
+            key = ((cluster_scope(host), st.get("storage")) if st.get("shared")
+                   else (cluster_scope(host), st.get("node"), st.get("storage")))
             seen.setdefault(key, _row(host, st))
     return sorted(seen.values(),
-                  key=lambda r: (r["host_id"], r["storage"] or "", r["node"] or ""))
+                  key=lambda r: (r["storage"] or "", r["node"] or "", r["host_id"]))
 
 
 @router.get("/{host_id}/{name}",
