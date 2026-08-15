@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
@@ -9,10 +9,6 @@ import { Dialog } from './ui/dialog'
 import { SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 type PowerResult = { job: { id: number; kind: string; status: string }; is_self: boolean }
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Could not reach that node, try again.'
 
 /**
  * Reboot / power off ONE Proxmox node (backend/proxploy/api/hosts.py
@@ -62,7 +58,11 @@ export function HostPowerDialog({ hostId, node, command, onClose }: {
       qc.invalidateQueries({ queryKey: ['cluster', 'nodes'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
-    onError: (e) => { notify.error('Could not send that action.', { description: detailOf(e) }); onClose() },
+    onError: (e) => {
+      notify.error('Could not send that action.',
+        { description: apiErrorDetail(e, 'Could not reach that node, try again.') })
+      onClose()
+    },
   })
 
   if (jobId != null) {

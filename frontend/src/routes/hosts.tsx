@@ -414,7 +414,7 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
                  transition hover:border-amber hover:text-amber"
       onClick={() => {
         if (ent.data != null && !ent.has('terminal.node')) {
-          notify.error('Node shells are part of the Pro plan.', {
+          notify.error('Not included in your plan.', {
             description: 'Everything else on this page works without it.',
           })
           return

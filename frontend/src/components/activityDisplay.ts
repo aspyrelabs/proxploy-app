@@ -53,7 +53,6 @@ export const ACTION_LABEL: Record<string, string> = {
   'apikey.revoke': 'API Key Revoked',
   'app.forget': 'App Forgotten',
   'app.install': 'App Installed',
-  'app.migrate': 'App Migrated',
   'app.reaped': 'App Removed',
   'app.reconfigure': 'App Reconfigured',
   'app.restart': 'App Restarted',

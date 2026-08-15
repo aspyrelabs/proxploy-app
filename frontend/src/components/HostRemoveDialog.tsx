@@ -1,16 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-dialog'
 
 type RemoveResult = { removed: true; forgot_apps: number; was_own_host: boolean }
 type ConflictApp = { id: number; name: string; ctid: number }
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Could not remove that host, try again.'
 
 /**
  * DELETE /hosts/{id} refuses (409 host_has_apps) when apps still reference
@@ -48,7 +44,7 @@ export function HostRemoveDialog({ hostId, hostName, onClose, onRemoved }: {
         setTyped(vars.confirm)
         return
       }
-      notify.error(detailOf(e))
+      notify.error(apiErrorDetail(e, 'Could not remove that host, try again.'))
       onClose()
     },
   })

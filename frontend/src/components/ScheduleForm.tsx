@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, apiErrorDetail } from '../api/client'
 import { SCHEDULABLE } from '../api/schedules'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
@@ -63,9 +63,7 @@ export function ScheduleForm({ jobKind, onSaved }:
         return
       }
       notify.error(
-        e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-          ? (e.body as any).detail
-          : 'Could not create that schedule, check the fields and try again.')
+        apiErrorDetail(e, 'Could not create that schedule, check the fields and try again.'))
     },
   })
 

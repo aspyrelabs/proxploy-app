@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { useApiKeys } from '../api/apikeys'
@@ -19,10 +19,6 @@ const SCOPE_RESOURCES = [
   'team', 'entitlement', 'meta',
 ] as const
 const SCOPE_OPTIONS = ['read', ...SCOPE_RESOURCES.map((r) => `${r}:write`)]
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
 
 export function ApiKeysCard() {
   const ent = useEntitlements()
@@ -64,12 +60,12 @@ export function ApiKeysCard() {
       setName(''); setScopes(new Set()); setExpiresAt(''); setAdding(false)
       qc.invalidateQueries({ queryKey: ['api-keys'] })
     },
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   const revokeKey = useMutation({
     mutationFn: (id: number) => api(`/api-keys/${id}`, { method: 'DELETE' }),
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
     onSettled: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   })
 

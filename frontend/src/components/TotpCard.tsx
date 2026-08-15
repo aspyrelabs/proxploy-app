@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useTotpStatus } from '../api/account'
 import { notify } from '../lib/notify'
@@ -8,10 +8,6 @@ import type { TotpEnrollment } from '../api/account'
 import { Button } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
 import { Dialog } from './ui/dialog'
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
 
 const copyText = (text: string) => { void navigator.clipboard?.writeText(text) }
 
@@ -75,7 +71,7 @@ export function TotpCard() {
   const enroll = useMutation({
     mutationFn: () => api<TotpEnrollment>('/auth/totp/enroll', { method: 'POST' }),
     onSuccess: (r) => setEnrollment(r),
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   const confirm = useMutation({
@@ -92,7 +88,7 @@ export function TotpCard() {
       setAckSaved(false)
       invalidateMe()
     },
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   const disable = useMutation({
@@ -104,7 +100,7 @@ export function TotpCard() {
       setPassword('')
       invalidateMe()
     },
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   const regenerate = useMutation({
@@ -119,7 +115,7 @@ export function TotpCard() {
       setRegenerating(false)
       setRegenPassword('')
     },
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   return (

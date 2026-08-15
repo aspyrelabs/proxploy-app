@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
@@ -10,10 +10,6 @@ import { HostCapabilityList } from './HostCapabilityList'
 export type HostSummary = { name: string; address: string }
 
 type TestResult = { status: string; pve_version: string | null }
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
 
 /**
  * The host actions menu's Edit: name, address, and the API token id/secret,
@@ -71,7 +67,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
         setError(`Could not connect: the host reports "${r.status}". `
                 + 'Check the address and credentials.')
       }
-    } catch (e) { setError(detailOf(e)) } finally { setTesting(false) }
+    } catch (e) { setError(apiErrorDetail(e, 'Request failed, try again.')) } finally { setTesting(false) }
   }
 
   async function save() {
@@ -101,7 +97,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
                 + `"${r.status}". Check the address and credentials.`)
       }
     } catch (e) {
-      setError(detailOf(e))
+      setError(apiErrorDetail(e, 'Request failed, try again.'))
     } finally {
       setSaving(false)
     }

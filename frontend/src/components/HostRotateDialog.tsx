@@ -1,16 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 
 type RotateResult = { id: number; rotated: string[]; public_key?: string; consent_note?: string }
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
 
 export function HostRotateDialog({ hostId, hostName, onClose }: {
   hostId: number; hostName: string; onClose: () => void
@@ -37,7 +33,7 @@ export function HostRotateDialog({ hostId, hostName, onClose }: {
       }),
     }),
     onSuccess: (r) => { setResult(r); qc.invalidateQueries({ queryKey: ['hosts'] }) },
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   return (

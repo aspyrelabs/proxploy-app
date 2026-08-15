@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { notify } from '../lib/notify'
 import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
@@ -17,10 +17,6 @@ const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px]
 // those straight in body.detail. Surface them verbatim rather than a canned
 // message: they're the whole point of the two backend behaviors this card
 // has to be honest about.
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
-
 function TeamMembers({ team, users, usersError, onRemove }: {
   team: TeamRow; users: UserRow[]; usersError: boolean
   onRemove: (team: TeamRow, m: MemberRow) => void
@@ -38,14 +34,14 @@ function TeamMembers({ team, users, usersError, onRemove }: {
   const setRole = useMutation({
     mutationFn: ({ userId, role }: { userId: number; role: string }) =>
       api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
     onSettled: invalidate,
   })
   const addMember = useMutation({
     mutationFn: ({ userId, role }: { userId: number; role: string }) =>
       api(`/teams/${team.id}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
     onSuccess: () => setPickUserId(''),
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
     onSettled: invalidate,
   })
 
@@ -142,7 +138,7 @@ export function TeamsCard() {
     // Deliberate per Task 20: the "New team" affordance renders for every
     // role (owner-only enforcement is the backend's job, not UI cosmetics)
     // -- an operator/admin gets teams.py's 403 back here, verbatim.
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 
   const removeMember = useMutation({
@@ -153,7 +149,7 @@ export function TeamsCard() {
     // not swallowed); a non-default team's last membership for a user is
     // allowed and returns 200 -- that case is warned about *before* the
     // click, in confirmRemove below, per amendment A1.
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
     onSettled: (_d, _e, v) => {
       qc.invalidateQueries({ queryKey: ['teams'] })
       qc.invalidateQueries({ queryKey: ['teams', v.teamId, 'members'] })

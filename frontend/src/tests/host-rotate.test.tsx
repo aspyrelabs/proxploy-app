@@ -17,6 +17,17 @@ let rotateResult: 'ok' | 'rejected' = 'ok'
 
 vi.mock('../api/client', () => ({
   ApiError,
+  apiErrorDetail: (e: unknown, fallback: string) => {
+    if (!(e instanceof ApiError)) return fallback
+    const detail = (e.body as { detail?: unknown } | null)?.detail
+    const text = typeof detail === 'string' ? detail
+      : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
+        ? (detail as { detail: string }).detail
+        : undefined
+    if (text == null) return fallback
+    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
+    return text
+  },
   api: vi.fn((path: string, opts?: RequestInit) => {
     calls.push({ path, method: opts?.method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
     if (rotateResult === 'rejected') {
@@ -80,6 +91,9 @@ describe('HostRotateDialog', () => {
     fireEvent.change(screen.getByLabelText('New API token id'), { target: { value: 'proxploy@pve!x' } })
     fireEvent.change(screen.getByLabelText('New API token secret'), { target: { value: 'shh' } })
     fireEvent.click(screen.getByRole('button', { name: 'Rotate' }))
-    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('nope'))
+    // A 502 means Proxploy could not complete the call to Proxmox itself, so
+    // the toast says whose side failed rather than passing the text through
+    // bare (see apiErrorDetail in api/client.ts).
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Proxmox could not do this: nope'))
   })
 })

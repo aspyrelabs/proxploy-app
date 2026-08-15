@@ -3,7 +3,7 @@ import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/rea
 import { useEffect, useState } from 'react'
 import { notify } from '../lib/notify'
 import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, apiErrorDetail } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
@@ -170,7 +170,7 @@ function DestroyVmButton({ vm }: { vm: VmRow }) {
         // untested here.
         const msg = body?.error === 'self_target'
           ? 'Proxploy will not destroy the guest it is running inside.'
-          : String(body?.detail ?? 'Could not destroy that VM, try again.')
+          : apiErrorDetail(e, 'Could not destroy that VM, try again.')
         notify.error(msg)
       },
     })

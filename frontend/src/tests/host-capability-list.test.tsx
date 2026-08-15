@@ -17,6 +17,17 @@ let reject = false
 
 vi.mock('../api/client', () => ({
   ApiError,
+  apiErrorDetail: (e: unknown, fallback: string) => {
+    if (!(e instanceof ApiError)) return fallback
+    const detail = (e.body as { detail?: unknown } | null)?.detail
+    const text = typeof detail === 'string' ? detail
+      : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
+        ? (detail as { detail: string }).detail
+        : undefined
+    if (text == null) return fallback
+    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
+    return text
+  },
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, body })

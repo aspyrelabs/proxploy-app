@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react'
 import { createRoute, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { shellRoute } from './shell'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { useSchedules } from '../api/schedules'
@@ -188,8 +188,7 @@ export function SettingsPage() {
     mutationFn: (h: HostRow) => api<{ id: number; status: string; last_seen_at: string | null; events: number }>(
       `/hosts/${h.id}/sync`, { method: 'POST' }),
     onSuccess: (r) => notify.success('Synced.', { description: `${r.events} event(s) applied.` }),
-    onError: (e) => notify.error(e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-      ? (e.body as any).detail : 'Sync failed, try again.'),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Sync failed, try again.')),
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 

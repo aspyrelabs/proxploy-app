@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { useAlertMetrics } from '../api/alerts'
 import { notify } from '../lib/notify'
 import type { AppRow, VmRow } from '../api/hooks'
@@ -78,9 +78,7 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
     // The backend's 422s are the useful ones ("disk_pct can only target host"),
     // so surface the message rather than a generic failure.
     onError: (e) => notify.error(
-      e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-        ? (e.body as any).detail
-        : 'Could not create that rule, check the fields and try again.'),
+      apiErrorDetail(e, 'Could not create that rule, check the fields and try again.')),
   })
 
   function pickMetric(next: string) {

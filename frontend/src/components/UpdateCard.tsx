@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { useApplyUpdate, useUpdateStatus } from '../api/account'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
@@ -14,10 +14,6 @@ const UPDATE_TIMEOUT_MS = 600_000
 const POLL_INTERVAL_MS = 3000
 
 type PollState = 'idle' | 'polling' | 'success' | 'timeout'
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Could not start the update, try again.'
 
 export function UpdateCard() {
   const status = useUpdateStatus()
@@ -58,7 +54,7 @@ export function UpdateCard() {
     setNewVersion(null)
     apply.mutate(latest, {
       onSuccess: () => setPoll('polling'),
-      onError: (e) => notify.error(detailOf(e)),
+      onError: (e) => notify.error(apiErrorDetail(e, 'Could not start the update, try again.')),
     })
   }
 

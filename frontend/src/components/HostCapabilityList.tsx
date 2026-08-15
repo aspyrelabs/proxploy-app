@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
@@ -26,11 +26,6 @@ type HostCapabilities = { capabilities?: Record<string, boolean> }
 // future multi-word key (e.g. "node_power") would render as "Node_power".
 // Fine for the four keys that exist today; revisit if one lands.
 const labelOf = (key: string) => key.charAt(0).toUpperCase() + key.slice(1)
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as { detail?: unknown })?.detail === 'string'
-    ? (e.body as { detail: string }).detail
-    : 'Request failed, try again.'
 
 function CapabilityRow({ hostId, name, stored }: {
   hostId: number; name: string; stored: boolean
@@ -108,7 +103,7 @@ function CapabilityRow({ hostId, name, stored }: {
     // The route names the address and says the old credential is still in
     // place; naming the capability is what turns it from a bare 502 into
     // something the operator can act on.
-    onError: (e) => setError(`${label}: ${detailOf(e)}`),
+    onError: (e) => setError(`${label}: ${apiErrorDetail(e, 'Request failed, try again.')}`),
   })
 
   return (

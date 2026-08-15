@@ -1,15 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useSessions } from '../api/account'
 import type { SessionRow } from '../api/account'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
-
-const detailOf = (e: unknown) =>
-  e instanceof ApiError && typeof (e.body as any)?.detail === 'string'
-    ? (e.body as any).detail : 'Request failed, try again.'
 
 // No entitlement gate: GET/DELETE /auth/sessions are self-service on the
 // caller's own login state (api/auth.py's comment on that section), not an
@@ -22,7 +18,7 @@ export function SessionsCard() {
 
   const revoke = useMutation({
     mutationFn: (id: number) => api(`/auth/sessions/${id}`, { method: 'DELETE' }),
-    onError: (e) => notify.error(detailOf(e)),
+    onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
     onSettled: () => qc.invalidateQueries({ queryKey: ['auth', 'sessions'] }),
   })
 
