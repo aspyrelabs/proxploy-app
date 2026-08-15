@@ -408,6 +408,41 @@ the query plan rather than a timing.
 
 ---
 
+## Open at the end of 2026-08-15
+
+Not risks so much as the shortlist a fresh session should start from.
+
+1. **Nothing built today has been looked at.** Roughly 45 user-facing changes
+   landed: every audit label rewritten to the neutral convention in doc 13, a
+   "Blocked" prefix on refused rows, renamed statuses, 19 pickers reworked,
+   skeletons on four surfaces. Both suites are green and neither proves the
+   activity feed reads well. Drive the app and look at it before building more.
+
+2. **apiErrorDetail cannot read a Pydantic 422.** `main.py`'s validation
+   handler returns `{"detail": [ ...objects... ]}`, a list, and the helper only
+   reads a string detail, so it falls through to the caller's fallback. Every
+   422 in the app therefore shows a generic sentence instead of the field that
+   was wrong. Found while splitting the profile password errors, left alone
+   because it wants a decision about how field errors should read, not a patch.
+
+3. **Two `/auth/me` queries under different keys.** `useMe` in `api/hooks.ts`
+   is `['me']`; `useTotpStatus` in `api/account.ts` is `['auth', 'me']`. Both
+   hit the same route. Nothing is broken, but an invalidation aimed at one does
+   not touch the other, which is a trap already worth one wrong guess.
+
+4. **AlertRuleForm's target select is a near miss.** `targetType` starts "any"
+   while `targetOptions` drops "any" for a single-target metric, so the control
+   would display "host" while the state says "any" and the POST would send
+   "any". Unreachable today because the initial metric is multi-target. It goes
+   live the day that changes.
+
+5. **Hardware checks 7, 8, 9, 11 and 12** in doc 12. None blocked on effort:
+   7 needs the nodes unclustered, 8 can cost connectivity to the node running
+   it, 9 needs backups that exist, 11 needs a real IdP, 12 means deliberately
+   breaking quorum.
+
+---
+
 ## Summary table
 
 | # | Risk | Likelihood | Impact | Posture |
