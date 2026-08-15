@@ -569,3 +569,109 @@ def test_install_declines_telemetry_before_the_script_can_ask(tmp_path):
         assert "/usr/local/community-scripts" not in install
 
     asyncio.run(scenario())
+
+
+def test_install_survives_a_stale_orphan_app_scripts_row(tmp_path):
+    """Real incident: an app_scripts row survives after its apps row is gone
+    (an orphan left by a path that bypassed the FK cascade, e.g. a raw
+    connection that never got db.py's `PRAGMA foreign_keys=ON`, simulated
+    here the same way). SQLite reissues row ids once the apps table is
+    empty, so the next install's brand new App row lands on the same id the
+    orphan still claims, and the AppScript insert then collides on
+    `ux_app_scripts (app_id, version)`. That must never brick the install:
+    a fresh app id cannot legitimately own any app_scripts row already, so
+    the stale one is garbage to be cleared, not a conflict to fail on.
+    """
+    async def scenario():
+        import sqlite3
+
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        # apps is empty, so the next App row SQLAlchemy inserts gets id 1.
+        # Plant the orphan there directly, through a raw sqlite3 connection
+        # (unlike app.state.sessionmaker's engine, it never runs db.py's
+        # connect-time PRAGMA foreign_keys=ON), the same way the real one
+        # could have been written.
+        raw = sqlite3.connect(str(tmp_path / "t.db"))
+        raw.execute(
+            "INSERT INTO app_scripts (app_id, version, content, content_sha256, "
+            "source, upstream_ref, created_at, updated_at) VALUES "
+            "(1, 1, 'stale script from a deleted app', ?, 'upstream', "
+            "'deadbeef', datetime('now'), datetime('now'))",
+            ("x" * 64,))
+        raw.commit()
+        raw.close()
+
+        app.state.ssh_connect_factory = _ssh_that_builds(pve, 150)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        result = await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                         "name": "Redis", "ctid": 150, "overrides": {}})
+
+        with app.state.sessionmaker() as db:
+            row = db.query(App).filter_by(slug=result["slug"]).one()
+            assert row.id == 1, ("this only proves anything if the new app "
+                                 "landed on the id the orphan poisoned")
+            script = db.query(AppScript).filter_by(app_id=row.id, version=1).one()
+            assert script.content_sha256 == hashlib.sha256(b"msg_ok done").hexdigest()
+            assert db.query(AppScript).filter_by(app_id=1).count() == 1, \
+                "the orphan must be gone, not sitting alongside the real row"
+
+    asyncio.run(scenario())
+
+
+def test_install_reports_the_running_container_when_db_recording_fails(tmp_path):
+    """The container is built on the node BEFORE anything is written to the
+    DB (ctx.progress(80) above), so a failure recording it must never look
+    like the install itself failed, and must never dump a raw DB error at
+    the user: it can carry the full SQL statement, the bound parameters, and
+    even the install script text. Triggered here with a collision unrelated
+    to the app_scripts orphan (an existing App already claims this host+ctid
+    via `ux_apps_host_ctid`), so this proves the reporting behavior holds for
+    ANY post-creation DB failure, not just the one case fixed above.
+    """
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+            db.add(App(host_id=host_id, ctid=150, name="Other App",
+                       slug="other-app-already-here", adopted=True,
+                       web_protocol="http", web_path="/"))
+            db.commit()
+
+        app.state.ssh_connect_factory = _ssh_that_builds(pve, 150)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        with pytest.raises(JobFailed) as exc_info:
+            await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                    "name": "Redis", "ctid": 150, "overrides": {}})
+
+        message = str(exc_info.value)
+        # Names what actually happened.
+        assert "150" in message
+        assert "redis" in message
+        assert "running" in message or "was installed" in message
+        # Never a raw DB error: no SQL, no bound parameters, no script body.
+        assert "INSERT INTO" not in message
+        assert "IntegrityError" not in message
+        assert "SELECT" not in message
+        assert "msg_ok done" not in message
+        assert "parameters" not in message.lower()
+
+        # The container the node actually built must still exist: nothing
+        # here destroys it.
+        assert 150 in {int(r["vmid"]) for r in pve.resources
+                       if r.get("type") == "lxc"}
+        # And no phantom App row was filed for it either.
+        with app.state.sessionmaker() as db:
+            assert db.query(App).filter_by(host_id=host_id, ctid=150).count() == 1
+
+    asyncio.run(scenario())

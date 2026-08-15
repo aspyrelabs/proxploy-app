@@ -285,18 +285,46 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # the same catalog app onto the same CTID, which would collide without
     # host_id in the slug.
     slug = f"{catalog_slug}-{host_id}-{ctid}"
-    with app.state.sessionmaker() as db:
-        row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
-                  catalog_slug=catalog_slug, category=entry.category,
-                  web_protocol="http", web_path="/", adopted=True,
-                  update_available=None)
-        db.add(row)
-        db.flush()
-        db.add(AppScript(app_id=row.id, version=1, content=install_script,
-                         content_sha256=hashlib.sha256(install_script.encode()).hexdigest(),
-                         source="upstream", upstream_ref=entry.upstream_sha))
-        db.commit()
-        app_id, out_slug = row.id, row.slug
+    try:
+        with app.state.sessionmaker() as db:
+            row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
+                      catalog_slug=catalog_slug, category=entry.category,
+                      web_protocol="http", web_path="/", adopted=True,
+                      update_available=None)
+            db.add(row)
+            db.flush()
+            # A freshly created App row can never legitimately own an
+            # app_scripts row yet, so any that exist for this id are stale by
+            # definition. SQLite reissues row ids once a table is empty (or
+            # once older rows are gone), so a leftover row from a deleted app
+            # (an orphan left by a path that bypassed the FK cascade, or from
+            # before db.py started enforcing foreign keys) can collide with
+            # the id this brand new app was just given. One poisoned row must
+            # never be able to brick every future install on
+            # ux_app_scripts, so clear it before writing the real one.
+            db.query(AppScript).filter_by(app_id=row.id).delete()
+            db.add(AppScript(app_id=row.id, version=1, content=install_script,
+                             content_sha256=hashlib.sha256(install_script.encode()).hexdigest(),
+                             source="upstream", upstream_ref=entry.upstream_sha))
+            db.commit()
+            app_id, out_slug = row.id, row.slug
+    except Exception as e:  # noqa: BLE001
+        # The container is REAL and RUNNING on the node at this point; only
+        # the bookkeeping failed. A raw DB error can carry the full SQL
+        # statement, every bound parameter, and even the install script text
+        # (SQLAlchemy's IntegrityError.__str__ includes all three), and none
+        # of that may ever reach the user. Say plainly what actually
+        # happened instead. Nothing on the node is touched: the container is
+        # not removed, and it will show up as a discovered, not-yet-adopted
+        # container on the Apps page, where it can be adopted to bring it
+        # under management.
+        ctx.log(f"could not record the install in the database: {e}", stream="stderr")
+        raise JobFailed(
+            f"{catalog_slug} was installed on {host.name} as CT {ctid} and is "
+            f"running, but Proxploy could not save a record of it. The "
+            f"container was not removed. It will appear as a discovered "
+            f"container on the Apps page, where you can adopt it to bring it "
+            f"under management.") from e
 
     ctx.progress(100)
     app.state.bus.publish("resource", {"type": "app", "id": app_id, "change": "installed"})
