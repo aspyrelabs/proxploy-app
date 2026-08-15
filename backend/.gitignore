@@ -2,6 +2,11 @@
 __pycache__/
 *.egg-info/
 data/
+# The documented way to re-run onboarding is `mv data data.bak-$(date +%H%M%S)`
+# (see .claude/skills/run-proxploy). That lands outside `data/` and was being
+# committed, master.key and all, which is every stored credential plus the key
+# that decrypts them sitting in the repository.
+data.bak-*/
 .pytest_cache/
 mutants/
 .mutmut-cache*
