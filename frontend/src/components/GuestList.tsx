@@ -1,15 +1,15 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow, VmRow } from '../api/hooks'
 import { fmtBytes, fmtPct } from '../lib/format'
-import { LifecycleActions } from './LifecycleActions'
+import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
-import { Button } from './ui/button'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, UsageBar } from './UsageBar'
 
 export type Guest = {
   kind: 'app' | 'vm'
   id: number
+  host_id: number
   name: string
   /** "CT 104" / "VM 201": the id an operator actually types. */
   label: string
@@ -27,7 +27,7 @@ export type Guest = {
 export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
   return [
     ...apps.map((a): Guest => ({
-      kind: 'app', id: a.id, name: a.name, label: `CT ${a.ctid}`,
+      kind: 'app', id: a.id, host_id: a.host_id, name: a.name, label: `CT ${a.ctid}`,
       status: a.status, cpu_pct: a.cpu_pct,
       mem: a.mem_total_bytes
         ? `${fmtBytes(a.mem_bytes)} / ${fmtBytes(a.mem_total_bytes)}`
@@ -35,7 +35,7 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
       update: a.update_available,
     })),
     ...vms.map((v): Guest => ({
-      kind: 'vm', id: v.id, name: v.name, label: `VM ${v.vmid}`,
+      kind: 'vm', id: v.id, host_id: v.host_id, name: v.name, label: `VM ${v.vmid}`,
       status: v.status, cpu_pct: v.cpu_pct,
       // No mem_total_bytes on VmRow. Inventing one to make the two rows match
       // would be making up a number.
@@ -131,11 +131,9 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       </div>
       <span className="font-mono text-[11px] text-text-2">{g.mem}</span>
       <div className="ml-auto flex items-center gap-2">
-        <LifecycleActions target={g.kind} id={g.id} name={g.name} status={g.status} size="sm" />
-        <Button variant="ghost" className="px-2 py-1 text-[11px]"
-          onClick={() => navigate({ to: consolePath as never, params: params as never })}>
-          Console
-        </Button>
+        <LifecycleActions target={g.kind} id={g.id} name={g.name} status={g.status} hostId={g.host_id} size="sm" />
+        <ConsoleButton hostId={g.host_id}
+          onClick={() => navigate({ to: consolePath as never, params: params as never })} />
       </div>
     </div>
   )

@@ -1,20 +1,45 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { ApiError } = vi.hoisted(() => ({
-  ApiError: class extends Error {
+// apiErrorDetail re-implemented against this file's own hoisted ApiError
+// (not client.ts's real class, so `e instanceof ApiError` inside the real
+// function would never match an error this mock throws): same shapes as
+// api/client.ts's own doc comment, just close enough to prove LoginForm
+// reads the server's 422 instead of assuming the network is down.
+const { ApiError, apiErrorDetail } = vi.hoisted(() => {
+  class ApiError extends Error {
     status: number; body: unknown
     constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
-  },
-}))
+  }
+  function apiErrorDetail(e: unknown, fallback: string): string {
+    if (!(e instanceof ApiError)) return fallback
+    const detail = (e.body as { detail?: unknown } | null)?.detail
+    let text: string | undefined
+    if (typeof detail === 'string') text = detail
+    else if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d: unknown) => (d && typeof (d as { msg?: unknown }).msg === 'string' ? (d as { msg: string }).msg : null))
+        .filter((m): m is string => m != null)
+      text = msgs.length > 0 ? msgs.join('; ') : undefined
+    } else if (detail != null && typeof (detail as { detail?: unknown }).detail === 'string') {
+      text = (detail as { detail: string }).detail
+    }
+    if (text == null) return fallback
+    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
+    return text
+  }
+  return { ApiError, apiErrorDetail }
+})
 
 let oidcEnabled = false
 let totpRequired = false
 let totpCodeFails = false
+let loginFails: '422' | 'network' | null = null
 const posted: { path: string; body: any }[] = []
 
 vi.mock('../api/client', () => ({
   ApiError,
+  apiErrorDetail,
   api: vi.fn((path: string, opts?: RequestInit) => {
     if (path === '/meta/onboarding') {
       posted.push({ path, body: null })
@@ -22,6 +47,15 @@ vi.mock('../api/client', () => ({
     }
     if (path === '/auth/login') {
       posted.push({ path, body: opts?.body ? JSON.parse(String(opts.body)) : null })
+      if (loginFails === '422') {
+        return Promise.reject(new ApiError(422, { detail: [{
+          type: 'value_error', loc: ['body', 'email'],
+          msg: 'value is not a valid email address: The part after the @-sign is '
+             + 'a special-use or reserved name that cannot be used with email.',
+          ctx: { reason: 'special-use or reserved name' },
+        }] }))
+      }
+      if (loginFails === 'network') return Promise.reject(new TypeError('Failed to fetch'))
       if (totpRequired) return Promise.resolve({ totp_required: true, pending: 'PEND-TOKEN' })
       return Promise.resolve({ ok: true, user: { id: 1, email: 'a@b.com', display_name: null, role: 'owner' } })
     }
@@ -49,7 +83,28 @@ describe('LoginForm, TOTP step', () => {
     oidcEnabled = false
     totpRequired = false
     totpCodeFails = false
+    loginFails = null
     posted.length = 0
+  })
+
+  // The bug: a 422 answers precisely what was wrong with the email, and the
+  // form used to show "Sign-in failed, is the server reachable?" for every
+  // non-401 error, which blames the network for something the server
+  // explained in full.
+  it('shows the server\'s own validation message on a 422, not the network fallback', async () => {
+    loginFails = '422'
+    await loginWithPassword()
+    expect(await screen.findByText(
+      /value is not a valid email address/)).toBeInTheDocument()
+    expect(screen.queryByText(/is the server reachable/i)).toBeNull()
+  })
+
+  // A genuine network failure (fetch itself rejects, no response at all) is
+  // the one case the fallback wording is honest about.
+  it('still shows the network fallback when the request never got a response', async () => {
+    loginFails = 'network'
+    await loginWithPassword()
+    expect(await screen.findByText(/is the server reachable/i)).toBeInTheDocument()
   })
 
   it('swaps the password form for a single code input when totp_required comes back', async () => {

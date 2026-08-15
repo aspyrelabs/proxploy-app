@@ -724,6 +724,52 @@ describe('InstallDialog', () => {
     // "debian", and no "MB RAM"/"GB disk" for figures that do not exist.
     expect(screen.getByText('2 vCPU · debian')).toBeInTheDocument()
   })
+
+  // Bug: with Advanced open and vCPU/RAM/disk typed over, the script's own
+  // defaults line stayed on screen right above the custom fields, reading as
+  // a claim about what THIS install would build rather than what the app
+  // ships with by default.
+  it('hides the app-defaults line once Advanced is open, since CoreFields already shows the live values', async () => {
+    await mockEntry({ default_cpu: 1, default_ram_mb: 512, default_disk_gb: 2,
+      default_os: 'debian', default_os_version: '13' })
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    expect(screen.getByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+    expect(screen.queryByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: /default/i }))
+    expect(screen.getByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).toBeInTheDocument()
+  })
+
+  // Bug: node1 answering /hosts with status "unreachable" still listed in the
+  // host <select> with disabled: false. Picking it can only fail.
+  it('disables an unreachable host in the picker and says why', async () => {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') return Promise.resolve({
+        slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
+        default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
+      })
+      if (path === '/hosts') return Promise.resolve([
+        { id: 1, name: 'node1.lab.local', status: 'unreachable' },
+        { id: 2, name: 'node2.lab.local', status: 'connected' },
+      ])
+      // Kept consistent with the file's other fixtures (not this test's own
+      // concern) so this does not become the implementation the next test's
+      // `getMockImplementation()` inherits, the way an incomplete one would.
+      if (path === '/storage') return Promise.resolve(withStatus(DEFAULT_STORAGE))
+      return Promise.resolve(null)
+    })
+    renderDialog()
+    const hostSelect = await screen.findByRole('combobox', { name: /host/i })
+    const unreachable = within(hostSelect).getByText(/node1\.aspyrelabs\.local/) as HTMLOptionElement
+    const reachable = within(hostSelect).getByText('node2.lab.local') as HTMLOptionElement
+    expect(unreachable.disabled).toBe(true)
+    expect(unreachable.textContent).toMatch(/unreachable/i)
+    expect(reachable.disabled).toBe(false)
+  })
 })
 
 describe('knownPool', () => {

@@ -1,10 +1,9 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtPct } from '../lib/format'
+import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { IconTile } from './IconTile'
-import { LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
-import { Button } from './ui/button'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
 
@@ -59,11 +58,9 @@ export function AppCard({ app }: { app: AppRow }) {
         </div>
       </div>
       <div className="mt-3 border-t border-line-soft pt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-        <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} size="sm" />
-        <Button variant="ghost" className="px-2 py-1 text-[11px]"
-          onClick={() => navigate({ to: '/apps/$appId/console' as never, params: { appId: String(app.id) } as never })}>
-          Console
-        </Button>
+        <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} size="sm" />
+        <ConsoleButton hostId={app.host_id}
+          onClick={() => navigate({ to: '/apps/$appId/console' as never, params: { appId: String(app.id) } as never })} />
       </div>
     </div>
   )

@@ -22,6 +22,11 @@ type HostRow = {
   // means "not chosen yet".
   default_container_storage?: string | null
   default_template_storage?: string | null
+  // "connected" or "unreachable" (backend/proxploy/models: only two values,
+  // "connected" the default). An unreachable host answers every job the
+  // install would enqueue with a failure, so the picker below disables it
+  // instead of letting it be chosen only to fail.
+  status?: string | null
   // Non-null once this host has acknowledged that installs run a
   // community-scripts.org script as root (api/catalog.py). Asking again
   // surfaces no new information, so the tick is only shown while this is null.
@@ -294,7 +299,11 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               : hosts.isLoading
                 ? <option value="">Loading hosts…</option>
                 : <option value="">Select a host…</option>}
-            {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            {(hosts.data ?? []).map((h) => (
+              <option key={h.id} value={h.id} disabled={h.status === 'unreachable'}>
+                {h.name}{h.status === 'unreachable' ? ' (unreachable, cannot install here)' : ''}
+              </option>
+            ))}
           </select>
           <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             placeholder="App name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -302,8 +311,14 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             placeholder="Container ID (CTID)" value={ctid}
             onChange={(e) => setCtid(e.target.value)} />
           {/* Nothing recorded at all means no box, not an empty one: the
-              Store detail page drops the whole section the same way. */}
-          {defaultsLine !== '' && (
+              Store detail page drops the whole section the same way.
+              Default mode only: this line is the APP's own script-parsed
+              defaults, not a summary of what this install will build, and in
+              Advanced mode CoreFields below shows the fields that actually
+              decide that, sometimes with the operator's own numbers typed
+              over these same defaults. Showing both was one true line and one
+              stale one, directly on top of each other. */}
+          {mode === 'default' && defaultsLine !== '' && (
             <div className="rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
               {defaultsLine}
             </div>

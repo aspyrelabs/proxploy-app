@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, ApiError } from '../api/client'
+import { api, apiErrorDetail, ApiError } from '../api/client'
 import { fetchOnboarding } from '../api/account'
 import { Button } from './ui/button'
 import Logo from './Logo'
@@ -40,8 +40,13 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       if (r.totp_required) setPending(r.pending!)
       else onSuccess()
     } catch (err) {
+      // A non-401 ApiError means the server answered and said what was
+      // wrong (a 422 validation error, most often); apiErrorDetail's
+      // fallback only fires when the request itself never got a response,
+      // which is the one case "is the server reachable?" is honest about.
       setError(err instanceof ApiError && err.status === 401
-        ? 'Invalid email or password.' : 'Sign-in failed, is the server reachable?')
+        ? 'Invalid email or password.'
+        : apiErrorDetail(err, 'Sign-in failed, is the server reachable?'))
     } finally { setBusy(false) }
   }
 

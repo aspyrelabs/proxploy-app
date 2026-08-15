@@ -311,7 +311,7 @@ export function HostsPage() {
                       {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
                     </SkeletonGroup>}
                     emptyTitle="No apps yet"
-                    emptyNote="Installed or adopted apps appear here. The App Store lands in Phase 4."
+                    emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
                     errorTitle="Apps not readable"
                     errorNote="Proxploy could not reach the backend to list your apps.">
           {(rows) => (

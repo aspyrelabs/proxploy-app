@@ -19,6 +19,33 @@ export function useHostTasks(hostId: number | null, enabled = true) {
   })
 }
 
+// {monitoring, lifecycle, console, backup}, always present with a boolean
+// each (backend/proxploy/api/hosts.py::_capability_state never omits a key,
+// a host with no credential rows reports every capability False).
+export type HostCapabilities = { monitoring: boolean; lifecycle: boolean; console: boolean; backup: boolean }
+
+/**
+ * Whether ONE host can run lifecycle actions, open a console, etc, read off
+ * the same GET /hosts every other page already fetches on the ['hosts']
+ * key (InstallDialog, apps.tsx, MigrateDialog), so this dedupes against
+ * whichever of them mounted first instead of adding a second request.
+ *
+ * `loaded` mirrors useEntitlements()'s `data != null` gate: capabilities
+ * read undefined before the first fetch resolves, and a caller that disabled
+ * its controls on that alone would grey out every host for the whole first
+ * load, not just the ones that actually lack the capability.
+ */
+export function useHostCapabilities(hostId: number | null) {
+  const q = useQuery({
+    queryKey: ['hosts'],
+    queryFn: () => api<{ id: number; capabilities: HostCapabilities }[]>('/hosts'),
+  })
+  return {
+    loaded: q.data != null,
+    capabilities: q.data?.find((h) => h.id === hostId)?.capabilities,
+  }
+}
+
 export function useHostTaskLog(hostId: number | null, upid: string | null) {
   // Encoded outside the template literal: a UPID is full of characters that
   // must not reach the path raw, and the cast this used to need inline is

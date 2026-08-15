@@ -188,6 +188,11 @@ describe('HostsPage', () => {
     expect(await screen.findByText('pve1')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
     expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
+    // The App Store shipped and is a working nav item; the empty Apps
+    // section used to point at "Phase 4" instead, which was both jargon and,
+    // by the time this was reproduced, false.
+    expect(screen.getByText(/Install one from the App Store/)).toBeInTheDocument()
+    expect(screen.queryByText(/Phase/)).not.toBeInTheDocument()
   })
 
   it('says the nodes could not be read rather than showing "no nodes yet"', async () => {
@@ -277,9 +282,9 @@ describe('HostsPage', () => {
     features = { 'hosts.multi': true }
     withQuery(<HostsPage />)
     const add = await screen.findByRole('button', { name: 'Add host' })
-    expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
     fireEvent.click(add)
-    expect(await screen.findByLabelText('API token id')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Monitoring token id')).toBeInTheDocument()
   })
 
   it('explains the multi-host plan instead of dropping an entitlement 403 on the operator', async () => {
@@ -290,7 +295,7 @@ describe('HostsPage', () => {
     withQuery(<HostsPage />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add host' }))
     expect(await screen.findByText(/needs the multi-host plan/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
   })
 })
 

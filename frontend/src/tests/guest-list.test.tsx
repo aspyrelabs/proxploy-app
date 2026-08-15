@@ -1,17 +1,26 @@
 /** One list, two kinds of guest. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Both guests below share host_id: 1, so one row here controls both.
+let hostCapabilities: Record<string, boolean> | undefined =
+  { monitoring: true, lifecycle: true, console: true, backup: true }
 
 // Path-aware on purpose. LifecycleActions calls useEntitlements, whose `has`
 // reads `q.data?.features[key]`: the optional chain guards `data`, NOT
 // `features`. Resolving every call to [] would make `[].features[key]` throw,
 // and the failure would look like a GuestList bug.
 vi.mock('../api/client', () => ({
-  api: vi.fn((path: string) =>
-    path === '/entitlements'
-      ? Promise.resolve({ tier: 'pro', features: { 'apps.lifecycle': true, 'vms.lifecycle': true } })
-      : Promise.resolve([])),
+  api: vi.fn((path: string) => {
+    if (path === '/entitlements') {
+      return Promise.resolve({ tier: 'pro', features: { 'apps.lifecycle': true, 'vms.lifecycle': true } })
+    }
+    if (path === '/hosts') {
+      return Promise.resolve([{ id: 1, capabilities: hostCapabilities }])
+    }
+    return Promise.resolve([])
+  }),
   ApiError: class extends Error {},
 }))
 
@@ -47,6 +56,10 @@ const wrap = (guests = toGuests([app()], [vm()])) => {
 }
 
 describe('GuestList', () => {
+  beforeEach(() => {
+    hostCapabilities = { monitoring: true, lifecycle: true, console: true, backup: true }
+  })
+
   it('puts apps and VMs in one list, each saying which it is', () => {
     wrap()
     expect(screen.getByText('jellyfin')).toBeInTheDocument()
@@ -84,6 +97,20 @@ describe('GuestList', () => {
   it('offers a console for both kinds', () => {
     wrap()
     expect(screen.getAllByRole('button', { name: 'Console' })).toHaveLength(2)
+  })
+
+  // Bug: Console rendered enabled even when its host answered
+  // capabilities.console: false, and opening it only failed once the
+  // console ticket request reached the backend.
+  it('disables Console when the host reports capabilities.console: false, and says why', async () => {
+    hostCapabilities = { monitoring: true, lifecycle: true, console: false, backup: true }
+    wrap()
+    await waitFor(() => {
+      for (const b of screen.getAllByRole('button', { name: 'Console' })) expect(b).toBeDisabled()
+    })
+    for (const b of screen.getAllByRole('button', { name: 'Console' })) {
+      expect(b).toHaveAttribute('title', expect.stringContaining('console'))
+    }
   })
 
   it('renders nothing but keeps its shape when there are no guests', () => {

@@ -13,7 +13,7 @@ import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
-import { LifecycleActions } from '../components/LifecycleActions'
+import { ConsoleButton, LifecycleActions } from '../components/LifecycleActions'
 import { QueryState } from '../components/QueryState'
 import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { SnapshotPanel } from '../components/SnapshotPanel'
@@ -103,11 +103,9 @@ export function VmsPage() {
                     <td className="py-2.5 font-mono text-text-2">{fmtPct(v.cpu_pct)}</td>
                     <td className="py-2.5"><StatusPill status={v.status} /></td>
                     <td className="py-2.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} size="sm" />
-                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                        onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })}>
-                        Console
-                      </Button>
+                      <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} hostId={v.host_id} size="sm" />
+                      <ConsoleButton hostId={v.host_id}
+                        onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })} />
                       {/* doc 06 §e rule 2: a table-cell button is a "small inline
                           action", so the Pro treatment here is disabled+tooltip,
                           not LockVeil, veiling a 60px cell blurs nothing legible,
@@ -262,7 +260,7 @@ export function VmDetail() {
               </div>
             </div>
             <div className="ml-auto flex items-center gap-3">
-              <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} />
+              <LifecycleActions target="vm" id={vm.id} name={vm.name} status={vm.status} hostId={vm.host_id} />
               <DestroyVmButton vm={vm} />
               <StatusPill status={vm.status} />
             </div>

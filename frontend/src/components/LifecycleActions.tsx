@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { useHostCapabilities } from '../api/hosts'
 import { useLifecycle } from '../api/jobs'
 import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
@@ -23,10 +24,11 @@ type Guard = { phrase: string; detail: string; action: string }
  * real 202-Accepted job endpoints. Optimistic status patch happens in
  * useLifecycle; a 409 self_target escalates to the typed-confirmation dialog.
  */
-export function LifecycleActions({ target, id, name, status, size = 'md' }: {
-  target: Target; id: number; name: string; status: string; size?: 'sm' | 'md'
+export function LifecycleActions({ target, id, name, status, hostId, size = 'md' }: {
+  target: Target; id: number; name: string; status: string; hostId: number; size?: 'sm' | 'md'
 }) {
   const ent = useEntitlements()
+  const hostCaps = useHostCapabilities(hostId)
   const run = useLifecycle()
   const [guard, setGuard] = useState<Guard | null>(null)
   const flag = target === 'app' ? 'apps.lifecycle' : 'vms.lifecycle'
@@ -44,6 +46,14 @@ export function LifecycleActions({ target, id, name, status, size = 'md' }: {
   // the flag. Only withhold access once the entitlements response has
   // actually landed and said no.
   const denied = ent.data != null && !ent.has(flag)
+  // Same guard as `denied` above (hostCaps.loaded gates the same way
+  // ent.data != null does): capabilities read undefined before GET /hosts
+  // resolves, and disabling on that alone would grey out a perfectly capable
+  // host for the whole first fetch. Only an explicit `false` withholds it.
+  const noLifecycle = hostCaps.loaded && hostCaps.capabilities?.lifecycle === false
+  const reason = noLifecycle
+    ? 'This host has no lifecycle API token configured. Add one in Settings → Hosts.'
+    : denied ? 'Not included in your plan' : undefined
 
   const fire = (action: string, confirm?: string) =>
     run.mutate({ target, id, action, confirm }, {
@@ -76,8 +86,8 @@ export function LifecycleActions({ target, id, name, status, size = 'md' }: {
             key={a}
             variant={a === 'stop' ? 'danger' : a === 'start' ? 'primary' : 'ghost'}
             className={cls}
-            disabled={pending || denied}
-            title={denied ? 'Not included in your plan' : undefined}
+            disabled={pending || denied || noLifecycle}
+            title={reason}
             onClick={(e) => { e.stopPropagation(); fire(a) }}
           >
             {LABEL[a]}
@@ -93,5 +103,23 @@ export function LifecycleActions({ target, id, name, status, size = 'md' }: {
         />
       )}
     </>
+  )
+}
+
+/**
+ * The "Console" ghost button that sits beside LifecycleActions everywhere it
+ * renders (AppCard, GuestList, vms.tsx's list row): same host, same
+ * capability shape, so the capabilities.console gate lives here once instead
+ * of being copied into each call site.
+ */
+export function ConsoleButton({ hostId, onClick }: { hostId: number; onClick: () => void }) {
+  const hostCaps = useHostCapabilities(hostId)
+  const noConsole = hostCaps.loaded && hostCaps.capabilities?.console === false
+  return (
+    <Button variant="ghost" className="px-2 py-1 text-[11px]" disabled={noConsole}
+      title={noConsole ? 'This host has no console API token configured. Add one in Settings → Hosts.' : undefined}
+      onClick={onClick}>
+      Console
+    </Button>
   )
 }

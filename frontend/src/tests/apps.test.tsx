@@ -91,4 +91,13 @@ describe('AppsPage', () => {
     expect(await screen.findByText('No apps match your filter.')).toBeInTheDocument()
     expect(screen.queryByText(/apps not readable/i)).not.toBeInTheDocument()
   })
+
+  // The App Store shipped and is a working nav item; "Phase 4" was both
+  // internal jargon and, by the time this was reproduced, a false claim.
+  it('points at the real App Store, not an internal phase number', async () => {
+    appsResult = 'empty'
+    withQuery(<AppsPage />)
+    expect(await screen.findByText(/Install from the App Store/)).toBeInTheDocument()
+    expect(screen.queryByText(/Phase/)).not.toBeInTheDocument()
+  })
 })

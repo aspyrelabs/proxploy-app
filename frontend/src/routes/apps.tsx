@@ -160,7 +160,7 @@ export function AppsPage() {
                     {Array.from({ length: 8 }, (_, i) => <AppCardSkeleton key={i} />)}
                   </SkeletonGroup>}
                   emptyTitle="No apps match your filter."
-                  emptyNote="Install from the App Store (Phase 4) or adopt discovered containers."
+                  emptyNote="Install from the App Store, or adopt a container Proxploy already found."
                   errorTitle="Apps not readable"
                   errorNote="Proxploy could not reach the backend to list your apps.">
         {(rows) => (
@@ -250,7 +250,7 @@ export function AppDetail() {
                 </div>
               </div>
               <div className="ml-auto flex items-center gap-3">
-                <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} />
+                <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} />
                 <Button variant="ghost" disabled={migrateDenied}
                   title={migrateDenied ? 'Not included in your plan' : undefined}
                   onClick={() => setMigrating(true)}>

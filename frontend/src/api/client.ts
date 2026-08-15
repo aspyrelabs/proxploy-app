@@ -41,14 +41,34 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
  * Proxploy itself is broken; read verbatim the passed-through text looks
  * like a Proxploy bug, so a 502's text alone gets a prefix that says whose
  * side failed. 4xx text is returned exactly as the backend wrote it.
+ *
+ * Two more shapes read here besides the plain/nested string above:
+ * FastAPI's own RequestValidationError handler (main.py) answers a 422 with
+ * `detail` as an ARRAY of `{loc, msg, type, ...}`, one per invalid field,
+ * which the old code's `typeof detail === 'string'` check fell straight
+ * through on, showing the network fallback for an error the server had
+ * already explained. And main.py's problem_handler/capability_not_configured_
+ * handler answer RFC 9457 problem+json, `{type, title, status, detail}`
+ * with `detail` a plain string, already covered by the string branch above.
  */
+function detailText(detail: unknown): string | undefined {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => (typeof d === 'object' && d !== null && typeof (d as { msg?: unknown }).msg === 'string'
+        ? (d as { msg: string }).msg : null))
+      .filter((m): m is string => m != null)
+    return msgs.length > 0 ? msgs.join('; ') : undefined
+  }
+  if (typeof detail === 'object' && detail !== null && typeof (detail as { detail?: unknown }).detail === 'string') {
+    return (detail as { detail: string }).detail
+  }
+  return undefined
+}
+
 export function apiErrorDetail(e: unknown, fallback: string): string {
   if (!(e instanceof ApiError)) return fallback
-  const detail = (e.body as { detail?: unknown } | null)?.detail
-  const text = typeof detail === 'string' ? detail
-    : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
-      ? (detail as { detail: string }).detail
-      : undefined
+  const text = detailText((e.body as { detail?: unknown } | null)?.detail)
   if (text == null) return fallback
   if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
   return text
