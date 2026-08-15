@@ -20,7 +20,7 @@ from pydantic import BaseModel, field_validator
 from proxploy.api.deps import ROLE_ORDER, authorize, get_db, require_entitlement
 from proxploy.models import Host, Team, TeamMember, User
 from proxploy.services.audit import write_audit
-from proxploy.services.authz import sync_user
+from proxploy.services.authz import build_enforcer, sync_user
 
 router = APIRouter(prefix="/teams", tags=["teams"])
 
@@ -118,7 +118,8 @@ def patch_team(team_id: int, body: TeamPatchIn, db=Depends(get_db),
 
 
 @router.delete("/{team_id}", dependencies=[Depends(_manage), Depends(_ENT)])
-def delete_team(team_id: int, db=Depends(get_db), user: User = Depends(_manage)):
+def delete_team(team_id: int, request: Request, db=Depends(get_db),
+                user: User = Depends(_manage)):
     t = db.get(Team, team_id)
     if t is None:
         raise HTTPException(404, "team not found")
@@ -130,6 +131,12 @@ def delete_team(team_id: int, db=Depends(get_db), user: User = Depends(_manage))
     db.query(Host).filter_by(team_id=t.id).update({"team_id": None})
     db.delete(t)
     db.commit()
+    # team_members cascades in the DB, but casbin keeps its own g-lines keyed
+    # on the team id and enforce() trusts them without ever re-reading the
+    # table. SQLite hands the same rowid to the next team created, which would
+    # inherit this team's grants. Rebuild rather than sync_user: the members
+    # are gone, so there is nothing left to sync policies FOR.
+    request.app.state.authz = build_enforcer(db)
     write_audit(db, actor_type="user", actor_id=user.id, action="team.delete",
                 target_type="team", target_id=team_id, params={"slug": t.slug})
     return {"ok": True}

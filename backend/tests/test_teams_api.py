@@ -173,3 +173,41 @@ def test_entitlement_gate_blocks_owner_when_off(app_client, csrf_header):
         assert r.status_code == 403
     finally:
         app_client.app.state.entitlements._features = None
+
+
+def test_deleting_a_team_drops_its_grants_even_if_the_id_comes_back(app_client,
+                                                                   csrf_header):
+    """team_members cascades in the DB, but casbin keeps its own g-lines keyed
+    on the team id and enforce() never re-reads the table. SQLite hands a
+    deleted team's rowid to the next team created, so without the rebuild in
+    delete_team the new team silently inherits the old one's grants."""
+    r = app_client.post("/api/v1/teams", json={"name": "Old"},
+                        headers=csrf_header(app_client))
+    old_id = r.json()["id"]
+    v = _mk_user(app_client, csrf_header, "ghost@x.io", "viewer")
+    app_client.put(f"/api/v1/teams/{old_id}/members/{v['id']}", json={"role": "owner"},
+                   headers=csrf_header(app_client))
+    assert app_client.delete(f"/api/v1/teams/{old_id}",
+                             headers=csrf_header(app_client)).status_code == 200
+
+    r = app_client.post("/api/v1/teams", json={"name": "New"},
+                        headers=csrf_header(app_client))
+    new_id = r.json()["id"]
+    assert new_id == old_id, "this test only means something when the id is reused"
+
+    with app_client.app.state.sessionmaker() as db:
+        h = Host(name="new-host", address="https://10.0.0.9:8006", node_name="pve1",
+                 team_id=new_id)
+        db.add(h)
+        db.commit()
+        host_id = h.id
+
+    # ghost@x.io was never made a member of "New"; its only surviving
+    # membership is viewer in the default team.
+    _logout(app_client, csrf_header)
+    _login(app_client, csrf_header, "ghost@x.io")
+    assert app_client.patch(f"/api/v1/hosts/{host_id}",
+                            json={"node_shell_enabled": True},
+                            headers=csrf_header(app_client)).status_code == 403
+    assert app_client.delete(f"/api/v1/hosts/{host_id}",
+                             headers=csrf_header(app_client)).status_code == 403
