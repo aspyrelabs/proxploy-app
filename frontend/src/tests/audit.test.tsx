@@ -139,13 +139,13 @@ describe('AuditPage pagination boundary', () => {
   it('shows the friendly name and keeps the raw action beside it', async () => {
     await serve(1)
     wrap()
-    expect(await screen.findByText('Host Synced')).toBeInTheDocument()
+    expect(await screen.findByText('Host Sync')).toBeInTheDocument()
     expect(screen.getByText('host.sync')).toBeInTheDocument()
   })
 
   // The compliance surface: a denied row must not be readable as the thing
   // it denied. The Result column says "denied" too, but the Action column is
-  // the one people scan, and "Host Removed" there is a claim the host is gone.
+  // the one people scan, so the refusal is the first word it reads.
   it('does not title a denied row with the label for the thing that did not happen', async () => {
     const { api } = await import('../api/client')
     ;(api as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
@@ -158,8 +158,8 @@ describe('AuditPage pagination boundary', () => {
       return Promise.resolve(null)
     })
     wrap()
-    expect(await screen.findByText('Host Remove Denied')).toBeInTheDocument()
-    expect(screen.queryByText('Host Removed')).not.toBeInTheDocument()
+    expect(await screen.findByText('Blocked Host Disconnect')).toBeInTheDocument()
+    expect(screen.queryByText('Host Disconnect')).not.toBeInTheDocument()
     // The stored identifier still shows: the filter and the exports match on it.
     expect(screen.getByText('host.remove')).toBeInTheDocument()
   })

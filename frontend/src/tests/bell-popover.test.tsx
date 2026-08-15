@@ -181,7 +181,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     expect(await screen.findByText(/App Start #/)).toBeInTheDocument()
-    expect(screen.getByText(/App Stopped/)).toBeInTheDocument()
+    expect(screen.getByText(/App Stop #/)).toBeInTheDocument()
     expect(screen.getByText(/VM Backup/)).toBeInTheDocument()
   })
 
@@ -238,7 +238,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const finished = cards.find((c) => c.textContent?.includes('App Stopped'))!
+    const finished = cards.find((c) => c.textContent?.includes('App Stop #'))!
     expect(within(finished).queryByRole('status')).toBeNull()
   })
 
@@ -455,7 +455,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const forJob11 = cards.filter((c) => c.textContent?.includes('App Stopped'))
+    const forJob11 = cards.filter((c) => c.textContent?.includes('App Stop #'))
     expect(forJob11).toHaveLength(1)
   })
 
@@ -499,7 +499,7 @@ describe('BellPopover', () => {
     await openBell()
     expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
     expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
   })
 
   // The watermark only covers ids at or below it; an id dismissed on its
@@ -509,7 +509,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     expect(await screen.findByText(/App Start #/)).toBeInTheDocument()
-    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
     expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
   })
 
@@ -582,7 +582,7 @@ describe('BellPopover', () => {
       dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
     ).toBe(true))
     expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/App Stopped/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
     expect(screen.queryByText(/VM Backup/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })

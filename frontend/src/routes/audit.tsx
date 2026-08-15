@@ -6,7 +6,7 @@ import type { AuditFilters } from '../api/audit'
 import { useEntitlements } from '../api/hooks'
 import { inputCls } from '../components/LoginForm'
 import { LockVeil } from '../components/LockVeil'
-import { actionLabel } from '../components/activityDisplay'
+import { actionLabel, statusLabel } from '../components/activityDisplay'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
 import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
@@ -116,18 +116,17 @@ export function AuditPage() {
                             filter, the export and the API all still speak the
                             stored value, so hiding it would make this page
                             unusable for filtering and for debugging. The
-                            result is passed in so a denied or errored row is
-                            never titled as though it went through; the
-                            Result column beside it is a second glance, and
-                            this column is the one people read. */}
+                            result is passed in so a denied row reads "Blocked
+                            Host Disconnect" rather than leaving the verdict to
+                            the Result column, which is the second glance. */}
                         <td className="py-2 text-text">
                           {/* job_id matters here and nowhere else: it marks a
                               row that recorded a REQUEST, written when the job
-                              was queued, so the past-tense label would claim a
-                              finish the job may not have reached. The activity
-                              feed drops these rows entirely, the audit log
-                              keeps them, so this is the only surface that has
-                              to say which it is. */}
+                              was queued, so the row is about the asking and
+                              not about the finishing. The activity feed drops
+                              these rows entirely, the audit log keeps them, so
+                              this is the only surface that has to say which it
+                              is. */}
                           {actionLabel(r.action, r.result, r.job_id != null)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>
@@ -138,7 +137,9 @@ export function AuditPage() {
                             failure before ("error" only) it painted `denied`
                             green, i.e. the one result that most needs to
                             stand out was styled as the happy path. */}
-                        <td className={r.result === 'ok' ? 'text-green' : 'text-red'}>{r.result}</td>
+                        <td className={r.result === 'ok' ? 'text-green' : 'text-red'}>
+                          {statusLabel(r.result)}
+                        </td>
                         <td className="font-mono text-[11.5px] text-text-3">{r.ip ?? ''}</td>
                       </tr>
                     ))}

@@ -2,7 +2,7 @@ import { ApiError } from '../api/client'
 import { notify } from '../lib/notify'
 import { TERMINAL, useActivity, useCancelJob } from '../api/jobs'
 import type { ActivityRow, JobStatus } from '../api/jobs'
-import { actionLabel, ago, TINT } from './activityDisplay'
+import { actionLabel, ago, statusLabel, TINT } from './activityDisplay'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { Loading } from './ui/loading'
@@ -45,14 +45,14 @@ function Item({ row }: { row: ActivityRow }) {
       <span className="min-w-0 flex-1">
         {/* An alert's title is the rule's own name, already written for a
             person; only job kinds and audit actions are raw identifiers.
-            The status goes in as well as under: a denied or failed row must
-            not be titled "VM Deleted" just because that is what was asked
-            for. */}
+            The status goes in as well as under: a denied row reads "Blocked
+            VM Delete", so the title says nothing happened without the reader
+            having to check the line beneath it. */}
         <span className="block text-[12.5px] text-text">
           {row.kind === 'alert' ? row.title : actionLabel(row.title, row.status)}
         </span>
         <span className="block font-mono text-[11px] text-text-3">
-          {row.status ?? 'unknown'}
+          {statusLabel(row.status)}
           {row.target_type ? ` · ${row.target_type}${row.target_id != null ? ` ${row.target_id}` : ''}` : ''}
           {row.actor ? ` · ${row.actor}` : ''} · {ago(row.at)}
         </span>

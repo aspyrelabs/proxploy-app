@@ -102,8 +102,8 @@ describe('ActivityFeed', () => {
 
   it('renders merged job and audit rows with their actor', async () => {
     wrap(<ActivityFeed />)
-    expect(await screen.findByText('App Started')).toBeInTheDocument()
-    expect(screen.getByText('Host Added')).toBeInTheDocument()
+    expect(await screen.findByText('App Start')).toBeInTheDocument()
+    expect(screen.getByText('Host Add')).toBeInTheDocument()
     expect(screen.getAllByText(/admin@example.com/).length).toBe(2)
   })
 
@@ -121,12 +121,17 @@ describe('ActivityFeed', () => {
   })
 
   // The feed prints the result underneath, but the title is what gets read,
-  // and a refused migration titled "App Migrated" is the feed asserting a
-  // thing that never happened.
+  // and the first word of a refused row has to be the refusal, not the name of
+  // the destructive thing that did not happen.
   it('does not title a refused action or a failed job as though it went through', async () => {
     activityResult = 'refused'
     wrap(<ActivityFeed />)
-    expect(await screen.findByText('App Migration Denied')).toBeInTheDocument()
+    // app.migrate carries the neutral "App Migrate", not doc 13's "Migration
+    // Refused": that identifier is written for real migrations too, so the
+    // doc's label made a success read "Migration Refused Requested" and this
+    // refusal read "Blocked Migration Refused", colliding with the prefix its
+    // own rule 6 forbids colliding with. The prefix carries the refusal.
+    expect(await screen.findByText('Blocked App Migrate')).toBeInTheDocument()
     expect(screen.getByText('VM Delete Failed')).toBeInTheDocument()
     expect(screen.queryByText('App Migrated')).not.toBeInTheDocument()
     expect(screen.queryByText('VM Deleted')).not.toBeInTheDocument()
@@ -154,8 +159,8 @@ describe('ActivityFeed', () => {
   // standing in for "no figure" either.
   it('shows no ring on a row with no progress figure', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('Host Added')
-    const row = screen.getByText('Host Added').closest('div')!
+    await screen.findByText('Host Add')
+    const row = screen.getByText('Host Add').closest('div')!
     expect(within(row).queryByRole('status')).toBeNull()
   })
 
@@ -163,8 +168,8 @@ describe('ActivityFeed', () => {
   // progress_pct: 100. A determinate ring is for a job still running.
   it('shows no ring on a finished job even though it carries a progress figure', async () => {
     wrap(<ActivityFeed />)
-    await screen.findByText('App Started')
-    const row = screen.getByText('App Started').closest('div')!
+    await screen.findByText('App Start')
+    const row = screen.getByText('App Start').closest('div')!
     expect(within(row).queryByRole('status')).toBeNull()
   })
 

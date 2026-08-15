@@ -35,157 +35,189 @@ export function ago(iso: string): string {
  * keep matching on the real values rather than on prose that could be reworded
  * at any time.
  *
- * Convention throughout: past tense, "<Thing> <Verbed>", because this is a log
- * of things that already happened. Two entries carry a parenthetical because
- * the bare verb would mislead: those two removals are not the ordinary ones.
+ * Convention throughout (doc 13): two words, NEUTRAL, bare verb. Not past
+ * tense. One label has to read correctly on a row that is waiting, running,
+ * done, failed or blocked, so the label names the ACTION and the surrounding
+ * status word says how it went. "App Install" reads right next to "Waiting",
+ * next to "Done" and next to "Failed"; "App Installed" reads right next to
+ * none of them.
  *
- * Every label here is therefore only usable on a row that SUCCEEDED. A denied
- * or failed row is titled by actionLabel from the identifier plus the verdict
- * instead; see OUTCOME below.
+ * Because the label claims nothing about the outcome, one entry serves every
+ * state of the row. actionLabel() only decorates it: "Blocked" in front of a
+ * denied row, the verdict word after a failed one.
  *
  * Covers every `action=` written by write_audit and every key registered in
- * HANDLERS; anything newer falls through to actionLabel()'s derivation, which
+ * HANDLERS; anything newer falls through to derive()'s word splitting, which
  * is why a missing entry degrades rather than breaks.
  */
 export const ACTION_LABEL: Record<string, string> = {
-  'alert.ack': 'Alert Acknowledged',
-  'apikey.create': 'API Key Created',
-  'apikey.revoke': 'API Key Revoked',
-  'app.forget': 'App Forgotten',
-  'app.install': 'App Installed',
-  'app.reaped': 'App Removed',
-  'app.reconfigure': 'App Reconfigured',
-  'app.restart': 'App Restarted',
-  'app.shutdown': 'App Shut Down',
-  'app.start': 'App Started',
-  'app.stop': 'App Stopped',
-  'app.uninstall': 'App Uninstalled',
-  'app.update': 'App Updated',
-  'apps.adopt': 'Apps Imported',
-  'apps.script_edit': 'App Script Edited',
-  'apps.script_revert': 'App Script Reverted',
-  'auth.login': 'Signed In',
+  'alert.ack': 'Alert Acknowledge',
+  'apikey.create': 'API Key Create',
+  'apikey.revoke': 'API Key Revoke',
+  'app.forget': 'App Unlink',
+  'app.install': 'App Install',
+  // The poller finding the container gone and dropping Proxploy's own row.
+  // Nobody removed anything through Proxploy, so this must not share a voice
+  // with app.forget or app.uninstall. Unlink means the container is still on
+  // Proxmox and only Proxploy stopped tracking it; vanished means it is gone
+  // and Proxploy cleaned up after it.
+  'app.reaped': 'App Vanished',
+  'app.reconfigure': 'App Reconfigure',
+  'app.restart': 'App Restart',
+  'app.shutdown': 'App Shutdown',
+  'app.start': 'App Start',
+  'app.stop': 'App Stop',
+  'app.uninstall': 'App Uninstall',
+  'app.update': 'App Update',
+  'apps.adopt': 'App Import',
+  'apps.script_edit': 'Script Edit',
+  'apps.script_revert': 'Script Restore',
+  'auth.login': 'Sign In',
   // api/auth.py:109, between a correct password and the TOTP code.
-  'auth.login.totp_pending': 'Two-Factor Prompted',
-  'auth.logout': 'Signed Out',
-  'backup.delete': 'Backup Deleted',
-  'backup.prune': 'Backup Retention Applied',
-  'backup.restore': 'Backup Restored',
-  'backup.run': 'Backup Taken',
-  'backup.sync': 'Backups Synced',
-  'catalog.classify_backlog': 'Catalog Entries Checked',
-  'catalog.refresh': 'Catalog Refreshed',
-  'console.open': 'Console Opened',
-  'entitlement.refresh': 'Plan Refreshed',
-  'host.create': 'Host Added',
-  'host.credentials': 'Host Credentials Updated',
-  'host.reboot': 'Host Rebooted',
-  'host.remove': 'Host Removed',
-  'host.shutdown': 'Host Shut Down',
-  'host.ssh_verify': 'Host SSH Key Verified',
-  'host.sync': 'Host Synced',
-  'host.test': 'Host Connection Tested',
-  'job.cancel': 'Job Canceled',
+  'auth.login.totp_pending': 'Two-Factor Prompt',
+  'auth.logout': 'Sign Out',
+  'backup.delete': 'Backup Delete',
+  'backup.prune': 'Backup Prune',
+  'backup.restore': 'Backup Restore',
+  'backup.run': 'Backup Run',
+  'backup.sync': 'Backup Sync',
+  'catalog.classify_backlog': 'Compatibility Check',
+  'catalog.refresh': 'Store Refresh',
+  'console.open': 'Console Open',
+  'entitlement.refresh': 'Plan Refresh',
+  'host.create': 'Host Add',
+  'host.credentials': 'Credentials Rotate',
+  'host.reboot': 'Host Reboot',
+  'host.remove': 'Host Disconnect',
+  'host.shutdown': 'Host Shutdown',
+  'host.ssh_verify': 'Fingerprint Verify',
+  'host.sync': 'Host Sync',
+  'host.test': 'Connection Test',
+  'job.cancel': 'Task Cancel',
   'metrics.maintain': 'Usage Cleanup',
-  'migrate.app': 'App Migrated',
-  'network.apply': 'Network Changes Applied',
-  'network.guest_config': 'Guest Network Configured',
+  // Doc 13 asks for "Migration Refused" here, on the premise that app.migrate
+  // is only ever written for a refusal and that a real migration is logged
+  // under migrate.app. Neither half holds: api/apps.py passes
+  // action="app.migrate" to enqueue_and_audit for every REAL migration (that
+  // row carries result ok and a job_id), and migrate.app is the JOB KIND, not
+  // a second audit action. Applying the doc made a successful migration read
+  // "Migration Refused Requested" and its refusal "Blocked Migration Refused",
+  // which is both a false statement and the collision rule 6 forbids.
+  //
+  // So both identifiers carry the same neutral label, which is correct
+  // because they are the same event seen twice: the audit action and the job
+  // kind it enqueued. The Blocked prefix does the refusal work it was
+  // designed for.
+  'app.migrate': 'App Migrate',
+  'migrate.app': 'App Migrate',
+  'network.apply': 'Network Apply',
+  'network.guest_config': 'Guest Network',
   // Distinct from the line above on purpose: this one is only ever written
-  // when READING the guest's current NIC config failed, before anything was
-  // sent to the guest, so it must not read as a configuration attempt.
+  // when READING the guest's current NIC config failed (api/network.py:112),
+  // before anything was sent to the guest, so it must not read as a
+  // configuration attempt. Doc 13 item 7 claims both halves now share one
+  // identifier; they do not, so this entry stays.
   'network.guest_config_read': 'Guest Network Read',
-  'network.host_config': 'Host Network Configured',
-  'network.revert': 'Network Changes Reverted',
-  'schedule.create': 'Schedule Created',
-  'schedule.delete': 'Schedule Deleted',
+  'network.host_config': 'Host Network',
+  'network.revert': 'Network Revert',
+  'schedule.create': 'Schedule Create',
+  'schedule.delete': 'Schedule Delete',
   // Not the same event as a person switching a schedule off: THAT is written
   // by api/schedules.py as `schedule.update`. This identifier is written from
   // exactly one place, jobs/scheduler.py::_disable, when the scheduler gives
   // up on a row it cannot run at all (unparseable cron, unknown timezone, no
-  // handler for its job kind). "Schedule Disabled" made the automatic
-  // give-up look like somebody's decision, so the label says who did it.
-  'schedule.disable': 'Schedule Disabled Automatically',
-  'schedule.fire': 'Schedule Ran',
-  'schedule.run': 'Schedule Ran Manually',
-  'schedule.update': 'Schedule Updated',
-  'settings.update': 'Settings Updated',
-  'storage.create': 'Storage Added',
-  'storage.delete_volume': 'Storage Volume Deleted',
-  'storage.remove': 'Storage Removed',
-  'storage.update': 'Storage Updated',
-  'storage.upload': 'File Uploaded To Storage',
-  'team.create': 'Team Created',
-  'team.delete': 'Team Deleted',
-  'team.update': 'Team Updated',
-  'user.create': 'User Created',
-  'user.delete': 'User Deleted',
-  'user.password_reset': 'User Password Reset',
-  'user.update': 'User Updated',
-  'vm.clone': 'VM Cloned',
-  'vm.create': 'VM Created',
-  'vm.delete': 'VM Deleted',
-  'vm.pause': 'VM Paused',
-  'vm.restart': 'VM Restarted',
-  'vm.resume': 'VM Resumed',
-  'vm.shutdown': 'VM Shut Down',
-  'vm.snapshot_create': 'VM Snapshot Created',
-  'vm.snapshot_delete': 'VM Snapshot Deleted',
-  'vm.snapshot_rollback': 'VM Snapshot Rolled Back',
-  'vm.start': 'VM Started',
-  'vm.stop': 'VM Stopped',
+  // handler for its job kind). A bare "Schedule Disable" would make the
+  // automatic give-up look like somebody's decision, so the label says who
+  // did it.
+  'schedule.disable': 'Schedule Auto-Disable',
+  'schedule.fire': 'Schedule Trigger',
+  'schedule.run': 'Schedule Run',
+  'schedule.update': 'Schedule Update',
+  'settings.update': 'Settings Update',
+  'storage.create': 'Storage Add',
+  'storage.delete_volume': 'File Delete',
+  'storage.remove': 'Storage Detach',
+  'storage.update': 'Storage Update',
+  'storage.upload': 'File Upload',
+  'team.create': 'Team Create',
+  'team.delete': 'Team Delete',
+  'team.update': 'Team Update',
+  'user.create': 'User Create',
+  'user.delete': 'User Delete',
+  'user.password_reset': 'Password Reset',
+  'user.update': 'User Update',
+  'vm.clone': 'VM Clone',
+  'vm.create': 'VM Create',
+  'vm.delete': 'VM Delete',
+  'vm.pause': 'VM Pause',
+  'vm.restart': 'VM Restart',
+  'vm.resume': 'VM Resume',
+  'vm.shutdown': 'VM Shutdown',
+  'vm.snapshot_create': 'Snapshot Create',
+  'vm.snapshot_delete': 'Snapshot Delete',
+  'vm.snapshot_rollback': 'Snapshot Restore',
+  'vm.start': 'VM Start',
+  'vm.stop': 'VM Stop',
+}
+
+/**
+ * Job status, audit result, alert state and host status, as doc 13 names them.
+ *
+ * Keyed on the raw value the API sends, same as TINT above, so one map serves
+ * the activity feed's status line, the audit log's Result column and the
+ * StatusPill on hosts and guests. Anything absent falls through to the raw
+ * value: `denied` and `error` have no entry because doc 13 gives none, it
+ * spends its denied row on the "Blocked" prefix instead.
+ */
+export const STATUS_LABEL: Record<string, string> = {
+  queued: 'Waiting',
+  running: 'Running',
+  succeeded: 'Done',
+  ok: 'Complete',
+  resolved: 'Cleared',
+  canceled: 'Canceled',
+  interrupted: 'Interrupted',
+  failed: 'Failed',
+  unreachable: 'Host Unreachable',
+}
+
+/** hasOwn, not `STATUS_LABEL[s]`: a status of 'toString' would otherwise
+ *  answer with the function on Object.prototype and render as JS source. */
+export function statusLabel(status: string | null | undefined): string {
+  if (!status) return 'unknown'
+  return Object.hasOwn(STATUS_LABEL, status) ? STATUS_LABEL[status] : status
 }
 
 /** Words the naive title-caser below would otherwise mangle into 'Vm', 'Api'.
  *  A map rather than a set of acronyms because 'apikey' is one identifier word
- *  but two English ones, and derived phrases are now shown for every failed or
- *  denied action (see OUTCOME), not just for identifiers nobody mapped. */
+ *  but two English ones. Only reachable for identifiers ACTION_LABEL has never
+ *  heard of, which is exactly the case it exists for. */
 const WORDS: Record<string, string> = {
   vm: 'VM', api: 'API', apikey: 'API Key', ssh: 'SSH', ip: 'IP',
   tls: 'TLS', vnc: 'VNC', cpu: 'CPU', lxc: 'LXC', ct: 'CT',
 }
 
-/** 'vm.snapshot_delete' -> 'VM Snapshot Delete'. Identifiers in this codebase
- *  are verb-final, so the derivation reads as the ATTEMPT ("VM Delete"), not
- *  as the accomplished fact ("VM Deleted") the map above states. */
-// Overrides for identifiers whose derived phrase is wrong or is the jargon we
-// are trying to get rid of. Kept deliberately tiny: derive() is right for
-// almost everything because the identifiers are verb-final, so this is an
-// exceptions list, NOT a second copy of ACTION_LABEL. `metrics.maintain`
-// would otherwise fail as "Metrics Maintain Failed", reintroducing the exact
-// wording the success label was renamed to remove.
-const ATTEMPT: Record<string, string> = {
-  // Verb-first, so derive() reverses it into "Migrate App".
-  'migrate.app': 'App Migration',
-  'app.migrate': 'App Migration',
-  // No verb in the identifier at all, so the derivation has nothing to say.
-  'host.credentials': 'Host Credentials Update',
-  // These two are the reachable ones, not hypothetical: api/auth.py:101 audits
-  // result error on every wrong password, so "Auth Login Failed" is a title
-  // real users see today.
-  'auth.login': 'Sign In',
-  'auth.logout': 'Sign Out',
-  // api/hosts.py:415 audits result error on every failed connection test.
-  'host.test': 'Host Connection Test',
-  'host.ssh_verify': 'Host SSH Key Check',
-  'storage.delete_volume': 'Storage Volume Delete',
-  'catalog.classify_backlog': 'Catalog Entry Check',
-  'alert.ack': 'Alert Acknowledgement',
-  'backup.prune': 'Backup Retention',
-  'entitlement.refresh': 'Plan Refresh',
-  'apps.adopt': 'App Import',
-  'metrics.maintain': 'Usage Cleanup',
-}
-
-
+/**
+ * The neutral name of an action or job kind: the mapped label if there is one,
+ * otherwise 'vm.snapshot_delete' -> 'VM Snapshot Delete'.
+ *
+ * One function, because the map is now neutral too. It used to need a second
+ * map (ATTEMPT) to supply a phrase that worked on a row which had not
+ * succeeded, since ACTION_LABEL only had past-tense assertions to offer.
+ * Every ACTION_LABEL entry is that neutral phrase now, so the fallback is just
+ * the word splitting for identifiers nobody has mapped yet.
+ *
+ * The derivation reads correctly because identifiers in this codebase are
+ * verb-final. `migrate.app` is the one that is not, and it is mapped.
+ */
 function derive(raw: string): string {
-  if (Object.hasOwn(ATTEMPT, raw)) return ATTEMPT[raw]
+  // hasOwn, not `ACTION_LABEL[raw] ?? ...`: ACTION_LABEL is a plain object
+  // literal, so 'toString' answers with the function on Object.prototype, and
+  // `??` does not fall through because a function is neither null nor
+  // undefined. The title would then render as JS source.
+  if (Object.hasOwn(ACTION_LABEL, raw)) return ACTION_LABEL[raw]
   return raw.split(/[._\-:]/).filter(Boolean)
-    // hasOwn, not `WORDS[w] ?? ...`: WORDS is a plain object literal, so a
-    // word like "constructor" or "toString" answers with the function on
-    // Object.prototype, and `??` does not fall through because a function is
-    // neither null nor undefined. The title then renders as JS source. Same
-    // guard as OUTCOME and ACTION_LABEL below, and this one is the reachable
-    // case, since it applies per WORD rather than per identifier.
+    // Same guard, per WORD rather than per identifier.
     .map((w) => {
       const key = w.toLowerCase()
       return Object.hasOwn(WORDS, key) ? WORDS[key] : w[0].toUpperCase() + w.slice(1)
@@ -194,34 +226,20 @@ function derive(raw: string): string {
 }
 
 /**
- * Verdict word for an audit `result` or job `status` that did NOT succeed.
+ * Verdict word appended to a row that ended badly.
  *
- * Every label in ACTION_LABEL is an ASSERTION: "VM Deleted" says the VM is
- * gone, "Host Removed" says the host is out. write_audit records `ok`,
- * `denied` or `error`, and jobs finish `failed`/`canceled`/`interrupted`, so
- * titling a refused migration "App Migrated" makes the audit log claim a
- * destructive thing that never happened: the worst failure available to a
- * compliance surface. A non-success row is therefore titled from the attempt
- * plus the verdict, "App Migrate Denied" / "VM Delete Failed".
+ * `denied` is deliberately NOT here: a refusal is prefixed, not suffixed (doc
+ * 13, "Two structural fixes"). "Blocked Host Disconnect" says up front that
+ * nothing happened, where "Host Disconnect Denied" buries it behind the name
+ * of the thing that did not happen.
  *
  * Keyed by result, never by action: one rule covers every action and job kind
  * that exists or gets added later, instead of a second map to keep in sync.
- * Statuses absent from here (`ok`, `succeeded`, `resolved`) keep the plain
- * past-tense label, and so do the in-flight `queued`/`running`, whose status
- * every surface that shows them prints right next to the title.
+ * A status this file has not heard of gets the bare label, which claims
+ * nothing either way, and so do `queued` and `running`, whose status every
+ * surface that shows them prints right next to the title.
  */
-// The only statuses that entitle a row to its past-tense label. Everything
-// else, known failure or not, is treated as "did not necessarily succeed".
-// Note what is NOT here: `queued` and `running`. A job still in flight has
-// not started the app yet, so titling its row "App Started" asserts an
-// outcome that has not happened, which is the same defect as "VM Deleted" on
-// a denied row. The argument that the status prints beside the title applies
-// equally to both, so it cannot justify one without the other. In-flight rows
-// therefore read "App Start" next to their `running` status.
-const SUCCESS = new Set(['ok', 'succeeded', 'resolved'])
-
 const OUTCOME: Record<string, string> = {
-  denied: 'Denied',
   error: 'Failed',
   failed: 'Failed',
   canceled: 'Canceled',
@@ -229,65 +247,32 @@ const OUTCOME: Record<string, string> = {
 }
 
 /**
- * The job a schedule RUNS, named as the thing it does rather than as a thing
- * that already happened.
- *
- * Deliberately NOT actionLabel(): ACTION_LABEL is past tense by design, so
- * `backup.run` reads "Backup Taken" there, which is right above a finished
- * job and wrong in a column headed "Runs". A schedule does not run a Backup
- * Taken. derive() gives the attempt phrasing the column actually wants, and
- * it consults ATTEMPT on the way, so a kind whose derived name is jargon
- * (metrics.maintain) still gets its override.
- */
-export function jobKindLabel(kind: string | null | undefined): string {
-  return kind ? derive(kind) : 'Unknown'
-}
-
-
-/**
  * Friendly name for a raw identifier, deriving one when the map has no entry.
  * New actions and job kinds get added backend-side all the time and must never
  * render as a blank title, so an unmapped `foo.bar_baz` still reads as
  * 'Foo Bar Baz' rather than as nothing.
  *
- * `status` is the row's audit result or job status. Pass it wherever one
- * exists: without it this can only state that the action happened.
+ * `status` is the row's audit result or job status. The label is already true
+ * without it; passing it adds the verdict, which is the part the reader wants
+ * at a glance.
  */
 export function actionLabel(raw: string | null | undefined,
                             status?: string | null,
                             jobLinked = false): string {
   if (!raw) return 'Unknown'
-  // Success is an ALLOWLIST, failure is not. Keying off OUTCOME alone would
-  // mean any status this file has not heard of falls through to the past-tense
-  // label, so the day the backend adds `timed_out` every timed-out row starts
-  // asserting "VM Deleted" again, which is the whole bug this argument exists
-  // to prevent. Unknown statuses therefore get the neutral derivation: it
-  // names the attempt and claims nothing about how it ended.
-  //
-  // hasOwn, not `OUTCOME[status]`: a status of 'constructor' or 'toString'
-  // would otherwise hit Object.prototype and render as source code.
-  if (status != null && !SUCCESS.has(status)) {
-    return Object.hasOwn(OUTCOME, status)
-      ? `${derive(raw)} ${OUTCOME[status]}`
-      : derive(raw)
-  }
+  const label = derive(raw)
+  // One rule for every action, present and future, rather than a map entry
+  // per denied action. hasOwn on OUTCOME for the prototype-key reason above.
+  if (status === 'denied') return `Blocked ${label}`
+  if (status != null && Object.hasOwn(OUTCOME, status)) return `${label} ${OUTCOME[status]}`
   // A job-backed audit row is written by enqueue_and_audit the moment the job
-  // is QUEUED, with result ok, because what succeeded is the request. So in
-  // the audit log "App Installed" meant "an install was asked for", and the
-  // install itself might still be running, or have failed minutes later.
+  // is QUEUED, with result ok, because what succeeded is the REQUEST. The row
+  // is a record of the asking, and the job beside it carries the real outcome,
+  // so this says so rather than letting the audit log imply the work is done.
   //
-  // The activity feed never showed this, which is why it went unnoticed: it
-  // filters audit rows that carry a job_id (api/cluster.py) precisely because
-  // the JOB row beside them already reports the real outcome. The audit log
-  // shows both, so only there did the row assert a finish.
-  //
-  // Same ATTEMPT phrases as the failure branch above, and that is the point of
-  // them: "App Migration" reads correctly as both "... Requested" and
-  // "... Failed", where a past-tense label reads as neither.
-  if (jobLinked) return `${derive(raw)} Requested`
-  // hasOwn here for the same reason as above, not just on OUTCOME: this is a
-  // plain object literal, so `ACTION_LABEL['toString']` answers with a
-  // function rather than undefined, and `?? derive(raw)` does not catch it
-  // because a function is neither null nor undefined.
-  return Object.hasOwn(ACTION_LABEL, raw) ? ACTION_LABEL[raw] : derive(raw)
+  // The activity feed never shows these rows (api/cluster.py filters audit
+  // rows that carry a job_id), so the audit log is the only surface that needs
+  // the distinction.
+  if (jobLinked) return `${label} Requested`
+  return label
 }

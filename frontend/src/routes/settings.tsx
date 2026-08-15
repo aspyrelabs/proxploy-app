@@ -6,7 +6,7 @@ import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { useSchedules } from '../api/schedules'
-import { jobKindLabel } from '../components/activityDisplay'
+import { actionLabel } from '../components/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
 import type { ChannelRow } from '../components/ChannelForm'
@@ -117,8 +117,13 @@ export function SchedulesCard() {
                       Monospace went with it: that face was signalling "this is
                       a machine value", which stopped being true. The raw kind
                       is still what the API returns and what the backend keys
-                      on, it is just not what this column is for. */}
-                  <td className="text-[12px] text-text-2">{jobKindLabel(s.job_kind)}</td>
+                      on, it is just not what this column is for.
+
+                      actionLabel with no status, which is the whole label:
+                      the labels are neutral now, so "Backup Run" is both what
+                      this schedule runs and what a finished row is called.
+                      jobKindLabel existed only to dodge the past-tense map. */}
+                  <td className="text-[12px] text-text-2">{actionLabel(s.job_kind)}</td>
                   <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
                   <td className="font-mono text-[11.5px] text-text-3">
                     {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : 'unknown'}

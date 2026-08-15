@@ -297,8 +297,9 @@ export function BellPopover() {
     id: `job:${j.id}`,
     severity: severityOf(j.status),
     // Status in the title too, not only in severityOf's colour: a card headed
-    // "App Uninstalled #12" over a red icon is still telling the reader the
-    // container is gone when the job failed halfway.
+    // "App Uninstall #12" over a red icon leaves the reader working out from
+    // the colour alone whether the container is gone. actionLabel spells it
+    // out, "App Uninstall Failed".
     title: `${actionLabel(j.kind, j.status)} #${j.id}`,
     description: messageOf(j),
     footer: footerOf(j),

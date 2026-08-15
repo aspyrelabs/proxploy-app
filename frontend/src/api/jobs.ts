@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type { ApiError } from './client'
+import { actionLabel, statusLabel } from '../components/activityDisplay'
 
 export type JobStatus =
   | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted'
@@ -26,8 +27,12 @@ export type ActivityRow = {
   severity: string | null; message: string | null
 }
 
+/** The one line a job toast shows. The raw pair (`app.start succeeded`) was
+ *  the last place the product handed a user a stored identifier and a stored
+ *  status verbatim. Doc 13 names both: the kind neutrally, so no status word
+ *  contradicts it, and the status on its own. */
 export function jobLabel(j: { kind: string; status: string }): string {
-  return `${j.kind} ${j.status}`
+  return `${actionLabel(j.kind)} ${statusLabel(j.status)}`
 }
 
 /** 10s while the bell popover is open, never otherwise (`enabled` gates it). */

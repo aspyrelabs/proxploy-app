@@ -135,8 +135,9 @@ describe('SchedulesCard', () => {
     // The Runs column names the job, it does not print its identifier. This
     // is the surface that went on saying "metrics.maintain" after the label
     // for that kind had already been renamed everywhere else.
-    // "Backup Run", not ACTION_LABEL's past-tense "Backup Taken": the column
-    // says what this schedule runs, not what has already happened.
+    // "Backup Run" is now ACTION_LABEL's own entry, not a second phrasing
+    // built for this column: the labels are neutral, so what a schedule runs
+    // and what a finished row is called are the same words.
     expect(screen.getByText('Backup Run')).toBeInTheDocument()
     expect(screen.queryByText('backup.run')).not.toBeInTheDocument()
   })

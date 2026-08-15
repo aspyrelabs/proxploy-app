@@ -12,10 +12,14 @@ function client() {
 }
 
 describe('jobLabel', () => {
-  it('renders a human sentence per terminal state', () => {
-    expect(jobLabel({ kind: 'app.start', status: 'succeeded' })).toBe('app.start succeeded')
-    expect(jobLabel({ kind: 'vm.stop', status: 'failed' })).toBe('vm.stop failed')
-    expect(jobLabel({ kind: 'app.restart', status: 'canceled' })).toBe('app.restart canceled')
+  // Doc 13: neither half of a job toast is a stored identifier any more. The
+  // kind is neutral so no status word can contradict it, and the status is
+  // named rather than printed raw.
+  it('names both halves rather than printing the stored pair', () => {
+    expect(jobLabel({ kind: 'app.start', status: 'succeeded' })).toBe('App Start Done')
+    expect(jobLabel({ kind: 'vm.stop', status: 'failed' })).toBe('VM Stop Failed')
+    expect(jobLabel({ kind: 'app.restart', status: 'canceled' })).toBe('App Restart Canceled')
+    expect(jobLabel({ kind: 'app.install', status: 'queued' })).toBe('App Install Waiting')
   })
 })
 
@@ -33,7 +37,7 @@ describe('applyJob', () => {
     const toasts: unknown[] = []
     applyJob(qc, { id: 3, kind: 'app.start', status: 'succeeded', target_type: 'app' },
       (t) => toasts.push(t))
-    expect(toasts).toEqual([{ kind: 'ok', text: 'app.start succeeded', jobId: 3 }])
+    expect(toasts).toEqual([{ kind: 'ok', text: 'App Start Done', jobId: 3 }])
     expect(spy).toHaveBeenCalledWith({ queryKey: ['apps'] })
     expect(spy).toHaveBeenCalledWith({ queryKey: ['cluster', 'activity'] })
   })

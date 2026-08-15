@@ -1,3 +1,5 @@
+import { statusLabel } from './activityDisplay'
+
 const STYLES: Record<string, string> = {
   running: 'bg-green-dim text-green',
   connected: 'bg-green-dim text-green',
@@ -13,7 +15,7 @@ export function StatusPill({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10.5px] uppercase ${STYLES[status] ?? STYLES.unknown}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {status}
+      {statusLabel(status)}
     </span>
   )
 }
