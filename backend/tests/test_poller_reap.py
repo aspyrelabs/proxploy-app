@@ -188,3 +188,50 @@ def test_an_unreachable_host_never_reaps(tmp_path):
             a = db.query(App).filter_by(host_id=host_id).one()
             assert a.missing_since is None
             assert db.get(type(a), a.id) is not None
+
+
+def _vm(db, host, vmid=100):
+    from proxploy.models import Vm
+
+    return db.query(Vm).filter_by(host_id=host.id, vmid=vmid).one_or_none()
+
+
+def _resources_without_qemu(node_status="online"):
+    rows = _resources(drop_ctid=None, node_status=node_status)
+    return [r for r in rows if r.get("type") != "qemu"]
+
+
+def test_a_node_going_offline_does_not_delete_its_vm_rows(tmp_path):
+    """The app loop refused to treat a cycle with a downed cluster member as
+    proof of absence; the VM loop deleted on the same cycle without asking.
+    Losing the row loses the alert rules pointing at it: targets_for()
+    resolves a vm rule to nothing, and the orphan sweep then resolves whatever
+    was firing as "target removed"."""
+    from proxploy.pollers import ingest_cycle
+
+    db, host, t0 = _seed(tmp_path)
+    ingest_cycle(db, host, _resources(drop_ctid=None), {}, t0, degraded=False)
+    vm = _vm(db, host)
+    assert vm is not None, "the fixture's qemu guest should be ingested"
+    vm_id = vm.id
+
+    # The node its guest lives on drops out: the guest vanishes from
+    # /cluster/resources while the cycle otherwise looks perfectly healthy.
+    ingest_cycle(db, host, _resources_without_qemu(node_status="offline"), {},
+                 t0 + timedelta(seconds=60), degraded=False)
+    assert _vm(db, host) is not None, "a downed cluster member is not proof"
+    assert _vm(db, host).id == vm_id, "and the row keeps its id, so rules still point at it"
+
+
+def test_a_vm_really_gone_from_a_healthy_cluster_is_still_removed(tmp_path):
+    """The guard must not turn into "never delete": a guest absent from a
+    fully online, undegraded cycle is gone."""
+    from proxploy.pollers import ingest_cycle
+
+    db, host, t0 = _seed(tmp_path)
+    ingest_cycle(db, host, _resources(drop_ctid=None), {}, t0, degraded=False)
+    assert _vm(db, host) is not None
+
+    ingest_cycle(db, host, _resources_without_qemu(node_status="online"), {},
+                 t0 + timedelta(seconds=60), degraded=False)
+    assert _vm(db, host) is None

@@ -289,7 +289,16 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         v.cpu_cores, v.mem_bytes, v.disk_bytes = (
             g["cpu_cores"], g["mem_total_bytes"], g["disk_bytes"])
     for vmid, v in existing.items():
-        if vmid not in seen:
+        if vmid not in seen and trustworthy:
+            # Same evidence rule the app loop above applies, and for the same
+            # reason: with one cluster member down, that node's guests vanish
+            # from /cluster/resources while the cycle otherwise looks healthy.
+            # Deleting here took the alert rules with it, since targets_for()
+            # resolves a vm rule to nothing once the row is gone and the orphan
+            # sweep then resolves any firing alert as "target removed".
+            # ponytail: no missing_since countdown for VMs like apps have, so a
+            # trustworthy cycle still deletes at once. Add the column if a VM
+            # is ever seen disappearing from a fully-online cluster.
             db.delete(v)
             membership_changed = True
     db.flush()  # new Vm rows need ids before sampling
