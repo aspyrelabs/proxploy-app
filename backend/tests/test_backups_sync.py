@@ -255,6 +255,55 @@ def test_backups_list_returns_cached_rows_and_stats(tmp_path, bootstrap_admin):
         assert body["stale"] is False and body["synced_at"] is not None
 
 
+def test_backups_list_is_capped_but_its_totals_are_not(tmp_path, bootstrap_admin):
+    """The list is bounded; the summary block still counts the whole table.
+
+    GET /backups used to serialise every row on a page that polls every 60s.
+    Capping the rows is only safe if the stats stop being derived from them,
+    so this seeds more archives than the cap and checks both halves at once:
+    a short list, and totals that still know about every archive.
+    """
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from proxploy.api.backups import BACKUPS_MAX
+    from proxploy.models import utcnow
+    from tests.support import make_app, seed_host_row
+
+    extra = 5
+    app = make_app(tmp_path)
+    c = TestClient(app)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db)
+            now = utcnow()
+            for i in range(BACKUPS_MAX + extra):
+                db.add(Backup(host_id=h.id, storage="local", volid=f"local:backup/v{i}",
+                              guest_type="ct", guest_vmid=150,
+                              taken_at=now - timedelta(minutes=i), size_bytes=10,
+                              verify_state="ok", synced_at=now))
+            db.commit()
+        body = c.get("/api/v1/backups").json()
+
+        assert len(body["backups"]) == BACKUPS_MAX
+        assert body["backups"][0]["volid"] == "local:backup/v0"  # newest first
+        st = body["stats"]
+        assert st["total"] == BACKUPS_MAX + extra
+        assert st["total_bytes"] == (BACKUPS_MAX + extra) * 10
+        assert st["ok_count"] == BACKUPS_MAX + extra
+        assert st["datastores"] == [{"storage": "local", "count": BACKUPS_MAX + extra,
+                                     "size_bytes": (BACKUPS_MAX + extra) * 10}]
+        assert st["success_rate_30d"] == 100.0
+        assert body["synced_at"] is not None  # aggregate, not scanned from the page
+
+        # A smaller ask is honoured; an absurd one is clamped, never obeyed.
+        assert len(c.get("/api/v1/backups", params={"limit": 3}).json()["backups"]) == 3
+        assert len(c.get("/api/v1/backups",
+                         params={"limit": 100000}).json()["backups"]) == BACKUPS_MAX
+
+
 def test_unverified_backups_report_no_success_rate(tmp_path, bootstrap_admin):
     from fastapi.testclient import TestClient
     from proxploy.models import utcnow

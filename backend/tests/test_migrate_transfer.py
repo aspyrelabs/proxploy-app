@@ -31,6 +31,7 @@ from proxploy.executor.transfer import sftp_copy
 from proxploy.jobs import HANDLERS, JobBackend, JobContext, JobFailed
 from proxploy.models import App, Host, HostCredential, Job, JobEvent
 from proxploy.services import migrate as migrate_mod  # registers migrate.app
+from proxploy.services.proxmox import ProxmoxClient
 from tests.fakes.pve import FakePVE, make_addressed_factory
 from tests.fakes.ssh import FakeSSHConnection, make_addressed_connect_factory
 from tests.support import make_job_app
@@ -454,5 +455,60 @@ def test_transfer_strategy_ssh_host_key_mismatch_fails_and_cleans_up_source_arch
 
         transcript = " ".join(_events(app, job_id)).lower()
         assert "intact" in transcript
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_success_cleanup_spends_the_backup_token(tmp_path, monkeypatch):
+    """Both scratch archives are deleted with each host's BACKUP token.
+
+    That is the token the vzdump wrote them with, the one every failure path in
+    the same handler already cleans up with (see the host-key-mismatch test
+    above), and the one backupjobs.py::delete_backup spends on the identical
+    storage_delete_volume call. Datastore.AllocateSpace is granted through the
+    Backup role as well as the Lifecycle one (docs/08 §roles), so a host that
+    only carries it on Backup answers the lifecycle token with a 403 here, and
+    `_cleanup_volume` swallows every exception by design: spending the wrong
+    token leaves multi-GB dump files on both hosts after every successful
+    migration and never says so. FakePVE ignores token identity, so the token
+    each call was made with is recorded at the ProxmoxClient seam instead.
+    """
+    seen: list[tuple[str, str, str, str]] = []
+    real_delete = ProxmoxClient.storage_delete_volume
+
+    def spy(self, node, storage, volid):
+        seen.append((self.token_id, node, storage, volid))
+        return real_delete(self, node, storage, volid)
+
+    monkeypatch.setattr(ProxmoxClient, "storage_delete_volume", spy)
+
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+        fake_tgt.add_ct(500, node="pve-tgt", name="immich", status="running")
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                            "target_host_id": tgt_id})
+
+        assert seen == [
+            ("proxploy@pve!src-backup", "pve-src", "local-src", SRC_VOLID),
+            ("proxploy@pve!tgt-backup", "pve-tgt", "local-tgt", DST_VOLID),
+        ], f"scratch archives cleaned up with the wrong host tokens: {seen}"
 
     asyncio.run(go())

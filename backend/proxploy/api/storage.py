@@ -282,7 +282,11 @@ def upload_content(request: Request, host_id: int, name: str,
         target_id=host.id,
         params={"host_id": host.id, "node": node, "storage": name,
                 "content": content, "filename": file.filename or "upload",
-                "path": spool, "size_bytes": written})
+                # `spool_path`, not `path`: the job runner deletes whatever
+                # this key names on every exit, including a cancel that
+                # settles the job before its handler ever runs
+                # (jobs/backend.py::JobBackend._run).
+                "spool_path": spool, "size_bytes": written})
 
 
 @router.delete("/{host_id}/{name}/content/{volid:path}", status_code=202,

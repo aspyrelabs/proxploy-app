@@ -16,6 +16,8 @@ a second, blind execution.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 from collections.abc import Callable
 
 from proxploy.models import Job, JobEvent, utcnow
@@ -302,6 +304,21 @@ class JobBackend:
         else:
             self._finish(ctx, kind, "succeeded", result=result or {}, target_type=target_type)
         finally:
+            # `spool_path`: a file the route staged on this machine for the job
+            # to consume (api/storage.py spools an upload body to
+            # data_dir/uploads and hands over the path). The job owns deleting
+            # it, and that cannot live in the handler, because the handler does
+            # not always run: both cancel paths above (a `_cancel_requested`
+            # job that returns before the semaphore, and a CancelledError out
+            # of the acquire itself) settle the job without ever calling
+            # HANDLERS[kind], and the file then sits there until the next boot
+            # clears the directory. Here it is removed on every exit, handler
+            # or no handler. Suppressed because a failed unlink must not turn a
+            # succeeded job into a failed one; the work itself is already done.
+            spool = params.get("spool_path")
+            if spool:
+                with contextlib.suppress(OSError):
+                    os.unlink(spool)
             # Bound _tasks/_done to in-flight jobs only: otherwise a daemon
             # running for months holds every completed Task (and its retained
             # result/exception) and every Event forever.

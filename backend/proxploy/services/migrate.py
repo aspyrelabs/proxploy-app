@@ -672,9 +672,15 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         # scratch files (source vzdump output, target-side SFTP copy) were
         # transfer plumbing, not real backups: remove them on both hosts so
         # a migration never silently fills either one's storage.
-        await _cleanup_volume(ctx, src_client, source_node, src_storage,
+        # On the BACKUP clients, like every failure path above and like
+        # backupjobs.py::delete_backup's identical storage_delete_volume call:
+        # these are the tokens that wrote the archives, and a host that grants
+        # Datastore.AllocateSpace through the Backup role only would 403 the
+        # lifecycle token here. `_cleanup_volume` swallows that, so the wrong
+        # client leaves multi-GB dumps behind on both hosts and says nothing.
+        await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                               src_volid, timeout_s)
-        await _cleanup_volume(ctx, tgt_client, target_node, tgt_storage,
+        await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
                               dst_volid, timeout_s)
         volid = dst_volid
 

@@ -95,8 +95,14 @@ class TotpLoginIn(BaseModel):
 def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db)):
     user = db.query(User).filter_by(email=body.email).one_or_none()
     ip = request.client.host if request.client else None
-    if not user or not user.password_hash or not authn.verify_password(
-            user.password_hash, body.password) or not user.is_active:
+    # Always one password verification, even with nothing to verify against.
+    # Short-circuiting on "no such email" or "no password on this account"
+    # answered in the time of one indexed SELECT while a real password
+    # account took a full argon2id run, so the two identical 401s below were
+    # still telling anyone with a stopwatch which addresses exist.
+    ok = authn.verify_password(user.password_hash if user and user.password_hash
+                               else authn.DUMMY_HASH, body.password)
+    if not user or not user.password_hash or not ok or not user.is_active:
         write_audit(db, actor_type="user", actor_id=user.id if user else None,
                     action="auth.login", result="error", ip=ip)
         raise HTTPException(401, "invalid credentials")

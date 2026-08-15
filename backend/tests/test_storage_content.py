@@ -64,7 +64,7 @@ def test_upload_spools_to_disk_and_enqueues_a_job(tmp_path, csrf_header, bootstr
             row = db.get(Job, job["id"])
             assert row.params["filename"] == "ubuntu.iso"
             assert row.params["size_bytes"] == len(payload)
-            spooled = Path(row.params["path"])
+            spooled = Path(row.params["spool_path"])
             assert spooled.parent == app.state.settings.data_dir / "uploads"
             # the bytes really are on disk, not in the request object
             assert spooled.stat().st_size == len(payload)
@@ -119,7 +119,7 @@ def test_upload_job_posts_to_proxmox_and_always_deletes_the_temp_file(tmp_path):
                                      params={"host_id": hid, "node": "pve1",
                                              "storage": "local", "content": "iso",
                                              "filename": "ubuntu.iso",
-                                             "path": str(spool), "size_bytes": 9}).id
+                                             "spool_path": str(spool), "size_bytes": 9}).id
         await backend.wait(job_id, timeout=10)
         assert fake.uploads == [{"node": "pve1", "storage": "local", "content": "iso",
                                  "filename": "ubuntu.iso", "bytes": b"ISO-BYTES"}]
@@ -128,7 +128,7 @@ def test_upload_job_posts_to_proxmox_and_always_deletes_the_temp_file(tmp_path):
             assert job.status == "succeeded"
             assert job.result["volid"] == "local:iso/ubuntu.iso"
             assert job.result["exitstatus"] == "OK"
-        assert not spool.exists()  # deleted in the finally
+        assert not spool.exists()  # deleted by the runner on exit
 
     asyncio.run(run())
 
@@ -153,11 +153,92 @@ def test_upload_job_deletes_the_temp_file_even_when_proxmox_fails(tmp_path):
                                      params={"host_id": hid, "node": "pve1",
                                              "storage": "local", "content": "iso",
                                              "filename": "doomed.iso",
-                                             "path": str(spool), "size_bytes": 1}).id
+                                             "spool_path": str(spool), "size_bytes": 1}).id
         await backend.wait(job_id, timeout=10)
         with app.state.sessionmaker() as db:
             assert db.get(Job, job_id).status == "failed"
         assert not spool.exists()
+
+    asyncio.run(run())
+
+
+def test_an_upload_cancelled_while_still_queued_deletes_its_spool_file(
+        tmp_path, monkeypatch):
+    """Cancel an upload that is still waiting behind MAX_CONCURRENT other jobs
+    and the handler never runs at all, so it cannot be the thing that removes
+    the spool file: the job settles `canceled`, and a multi-GB ISO would sit in
+    data_dir/uploads until the next restart cleared it.
+
+    Both no-handler cancel windows are exercised, because they leave the runner
+    at two different places: `victim_a` is cancelled in the same breath as the
+    enqueue, before `_spawn` has had a loop turn (`_cancel_requested`, an early
+    return); `victim_b` is cancelled once it already has a Task blocked on the
+    semaphore (a CancelledError out of the acquire). Neither ever reaches
+    `HANDLERS["storage.upload"]`.
+    """
+    from proxploy.jobs import HANDLERS, JobBackend
+    from proxploy.jobs.backend import MAX_CONCURRENT
+    from proxploy.models import Job
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=FakePVE())
+        import proxploy.services.storagejobs  # noqa: F401  (registers handlers)
+        backend = JobBackend(app)
+        hid = _seed(app)
+
+        gate = asyncio.Event()
+        started = [asyncio.Event() for _ in range(MAX_CONCURRENT)]
+
+        async def hog(ctx, params):
+            started[params["i"]].set()
+            await gate.wait()
+            return {}
+
+        monkeypatch.setitem(HANDLERS, "test.hog", hog)
+
+        async def never(ctx, params):
+            raise AssertionError("the upload handler must not run for a "
+                                 "job cancelled while it was still queued")
+
+        monkeypatch.setitem(HANDLERS, "storage.upload", never)
+
+        with app.state.sessionmaker() as db:
+            hog_ids = [backend.enqueue(db, kind="test.hog", params={"i": i}).id
+                       for i in range(MAX_CONCURRENT)]
+        await asyncio.gather(*(asyncio.wait_for(e.wait(), timeout=5) for e in started))
+
+        updir = app.state.settings.data_dir / "uploads"
+        updir.mkdir(parents=True, exist_ok=True)
+
+        def enqueue_upload(name):
+            spool = updir / name
+            spool.write_bytes(b"pretend-multi-gb-iso")
+            with app.state.sessionmaker() as db:
+                job_id = backend.enqueue(
+                    db, kind="storage.upload", target_type="storage", target_id=hid,
+                    params={"host_id": hid, "node": "pve1", "storage": "local",
+                            "content": "iso", "filename": name,
+                            "spool_path": str(spool), "size_bytes": 20}).id
+            return job_id, spool
+
+        job_a, spool_a = enqueue_upload("pre-spawn.iso")
+        assert backend.cancel(job_a) is True   # no await since enqueue: _pending
+
+        job_b, spool_b = enqueue_upload("queued.iso")
+        await asyncio.sleep(0.02)              # let _spawn block it on the semaphore
+        assert backend.cancel(job_b) is True
+
+        for job_id, spool in ((job_a, spool_a), (job_b, spool_b)):
+            assert await backend.wait(job_id, timeout=5) is True
+            with app.state.sessionmaker() as db:
+                assert db.get(Job, job_id).status == "canceled"
+            assert not spool.exists(), f"{spool.name} was left behind"
+
+        gate.set()  # release the hogs; the pool must still work for them
+        for hid_ in hog_ids:
+            assert await backend.wait(hid_, timeout=5) is True
 
     asyncio.run(run())
 

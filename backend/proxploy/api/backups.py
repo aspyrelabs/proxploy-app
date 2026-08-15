@@ -14,6 +14,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import func
 
 from proxploy.api.deps import authorize, get_db, require_entitlement, scope_backup
 from proxploy.api.jobs import enqueue_and_audit
@@ -73,14 +74,63 @@ def _last_sync(db) -> datetime | None:
     return None
 
 
+BACKUPS_MAX = 200
+
+
+def _stats(db) -> dict:
+    """The summary block, computed with aggregates over the WHOLE table.
+
+    Deliberately not derived from the page of rows the route returns: a
+    datastore with a year of daily archives is thousands of rows, and totals
+    counted from the newest 200 of them would quietly under-report every
+    number on the page. Four scalar aggregates cost less than serialising the
+    table did.
+    """
+    stores: dict[str, dict] = {}
+    for storage, count, size in (db.query(Backup.storage, func.count(Backup.id),
+                                          func.coalesce(func.sum(Backup.size_bytes), 0))
+                                 .group_by(Backup.storage)):
+        # `or "-"` matches the old per-row key, so NULL and "" still merge.
+        d = stores.setdefault(storage or "-", {"storage": storage or "-",
+                                               "count": 0, "size_bytes": 0})
+        d["count"] += count
+        d["size_bytes"] += int(size)
+    by_state = dict(db.query(Backup.verify_state, func.count(Backup.id))
+                    .group_by(Backup.verify_state))
+    cutoff = utcnow() - timedelta(days=30)
+    recent = dict(db.query(Backup.verify_state, func.count(Backup.id))
+                  .filter(Backup.taken_at >= cutoff)
+                  .group_by(Backup.verify_state))
+    ok_30d, bad_30d = recent.get("ok", 0), recent.get("failed", 0)
+    return {
+        "total": sum(d["count"] for d in stores.values()),
+        "total_bytes": sum(d["size_bytes"] for d in stores.values()),
+        "ok_count": by_state.get("ok", 0),
+        "failed_count": by_state.get("failed", 0),
+        # verify_state is the only per-archive success signal Proxmox
+        # exposes. Unverified archives are excluded from the denominator
+        # rather than counted as either outcome, so a datastore with
+        # verification switched off reports None instead of a fake 100%.
+        "success_rate_30d": (round(ok_30d / (ok_30d + bad_30d) * 100, 1)
+                             if (ok_30d + bad_30d) else None),
+        "datastores": sorted(stores.values(), key=lambda d: -d["size_bytes"]),
+    }
+
+
 @router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("backups.pbs"))])
-def list_backups(request: Request, db=Depends(get_db),
+def list_backups(request: Request, db=Depends(get_db), limit: int = BACKUPS_MAX,
                  user: User = Depends(_read)):
+    # Same clamp the other list reads use (audit.py, jobs.py, alerts.py,
+    # cluster.py). This page polls every 60s and can be open in several tabs;
+    # a PBS datastore with a year of daily per-guest snapshots is tens of
+    # thousands of rows, and it used to send all of them every time. The
+    # newest `limit` are what the "Recent backups" table shows; `stats` below
+    # still covers everything.
+    limit = max(1, min(limit, BACKUPS_MAX))
     hosts = {h.id: h.name for h in db.query(Host).all()}
-    rows = db.query(Backup).order_by(Backup.taken_at.desc()).all()
-    synced_at = _last_sync(db) or max((b.synced_at for b in rows if b.synced_at),
-                                      default=None)
+    rows = db.query(Backup).order_by(Backup.taken_at.desc()).limit(limit).all()
+    synced_at = _last_sync(db) or db.query(func.max(Backup.synced_at)).scalar()
     stale_s = request.app.state.settings.backup_sync_stale_s
     stale = synced_at is None or (utcnow() - synced_at).total_seconds() > stale_s
     if stale:
@@ -90,31 +140,9 @@ def list_backups(request: Request, db=Depends(get_db),
                     db, kind="backup.sync", target_type="system",
                     params={}, requested_by=user.id)
 
-    cutoff = utcnow() - timedelta(days=30)
-    recent = [b for b in rows if b.taken_at and b.taken_at >= cutoff]
-    ok_30d = sum(1 for b in recent if b.verify_state == "ok")
-    bad_30d = sum(1 for b in recent if b.verify_state == "failed")
-    datastores: dict[str, dict] = {}
-    for b in rows:
-        d = datastores.setdefault(b.storage or "-", {"storage": b.storage or "-",
-                                                     "count": 0, "size_bytes": 0})
-        d["count"] += 1
-        d["size_bytes"] += b.size_bytes or 0
     return {
         "backups": [_backup_out(b, hosts.get(b.host_id)) for b in rows],
-        "stats": {
-            "total": len(rows),
-            "total_bytes": sum(b.size_bytes or 0 for b in rows),
-            "ok_count": sum(1 for b in rows if b.verify_state == "ok"),
-            "failed_count": sum(1 for b in rows if b.verify_state == "failed"),
-            # verify_state is the only per-archive success signal Proxmox
-            # exposes. Unverified archives are excluded from the denominator
-            # rather than counted as either outcome, so a datastore with
-            # verification switched off reports None instead of a fake 100%.
-            "success_rate_30d": (round(ok_30d / (ok_30d + bad_30d) * 100, 1)
-                                 if (ok_30d + bad_30d) else None),
-            "datastores": sorted(datastores.values(), key=lambda d: -d["size_bytes"]),
-        },
+        "stats": _stats(db),
         "synced_at": _iso(synced_at),
         "stale": stale,
     }

@@ -8,6 +8,7 @@ from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import Host, HostCredential, User
 from proxploy.services import oidc, updater
 from proxploy.services.audit import write_audit
+from proxploy.services.authn import resolve_session
 from proxploy.services.settings import get_setting
 
 router = APIRouter(prefix="/meta", tags=["meta"])
@@ -47,17 +48,38 @@ def version(request: Request, user=Depends(_read)):
 
 @router.get("/onboarding")
 def onboarding(request: Request, db=Depends(get_db)):
-    return {"admin_exists": db.query(User).count() > 0,
-            "host_added": db.query(Host).count() > 0,
-            # An enrolled-but-unverified key is the wizard's authorize step
-            # still being owed an answer (Task 2). Verified or absent, there
-            # is nothing left to ask.
-            "ssh_pending": db.query(HostCredential).filter_by(kind="ssh_key")
-                             .filter(HostCredential.ssh_verified_at.is_(None))
-                             .count() > 0,
+    """Where setup has got to.
+
+    PUBLIC by necessity, so it answers a stranger with the three booleans the
+    pre-session screens genuinely cannot work without and nothing else:
+    `admin_exists` (step 1 of the wizard, and whether this is a fresh
+    install), `complete` (the redirect both shell.tsx and the wizard route
+    make before any session exists) and `oidc` (whether the login page draws
+    an SSO button).
+
+    `host_added` and `ssh_pending` are a different kind of fact: they say
+    this install manages Proxmox hosts and that a root SSH key is enrolled
+    but not yet working, which is reconnaissance for anyone who can reach the
+    port. The wizard only reads them from step 2 onwards, and step 1 signs
+    the new admin in before it gets there (components/AdminAccountStep.tsx
+    posts /users then /auth/login), so a session always exists by the time
+    they matter. Absent rather than faked for everyone else: a hardcoded
+    False would send a signed-out caller to the wrong wizard step.
+    """
+    body = {"admin_exists": db.query(User).count() > 0,
             "complete": bool(get_setting(db, "onboarding.complete", False)),
             # Task 11: login page's pre-session SSO-button gate.
             "oidc": oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")}
+    raw = request.cookies.get(request.app.state.settings.session_cookie)
+    if raw and resolve_session(db, raw):
+        body["host_added"] = db.query(Host).count() > 0
+        # An enrolled-but-unverified key is the wizard's authorize step
+        # still being owed an answer (Task 2). Verified or absent, there
+        # is nothing left to ask.
+        body["ssh_pending"] = (db.query(HostCredential).filter_by(kind="ssh_key")
+                               .filter(HostCredential.ssh_verified_at.is_(None))
+                               .count() > 0)
+    return body
 
 
 @router.get("/update", dependencies=[Depends(_read), Depends(_self_update)])

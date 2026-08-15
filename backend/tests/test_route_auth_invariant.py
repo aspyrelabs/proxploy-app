@@ -25,7 +25,13 @@ from fastapi.testclient import TestClient
 # each entry: anything not listed here is assumed to require a session.
 PUBLIC = {
     ("GET", "/api/v1/meta/health"),      # liveness probe, must work unauthenticated
-    ("GET", "/api/v1/meta/onboarding"),  # "does an admin exist yet"; needed pre-login
+    ("GET", "/api/v1/meta/onboarding"),  # "does an admin exist yet", "is setup
+                                          # finished", "draw the SSO button": the
+                                          # three booleans the login page and step 1
+                                          # of the wizard need pre-login, and the only
+                                          # three it answers a session-less caller
+                                          # with. Host and SSH state is added for a
+                                          # signed-in caller only (api/meta.py).
     ("POST", "/api/v1/auth/login"),      # how a caller gets a session in the first place
     ("POST", "/api/v1/users"),           # first-run owner bootstrap (doc 08 §8), every
                                           # call after the first user exists 401s instead

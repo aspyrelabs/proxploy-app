@@ -42,6 +42,45 @@ def test_bad_password_rejected_and_audited(client, csrf_header):
     assert row.result == "error"
 
 
+def test_login_hashes_even_when_the_email_is_unknown(client, csrf_header, monkeypatch):
+    """Login must not answer faster for an address that does not exist.
+
+    Asserting on the code path, never on the clock: a wall-clock comparison
+    of one argon2 run against none flakes on a loaded CI box. Counting the
+    verifications is the same property without the timer. Three logins that
+    all fail for different reasons must all do exactly one verification: an
+    unknown email, a real account with a wrong password, and an account with
+    no password at all (OIDC-only).
+    """
+    from proxploy.models import User
+    from proxploy.services import authn
+
+    client.post("/api/v1/users", json={
+        "email": "real@example.com", "password": "correct-horse-battery"},
+        headers=csrf_header(client))
+    db = client.app.state.sessionmaker()
+    db.add(User(email="sso@example.com", password_hash=None))
+    db.commit()
+
+    calls = []
+    real = authn.verify_password
+    monkeypatch.setattr(authn, "verify_password",
+                        lambda h, pw: (calls.append(h), real(h, pw))[1])
+
+    for email in ("nobody@example.com", "real@example.com", "sso@example.com"):
+        r = client.post("/api/v1/auth/login",
+                        json={"email": email, "password": "wrong-wrong-wrong"},
+                        headers=csrf_header(client))
+        assert r.status_code == 401
+        assert r.json()["detail"] == "invalid credentials"  # one body for all three
+
+    assert len(calls) == 3, "every failed login must cost one password verification"
+    # The two accountless cases verify against the shared dummy, so the work
+    # done is the same as for a real account, not a skipped hash.
+    assert calls[0] == authn.DUMMY_HASH and calls[2] == authn.DUMMY_HASH
+    assert calls[1] != authn.DUMMY_HASH
+
+
 def test_csrf_required_for_mutations(client):
     r = client.post("/api/v1/users", json={
         "email": "b@example.com", "password": "correct-horse-battery"})

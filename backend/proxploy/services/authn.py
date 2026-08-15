@@ -21,6 +21,14 @@ def verify_password(hash_: str, pw: str) -> bool:
         return False
 
 
+# A real argon2id hash of a value nobody can supply, hashed once at import
+# rather than per request. Login verifies against this when the email is
+# unknown or the account has no password (OIDC-only), so the reply costs the
+# same KDF either way instead of returning early and telling a stranger, by
+# the clock alone, which addresses have password accounts.
+DUMMY_HASH = _ph.hash(secrets.token_urlsafe(32))
+
+
 def _th(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 

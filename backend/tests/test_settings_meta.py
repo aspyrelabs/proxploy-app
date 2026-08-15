@@ -1,7 +1,8 @@
 def test_onboarding_state_progression(client, csrf_header, bootstrap_admin):
     r = client.get("/api/v1/meta/onboarding")
-    assert r.json() == {"admin_exists": False, "host_added": False, "ssh_pending": False,
-                        "complete": False,
+    # Signed out, this route answers with the three booleans the login page
+    # and step 1 of the wizard need, and nothing about the infrastructure.
+    assert r.json() == {"admin_exists": False, "complete": False,
                         "oidc": False}  # Task 11: unconfigured OIDC -> False
 
     bootstrap_admin(client)
@@ -11,6 +12,28 @@ def test_onboarding_state_progression(client, csrf_header, bootstrap_admin):
                      headers=csrf_header(client))
     assert r.status_code == 200
     assert client.get("/api/v1/meta/onboarding").json()["complete"] is True
+
+
+def test_onboarding_tells_a_stranger_nothing_about_the_hosts(client, csrf_header,
+                                                             bootstrap_admin):
+    """This route is public, so it must not describe the infrastructure.
+
+    `host_added` and `ssh_pending` told anyone who could reach the port that
+    this install manages Proxmox hosts and that a root SSH key is enrolled
+    but not yet working. The wizard only needs them from step 2, by which
+    point step 1 has signed the admin in, so they are for signed-in callers.
+    """
+    bootstrap_admin(client)
+    signed_in = client.get("/api/v1/meta/onboarding").json()
+    assert signed_in["host_added"] is False and signed_in["ssh_pending"] is False
+
+    assert client.post("/api/v1/auth/logout", headers=csrf_header(client)).status_code == 200
+    anon = client.get("/api/v1/meta/onboarding")
+    assert anon.status_code == 200  # still public: the wizard starts here
+    assert "host_added" not in anon.json() and "ssh_pending" not in anon.json()
+    # The pre-login fields survive, or a fresh install could not be set up.
+    assert anon.json()["admin_exists"] is True
+    assert anon.json()["complete"] is False
 
 
 def test_onboarding_reports_ssh_pending_until_verified(tmp_path, csrf_header, bootstrap_admin):

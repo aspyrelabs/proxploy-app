@@ -12,14 +12,15 @@ host therefore needs transient free disk equal to the file size for the life of
 the job, and the upload takes about twice as long as a direct PVE upload. That
 is the accepted cost of proxying it; what is not acceptable is holding the file
 in memory, which is why the route streams and this handler takes a path rather
-than bytes. The spool file is deleted in a `finally` on EVERY exit, success,
-PVE failure, timeout, cancellation; because nothing else ever will.
+than bytes. The spool file is deleted by the job runner (jobs/backend.py::
+JobBackend._run's `finally`, keyed on the `spool_path` param) on EVERY exit,
+success, PVE failure, timeout, cancellation; because nothing else ever will,
+and because a job cancelled while it is still queued settles without this
+handler ever being called at all.
 """
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import os
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import Host
@@ -52,25 +53,18 @@ async def run_upload(ctx: JobContext, params: dict) -> dict:
     app = ctx.backend.app
     host_id = int(params["host_id"])
     storage, content = params["storage"], params["content"]
-    filename, path = params["filename"], params["path"]
-    try:
-        client, node = await asyncio.to_thread(_resolve, app, host_id, params.get("node"))
-        ctx.log(f"uploading {filename} ({params.get('size_bytes', 0)} bytes) "
-                f"to {storage} on {node}")
-        upid = await asyncio.to_thread(client.storage_upload, node, storage,
-                                       content, filename, path)
-        status = await await_task(ctx, client, node, upid,
-                                  timeout_s=app.state.settings.pve_task_timeout_s)
-        app.state.bus.publish("resource", {"type": "storage", "id": host_id,
-                                           "change": "content"})
-        return {"upid": upid, "exitstatus": status.get("exitstatus"), "node": node,
-                "storage": storage, "volid": f"{storage}:{content}/{filename}"}
-    finally:
-        # The ONLY place this file is ever removed. Suppressed because a failure
-        # to unlink must not turn a succeeded upload into a failed job: the
-        # bytes are already on PVE by then.
-        with contextlib.suppress(OSError):
-            os.unlink(path)
+    filename, path = params["filename"], params["spool_path"]
+    client, node = await asyncio.to_thread(_resolve, app, host_id, params.get("node"))
+    ctx.log(f"uploading {filename} ({params.get('size_bytes', 0)} bytes) "
+            f"to {storage} on {node}")
+    upid = await asyncio.to_thread(client.storage_upload, node, storage,
+                                   content, filename, path)
+    status = await await_task(ctx, client, node, upid,
+                              timeout_s=app.state.settings.pve_task_timeout_s)
+    app.state.bus.publish("resource", {"type": "storage", "id": host_id,
+                                       "change": "content"})
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "node": node,
+            "storage": storage, "volid": f"{storage}:{content}/{filename}"}
 
 
 async def run_delete_volume(ctx: JobContext, params: dict) -> dict:
