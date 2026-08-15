@@ -7,30 +7,12 @@ vi.mock('../lib/notify', () => ({
   notify: { success: toastSuccess, error: toastError, info: vi.fn(), warning: vi.fn() },
 }))
 
-const { ApiError } = vi.hoisted(() => ({
-  ApiError: class extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
-  },
-}))
-
 let isSelf = false
 let powerFails = false
 const calls: { path: string; method?: string; body: unknown }[] = []
 
-vi.mock('../api/client', () => ({
-  ApiError,
-  apiErrorDetail: (e: unknown, fallback: string) => {
-    if (!(e instanceof ApiError)) return fallback
-    const detail = (e.body as { detail?: unknown } | null)?.detail
-    const text = typeof detail === 'string' ? detail
-      : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
-        ? (detail as { detail: string }).detail
-        : undefined
-    if (text == null) return fallback
-    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
-    return text
-  },
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, method: opts?.method, body })
@@ -52,6 +34,7 @@ vi.mock('../api/client', () => ({
   }),
 }))
 
+import { ApiError } from '../api/client'
 import { HostPowerDialog } from '../components/HostPowerDialog'
 
 const wrap = (command: 'reboot' | 'shutdown', onClose = vi.fn()) => {

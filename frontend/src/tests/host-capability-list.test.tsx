@@ -2,32 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { ApiError } = vi.hoisted(() => ({
-  ApiError: class extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
-  },
-}))
-
 const calls: { path: string; body: any }[] = []
 let capabilities: Record<string, boolean> = {
   monitoring: true, lifecycle: false, console: false, backup: false,
 }
 let reject = false
 
-vi.mock('../api/client', () => ({
-  ApiError,
-  apiErrorDetail: (e: unknown, fallback: string) => {
-    if (!(e instanceof ApiError)) return fallback
-    const detail = (e.body as { detail?: unknown } | null)?.detail
-    const text = typeof detail === 'string' ? detail
-      : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
-        ? (detail as { detail: string }).detail
-        : undefined
-    if (text == null) return fallback
-    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
-    return text
-  },
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, body })
@@ -45,6 +27,7 @@ vi.mock('../api/client', () => ({
   }),
 }))
 
+import { ApiError } from '../api/client'
 import { HostCapabilityList } from '../components/HostCapabilityList'
 
 /** Fields are closed for stored AND unstored capabilities now, so a test that

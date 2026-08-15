@@ -12,26 +12,9 @@ let vmStatus: 'running' | 'stopped' = 'stopped'
 let deleteOutcome: 'ok' | 'guest_running' | 'self_target' = 'ok'
 const calls: { path: string; method: string; body: any }[] = []
 
-vi.mock('../api/client', () => {
-  class ApiError extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) {
-      super(`API ${status}`); this.status = status; this.body = body
-    }
-  }
+vi.mock('../api/client', async (importOriginal) => {
   return {
-    ApiError,
-    apiErrorDetail: (e: unknown, fallback: string) => {
-      if (!(e instanceof ApiError)) return fallback
-      const detail = (e.body as { detail?: unknown } | null)?.detail
-      const text = typeof detail === 'string' ? detail
-        : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
-          ? (detail as { detail: string }).detail
-          : undefined
-      if (text == null) return fallback
-      if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
-      return text
-    },
+    ...(await importOriginal<typeof import('../api/client')>()),
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
@@ -82,6 +65,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   useParams: () => ({ vmId: '9' }),
 }))
 
+import { ApiError } from '../api/client'
 import { VmDetail } from '../routes/vms'
 
 const wrap = () => {

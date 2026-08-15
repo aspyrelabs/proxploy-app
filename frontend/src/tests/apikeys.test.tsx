@@ -12,26 +12,8 @@ let listRows: any[] = []
 let createStatus: 201 | 422 = 201
 let listError = false
 
-const { ApiError } = vi.hoisted(() => ({
-  ApiError: class extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) { super(`API ${status}`); this.status = status; this.body = body }
-  },
-}))
-
-vi.mock('../api/client', () => ({
-  ApiError,
-  apiErrorDetail: (e: unknown, fallback: string) => {
-    if (!(e instanceof ApiError)) return fallback
-    const detail = (e.body as { detail?: unknown } | null)?.detail
-    const text = typeof detail === 'string' ? detail
-      : typeof (detail as { detail?: unknown } | null)?.detail === 'string'
-        ? (detail as { detail: string }).detail
-        : undefined
-    if (text == null) return fallback
-    if (e.status === 502 && !text.startsWith('Proxmox')) return `Proxmox could not do this: ${text}`
-    return text
-  },
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
     if (path === '/entitlements') {
@@ -61,6 +43,7 @@ vi.mock('../api/client', () => ({
   }),
 }))
 
+import { ApiError } from '../api/client'
 import { ApiKeysCard } from '../components/ApiKeysCard'
 
 const wrap = () => {
