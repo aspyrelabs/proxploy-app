@@ -451,6 +451,17 @@ def _owner_ids(db) -> set[int]:
     return {m.user_id for m in db.query(TeamMember).filter_by(role="owner")}
 
 
+def _would_strand_the_install(db, target_id: int) -> bool:
+    """True when removing this user leaves nobody who can sign in and grant
+    owner back. Deactivating and deleting have to ask the same question: a
+    guard that counts every owner lets you deactivate one owner and then
+    delete the other, which is how you reach zero active owners through two
+    individually allowed steps."""
+    active = {o for o in _owner_ids(db)
+              if (u := db.get(User, o)) is not None and u.is_active}
+    return not (active - {target_id})
+
+
 def _revoke_all_sessions(db, user_id: int) -> int:
     """Every live session for a user, gone.
 
@@ -487,10 +498,7 @@ def patch_user(request: Request, user_id: int, body: UserPatchIn,
                 raise HTTPException(409, {
                     "error": "self_deactivate",
                     "detail": "you cannot deactivate your own account"})
-            owners = _owner_ids(db)
-            if target.id in owners and len({
-                    o for o in owners
-                    if (u := db.get(User, o)) is not None and u.is_active}) <= 1:
+            if _would_strand_the_install(db, target.id):
                 # The one lockout with no in-app recovery path: no active owner
                 # means nobody can grant owner back.
                 raise HTTPException(409, {
@@ -558,11 +566,11 @@ def delete_user(request: Request, user_id: int, db=Depends(get_db),
     if target.id == actor.id:
         raise HTTPException(409, {"error": "self_delete",
                                   "detail": "you cannot delete your own account"})
-    owners = _owner_ids(db)
-    if target.id in owners and len(owners) <= 1:
+    if _would_strand_the_install(db, target.id):
         raise HTTPException(409, {
             "error": "last_owner",
-            "detail": "this is the last owner; promote another owner first"})
+            "detail": "this is the last owner who can sign in; promote another "
+                      "owner first"})
 
     email = target.email
     _revoke_all_sessions(db, target.id)

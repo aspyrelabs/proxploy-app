@@ -254,3 +254,46 @@ def test_deleting_a_missing_user_is_404(tmp_path, csrf_header, bootstrap_admin):
         bootstrap_admin(c)
         assert c.request("DELETE", "/api/v1/users/9999",
                          headers=csrf_header(c)).status_code == 404
+
+
+def test_deleting_the_last_active_owner_is_refused_even_with_an_inactive_one(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The deactivate guard counted owners who can sign in; the delete guard
+    counted every owner row. So an owner deactivated earlier still padded the
+    delete count, and deleting the one remaining active owner was allowed,
+    reaching the exact state both guards exist to prevent. The actor here is
+    an admin, not an owner, because an owner actor is itself an active owner
+    and can never strand the install by deleting someone else."""
+    app, c = _app(tmp_path)
+    with c:
+        bootstrap_admin(c)                      # owner 1, active
+        spare_owner = _make_user(c, csrf_header, "owner2@example.com", role="owner")
+        admin = _make_user(c, csrf_header, "admin@corp.io", role="admin")
+
+        # Allowed: two active owners, so deactivating one leaves one.
+        assert c.patch(f"/api/v1/users/{spare_owner}", json={"is_active": False},
+                       headers=csrf_header(c)).status_code == 200
+
+        with app.state.sessionmaker() as db:
+            owners = {m.user_id for m in db.query(TeamMember).filter_by(role="owner")}
+            bootstrap_owner = next(o for o in owners if o != spare_owner)
+            assert len(owners) == 2, "two owner rows, only one of them active"
+
+        c.post("/api/v1/auth/logout", headers=csrf_header(c))
+        c.post("/api/v1/auth/login",
+               json={"email": "admin@corp.io", "password": "correct-horse-battery"},
+               headers=csrf_header(c))
+
+        r = c.delete(f"/api/v1/users/{bootstrap_owner}", headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        assert r.json()["error"] == "last_owner", r.text
+
+        # The inactive owner is still removable: it was never what kept the
+        # install reachable.
+        assert c.delete(f"/api/v1/users/{spare_owner}",
+                        headers=csrf_header(c)).status_code == 200
+
+        with app.state.sessionmaker() as db:
+            owners = {m.user_id for m in db.query(TeamMember).filter_by(role="owner")}
+            assert [o for o in owners if db.get(User, o).is_active], \
+                "somebody must still be able to sign in and grant owner back"
