@@ -1,0 +1,127 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { notifyError, notifySuccess } = vi.hoisted(() => ({
+  notifyError: vi.fn(), notifySuccess: vi.fn(),
+}))
+vi.mock('../lib/notify', () => ({
+  notify: { error: notifyError, success: notifySuccess, info: vi.fn(), warning: vi.fn() },
+}))
+
+// Only `api` is faked: apiErrorDetail and ApiError are the real ones, so what
+// the user is told about a refused password is decided by the same code the
+// app runs.
+vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+  return { ...actual, api: vi.fn() }
+})
+
+import { ApiError, api } from '../api/client'
+import { ProfilePage } from '../routes/profile'
+
+const ME = { id: 1, email: 'admin@example.com', display_name: 'Admin', role: 'owner',
+  totp_enabled: false }
+
+const SESSIONS = [
+  { id: 1, ip: '10.0.0.1', user_agent: 'Chrome', created_at: '2026-08-01T00:00:00',
+    last_seen_at: '2026-08-04T00:00:00', current: true },
+  { id: 2, ip: '10.0.0.2', user_agent: 'Firefox', created_at: '2026-08-02T00:00:00',
+    last_seen_at: '2026-08-03T00:00:00', current: false },
+]
+
+// TotpCard reads the entitlement before it renders anything.
+const ENTITLEMENTS = { tier: 'pro', features: { 'auth.totp': true }, grace: null }
+
+let loginFails = false
+
+function mockApi() {
+  vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) => {
+    const method = opts?.method
+    if (path === '/auth/me') return Promise.resolve(ME) as Promise<never>
+    if (path === '/entitlements') return Promise.resolve(ENTITLEMENTS) as Promise<never>
+    if (path === '/auth/sessions' && !method) return Promise.resolve(SESSIONS) as Promise<never>
+    if (path === '/auth/login' && loginFails) {
+      return Promise.reject(new ApiError(401, { detail: 'invalid credentials' }))
+    }
+    return Promise.resolve({ ok: true }) as Promise<never>
+  })
+}
+
+function renderProfile() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  return render(<QueryClientProvider client={qc}><ProfilePage /></QueryClientProvider>)
+}
+
+async function setPassword(pw = 'a-long-enough-password') {
+  await waitFor(() => expect(screen.getByLabelText(/new password/i)).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText(/new password/i), { target: { value: pw } })
+  fireEvent.click(screen.getByRole('button', { name: /set new password/i }))
+}
+
+const sessionReads = () =>
+  vi.mocked(api).mock.calls.filter(([path, opts]) =>
+    path === '/auth/sessions' && !(opts as RequestInit | undefined)?.method).length
+
+describe('ProfilePage password change', () => {
+  beforeEach(() => {
+    vi.mocked(api).mockReset()
+    notifyError.mockClear()
+    notifySuccess.mockClear()
+    loginFails = false
+    mockApi()
+  })
+
+  it('refreshes the sessions list after the password changes', async () => {
+    // The reset revokes every other session server-side. Without an
+    // invalidation the Sessions card on this same page went on listing
+    // sessions that no longer exist, and the success toast said they were
+    // signed out while the table below it disagreed.
+    renderProfile()
+    await waitFor(() => expect(sessionReads()).toBe(1))
+    const before = sessionReads()
+
+    await setPassword()
+
+    await waitFor(() => expect(notifySuccess).toHaveBeenCalled())
+    await waitFor(() => expect(sessionReads()).toBeGreaterThan(before))
+  })
+
+  it('reports a failed re-login as a changed password, not as a bad password', async () => {
+    // One try used to wrap both POSTs, so a re-login that failed after a
+    // password that changed perfectly well was reported as
+    // "Could not set the password (12+ characters)": it blamed the user's
+    // input, and it told them their password had not changed when it had.
+    loginFails = true
+    renderProfile()
+    await setPassword()
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalled())
+    const [title, options] = notifyError.mock.calls[0]
+    const said = `${title} ${(options as { description?: string } | undefined)?.description ?? ''}`
+    expect(said).not.toMatch(/12|characters/i)
+    expect(said).toMatch(/password was changed/i)
+    expect(said).toMatch(/sign in again/i)
+    expect(notifySuccess).not.toHaveBeenCalled()
+  })
+
+  it('reports a refused password in the backend\'s own words', async () => {
+    vi.mocked(api).mockImplementation((path: string, opts?: RequestInit) => {
+      if (path === '/auth/me') return Promise.resolve(ME) as Promise<never>
+    if (path === '/entitlements') return Promise.resolve(ENTITLEMENTS) as Promise<never>
+      if (path === '/auth/sessions' && !opts?.method) return Promise.resolve(SESSIONS) as Promise<never>
+      if (path.endsWith('/password')) {
+        return Promise.reject(new ApiError(403, { detail: 'not allowed to set this password' }))
+      }
+      return Promise.resolve({ ok: true }) as Promise<never>
+    })
+    renderProfile()
+    await setPassword()
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('not allowed to set this password'))
+    // A password that never changed must not claim it did.
+    expect(notifyError.mock.calls[0][0]).not.toMatch(/was changed/i)
+    // And no login is attempted on top of a password that was refused.
+    expect(vi.mocked(api).mock.calls.some(([p]) => p === '/auth/login')).toBe(false)
+  })
+})

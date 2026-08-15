@@ -87,4 +87,40 @@ describe('useReconnectingTicket', () => {
     await act(async () => { result.current.start() })
     expect(result.current.failed).toBe(false)
   })
+
+  it('a console closed while a backoff timer is pending mints no ticket', async () => {
+    // The backoff timer used to be fired and forgotten: no handle kept, no
+    // clearTimeout, no unmount cleanup. Close the console during the wait and
+    // the timer still fired, POSTing a ticket, minting a real one against
+    // Proxmox and writing a `console.open` audit row for a console that was
+    // already gone. The audit log then claims a session that never happened.
+    vi.mocked(api).mockResolvedValue({ ticket: 'tix', expires_at: '2026-01-01T00:00:00Z' })
+    vi.useFakeTimers()
+    const { result, unmount } = renderHook(() => useReconnectingTicket('app', 42), { wrapper })
+
+    await act(async () => { result.current.start() })
+    act(() => { result.current.reconnect() })
+    const callsBefore = vi.mocked(api).mock.calls.length
+
+    unmount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(vi.mocked(api).mock.calls.length).toBe(callsBefore)
+  })
+
+  it('giving up while a backoff timer is pending mints no ticket', async () => {
+    // The other way a console ends: Terminal.tsx reports a fatal drop, the
+    // pane switches to the cap-reached message and nothing is retried. A
+    // timer armed by the previous, transient drop must go with it.
+    vi.mocked(api).mockResolvedValue({ ticket: 'tix', expires_at: '2026-01-01T00:00:00Z' })
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useReconnectingTicket('app', 42), { wrapper })
+
+    await act(async () => { result.current.start() })
+    act(() => { result.current.reconnect() })
+    const callsBefore = vi.mocked(api).mock.calls.length
+
+    act(() => { result.current.giveUp() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(vi.mocked(api).mock.calls.length).toBe(callsBefore)
+  })
 })

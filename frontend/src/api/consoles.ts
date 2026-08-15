@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, apiErrorDetail } from './client'
 
 export type ConsoleTicket = { ticket: string; expires_at: string }
@@ -70,10 +70,40 @@ export function useReconnectingTicket(kind: ConsoleKind, id: number) {
   const ticket = useConsoleTicket(kind, id)
   const attempts = useRef(0)
   const [failed, setFailed] = useState(false)
+  // The pending backoff timer, and whether this console still wants one.
+  //
+  // Both are needed, and neither alone is enough. Clearing the timer without
+  // the flag still loses the race where the timer fires in the instant before
+  // cleanup runs; the flag without the clear leaves a live timer behind for
+  // every closed console. A timer that survives either way mints a real
+  // Proxmox ticket and writes a `console.open` audit row for a console the
+  // user already closed, which is an audit log describing a session that
+  // never happened.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const wanted = useRef(true)
+
+  const stop = useCallback(() => {
+    wanted.current = false
+    clearTimeout(timer.current)
+    timer.current = undefined
+  }, [])
+
+  // Unmount is the close signal all three call sites actually have: none of
+  // apps.tsx, vms.tsx or nodeshell.tsx has a close button on the console
+  // pane, they are left by navigating away (or, for the node shell popup,
+  // by closing the window, which takes the whole page with it).
+  useEffect(() => {
+    wanted.current = true
+    return stop
+  }, [stop])
 
   // Fresh console (first open, or the id changed): reset the attempt count
-  // and mint a ticket right away.
+  // and mint a ticket right away. Any backoff timer still pending belongs to
+  // the console being replaced, so it goes with it.
   const start = useCallback(() => {
+    clearTimeout(timer.current)
+    timer.current = undefined
+    wanted.current = true
     attempts.current = 0
     setFailed(false)
     ticket.mutate()
@@ -83,18 +113,24 @@ export function useReconnectingTicket(kind: ConsoleKind, id: number) {
   // A transient drop: retry with backoff up to the cap, then give up for good.
   const reconnect = useCallback(() => {
     if (attempts.current >= MAX_RECONNECT_ATTEMPTS) {
+      stop()
       setFailed(true)
       return
     }
     const delay = BACKOFF_MS[attempts.current]
     attempts.current += 1
-    setTimeout(() => ticket.mutate(), delay)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      timer.current = undefined
+      if (!wanted.current) return
+      ticket.mutate()
+    }, delay)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [stop])
 
-  // A drop we already know is terminal (Terminal.tsx saw an error frame), 
+  // A drop we already know is terminal (Terminal.tsx saw an error frame),
   // skip straight to the cap-reached message instead of burning attempts.
-  const giveUp = useCallback(() => setFailed(true), [])
+  const giveUp = useCallback(() => { stop(); setFailed(true) }, [stop])
 
   return { ticket, failed, start, reconnect, giveUp }
 }

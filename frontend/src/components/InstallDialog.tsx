@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useCatalogEntry, useInstall } from '../api/catalog'
+import { figure, text } from '../api/catalogMetadata'
 import { CoreFields, type CoreFieldsValue } from './install/CoreFields'
 import { knownPool, useStoragePools } from './install/pools'
 import { StorageFields } from './install/StorageFields'
@@ -141,6 +142,20 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     hostname: coreOverride.hostname ?? name,
     unprivileged: coreOverride.unprivileged,
   }
+
+  // The one-line summary of what the script would build, with the missing
+  // halves left out instead of printed as bare units. Every default_* column
+  // is nullable (api/catalog.ts) because discovery parses them out of the ct
+  // script and plenty of scripts do not set them, which used to render as
+  // " vCPU · MB RAM · GB disk · ". Same figure()/text() rules the Store
+  // detail page uses, so 0 and "" count as missing there and here alike.
+  const defaultsLine = [
+    figure(entry.default_cpu) && `${entry.default_cpu} vCPU`,
+    figure(entry.default_ram_mb) && `${entry.default_ram_mb}MB RAM`,
+    figure(entry.default_disk_gb) && `${entry.default_disk_gb}GB disk`,
+    text(entry.default_os)
+      && [text(entry.default_os), text(entry.default_os_version)].filter(Boolean).join(' '),
+  ].filter(Boolean).join(' · ')
 
   // Whether the snapshot behind GET /storage has been read at all. Empty
   // candidate lists mean two opposite things (this host has no such pool /
@@ -286,10 +301,13 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
           <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             placeholder="Container ID (CTID)" value={ctid}
             onChange={(e) => setCtid(e.target.value)} />
-          <div className="rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
-            {entry.default_cpu} vCPU · {entry.default_ram_mb}MB RAM · {entry.default_disk_gb}GB disk ·{' '}
-            {entry.default_os} {entry.default_os_version}
-          </div>
+          {/* Nothing recorded at all means no box, not an empty one: the
+              Store detail page drops the whole section the same way. */}
+          {defaultsLine !== '' && (
+            <div className="rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
+              {defaultsLine}
+            </div>
+          )}
           {storageUnknown && (
             <div className="rounded-ctl border border-line-soft bg-elev p-2 text-[12px] text-text-3">
               {pools.state === 'error'

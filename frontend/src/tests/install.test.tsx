@@ -683,6 +683,47 @@ describe('InstallDialog', () => {
       expect(screen.queryByRole('checkbox', { name: /runs as root/i })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
+
+  // Every default_* column is nullable: discovery parses them out of the ct
+  // script and plenty of scripts set none of them. The summary line used to
+  // interpolate them unconditionally, so a row with nothing recorded printed
+  // the units on their own -- " vCPU · MB RAM · GB disk · " -- which reads as
+  // a measurement of nothing.
+  async function mockEntry(entry: Record<string, unknown>) {
+    const { api } = await import('../api/client')
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path === '/catalog/redis') {
+        return Promise.resolve({ slug: 'redis', name: 'Redis', installable: true,
+          default_cpu: null, default_ram_mb: null, default_disk_gb: null,
+          default_os: null, default_os_version: null, ...entry })
+      }
+      if (path === '/hosts') return Promise.resolve(DEFAULT_HOSTS)
+      if (path === '/storage') return Promise.resolve(withStatus(DEFAULT_STORAGE))
+      return Promise.resolve(null)
+    })
+  }
+
+  it('shows no bare units for a ct entry that records no defaults', async () => {
+    await mockEntry({})
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+
+    expect(screen.queryByText(/vCPU/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/MB RAM/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/GB disk/)).not.toBeInTheDocument()
+    // Nothing to say means no box at all, not an empty one.
+    expect(document.querySelector('.font-mono')).toBeNull()
+  })
+
+  it('drops the missing defaults and their separators, keeping the ones it has', async () => {
+    await mockEntry({ default_cpu: 2, default_os: 'debian' })
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+
+    // Exact text: no leading separator before "2 vCPU", none dangling after
+    // "debian", and no "MB RAM"/"GB disk" for figures that do not exist.
+    expect(screen.getByText('2 vCPU · debian')).toBeInTheDocument()
+  })
 })
 
 describe('knownPool', () => {
