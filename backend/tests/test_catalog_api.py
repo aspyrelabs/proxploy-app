@@ -294,8 +294,10 @@ def test_the_tag_fields_are_serialized_with_their_real_types(client, csrf_header
 
     row = client.get("/api/v1/catalog").json()[0]
 
-    assert row["script_created"] == "2024-05-02T00:00:00"
-    assert row["script_updated"] == "2026-06-11T00:00:00"
+    # Naive-UTC columns serialize with an explicit "Z" (proxploy.models.to_iso)
+    # so a browser's `new Date(...)` reads them as UTC, not local time.
+    assert row["script_created"] == "2024-05-02T00:00:00Z"
+    assert row["script_updated"] == "2026-06-11T00:00:00Z"
     assert row["has_arm"] is True and row["updateable"] is True
     assert row["privileged"] is False            # a real, known negative
     assert row["architectures"] == ["amd64", "arm64"]
