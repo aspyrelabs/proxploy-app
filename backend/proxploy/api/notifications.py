@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
-from proxploy.models import NotificationChannel, User, utcnow
+from proxploy.models import NotificationChannel, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.notifier import kind_for, send_one
 
@@ -44,8 +44,7 @@ class ChannelPatch(BaseModel):
 def _out(c: NotificationChannel) -> dict:
     return {"id": c.id, "name": c.name, "kind": c.kind, "events": c.events or [],
             "enabled": c.enabled,
-            "last_notified_at": c.last_notified_at.isoformat() + "Z"
-            if c.last_notified_at else None}
+            "last_notified_at": to_iso(c.last_notified_at)}
 
 
 def _require_url(url: str) -> str:

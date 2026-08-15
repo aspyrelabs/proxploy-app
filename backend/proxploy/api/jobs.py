@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.jobs import TERMINAL
-from proxploy.models import Job, JobEvent, User, utcnow
+from proxploy.models import Job, JobEvent, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.authn import resolve_session
 
@@ -32,9 +32,9 @@ def job_out(j: Job) -> dict:
         "params": j.params, "result": j.result, "error": j.error,
         "progress_pct": j.progress_pct, "requested_by": j.requested_by,
         "schedule_id": j.schedule_id,
-        "started_at": j.started_at.isoformat() + "Z" if j.started_at else None,
-        "finished_at": j.finished_at.isoformat() + "Z" if j.finished_at else None,
-        "created_at": j.created_at.isoformat() + "Z",
+        "started_at": to_iso(j.started_at),
+        "finished_at": to_iso(j.finished_at),
+        "created_at": to_iso(j.created_at),
     }
 
 
@@ -42,7 +42,7 @@ def backlog(db, job_id: int, after: int = 0, limit: int = 5000) -> list[dict]:
     rows = (db.query(JobEvent)
             .filter(JobEvent.job_id == job_id, JobEvent.seq > after)
             .order_by(JobEvent.seq).limit(limit).all())
-    return [{"seq": e.seq, "ts": e.ts.isoformat() + "Z",
+    return [{"seq": e.seq, "ts": to_iso(e.ts),
              "stream": e.stream, "message": e.message} for e in rows]
 
 

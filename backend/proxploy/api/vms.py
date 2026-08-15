@@ -11,7 +11,7 @@ from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
 from proxploy.api.deps import authorize, get_db, require_entitlement, scope_vm
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
-from proxploy.models import Host, User, Vm
+from proxploy.models import Host, User, Vm, to_iso
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import VM_ACTIONS
@@ -46,7 +46,7 @@ def _vm_out(v: Vm, host: Host, snapshots) -> dict:
         "cpu_pct": g["cpu_pct"] if g else None,
         "mem_bytes": v.mem_bytes, "disk_bytes": v.disk_bytes,
         "uptime_s": v.uptime_s,
-        "synced_at": v.synced_at.isoformat() + "Z" if v.synced_at else None,
+        "synced_at": to_iso(v.synced_at),
     }
 
 

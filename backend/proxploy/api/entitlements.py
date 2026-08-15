@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from proxploy.api.deps import authorize, get_db, get_entitlements
 from proxploy.entitlements.client import TokenInvalid
-from proxploy.models import AppSetting, EntitlementCache, utcnow
+from proxploy.models import AppSetting, EntitlementCache, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.license_client import LicenseApiError
 from proxploy.services.settings import get_setting as _setting
@@ -22,8 +22,8 @@ def entitlements(ent=Depends(get_entitlements)):
     st = ent.status()
     grace = None
     if st.source == "token":
-        grace = {"expires_at": st.expires_at.isoformat(),
-                 "grace_until": st.grace_until.isoformat(), "in_grace": st.in_grace}
+        grace = {"expires_at": to_iso(st.expires_at),
+                 "grace_until": to_iso(st.grace_until), "in_grace": st.in_grace}
     return {"tier": st.tier, "features": ent.snapshot(), "grace": grace,
             "clock_skew": st.clock_skew}
 

@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
                                get_db, require_entitlement, user_role)
-from proxploy.models import SessionRow, TeamMember, User, utcnow
+from proxploy.models import SessionRow, TeamMember, User, to_iso, utcnow
 from proxploy.services import authn, oidc, totp
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import enforce
@@ -261,10 +261,6 @@ def totp_regenerate_recovery_codes(request: Request, body: TotpDisableIn, db=Dep
 # enforced by filtering the query on user_id=user.id, so a caller can never
 # even discover another user's session id, let alone revoke it.
 
-def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
-
-
 @router.get("/sessions")
 def list_sessions(request: Request, db=Depends(get_db),
                   user: User = Depends(get_current_user)):
@@ -277,7 +273,7 @@ def list_sessions(request: Request, db=Depends(get_db),
                    SessionRow.expires_at > now)
             .order_by(SessionRow.id))
     return [{"id": r.id, "ip": r.ip, "user_agent": r.user_agent,
-             "created_at": _iso(r.created_at), "last_seen_at": _iso(r.last_seen_at),
+             "created_at": to_iso(r.created_at), "last_seen_at": to_iso(r.last_seen_at),
              "current": r.token_hash == current_hash} for r in rows]
 
 

@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timezone
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
-from proxploy.models import App, Backup, Host, Job, Vm, utcnow
+from proxploy.models import App, Backup, Host, Job, Vm, to_iso, utcnow
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
@@ -149,7 +149,7 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
         # "the cache was never filled" are different, and only this key can tell
         # the GET route apart: otherwise a cluster with no backups re-enqueues
         # a sync on every page load.
-        set_setting(db, SYNCED_AT_KEY, utcnow().isoformat())
+        set_setting(db, SYNCED_AT_KEY, to_iso(utcnow()))
     ctx.log(f"{synced} backups cached, {dropped} dropped, {len(failed)} host(s) failed")
     ctx.progress(100)
     app.state.bus.publish("resource", {"type": "backup", "change": "list"})

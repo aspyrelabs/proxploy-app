@@ -18,7 +18,7 @@ from sqlalchemy import func
 
 from proxploy.api.deps import authorize, get_db, require_entitlement, scope_backup
 from proxploy.api.jobs import enqueue_and_audit
-from proxploy.models import App, Backup, Host, User, Vm, utcnow
+from proxploy.models import App, Backup, Host, User, Vm, to_iso, utcnow
 from proxploy.services.backupjobs import SYNCED_AT_KEY, sync_in_flight
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
@@ -49,16 +49,12 @@ _manage_scoped = authorize("backup", "manage", scope_of=scope_backup())
 _sync_enqueue_lock = threading.Lock()
 
 
-def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() + "Z" if dt else None
-
-
 def _backup_out(b: Backup, host_name: str | None) -> dict:
     return {
         "id": b.id, "host_id": b.host_id, "host_name": host_name,
         "storage": b.storage, "volid": b.volid,
         "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
-        "guest_name": b.guest_name, "taken_at": _iso(b.taken_at),
+        "guest_name": b.guest_name, "taken_at": to_iso(b.taken_at),
         "size_bytes": b.size_bytes, "verify_state": b.verify_state,
         "notes": b.notes,
     }
@@ -68,7 +64,12 @@ def _last_sync(db) -> datetime | None:
     raw = get_setting(db, SYNCED_AT_KEY)
     if raw:
         try:
-            return datetime.fromisoformat(raw)
+            dt = datetime.fromisoformat(raw)
+            # Stored via to_iso(), which appends "Z" -> aware. Every other
+            # datetime in this module is naive UTC (utcnow()'s convention),
+            # so this strips the offset right back off rather than making
+            # the one arithmetic site below handle both.
+            return dt.replace(tzinfo=None) if dt.tzinfo else dt
         except ValueError:
             pass
     return None
@@ -143,7 +144,7 @@ def list_backups(request: Request, db=Depends(get_db), limit: int = BACKUPS_MAX,
     return {
         "backups": [_backup_out(b, hosts.get(b.host_id)) for b in rows],
         "stats": _stats(db),
-        "synced_at": _iso(synced_at),
+        "synced_at": to_iso(synced_at),
         "stale": stale,
     }
 

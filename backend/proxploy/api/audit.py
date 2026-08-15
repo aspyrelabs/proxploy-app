@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
-from proxploy.models import AuditEvent
+from proxploy.models import AuditEvent, to_iso
 
 EXPORT_COLUMNS = ("id", "ts", "actor_type", "actor_id", "action", "target_type",
                   "target_id", "params", "result", "ip", "job_id")
@@ -33,7 +33,7 @@ def _filtered(db, action, actor, from_, to):
 
 
 def row_dict(r: AuditEvent) -> dict:
-    return {"id": r.id, "ts": r.ts.isoformat(), "actor_type": r.actor_type,
+    return {"id": r.id, "ts": to_iso(r.ts), "actor_type": r.actor_type,
             "actor_id": r.actor_id, "action": r.action,
             "target_type": r.target_type, "target_id": r.target_id,
             "params": r.params, "result": r.result, "ip": r.ip,

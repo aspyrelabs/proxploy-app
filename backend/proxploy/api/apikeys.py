@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from proxploy.api.deps import get_current_user, get_db, require_entitlement
-from proxploy.models import ApiKey, User, utcnow
+from proxploy.models import ApiKey, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import PERMISSIONS
 
@@ -47,15 +47,11 @@ class ApiKeyIn(BaseModel):
     expires_at: datetime | None = None
 
 
-def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
-
-
 def _out(row: ApiKey) -> dict:
     return {"id": row.id, "name": row.name, "prefix": row.prefix,
-            "scopes": row.scopes, "expires_at": _iso(row.expires_at),
-            "last_used_at": _iso(row.last_used_at),
-            "revoked_at": _iso(row.revoked_at), "created_at": _iso(row.created_at)}
+            "scopes": row.scopes, "expires_at": to_iso(row.expires_at),
+            "last_used_at": to_iso(row.last_used_at),
+            "revoked_at": to_iso(row.revoked_at), "created_at": to_iso(row.created_at)}
 
 
 @router.post("", status_code=201,

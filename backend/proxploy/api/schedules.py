@@ -17,7 +17,7 @@ from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.jobs import HANDLERS
 from proxploy.jobs.scheduler import BadSchedule, _target, next_fire
-from proxploy.models import Job, Schedule, User, utcnow
+from proxploy.models import Job, Schedule, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
@@ -53,15 +53,11 @@ class SchedulePatch(BaseModel):
     enabled: bool | None = None
 
 
-def _iso(dt):
-    return dt.isoformat() + "Z" if dt else None
-
-
 def _out(s: Schedule) -> dict:
     return {"id": s.id, "name": s.name, "job_kind": s.job_kind, "cron": s.cron,
             "timezone": s.timezone, "params": s.params or {},
             "enabled": s.enabled, "created_by": s.created_by,
-            "last_run_at": _iso(s.last_run_at), "next_run_at": _iso(s.next_run_at)}
+            "last_run_at": to_iso(s.last_run_at), "next_run_at": to_iso(s.next_run_at)}
 
 
 def _ip(request: Request) -> str | None:

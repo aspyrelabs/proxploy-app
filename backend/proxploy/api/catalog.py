@@ -16,7 +16,7 @@ from sqlalchemy import nulls_last
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
-from proxploy.models import App, CatalogEntry, Host, HostCredential, User, utcnow
+from proxploy.models import App, CatalogEntry, Host, HostCredential, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
 from proxploy.services.catalog_icons import (CONTENT_TYPES,
@@ -100,8 +100,7 @@ def _serialize(r: CatalogEntry) -> dict:
         # cache (services/catalog_telemetry.py), so the number can be a full
         # day old while the name and icon beside it are minutes old. A raw
         # count with no "as of" next to it would present stale data as live.
-        "popularity_synced_at": (r.popularity_synced_at.isoformat()
-                                 if r.popularity_synced_at else None),
+        "popularity_synced_at": to_iso(r.popularity_synced_at),
         # "listed" | "delisted" | "unlisted" | "variant" | null. The one
         # metadata-sync column that IS served, because it changes what the
         # card says rather than how fresh it is: "delisted" and "unlisted"
@@ -114,7 +113,7 @@ def _serialize(r: CatalogEntry) -> dict:
         "default_disk_gb": r.default_disk_gb, "default_os": r.default_os,
         "default_os_version": r.default_os_version,
         "installable": r.installable, "unsupported_reason": r.unsupported_reason,
-        "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+        "synced_at": to_iso(r.synced_at),
         # The verifiable answer to "what will Proxploy actually run?". These
         # two are only meaningful together: the path names the exact file and
         # the sha pins the exact revision of it, which is the same
@@ -151,10 +150,8 @@ def _serialize(r: CatalogEntry) -> dict:
         # `synced_at` (when WE last discovered the row) or with
         # upstream_updated_at (when the upstream RECORD was last edited, which
         # a description fix bumps). ISO or null.
-        "script_created": (r.script_created.isoformat()
-                           if r.script_created else None),
-        "script_updated": (r.script_updated.isoformat()
-                           if r.script_updated else None),
+        "script_created": to_iso(r.script_created),
+        "script_updated": to_iso(r.script_updated),
         # The card tags. ALL FOUR ARE TRI-STATE AND NULL MEANS UNKNOWN, NEVER
         # "NO". The 9 `unlisted` rows have no upstream record at all, so we do
         # not know whether they are ARM-capable, updateable or privileged, and
@@ -252,7 +249,7 @@ def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_r
     stale_after_s = request.app.state.settings.catalog_stale_after_s
     age_s = (utcnow() - newest).total_seconds() if newest else None
     return {
-        "synced_at": newest.isoformat() if newest else None,
+        "synced_at": to_iso(newest),
         "age_s": age_s,
         "entries": total,
         "stale_after_s": stale_after_s,

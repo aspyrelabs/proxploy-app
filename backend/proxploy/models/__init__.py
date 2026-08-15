@@ -16,6 +16,25 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def to_iso(dt: datetime | None) -> str | None:
+    """The one way to serialize a datetime for an API response.
+
+    Every timestamp column here is stored as naive UTC (see utcnow() above),
+    so a bare dt.isoformat() carries no offset. A browser's
+    `new Date("...")` reads an offset-less string as LOCAL time, not UTC,
+    which silently shifts every timestamp shown in the UI by the viewer's
+    own timezone. Naive input gets a literal "Z" appended so it reads as
+    UTC unambiguously. A value that already carries a timezone is left as
+    isoformat() renders it (its own offset is already unambiguous), so this
+    never double-suffixes. None passes through as None.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.isoformat()
+    return dt.isoformat() + "Z"
+
+
 class Base(DeclarativeBase):
     pass
 

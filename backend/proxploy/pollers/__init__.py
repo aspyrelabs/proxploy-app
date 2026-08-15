@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, utcnow
+from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import cluster_identity
 from proxploy.services.metrics import write_samples
@@ -360,7 +360,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         write_audit(db, actor_type="system", action="app.reaped",
                     target_type="app", target_id=a.id,
                     params={"ctid": a.ctid, "host_id": host.id,
-                            "missing_since": a.missing_since.isoformat()})
+                            "missing_since": to_iso(a.missing_since)})
         events.append(("resource", {"type": "app", "id": a.id,
                                     "change": "removed"}))
         db.delete(a)

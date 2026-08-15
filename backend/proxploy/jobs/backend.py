@@ -20,7 +20,7 @@ import contextlib
 import os
 from collections.abc import Callable
 
-from proxploy.models import Job, JobEvent, utcnow
+from proxploy.models import Job, JobEvent, to_iso, utcnow
 from proxploy.services.audit import redact
 
 TERMINAL = ("succeeded", "failed", "canceled", "interrupted")
@@ -93,7 +93,7 @@ class JobContext:
             db.commit()
         self.backend._fanout(self.job_id, {
             "event": "line", "id": seq,
-            "data": {"stream": stream, "ts": ts.isoformat() + "Z", "message": message},
+            "data": {"stream": stream, "ts": to_iso(ts), "message": message},
         })
 
     def progress(self, pct: int) -> None:
@@ -356,7 +356,11 @@ class JobBackend:
         if error:
             payload["error"] = error
         self._fanout(job_id, {"event": "status", "data": payload})
-        self._publish(job_id, status=status, kind=kind, target_type=target_type)
+        # error only when set (mirrors the fanout payload above): the global
+        # `job` delta is what LiveProvider's failure toast reads its message
+        # from, and a bare "App Stop Failed" with no reason was the finding.
+        self._publish(job_id, status=status, kind=kind, target_type=target_type,
+                      **({"error": error} if error else {}))
         self._notify(job_id, kind, status, error)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:

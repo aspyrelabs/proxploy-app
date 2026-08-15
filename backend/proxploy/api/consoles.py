@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
 from proxploy.api.deps import authorize, get_db, require_entitlement, scope_app, scope_host, scope_vm
-from proxploy.models import App, Host, User, Vm
+from proxploy.models import App, Host, User, Vm, to_iso
 from proxploy.services import ptybridge
 from proxploy.services.audit import write_audit
 from proxploy.services.consoleproxy import ConsoleProxyError, bridge_binary, connect_upstream_vnc
@@ -54,7 +54,7 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="console.open",
                target_type="app", target_id=a.id,
                ip=request.client.host if request.client else None)
-    return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
+    return {"ticket": raw, "expires_at": to_iso(expires_at)}
 
 
 # PVE happily mints a termproxy ticket for a guest that is not running, and the
@@ -200,7 +200,7 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="console.open",
                target_type="host", target_id=host.id,
                ip=request.client.host if request.client else None)
-    return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
+    return {"ticket": raw, "expires_at": to_iso(expires_at)}
 
 
 @router.websocket("/hosts/{host_id}/shell/ws")
@@ -233,7 +233,7 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="console.open",
                target_type="vm", target_id=v.id,
                ip=request.client.host if request.client else None)
-    return {"ticket": raw, "expires_at": expires_at.isoformat() + "Z"}
+    return {"ticket": raw, "expires_at": to_iso(expires_at)}
 
 
 @router.websocket("/vms/{vm_id}/vnc/ws")

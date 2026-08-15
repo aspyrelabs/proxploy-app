@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import (Alert, AlertRule, App, Host, NotificationChannel,
-                             User, Vm, utcnow)
+                             User, Vm, to_iso, utcnow)
 from proxploy.services.alerts import METRIC_TARGETS, STATUS_METRICS
 from proxploy.services.audit import write_audit
 
@@ -216,10 +216,10 @@ def alert_out(a: Alert, rules: dict, labels: dict, emails: dict) -> dict:
         "target_type": a.target_type, "target_id": a.target_id,
         "target_label": labels.get((a.target_type, a.target_id)),
         "state": a.state, "value": a.value, "message": a.message,
-        "fired_at": a.fired_at.isoformat() + "Z" if a.fired_at else None,
-        "resolved_at": a.resolved_at.isoformat() + "Z" if a.resolved_at else None,
+        "fired_at": to_iso(a.fired_at),
+        "resolved_at": to_iso(a.resolved_at),
         "acked_by": a.acked_by, "acked_by_email": emails.get(a.acked_by),
-        "acked_at": a.acked_at.isoformat() + "Z" if a.acked_at else None,
+        "acked_at": to_iso(a.acked_at),
     }
 
 
