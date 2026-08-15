@@ -52,11 +52,18 @@ _read = authorize("audit", "read")
 # enforced, so the documented control did not exist. It costs nothing to arm
 # today (tiers.yaml keeps all_entitled) and stops the docs describing a gate
 # that isn't there.
+AUDIT_PAGE_MAX = 200
+
+
 @router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("audit.log"))])
 def list_audit(response: Response, db=Depends(get_db), action: str | None = None,
                actor: int | None = None, from_: datetime | None = None,
                to: datetime | None = None, page: int = 1, per_page: int = 50):
+    # Same clamp the other paged reads use (alerts.py, cluster.py). Unbounded,
+    # per_page=100000000 turns the append-only audit table into one response,
+    # and page=0 asks SQLite for OFFSET -50.
+    page, per_page = max(1, page), max(1, min(per_page, AUDIT_PAGE_MAX))
     q = _filtered(db, action, actor, from_, to)
     response.headers["X-Total-Count"] = str(q.count())
     rows = (q.order_by(AuditEvent.ts.desc(), AuditEvent.id.desc())

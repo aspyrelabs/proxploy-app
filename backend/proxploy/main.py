@@ -97,11 +97,21 @@ def create_app(
                         row = (db.query(AppSetting)
                                .filter_by(key="license.refresh_credential.enc").one_or_none())
                         if not row:
-                            return
+                            # continue, not return: an owner who removes the
+                            # license and activates a new one later would
+                            # otherwise get no auto-refresh until a restart,
+                            # and the token lapses to builtin after grace.
+                            continue
                         install_row = (db.query(AppSetting)
                                        .filter_by(key="license.install_id").one_or_none())
                         cred = app.state.secretstore.decrypt(row.value.encode()).decode()
-                        out = app.state.license_client.refresh(
+                        # refresh() is synchronous httpx with a 10s timeout.
+                        # On the loop it stalls SSE pings, console frames and
+                        # every job's await_task poll with it, the same reason
+                        # the poller and scheduler hand their blocking calls to
+                        # a thread.
+                        out = await asyncio.to_thread(
+                            app.state.license_client.refresh,
                             cred, install_row.value if install_row else None)
                         # apply via a fake-request shim: the helper only needs .app
                         class _Req:  # noqa: N801  (minimal shim)

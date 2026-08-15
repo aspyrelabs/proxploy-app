@@ -69,11 +69,16 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
     return {"job": job_out(job)}
 
 
+JOBS_PAGE_MAX = 200
+JOB_EVENTS_MAX = 5000
+
+
 @router.get("", dependencies=[Depends(_read),
                               Depends(require_entitlement("jobs.history"))])
 def list_jobs(response: Response, status: str | None = None, kind: str | None = None,
               target: str | None = None, page: int = 1, per_page: int = 50,
               db=Depends(get_db)):
+    page, per_page = max(1, page), max(1, min(per_page, JOBS_PAGE_MAX))
     q = db.query(Job)
     if status:
         q = q.filter(Job.status == status)
@@ -104,6 +109,7 @@ def job_detail(job_id: int, db=Depends(get_db)):
             dependencies=[Depends(_read),
                           Depends(require_entitlement("jobs.history"))])
 def job_events(job_id: int, after: int = 0, limit: int = 5000, db=Depends(get_db)):
+    limit = max(1, min(limit, JOB_EVENTS_MAX))
     if db.get(Job, job_id) is None:
         raise HTTPException(404, "job not found")
     return backlog(db, job_id, after=after, limit=limit)
