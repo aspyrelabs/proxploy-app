@@ -224,8 +224,13 @@ the error text underneath them. HTTP 502 keeps Proxmox's own message under the
    interactive `read`/`whiptail` prompts, to decide whether a store entry can
    install unattended. Host availability is irrelevant to it, and it reports
    "succeeded" with "classified 0" whenever the backlog is empty, which is
-   correct and reads like a failure. Something naming what it actually reads,
-   "Script Check" or "Store Scan", would be true. Not changed, needs a call.
+   correct and reads like a failure.
+
+   DECIDED: keep "Compatibility Check". Alternatives naming what it reads
+   ("Script Check", "Store Scan") were considered and turned down. Recorded
+   here because the label genuinely did mislead a reader once, so anyone
+   meeting that confusion again should know it is a known, accepted one and
+   not a fresh finding.
 
 2. **Four labels are past tense, against rule 2.** "App Vanished" is gone, but
    "Backup Failed" (alert), "Jobs Interrupted" (restart notifier) and the two
