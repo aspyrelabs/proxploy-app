@@ -113,3 +113,71 @@ def test_a_capability_added_to_CAPABILITIES_appears_with_no_second_list(
         host_id = _seed(app, ["api_token:monitoring"])
         caps = c.get(f"/api/v1/hosts/{host_id}").json()["capabilities"]
         assert caps["teleportation"] is False
+
+
+# GET /hosts/capabilities: the static catalogue (key/label/why/required) the
+# HostForm reads to tell an operator what unticking a box gives up. Not to be
+# confused with _capability_state above, which is per-host presence booleans.
+
+def test_capabilities_route_lists_them_in_declaration_order(tmp_path, bootstrap_admin):
+    """Monitoring first, matching CAPABILITIES's own order (the order the
+    script emits), and only monitoring is required."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.get("/api/v1/hosts/capabilities")
+        assert r.status_code == 200
+        caps = r.json()
+        assert isinstance(caps, list)
+        assert [entry["key"] for entry in caps] == list(CAPABILITIES.keys())
+        assert caps[0]["key"] == "monitoring" and caps[0]["required"] is True
+        assert all(entry["required"] is False for entry in caps[1:])
+
+
+def test_capabilities_route_carries_the_exact_label_and_why_from_pveum(
+        tmp_path, bootstrap_admin):
+    """Compared against the imported dataclass, never a pasted string: pveum.py
+    stays the only place label/why text is written."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        caps = c.get("/api/v1/hosts/capabilities").json()
+        for entry in caps:
+            source = CAPABILITIES[entry["key"]]
+            assert entry["label"] == source.label
+            assert entry["why"] == source.why
+
+
+def test_capabilities_route_omits_privileges_role_and_token(tmp_path, bootstrap_admin):
+    """The UI needs why a capability matters, not the PVE privilege names or
+    role/token identifiers that generate the script."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        caps = c.get("/api/v1/hosts/capabilities").json()
+        for entry in caps:
+            assert set(entry.keys()) == {"key", "label", "why", "required"}
+
+
+def test_capabilities_route_is_not_shadowed_by_the_host_id_wildcard(
+        tmp_path, bootstrap_admin):
+    """A literal /capabilities segment must resolve to this route, not fall
+    into GET /{host_id} with host_id="capabilities" (which would 404 as
+    "no such host")."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.get("/api/v1/hosts/capabilities")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+
+def test_capabilities_route_requires_auth_like_the_other_host_reads(
+        tmp_path, bootstrap_admin):
+    """Same treatment as GET /hosts (list_hosts): anonymous is 401."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert c.get("/api/v1/hosts/capabilities").status_code == 200
+    with TestClient(app) as anon:
+        assert anon.get("/api/v1/hosts/capabilities").status_code == 401

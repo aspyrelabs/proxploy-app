@@ -7,7 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import authorize, get_db, scope_host
 from proxploy.api.jobs import enqueue_and_audit
-from proxploy.models import Host, HostCredential, Team, User, utcnow
+from proxploy.models import Host, HostCredential, Team, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
@@ -323,11 +323,32 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              # Same reason (Task 6): the install dialog asks the root-execution
              # tick only while this is null. Re-asking a host that already
              # acknowledged surfaces no new information, it is just friction.
-             "install_consent_at": (h.install_consent_at.isoformat()
-                                    if h.install_consent_at else None),
+             "install_consent_at": to_iso(h.install_consent_at),
              "capabilities": _capability_state(kinds.get(h.id, ())),
-             "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None}
+             "last_seen_at": to_iso(h.last_seen_at)}
             for h in db.query(Host).order_by(Host.id)]
+
+
+@router.get("/capabilities")
+def list_capabilities(user: User = Depends(_read)):
+    """The static catalogue of optional capabilities the setup script can
+    grant (key, label, why it matters, whether it is required), for the
+    frontend to tell an operator what they give up by unticking one.
+
+    Registered ABOVE the /{host_id} wildcard below: Starlette matches in
+    registration order, and out of order this literal path would be
+    swallowed by GET /{host_id} with host_id="capabilities" (same WARNING
+    as api/vms.py's /{vm_id}/{action} ordering hazard). Confirmed by
+    test_capabilities_route_is_not_shadowed_by_the_host_id_wildcard.
+
+    Derived straight from CAPABILITIES, list not dict, so declaration order
+    (monitoring first) survives into the response, and a capability added
+    there needs no edit here. privileges/role/token are deliberately left
+    off: the UI only needs why a capability matters, not the PVE privilege
+    names or the identifiers that build the script.
+    """
+    return [{"key": c.key, "label": c.label, "why": c.why, "required": c.required}
+            for c in CAPABILITIES.values()]
 
 
 @router.get("/{host_id}")
@@ -345,8 +366,7 @@ def host_detail(host_id: int, db=Depends(get_db),
             "node_power_missing": h.node_power_missing, "team_id": h.team_id,
             "capabilities": _capability_state(c.kind for c in creds),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
-                             "last_used_at": c.last_used_at.isoformat()
-                             if c.last_used_at else None} for c in creds]}
+                             "last_used_at": to_iso(c.last_used_at)} for c in creds]}
 
 
 @router.patch("/{host_id}")
@@ -471,7 +491,7 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="host.ssh_verify",
                 target_type="host", target_id=host_id,
                 ip=request.client.host if request.client else None)
-    return {"verified": True, "verified_at": cred.ssh_verified_at.isoformat()}
+    return {"verified": True, "verified_at": to_iso(cred.ssh_verified_at)}
 
 
 # --- removal, credential rotation, forced sync, task passthrough (PXP-17) ---
@@ -989,8 +1009,7 @@ async def sync_host(request: Request, host_id: int, db=Depends(get_db),
     with request.app.state.sessionmaker() as fresh:
         row = fresh.get(Host, host_id)
         return {"id": host_id, "status": row.status if row else None,
-                "last_seen_at": row.last_seen_at.isoformat()
-                if row and row.last_seen_at else None,
+                "last_seen_at": to_iso(row.last_seen_at) if row else None,
                 "events": len(events)}
 
 
