@@ -4,12 +4,13 @@ import { ThemeToggle } from './ThemeToggle'
 import { TierPill } from './TierPill'
 import { useEntitlements } from '../api/hooks'
 import { AccountMenu } from './AccountMenu'
+import { Skeleton, SkeletonGroup } from './ui/skeleton'
 import { openCommandPalette } from './CommandPalette'
 import { Link } from '@tanstack/react-router'
 import Logo, { GhostMark } from './Logo'
 
 export function Topbar() {
-  const { has } = useEntitlements()
+  const ent = useEntitlements()
   return (
     // h-14 rather than py-2.5: the sidebar now sticks BELOW this bar, so its
     // offset has to be a number something else can rely on. z-10 is enough to
@@ -69,7 +70,27 @@ export function Topbar() {
         </button>
       </div>
       <TierPill />
-      {has('notify.inapp') && <BellPopover />}
+      {/* Three states, not two. api/hooks.ts keeps has() fail-closed on
+          purpose, but that is a security default and not a statement of
+          fact, so gating the bell on it alone read "your plan does not
+          include this" for every plan while /entitlements was in flight,
+          and forever if that request failed. A user whose entitlements call
+          500s then had no surface at all telling them whether their install
+          worked, and nothing explaining why it had gone.
+
+          pending  -> a placeholder the size of the bell, same answer
+                      TierPill gives beside it: no claim either way, and no
+                      control popping in and out of the bar.
+          errored  -> the bell. Not a fail-open: what the tray shows is
+                      /jobs, which the backend authorises on its own, so
+                      nothing here unlocks anything the server would refuse.
+                      Hiding it would assert a plan limit we could not check.
+          not entitled (data read, feature absent) -> no bell, as before. */}
+      {ent.isPending ? (
+        <SkeletonGroup label="Checking your plan" className="shrink-0">
+          <Skeleton className="h-8 w-8 rounded-tile" />
+        </SkeletonGroup>
+      ) : (ent.data == null || ent.has('notify.inapp')) && <BellPopover />}
       <ThemeToggle />
       <AccountMenu />
     </header>

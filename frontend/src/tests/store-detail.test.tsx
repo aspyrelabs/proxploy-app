@@ -426,6 +426,18 @@ describe('StoreDetailPage, states other than a loaded row', () => {
     expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 
+  it('still offers Install while feasibility is unconfirmed, same as the card', async () => {
+    // installable is tri-state and null means "not classified yet", not "no"
+    // (decision 2, lazy classification). The card has always offered Install
+    // on a null and is tested for it; this page used to withhold it, so the
+    // same entry said two different things depending on where you looked.
+    // The install request classifies before it runs and refuses in words if
+    // the check fails, so the button is what settles the question.
+    mount({ ...rich, installable: null, unsupported_reason: null })
+    expect(await screen.findByText(/has not been able to confirm/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
   it('renders a not-found page for an unknown slug, naming it', async () => {
     slug = 'nope'
     mount(new ApiError(404, { detail: 'not found' }))

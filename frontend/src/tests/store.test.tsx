@@ -1313,15 +1313,24 @@ describe('Store detail popup', () => {
     expect(within(dialog).queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
-  it('claims neither way in the popup while feasibility is unconfirmed', async () => {
-    // installable === null is "not established yet", never "no". Offering
-    // Install here would assert the very thing the page says it cannot
-    // establish, so the retry is the only affordance.
+  it('offers Install in the popup while feasibility is unconfirmed, and says so', async () => {
+    // installable === null is "not established yet", never "no" (decision 2,
+    // lazy classification). The popup used to withhold Install here while the
+    // card behind it offered it, so one entry said two different things
+    // depending on where you looked. The card is the tested product decision:
+    // a null must not block install. The backend agrees, and is the authority
+    // either way, POST /catalog/{slug}/install classifies before it runs and
+    // refuses in words if the check fails or comes back negative.
+    //
+    // Both affordances, because they answer different questions: Install acts,
+    // Check again just re-reads feasibility. Neither claims the app IS
+    // installable; the sentence beside them says it is not confirmed.
     detail = { ...DETAIL, installable: null }
     const dialog = await openPopup()
     expect(within(dialog).getByRole('button', { name: /check again/i })).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(within(dialog).queryByText(/Not installable/)).toBeNull()
+    expect(within(dialog).getByText(/has not been able to confirm/)).toBeInTheDocument()
   })
 
   it('nests no interactive element inside another in the popup', async () => {

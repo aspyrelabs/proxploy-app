@@ -18,9 +18,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // notify.inapp gates the toast surface, not the data; a ref keeps the
   // effect below from re-subscribing (and dropping the EventSource) every
   // time the entitlements query refetches.
-  const { has } = useEntitlements()
+  //
+  // `ent.data == null ||`, not a bare has(): has() is fail-closed by design
+  // (api/hooks.ts), so on its own it dropped every job and alert that landed
+  // while the first /entitlements fetch was in flight, and every one after
+  // that if the fetch failed. Those events are not replayed, so the operator
+  // was left with no record of whether their install succeeded. Only a plan
+  // we have actually read, and that genuinely lacks the feature, silences
+  // this. The events are stored, not shown as an unlocked paid feature: the
+  // topbar bell follows the same three-state rule.
+  const ent = useEntitlements()
   const inApp = useRef(true)
-  inApp.current = has('notify.inapp')
+  inApp.current = ent.data == null || ent.has('notify.inapp')
   useEffect(() => {
     if (typeof EventSource === 'undefined') return // jsdom / stripped proxies
     const es = new EventSource('/api/v1/events/stream')

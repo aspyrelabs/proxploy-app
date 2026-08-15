@@ -229,16 +229,23 @@ function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
  * `installable === false` deliberately renders NOTHING here. A disabled
  * primary action with its explanation somewhere else reads worse than no
  * action at all, so the reason stays in Availability where there is room for
- * the sentence. `installable === null` is the same: unconfirmed feasibility is
- * not an invitation to install, and the recovery affordance stays in
- * Availability too, being a recovery rather than a primary action.
+ * the sentence.
+ *
+ * `installable === null` DOES get the button, matching StoreCard. Null is
+ * "not classified yet", not "no": classification is lazy (decision 2) and
+ * runs on demand at exactly two moments, opening this page
+ * (GET /catalog/{slug}) and starting an install
+ * (POST /catalog/{slug}/install). So the install itself re-checks
+ * feasibility before it does anything, and refuses in words if the check
+ * fails or comes back negative. Withholding the button here only blocked
+ * the one action that would have resolved the state.
  */
 export function InstallAction({ entry, installed, onInstall }: {
   entry: { slug: string; installable: boolean | null }
   installed: boolean
   onInstall: (slug: string) => void
 }) {
-  if (entry.installable !== true) return null
+  if (entry.installable === false) return null
   return installed
     ? <Button variant="ghost" disabled>Installed</Button>
     : <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>
@@ -255,10 +262,14 @@ function Feasibility({ entry, onRecheck, rechecking }: {
           can be installed:
             true  -> Install, or a disabled "Installed" if it already is
             false -> the reason, and NO button
-            null  -> neither claim, just the retry below
-          In particular there is no Install button on a null: feasibility is
-          unconfirmed, and offering the action would be asserting the very
-          thing this page says it cannot establish. */}
+            null  -> Install, and the sentence below saying feasibility is
+                     not confirmed yet
+          The null case used to withhold the button here while the card
+          offered it, which is the disagreement those first two lines exist
+          to prevent. The card is right: classification is lazy, and the
+          install request classifies before it runs, so the button is what
+          settles the question rather than a claim that it is already
+          settled. Nothing is promised that the backend will not check. */}
       {/* The button that used to live here is now at the top right, where a
           primary action belongs; this section keeps the STATEMENT of
           feasibility, which is what it was always for. */}
