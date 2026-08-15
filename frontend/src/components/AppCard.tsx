@@ -15,8 +15,19 @@ export function AppCard({ app }: { app: AppRow }) {
   const stopped = app.status !== 'running'
   return (
     <div
+      // The only way into app detail, so it has to work without a mouse:
+      // NodeCard.tsx does the identical card-as-navigation this way. Space is
+      // prevented so the page does not scroll under the press.
+      role="link" tabIndex={0}
+      aria-label={app.name}
       className={`cursor-pointer rounded-card border border-line-soft bg-panel p-4 transition-transform hover:-translate-y-[3px] motion-reduce:transform-none ${stopped ? 'opacity-70' : ''}`}
       onClick={() => navigate({ to: '/apps/$appId' as never, params: { appId: String(app.id) } as never })}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          navigate({ to: '/apps/$appId' as never, params: { appId: String(app.id) } as never })
+        }
+      }}
     >
       <div className="flex items-start justify-between">
         {/* The same tile the Store card draws, so an installed app wears the

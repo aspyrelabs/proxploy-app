@@ -82,8 +82,18 @@ export function VmsPage() {
                 {rows.map((v) => (
                   <tr
                     key={v.id}
+                    // Same reason as AppCard: this row is the only route into
+                    // VM detail, so it cannot be mouse-only.
+                    role="link" tabIndex={0}
+                    aria-label={v.name}
                     className="cursor-pointer border-t border-line-soft hover:bg-panel-2"
                     onClick={() => navigate({ to: '/vms/$vmId' as never, params: { vmId: String(v.id) } as never })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        navigate({ to: '/vms/$vmId' as never, params: { vmId: String(v.id) } as never })
+                      }
+                    }}
                   >
                     <td className="py-2.5 font-mono">{v.name}</td>
                     <td className="py-2.5 text-text-2">{v.host_name}</td>

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 
 // Mirrors backend/proxploy/api/audit.py::row_dict.
@@ -42,6 +42,10 @@ export function useAuditLog(filters: AuditFilters, page: number, enabled = true)
       p.set('per_page', String(AUDIT_PER_PAGE + 1))
       return api<AuditRow[]>(`/audit?${p.toString()}`)
     },
+    // Four filter inputs feed this key, so it changes per keystroke and per
+    // page step. Holding the previous rows keeps the table from blanking
+    // between them.
+    placeholderData: keepPreviousData,
     enabled,
   })
 }

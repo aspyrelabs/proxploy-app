@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
@@ -47,6 +47,11 @@ export function AppsPage() {
   })
   const hosts = hostsQuery.data
   const appsQuery = useQuery({
+    // Every keystroke in the filter box is a new key, and without this each
+    // one is isPending, so QueryState swapped the whole grid for eight
+    // skeletons between letters and the list strobed while you typed. Keeping
+    // the previous rows on screen is what react-query has this for.
+    placeholderData: keepPreviousData,
     queryKey: ['apps', { host: search.host, q: search.q }],
     queryFn: () => {
       const p = new URLSearchParams()
