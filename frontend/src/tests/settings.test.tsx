@@ -9,6 +9,7 @@ let hostRows: unknown[] = []
 let hostsError = false
 let channelsError = false
 let clockSkew = false
+let entitlementsError = false
 const teamRows = [{ id: 1, name: 'Default', slug: 'default', description: null,
                     member_count: 1, host_count: 1 },
                    { id: 2, name: 'Ops', slug: 'ops', description: null,
@@ -18,6 +19,7 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
   api: vi.fn((path: string, opts?: RequestInit) => {
     if (path === '/entitlements') {
+      if (entitlementsError) return Promise.reject(new Error('boom'))
       return Promise.resolve({
         tier: 'builtin',
         features: { 'notify.channels': notifyChannels, 'teams.rbac': teamsRbac },
@@ -214,3 +216,57 @@ describe('SettingsPage, clock skew', () => {
 })
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('SettingsPage, the plan card', () => {
+  beforeEach(() => {
+    calls.length = 0; hostRows = []; entitlementsError = false; teamsRbac = true
+  })
+  afterEach(() => { entitlementsError = false })
+
+  it('does not call the install FREE before the plan has been fetched', () => {
+    // api/hooks.ts defaults tier to 'builtin' so gating fails closed, which is
+    // right for security and wrong to print. A paid install read "FREE" for
+    // the length of the fetch and then corrected itself.
+    wrap()
+    expect(screen.queryByText('FREE')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Checking your plan')).toBeInTheDocument()
+  })
+
+  it('says it could not check, rather than FREE, when the plan fetch fails', async () => {
+    entitlementsError = true
+    wrap()
+    // TotpCard says the same sentence for the same reason, so more than one
+    // match is expected here; the property under test is that the tier is NOT
+    // stated as fact.
+    expect((await screen.findAllByText('Could not check your plan, try reloading.')).length)
+      .toBeGreaterThan(0)
+    expect(screen.queryByText('FREE')).not.toBeInTheDocument()
+  })
+
+  it('shows the tier once it lands', async () => {
+    wrap()
+    expect(await screen.findByText('FREE')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Checking your plan')).not.toBeInTheDocument()
+  })
+})
+
+describe('SettingsPage, unassigning a host from its team', () => {
+  beforeEach(() => {
+    calls.length = 0; teamsRbac = true; entitlementsError = false
+    hostRows = [{ id: 1, name: 'pve1', address: 'https://pve:8006', status: 'connected',
+                  node_shell_enabled: false, team_id: 2, capabilities: {} }]
+  })
+
+  it('sends team_id null, instead of skipping the request entirely', async () => {
+    // The option's value is '' and the handler skipped falsy values, so
+    // "Unassigned" fired nothing and the select snapped back to the old team.
+    wrap()
+    const select = await screen.findByLabelText('team for pve1')
+    fireEvent.change(select, { target: { value: '' } })
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === 'PATCH')
+      expect(patch).toBeTruthy()
+      expect((patch!.body as { team_id: number | null }).team_id).toBeNull()
+    })
+  })
+})

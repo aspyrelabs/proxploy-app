@@ -25,7 +25,7 @@ import { SessionsCard } from '../components/SessionsCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
-import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
 
 export const settingsRoute = createRoute({
@@ -259,12 +259,29 @@ export function SettingsPage() {
       <h1 className="font-display text-[22px] font-semibold">Settings</h1>
 
       <Card title="Plan">
-        <p className="text-[13.5px] text-text-2">
-          <span className="font-mono text-amber">{tier === 'builtin' ? 'FREE' : tier.toUpperCase()}</span>
-          {', '}all features are enabled. Licensing is dormant; entering a license key
-          activates against the Proxploy licensing service.
-          {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
-        </p>
+        {/* api/hooks.ts defaults tier to 'builtin' because failing closed is
+            the right security answer, but printing that default as a sentence
+            told a paid installation it was on the free plan for the length of
+            the fetch, and kept saying so if the fetch failed. TierPill, which
+            this page's own topbar link points at, has said the same thing in
+            a comment since it was written. `unknown` is what separates "not
+            entitled" from "could not check". */}
+        {ent.isPending ? (
+          <SkeletonGroup label="Checking your plan">
+            <Skeleton className="h-[19px] w-72" />
+          </SkeletonGroup>
+        ) : ent.unknown ? (
+          <p className="text-[13.5px] text-text-2">
+            Could not check your plan, try reloading.
+          </p>
+        ) : (
+          <p className="text-[13.5px] text-text-2">
+            <span className="font-mono text-amber">{tier === 'builtin' ? 'FREE' : tier.toUpperCase()}</span>
+            {', '}all features are enabled. Licensing is dormant; entering a license key
+            activates against the Proxploy licensing service.
+            {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
+          </p>
+        )}
         {clockSkew && (
           <p className="mt-2 text-[13.5px] text-amber">
             This machine&apos;s clock looks wrong. Fix the system time; entitlement checks depend on it.

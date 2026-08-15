@@ -260,6 +260,13 @@ export function StorePage() {
               <SkeletonGroup label="Loading the catalog summary">
                 <SkeletonLine className="w-96 max-w-full text-[12px]" />
               </SkeletonGroup>
+            ) : catalogQuery.isError ? (
+              // isPending is false in the error state, so these counts used to
+              // render from `entries ?? []` and state "0 of 0 scripts
+              // installable" as fact, directly above a grid correctly saying
+              // the catalog could not be read. The attribution is not waiting
+              // on anything and stays.
+              <>Sourced from community-scripts/ProxmoxVE</>
             ) : (
               <>
                 Sourced from community-scripts/ProxmoxVE · {installableCount} of{' '}
@@ -366,7 +373,7 @@ export function StorePage() {
               <Skeleton key={w} className={`h-[26.5px] rounded-full ${w}`} />
             ))}
           </SkeletonGroup>
-        ) : (
+        ) : catalogQuery.isError ? null : (
         <div className="flex flex-wrap gap-2">
           {categories.map((c) => (
             <button

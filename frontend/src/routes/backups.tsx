@@ -30,12 +30,29 @@ function fmtWhen(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : 'unknown'
 }
 
-function StatCard({ label, value, note }: { label: string; value: string; note: React.ReactNode }) {
+function StatCard({ label, value, note, loading }: {
+  label: string; value: string; note: React.ReactNode; loading?: boolean
+}) {
+  // The label is known before the data is, so it stays put and only the two
+  // lines under it wait. Without this the row stated three answers on every
+  // cold load ("unknown", "No backup schedule yet", "Nothing verified in the
+  // last 30 days") that read as findings rather than as a page still loading,
+  // to an operator who has a nightly schedule and a month of verified
+  // archives.
   return (
     <div className={card}>
       <div className="text-[11px] uppercase tracking-wide text-text-3">{label}</div>
-      <div className="mt-1 font-mono text-[20px] text-text">{value}</div>
-      <div className="mt-2 text-[12px] text-text-3">{note}</div>
+      {loading ? (
+        <SkeletonGroup label={`Loading ${label.toLowerCase()}`}>
+          <SkeletonLine className="mt-1 w-32 text-[20px]" />
+          <SkeletonLine className="mt-2 w-48 max-w-full text-[12px]" />
+        </SkeletonGroup>
+      ) : (
+        <>
+          <div className="mt-1 font-mono text-[20px] text-text">{value}</div>
+          <div className="mt-2 text-[12px] text-text-3">{note}</div>
+        </>
+      )}
     </div>
   )
 }
@@ -359,12 +376,13 @@ export function BackupsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <StatCard label="Next scheduled"
+        <StatCard label="Next scheduled" loading={schedules.isPending}
           value={nextBackup ? new Date(nextBackup.next_run_at!).toLocaleString() : 'unknown'}
           note={nextBackup
             ? `${nextBackup.name} · ${nextBackup.cron} ${nextBackup.timezone}`
             : 'No backup schedule yet, "New job" creates one.'} />
-        <StatCard label="Datastore used" value={fmtBytes(stats?.total_bytes)}
+        <StatCard label="Datastore used" loading={isPending}
+          value={fmtBytes(stats?.total_bytes)}
           note={
             <>
               <UsageBar gradient={STORAGE_GRADIENT}
@@ -375,7 +393,7 @@ export function BackupsPage() {
               </span>
             </>
           } />
-        <StatCard label="Success rate · 30d"
+        <StatCard label="Success rate · 30d" loading={isPending}
           value={fmtPct(stats?.success_rate_30d)}
           note={stats?.success_rate_30d == null
             ? 'Nothing verified in the last 30 days, unverified archives are left out rather than counted as passes.'

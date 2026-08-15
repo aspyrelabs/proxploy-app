@@ -52,7 +52,11 @@ function useNodes() {
 export function UpdateAllButton() {
   const ent = useEntitlements()
   const qc = useQueryClient()
-  const allowed = ent.has('store.update_all')
+  // ent.data != null, not a bare has(): has() is fail-closed and reads false
+  // while the first fetch is in flight, which disabled this button with a
+  // "Pro" tooltip for every plan on load, and permanently if the fetch
+  // failed. Same guard every other gate in the app uses.
+  const allowed = ent.data != null && ent.has('store.update_all')
   const run = useMutation({
     mutationFn: () => api<{ jobs: { id: number }[]; skipped: { reason: string }[] }>(
       '/apps/update-all', { method: 'POST', body: JSON.stringify({ consent: true }) }),
@@ -149,7 +153,10 @@ function AddHostSection({ hostCount }: { hostCount: number }) {
   const ent = useEntitlements()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const blocked = hostCount >= 1 && !ent.has('hosts.multi') && !ent.unknown
+  // ent.data != null covers the pending window as well as the error one:
+  // !unknown alone is true while the fetch is still running, so clicking
+  // "Add host" in that sliver replaced the form with the upsell.
+  const blocked = hostCount >= 1 && ent.data != null && !ent.has('hosts.multi')
   return (
     <>
       <div className="mb-3 flex items-center justify-between">
