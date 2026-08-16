@@ -6,7 +6,9 @@
  * What this proves: the panel's own logic and wiring against the two routes it
  * calls, end to end, including that each peer is offered with the address the
  * cluster reported and the certificate that machine presented, and that a host
- * row with its own copies of the tokens exists afterwards.
+ * row with its own copies of the tokens exists afterwards. The last step
+ * covers the same panel in the Edit dialog, where a host added before the
+ * panel existed gets the offer.
  *
  * What it does NOT prove: behaviour against real Proxmox hardware. Every node
  * here is a FakePVE from backend/tests/e2e_server.py, one per address, and the
@@ -142,4 +144,31 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
       await expect(dialog.getByText(/Connected, PVE/)).toBeVisible({ timeout: 15_000 })
       await dialog.getByRole('button', { name: 'Cancel' }).click()
     })
+
+    // Phase 6: the same panel in the Edit dialog, so a host added by hand
+    // before it shipped gets the offer without being removed and re-added.
+    // pve-02 was added by hand at the top of this test, and by now every one
+    // of its peers is in Proxploy, which is the normal state of this dialog
+    // once a cluster has been enrolled.
+    await test.step('the Edit dialog offers the same panel to a host added by hand',
+      async () => {
+        await page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) })
+          .getByRole('button', { name: 'Edit' }).click()
+        const dialog = page.getByRole('dialog')
+        await expect(dialog.getByText(`${FIRST.node} is part of cluster ${CLUSTER}. `
+          + 'Proxploy found 2 other nodes in it.')).toBeVisible({ timeout: 15_000 })
+        // Named, not hidden and not an error: each peer says the host name it
+        // is already known by, and neither can be ticked again.
+        for (const [node, name] of [[SECOND.node, SECOND.name], [PEER.node, PEER.node]]) {
+          const already = dialog.getByRole('checkbox', {
+            name: new RegExp(`${node}.*Already in Proxploy as ${name}`, 's') })
+          await expect(already).toBeDisabled()
+          await expect(already).not.toBeChecked()
+        }
+        // Nothing to continue to here, so nothing offers to: the dialog is
+        // closed by its own Cancel and Save, as it always was.
+        await expect(dialog.getByRole('button', { name: 'Skip' })).toHaveCount(0)
+        await expect(dialog.getByRole('button', { name: 'Continue' })).toHaveCount(0)
+        await dialog.getByRole('button', { name: 'Cancel' }).click()
+      })
   })

@@ -21,12 +21,28 @@ let hostCapabilities: Record<string, boolean> | undefined
 const PINNED = 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:9F'
 const PRESENTED = '12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:EF'
 let fingerprints: { tls_fingerprint: string | null; tls_fingerprint_seen: string | null }
+// GET /hosts/{id}/peers, which the peer panel in this dialog fires on mount.
+// Standalone by default, so every test that is not about peers behaves exactly
+// as it did before the panel was mounted here: no panel at all.
+const STANDALONE = { cluster: null, team: null, capabilities_to_copy: ['monitoring'],
+                     multi_host_entitled: true, peers: [] }
+let peersResult: unknown = STANDALONE
+// The Proxmox node name GET /hosts/{id} reports, which is what the cluster
+// calls this host and what the panel names.
+let nodeName: string | null = 'pve1'
 
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, method: opts?.method, body })
+    if (path.endsWith('/peers')) return Promise.resolve(peersResult)
+    if (path === '/hosts/capabilities') {
+      return Promise.resolve([
+        { key: 'monitoring', label: 'Read-only monitoring', required: true },
+        { key: 'lifecycle', label: 'Lifecycle', required: false },
+      ])
+    }
     if (path.endsWith('/test')) {
       return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1', ...fingerprints })
     }
@@ -35,7 +51,8 @@ vi.mock('../api/client', async (importOriginal) => ({
     }
     if (path === '/hosts/1' && !opts?.method) {
       // HostCapabilityList's own mount GET.
-      return Promise.resolve({ id: 1, name: 'pve1', capabilities: hostCapabilities })
+      return Promise.resolve({ id: 1, name: 'pve1', node_name: nodeName,
+                               capabilities: hostCapabilities })
     }
     // PATCH /hosts/{id}
     return Promise.resolve({ id: 1, node_shell_enabled: false })
@@ -60,6 +77,7 @@ describe('HostEditDialog', () => {
   beforeEach(() => {
     testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined
     fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: null }
+    peersResult = STANDALONE; nodeName = 'pve1'
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -185,6 +203,71 @@ describe('HostEditDialog', () => {
     expect(await screen.findByText(/connected, pve 8\.4\.1/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /accept the new certificate/i })).not.toBeInTheDocument()
     expect(screen.queryByText(/certificate has changed/i)).not.toBeInTheDocument()
+  })
+
+  // Phase 6 of docs/notes/cluster-peer-auto-enrolment-plan.md: a host enrolled
+  // before the panel shipped gets the same offer here, so nobody has to remove
+  // and re-add a host to get it.
+  const peer = (over: Record<string, unknown> = {}) => ({
+    node: 'node2', address: 'https://10.0.0.6:8006', online: true, reachable: true,
+    tls_fingerprint: 'AB:CD:EF', already_enrolled_as: null, error: null, ...over,
+  })
+
+  it('offers the other nodes of the cluster to a host enrolled before the panel existed',
+    async () => {
+      nodeName = 'node1'
+      peersResult = { cluster: 'lab-cluster', team: { id: 2, name: 'Platform' },
+                      capabilities_to_copy: ['monitoring'], multi_host_entitled: true,
+                      peers: [peer()] }
+      wrap()
+      // The Proxmox node name, which is what the cluster calls this host, not
+      // the Proxploy host name.
+      expect(await screen.findByText('node1 is part of cluster lab-cluster. '
+        + 'Proxploy found 1 other node in it.')).toBeInTheDocument()
+      expect(screen.getByText(/node2, https:\/\/10\.0\.0\.6:8006/)).toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: /node2/ })).toBeChecked()
+    })
+
+  it('offers nothing on a standalone host, exactly as the add-host flow does', async () => {
+    wrap()
+    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/peers')).toBe(true))
+    await waitFor(() => expect(screen.queryByText(/checking the other nodes/i)).toBeNull())
+    expect(screen.queryByText(/is part of cluster/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /add these nodes/i })).toBeNull()
+  })
+
+  // The common case for this dialog: it is where someone goes after enrolling
+  // a cluster, so every peer is usually already in Proxploy. That is
+  // information, not an empty panel and not a failure.
+  it('names the peers that are already in Proxploy instead of showing an empty panel',
+    async () => {
+      nodeName = 'node1'
+      peersResult = { cluster: 'lab-cluster', team: null, capabilities_to_copy: ['monitoring'],
+                      multi_host_entitled: true,
+                      peers: [peer({ already_enrolled_as: 'pve-02' }),
+                              peer({ node: 'node3', address: 'https://10.0.0.7:8006',
+                                     already_enrolled_as: 'pve-03' })] }
+      wrap()
+      expect(await screen.findByText('Already in Proxploy as pve-02.')).toBeInTheDocument()
+      expect(screen.getByText('Already in Proxploy as pve-03.')).toBeInTheDocument()
+      for (const name of [/node2/, /node3/]) {
+        const box = screen.getByRole('checkbox', { name })
+        expect(box).toBeDisabled()
+        expect(box).not.toBeChecked()
+      }
+      expect(screen.getByRole('button', { name: /add these nodes/i })).toBeDisabled()
+    })
+
+  // The dialog is not a wizard: there is nothing to continue to, so the panel
+  // offers nothing that pretends there is. Cancel and Save are how it closes.
+  it('has no Skip or Continue in the dialog, which continues to nothing', async () => {
+    nodeName = 'node1'
+    peersResult = { cluster: 'lab-cluster', team: null, capabilities_to_copy: ['monitoring'],
+                    multi_host_entitled: true, peers: [peer()] }
+    wrap()
+    expect(await screen.findByText(/is part of cluster lab-cluster/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^skip$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^continue$/i })).toBeNull()
   })
 
   it('has no standalone monitoring token fields, only the Capabilities row', async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useHostCapabilityCatalog, useHostPeers } from '../api/hosts'
 import type { HostPeer, PeerEnrolResult } from '../api/hosts'
@@ -30,9 +31,13 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
    *  is what settles whether there is a cluster at all. */
   cluster?: string | null
   /** Fires when the operator is done with the panel, whether they added
-   *  nodes, skipped, or there were none to offer. */
-  onDone: () => void
+   *  nodes, skipped, or there were none to offer. Left out where the panel is
+   *  not a stage in a flow: HostEditDialog has nothing to continue to, so it
+   *  gets no Skip and no Continue rather than a button that continues to
+   *  nothing. The dialog's own Cancel and Save close it. */
+  onDone?: () => void
 }) {
+  const qc = useQueryClient()
   const q = useHostPeers(hostId)
   const catalog = useHostCapabilityCatalog()
   // null means "nothing touched yet", which is what makes every addable peer
@@ -49,11 +54,14 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
   // exactly where it ended before this existed. A discovery failure ends the
   // same way rather than blocking a host that was added successfully: the
   // offer is not the enrolment, and HostEditDialog makes it again.
-  const nothingToOffer = (q.isSuccess && peers.length === 0) || q.isError
+  // Results outrank a later discovery: once peers have been added, what
+  // happened to them is the panel's job to show, whatever the refetch below
+  // says next.
+  const nothingToOffer = !results && ((q.isSuccess && peers.length === 0) || q.isError)
   // onDone is a fresh closure on every render of the parent, so depending on
   // it would fire it again on every render rather than once.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- onDone is not stable
-  useEffect(() => { if (nothingToOffer) onDone() }, [nothingToOffer])
+  useEffect(() => { if (nothingToOffer) onDone?.() }, [nothingToOffer])
 
   const labelOf = (key: string) =>
     catalog.data?.find(c => c.key === key)?.label ?? key
@@ -73,6 +81,10 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
             peers.filter(p => chosen.includes(p.node) && p.tls_fingerprint)
               .map(p => [p.node, p.tls_fingerprint])) }) })
       setResults(r.results)
+      // Every enrolled peer is a new host row. HostForm's callers invalidate
+      // when onCreated fires, HostEditDialog has no such moment, and the
+      // hosts list is otherwise stale for 15 seconds after this wrote to it.
+      qc.invalidateQueries({ queryKey: ['hosts'] })
     } catch {
       // Only 403 (the tier changed under the operator), 404 and 422 get here:
       // every per-peer failure is a result row, not a status code.
@@ -83,8 +95,11 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
 
   if (nothingToOffer) return null
   if (q.isPending || busy) {
+    // The Edit dialog has no cluster name to hand until discovery answers,
+    // so the sentence has to still be a sentence without one.
+    const named = cluster ?? q.data?.cluster
     const label = busy ? 'Adding the nodes you ticked'
-      : `Checking the other nodes of cluster ${cluster ?? q.data?.cluster ?? ''}`.trim()
+      : `Checking the other nodes of ${named ? `cluster ${named}` : 'this cluster'}`
     return (
       <div className="flex items-center gap-2 rounded-ctl border border-line bg-panel-2 p-3">
         <Loading label={label} size={18} />
@@ -111,7 +126,7 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
                 + `${r.capabilities_stored.map(labelOf).join(', ')}.`}
             </p>
           ))}
-          <Button type="button" onClick={onDone}>Continue</Button>
+          {onDone && <Button type="button" onClick={onDone}>Continue</Button>}
         </>
       ) : (
         <>
@@ -122,8 +137,12 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
           {entitled ? (
             <>
               <p className="text-[11.5px] text-text-3">
+                {/* "the tokens you just entered", which is what the plan wrote
+                    for the add-host flow, is not true in the Edit dialog,
+                    where nobody just entered anything. Same sentence, true at
+                    both call sites. */}
                 A Proxmox API token is shared across the whole cluster, so the tokens
-                you just entered will work on these nodes too. Each node you tick is
+                stored for {node} will work on these nodes too. Each node you tick is
                 added as its own host and gets its own copy of the tokens.
               </p>
               {/* Said before anything is ticked, rather than discovered in the
@@ -172,16 +191,20 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
             ))}
           </div>
           {error && <p className="text-[12.5px] text-red">{error}</p>}
-          <div className="flex gap-2">
-            {entitled && (
-              <Button type="button" onClick={confirm} disabled={!chosen.length}>
-                Add these nodes
-              </Button>
-            )}
-            <Button type="button" variant="ghost" onClick={onDone}>
-              {entitled ? 'Skip' : 'Continue'}
-            </Button>
-          </div>
+          {(entitled || onDone) && (
+            <div className="flex gap-2">
+              {entitled && (
+                <Button type="button" onClick={confirm} disabled={!chosen.length}>
+                  Add these nodes
+                </Button>
+              )}
+              {onDone && (
+                <Button type="button" variant="ghost" onClick={onDone}>
+                  {entitled ? 'Skip' : 'Continue'}
+                </Button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

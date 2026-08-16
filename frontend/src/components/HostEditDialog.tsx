@@ -8,10 +8,11 @@ import { Dialog } from './ui/dialog'
 import type { HostTestResult } from '../api/hosts'
 import { HostCapabilityList } from './HostCapabilityList'
 import { HostScriptPanel } from './HostScriptPanel'
+import { PeerEnrolmentPanel } from './PeerEnrolmentPanel'
 
 export type HostSummary = { name: string; address: string }
 
-type HostCapabilities = { capabilities?: Record<string, boolean> }
+type HostCapabilities = { capabilities?: Record<string, boolean>; node_name?: string | null }
 type SshRotateResult = { public_key?: string; consent_note?: string }
 
 /**
@@ -45,6 +46,16 @@ type SshRotateResult = { public_key?: string; consent_note?: string }
  * full and offers to accept the new one, which is the only way to change a
  * pin. Hosts are pinned at enrolment, and without this a renewed certificate
  * would leave a host row nobody could fix from the UI.
+ *
+ * The same peer panel HostForm shows after adding a host is mounted here too
+ * (docs/notes/cluster-peer-auto-enrolment-plan.md, phase 6), so a host
+ * enrolled before that shipped gets the same offer without being removed and
+ * re-added. It renders nothing at all on a standalone host. It sits below the
+ * occasional-maintenance half of the dialog and above the certificate
+ * warning, which stays next to the Test connection button that produces it,
+ * because that warning is the one thing here someone may need to act on
+ * urgently. No Skip and no Continue: this dialog is not a wizard and has
+ * nothing to continue to, so the panel is given no onDone.
  */
 export function HostEditDialog({ hostId, host, onClose }: {
   hostId: number
@@ -227,6 +238,11 @@ export function HostEditDialog({ hostId, host, onClose }: {
             </div>
           )}
         </div>
+        {/* The node name is what the cluster calls this host, and it comes off
+            the GET this dialog already runs, so the panel costs one request,
+            its own discovery. The cluster name is not on that response, and
+            discovery reports it anyway. */}
+        <PeerEnrolmentPanel hostId={hostId} node={capsQuery.data?.node_name ?? host.name} />
         {certificateChanged && (
           <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
             <p className="text-[12.5px] text-amber">
