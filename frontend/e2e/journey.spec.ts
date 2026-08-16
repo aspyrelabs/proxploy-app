@@ -70,8 +70,11 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // this is a hard prerequisite of the "install an app" clause below.
     await page.getByLabel('Name').fill(HOST_NAME)
     await page.getByLabel('Address').fill('https://10.0.0.5:8006')
-    await page.getByLabel('API token id', { exact: true }).fill('proxploy@pve!e2e')
-    await page.getByLabel('API token secret', { exact: true }).fill('secret')
+    // Named per capability since 64e11fa merged the three host dialogs into
+    // one. The monitoring pair is the only one this journey needs: it is the
+    // mandatory capability, and the rest can be left blank and added later.
+    await page.getByLabel('Monitoring token id', { exact: true }).fill('proxploy@pve!e2e')
+    await page.getByLabel('Monitoring token secret', { exact: true }).fill('secret')
     await page.getByLabel(/Enable App Store installs/).check()
     await page.getByRole('button', { name: 'Add host' }).click()
     await expect(page.getByRole('button', { name: 'I have added it' })).toBeVisible()
@@ -110,7 +113,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await dialog.getByLabel('I understand this runs as root on the node').check()
     await dialog.getByRole('button', { name: 'Install' }).click()
     await expect(dialog.getByText('succeeded')).toBeVisible({ timeout: 20_000 })
-    await dialog.getByRole('button', { name: 'Close' }).click()
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
     await goToNavPage(page, 'Apps')
     await expect(page.getByText(APP_NAME)).toBeVisible()
@@ -158,7 +161,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
 
     await dialog.getByRole('button', { name: 'Create' }).click()
     await expect(dialog.getByText('succeeded')).toBeVisible({ timeout: 20_000 })
-    await dialog.getByRole('button', { name: 'Close' }).click()
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
     // A created VM is not written to the `vms` table by the create job on
     // purpose (services/guestjobs.py::create_vm: "the next poll cycle either
