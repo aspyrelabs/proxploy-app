@@ -2,6 +2,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def no_real_tls_probe(monkeypatch):
+    """api/hosts.py fetches a node's certificate over a real socket (enrolment
+    pins it, POST /{id}/test reports it, GET /{id}/peers shows it per peer).
+    Every address in these tests is an RFC1918 literal nothing answers on, so
+    the real helper would spend its full 10 second timeout per call.
+
+    Failing fast is the "could not be fetched" path all three already survive,
+    so the default here is exactly the behaviour tests had before pinning
+    existed: no pin. A test about fingerprints replaces this with its own stub,
+    and stubs proxploy.services.proxmox's binding too when it wants
+    ProxmoxClient._connect to enforce the pin.
+    """
+    def _no_probe(host, port=8006):
+        raise OSError(f"no TLS probe for {host}:{port} in tests")
+
+    monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _no_probe)
+
+
 @pytest.fixture
 def client(tmp_path):
     from proxploy.api.auth import limiter

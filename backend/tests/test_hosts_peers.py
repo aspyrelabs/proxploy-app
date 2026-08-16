@@ -45,6 +45,11 @@ def peers_app(tmp_path, monkeypatch, bootstrap_admin, csrf_header):
         return f"FP:{host}"
 
     monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _fingerprint)
+    # The origin is pinned at enrolment now (plan phase 3), so this is also the
+    # certificate ProxmoxClient._connect checks that pin against. Same fake
+    # node, one answer.
+    monkeypatch.setattr("proxploy.services.proxmox.tls_fingerprint_sha256",
+                        _fingerprint)
     limiter.reset()
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key", poll_enabled=False)

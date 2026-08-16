@@ -5,12 +5,12 @@ import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import type { HostTestResult } from '../api/hosts'
 import { HostCapabilityList } from './HostCapabilityList'
 import { HostScriptPanel } from './HostScriptPanel'
 
 export type HostSummary = { name: string; address: string }
 
-type TestResult = { status: string; pve_version: string | null }
 type HostCapabilities = { capabilities?: Record<string, boolean> }
 type SshRotateResult = { public_key?: string; consent_note?: string }
 
@@ -39,6 +39,12 @@ type SshRotateResult = { public_key?: string; consent_note?: string }
  * standing alone -- check the CURRENT connection before touching anything --
  * and automatically after a successful Save, so a broken result is seen here
  * rather than discovered later as a silently unreachable host.
+ *
+ * That test also reports the host's stored TLS pin and the certificate the
+ * node is presenting right now. When they differ, the dialog shows both in
+ * full and offers to accept the new one, which is the only way to change a
+ * pin. Hosts are pinned at enrolment, and without this a renewed certificate
+ * would leave a host row nobody could fix from the UI.
  */
 export function HostEditDialog({ hostId, host, onClose }: {
   hostId: number
@@ -49,11 +55,12 @@ export function HostEditDialog({ hostId, host, onClose }: {
   const [name, setName] = useState(host.name)
   const [address, setAddress] = useState(host.address)
   const [error, setError] = useState('')
-  const [testResult, setTestResult] = useState<TestResult | null>(null)
+  const [testResult, setTestResult] = useState<HostTestResult | null>(null)
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [rotateSsh, setRotateSsh] = useState(false)
   const [rotatingSsh, setRotatingSsh] = useState(false)
+  const [accepting, setAccepting] = useState(false)
   const [sshResult, setSshResult] = useState<SshRotateResult | null>(null)
 
   // Same key and fetch as HostCapabilityList uses below, so this shares its
@@ -73,6 +80,17 @@ export function HostEditDialog({ hostId, host, onClose }: {
   const missing = known.filter(k => !capsQuery.data?.capabilities?.[k])
   const defaultCapabilities = missing.length ? missing : known
 
+  // Both read off the same POST /hosts/{id}/test the dialog already runs, so
+  // the pin and the certificate the node is presenting were read a moment
+  // apart, not from two different requests. Only a difference between two
+  // known fingerprints counts, and the backend sends a presented fingerprint
+  // only when the pin is what refused the connection, so every other outcome
+  // leaves this null and shows no warning.
+  const pinned = testResult?.tls_fingerprint ?? null
+  const presented = testResult?.tls_fingerprint_seen ?? null
+  const certificateChanged = !!pinned && !!presented
+    && pinned.toUpperCase() !== presented.toUpperCase()
+
   const nameChanged = name.trim() !== host.name
   const addressChanged = address.trim() !== host.address
   const nothingToSave = !nameChanged && !addressChanged
@@ -85,13 +103,32 @@ export function HostEditDialog({ hostId, host, onClose }: {
   async function testConnection() {
     setError(''); setTesting(true)
     try {
-      const r = await api<TestResult>(`/hosts/${hostId}/test`, { method: 'POST' })
+      const r = await api<HostTestResult>(`/hosts/${hostId}/test`, { method: 'POST' })
       setTestResult(r)
       if (r.status !== 'connected') {
         setError(`Could not connect: the host reports "${r.status}". `
                 + 'Check the address and credentials.')
       }
     } catch (e) { setError(apiErrorDetail(e, 'Request failed, try again.')) } finally { setTesting(false) }
+  }
+
+  // The only way to change a stored pin. Nothing re-pins on its own: a pin
+  // that silently follows whatever the node presents is not a pin. Re-testing
+  // afterwards is what clears the warning, since it re-reads both fingerprints.
+  async function acceptCertificate() {
+    setError(''); setAccepting(true)
+    try {
+      await api(`/hosts/${hostId}`, {
+        method: 'PATCH', body: JSON.stringify({ tls_fingerprint: presented }),
+      })
+      invalidate()
+      notify.success(`${host.name} is now pinned to the certificate it is presenting.`)
+      await testConnection()
+    } catch (e) {
+      setError(apiErrorDetail(e, 'Request failed, try again.'))
+    } finally {
+      setAccepting(false)
+    }
   }
 
   async function regenerateSshKey() {
@@ -122,7 +159,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
       invalidate()
       notify.success(`${name.trim() || host.name} saved.`)
       // Verify what is now actually stored, not what used to be here.
-      const r = await api<TestResult>(`/hosts/${hostId}/test`, { method: 'POST' })
+      const r = await api<HostTestResult>(`/hosts/${hostId}/test`, { method: 'POST' })
       setTestResult(r)
       if (r.status === 'connected') {
         onClose()
@@ -190,6 +227,25 @@ export function HostEditDialog({ hostId, host, onClose }: {
             </div>
           )}
         </div>
+        {certificateChanged && (
+          <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+            <p className="text-[12.5px] text-amber">
+              {host.name}&rsquo;s TLS certificate has changed. Proxploy pinned{' '}
+              <code className="break-all font-mono text-[11.5px] text-text-2">{pinned}</code>{' '}
+              when the host was added, and {host.name} is now presenting{' '}
+              <code className="break-all font-mono text-[11.5px] text-text-2">{presented}</code>.
+              Proxploy will not connect until you say which is right. If you renewed the
+              certificate, accept the new one. If you did not, do not accept it, and find
+              out why it changed.
+            </p>
+            <div className="mt-2">
+              <Button type="button" variant="ghost" size="sm" disabled={accepting}
+                onClick={acceptCertificate}>
+                {accepting ? 'Accepting…' : 'Accept the new certificate'}
+              </Button>
+            </div>
+          </div>
+        )}
         {testResult && testResult.status === 'connected' && (
           <p className="font-mono text-[12px] text-green">
             Connected, PVE {testResult.pve_version ?? '?'}

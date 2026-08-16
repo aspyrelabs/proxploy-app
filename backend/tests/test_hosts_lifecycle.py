@@ -582,3 +582,94 @@ def test_a_standalone_node_records_no_cluster_name(tmp_path, csrf_header,
         assert r.status_code == 201, r.text
         with app.state.sessionmaker() as db:
             assert db.get(Host, r.json()["id"]).cluster_name is None
+
+
+# --- TLS pin on first use (plan phase 3) ----------------------------------
+# The pin is only enforced while verify_tls is false, which is the normal case
+# for a stock node with a self-signed certificate, so it is the only integrity
+# these connections have. First use of a host is its enrolment, so that is
+# where it is taken.
+
+def _enrol_at(client, csrf_header, address, **extra):
+    return client.post("/api/v1/hosts", json={
+        "name": "host-01", "address": address,
+        "token_id": "proxploy@pve!ops", "token_secret": "s3cret",
+        "verify_tls": False, **extra}, headers=csrf_header(client))
+
+
+def test_enrolment_pins_the_certificate_the_node_is_presenting(
+        tmp_path, monkeypatch, csrf_header, bootstrap_admin):
+    """Nothing pinned a fingerprint before this, so every host ran with neither
+    TLS verification nor a pin. The fingerprint is fetched from the address
+    being enrolled, never from anywhere else."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    seen = []
+
+    def _fingerprint(host, port=8006):
+        seen.append((host, port))
+        return f"FP:{host}"
+
+    monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _fingerprint)
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = _enrol_at(client, csrf_header, "https://10.0.0.9:8006")
+        assert r.status_code == 201, r.text
+        assert seen == [("10.0.0.9", 8006)]
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, r.json()["id"]).tls_fingerprint == "FP:10.0.0.9"
+
+
+def test_a_supplied_fingerprint_is_kept_and_no_probe_overrides_it(
+        tmp_path, monkeypatch, csrf_header, bootstrap_admin):
+    """An operator who pasted a fingerprint has already decided which
+    certificate is right. Probing over the top of it would replace their
+    answer with whatever the node happens to be presenting."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    def _boom(host, port=8006):
+        raise AssertionError("a supplied fingerprint must not be probed over")
+
+    monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _boom)
+    # The node presents exactly what was pasted, so enrolment's own version()
+    # call passes ProxmoxClient._connect's pin check without a real socket.
+    monkeypatch.setattr("proxploy.services.proxmox.tls_fingerprint_sha256",
+                        lambda host, port=8006: "AB:CD")
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = _enrol_at(client, csrf_header, "https://10.0.0.9:8006",
+                      tls_fingerprint="AB:CD")
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, r.json()["id"]).tls_fingerprint == "AB:CD"
+
+
+def test_a_failed_fingerprint_probe_still_enrols_the_host_unpinned(
+        tmp_path, monkeypatch, csrf_header, bootstrap_admin):
+    """Same rule cluster_identity already follows here: a probe hiccup must
+    never block enrolment. An unpinned host is what every host was before
+    this, not a new failure mode."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+
+    def _refused(host, port=8006):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _refused)
+    app = make_app(tmp_path, fake=FakePVE())
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        r = _enrol_at(client, csrf_header, "https://10.0.0.9:8006")
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            assert db.get(Host, r.json()["id"]).tls_fingerprint is None

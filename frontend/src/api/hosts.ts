@@ -11,6 +11,18 @@ export type HostTaskRow = {
 
 export type HostTaskLog = { upid: string; lines: string[] }
 
+// POST /hosts/{id}/test (backend/proxploy/api/hosts.py::test_host).
+// `tls_fingerprint` is the pin stored for this host, null when it was never
+// pinned. `tls_fingerprint_seen` is the certificate the node is presenting
+// right now, and it is only fetched when the pin is what refused the
+// connection, so it is null whenever there is nothing to compare: a host that
+// connected, a node that is simply down, an unpinned host.
+export type HostTestResult = {
+  id: number; status: string; pve_version: string | null
+  node_power_missing?: boolean | null
+  tls_fingerprint: string | null; tls_fingerprint_seen: string | null
+}
+
 export function useHostTasks(hostId: number | null, enabled = true) {
   return useQuery({
     queryKey: ['hosts', hostId, 'tasks'],

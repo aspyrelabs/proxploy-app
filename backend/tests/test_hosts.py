@@ -449,3 +449,123 @@ def test_a_host_can_be_moved_out_of_a_team_not_just_between_teams(
     assert client.patch(f"/api/v1/hosts/{host_id}", json={"name": "h-renamed"},
                         headers=csrf_header(client)).status_code == 200
     assert client.get(f"/api/v1/hosts/{host_id}").json()["team_id"] == team_id
+
+
+# --- the stored pin, and the way back out of one (plan phase 3) ------------
+# A pin is only enforced while verify_tls is false, so that is what these
+# enrol with. Both bindings of tls_fingerprint_sha256 are stubbed: api/hosts.py
+# takes the pin, services/proxmox.py's ProxmoxClient._connect enforces it, and
+# the real one opens a socket.
+
+def _pinned_host(c, csrf_header, monkeypatch, presenting):
+    """(host_id, probes). `presenting` is a one-item list read on every call, so
+    a test can change the certificate afterwards the way a renewal does, and
+    `probes` counts the probes api/hosts.py itself took."""
+    probes = []
+
+    def _fingerprint(host, port=8006):
+        probes.append((host, port))
+        return presenting[0]
+
+    monkeypatch.setattr("proxploy.api.hosts.tls_fingerprint_sha256", _fingerprint)
+    # ProxmoxClient._connect enforces the pin through its own binding, which is
+    # a connection cost and not a probe api/hosts.py chose to take, so it is
+    # deliberately not counted.
+    monkeypatch.setattr("proxploy.services.proxmox.tls_fingerprint_sha256",
+                        lambda host, port=8006: presenting[0])
+    r = c.post("/api/v1/hosts", json=HOST | {"verify_tls": False},
+               headers=csrf_header(c))
+    assert r.status_code == 201, r.text
+    probes.clear()  # enrolment's own pin, not what any test below is counting
+    return r.json()["id"], probes
+
+
+def test_a_pin_that_stops_matching_refuses_the_connection_and_test_says_what_is_presented(
+        pve_client, csrf_header, monkeypatch):
+    """The node is answering perfectly here: only the certificate changed. That
+    has to read as a refusal, never as a quiet connection, and the test route
+    has to hand back what the node is presenting now so the operator can
+    compare it with the pin before accepting anything."""
+    c, _ = pve_client
+    presenting = ["AB:CD"]
+    hid, _ = _pinned_host(c, csrf_header, monkeypatch, presenting)
+
+    presenting[0] = "12:34"  # the node renewed its certificate
+    r = c.post(f"/api/v1/hosts/{hid}/test", headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "unreachable"
+    assert r.json()["tls_fingerprint"] == "AB:CD"
+    assert r.json()["tls_fingerprint_seen"] == "12:34"
+
+
+def test_patch_repins_to_the_supplied_fingerprint_and_null_clears_the_pin(
+        pve_client, csrf_header, monkeypatch):
+    """The way out of a pin that no longer matches, and the way out of pinning
+    altogether. Without both, a routine certificate renewal leaves a host row
+    nobody can fix from the UI."""
+    from proxploy.models import Host
+
+    c, _ = pve_client
+    presenting = ["AB:CD"]
+    hid, _ = _pinned_host(c, csrf_header, monkeypatch, presenting)
+
+    presenting[0] = "12:34"
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"tls_fingerprint": "12:34"},
+                headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    with c.app.state.sessionmaker() as db:
+        assert db.get(Host, hid).tls_fingerprint == "12:34"
+    assert c.post(f"/api/v1/hosts/{hid}/test",
+                  headers=csrf_header(c)).json()["status"] == "connected"
+
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"tls_fingerprint": None},
+                headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    with c.app.state.sessionmaker() as db:
+        assert db.get(Host, hid).tls_fingerprint is None
+
+
+def test_patching_something_else_leaves_the_pin_alone(pve_client, csrf_header,
+                                                      monkeypatch):
+    """An omitted field and an explicit null mean different things here, same
+    as team_id: a rename must not silently unpin the host."""
+    from proxploy.models import Host
+
+    c, _ = pve_client
+    hid, _ = _pinned_host(c, csrf_header, monkeypatch, ["AB:CD"])
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"name": "pve-renamed"},
+                headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    with c.app.state.sessionmaker() as db:
+        assert db.get(Host, hid).tls_fingerprint == "AB:CD"
+
+
+def test_testing_an_unreachable_host_takes_no_fingerprint_probe(
+        pve_client, csrf_header, monkeypatch):
+    """A dead node is the case an operator tests most, and fetching a
+    certificate from it can only sit out the full connect timeout. The probe
+    belongs on the one failure the operator can act on, the pin refusing the
+    connection, and nowhere else."""
+    c, fake = pve_client
+    hid, probes = _pinned_host(c, csrf_header, monkeypatch, ["AB:CD"])
+
+    fake.version._fail = True
+    r = c.post(f"/api/v1/hosts/{hid}/test", headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "unreachable"
+    assert probes == []
+    assert r.json()["tls_fingerprint_seen"] is None
+    assert r.json()["tls_fingerprint"] == "AB:CD"  # the stored pin is still reported
+
+
+def test_a_connected_host_reports_no_presented_fingerprint(pve_client, csrf_header,
+                                                           monkeypatch):
+    """version() got through with the pin enforced, so the certificate matched
+    it by definition. There is nothing to compare and nothing to probe."""
+    c, _ = pve_client
+    hid, probes = _pinned_host(c, csrf_header, monkeypatch, ["AB:CD"])
+
+    r = c.post(f"/api/v1/hosts/{hid}/test", headers=csrf_header(c))
+    assert r.json()["status"] == "connected"
+    assert probes == []
+    assert r.json()["tls_fingerprint_seen"] is None

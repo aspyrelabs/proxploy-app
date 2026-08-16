@@ -201,6 +201,21 @@ def create_e2e_app():
         scheduler_enabled=False, alerts_enabled=False,
     )
 
+    # There is no TLS listener behind the fake PVE, so the fingerprint
+    # enrolment pins (api/hosts.py) and the one ProxmoxClient._connect checks
+    # it against would each sit out a 10 second connect timeout on an address
+    # nothing answers on. One stub for both, so the pin the wizard stores is
+    # the certificate the fake node "presents" and every later call matches it.
+    import importlib
+
+    def _e2e_fingerprint(host, port=8006):
+        return f"E2:E0:{host}"
+
+    # Every module that took its own reference to the helper at import time.
+    for name in ("proxploy.api.hosts", "proxploy.services.proxmox",
+                 "proxploy.services.consoleproxy", "proxploy.services.ptybridge"):
+        importlib.import_module(name).tls_fingerprint_sha256 = _e2e_fingerprint
+
     _seed_catalog(settings)
     fake = _seed_pve()
     ssh = FakeSSHConnection(host_key_fingerprint="SHA256:e2e",

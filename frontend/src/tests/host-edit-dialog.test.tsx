@@ -14,6 +14,13 @@ const calls: { path: string; method?: string; body: unknown }[] = []
 // file, so Task 3's wiring only had accidental coverage. One test below sets
 // this to exercise the real thing.
 let hostCapabilities: Record<string, boolean> | undefined
+// What POST /hosts/{id}/test reports about TLS: the pin stored at enrolment,
+// and the fingerprint the node is presenting, which the backend only fetches
+// when that pin refused the connection. Null by default, which is what a host
+// that connected reports and what every other test in this file runs with.
+const PINNED = 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:9F'
+const PRESENTED = '12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:EF'
+let fingerprints: { tls_fingerprint: string | null; tls_fingerprint_seen: string | null }
 
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
@@ -21,7 +28,7 @@ vi.mock('../api/client', async (importOriginal) => ({
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, method: opts?.method, body })
     if (path.endsWith('/test')) {
-      return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1' })
+      return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1', ...fingerprints })
     }
     if (path.endsWith('/credentials')) {
       return Promise.resolve({ id: 1, rotated: ['api_token'] })
@@ -50,7 +57,10 @@ const wrap = (onClose = vi.fn()) => {
 }
 
 describe('HostEditDialog', () => {
-  beforeEach(() => { testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined })
+  beforeEach(() => {
+    testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined
+    fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: null }
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('starts pre-filled with the current name and address', () => {
@@ -150,6 +160,33 @@ describe('HostEditDialog', () => {
   // open, so a re-added standalone pair could not hide behind it: the
   // capability row's own fields are labelled "Monitoring token id/secret"
   // (no "New" prefix), which is a different string.
+  // A pin is the only integrity a connection to a self-signed node has, and
+  // nothing in the product could change one before this: a renewed
+  // certificate left a host row nobody could fix from the UI.
+  it('shows both fingerprints in full and offers to accept the new one', async () => {
+    testResult = 'unreachable'
+    fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: PRESENTED }
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(new RegExp(`pve1.s TLS certificate has changed`, 'i'))).toBeInTheDocument()
+    // In full, never truncated: the operator compares them against the node.
+    expect(screen.getByText(PINNED)).toBeInTheDocument()
+    expect(screen.getByText(PRESENTED)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /accept the new certificate/i }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ tls_fingerprint: PRESENTED })
+  })
+
+  it('offers nothing to accept while the presented certificate matches the pin', async () => {
+    fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: PINNED }
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/connected, pve 8\.4\.1/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /accept the new certificate/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/certificate has changed/i)).not.toBeInTheDocument()
+  })
+
   it('has no standalone monitoring token fields, only the Capabilities row', async () => {
     hostCapabilities = { monitoring: true, lifecycle: false, console: false, backup: false }
     wrap()

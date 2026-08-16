@@ -1,6 +1,7 @@
 """Host onboarding. ROUTE TEMPLATE (doc 10 Phase 1 DoD): every mutation stacks
 auth -> RBAC stub -> entitlement -> work -> audit. Later phases copy this shape."""
 import json as jsonlib
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
@@ -78,6 +79,14 @@ class HostPatchIn(BaseModel):
     team_id: int | None = None
     name: str | None = None
     address: str | None = None
+    # The re-pin path. A pin is only enforced while verify_tls is false, which
+    # is the normal case for a stock node with a self-signed certificate, so it
+    # is the only integrity those connections have. Nothing could change one
+    # before this, so a routine certificate renewal left a host row nobody
+    # could fix from the UI. Setting it re-pins, setting it to null clears the
+    # pin (see model_fields_set in patch_host: omitted and null differ here the
+    # same way they do for team_id).
+    tls_fingerprint: str | None = None
 
     @field_validator("name", "address")
     @classmethod
@@ -85,6 +94,21 @@ class HostPatchIn(BaseModel):
         if v is not None and not v.strip():
             raise ValueError("cannot be blank")
         return v
+
+
+def _fingerprint_now(address: str) -> str | None:
+    """The certificate the node at `address` is presenting right now, or None
+    if it could not be fetched.
+
+    Never raises. A pin is worth having, but never worth blocking an enrolment
+    or a connection test over, the same rule cluster_identity already follows
+    in create_host below.
+    """
+    url = urlparse(address)
+    try:
+        return tls_fingerprint_sha256(url.hostname, url.port or 8006)
+    except (OSError, ProxmoxError):
+        return None
 
 
 def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
@@ -258,8 +282,15 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
         node_name, cluster_name = cluster_identity(client)
     except ProxmoxError:  # enrolment must survive a probe hiccup
         node_name = cluster_name = None
+    # Pin on first use: first use of a host is its enrolment. Only when the
+    # request supplied none, because an operator who pasted a fingerprint has
+    # already said which certificate is right, and probing over the top of that
+    # would replace their answer with whatever the node is presenting.
+    # A failed probe leaves the host unpinned, which is what every host was
+    # before this, rather than blocking enrolment.
+    fingerprint = body.tls_fingerprint or _fingerprint_now(body.address)
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
-                tls_fingerprint=body.tls_fingerprint, status="connected",
+                tls_fingerprint=fingerprint, status="connected",
                 node_name=node_name, cluster_name=cluster_name,
                 last_error=_privilege_note(missing),
                 node_power_missing=node_power_missing,
@@ -493,13 +524,20 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
         # page), not a second implementation of the same check.
         h.address = body.address
         audit_params["address"] = body.address
+    # model_fields_set for the same reason team_id uses it: null is the only
+    # way to say "stop pinning this host", and an omitted field must leave the
+    # pin alone rather than clearing it on every rename.
+    if "tls_fingerprint" in body.model_fields_set:
+        h.tls_fingerprint = body.tls_fingerprint
+        audit_params["tls_fingerprint"] = body.tls_fingerprint
     db.commit()
     # Same action name as before when only the node-shell toggle (plus,
     # historically, team assignment) changed -- test_patch_host_writes_an_
     # audit_event pins that exact string. A name/address change is different
     # enough in kind (identity, not a feature flag) to get its own name.
-    action = ("host.update" if {"name", "address"} & audit_params.keys()
-             else "host.node_shell_toggle")
+    action = ("host.update"
+              if {"name", "address", "tls_fingerprint"} & audit_params.keys()
+              else "host.node_shell_toggle")
     write_audit(db, actor_type="user", actor_id=user.id,
                 action=action, target_type="host",
                 target_id=h.id, params=audit_params)
@@ -515,6 +553,7 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     cred = db.query(HostCredential).filter_by(
         host_id=h.id, kind="api_token:monitoring").one()
     tok = jsonlib.loads(request.app.state.secretstore.decrypt(cred.encrypted_blob))
+    seen = None
     try:
         client = ProxmoxClient(h.address, tok["token_id"], tok["token_secret"],
                                verify_tls=h.verify_tls, tls_fingerprint=h.tls_fingerprint,
@@ -527,13 +566,27 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
         h.node_power_missing = _node_power_missing(client)
         cred.last_used_at = utcnow()
         result = "ok"
-    except ProxmoxError:
+    except ProxmoxError as e:
         h.status, result = "unreachable", "error"
+        # Only when the pin is what refused the connection. ProxmoxClient.
+        # _connect raises that kind before it sends anything, and it is the one
+        # case the Edit dialog's compare and accept control fires on, so this
+        # is where the certificate the node is presenting is worth a socket. A
+        # node that is simply dead answers with a different kind and gets no
+        # probe, because fetching a certificate from it could only sit out the
+        # full connect timeout on top of the one already spent.
+        #
+        # Known gap, deliberate: with verify_tls true the pin is not enforced
+        # at all, so a changed certificate never raises here and the control
+        # never appears. CA validation is the trust anchor in that mode.
+        if e.kind == "tls_fingerprint":
+            seen = _fingerprint_now(h.address)
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="host.test",
                 target_type="host", target_id=h.id, result=result)
     return {"id": h.id, "status": h.status, "pve_version": h.pve_version,
-            "node_power_missing": h.node_power_missing}
+            "node_power_missing": h.node_power_missing,
+            "tls_fingerprint": h.tls_fingerprint, "tls_fingerprint_seen": seen}
 
 
 @router.post("/{host_id}/ssh/verify")
