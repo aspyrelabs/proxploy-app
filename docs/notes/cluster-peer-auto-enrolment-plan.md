@@ -273,9 +273,26 @@ a different design.
 Dependency: `_credentials` (owner, host scoped). This copies stored secrets
 into new rows, which is the same severity class as rotating them.
 
-Body: `{"nodes": ["node2", "node3"]}`. Node names only. The caller never
-supplies an address, so a compromised or confused client cannot aim the
-enrolment at a machine the cluster did not name.
+Body:
+
+```json
+{"nodes": ["node2", "node3"],
+ "tls_fingerprints": {"node2": "AB:CD:...:9F"}}
+```
+
+Node names address the request. The caller never supplies an address, so a
+compromised or confused client cannot aim the enrolment at a machine the
+cluster did not name.
+
+`tls_fingerprints` is optional, per node, and is a different kind of thing,
+which is why it is allowed where an address is not: an address is an
+instruction, a fingerprint is an assertion about what the operator was shown,
+and it can aim nothing anywhere. It carries the fingerprint discovery
+displayed for that node. **It is only ever used to refuse.** It is never
+pinned, never a fallback when the probe fails, and never written to the
+database: the pin always comes from the handler's own probe of that peer. A
+node with no entry enrols exactly as it would if the field did not exist, so
+there is no flag day between this and the panel that fills it in.
 
 Response, always `200` when the origin host exists and the body parses:
 
@@ -293,12 +310,27 @@ Response, always `200` when the origin host exists and the body parses:
 ]}
 ```
 
+`status` is one of three, and the third is not a failure: `enrolled` (a host
+row exists now, see `capabilities_failed` for anything that did not verify),
+`failed` (nothing was written, `detail` says why), and `skipped` (the skip
+rules of section 6.4 recognised the machine, nothing was written and nothing
+was wrong). The panel has to render `skipped` as information, not as an
+error.
+
 Failures are rows, not status codes, for the same reason `HostForm` already
 treats one rejected capability token as that capability's failure and not
 the enrolment's: a 502 for the whole request would throw away the record of
 the peers that did work. The only whole request failures are `404` (origin
 host gone), `403` (`hosts.multi` not entitled, same body shape
 `create_host` uses) and `422` (empty `nodes` list).
+
+A `/cluster/status` read that fails against the origin is also `200`, with a
+row per requested node saying the cluster could not be read from the origin
+and that nothing was added or stored. Discovery answers the same failure with
+a `502`, and the difference is deliberate: discovery has one thing to report
+and no per node answer to give, while enrolment was asked about specific
+nodes and owes an answer for each of them in the shape the caller already
+renders.
 
 Per peer, in order:
 
@@ -310,7 +342,13 @@ Per peer, in order:
    fingerprint, which is stored as that peer's pin. Never the origin's.
    Before the loop, the origin host is pinned the same way if it has no pin
    yet: same helper, same code path, so two hosts in one cluster never
-   disagree about whether they are pinned (decision 1).
+   disagree about whether they are pinned (decision 1). If the body echoed a
+   fingerprint for this node and it does not match what the probe just saw,
+   compared case insensitively the way `_connect` compares a stored pin, this
+   peer fails here with nothing written and the wording in section 6.2. A
+   probe that could not read the certificate at all counts as a mismatch too:
+   the operator approved a specific certificate and Proxploy cannot say this
+   is it.
 4. Verify the monitoring token against the peer with
    `ProxmoxClient(peer_address, ...).version()`. A failure here ends this
    peer with nothing written, because a host with no monitoring credential
@@ -333,7 +371,9 @@ Per peer, in order:
    capability and its reason on the result row and moves to the next one.
    The host stays enrolled and working for everything that did verify.
 8. Audit. `host.create` per enrolled peer with
-   `{"name", "address", "node", "via_host_id", "via_node"}`, and
+   `{"name", "address", "node", "via_host_id", "via_node"}`, where `via_node`
+   is the origin's Proxmox node name (`hosts.node_name`), not its Proxploy
+   host name, which is already in `via_host_id`. And
    `host.credentials` per copied capability with
    `{"capability", "copied_from_host_id"}`. Reusing the two existing action
    names keeps the audit filters, the activity feed labels in
@@ -447,8 +487,10 @@ enrolment for hosts that predate this. Without that, one cluster would hold
 pinned peers and an unpinned origin, which is the sort of disagreement
 nobody reasons about correctly at 3am.
 
-**If the fingerprint changes between discovery and confirm**, the confirm
-result row says:
+**If the fingerprint changes between discovery and confirm**, which the
+confirm call can tell because the body echoes back the fingerprint the panel
+showed per node (section 4.2), the result row says, with both fingerprints
+written out in full:
 
 > node2 is presenting a different TLS certificate than the one shown a
 > moment ago, so it was not added. Nothing was stored. If you did not just

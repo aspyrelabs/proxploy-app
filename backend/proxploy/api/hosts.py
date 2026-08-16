@@ -1156,6 +1156,232 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
     return out
 
 
+class PeerEnrolIn(BaseModel):
+    """Node names, never an address.
+
+    The addresses come from a fresh /cluster/status read inside the handler,
+    so a confused or hostile caller cannot aim an enrolment at a machine the
+    cluster never named. There is deliberately no address field.
+
+    `tls_fingerprints` is a different thing and is allowed for that reason: an
+    address is an instruction, a fingerprint is an assertion about what the
+    operator was shown, and it can aim nothing anywhere. It maps node name to
+    the fingerprint discovery displayed, and it is ONLY ever used to refuse: a
+    node presenting something else by the time the operator confirms is not
+    added. It is never pinned, never a fallback when the probe fails, and
+    never written to the database. Optional per node, so a caller that sends
+    none behaves exactly as it did before the field existed.
+    """
+    nodes: list[str]
+    tls_fingerprints: dict[str, str] = {}
+
+    @field_validator("nodes")
+    @classmethod
+    def _at_least_one(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("name at least one node to add")
+        return v
+
+
+@router.post("/{host_id}/peers")
+def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
+                db=Depends(get_db), user: User = Depends(_credentials)):
+    """Add the named nodes of this host's cluster as hosts of their own, each
+    with its own copy of every API token this host holds.
+
+    The write half of GET /{host_id}/peers above, and owner-scoped rather than
+    admin for that reason: copying stored secrets into new rows is the same
+    severity class as rotating them, which is why it sits next to
+    rotate_credentials rather than next to discovery.
+
+    One result row per requested node, always 200. The flow is inherently
+    partial and a 502 for the whole request would throw away the record of the
+    peers that did work, so a failure is a row saying what happened to that
+    node, exactly as the frontend already treats one rejected capability token
+    as that capability's failure and not the enrolment's.
+
+    Never copied: the ssh_key credential, install consent, and the node shell
+    opt-in. The SSH key is a root shell on the node, a different trust
+    decision from an API token, and keeping them separate is the whole reason
+    this route was allowed to exist.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    # A peer is never the first host, so unlike create_host the entitlement is
+    # always required. Same body, so a caller has one shape to handle.
+    if not request.app.state.entitlements.enabled("hosts.multi"):
+        raise HTTPException(403, {"error": "entitlement_required",
+                                  "feature": "hosts.multi"})
+
+    ss = request.app.state.secretstore
+    ip = request.client.host if request.client else None
+    results = [{"node": n, "status": "failed", "host_id": None, "address": None,
+                "capabilities_stored": [], "capabilities_failed": [],
+                "detail": None} for n in body.nodes]
+    try:
+        client = client_for_host(request.app, db, h)
+        rows = client.cluster_status()
+    except ProxmoxError as e:
+        # Still 200 with a row per node: the caller asked about these nodes and
+        # deserves an answer per node. Nothing was reached, so nothing is
+        # written, and every row says the same true thing.
+        for row in results:
+            row["detail"] = (f"Proxploy could not read the cluster from {h.name}: "
+                             f"{e}. Nothing was added and nothing was stored.")
+        return {"results": results}
+
+    cluster = next((r.get("name") for r in rows if r.get("type") == "cluster"), None)
+    # Re-read once for the whole request, because discovery and this call can
+    # be minutes apart. No cluster row means standalone, and a standalone
+    # node's single row carries no `local` flag on some versions, so without
+    # the `cluster and` guard it would offer itself as its own peer (the same
+    # guard list_peers makes, for the same reason).
+    peers = {r.get("name"): r for r in rows
+             if cluster and r.get("type") == "node" and not r.get("local")}
+    # Pin the origin on the same code path its peers use, so two nodes of one
+    # cluster never disagree about whether they are pinned. Only hosts enrolled
+    # before pinning existed still have no pin.
+    if not h.tls_fingerprint:
+        h.tls_fingerprint = _fingerprint_now(h.address)
+        db.commit()
+    creds = {c.kind: c for c in db.query(HostCredential).filter_by(host_id=h.id)}
+
+    for row in results:
+        node = row["node"]
+        r = peers.get(node)
+        if r is None:
+            row["detail"] = (f"{node} is not one of the nodes {h.name} reports in "
+                             f"its cluster right now, so it was not added. "
+                             f"Nothing was stored.")
+            continue
+        row["address"] = address = f"https://{r.get('ip')}:8006"
+        # The skip rules, re-applied here rather than trusted from discovery.
+        # Cluster plus node name, never address, so the same machine enrolled
+        # under a second address or a DNS name is still recognised. A NULL
+        # cluster_name counts too: adding the same machine twice is the worse
+        # failure of the two.
+        already = next((e for e in db.query(Host).filter(Host.id != h.id)
+                        if e.node_name == node and e.cluster_name in (cluster, None)),
+                       None)
+        if already:
+            row["status"] = "skipped"
+            row["detail"] = (f"{node} is already in Proxploy as {already.name}. "
+                             f"Nothing was stored.")
+            continue
+        # The skip rules have already excluded the same machine, so a clash on
+        # hosts.name is a different machine wearing the name. That peer fails
+        # and the rest still enrol; no generated suffix, because a host
+        # silently wearing a name that is not its node name is worse.
+        clash = db.query(Host).filter_by(name=node).one_or_none()
+        if clash:
+            row["detail"] = (f"{node} was not added: Proxploy already has a "
+                             f"different host called {node}, at {clash.address}. "
+                             f"Nothing was stored. Rename that host, then add this "
+                             f"node again. Any other nodes you ticked were still "
+                             f"added.")
+            continue
+
+        # This peer's own certificate, never the origin's: cluster nodes serve
+        # distinct ones, so an inherited pin would refuse every connection.
+        # The pin always comes from this probe, never from what the caller
+        # echoed back, which is only ever compared against it.
+        fingerprint = _fingerprint_now(address)
+        shown = body.tls_fingerprints.get(node)
+        # Case-insensitively, the way _connect already compares a stored pin.
+        # A probe that could not read the certificate counts as a mismatch:
+        # the operator approved a specific one and Proxploy cannot say this is
+        # it, which is exactly the case not to guess about.
+        if shown and (fingerprint or "").upper() != shown.upper():
+            row["detail"] = (
+                f"{node} is presenting a different TLS certificate than the one "
+                f"shown a moment ago, so it was not added. Nothing was stored. "
+                f"If you did not just replace its certificate, stop and "
+                f"investigate. Shown then: {shown}. Presenting now: "
+                f"{fingerprint or 'nothing Proxploy could read'}.")
+            continue
+        tok = jsonlib.loads(ss.decrypt(creds["api_token:monitoring"].encrypted_blob))
+        peer_client = ProxmoxClient(address, tok["token_id"], tok["token_secret"],
+                                    verify_tls=h.verify_tls,
+                                    tls_fingerprint=fingerprint,
+                                    factory=request.app.state.proxmox_factory)
+        try:
+            v = peer_client.version()
+        except ProxmoxError as e:
+            # Nothing is written either way: a host with no monitoring
+            # credential cannot poll, and monitoring is the mandatory
+            # capability.
+            row["detail"] = (
+                f"{node} at {r.get('ip')} did not answer on port 8006, so it was "
+                f"not added. Nothing was stored."
+                if e.kind == "unreachable" else
+                f"{node} refused the monitoring token, so it was not added. "
+                f"Nothing was stored. Check that the token exists on that node "
+                f"and that its permissions cover it.")
+            continue
+
+        peer = Host(name=node, address=address, verify_tls=h.verify_tls,
+                    tls_fingerprint=fingerprint, status="connected",
+                    node_name=node, cluster_name=cluster,
+                    # Copied so a cluster is never half inside a team and half
+                    # outside it. A teamless origin leaves the peer teamless.
+                    team_id=h.team_id,
+                    last_error=_privilege_note(_missing_privileges(peer_client)),
+                    node_power_missing=_node_power_missing(peer_client),
+                    pve_version=v.get("version"), last_seen_at=utcnow())
+        db.add(peer)
+        db.commit()
+
+        for cap in CAPABILITIES:
+            cred = creds.get(f"api_token:{cap}")
+            if cred is None:
+                continue
+            if cap != "monitoring":  # monitoring was verified just above
+                t = jsonlib.loads(ss.decrypt(cred.encrypted_blob))
+                try:
+                    ProxmoxClient(address, t["token_id"], t["token_secret"],
+                                  verify_tls=h.verify_tls,
+                                  tls_fingerprint=fingerprint,
+                                  factory=request.app.state.proxmox_factory).version()
+                except ProxmoxError:
+                    # The host stays enrolled and works for everything that did
+                    # verify. A node that has left the cluster shows up exactly
+                    # here, its copy of the token having drifted.
+                    row["capabilities_failed"].append(cap)
+                    continue
+            # Same secret store and same key version, so the blob is copied as
+            # it is: a decrypt and re-encrypt round trip would change nothing
+            # except the number of places a plaintext secret exists.
+            db.add(HostCredential(host_id=peer.id, kind=cred.kind,
+                                  encrypted_blob=cred.encrypted_blob,
+                                  key_version=cred.key_version,
+                                  public_meta=cred.public_meta))
+            row["capabilities_stored"].append(cap)
+        db.commit()
+
+        row["status"], row["host_id"] = "enrolled", peer.id
+        if row["capabilities_failed"]:
+            row["detail"] = " ".join(
+                [f"{node} was added, and everything else was stored."]
+                + [f"Proxmox on {node} refused the {cap} token, so "
+                   f"{CAPABILITIES[cap].label} is not configured there. Add it "
+                   f"from {node}'s Edit dialog once the token works on that node."
+                   for cap in row["capabilities_failed"]])
+        # The two existing action names, so the audit filters and the activity
+        # feed's labels keep working with nothing new to register.
+        write_audit(db, actor_type="user", actor_id=user.id, action="host.create",
+                    target_type="host", target_id=peer.id,
+                    params={"name": peer.name, "address": address, "node": node,
+                            "via_host_id": h.id, "via_node": h.node_name}, ip=ip)
+        for cap in row["capabilities_stored"]:
+            write_audit(db, actor_type="user", actor_id=user.id,
+                        action="host.credentials", target_type="host",
+                        target_id=peer.id,
+                        params={"capability": cap, "copied_from_host_id": h.id},
+                        ip=ip)
+    return {"results": results}
+
+
 @router.post("/{host_id}/sync")
 async def sync_host(request: Request, host_id: int, db=Depends(get_db),
                     user: User = Depends(_sync)):
