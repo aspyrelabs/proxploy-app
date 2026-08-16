@@ -17,9 +17,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 NODE = "pve1"
+# journey.spec.ts adds its one host at exactly this address. Both the fake
+# below and that spec have to agree on it now that the factory is keyed by
+# address rather than answering with one fake for everything.
+NODE_ADDRESS = "10.0.0.5"
 ISO_STORAGE = "local"
 IMAGES_STORAGE = "local-lvm"
 DEMO_CATALOG_SLUG = "e2e-demo"
+
+# The cluster peers.spec.ts drives, one node per address. Deliberately NOT at
+# NODE's address: pve1 stays a standalone node, so journey.spec.ts keeps
+# describing the simpler world and never meets a peer panel it knows nothing
+# about. Same cluster name, node names and addresses as the unit tests in
+# tests/test_hosts_peers.py, so there is one fake world here and not two.
+CLUSTER = "lab-cluster"
+CLUSTER_NODES = {"pve2": "10.0.0.6", "pve3": "10.0.0.7", "pve4": "10.0.0.8"}
 
 
 def _seed_catalog(settings) -> None:
@@ -177,10 +189,34 @@ def _seed_pve():
     return fake
 
 
+def _seed_cluster():
+    """One FakePVE per node of CLUSTER, keyed by address.
+
+    Each node answers /cluster/status with every node of the cluster and marks
+    itself `local`, which is what a real node does and what cluster_identity
+    reads to work out which node it is talking to. Without one fake per
+    address, GET/POST /hosts/{id}/peers would reach the same machine whichever
+    peer they were aimed at, and the panel could not be rendered at all.
+    """
+    from tests.fakes.pve import FakePVE
+
+    fakes = {}
+    for node, ip in CLUSTER_NODES.items():
+        fake = FakePVE(resources=[
+            {"type": "node", "node": node, "status": "online", "cpu": 0.04,
+             "maxcpu": 4, "mem": 2147483648, "maxmem": 8589934592,
+             "uptime": 100000}])
+        fake.cluster_status_rows = [{"type": "cluster", "name": CLUSTER}] + [
+            {"type": "node", "name": n, "ip": i, "online": 1,
+             "local": 1 if n == node else 0} for n, i in CLUSTER_NODES.items()]
+        fakes[ip] = fake
+    return fakes
+
+
 def create_e2e_app():
     from proxploy.config import Settings
     from proxploy.main import create_app
-    from tests.fakes.pve import make_fake_factory
+    from tests.fakes.pve import make_addressed_factory
     from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
 
     data_dir = Path(os.environ["PROXPLOY_DATA_DIR"])
@@ -206,6 +242,9 @@ def create_e2e_app():
     # it against would each sit out a 10 second connect timeout on an address
     # nothing answers on. One stub for both, so the pin the wizard stores is
     # the certificate the fake node "presents" and every later call matches it.
+    # It answers per address, never one constant: cluster nodes serve distinct
+    # certificates, and a peer that appeared to present the origin's would
+    # make the panel's fingerprint line a lie.
     import importlib
 
     def _e2e_fingerprint(host, port=8006):
@@ -222,6 +261,11 @@ def create_e2e_app():
                             stdout_lines=["ok"], stderr_lines=[], exit_status=0,
                             on_create_process=_mirror_ssh_installs(fake))
 
+    # An address with no fake behind it raises KeyError here, which
+    # ProxmoxClient._connect already wraps into the same ProxmoxError a dead
+    # node produces, so a typo'd address in a spec reads as "cannot connect"
+    # rather than as a 500.
     return create_app(settings,
-                      proxmox_factory=make_fake_factory(fake),
+                      proxmox_factory=make_addressed_factory(
+                          {NODE_ADDRESS: fake, **_seed_cluster()}),
                       ssh_factory=make_fake_connect_factory(ssh))
