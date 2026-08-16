@@ -27,8 +27,33 @@ type HostCapabilities = { capabilities?: Record<string, boolean> }
 // Fine for the four keys that exist today; revisit if one lands.
 const labelOf = (key: string) => key.charAt(0).toUpperCase() + key.slice(1)
 
-function CapabilityRow({ hostId, name, stored }: {
+// The other enrolled hosts of this host's cluster, by the node name Proxmox
+// gave them. Empty on a standalone host, which is every single-host install.
+type Peer = { id: number; node: string }
+type HostRow = { id: number; name: string; node_name?: string | null; cluster_name?: string | null }
+
+// "node1", "node1 and node2", "node1, node2 and node3".
+const listOf = (names: string[]) =>
+  names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+
+/**
+ * What the operator is told once Save has finished writing (plan section 5).
+ * `stored` starts with the origin, because the origin is written first and a
+ * peer's refusal never takes it back: every outcome here either added a
+ * working token or changed nothing.
+ */
+const outcome = (label: string, origin: string, stored: string[], refused: string[]) =>
+  refused.length === 0
+    ? `${label} token stored on ${listOf(stored)}.`
+    : `${label} token stored on ${listOf(stored)}. ${listOf(refused)} refused the same `
+      + `token, so ${label} is still not configured there. ${origin} keeps the token you `
+      + `just saved. Check that the token exists on ${listOf(refused)} and that its `
+      + 'permissions cover it, then add it from '
+      + (refused.length > 1 ? "each of those nodes' Edit dialog." : `${refused[0]}'s Edit dialog.`)
+
+function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
   hostId: number; name: string; stored: boolean
+  cluster: string; originNode: string; peers: Peer[]
 }) {
   const qc = useQueryClient()
   const label = labelOf(name)
@@ -50,6 +75,12 @@ function CapabilityRow({ hostId, name, stored }: {
   const [tokenId, setTokenId] = useState('')
   const [tokenSecret, setTokenSecret] = useState('')
   const [error, setError] = useState('')
+  // Pre ticked: the same token already works on every node of the cluster, so
+  // storing it once and leaving the peers reporting "not configured" is the
+  // outcome nobody wants. Untick and it is a single-host save, exactly as
+  // before. Shown only when there is a peer to name.
+  const [alsoPeers, setAlsoPeers] = useState(true)
+  const [result, setResult] = useState('')
   const halfFilled = Boolean(tokenId) !== Boolean(tokenSecret)
   // Ids are prefixed with hostId: routes/settings.tsx can render the add-host
   // form (Task 2, unprefixed `cap-${key}-id`) alongside this per-host dialog
@@ -82,22 +113,47 @@ function CapabilityRow({ hostId, name, stored }: {
   // already, and the one state that still needed it (Rotate on a stored row)
   // was the one state nobody focus-tested.
   useEffect(() => { if (open) idRef.current?.focus() }, [open])
-  const reveal = () => setOpen(true)
+  const reveal = () => { setResult(''); setOpen(true) }
 
   const save = useMutation({
-    mutationFn: () => api(`/hosts/${hostId}/credentials`, {
-      method: 'POST',
-      body: JSON.stringify({ token_id: tokenId, token_secret: tokenSecret,
-                            capability: name }) }),
-    onSuccess: () => {
-      setTokenId(''); setTokenSecret(''); setError(''); setOpen(false)
-      // Patch this host's own query in place -- we already know the result,
-      // no need to round-trip a GET for it. The hosts table's separate
+    mutationFn: async () => {
+      // One host per call, capability named every time, because that is what
+      // POST /hosts/{id}/credentials already does correctly: it verifies the
+      // token against that host before it stores anything. Propagation to the
+      // cluster is this loop and nothing more.
+      const post = (id: number) => api(`/hosts/${id}/credentials`, {
+        method: 'POST',
+        body: JSON.stringify({ token_id: tokenId, token_secret: tokenSecret,
+                              capability: name }) })
+      // Origin first, and it throws on refusal, so nothing reaches a peer
+      // when the origin will not take the token.
+      await post(hostId)
+      const written = [hostId]
+      if (!alsoPeers || peers.length === 0) return { message: '', written }
+      const done = [originNode]
+      const refused: string[] = []
+      for (const p of peers) {
+        try { await post(p.id); done.push(p.node); written.push(p.id) }
+        catch { refused.push(p.node) }
+      }
+      return { message: outcome(label, originNode, done, refused), written }
+    },
+    onSuccess: ({ message, written }) => {
+      setTokenId(''); setTokenSecret(''); setError(''); setOpen(false); setResult(message)
+      // Patch every host that took the token, this one and each peer, in
+      // place -- we already know the result, no need to round-trip a GET for
+      // it. The peers matter as much as the origin here: queries are fresh
+      // for 15 seconds (main.tsx), so a peer's Edit dialog opened right after
+      // this would otherwise show the capability it just gained as still
+      // missing. A host whose detail was never fetched has no cache entry and
+      // is left to fetch it when something asks. The hosts table's separate
       // ['hosts'] query is invalidated (exact, not a prefix match) so it
-      // refetches next time it's active without also re-fetching this same
-      // detail query out from under the row we just closed.
-      qc.setQueryData<HostCapabilities>(['hosts', hostId], (old) =>
-        old ? { ...old, capabilities: { ...old.capabilities, [name]: true } } : old)
+      // refetches next time it's active without also re-fetching these same
+      // detail queries out from under the row we just closed.
+      for (const id of written) {
+        qc.setQueryData<HostCapabilities>(['hosts', id], (old) =>
+          old ? { ...old, capabilities: { ...old.capabilities, [name]: true } } : old)
+      }
       qc.invalidateQueries({ queryKey: ['hosts'], exact: true })
     },
     // The route names the address and says the old credential is still in
@@ -182,6 +238,23 @@ function CapabilityRow({ hostId, name, stored }: {
             </p>
           )}
           {error && <p className="text-[12px] text-red">{error}</p>}
+          {/* Consent before the save, not a prompt after it: one Save writes
+            * the origin and the ticked peers, and the secret is never held
+            * waiting for a second decision. */}
+          {peers.length > 0 && (
+            <label className="flex items-start gap-1.5 text-[11.5px] text-text-2">
+              <input type="checkbox" className="mt-0.5" checked={alsoPeers}
+                onChange={(e) => setAlsoPeers(e.target.checked)} />
+              <span>
+                Also store this on the other nodes of cluster {cluster}:{' '}
+                {peers.map((p) => p.node).join(', ')}.
+                <span className="block text-[11px] text-text-3">
+                  A Proxmox API token works across the whole cluster, so the same
+                  token is verified against each node before it is stored there.
+                </span>
+              </span>
+            </label>
+          )}
           {/*
             * `size="sm"`, not the default md, is the "make the Add button 30%
             * smaller" ask. This submit is the only Add button that existed
@@ -220,6 +293,9 @@ function CapabilityRow({ hostId, name, stored }: {
           </div>
         </div>
       )}
+      {/* Under the row, not inside the form, because the form has closed by
+        * the time there is anything to say. */}
+      {result && <p className="mt-1 text-[11.5px] text-text-3">{result}</p>}
     </div>
   )
 }
@@ -229,6 +305,17 @@ export function HostCapabilityList({ hostId }: { hostId: number }) {
     queryKey: ['hosts', hostId],
     queryFn: () => api<HostCapabilities>(`/hosts/${hostId}`),
   })
+  // The sibling list comes from the hosts table's own query, on the ['hosts']
+  // key every other page already uses, so this dedupes against whichever
+  // mounted first rather than adding a request. GET /hosts carries
+  // cluster_name and node_name.
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  const origin = hosts.data?.find((h) => h.id === hostId)
+  const cluster = origin?.cluster_name ?? ''
+  const peers: Peer[] = cluster
+    ? (hosts.data ?? []).filter((h) => h.id !== hostId && h.cluster_name === cluster)
+        .map((h) => ({ id: h.id, node: h.node_name || h.name }))
+    : []
   return (
     <QueryState query={host}
                 // This list is the whole body of the Tokens dialog, so the
@@ -264,6 +351,8 @@ export function HostCapabilityList({ hostId }: { hostId: number }) {
           </p>
           {Object.entries(data.capabilities ?? {}).map(([name, stored]) => (
             <CapabilityRow key={name} hostId={hostId} name={name}
+              cluster={cluster} originNode={origin?.node_name || origin?.name || ''}
+              peers={peers}
               // monitoring is required=True and the host cannot exist without it,
               // so it is rotate-only and never shown as a gap. Forcing `stored`
               // is still the whole mechanism under the button group: its Add

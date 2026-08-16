@@ -20,6 +20,9 @@ const scriptResult = { script: "# Proxploy\npveum user add proxploy@pve --commen
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
+    // GET /hosts is a LIST, and HostCapabilityList reads it to find this
+    // host's cluster peers. Standalone here, so it offers no peer checkbox.
+    if (path === '/hosts') return Promise.resolve([])
     if (path === '/hosts/token-script' && opts?.body) {
       scriptCalls.push(JSON.parse(String(opts.body)))
       return Promise.resolve(scriptResult)

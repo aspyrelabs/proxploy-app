@@ -13,6 +13,9 @@ vi.mock('../api/client', async (importOriginal) => ({
   api: vi.fn((path: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(String(opts.body)) : null
     calls.push({ path, body })
+    // GET /hosts is a LIST, and HostCapabilityList reads it to find this
+    // host's cluster peers. Standalone here, so it offers no peer checkbox.
+    if (path === '/hosts') return Promise.resolve([])
     if (path.endsWith('/credentials')) {
       if (reject) {
         return Promise.reject(new ApiError(502, {
@@ -87,7 +90,9 @@ describe('HostCapabilityList', () => {
                      { target: { value: 'lc' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Lifecycle token' }))
 
-    await waitFor(() => expect(calls.at(-1)).toEqual({
+    // The credential POST itself, not the last call made: the hosts list is
+    // invalidated on success and its refetch lands after it.
+    await waitFor(() => expect(calls.find(c => c.path.endsWith('/credentials'))).toEqual({
       path: '/hosts/3/credentials',
       body: { token_id: 'proxploy@pve!lifecycle', token_secret: 'lc',
               capability: 'lifecycle' },

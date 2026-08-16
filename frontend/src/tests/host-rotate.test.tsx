@@ -18,6 +18,9 @@ vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   api: vi.fn((path: string, opts?: RequestInit) => {
     calls.push({ path, method: opts?.method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
+    // GET /hosts is a LIST, and HostCapabilityList reads it to find this
+    // host's cluster peers. Standalone here, so it offers no peer checkbox.
+    if (path === '/hosts') return Promise.resolve([])
     if (path === '/hosts/5' && !opts?.method) {
       return Promise.resolve({ id: 5, name: 'pve1', capabilities: { monitoring: true } })
     }

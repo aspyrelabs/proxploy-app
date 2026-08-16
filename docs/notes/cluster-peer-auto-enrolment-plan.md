@@ -463,6 +463,14 @@ Per node, under the row:
 
 Success is as plain: "Lifecycle token stored on node1, node2 and node3."
 
+Two things phase 7 found that this section had not said. Each host that took
+the token has its cached detail patched, peers as well as the origin: queries
+are fresh for 15 seconds (`frontend/src/main.tsx`), so a peer's Edit dialog
+opened straight after a save would otherwise still show the capability it had
+just gained as missing, which was caught by the browser test. And with more
+than one node refusing, the last sentence reads "add it from each of those
+nodes' Edit dialog", since naming one node there would be wrong.
+
 Deliberately not built: a `propagate_to_peers` flag on the credentials
 route, a fan out endpoint, and any background reconciliation that keeps
 tokens in step forever. All three are more code than a loop over hosts the

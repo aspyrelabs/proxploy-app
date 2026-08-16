@@ -171,4 +171,40 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
         await expect(dialog.getByRole('button', { name: 'Continue' })).toHaveCount(0)
         await dialog.getByRole('button', { name: 'Cancel' }).click()
       })
+
+    // Phase 7: a capability token pasted on one node reaches the rest of the
+    // cluster from the same Save. What it proves is the loop and its copy
+    // against three separate host rows in a real browser. What it cannot
+    // prove here: the refusal half. Every FakePVE accepts every token, and
+    // nothing reachable from the browser makes one of them refuse, so the
+    // mixed outcome is covered in src/tests/settings-host-tokens.test.tsx
+    // against the same code path instead of faked into this spec.
+    await test.step('one Save stores a capability token on every node of the cluster',
+      async () => {
+        await page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) })
+          .getByRole('button', { name: 'Edit' }).click()
+        const dialog = page.getByRole('dialog')
+        await dialog.getByRole('button', { name: 'Add Backup token, show fields' }).click()
+        await dialog.getByLabel('Backup token id').fill('proxploy@pve!backup')
+        await dialog.getByLabel('Backup token secret').fill('secret')
+        const also = dialog.getByRole('checkbox', { name: new RegExp(
+          `other nodes of cluster ${CLUSTER}: ${SECOND.node}, ${PEER.node}\\.`) })
+        await expect(also).toBeChecked()
+        await dialog.getByRole('button', { name: 'Save Backup token' }).click()
+        await expect(dialog.getByText(`Backup token stored on ${FIRST.node}, `
+          + `${SECOND.node} and ${PEER.node}.`)).toBeVisible({ timeout: 15_000 })
+        await dialog.getByRole('button', { name: 'Cancel' }).click()
+      })
+
+    await test.step('each peer holds that token itself, not a note that pve2 has it',
+      async () => {
+        for (const name of [SECOND.name, PEER.node]) {
+          await page.getByRole('row', { name: new RegExp(`^${name} `) })
+            .getByRole('button', { name: 'Edit' }).click()
+          const dialog = page.getByRole('dialog')
+          await expect(dialog.getByRole('button',
+            { name: 'Backup token already stored' })).toBeVisible({ timeout: 15_000 })
+          await dialog.getByRole('button', { name: 'Cancel' }).click()
+        }
+      })
   })
