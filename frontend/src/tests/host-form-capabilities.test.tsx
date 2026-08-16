@@ -44,6 +44,12 @@ vi.mock('../api/client', () => ({
       return Promise.resolve(CAPABILITIES_CATALOG)
     }
     if (path === '/hosts') return Promise.resolve({ id: 7, name: body.name })
+    // The standalone answer: no cluster, no peers, so PeerEnrolmentPanel
+    // renders nothing and this file's flow is what it was before it existed.
+    if (path.endsWith('/peers')) {
+      return Promise.resolve({ cluster: null, team: null, peers: [],
+        capabilities_to_copy: ['monitoring'], multi_host_entitled: true })
+    }
     if (path.endsWith('/credentials')) {
       if (body.capability === reject) {
         return Promise.reject(new ApiError(502, {
@@ -78,8 +84,10 @@ const fillHost = () => {
 const credentialCalls = () => calls.filter(c => c.path.endsWith('/credentials'))
 // Every assertion below that counts or indexes into `calls` cares about the
 // host/credential requests HostForm's submit makes, not the capability
-// catalog fetched on mount, so this is what those assertions filter on.
-const hostCalls = () => calls.filter(c => c.path !== '/hosts/capabilities')
+// catalog fetched on mount or the peer discovery made once the host exists,
+// so this is what those assertions filter on.
+const hostCalls = () => calls.filter(
+  c => c.path !== '/hosts/capabilities' && !c.path.endsWith('/peers'))
 
 describe('HostForm capability tokens', () => {
   beforeEach(() => { calls.length = 0; reject = null; capsOutcome = 'ok' })

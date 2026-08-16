@@ -170,10 +170,13 @@ code that already exists. No new guard is needed.
    address Proxmox reported, and the TLS fingerprint that node presented.
    A peer already in Proxploy is shown unticked and disabled with the host
    name it is already known by. A peer that did not answer is shown unticked
-   and disabled with the reason and no fingerprint, for example:
+   and disabled with the reason and no fingerprint. The reason is the
+   `detail` discovery returned, rendered as it came rather than reworded, so
+   as shipped the row reads:
 
-   > node3, 10.0.0.7. Did not answer on port 8006, so it cannot be added
-   > yet. Add it from its own Edit dialog once it is back.
+   > node3, https://10.0.0.7:8006. Proxploy could not reach node3 at 10.0.0.7
+   > on port 8006: connection refused. It cannot be added until it answers
+   > there.
 
    When the `hosts.multi` entitlement is off, the panel names the peers it
    found and says adding more than one host needs a paid tier, with no
@@ -186,8 +189,14 @@ code that already exists. No new guard is needed.
    fingerprinted, has each token verified against it, and is then added as
    its own host, carrying the origin's `team_id` and its own copy of every
    capability token that verified.
-7. The panel reports one line per peer: added with which tokens and into
-   which team, added but with a named token rejected, or not added and why.
+7. The panel reports one line per peer: added with which tokens, added but
+   with a named token rejected, not added and why, or skipped because the
+   machine is already in Proxploy, which is information and not a failure.
+   Every one of those but the clean add is a `detail` string the route
+   already wrote, so the panel renders them rather than composing new wording
+   over the top. The team is not repeated here: it is named above the
+   checkboxes, before anything is ticked, and the result rows do not carry
+   it.
 8. `onCreated` fires once the operator presses Continue, so onboarding
    advances after the peer step rather than before it.
 
@@ -220,7 +229,7 @@ already returns to an admin, and it stores nothing.
      "reachable": false, "tls_fingerprint": null,
      "already_enrolled_as": null,
      "error": {"kind": "unreachable",
-               "detail": "node3 at 10.0.0.7 did not answer on port 8006."}}
+               "detail": "Proxploy could not reach node3 at 10.0.0.7 on port 8006: connection refused. It cannot be added until it answers there."}}
   ]
 }
 ```

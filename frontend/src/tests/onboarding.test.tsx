@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
@@ -14,6 +14,12 @@ let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
 let meAuthed = true
 let probeResult: unknown = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+// GET /hosts/{id}/peers. The standalone answer by default: no cluster and no
+// peers, so PeerEnrolmentPanel renders nothing and every test below behaves
+// exactly as it did before the panel existed.
+const STANDALONE_PEERS = { cluster: null, team: null, peers: [],
+  capabilities_to_copy: ['monitoring'], multi_host_entitled: true }
+let peersResult: unknown = STANDALONE_PEERS
 // Held open by the pending-state tests below so they can observe the
 // indeterminate ring before the awaited call resolves.
 let probeHeld = false
@@ -57,6 +63,7 @@ beforeEach(() => {
   verifyOutcome = { ok: true }
   meAuthed = true
   probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
+  peersResult = STANDALONE_PEERS
   scriptCalls = []
   probeHeld = false; releaseProbe = null
   addHeld = false; releaseAdd = null
@@ -89,6 +96,7 @@ vi.mock('../api/client', () => {
         return Promise.resolve({ id: 7, name: JSON.parse(String(init.body)).name })
       }
       if (path === '/hosts') return Promise.resolve(hostList)
+      if (path.endsWith('/peers')) return Promise.resolve(peersResult)
       if (path.endsWith('/ssh/verify')) {
         if (verifyHeld) return new Promise((resolve) => { releaseVerify = resolve })
         return verifyOutcome.ok
@@ -265,8 +273,10 @@ describe('HostForm', () => {
     expect(document.body.textContent).not.toMatch(/\d+ ?%/)
 
     releaseAdd?.({ id: 7, name: 'pve-01' })
-    await new Promise((r) => setTimeout(r, 0))
-    expect(onCreated).toHaveBeenCalled()
+    // waitFor, not one tick: the peer panel asks GET /hosts/{id}/peers before
+    // onCreated fires, and on a standalone host that answer is what ends the
+    // flow here.
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
   })
 })
 
@@ -506,6 +516,30 @@ describe('onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
     expect(await screen.findByText(/signed out/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create admin account/i })).not.toBeInTheDocument()
+  })
+
+  // The wizard advances on onCreated, and the peer panel holds that back so
+  // the offer to add the rest of the cluster is not skipped past.
+  it('does not advance past the add host step while the peer panel is open', async () => {
+    mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+    peersResult = { cluster: 'lab-cluster', team: null, capabilities_to_copy: ['monitoring'],
+      multi_host_entitled: true,
+      peers: [{ node: 'node2', address: 'https://10.0.0.6:8006', online: true,
+                reachable: true, tls_fingerprint: 'AB:CD:EF',
+                already_enrolled_as: null, error: null }] }
+    renderWizard()
+    fireEvent.change(await screen.findByLabelText(/^name$/i), { target: { value: 'pve-01' } })
+    fireEvent.change(screen.getByLabelText(/address/i), { target: { value: 'https://10.0.0.5:8006' } })
+    fireEvent.change(screen.getByLabelText('Monitoring token id'), { target: { value: 'proxploy@pve!x' } })
+    fireEvent.change(screen.getByLabelText('Monitoring token secret'), { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
+
+    expect(await screen.findByRole('checkbox', { name: /node2/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+
+    // Skip is what ends the step, so nothing is added and the wizard moves on.
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 
   it('does not let you jump forward past the step the server is on', async () => {

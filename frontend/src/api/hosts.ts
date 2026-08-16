@@ -73,6 +73,43 @@ export function useHostCapabilityCatalog() {
   })
 }
 
+// GET /hosts/{id}/peers (backend/proxploy/api/hosts.py::list_peers). Every
+// peer is probed before the route answers, so `reachable`, `tls_fingerprint`
+// and `error` are already settled by the time this resolves: there is no row
+// whose state is still unknown, and nothing to stream.
+export type HostPeer = {
+  node: string; address: string; online: boolean; reachable: boolean
+  tls_fingerprint: string | null; already_enrolled_as: string | null
+  error: { kind: string; detail: string } | null
+}
+
+// `cluster` is null on a standalone node, and `peers` is empty with it.
+export type HostPeers = {
+  cluster: string | null
+  team: { id: number; name: string } | null
+  capabilities_to_copy: string[]
+  multi_host_entitled: boolean
+  peers: HostPeer[]
+}
+
+// One row per requested node from POST /hosts/{id}/peers
+// (backend/proxploy/api/hosts.py::enrol_peers). `skipped` is not a failure:
+// the machine was recognised, nothing was written and nothing was wrong.
+export type PeerEnrolResult = {
+  node: string; status: 'enrolled' | 'failed' | 'skipped'
+  host_id: number | null; address: string | null
+  capabilities_stored: string[]; capabilities_failed: string[]
+  detail: string | null
+}
+
+export function useHostPeers(hostId: number | null) {
+  return useQuery({
+    queryKey: ['hosts', hostId, 'peers'],
+    queryFn: () => api<HostPeers>(`/hosts/${hostId}/peers`),
+    enabled: hostId != null,
+  })
+}
+
 export function useHostTaskLog(hostId: number | null, upid: string | null) {
   // Encoded outside the template literal: a UPID is full of characters that
   // must not reach the path raw, and the cast this used to need inline is

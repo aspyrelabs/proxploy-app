@@ -4,12 +4,19 @@ import { api, ApiError } from '../api/client'
 import { useHostCapabilityCatalog } from '../api/hosts'
 import { Button } from './ui/button'
 import { HostScriptPanel } from './HostScriptPanel'
+import { PeerEnrolmentPanel } from './PeerEnrolmentPanel'
 import { inputCls } from './LoginForm'
 import { Loading } from './ui/loading'
 
 export type HostCreated = {
   id: number; name: string; ssh_public_key?: string
   authorized_keys_line?: string; consent_note?: string
+  // Both come from POST /hosts and are only used by the peer panel below:
+  // the node name is what the cluster calls this host, and the cluster name
+  // is what the panel says it is checking while discovery is in flight.
+  // Either can be null when the probe could not read /cluster/status, which
+  // is why discovery is asked regardless of what they say.
+  node_name?: string | null; cluster_name?: string | null
 }
 
 const CONSENT_COPY = 'App Store installs run community scripts through a dedicated ' +
@@ -128,6 +135,11 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   // The host, once POST /hosts has succeeded. Non-null means a retry must NOT
   // create it again (409 host name already exists).
   const [created, setCreated] = useState<HostCreated | null>(null)
+  // The host and its tokens are stored, so the peer panel takes over: it asks
+  // whether this host has other cluster nodes, and onCreated waits for its
+  // answer. On a standalone host it renders nothing and calls onCreated
+  // immediately, which is exactly what used to happen here.
+  const [peerStage, setPeerStage] = useState(false)
   const [storedCaps, setStoredCaps] = useState<string[]>([])
   const [capErrors, setCapErrors] = useState<Record<string, string>>({})
   const setCapToken = (key: string, field: 'id' | 'secret', v: string) =>
@@ -196,7 +208,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         } catch (err) { failed[key] = `${labelOf(key)}: ${errText(err)}` }
       }
       setStoredCaps(done); setCapErrors(failed)
-      if (!Object.keys(failed).length) onCreated(h)
+      if (!Object.keys(failed).length) setPeerStage(true)
     } catch (e) { setError(errText(e)) } finally { setBusy(false) }
   }
 
@@ -385,20 +397,29 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           </div>
         </div>
       )}
-      <div className="flex items-center gap-2">
-        {/* Neither call has a progress signal: connecting either succeeds or
-            it doesn't, and adding the host is one POST. Ring, not a number. */}
-        {(testing || busy) && (
-          <Loading label={testing ? 'Testing the connection' : 'Adding the host'} size={18} />
-        )}
-        <Button type="button" variant="ghost" onClick={testConnection} disabled={testing}>
-          Test connection
-        </Button>
-        <Button type="submit" disabled={busy}>
-          {busy ? (created ? 'Retrying…' : 'Adding…')
-                : (created ? 'Retry rejected token' : 'Add host')}
-        </Button>
-      </div>
+      {/* The host exists and its tokens are stored by now, so the form's own
+          controls are done: the panel owns the rest of the flow, including
+          when onCreated fires. It renders nothing at all for a standalone
+          host, so that case ends here exactly as it did before. */}
+      {peerStage && created ? (
+        <PeerEnrolmentPanel hostId={created.id} node={created.node_name ?? created.name}
+          cluster={created.cluster_name} onDone={() => onCreated(created)} />
+      ) : (
+        <div className="flex items-center gap-2">
+          {/* Neither call has a progress signal: connecting either succeeds or
+              it doesn't, and adding the host is one POST. Ring, not a number. */}
+          {(testing || busy) && (
+            <Loading label={testing ? 'Testing the connection' : 'Adding the host'} size={18} />
+          )}
+          <Button type="button" variant="ghost" onClick={testConnection} disabled={testing}>
+            Test connection
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? (created ? 'Retrying…' : 'Adding…')
+                  : (created ? 'Retry rejected token' : 'Add host')}
+          </Button>
+        </div>
+      )}
     </form>
   )
 }
