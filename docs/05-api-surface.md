@@ -85,6 +85,7 @@ documented endpoint callable with an API key (`api_keys` table,
 | PATCH | `/api/v1/hosts/{id}` | Rename, TLS settings, team assignment | admin | |
 | DELETE | `/api/v1/hosts/{id}` | Remove host (refused while apps reference it) | owner | |
 | POST | `/api/v1/hosts/{id}/test` | Probe API token + SSH reachability, report scopes | admin | |
+| GET | `/api/v1/hosts/{id}/peers` | Other nodes of this host's cluster, each probed for reachability and TLS fingerprint (read-only, adds nothing) | admin | |
 | PUT | `/api/v1/hosts/{id}/credentials/{kind}` | Rotate `api_token` or `ssh_key` (encrypted at rest, audit-logged) | owner | |
 | POST | `/api/v1/hosts/{id}/sync` | Force re-poll → job | operator | |
 | GET | `/api/v1/hosts/{id}/tasks` | Recent Proxmox-native task log (passthrough) | viewer | |

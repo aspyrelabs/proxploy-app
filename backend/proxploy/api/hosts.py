@@ -11,7 +11,7 @@ from proxploy.models import Host, HostCredential, Team, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
-                                       token_public_meta)
+                                       tls_fingerprint_sha256, token_public_meta)
 from proxploy.services.hostclient import client_for_host, cluster_identity
 from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
@@ -309,7 +309,11 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
     for host_id, kind in db.query(HostCredential.host_id, HostCredential.kind):
         kinds.setdefault(host_id, set()).add(kind)
     return [{"id": h.id, "name": h.name, "address": h.address,
-             "node_name": h.node_name, "status": h.status,
+             # cluster_name so the frontend can tell which enrolled hosts are
+             # nodes of the same cluster. Already on the model, already
+             # returned by POST /hosts.
+             "node_name": h.node_name, "cluster_name": h.cluster_name,
+             "status": h.status,
              "last_error": h.last_error,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "node_power_missing": h.node_power_missing,
@@ -367,6 +371,93 @@ def host_detail(host_id: int, db=Depends(get_db),
             "capabilities": _capability_state(c.kind for c in creds),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": to_iso(c.last_used_at)} for c in creds]}
+
+
+@router.get("/{host_id}/peers")
+def list_peers(request: Request, host_id: int, db=Depends(get_db),
+               user: User = Depends(_manage)):
+    """The other nodes of this host's cluster, and whether each can be added.
+
+    Read only: nothing here writes a host, a credential or an audit row. It
+    reveals node names, addresses and fingerprints, which is the same class of
+    information POST /hosts/probe already returns to an admin.
+
+    Every peer is probed before this answers, so the caller never renders a
+    row whose reachability is still unknown. A failure against one peer is
+    recorded on that peer's row and never raised: one dead node must not hide
+    the live ones.
+
+    Every outbound connection still goes through resolve_target(), inside
+    tls_fingerprint_sha256 and ProxmoxClient._connect. That guard matters more
+    here than anywhere else, because the peer address comes from the node
+    rather than from the operator, and it is why no new guard is needed.
+    """
+    h = db.get(Host, host_id)
+    if h is None:
+        raise HTTPException(404, "host not found")
+    try:
+        client = client_for_host(request.app, db, h)
+        rows = client.cluster_status()
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)}) from e
+
+    kinds = {c.kind for c in db.query(HostCredential).filter_by(host_id=h.id)}
+    team = db.get(Team, h.team_id) if h.team_id is not None else None
+    cluster = next((r.get("name") for r in rows if r.get("type") == "cluster"), None)
+    out = {"cluster": cluster,
+           "team": {"id": team.id, "name": team.name} if team else None,
+           # The origin's own api_token:* kinds, so the caller can say what
+           # would be copied. ssh_key is not in here and never will be: it is
+           # a root shell, a different trust decision from an API token.
+           "capabilities_to_copy": [c for c in CAPABILITIES
+                                    if f"api_token:{c}" in kinds],
+           # Mirrors the check create_host makes. A peer is never the first
+           # host, so the entitlement is always required for one.
+           "multi_host_entitled": request.app.state.entitlements.enabled("hosts.multi"),
+           "peers": []}
+    if cluster is None:
+        # No cluster row means standalone. Its single node row is this host
+        # itself and carries no `local` flag on some versions, so returning
+        # here is what stops a standalone node being offered as its own peer.
+        return out
+
+    enrolled = db.query(Host).filter(Host.id != h.id).all()
+    for r in rows:
+        if r.get("type") != "node" or r.get("local"):
+            continue
+        node, ip = r.get("name"), r.get("ip")
+        peer = {"node": node, "address": f"https://{ip}:8006",
+                "online": bool(r.get("online")), "reachable": False,
+                "tls_fingerprint": None, "already_enrolled_as": None,
+                "error": None}
+        # Matched on cluster plus node name, never on address, so a peer
+        # enrolled under a second address or a DNS name is still recognised.
+        # A NULL cluster_name counts too: it means a row from before cluster
+        # detection, or one the poller has not filled in yet, and adding the
+        # same machine twice is the worse failure of the two.
+        peer["already_enrolled_as"] = next(
+            (e.name for e in enrolled if e.node_name == node
+             and e.cluster_name in (cluster, None)), None)
+        # An already enrolled peer is not probed: it cannot be added again, so
+        # the handshake and the /version call would buy nothing.
+        if peer["already_enrolled_as"] is None:
+            try:
+                # Assigned only once both probes pass, so an errored row never
+                # carries a fingerprint the operator might act on.
+                fingerprint = tls_fingerprint_sha256(ip)
+                ProxmoxClient(peer["address"], client.token_id, client.token_secret,
+                              verify_tls=h.verify_tls,
+                              factory=request.app.state.proxmox_factory).version()
+            except (OSError, ProxmoxError) as e:
+                peer["error"] = {
+                    "kind": getattr(e, "kind", "unreachable"),
+                    "detail": (f"Proxploy could not reach {node} at {ip} on port "
+                               f"8006: {e}. It cannot be added until it answers "
+                               f"there.")}
+            else:
+                peer["reachable"], peer["tls_fingerprint"] = True, fingerprint
+        out["peers"].append(peer)
+    return out
 
 
 @router.patch("/{host_id}")

@@ -234,7 +234,13 @@ Work:
    the usual `{"error": kind, "detail": ...}` body, the same shape every
    other route here returns.
 3. Rows with `type == "node"` and no `local` flag are the peers. No cluster
-   row means standalone, and the response is `{"cluster": null, "peers": []}`.
+   row means standalone. The standalone check has to come first and return
+   before the peer loop, not as part of it: a standalone node's single row
+   carries no `local` flag on some versions, which is the case
+   `cluster_identity` special cases with `len(nodes) == 1`, so a combined
+   rule would offer a standalone node as its own peer. The response keeps
+   the full shape with `cluster: null` and `peers: []`, rather than a
+   shorter standalone-only body, so a client parses one shape.
 4. For each peer: build the address, apply the skip rules (section 6.4),
    then call `tls_fingerprint_sha256(hostname, port)` and
    `ProxmoxClient(address, <origin monitoring token>, ...).version()`. A
