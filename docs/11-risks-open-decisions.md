@@ -441,6 +441,44 @@ Not risks so much as the shortlist a fresh session should start from.
    it, 9 needs backups that exist, 11 needs a real IdP, 12 means deliberately
    breaking quorum.
 
+## Open at the end of 2026-08-16
+
+Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
+
+1. **None of it has met real Proxmox.** Every node in every test is a
+   `FakePVE`, including the browser tests. Two things a fake cannot answer:
+   whether the `ip` a node reports in `/cluster/status` is one the API actually
+   answers on, and whether each node presents the certificate the panel shows
+   before you tick its box. Both are cheap to check against a real two node
+   cluster and expensive to be wrong about, since the second one is what the
+   pinning rests on. Check them before anyone relies on the feature.
+
+2. **The certificate swap refusal has no browser coverage, deliberately.** The
+   panel echoes back the fingerprint it displayed and enrolment refuses a peer
+   that presents something else, but nothing reachable from a browser can
+   change what the fake presents between those two moments. Faking it would
+   mean a fixture that lies about how certificates change. Covered against the
+   real handler in `test_hosts_peers.py`, and worth one manual check on real
+   hardware alongside item 1.
+
+3. **`journey.spec.ts:163` fails.** VM create never shows "succeeded" within
+   twenty seconds. Pre-existing from the VM wizard work of 2026-08-15,
+   confirmed identical against the commit before today's. It matters more than
+   it looks: the `chromium` Playwright project depends on the `journey`
+   project, so this one failure skips 14 other tests and the suite needs
+   `--no-deps` to run at all.
+
+4. **Duplicate React key at `frontend/src/routes/store.tsx:372`.** The category
+   skeleton uses its class string as the key over a list where `w-20` and
+   `w-16` each appear twice. Only fires when the catalog query is slow enough
+   to render the skeleton, which is why it is intermittent, and it is what
+   `smoke.spec.ts` currently fails on.
+
+Still carried from 2026-08-15: the swallowed error detail, the node shell
+toggle that can be enabled without `Sys.Console`, the SSH enrolment checkbox
+granting the key silently, and the history purge decision on the committed
+`master.key`.
+
 ---
 
 ## Summary table
