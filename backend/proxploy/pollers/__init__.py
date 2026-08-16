@@ -128,6 +128,7 @@ def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
 def ingest_cycle(db, host: Host, resources: list[dict],
                  rrd_by_node: dict[str, list[dict]], now: datetime,
                  version: str | None = None,
+                 node_name: str | None = None,
                  cluster_name: str | None | object = UNREAD,
                  degraded: bool = False) -> CycleResult:
     events: list[tuple[str, dict]] = []
@@ -161,10 +162,19 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # so they silently had nothing to offer. Only tests/support.py's
     # seed_host_row ever set it, which is why this never showed up until the
     # onboarding journey actually drove host creation through the UI (Task 16).
-    # Written once, like main.py's self.ctid: a later operator correction must
-    # survive restarts, and a real multi-node cluster's actual "home" node for
-    # this Host row is not something a later poll should second-guess.
-    if not host.node_name and snap_nodes:
+    # The guess from snap_nodes is written once: it is whichever node happened
+    # to come first in /cluster/resources, so a real multi-node cluster's
+    # actual "home" node for this Host row is not something it should
+    # second-guess. `node_name` from the caller is not a guess: /cluster/status
+    # marks the node at this host's own address, so it is refreshed every
+    # cycle, for the same reason pve_version and cluster_name below are. A node
+    # renamed in PVE otherwise keeps its old name here forever, and peer
+    # discovery compares against this column to decide a node is already
+    # enrolled. Falsy means the read failed or the cluster shape was
+    # surprising, and a stale name beats a blank one.
+    if node_name:
+        host.node_name = node_name
+    elif not host.node_name and snap_nodes:
         host.node_name = snap_nodes[0]["node"]
 
     own = next((n for n in snap_nodes if n["node"] == host.node_name),
@@ -541,13 +551,14 @@ class Poller:
             # constant-cost call per host per cycle, which the doc 02 section 3
             # budget allows (it forbids per-GUEST calls, not per-host ones).
             try:
-                _, cluster_name = cluster_identity(client)
+                node_name, cluster_name = cluster_identity(client)
             except ProxmoxError:
-                cluster_name = UNREAD
+                node_name, cluster_name = None, UNREAD
 
             prev = self.snapshots.get(host_id)
             result = ingest_cycle(db, host, resources, rrd, utcnow(),
-                                  version=version, cluster_name=cluster_name,
+                                  version=version, node_name=node_name,
+                                  cluster_name=cluster_name,
                                   degraded=bool(degraded))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears

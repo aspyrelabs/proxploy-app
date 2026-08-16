@@ -274,3 +274,38 @@ def test_a_version_probe_that_failed_does_not_erase_the_known_version(tmp_path):
     ingest_cycle(db, host, resources, rrd, utcnow(), version=None)
     assert host.pve_version == "9.2.10"
     assert host.status == "connected"
+
+
+def test_a_node_renamed_in_pve_gets_its_new_name_on_the_next_cycle(tmp_path):
+    """hosts.node_name was written at enrolment and never again, so a node
+    renamed in PVE kept its old name here forever. That is the name peer
+    discovery compares against to decide a node is already enrolled, so a
+    stale one would offer an enrolled node as a brand new peer."""
+    from proxploy.models import utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    resources, rrd = _fixtures()
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), node_name="pve1-renamed")
+    assert host.node_name == "pve1-renamed"
+
+
+def test_a_cluster_status_read_that_failed_does_not_erase_the_node_name(tmp_path):
+    """Same hazard as the version probe: /cluster/status can 403 on a token
+    that still reads /cluster/resources. Losing it must cost the node name
+    refresh and nothing else, because /cluster/nodes and the VM-create node
+    picker read this column and would find it blank."""
+    from proxploy.models import utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve2")
+    resources, rrd = _fixtures()
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), node_name=None)
+    assert host.node_name == "pve2"
+    assert host.status == "connected"
