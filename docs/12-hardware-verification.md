@@ -458,13 +458,28 @@ exercise any of it and the script says so and stops.
     that node's API certificate. Building peer addresses from `pve_addr` would
     make this entire check moot. Two things to settle before relying on it:
 
-    - Whether a narrow monitoring token may read `/cluster/config/join` at all.
-      This lab's token is `root@pam!proxploy`, which holds every privilege, so
-      the run above proves nothing about a PVEAuditor token, and the peer panel
-      runs on the monitoring credential.
+    - **Settled 2026-08-17, PVE 9.2.10: a narrow token may read it.** Against a
+      throwaway `pp-probe@pve!probe` holding only `PVEAuditor` at `/` (created,
+      asked, and deleted in one run), `/cluster/config/join` was READABLE and
+      returned `pve_addr`, `ring0_addr` and `pve_fp` for both nodes, as were
+      `/cluster/status` and `/cluster/config/nodes`. `PVEAuditor` carries
+      `Sys.Audit` at `/`, which is what that endpoint wants. So the monitoring
+      credential the peer panel runs on is sufficient, and this is no longer an
+      obstacle. The token was created with `privsep=0` so it inherited the
+      user's role; PVE's default `privsep=1` gives a token nothing until the
+      token itself appears in an ACL, which would have made a refusal say
+      nothing about `PVEAuditor`.
     - `pve_fp` is recorded at join time. A node whose certificate was replaced
       after it joined would report a stale one, so `pve_fp` is worth having as a
       second opinion and is NOT a substitute for reading the live certificate.
+
+    **Deliberately not built, 2026-08-17.** Both prerequisites are now cheap or
+    cleared, and the change is still deferred: no cluster with a dedicated
+    corosync link has been reported, and the behaviour on one today is already
+    honest rather than broken (an unreachable row, a disabled checkbox, and an
+    enrolment refused with the reason). Build it when a real cluster needs it.
+    What it would be is one call swapped for another, plus `pve_fp` as a second
+    opinion on the fingerprint the socket already returns.
 
 14. **Each node presents the certificate the panel showed, and still presents
     it a moment later.** This is the foundational one: the entire trust model
