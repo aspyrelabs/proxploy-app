@@ -369,8 +369,12 @@ export function StorePage() {
             vocabulary this page does not know yet. */}
         {catalogQuery.isPending ? (
           <SkeletonGroup label="Loading categories" className="flex flex-wrap gap-2">
-            {['w-10', 'w-20', 'w-16', 'w-24', 'w-14', 'w-20', 'w-16', 'w-28'].map((w) => (
-              <Skeleton key={w} className={`h-[26.5px] rounded-full ${w}`} />
+            {/* Keyed by index, not by `w`: the list repeats widths (w-20 and
+                w-16 appear twice), so the class string is not unique. It is a
+                fixed-length placeholder that never reorders, which is exactly
+                the case an index key is correct for. */}
+            {['w-10', 'w-20', 'w-16', 'w-24', 'w-14', 'w-20', 'w-16', 'w-28'].map((w, i) => (
+              <Skeleton key={i} className={`h-[26.5px] rounded-full ${w}`} />
             ))}
           </SkeletonGroup>
         ) : catalogQuery.isError ? null : (

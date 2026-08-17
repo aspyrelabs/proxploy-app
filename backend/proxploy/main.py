@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from proxploy import __version__
@@ -45,6 +47,44 @@ def _init_reporting(settings: Settings) -> str:
     except Exception as e:
         return f"error: {type(e).__name__}"
     return "on"
+
+
+class _SPAStatic(StaticFiles):
+    """StaticFiles that also serves index.html for client-side routes.
+
+    `html=True` falls back to index.html for a DIRECTORY, never for a
+    client-side route, and every route in this product is client-side. So
+    refreshing on /settings or /store/plex returned the app's 404 in
+    production while Vite did the fallback in dev (doc 12).
+
+    Subclassing here rather than registering a 404 exception handler is the
+    whole point. A handler ALSO replaced the body of every other 404, which
+    flattened the structured `detail` that routes like
+    `HTTPException(404, {"error": "oidc_not_configured"})` pass, and that is
+    why the first attempt was reverted. This code only ever runs for a path
+    that reached the mount, i.e. one the API router did not claim, so no
+    route's own 404 can pass through it.
+    """
+
+    async def get_response(self, path: str, scope):
+        # StaticFiles RAISES HTTPException(404) for a missing path rather than
+        # returning a 404 response, so this has to catch rather than inspect.
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as e:
+            if e.status_code != 404:
+                raise
+            # An unmatched /api/... path is a caller error, not a page: let its
+            # 404 stand rather than answering with HTML.
+            if scope.get("path", "").startswith("/api/"):
+                raise
+            # Accept is the discriminator, not the path shape: a navigation
+            # sends text/html, while a fetch for a missing module sends */*. A
+            # missing asset must stay a 404; handing the loader HTML instead
+            # fails further from the cause.
+            if "text/html" not in Headers(scope=scope).get("accept", ""):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def create_app(
@@ -222,11 +262,9 @@ def create_app(
 
     app.include_router(api_router)
 
-    from fastapi.staticfiles import StaticFiles
-
     dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if dist.exists():
-        app.mount("/", StaticFiles(directory=dist, html=True), name="spa")
+        app.mount("/", _SPAStatic(directory=dist, html=True), name="spa")
 
     @app.exception_handler(RequestValidationError)
     async def _no_echo_validation_errors(request, exc):
