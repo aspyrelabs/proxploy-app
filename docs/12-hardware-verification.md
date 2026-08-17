@@ -436,8 +436,35 @@ exercise any of it and the script says so and stops.
     address its API listens on, and the two can agree here while diverging on a
     cluster built with a dedicated cluster network. A pass on this hardware says
     the field is present and usable, not that it is the API's address
-    everywhere. Re-run this one on a split-network cluster before treating the
-    question as settled.
+    everywhere.
+
+    **The hazard is real, established 2026-08-17 without a second network.**
+    `GET /cluster/config/join` on PVE 9.2.10 returns, per node, a `ring0_addr`
+    and a `pve_addr` as SEPARATE fields. On this cluster they hold the same
+    value, which is why every check above passes, but PVE storing them
+    independently is what says they can diverge. So a cluster joined with a
+    dedicated corosync link has a real chance of reporting an address the API
+    does not answer on, and the panel's unreachable row is a real mitigation
+    rather than dead code.
+
+    Still not distinguished, and no longer worth breaking a cluster over: WHICH
+    of those two fields the `ip` in `/cluster/status` reflects. With both equal
+    here, the run cannot tell. The better answer is to stop depending on it, see
+    below.
+
+    **`/cluster/config/join` is a better source than `/cluster/status` for this,
+    and the panel does not use it yet.** It carries `pve_addr`, the address PVE
+    itself designates for API access, alongside `pve_fp`, PVE's own record of
+    that node's API certificate. Building peer addresses from `pve_addr` would
+    make this entire check moot. Two things to settle before relying on it:
+
+    - Whether a narrow monitoring token may read `/cluster/config/join` at all.
+      This lab's token is `root@pam!proxploy`, which holds every privilege, so
+      the run above proves nothing about a PVEAuditor token, and the peer panel
+      runs on the monitoring credential.
+    - `pve_fp` is recorded at join time. A node whose certificate was replaced
+      after it joined would report a stale one, so `pve_fp` is worth having as a
+      second opinion and is NOT a substitute for reading the live certificate.
 
 14. **Each node presents the certificate the panel showed, and still presents
     it a moment later.** This is the foundational one: the entire trust model
@@ -455,6 +482,13 @@ exercise any of it and the script says so and stops.
     on two reads seconds apart, so the echo comparison in `enrol_peers` is not
     fighting a moving target on real hardware. This is the one the whole design
     rests on.
+
+    **Corroborated by PVE itself, 2026-08-17.** `pve_fp` in
+    `/cluster/config/join` matched, character for character, the fingerprint
+    read off the wire for both nodes and now pinned in the dev database. So two
+    independent sources, a TLS handshake and Proxmox's own join record, agree on
+    what each node's API certificate is. That is the strongest statement
+    available here that the pinning pins the right thing.
 
     The script also reports whether the nodes present *distinct* certificates.
     They are expected to: the code fetches each peer's own certificate rather
