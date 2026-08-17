@@ -470,6 +470,14 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    real handler in `test_hosts_peers.py`, and worth one manual check on real
    hardware alongside item 1.
 
+   **Observed for real 2026-08-17, and the guard worked.** No manual sequence
+   was needed in the end: `pvecm add` regenerates the joining node's
+   certificate, so rejoining `node1` to the cluster changed its fingerprint and
+   the pinned client refused every connection with `kind=tls_fingerprint`. A
+   legitimate cause, not a contrived one. Doc 12 check 16 has the detail. What
+   is still uncovered is narrow: whether that refusal reads usefully in the
+   BROWSER mid-enrolment rather than as a connection error afterwards.
+
 3. **`journey.spec.ts:163` fails.** VM create never shows "succeeded" within
    twenty seconds. Pre-existing from the VM wizard work of 2026-08-15,
    confirmed identical against the commit before today's. It matters more than
@@ -496,6 +504,25 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    a real cluster needs it. Doc 12 check 13 has the evidence and the one caveat:
    `pve_fp` is written at join time, so it is a second opinion on a node's
    certificate and never a replacement for reading the live one.
+
+6. **A pin is silently invalidated by anything that regenerates a node
+   certificate, and there is no way back except re-pinning.** Found the hard
+   way on 2026-08-17: `pvecm add` regenerates the joining node's certificate, so
+   a host that was pinned stops working the moment it rejoins a cluster. The
+   same applies to `pvenode cert set` and to an ACME renewal.
+
+   The guard behaving correctly is not the problem. The problem is what an
+   operator sees: a host that worked five minutes ago now fails with a
+   fingerprint mismatch phrased as a possible attack, with no affordance saying
+   "this changed legitimately, here is the new one, re-pin it". Nothing in the
+   product mentions that joining a cluster will do this.
+
+   Decide this before pinning is relied on in anger. The cheap version is a
+   re-pin action on the host's Edit dialog that shows the old and new
+   fingerprints side by side and makes the operator confirm; the expensive
+   version is corroborating against `pve_fp` from `/cluster/config/join`, which
+   on 2026-08-17 had already moved to the new value and would have flagged the
+   change as legitimate automatically.
 
 Still carried from 2026-08-15: the swallowed error detail, the node shell
 toggle that can be enabled without `Sys.Console`, the SSH enrolment checkbox
