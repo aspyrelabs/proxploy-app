@@ -544,11 +544,20 @@ message.
 
     `node1` stayed **`quorate=1`** for the whole outage and an `/etc/pve` write
     (creating and deleting a pool, which writes `user.cfg`) SUCCEEDED while
-    `node2` was out. So quorum was never lost. The likeliest reason is the one
-    this entry already names: PVE configures `two_node: 1` on a two-node
-    cluster, which lets a single survivor stay quorate. Confirming that needs
-    `/etc/pve/corosync.conf` itself, which has no API, so it is stated here as
-    inference from the behaviour rather than as a read fact.
+    `node2` was out. So quorum was never lost. **Confirmed by reading
+    `/etc/pve/corosync.conf` later the same day**, once shell access was
+    available through the app's own stored SSH key:
+
+        quorum {
+          provider: corosync_votequorum
+          two_node: 1
+        }
+
+    and `pvecm status` reporting `Expected votes: 2`, `Quorum: 1`,
+    `Flags: 2Node Quorate WaitForAll`. A quorum of 1 out of 2 expected votes is
+    why the survivor stayed quorate, so this is now a read fact rather than an
+    inference from behaviour. The same file also confirms check 13's reading:
+    `ring0_addr` is 192.168.50.199 / 192.168.50.200, the management addresses.
 
     **It did surface the "reports too cleanly" pattern, in a shape this entry
     did not predict.** With `node2`'s corosync stopped:
