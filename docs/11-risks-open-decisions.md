@@ -474,9 +474,17 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    was needed in the end: `pvecm add` regenerates the joining node's
    certificate, so rejoining `node1` to the cluster changed its fingerprint and
    the pinned client refused every connection with `kind=tls_fingerprint`. A
-   legitimate cause, not a contrived one. Doc 12 check 16 has the detail. What
-   is still uncovered is narrow: whether that refusal reads usefully in the
-   BROWSER mid-enrolment rather than as a connection error afterwards.
+   legitimate cause, not a contrived one. Doc 12 check 16 has the detail.
+
+   **Fully closed 2026-08-17: the browser half was run and passed.** `node1`'s
+   certificate was regenerated deliberately (`pvecm updatecerts --force`) and
+   the real Edit dialog was driven in a real browser against the real node. It
+   named the change, printed both fingerprints in full, offered "Accept the new
+   certificate", and reported Connected after accepting, with the stored pin
+   matching what the node presents. Doc 12 check 16 carries two presentation
+   notes worth reading before relying on it: three 502s land in the browser
+   console while the pin is stale, and the accept control sits below the fold at
+   laptop viewports because the dialog scrolls.
 
 3. **`journey.spec.ts:163` fails.** VM create never shows "succeeded" within
    twenty seconds. Pre-existing from the VM wizard work of 2026-08-15,
