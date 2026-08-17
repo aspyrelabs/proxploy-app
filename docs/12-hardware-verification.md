@@ -195,7 +195,35 @@ because a code review found both cases reachable and neither provable offline.
    So the documented failure mode (pool missing from the picker, or Default
    installing without asking on a host with two real candidates) does not
    occur. The install half, that a container placed there actually lands on
-   the shared pool, still needs a container create and is open.
+   the shared pool, **PASSED 2026-08-17, PVE 9.2.10.** A real Alpine install was
+   driven through the real App Store dialog on host `node1`, with container
+   storage `nfs-shared` (the shared NFS pool) and template storage `local`
+   (which already held the template, so no download and no exposure to the
+   exit-223 DNS failure recorded below). The install reported:
+
+       Storage local (Free: 83.2GB Used: 6.1GB) [Template]
+       Storage nfs-shared (Free: 610.8GB Used: 320.4GB) [Container]
+       Storage 'nfs-shared' (nfs) validated
+       Cluster is quorate
+       LXC Container 120 was successfully created.  Started LXC Container
+
+   and `pct config` afterwards is authoritative:
+   `rootfs: nfs-shared:120/vm-120-disk-0.raw,size=1G`, running on `node1`. So a
+   container chosen onto a shared pool really does land there, which is what
+   this half asked.
+
+   **The standing whiptail check was run on this transcript**, per the lesson
+   further down: 40 events, and zero hits for `whiptail`, `TELEMETRY`, "share
+   anonymous", `<Confirm>`/`<Exit>`, or `radiolist`/`--menu`/`--yesno`. So the
+   diagnostics opt-out still holds and upstream has not introduced a new
+   interactive prompt as of today.
+
+   **Two failures had to be fixed before this could run at all**, both recorded
+   elsewhere and both invisible to any fake: the install dialog offered NO pools
+   on this host (the `host_id` filter bug above), and the executor refused to
+   connect at all because rejoining the cluster had rotated `node1`'s SSH host
+   key, which it reported as "saw None" (doc 11 items 6 and the executor fix
+   8b40161). Getting a real install to happen surfaced both.
 
    Also newly proven by the same setup, and previously fake-only: with two
    nodes carrying identically named local pools, `GET /storage` returns
