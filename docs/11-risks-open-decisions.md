@@ -453,6 +453,15 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    cluster and expensive to be wrong about, since the second one is what the
    pinning rests on. Check them before anyone relies on the feature.
 
+   **Answered 2026-08-17 against cluster `lab-cluster` on PVE 9.2.10**, in both
+   directions, by `backend/scripts/verify_cluster_peers.py`. Both nodes serve
+   distinct certificates, stable across reads, and Proxmox's own `pve_fp` join
+   record agrees with what the socket returned. Pins are enforced: the right one
+   connects, a corrupted one is refused. Tokens do replicate cluster-wide. Doc
+   12 checks 13 to 16 carry the detail and the two things a pass on this lab
+   does NOT cover: a cluster with a dedicated corosync link, and a narrow token
+   in place of this lab's root one.
+
 2. **The certificate swap refusal has no browser coverage, deliberately.** The
    panel echoes back the fingerprint it displayed and enrolment refuses a peer
    that presents something else, but nothing reachable from a browser can
@@ -473,6 +482,20 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    `w-16` each appear twice. Only fires when the catalog query is slow enough
    to render the skeleton, which is why it is intermittent, and it is what
    `smoke.spec.ts` currently fails on.
+
+5. **Peer addresses could come from `pve_addr`, and deliberately do not.**
+   `/cluster/config/join` reports `ring0_addr` and `pve_addr` as separate fields
+   per node, so on a cluster with a dedicated corosync link the address the
+   panel builds from `/cluster/status` may be one the API never answers on.
+   Reading `pve_addr` instead would remove that risk entirely, and a
+   `PVEAuditor` token may read the endpoint, so nothing blocks it.
+
+   Not built, on purpose. No such cluster has been reported, and the behaviour
+   on one today is honest rather than broken: the peer shows as unreachable, its
+   checkbox is disabled, and enrolment refuses it with the reason. Build it when
+   a real cluster needs it. Doc 12 check 13 has the evidence and the one caveat:
+   `pve_fp` is written at join time, so it is a second opinion on a node's
+   certificate and never a replacement for reading the live one.
 
 Still carried from 2026-08-15: the swallowed error detail, the node shell
 toggle that can be enabled without `Sys.Console`, the SSH enrolment checkbox
