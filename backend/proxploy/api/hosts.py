@@ -102,6 +102,33 @@ class HostPatchIn(BaseModel):
         return v
 
 
+def _api_addresses(client) -> dict[str, str]:
+    """{node name: the address PVE designates for its API}, from
+    /cluster/config/join, or {} if that cannot be read.
+
+    `/cluster/status` reports only `ip`, which is corosync's ring0 address.
+    On a cluster whose corosync runs on a dedicated link that is NOT the
+    address the API answers on, so every peer built from it would be
+    unreachable (doc 12 check 13, where the hazard was confirmed real by PVE
+    storing `ring0_addr` and `pve_addr` as separate fields).
+
+    Best effort on purpose: an empty dict means callers fall back to the
+    `/cluster/status` address, which is what they used before this existed and
+    is correct whenever the two coincide. A peer discovery that failed outright
+    because one extra endpoint was unreadable would be a worse trade.
+    """
+    try:
+        info = client.cluster_join_info()
+    except (ProxmoxError, OSError):
+        return {}
+    out = {}
+    for n in (info or {}).get("nodelist", []) or []:
+        name, addr = n.get("name"), n.get("pve_addr")
+        if name and addr:
+            out[name] = addr
+    return out
+
+
 def _fingerprint_now(address: str) -> str | None:
     """The certificate the node at `address` is presenting right now, or None
     if it could not be fetched.
@@ -459,10 +486,14 @@ def list_peers(request: Request, host_id: int, db=Depends(get_db),
         return out
 
     enrolled = db.query(Host).filter(Host.id != h.id).all()
+    api_addresses = _api_addresses(client)
     for r in rows:
         if r.get("type") != "node" or r.get("local"):
             continue
-        node, ip = r.get("name"), r.get("ip")
+        node = r.get("name")
+        # pve_addr when PVE gives one, else the corosync address it reports
+        # here. See _api_addresses: these differ on a split-network cluster.
+        ip = api_addresses.get(node) or r.get("ip")
         peer = {"node": node, "address": f"https://{ip}:8006",
                 "online": bool(r.get("online")), "reachable": False,
                 "tls_fingerprint": None, "already_enrolled_as": None,
@@ -1263,6 +1294,7 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
         h.tls_fingerprint = _fingerprint_now(h.address)
         db.commit()
     creds = {c.kind: c for c in db.query(HostCredential).filter_by(host_id=h.id)}
+    api_addresses = _api_addresses(client)
 
     for row in results:
         node = row["node"]
@@ -1272,7 +1304,10 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
                              f"its cluster right now, so it was not added. "
                              f"Nothing was stored.")
             continue
-        row["address"] = address = f"https://{r.get('ip')}:8006"
+        # Same source and same fallback as discovery, so the address an
+        # operator was shown is the address that gets enrolled.
+        ip = api_addresses.get(node) or r.get("ip")
+        row["address"] = address = f"https://{ip}:8006"
         # The skip rules, re-applied here rather than trusted from discovery.
         # Cluster plus node name, never address, so the same machine enrolled
         # under a second address or a DNS name is still recognised. A NULL
@@ -1329,7 +1364,7 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
             # credential cannot poll, and monitoring is the mandatory
             # capability.
             row["detail"] = (
-                f"{node} at {r.get('ip')} did not answer on port 8006, so it was "
+                f"{node} at {ip} did not answer on port 8006, so it was "
                 f"not added. Nothing was stored."
                 if e.kind == "unreachable" else
                 f"{node} refused the monitoring token, so it was not added. "

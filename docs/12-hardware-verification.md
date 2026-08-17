@@ -837,7 +837,13 @@ exercise any of it and the script says so and stops.
     below.
 
     **`/cluster/config/join` is a better source than `/cluster/status` for this,
-    and the panel does not use it yet.** It carries `pve_addr`, the address PVE
+    and as of 2026-08-17 the panel USES it** (doc 11 item 5). Peer addresses now
+    come from `pve_addr`, falling back per node to the `/cluster/status` address
+    when the endpoint or the entry is unavailable, so this check's hazard cannot
+    reach an operator on a cluster where PVE knows the difference. What remains
+    unexercised here is the same as before: this lab's two addresses coincide,
+    so only a modelled split-network cluster in the test suite has actually
+    taken the diverging path. It carries `pve_addr`, the address PVE
     itself designates for API access, alongside `pve_fp`, PVE's own record of
     that node's API certificate. Building peer addresses from `pve_addr` would
     make this entire check moot. Two things to settle before relying on it:

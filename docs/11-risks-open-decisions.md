@@ -529,12 +529,29 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    Reading `pve_addr` instead would remove that risk entirely, and a
    `PVEAuditor` token may read the endpoint, so nothing blocks it.
 
-   Not built, on purpose. No such cluster has been reported, and the behaviour
-   on one today is honest rather than broken: the peer shows as unreachable, its
-   checkbox is disabled, and enrolment refuses it with the reason. Build it when
-   a real cluster needs it. Doc 12 check 13 has the evidence and the one caveat:
-   `pve_fp` is written at join time, so it is a second opinion on a node's
-   certificate and never a replacement for reading the live one.
+   **BUILT 2026-08-17.** Both prerequisites had cleared (a PVEAuditor token can
+   read the endpoint, verified on PVE 9.2.10), and the deferral rested on "no
+   such cluster has been reported" while the hazard itself was confirmed real by
+   PVE storing `ring0_addr` and `pve_addr` as separate fields.
+
+   `ProxmoxClient.cluster_join_info()` reads the endpoint, and a shared
+   `_api_addresses(client)` helper turns it into `{node: pve_addr}`, used by
+   BOTH discovery and enrolment so the address an operator was shown is the one
+   that gets enrolled. Deliberately best effort and per node: an unreadable
+   endpoint, an absent nodelist, or a nodelist that omits one node all fall back
+   to the `/cluster/status` address, which is what was used before and is
+   correct whenever the two coincide. Failing discovery outright because one
+   extra endpoint was unreadable would be the worse trade.
+
+   Four tests cover it, including a modelled split-network cluster where the
+   corosync address has no server at all: the peer is offered at `pve_addr` and
+   is reachable, where before it would have been offered at the corosync address
+   and reported dead. Verified against the real `lab-cluster` cluster too, where the
+   two addresses coincide and the offered address is unchanged.
+
+   Still true, and still not used: `pve_fp` is written at join time, so it is a
+   second opinion on a node's certificate and never a replacement for reading
+   the live one.
 
 6. **A pin is silently invalidated by anything that regenerates a node
    certificate, and there is no way back except re-pinning.** Found the hard

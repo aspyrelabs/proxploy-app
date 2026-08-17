@@ -890,6 +890,27 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster status read failed", e) from e
 
+    def cluster_join_info(self) -> dict:
+        """GET /cluster/config/join -> {nodelist: [{name, ring0_addr, pve_addr,
+        pve_fp, ...}], totem: {...}}.
+
+        `ring0_addr` is corosync's address and `pve_addr` is the one PVE
+        designates for its API. They are separate fields and can differ, which
+        is exactly why peer discovery prefers `pve_addr`: `/cluster/status`
+        reports only the corosync-side address, so on a cluster with a
+        dedicated corosync link it would offer peers at an address the API does
+        not answer on (doc 12 check 13).
+
+        Readable by a PVEAuditor-class token, verified on PVE 9.2.10, so the
+        monitoring credential peer discovery already runs on is enough.
+        """
+        try:
+            return self._connect().cluster.config.join.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("cluster join info read failed", e) from e
+
     def migrate_guest(self, kind: str, node: str, vmid: int, params: dict) -> str:
         """POST /nodes/{node}/{lxc|qemu}/{vmid}/migrate -> UPID.
 

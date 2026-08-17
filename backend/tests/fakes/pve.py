@@ -281,6 +281,17 @@ class _NextidLeaf:
         return str(self._owner.nextid)
 
 
+class _ClusterConfigNS:
+    """cluster.config.join.get(), which carries pve_addr and pve_fp per node.
+
+    Separate from cluster.status on purpose: PVE reports the corosync address
+    there and the API address here, and peer discovery prefers the latter.
+    """
+
+    def __init__(self, owner):
+        self.join = _AttrLeaf(owner, "cluster_join_info")
+
+
 class _ClusterNS:
     def __init__(self, owner, resources, fail):
         self.resources = _KwLeaf(resources, fail)
@@ -288,6 +299,7 @@ class _ClusterNS:
         # Phase 8 Task 14: lazy attr leaf (like storages_by_node) so a test can
         # assign fake.cluster_status_rows after construction.
         self.status = _AttrLeaf(owner, "cluster_status_rows")
+        self.config = _ClusterConfigNS(owner)
 
 
 class _ActionLeaf:
@@ -719,6 +731,11 @@ class FakePVE:
         # `fail` already covers "node unreachable"; this covers "node answered,
         # and said no".
         self.proxy_error: Exception | None = None
+        # GET /cluster/config/join. Empty by default, which is what makes every
+        # test written before peer discovery read pve_addr behave exactly as it
+        # did: no nodelist means no API addresses, so callers fall back to the
+        # address in cluster_status.
+        self.cluster_join_info: dict = {}
         self.last_termproxy_call = None
         self.last_node_termproxy_call = None
         self.last_vncproxy_call = None

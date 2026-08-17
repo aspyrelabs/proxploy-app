@@ -607,3 +607,87 @@ def test_enrolment_needs_an_owner(peers_app, csrf_header):
 def test_an_empty_node_list_is_refused(peers_app, csrf_header):
     c, _, host_id = peers_app
     assert _enrol(c, csrf_header, host_id, []).status_code == 422
+
+
+# --- a split-network cluster: corosync address is not the API address --------
+#
+# /cluster/status reports only `ip`, which is corosync's ring0 address. PVE
+# stores `ring0_addr` and `pve_addr` as SEPARATE fields in
+# /cluster/config/join, which is what confirms they can differ (doc 12 check
+# 13). On a cluster with a dedicated corosync link, building peers from
+# /cluster/status offers every peer at an address the API never answers on, so
+# discovery reports them all unreachable and enrolment cannot add any of them.
+
+COROSYNC_ONLY = "10.9.9.2"   # deliberately has no FakePVE: nothing answers here
+
+SPLIT_ROWS = [
+    {"type": "cluster", "name": "lab-cluster"},
+    {"type": "node", "name": "pve1", "local": 1, "online": 1, "ip": ORIGIN},
+    # The corosync address, which is all /cluster/status ever reports.
+    {"type": "node", "name": "pve2", "local": 0, "online": 1, "ip": COROSYNC_ONLY},
+]
+SPLIT_JOIN = {"nodelist": [
+    {"name": "pve1", "ring0_addr": ORIGIN, "pve_addr": ORIGIN},
+    {"name": "pve2", "ring0_addr": COROSYNC_ONLY, "pve_addr": PEER},
+]}
+
+
+def test_discovery_uses_the_api_address_not_the_corosync_one(peers_app):
+    c, fakes, host_id = peers_app
+    fakes[ORIGIN].cluster_status_rows = SPLIT_ROWS
+    fakes[ORIGIN].cluster_join_info = SPLIT_JOIN
+
+    peer = c.get(f"/api/v1/hosts/{host_id}/peers").json()["peers"][0]
+    assert peer["node"] == "pve2"
+    # The whole point: PEER, not COROSYNC_ONLY.
+    assert peer["address"] == f"https://{PEER}:8006"
+    # And because it is the address the API actually answers on, the peer is
+    # reachable rather than being reported dead at a corosync-only address.
+    assert peer["reachable"] is True
+    assert peer["error"] is None
+
+
+def test_discovery_falls_back_when_join_info_is_unreadable(peers_app):
+    """Best effort by design: an unreadable /cluster/config/join must not fail
+    discovery, it must leave it exactly as it was before this existed."""
+    c, fakes, host_id = peers_app
+    fakes[ORIGIN].cluster_status_rows = CLUSTER_ROWS
+    fakes[ORIGIN].cluster_join_info = {}      # no nodelist at all
+
+    peer = c.get(f"/api/v1/hosts/{host_id}/peers").json()["peers"][0]
+    assert peer["address"] == f"https://{PEER}:8006"
+    assert peer["reachable"] is True
+
+
+def test_a_node_missing_from_join_info_still_uses_its_cluster_status_address(peers_app):
+    """Per node, not all or nothing: a nodelist that omits one node must not
+    strand that node."""
+    c, fakes, host_id = peers_app
+    fakes[ORIGIN].cluster_status_rows = CLUSTER_ROWS
+    fakes[ORIGIN].cluster_join_info = {"nodelist": [
+        {"name": "pve1", "ring0_addr": ORIGIN, "pve_addr": ORIGIN}]}
+
+    peer = c.get(f"/api/v1/hosts/{host_id}/peers").json()["peers"][0]
+    assert peer["address"] == f"https://{PEER}:8006"
+
+
+def test_enrolment_adds_the_peer_at_the_api_address_it_was_shown_at(peers_app,
+                                                                    csrf_header):
+    """Discovery and enrolment must not disagree about an address: enrolment
+    re-derives everything rather than trusting the caller, so it has to read
+    the same source."""
+    from proxploy.models import Host
+
+    c, fakes, host_id = peers_app
+    fakes[ORIGIN].cluster_status_rows = SPLIT_ROWS
+    fakes[ORIGIN].cluster_join_info = SPLIT_JOIN
+
+    r = c.post(f"/api/v1/hosts/{host_id}/peers", json={"nodes": ["pve2"]},
+               headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    row = r.json()["results"][0]
+    assert row["status"] == "enrolled", row
+    assert row["address"] == f"https://{PEER}:8006"
+    with c.app.state.sessionmaker() as db:
+        added = db.query(Host).filter_by(name="pve2").one()
+        assert added.address == f"https://{PEER}:8006"
