@@ -49,4 +49,34 @@ describe('HostForm error copy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     expect(await screen.findByText(/already exists/i)).toBeInTheDocument()
   })
+
+  // KIND_COPY says what to DO about a kind. The server's `detail` says what
+  // actually happened, and only it can: which privilege Proxmox refused
+  // (services/proxmox.py::_permission_detail), or which fingerprint was pinned
+  // against which was presented. Showing only the advice threw the diagnosis
+  // away, which is doc 11's carried "swallowed error detail".
+  it('keeps the privilege Proxmox named, not just the advice', async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError(502, {
+      error: 'permission',
+      detail: 'version check failed: Sys.Console on /nodes/pve1' }))
+    withQuery(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    expect(await screen.findByText(/Sys\.Console on \/nodes\/pve1/)).toBeInTheDocument()
+  })
+
+  it('keeps both fingerprints on a mismatch, not just the word fingerprint', async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError(502, {
+      error: 'tls_fingerprint',
+      detail: 'TLS fingerprint mismatch: pinned 47:43:8A, got 29:F9:DA' }))
+    withQuery(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    expect(await screen.findByText(/pinned 47:43:8A, got 29:F9:DA/)).toBeInTheDocument()
+  })
+
+  it('still shows the advice alone when the server sent no detail', async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError(502, { error: 'auth' }))
+    withQuery(<HostForm onCreated={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    expect(await screen.findByText(/rejected the api token/i)).toBeInTheDocument()
+  })
 })

@@ -547,8 +547,46 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    on 2026-08-17 had already moved to the new value and would have flagged the
    change as legitimate automatically.
 
-Still carried from 2026-08-15: the swallowed error detail, and the SSH
-enrolment checkbox granting the key silently.
+9. **The swallowed error detail: fixed 2026-08-17.** Located in
+   `HostForm.tsx::errText`. When the server named a known error kind,
+   `KIND_COPY[kind]` was returned and `body.detail` was dropped on the floor.
+   `KIND_COPY` says what to DO about a kind; only `detail` can say what
+   happened, and it is the half the backend works hardest to get right: which
+   privilege Proxmox refused (`_permission_detail`), or which fingerprint was
+   pinned against which was presented.
+
+   Bounded more narrowly than it sounds. `KIND_COPY` has four keys, `auth`,
+   `unreachable`, `tls_fingerprint`, `refused`, and only those swallowed
+   anything; `permission` was never in it, so a denied privilege already showed
+   its detail. The one that mattered is `tls_fingerprint`, where the two
+   fingerprints ARE the finding, and today's real certificate change on `node1`
+   (item 6) is exactly the case an operator would have been shown generic advice
+   for. Both are now returned, advice first: act on the first sentence, verify
+   with the second. 409 and 403 deliberately keep their own wording, since there
+   the detail restates the same fact.
+
+10. **The SSH enrolment checkbox: nothing to fix, checked 2026-08-17.** Carried
+    as "granting the key silently", which is not what the code does. The
+    checkbox defaults OFF (`ssh_enroll: false`). Its label is itself the
+    attestation: "I understand this authorizes a root shell on the node",
+    followed by copy naming community scripts, root, and that skipping it leaves
+    everything except installs, updates and migration working. And
+    `POST /hosts` requires BOTH `ssh_enroll` and `ssh_consent`
+    (`api/hosts.py:259`), so an API caller cannot get the key as a side effect
+    of asking for installs.
+
+    The one thing worth knowing is that the frontend supplies `ssh_consent`
+    from the same tick (`HostForm.tsx:185`). That is correct here rather than a
+    loophole, because the label carries the attestation wording, so one tick is
+    one informed decision. The two-flag gate exists for API callers who have no
+    label to read. Recorded so this is not "fixed" later by adding a second
+    checkbox that asks the same question twice.
+
+    The consent copy dates from 2026-07-29, well before this item was written on
+    2026-08-15, so whatever the note meant is not recoverable from the
+    repository. Which is the real lesson: all three of these carried items were
+    one summary line with no write-up, and two of the three turned out to
+    describe something other than what the line said.
 
 8. **The node shell toggle and `Sys.Console`: fixed 2026-08-17, at the point of
    use rather than at the toggle.** The carried item read "the node shell

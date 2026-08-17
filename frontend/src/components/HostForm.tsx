@@ -37,10 +37,23 @@ const errText = (e: unknown) => {
   if (!(e instanceof ApiError)) return 'Request failed.'
   const body = e.body as { error?: string; detail?: string | { error?: string } } | null
   const kind = body?.error
-  if (kind && KIND_COPY[kind]) return KIND_COPY[kind]
+  // KIND_COPY says what to DO about a kind. The server's `detail` says what
+  // actually happened, and only it can: which privilege Proxmox refused
+  // (services/proxmox.py::_permission_detail), or which fingerprint was pinned
+  // against which was presented. Returning the advice alone threw the
+  // diagnosis away, which mattered most for tls_fingerprint, where the two
+  // fingerprints ARE the finding. Both, in that order: act on the first
+  // sentence, verify with the second.
+  const detail = typeof body?.detail === 'string' ? body.detail : null
+  if (kind && KIND_COPY[kind]) {
+    return detail ? `${KIND_COPY[kind]} ${detail}` : KIND_COPY[kind]
+  }
+  // 409 and 403 keep their own wording with no detail appended: there the
+  // server's detail restates the same fact, and "already exists. host name
+  // already exists" reads worse than either half.
   if (e.status === 409) return 'A host with that name already exists.'
   if (e.status === 403) return 'Managing more than one host needs a paid tier.'
-  return typeof body?.detail === 'string' ? body.detail : 'Request failed.'
+  return detail ?? 'Request failed.'
 }
 
 // docs.proxploy.com is the shipping docs site (proxploy-docs' astro `site`).
