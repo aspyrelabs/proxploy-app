@@ -374,9 +374,54 @@ message.
    route code. Never against two real non-clustered hosts. See
    `docs/11-risks-open-decisions.md` section 2.
 
-   **STILL OPEN, and 2026-08-17 established that it is harder to reach from
-   here than it looks.** Two independent reasons, both worth writing down so
-   nobody plans an afternoon around it again:
+   **THE DECISION HALF PASSED 2026-08-17, PVE 9.2.10**, against two genuinely
+   non-clustered real hosts. `node1` was separated from `lab-cluster` (it has no
+   guests of its own, so the live container on `node2` was never involved) and
+   `nfs-shared` was detached first, because with a shared pool in common the
+   preflight picks `STRATEGY_SHARED` and this path is never reached. Then
+   `node1` was rejoined and the pool reattached. With the pair split:
+
+   - `_cluster_name` returned `None` for `node1` and `'lab-cluster'` for `node2`, so
+     the else branch was genuinely entered rather than simulated.
+   - shared pools in common: none. dir-type pools: `local` on each end.
+   - **`STRATEGY_TRANSFER` selected**, `blockers` empty, capacity storage
+     `local` on the target.
+   - target ctid `102` from the target's OWN `cluster_nextid()`, not the
+     source's `100`, which is the renumbering this strategy requires.
+   - transfer size 1073741824 bytes, basis `allocated_disk` (the fallback path,
+     since no measured backup existed), `capacity_ok: True` against real free
+     space, estimated downtime 40s, and the operator sentence "This is stop ->
+     backup -> transfer -> restore -> start. Expect roughly 1 minute(s) of
+     downtime."
+
+   So every helper in the non-clustered branch ran against live data. **Still
+   open: the data-movement half**, `migrate_app`'s vzdump -> SFTP -> restore,
+   which needs a `JobContext` and the job runner rather than direct calls.
+
+   **Three traps for anyone re-running this.**
+
+   - `pvecm add` refuses a node that "already contains virtual guests", and it
+     counts configs under `/etc/pve/nodes/*` including the separated node's
+     STALE COPY of the other node's directory. `pct list` was empty on `node1`
+     while `/etc/pve/nodes/node2/lxc/101.conf` still sat there from cluster
+     days and blocked the rejoin twice. Removing that directory on the
+     separated node is the documented cleanup and is what unblocked it.
+   - **A guest deleted on a separated node comes BACK when it rejoins**, if the
+     cluster still holds its config. CT 100 was created before separation, so
+     `node2` kept `/etc/pve/nodes/node1/lxc/100.conf`, and the rejoin restored
+     the cluster's copy over the local deletion, leaving a config whose disk
+     was already gone. Create the throwaway AFTER separating, or delete it from
+     both sides.
+   - The rejoin needs no root password: `pvecm add <ip> --use_ssh 1 --link0
+     <ip>`, over the root SSH key already trusted between the nodes. Verify
+     that path works BEFORE separating anything.
+
+   **What made this reachable at all was the app's own stored `ssh_key`.**
+   Earlier assessments assumed no shell existed. Proxploy holds a root key per
+   host so the executor can install, and that is enough to run the documented
+   separate-and-rejoin procedure.
+
+   **What is still true about the difficulty**, and was why this sat open:
 
    - **Leaving a PVE cluster has no clean API.** `pvecm delnode`, and its
      `DELETE /cluster/config/nodes/{node}` equivalent, only removes the node
@@ -391,7 +436,7 @@ message.
      common and picks `STRATEGY_SHARED`. Confirmed against the real API on
      2026-08-17: unclustered, this pair would select `shared_storage`, shared
      in common `['nfs-shared']`. Reaching `STRATEGY_TRANSFER` needs the nodes
-     unclustered AND the shared pool detached.
+     unclustered AND the shared pool detached, which is what was done.
 
    **What was verified instead, 2026-08-17, PVE 9.2.10.** The parts of this
    code reachable on a clustered pair, all previously fake-only:
@@ -764,10 +809,32 @@ exercise any of it and the script says so and stops.
     fingerprint pinned, and refused a corrupted one with `kind="tls_fingerprint"`.
     The pin is load-bearing, not decoration.
 
-    Not covered by the script, and still open: whether a *genuine* certificate
-    replacement on a node produces the refusal in the UI. That needs
-    `pvenode cert set` on a live node between opening the panel and ticking the
-    box, which is a manual sequence rather than a scripted one.
+    **A GENUINE CERTIFICATE REPLACEMENT WAS OBSERVED 2026-08-17, and the pin
+    refused it.** Not contrived: `pvecm add` regenerates the joining node's
+    certificate and restarts pveproxy ("generate new node certificate ...
+    restart pveproxy and pvedaemon services"). So when `node1` rejoined
+    `lab-cluster` during check 7 its certificate changed from
+    `47:43:8A:A0:...:C1:74` to `29:F9:DA:00:...:6E:11:1C`, and the pinned
+    client refused every connection with `kind=tls_fingerprint` and the message
+    `TLS fingerprint mismatch: pinned 47:43:... got 29:F9:...`. `node2`, which
+    did not rejoin, kept its certificate.
+
+    Two things this settles that fixtures could not. The guard fires on a real
+    replacement from a legitimate cause, not only on a corrupted string. And
+    PVE's own `pve_fp` in `/cluster/config/join` had ALREADY moved to the new
+    value, so the two independent sources agree on the new certificate as well
+    as they did on the old one.
+
+    **It also exposes a real operational gap.** Joining a cluster silently
+    invalidates a pin, and re-pinning is the only way back. Nothing in the
+    product says so, and there is no "the certificate legitimately changed,
+    re-pin it" affordance: the host simply stops working with a mismatch error
+    that reads like an attack. Anything that regenerates a node certificate
+    (`pvecm add`, `pvenode cert set`, an ACME renewal) does the same. Worth a
+    decision before pinning is relied on in anger.
+
+    Still open, narrowly: whether that refusal is surfaced usefully in the
+    BROWSER mid-enrolment, rather than as a connection error afterwards.
 
 **Run in both directions, 2026-08-17, PVE 9.2.10.** All of 13 to 16 were run
 twice, once with each node as the origin, and passed both times. That is worth
