@@ -58,12 +58,19 @@ export (`192.168.50.8:/mnt/user/test`) was attached cluster-wide as
 this section asks for, and it is what checks 3a and 3b were finally run
 against.
 
-**`nfs-shared` is gone as of 2026-08-17.** Neither node lists it any more:
-`local` and `local-lvm` are all that remain, and only `local` carries `backup`.
-So the shared-pool shape does NOT currently exist on this hardware, and 3a and
-3b could not be re-run today without reattaching the export. Recorded because a
-green run of the other storage checks says nothing about the shared-pool ones
-while it is absent. Two notes for anyone rebuilding it:
+**Detached at some point before 2026-08-17, and reattached that day.** It was
+found missing from both nodes (only `local` and `local-lvm` remained, and only
+`local` carried `backup`), and was recreated with the same shape:
+`type=nfs server=192.168.50.8 export=/mnt/user/test`,
+`content=rootdir,vztmpl,images,iso,backup`, 617.5 GiB, active on both nodes.
+
+Two things worth keeping from doing that. `shared` is NOT a valid property for
+`type=nfs` on PVE 9.2.10; passing it gets `500 unexpected property 'shared'`,
+because NFS is shared by definition, and the per-node listing reports
+`shared=1` back anyway. And a freshly created NFS storage reports `active=0`
+with `avail=0` on the node that did not create it for a few seconds, because
+PVE mounts it lazily. Anything that reads `active` immediately after attaching
+a shared pool sees a pool that looks dead. Two notes for anyone rebuilding it:
 
 - Joining a node replaces its `/etc/pve`, so `node2`'s Proxmox API token was
   destroyed and Proxploy lost it with a 401 until its host row was repointed at
@@ -340,6 +347,39 @@ message.
 8. **Network apply on a real bridge.** Applying a NIC change to a live guest,
    including the failure path where the change costs connectivity to the node
    performing it.
+
+   **THE SAFE HALF PASSED 2026-08-17, PVE 9.2.10**, on `node1`. Staged an
+   UNUSED bridge (`vmbr99`, no `bridge_ports`, no address), applied it, then
+   removed it and applied again. That runs the whole real path, stage to
+   `/etc/network/interfaces.new`, promote, `ifreload -a`, remove, promote,
+   without the lockout the risky half carries, because nothing depends on the
+   interface being reloaded. Both applies returned OK in 2.1s, `vmbr99` came up
+   `active=1 autostart=1`, `vmbr0` stayed `active=1` on 192.168.50.199/24, the
+   node answered throughout, and the interface set afterwards matched the set
+   before.
+
+   **The `ponytail:` claim at `api/network.py:302` is confirmed.** With a clean
+   config, `GET /nodes/{node}/network` returns top-level keys `['data']`. With
+   a staged config it returns `['changes', 'data']`, where `changes` is a
+   unified diff of `interfaces` against `interfaces.new`. So PVE really does
+   report pending state as a sibling of `data`, proxmoxer's `.get()` really
+   does discard it, and the documented upgrade path (a raw-response accessor)
+   would work if a "you have unsaved changes" badge is ever wanted.
+
+   **An apply is never only your change, and no fake shows this.** The staged
+   diff was not limited to `vmbr99`. PVE's generated `.new` also rewrote the
+   rest of the file: it added `iface nic1 inet manual` and
+   `iface wlp0s20f3 inet manual` stanzas and a comment block that were not in
+   the running config, and moved `nic1` above `vmbr0`. So an operator who
+   stages one bridge and hits Apply also promotes PVE's normalisation of
+   everything else in `/etc/network/interfaces`. Harmless on this node, since
+   the added stanzas are `manual` with no `auto`, but it means the diff an
+   operator should be shown is PVE's `changes`, not the one field they edited.
+
+   **Still open: the lockout half**, applying a change that costs the node its
+   own connectivity. It needs someone at the node's physical console to
+   recover, which is the whole reason `apply_network` demands the node name
+   typed back.
 9. **Whole-storage prune.** Pruning across an entire storage, where the count
    of affected volumes and the time taken both differ materially from a fake.
 
@@ -380,6 +420,39 @@ message.
 
     Deliberately not run on 2026-08-14: it means deliberately breaking the
     cluster the other checks were using.
+
+    **RUN 2026-08-17, PVE 9.2.10, and it did not reach the documented state.**
+    corosync was stopped on `node2` through `POST
+    /nodes/node2/services/corosync/stop`, which is worth knowing on its own:
+    the check is reachable over the API with no shell, and the same API starts
+    it again, which is what makes it recoverable rather than a console trip.
+
+    `node1` stayed **`quorate=1`** for the whole outage and an `/etc/pve` write
+    (creating and deleting a pool, which writes `user.cfg`) SUCCEEDED while
+    `node2` was out. So quorum was never lost. The likeliest reason is the one
+    this entry already names: PVE configures `two_node: 1` on a two-node
+    cluster, which lets a single survivor stay quorate. Confirming that needs
+    `/etc/pve/corosync.conf` itself, which has no API, so it is stated here as
+    inference from the behaviour rather than as a read fact.
+
+    **It did surface the "reports too cleanly" pattern, in a shape this entry
+    did not predict.** With `node2`'s corosync stopped:
+
+    - `/cluster/status` was CORRECT: `nodes={'node1': 1, 'node2': 0}`, so the
+      departure is visible to anything that reads it.
+    - `/cluster/resources` still reported `lxc 101 status=running node=node2`,
+      the guest on the node that had left the membership.
+
+    So a poller that reads `cluster_resources` alone presents a departed node's
+    guests as healthy, while `cluster_status` right next to it knows better.
+    That is the same class of failure as the read-only-`/etc/pve` case and it is
+    reachable without breaking quorum at all, which makes it the more useful
+    finding of the two.
+
+    **Still open: actual quorum loss.** Reaching it means removing `two_node`
+    from `/etc/pve/corosync.conf` and bumping `config_version`, a cluster
+    config edit with real risk of leaving the pair unable to form a cluster.
+    Not attempted.
 
 ## Privileges and identity
 
