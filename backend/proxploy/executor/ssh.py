@@ -48,6 +48,16 @@ _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class SSHHostKeyMismatch(Exception):
+    """Carries `pinned` and `seen` so a caller can offer a re-pin without
+    parsing the message. `seen` is None only when no key could be read at all,
+    which is NOT a mismatch and must never be offered as one."""
+
+    def __init__(self, message: str, *, pinned: str | None = None,
+                 seen: str | None = None):
+        super().__init__(message)
+        self.pinned, self.seen = pinned, seen
+
+
     """The node's SSH host key does not match what was pinned at first
     connect (doc 08 §4: hard-fail, never auto-accept)."""
 
@@ -117,12 +127,14 @@ async def default_connect_factory(host: str, private_key_pem: bytes, *,
         raise SSHHostKeyMismatch(
             "could not read this node's SSH host key, so it cannot be checked "
             "against the pinned one. This is not a mismatch: nothing was "
-            f"compared. Pinned: {pinned_fingerprint or 'nothing yet'}.")
+            f"compared. Pinned: {pinned_fingerprint or 'nothing yet'}.",
+            pinned=pinned_fingerprint, seen=None)
     if pinned_fingerprint is not None and seen != pinned_fingerprint:
         conn.close()
         await conn.wait_closed()
         raise SSHHostKeyMismatch(
-            f"host key changed: pinned {pinned_fingerprint}, saw {seen}")
+            f"host key changed: pinned {pinned_fingerprint}, saw {seen}",
+            pinned=pinned_fingerprint, seen=seen)
     if pinned_fingerprint is None:
         on_new_fingerprint(seen)
     return conn

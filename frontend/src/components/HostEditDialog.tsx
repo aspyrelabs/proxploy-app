@@ -73,6 +73,9 @@ export function HostEditDialog({ hostId, host, onClose }: {
   const [rotatingSsh, setRotatingSsh] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const [sshResult, setSshResult] = useState<SshRotateResult | null>(null)
+  const [sshCheck, setSshCheck] = useState<{ pinned: string | null
+                                             seen: string | null } | null>(null)
+  const [acceptingKey, setAcceptingKey] = useState(false)
 
   // Same key and fetch as HostCapabilityList uses below, so this shares its
   // cache entry instead of doubling the request. It exists here only to pick
@@ -97,6 +100,15 @@ export function HostEditDialog({ hostId, host, onClose }: {
   // known fingerprints counts, and the backend sends a presented fingerprint
   // only when the pin is what refused the connection, so every other outcome
   // leaves this null and shows no warning.
+  // The SSH host key is a SECOND pin with the same failure mode, and until
+  // now no way back: rejoining a node to a cluster rotates it, and every
+  // install on that host then failed with nothing in the product able to
+  // change the stored value. Read from POST /hosts/{id}/ssh/verify, which
+  // returns both fingerprints on a mismatch.
+  const sshPinned = sshCheck?.pinned ?? null
+  const sshPresented = sshCheck?.seen ?? null
+  const hostKeyChanged = !!sshPinned && !!sshPresented && sshPinned !== sshPresented
+
   const pinned = testResult?.tls_fingerprint ?? null
   const presented = testResult?.tls_fingerprint_seen ?? null
   const certificateChanged = !!pinned && !!presented
@@ -120,6 +132,25 @@ export function HostEditDialog({ hostId, host, onClose }: {
         setError(`Could not connect: the host reports "${r.status}". `
                 + 'Check the address and credentials.')
       }
+      // The API check above says nothing about SSH, and the SSH host key is
+      // its own pin. A host whose key rotated answers the API perfectly and
+      // fails every install, so checking only one of the two reports a healthy
+      // host that cannot do the thing the key exists for.
+      setSshCheck(null)
+      try {
+        await api(`/hosts/${hostId}/ssh/verify`, { method: 'POST' })
+      } catch (e) {
+        const body = (e as { body?: { error?: string
+                                      ssh_host_key_fingerprint?: string | null
+                                      ssh_host_key_fingerprint_seen?: string | null } }).body
+        if (body?.error === 'host_key_mismatch') {
+          setSshCheck({ pinned: body.ssh_host_key_fingerprint ?? null,
+                        seen: body.ssh_host_key_fingerprint_seen ?? null })
+        }
+        // Every other SSH outcome (no_key, unreachable, timeout) is left
+        // alone: this dialog is not the place to re-report them, and a host
+        // with no enrolled key is the normal case.
+      }
     } catch (e) { setError(apiErrorDetail(e, 'Request failed, try again.')) } finally { setTesting(false) }
   }
 
@@ -139,6 +170,26 @@ export function HostEditDialog({ hostId, host, onClose }: {
       setError(apiErrorDetail(e, 'Request failed, try again.'))
     } finally {
       setAccepting(false)
+    }
+  }
+
+  // The SSH counterpart of acceptCertificate, and the same rule holds: nothing
+  // re-pins on its own, because a pin that follows whatever the node presents
+  // is not a pin.
+  async function acceptHostKey() {
+    setError(''); setAcceptingKey(true)
+    try {
+      await api(`/hosts/${hostId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ssh_host_key_fingerprint: sshPresented }),
+      })
+      invalidate()
+      notify.success(`${host.name} is now pinned to the SSH host key it is presenting.`)
+      await testConnection()
+    } catch (e) {
+      setError(apiErrorDetail(e, 'Request failed, try again.'))
+    } finally {
+      setAcceptingKey(false)
     }
   }
 
@@ -258,6 +309,26 @@ export function HostEditDialog({ hostId, host, onClose }: {
               <Button type="button" variant="ghost" size="sm" disabled={accepting}
                 onClick={acceptCertificate}>
                 {accepting ? 'Accepting…' : 'Accept the new certificate'}
+              </Button>
+            </div>
+          </div>
+        )}
+        {hostKeyChanged && (
+          <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+            <p className="text-[12.5px] text-amber">
+              {host.name}&rsquo;s SSH host key has changed. Proxploy pinned{' '}
+              <code className="break-all font-mono text-[11.5px] text-text-2">{sshPinned}</code>{' '}
+              and {host.name} is now presenting{' '}
+              <code className="break-all font-mono text-[11.5px] text-text-2">{sshPresented}</code>.
+              App Store installs, updates and migration all use this key and will
+              fail until you say which is right. Rejoining a node to a Proxmox
+              cluster rotates it, so this is often routine. If nothing on the node
+              changed, do not accept it, and find out why.
+            </p>
+            <div className="mt-2">
+              <Button type="button" variant="ghost" size="sm" disabled={acceptingKey}
+                onClick={acceptHostKey}>
+                {acceptingKey ? 'Accepting…' : 'Accept the new host key'}
               </Button>
             </div>
           </div>

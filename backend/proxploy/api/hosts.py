@@ -87,6 +87,12 @@ class HostPatchIn(BaseModel):
     # pin (see model_fields_set in patch_host: omitted and null differ here the
     # same way they do for team_id).
     tls_fingerprint: str | None = None
+    # The SSH re-pin path, and the reason it exists is the same one: nothing
+    # could change this before, so a node whose host key rotated (rejoining a
+    # cluster does it) failed every install with no way back but a manual
+    # database write. Omitted leaves it alone, null clears the pin so the next
+    # connection re-learns it (TOFU).
+    ssh_host_key_fingerprint: str | None = None
 
     @field_validator("name", "address")
     @classmethod
@@ -530,13 +536,17 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
     if "tls_fingerprint" in body.model_fields_set:
         h.tls_fingerprint = body.tls_fingerprint
         audit_params["tls_fingerprint"] = body.tls_fingerprint
+    if "ssh_host_key_fingerprint" in body.model_fields_set:
+        h.ssh_host_key_fingerprint = body.ssh_host_key_fingerprint
+        audit_params["ssh_host_key_fingerprint"] = body.ssh_host_key_fingerprint
     db.commit()
     # Same action name as before when only the node-shell toggle (plus,
     # historically, team assignment) changed -- test_patch_host_writes_an_
     # audit_event pins that exact string. A name/address change is different
     # enough in kind (identity, not a feature flag) to get its own name.
     action = ("host.update"
-              if {"name", "address", "tls_fingerprint"} & audit_params.keys()
+              if {"name", "address", "tls_fingerprint",
+                  "ssh_host_key_fingerprint"} & audit_params.keys()
               else "host.node_shell_toggle")
     write_audit(db, actor_type="user", actor_id=user.id,
                 action=action, target_type="host",
@@ -619,7 +629,14 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
             pinned_fingerprint=host.ssh_host_key_fingerprint,
             on_new_fingerprint=on_new_fingerprint, timeout_s=20.0)
     except SSHHostKeyMismatch as e:
-        raise HTTPException(502, {"error": "host_key_mismatch", "detail": str(e)})
+        # `seen` is what the node is presenting right now. Handing it back is
+        # what makes a re-pin possible without the operator reading it off a
+        # message, exactly as POST /hosts/{id}/test hands back
+        # tls_fingerprint_seen. It is None when no key could be read, which is
+        # not a mismatch and must not be offered as one.
+        raise HTTPException(502, {"error": "host_key_mismatch", "detail": str(e),
+                                  "ssh_host_key_fingerprint": e.pinned,
+                                  "ssh_host_key_fingerprint_seen": e.seen})
     except LookupError as e:
         raise HTTPException(502, {"error": "no_key", "detail": str(e)})
     except TimeoutError as e:

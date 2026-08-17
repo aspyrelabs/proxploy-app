@@ -27,6 +27,11 @@ let fingerprints: { tls_fingerprint: string | null; tls_fingerprint_seen: string
 const STANDALONE = { cluster: null, team: null, capabilities_to_copy: ['monitoring'],
                      multi_host_entitled: true, peers: [] }
 let peersResult: unknown = STANDALONE
+// What POST /hosts/{id}/ssh/verify does. Verified by default, which is what
+// every test that is not about the SSH pin ran with before this existed.
+const SSH_PINNED = 'SHA256:g6u8niJFRLc24lBpY/wfoWpYOjVwej34E3RsaWg+u+A'
+const SSH_PRESENTED = 'SHA256:A5ZL7u1eFiznvbB1exWOObi0YqPt7S6gLZbQ9GgmtIY'
+let sshVerify: 'ok' | 'mismatch' | 'no_key' = 'ok'
 // The Proxmox node name GET /hosts/{id} reports, which is what the cluster
 // calls this host and what the panel names.
 let nodeName: string | null = 'pve1'
@@ -45,6 +50,18 @@ vi.mock('../api/client', async (importOriginal) => ({
         { key: 'monitoring', label: 'Read-only monitoring', required: true },
         { key: 'lifecycle', label: 'Lifecycle', required: false },
       ])
+    }
+    if (path.endsWith('/ssh/verify')) {
+      if (sshVerify === 'ok') return Promise.resolve({ verified: true })
+      if (sshVerify === 'no_key') {
+        return Promise.reject(new ApiError(502, { error: 'no_key',
+          detail: 'this host has no enrolled SSH key' }))
+      }
+      return Promise.reject(new ApiError(502, {
+        error: 'host_key_mismatch',
+        detail: `host key changed: pinned ${SSH_PINNED}, saw ${SSH_PRESENTED}`,
+        ssh_host_key_fingerprint: SSH_PINNED,
+        ssh_host_key_fingerprint_seen: SSH_PRESENTED }))
     }
     if (path.endsWith('/test')) {
       return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1', ...fingerprints })
@@ -79,6 +96,7 @@ const wrap = (onClose = vi.fn()) => {
 describe('HostEditDialog', () => {
   beforeEach(() => {
     testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined
+    sshVerify = 'ok'
     fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: null }
     peersResult = STANDALONE; nodeName = 'pve1'
   })
@@ -280,5 +298,72 @@ describe('HostEditDialog', () => {
     expect(await screen.findByLabelText(/^monitoring token id$/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^new monitoring token id$/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/^new monitoring token secret$/i)).not.toBeInTheDocument()
+  })
+})
+
+
+// --- the SSH host key pin, the one with no way back until now ---------------
+//
+// Rejoining a node to a Proxmox cluster rotates its SSH host key. Nothing in
+// the product could change Host.ssh_host_key_fingerprint (it is only written
+// when the stored pin is already null), so a routine rotation failed every
+// install on that host with no fix but a manual database write. This is the
+// same control the TLS pin has had, for the other pin.
+
+describe('HostEditDialog SSH host key pin', () => {
+  it('shows both fingerprints in full and offers to accept the new key', async () => {
+    sshVerify = 'mismatch'
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/SSH host key has changed/i)).toBeInTheDocument()
+    // In full, never truncated: the operator compares them against the node.
+    expect(screen.getByText(SSH_PINNED)).toBeInTheDocument()
+    expect(screen.getByText(SSH_PRESENTED)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /accept the new host key/i }))
+    await waitFor(() => expect(calls.some(
+      (c) => c.method === 'PATCH'
+        && (c.body as { ssh_host_key_fingerprint?: string })?.ssh_host_key_fingerprint
+           === SSH_PRESENTED)).toBe(true))
+  })
+
+  it('says installs are what breaks, since that is where it bites', async () => {
+    sshVerify = 'mismatch'
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/App Store installs, updates and migration/i))
+      .toBeInTheDocument()
+  })
+
+  it('offers nothing while the SSH key still verifies', async () => {
+    sshVerify = 'ok'
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/ssh/verify')).toBe(true))
+    expect(screen.queryByText(/SSH host key has changed/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /accept the new host key/i }))
+      .not.toBeInTheDocument()
+  })
+
+  it('stays quiet for a host with no enrolled key, which is the normal case', async () => {
+    sshVerify = 'no_key'
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/hosts/1/ssh/verify')).toBe(true))
+    expect(screen.queryByText(/SSH host key has changed/i)).not.toBeInTheDocument()
+    // And it must not be reported as a connection error either.
+    expect(screen.queryByText(/no enrolled SSH key/i)).not.toBeInTheDocument()
+  })
+
+  it('checks SSH even when the API check says the host is connected', async () => {
+    // The whole failure mode: a rotated key answers the API perfectly and
+    // fails every install, so checking only the API reports a healthy host
+    // that cannot do the thing the key exists for.
+    testResult = 'connected'
+    sshVerify = 'mismatch'
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    expect(await screen.findByText(/Connected, PVE 8\.4\.1/i)).toBeInTheDocument()
+    expect(await screen.findByText(/SSH host key has changed/i)).toBeInTheDocument()
   })
 })

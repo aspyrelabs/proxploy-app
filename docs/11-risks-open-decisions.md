@@ -583,9 +583,28 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    So a legitimately rotated SSH host key bricks installs, updates and the
    transfer-strategy migration for that host, permanently, with the only fix
    being a manual database write. The TLS side has "Accept the new certificate";
-   this side has nothing. The asymmetry is the bug, and the cheap fix is the same
-   control: show pinned versus presented and let the operator accept, reusing the
-   shape `HostEditDialog` already has.
+   this side has nothing. The asymmetry is the bug.
+
+   **FIXED the same day, as the same control.** `POST /hosts/{id}/ssh/verify`
+   now returns `ssh_host_key_fingerprint` and `ssh_host_key_fingerprint_seen`
+   on a mismatch (carried on the exception rather than parsed out of its
+   message), `PATCH /hosts/{id}` accepts `ssh_host_key_fingerprint` with the
+   same omitted-versus-null contract `tls_fingerprint` uses, and
+   `HostEditDialog` shows "<host>'s SSH host key has changed" with both values
+   in full and an "Accept the new host key" button.
+
+   Two decisions worth keeping. **Test connection now checks SSH too**, because
+   the whole failure mode is that a rotated key answers the API perfectly and
+   fails every install: checking only the API reported a healthy host that could
+   not do the thing the key exists for. And the copy names installs, updates and
+   migration explicitly, and says that rejoining a cluster rotates the key, so
+   the routine cause is stated rather than leaving an operator to assume an
+   attack.
+
+   Verified against `node1` itself: its pin was set stale, the dialog showed
+   both real fingerprints, accepting re-pinned it and the panel went away. Five
+   frontend tests and four backend ones, including that a host with no enrolled
+   key stays silent.
 
    Worth pairing with the executor fix committed the same day (8b40161): the
    mismatch was additionally being reported as "saw None", because asyncssh had

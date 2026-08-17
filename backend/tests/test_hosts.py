@@ -569,3 +569,98 @@ def test_a_connected_host_reports_no_presented_fingerprint(pve_client, csrf_head
     assert r.json()["status"] == "connected"
     assert probes == []
     assert r.json()["tls_fingerprint_seen"] is None
+
+
+# --- re-pinning a rotated SSH host key --------------------------------------
+#
+# Rejoining a node to a PVE cluster rotates its SSH host key, and until this
+# existed nothing could change Host.ssh_host_key_fingerprint: it is only written
+# through on_new_fingerprint, which fires ONLY when the stored pin is already
+# None. So a legitimate rotation bricked installs, updates and transfer-strategy
+# migration for that host permanently, fixable only by editing the database. The
+# TLS pin has had "Accept the new certificate" for a while; this is the same
+# shape for the other pin.
+
+def test_patch_host_repins_the_ssh_host_key(pve_client, csrf_header):
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    r = c.patch(f"/api/v1/hosts/{hid}",
+                json={"ssh_host_key_fingerprint": "SHA256:the-new-one"},
+                headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    with c.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, hid).ssh_host_key_fingerprint == "SHA256:the-new-one"
+
+
+def test_patching_the_ssh_pin_to_null_clears_it_for_tofu(pve_client, csrf_header):
+    """Null is a real value here, the same as for tls_fingerprint and team_id:
+    it means "stop pinning", so the next connection learns the key again."""
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    c.patch(f"/api/v1/hosts/{hid}", json={"ssh_host_key_fingerprint": "SHA256:x"},
+            headers=csrf_header(c))
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"ssh_host_key_fingerprint": None},
+                headers=csrf_header(c))
+    assert r.status_code == 200, r.text
+    with c.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, hid).ssh_host_key_fingerprint is None
+
+
+def test_an_omitted_ssh_pin_is_left_alone_by_an_unrelated_patch(pve_client,
+                                                                csrf_header):
+    """An omitted field must not clear the pin on every rename."""
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+    c.patch(f"/api/v1/hosts/{hid}", json={"ssh_host_key_fingerprint": "SHA256:keep"},
+            headers=csrf_header(c))
+    c.patch(f"/api/v1/hosts/{hid}", json={"name": "renamed-host"},
+            headers=csrf_header(c))
+    with c.app.state.sessionmaker() as db:
+        from proxploy.models import Host
+        assert db.get(Host, hid).ssh_host_key_fingerprint == "SHA256:keep"
+
+
+def test_ssh_verify_hands_back_both_fingerprints_on_a_mismatch(tmp_path,
+                                                               csrf_header,
+                                                               bootstrap_admin):
+    """The operator has to be offered the key the node is presenting, not be
+    asked to read it out of an error message."""
+    from proxploy.executor.ssh import SSHHostKeyMismatch
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app, seed_host_row
+    from fastapi.testclient import TestClient
+    from proxploy.models import HostCredential
+
+    async def refusing_factory(host, key_pem, *, pinned_fingerprint,
+                               on_new_fingerprint, port=22):
+        raise SSHHostKeyMismatch("host key changed: pinned A, saw B",
+                                 pinned="SHA256:A", seen="SHA256:B")
+
+    app = make_app(tmp_path, fake=FakePVE())
+    c = TestClient(app)
+    with c:
+        # Inside the block: create_app's lifespan assigns this, so setting it
+        # before entering would be overwritten and the test would dial the real
+        # address in the fixture.
+        app.state.ssh_connect_factory = refusing_factory
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db)
+            # A real key: run_for_host imports it before the factory is
+            # reached, so a placeholder blob fails earlier than the case
+            # under test.
+            import asyncssh
+            pem = asyncssh.generate_private_key("ssh-ed25519").export_private_key()
+            blob, ver = app.state.secretstore.encrypt(pem)
+            db.add(HostCredential(host_id=h.id, kind="ssh_key",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            hid = h.id
+        r = c.post(f"/api/v1/hosts/{hid}/ssh/verify", headers=csrf_header(c))
+        assert r.status_code == 502, r.text
+        body = r.json()
+        assert body["error"] == "host_key_mismatch"
+        assert body["ssh_host_key_fingerprint"] == "SHA256:A"
+        assert body["ssh_host_key_fingerprint_seen"] == "SHA256:B"
