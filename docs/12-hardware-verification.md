@@ -396,6 +396,120 @@ message.
     JWKS endpoint. Everything except a third-party implementation on the wire.
     See `docs/superpowers/plans/2026-08-05-phase-8-scale.md`.
 
+## Cluster peer enrolment
+
+Everything in this section is answered in one run by
+`backend/scripts/verify_cluster_peers.py`, which calls the same
+`services/proxmox.py` functions the app calls and writes nothing:
+
+```
+PROXPLOY_TOKEN_SECRET=... .venv/bin/python scripts/verify_cluster_peers.py \
+    --address https://<node1>:8006 --token-id 'root@pam!proxploy'
+```
+
+**Host shape required:** two nodes in one cluster, both online, with a token on
+the origin that PVE has replicated cluster-wide. A standalone node cannot
+exercise any of it and the script says so and stops.
+
+13. **The addresses `/cluster/status` reports are answerable by the API.** The
+    peer panel builds every address as `https://{row["ip"]}:8006` from the node
+    rows PVE returns, and `FakePVE` returns rows we wrote, so no suite has ever
+    disagreed with itself here. On real hardware that `ip` is the corosync
+    ring0 address. On a cluster whose corosync ring runs on a dedicated network
+    the API does not listen on, every peer the panel offers would be one that
+    can never be enrolled. Pass: each peer's reported address completes a TLS
+    handshake on 8006. Fail: the handshake times out, which the panel would
+    render as an unreachable row with the enrolment checkbox disabled, correct
+    behaviour hiding a wrong address.
+
+    Also checked here, because the same rows carry it: exactly one node row
+    carries `local`. That flag is the only thing stopping a host being offered
+    as its own peer, and it is set by PVE, not by us.
+
+    **PASSED 2026-08-17, PVE 9.2.10**, in cluster `lab-cluster`, between `node1`
+    (192.168.50.199) and `node2` (192.168.50.200). Both node rows carried an
+    `ip`, the peer's completed a TLS handshake on 8006, and `local: 1` appeared
+    on exactly one row.
+
+    **The hazard this check exists for was NOT exercised.** This lab runs
+    corosync on the management network, so each node's ring0 address IS the
+    address its API listens on, and the two can agree here while diverging on a
+    cluster built with a dedicated cluster network. A pass on this hardware says
+    the field is present and usable, not that it is the API's address
+    everywhere. Re-run this one on a split-network cluster before treating the
+    question as settled.
+
+14. **Each node presents the certificate the panel showed, and still presents
+    it a moment later.** This is the foundational one: the entire trust model
+    is that an operator reads a fingerprint, ticks the node, and
+    `POST /hosts/{id}/peers` re-reads the certificate and refuses the node if
+    it has changed. Every test of that logic supplies both fingerprints from
+    the same fixture, so the suites prove the comparison is made and cannot
+    prove what a real node presents on two separate reads. Pass: two reads
+    seconds apart return the same fingerprint, on every node. Fail: they
+    differ, which means the echo check refuses honest enrolments and its alarm
+    text ("if you did not just replace its certificate, stop and investigate")
+    is crying wolf.
+
+    **PASSED 2026-08-17, PVE 9.2.10.** Each node returned the same fingerprint
+    on two reads seconds apart, so the echo comparison in `enrol_peers` is not
+    fighting a moving target on real hardware. This is the one the whole design
+    rests on.
+
+    The script also reports whether the nodes present *distinct* certificates.
+    They are expected to: the code fetches each peer's own certificate rather
+    than inheriting the origin's, and a comment in `enrol_peers` says an
+    inherited pin "would refuse every connection". If a cluster turns out to
+    share one certificate nothing breaks, but that comment is wrong about this
+    hardware and should say so.
+
+    Confirmed distinct on this hardware: `node1` served
+    `47:43:8A:A0:...:C1:74` and `node2` served `8D:99:03:50:...:3E:5B`. So the
+    comment in `enrol_peers` is right about why a peer must not inherit the
+    origin's pin.
+
+15. **The origin's token authenticates against its peers.** The premise of
+    copying one node's stored token to the rest of the cluster. Proven only
+    against `FakePVE`, which accepts any token it was configured with at any
+    address. Pass: `/version` through each peer's address, with the origin's
+    token, returns a version. Fail: a peer 401s, and the feature's central
+    assumption about cluster-wide token replication is wrong; the code already
+    degrades to a per-row "refused the monitoring token" failure rather than a
+    broken host, so this is a design question rather than a crash.
+
+    **PASSED 2026-08-17, PVE 9.2.10.** `node1`'s stored `api_token:monitoring`
+    authenticated against `node2`'s address and returned its version, so PVE
+    does replicate an API token cluster-wide and the copy the feature performs
+    is copying something that works. Note that this lab's token is
+    `root@pam!proxploy`, which holds every privilege; a narrow token's
+    replication is the same mechanism but is not what was tested.
+
+16. **A pin is actually enforced.** `_connect` only consults
+    `tls_fingerprint` when `verify_tls` is off, which is every default install,
+    and an unenforced pin is worse than no pin because the UI states the node
+    is pinned. Pass: connecting with the node's real fingerprint succeeds, and
+    connecting with a deliberately corrupted one is refused with
+    `kind="tls_fingerprint"`. Fail: the corrupted pin connects anyway.
+
+    **PASSED 2026-08-17, PVE 9.2.10.** `node2` connected with its real
+    fingerprint pinned, and refused a corrupted one with `kind="tls_fingerprint"`.
+    The pin is load-bearing, not decoration.
+
+    Not covered by the script, and still open: whether a *genuine* certificate
+    replacement on a node produces the refusal in the UI. That needs
+    `pvenode cert set` on a live node between opening the panel and ticking the
+    box, which is a manual sequence rather than a scripted one.
+
+**Run in both directions, 2026-08-17, PVE 9.2.10.** All of 13 to 16 were run
+twice, once with each node as the origin, and passed both times. That is worth
+doing rather than trusting one direction, because it cross-confirms the piece
+neither run can check about itself: the certificate `node2` presents at its own
+address is byte for byte the one read at the address `node1` reported for it,
+and the same in reverse. So the `ip` in a peer's `/cluster/status` row leads to
+the machine that node believes it does, and not merely to something that
+answers on 8006. Token replication proved bidirectional too, each node's stored
+monitoring token authenticating against the other.
+
 ## Frontend geometry
 
 Card and dialog geometry moved off this list on 2026-08-13. `npm run harness`
