@@ -581,10 +581,20 @@ checkbox granting the key silently.
    clone and every existing checkout, to remove a key that decrypts nothing.
    That is disproportionate to one password hash.
 
-   **Do instead, and it is the only live item:** change the password on
-   `admin@aspyrelabs.com`, and if that password was reused anywhere else,
-   change it there too. That neutralises the exposure at zero cost and needs no
-   history surgery.
+   **Decision 2026-08-17: the account and its password stay as they are.**
+   `admin@aspyrelabs.com` is the development test account and is in use until
+   Proxploy is ready to deploy, so rotating it now buys nothing while costing a
+   working login. The risk is accepted deliberately, on these grounds: the
+   repository is private, the hash is argon2id, and the key committed beside it
+   decrypts nothing.
+
+   **The trigger, and it is a deployment gate rather than a suggestion:** this
+   account must not survive into production. Before Proxploy is deployed
+   anywhere real, either delete `admin@aspyrelabs.com` or change its password,
+   and do not reuse that password for the production admin. The reason to write
+   it down here is that an accepted risk with no trigger is just a forgotten
+   one, and the hash in `2be341a` stays readable to anyone who ever has access
+   to this repository's history.
 
    The cause is already fixed: `bd5eb22` added `data.bak-*/` to
    `backend/.gitignore` (line 9, with a comment explaining why), so the reset
