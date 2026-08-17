@@ -548,9 +548,48 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    change as legitimate automatically.
 
 Still carried from 2026-08-15: the swallowed error detail, the node shell
-toggle that can be enabled without `Sys.Console`, the SSH enrolment checkbox
-granting the key silently, and the history purge decision on the committed
-`master.key`.
+toggle that can be enabled without `Sys.Console`, and the SSH enrolment
+checkbox granting the key silently.
+
+7. **The committed `master.key`: assessed 2026-08-17, and the answer is do not
+   rewrite history.** This sat on the carried list as an open purge decision,
+   phrased in a way that reads like an emergency. It is not one, and the
+   evidence is worth recording so it stops being re-litigated.
+
+   `2be341a` committed `backend/data.bak-142701/` whole: `master.key`,
+   `proxploy.db`, `-wal` and `-shm`. Both the key AND the database it protects,
+   which is the worst possible pairing. What is actually in them:
+
+   - **The committed key is not the live key.** `backend/data/master.key`
+     differs, because the reset procedure (`mv data data.bak-$(date +%H%M%S)`)
+     moves the old dir aside and a fresh one gets a new key.
+   - **The committed database holds no encrypted anything.** `hosts`: 0 rows.
+     `host_credentials`: 0 rows, so `encrypted_blob` has 0 non-null values.
+     `users.totp_secret_enc`: 0 non-null values. The committed `-wal` is 0
+     bytes, so nothing is hiding there either. **The leaked master key
+     decrypts nothing that was leaked with it.**
+   - What DID leak: one `users` row. `admin@aspyrelabs.com`, a display name,
+     and a `password_hash` that is **argon2id** (`$argon2id$v=19$`, 97 chars).
+     No TOTP secret, no OIDC identity.
+   - The repository is **private**.
+
+   So the residual exposure is one argon2id hash and one email address in a
+   private repo's history. argon2id is memory-hard, so that hash is not
+   practically crackable unless the password behind it is weak.
+
+   **Decision: do not rewrite history.** Rewriting `main` invalidates every
+   clone and every existing checkout, to remove a key that decrypts nothing.
+   That is disproportionate to one password hash.
+
+   **Do instead, and it is the only live item:** change the password on
+   `admin@aspyrelabs.com`, and if that password was reused anywhere else,
+   change it there too. That neutralises the exposure at zero cost and needs no
+   history surgery.
+
+   The cause is already fixed: `bd5eb22` added `data.bak-*/` to
+   `backend/.gitignore` (line 9, with a comment explaining why), so the reset
+   procedure can no longer produce a committable directory. Verified with
+   `git check-ignore`.
 
 ---
 
