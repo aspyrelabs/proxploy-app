@@ -71,10 +71,18 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await page.getByLabel('Name').fill(HOST_NAME)
     await page.getByLabel('Address').fill('https://10.0.0.5:8006')
     // Named per capability since 64e11fa merged the three host dialogs into
-    // one. The monitoring pair is the only one this journey needs: it is the
-    // mandatory capability, and the rest can be left blank and added later.
+    // one. Monitoring is the mandatory one, and the rest can be left blank and
+    // added later from the host's Edit dialog.
     await page.getByLabel('Monitoring token id', { exact: true }).fill('proxploy@pve!e2e')
     await page.getByLabel('Monitoring token secret', { exact: true }).fill('secret')
+    // Lifecycle is NOT optional for this journey, though, and leaving it blank
+    // is what made the "create a VM" step below fail from the VM wizard work
+    // onward: the wizard refuses with "pve-01 has no lifecycle API token
+    // configured; add one in Settings -> Hosts before this operation can run."
+    // Ticking the capability is what reveals its token pair.
+    await page.getByRole('checkbox', { name: /^Lifecycle/ }).check()
+    await page.getByLabel('Lifecycle token id', { exact: true }).fill('proxploy@pve!e2e-lifecycle')
+    await page.getByLabel('Lifecycle token secret', { exact: true }).fill('secret')
     await page.getByLabel(/Enable App Store installs/).check()
     await page.getByRole('button', { name: 'Add host' }).click()
     await expect(page.getByRole('button', { name: 'I have added it' })).toBeVisible()

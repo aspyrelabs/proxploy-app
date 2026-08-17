@@ -485,11 +485,34 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    project, so this one failure skips 14 other tests and the suite needs
    `--no-deps` to run at all.
 
+   **FIXED 2026-08-17, and it was the test that was wrong, not the app.**
+   Playwright's error context showed the dialog saying `pve-01 has no lifecycle
+   API token configured; add one in Settings -> Hosts before this operation can
+   run.` The VM wizard gained a lifecycle-capability gate and the journey was
+   never given the token: its onboarding step filled only the monitoring pair,
+   under a comment claiming that was all this journey needed, which stopped
+   being true the moment the gate landed. So the app refused correctly and the
+   test asserted a success that could not happen. The step now ticks the
+   Lifecycle capability, which reveals its token pair, and fills it.
+
+   Worth noting the failure shape: a capability gate reads as a timeout,
+   because the assertion waits for "succeeded" while the dialog is showing an
+   actionable refusal the whole time. Twenty seconds of waiting hid a message
+   that was correct and immediate.
+
+   The journey now passes in 4.0s, and the full suite runs 15/15 with
+   dependencies intact, no `--no-deps` needed.
+
 4. **Duplicate React key at `frontend/src/routes/store.tsx:372`.** The category
    skeleton uses its class string as the key over a list where `w-20` and
    `w-16` each appear twice. Only fires when the catalog query is slow enough
    to render the skeleton, which is why it is intermittent, and it is what
    `smoke.spec.ts` currently fails on.
+
+   **FIXED 2026-08-17.** Keyed by index instead: it is a fixed-length
+   placeholder that never reorders, which is the case an index key is correct
+   for. `smoke.spec.ts` (login and every nav page with a clean console) passes
+   with it.
 
 5. **Peer addresses could come from `pve_addr`, and deliberately do not.**
    `/cluster/config/join` reports `ring0_addr` and `pve_addr` as separate fields
