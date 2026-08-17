@@ -277,6 +277,35 @@ because a code review found both cases reachable and neither provable offline.
    makes asyncssh's `env=` silently no-op. The fix is safer either way, but the
    original behaviour was never reproduced against a live `sshd`.
 
+   **CONFIRMED 2026-08-17** against `node1`'s real sshd, OpenSSH_10.0p2
+   Debian-7+deb13u4, through asyncssh itself (the same library
+   `executor/ssh.py` uses) and the app's own stored key. Effective config from
+   `sshd -T`:
+
+       acceptenv LANG
+       acceptenv LC_*
+       acceptenv COLORTERM
+       acceptenv NO_COLOR
+
+   Three cases, which together name the cause rather than just observing the
+   symptom:
+
+   - `env={"var_ctid": "150"}`: the node saw `''`. Silently dropped, exactly as
+     the comment says.
+   - `env={"LC_TEST_CTID": "150"}`: the node saw `'150'`. **This is the control
+     that matters.** A name the allowlist matches DOES arrive through `env=`,
+     so asyncssh sends environment correctly and it is sshd's allowlist that
+     refuses the other one. Without this case the result would be
+     indistinguishable from asyncssh being broken.
+   - inlined as `var_ctid=150 sh -c ...`, which is what Proxploy does: the node
+     saw `'150'`.
+
+   So inlining is load-bearing, not belt-and-braces, and the reason is
+   `AcceptEnv`, not the client library. Note the default allowlist here is
+   WIDER than the LANG/LC_* usually quoted (it also carries `COLORTERM` and
+   `NO_COLOR`), which is worth knowing before anyone assumes a name is safe
+   because it is not `var_*`.
+
 ### Two things the first real install surfaced
 
 Neither is a storage finding, and both were invisible to every fake.
@@ -422,10 +451,50 @@ message.
    the added stanzas are `manual` with no `auto`, but it means the diff an
    operator should be shown is PVE's `changes`, not the one field they edited.
 
-   **Still open: the lockout half**, applying a change that costs the node its
-   own connectivity. It needs someone at the node's physical console to
-   recover, which is the whole reason `apply_network` demands the node name
-   typed back.
+   **THE LOCKOUT HALF PASSED 2026-08-17, PVE 9.2.10**, and it is the more
+   interesting half. Run on `node1` after arming recovery on the node itself as
+   a transient systemd timer (`systemd-run --on-active=150`) that restores the
+   backed-up `interfaces` file, runs `ifreload -a` and force-sets the address.
+   systemd owns that timer, so it fires whether or not sshd, pveproxy or the
+   network are reachable, and it does not care that the session which armed it
+   is gone. That is what makes this check runnable without standing at the node.
+   Nothing was broken until the timer was confirmed armed.
+
+   `vmbr0` was moved from 192.168.50.199/24 to 10.99.99.99/24. PVE's own
+   `changes` diff showed exactly that one line, so the staged change was
+   understood before applying it.
+
+   **What Proxploy sees is the finding, and it is worse than a plain failure:**
+
+   1. `network_apply` **returned a UPID in 0.1 seconds**, successfully.
+      `ifreload -a` is an asynchronous `srvreload` task, so the POST completes
+      before the reload takes effect. Proxploy has every reason to believe the
+      call worked.
+   2. `/version` **still answered 9.2.10** immediately afterwards. An immediate
+      health check gives a false all-clear.
+   3. Then the node vanished, for 193 seconds as measured from the apply.
+   4. So the job's UPID polling (`pvetask.py`) hits an unreachable host and the
+      job reports a FAILURE.
+   5. **But the apply genuinely succeeded.** Read after the node returned, that
+      same UPID reports `status: stopped`, `exitstatus: OK`, `TASK OK`.
+
+   In other words: a successful apply that costs the node its network is
+   reported to the operator as a failed one, and the truth is only recoverable
+   after the node comes back, at which point the task record settles it. That
+   is a strictly worse failure mode than "the job hangs", because the operator
+   is told the opposite of what happened. Nothing about it is reachable with a
+   fake, which answers this entry's original question about the failure path.
+
+   Two timings worth keeping. Recovery was NOT instant once the config was
+   restored: the timer fired about 140s after the apply and the API answered at
+   193s, so roughly 50s passed between `ifreload -a` putting the address back
+   and pveproxy being reachable again. And the whole outage was survivable only
+   because recovery was armed in advance; without it this is a console trip,
+   which is why `apply_network` demands the node name typed back.
+
+   Afterwards `vmbr0` was `active=1` on 192.168.50.199/24, the running config
+   matched the backup byte for byte, the staged config was discarded, and the
+   timer and backup file were removed.
 9. **Whole-storage prune.** Pruning across an entire storage, where the count
    of affected volumes and the time taken both differ materially from a fake.
 
