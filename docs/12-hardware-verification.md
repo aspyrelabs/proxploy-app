@@ -56,7 +56,14 @@ Later the same day the two nodes were clustered as `lab-cluster` and an Unraid N
 export (`192.168.50.8:/mnt/user/test`) was attached cluster-wide as
 `nfs-shared` carrying `rootdir,vztmpl,images,iso,backup`. That is the shape
 this section asks for, and it is what checks 3a and 3b were finally run
-against. Two notes for anyone rebuilding it:
+against.
+
+**`nfs-shared` is gone as of 2026-08-17.** Neither node lists it any more:
+`local` and `local-lvm` are all that remain, and only `local` carries `backup`.
+So the shared-pool shape does NOT currently exist on this hardware, and 3a and
+3b could not be re-run today without reattaching the export. Recorded because a
+green run of the other storage checks says nothing about the shared-pool ones
+while it is absent. Two notes for anyone rebuilding it:
 
 - Joining a node replaces its `/etc/pve`, so `node2`'s Proxmox API token was
   destroyed and Proxploy lost it with a 401 until its host row was repointed at
@@ -335,6 +342,22 @@ message.
    performing it.
 9. **Whole-storage prune.** Pruning across an entire storage, where the count
    of affected volumes and the time taken both differ materially from a fake.
+
+   **PASSED 2026-08-17, PVE 9.2.10**, on `node2`'s `local`. Both nodes held zero
+   backups, so the check made its own: four `vzdump`s of CT 101 in `snapshot`
+   mode, 391 MiB each, 8.2s each, with the container running throughout. Then
+   `keep-last=1` through the route's own `_prune_spec`/`_prune_call`.
+
+   **The number worth keeping: the dry run took 33 ms and the real prune took
+   2.1 s, 65x.** A fake answers both instantly, so any code that treats prune as
+   costing what its preview costs is wrong on hardware. The two agreed exactly
+   on which volumes were affected, `remove` 3 and `keep` 1, which is what
+   `prune_preview`'s "the two must stay in sync" comment asks of the pair, and
+   `keep-last` retained the NEWEST rather than the first.
+
+   Worth noting for anyone re-running it: the script refuses to start if the
+   target storage already holds a backup, so it can only delete what it created.
+   That also means it refuses until the one retained volume is removed.
 
 ## Cluster quorum
 
