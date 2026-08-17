@@ -84,6 +84,12 @@ def _content_list(v) -> list[str]:
 def _row(host: Host, st: dict) -> dict:
     used, total = int(st.get("used_bytes") or 0), int(st.get("total_bytes") or 0)
     return {"host_id": host.id, "host_name": host.name, "node": st.get("node"),
+            # The serving host's cluster, so a caller can tell "a sibling node
+            # of my cluster reported this" from "an unrelated host did". The
+            # dedupe below deliberately drops host_id from its key, so host_id
+            # alone cannot answer that, and the install dialog filtering on it
+            # was why one host of a cluster saw no pools at all.
+            "cluster_name": host.cluster_name,
             "storage": st.get("storage"), "type": st.get("type"),
             "content": _content_list(st.get("content")),
             "shared": bool(st.get("shared")),

@@ -47,6 +47,7 @@ def test_list_serves_the_enriched_snapshot_fields(tmp_path, csrf_header, bootstr
         seed_snapshot(app, hid, storage=[LOCAL_PVE1])
         rows = c.get("/api/v1/storage").json()
         assert rows == [{"host_id": hid, "host_name": "host-01", "node": "pve1",
+                         "cluster_name": None,
                          "storage": "local", "type": "dir",
                          "content": ["iso", "vztmpl"], "shared": False,
                          "status": "available", "used_bytes": 100,
@@ -209,3 +210,42 @@ def test_storage_reads_require_a_session(tmp_path):
         assert c.get("/api/v1/storage").status_code == 401
         assert c.get(f"/api/v1/storage/{hid}/local").status_code == 401
         assert c.get(f"/api/v1/storage/{hid}/local/content").status_code == 401
+
+
+
+# --- the cluster a row came from, which host_id alone cannot answer ----------
+#
+# list_storage keys its dedupe on (cluster, node, storage) with host_id
+# deliberately absent: both nodes of a cluster report the whole cluster's
+# storage and either can serve it, so the surviving row carries whichever host
+# polled first. On a two-node cluster that left the OTHER host unable to find
+# any pool in the install dialog, which filtered on host_id, and which host
+# broke flipped on every backend restart. The row now names the serving host's
+# cluster so the distinction is answerable.
+
+def test_storage_rows_name_the_serving_hosts_cluster(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    from tests.support import seed_snapshot
+
+    app, c, hid = _seed(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            from proxploy.models import Host
+            db.get(Host, hid).cluster_name = "lab-cluster"
+            db.commit()
+        seed_snapshot(app, hid, storage=[LOCAL_PVE1])
+        assert c.get("/api/v1/storage").json()[0]["cluster_name"] == "lab-cluster"
+
+
+def test_a_standalone_hosts_rows_report_no_cluster(tmp_path, csrf_header,
+                                                   bootstrap_admin):
+    """None is a real value meaning "not clustered", never "unknown", so two
+    standalone hosts must not be able to match each other through it."""
+    from tests.support import seed_snapshot
+
+    app, c, hid = _seed(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed_snapshot(app, hid, storage=[LOCAL_PVE1])
+        assert c.get("/api/v1/storage").json()[0]["cluster_name"] is None

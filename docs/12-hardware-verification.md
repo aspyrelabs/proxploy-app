@@ -203,6 +203,41 @@ because a code review found both cases reachable and neither provable offline.
    sees two candidates. The node filter plus dedupe collapses that to one
    candidate per content type, and Default correctly asked nothing before
    `nfs-shared` was attached.
+
+   **The picker half passed on 2026-08-14 by LUCK, and a real bug was hiding
+   under it. Found and fixed 2026-08-17.** Driving the same dialog against the
+   same cluster gave:
+
+   - `node1`: container `[]`, template `[]`
+   - `node2`: container `[local-lvm, nfs-shared]`, template `[local, nfs-shared]`
+
+   So Advanced install could not be configured on `node1` at all. The cause was
+   `components/install/pools.ts` filtering rows with `row.host_id === hostId`,
+   while `api/storage.py::list_storage` deliberately keys its dedupe on
+   `(cluster, node, storage)` with host_id ABSENT, because both nodes of a
+   cluster report the whole cluster's storage and either can serve it. Its own
+   comment says the surviving row is "whichever host's poll was seen first,
+   which is fine since any host in the cluster can serve it" — and the frontend
+   then filtered on exactly the field the backend had stopped guaranteeing.
+   Every row was attributed to host 2, so host 1 matched none of them and the
+   node filter and shared exemption below never ran.
+
+   **Which host breaks is a coin flip per backend restart**, decided by which
+   snapshot was seen first. That is why 2026-08-14 recorded a pass: host 1 won
+   the race that day, so `node1` worked and `node2` would have been the empty
+   one, unobserved because only `node1` was checked.
+
+   Fixed by having `GET /storage` name the serving host's cluster
+   (`cluster_name` on each row) and matching on that, with the strict host_id
+   check kept for standalone hosts, whose `cluster_name` is None and where None
+   means "not clustered" rather than "unknown". Both hosts now offer
+   `local-lvm` + `nfs-shared` and `local` + `nfs-shared`. Seven frontend tests
+   cover the filter directly, using the exact row shape this cluster returned,
+   plus two backend tests for the new field.
+
+   **The lesson for this document:** a check that passes on one host of a pair
+   has verified one host, not the behaviour. Both directions, as checks 13 to 16
+   already do for peers.
 3b. **A pool the node is not serving is never offered.** The dialog keeps only
    rows whose `status` is exactly `available`, a literal taken from
    `/cluster/resources`. Pass: disable or detach one pool on the node and

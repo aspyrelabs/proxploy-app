@@ -17,6 +17,9 @@ type HostRow = {
   // The node whose datastores an install on this host lands on: the same
   // host.node_name _storage_pools queries (services/appstore.py).
   node_name?: string | null
+  // Needed to tell a sibling node of the same cluster apart from an unrelated
+  // host when reading GET /storage, which does not key rows by host_id.
+  cluster_name?: string | null
   // Set once Default has asked the storage question and the operator has
   // answered it (Task 13; written back by POST .../install). NULL/absent
   // means "not chosen yet".
@@ -79,7 +82,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // Called above the early return, and with the same queryKey StorageFields
   // uses, so react-query dedupes it against Advanced mode's own fetch rather
   // than doubling the request.
-  const pools = useStoragePools(hostId, host?.node_name)
+  const pools = useStoragePools(hostId, host?.node_name, host?.cluster_name)
 
   // `return null` here meant the operator pressed Install on a store card and
   // the screen did nothing at all until the entry arrived, with no way to tell
@@ -374,7 +377,8 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
                 are not: those use the app script&rsquo;s own defaults.
               </span>
               <CoreFields value={core} onChange={(patch) => setCoreOverride((c) => ({ ...c, ...patch }))} />
-              <StorageFields hostId={hostId} node={host?.node_name} container={storage.container}
+              <StorageFields hostId={hostId} node={host?.node_name}
+              clusterName={host?.cluster_name} container={storage.container}
                 template={storage.template} onChange={setStorage} />
             </div>
           )}

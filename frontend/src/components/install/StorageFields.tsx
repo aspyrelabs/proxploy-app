@@ -25,14 +25,16 @@ const selectCls = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 te
  * name when the target host changes, since a name valid on the old host is
  * not necessarily valid on the new one.
  */
-export function StorageFields({ hostId, node, container, template, onChange }: {
+export function StorageFields({ hostId, node, clusterName, container, template,
+                                onChange }: {
   hostId: number | null
   node: string | null | undefined
+  clusterName?: string | null
   container: string
   template: string
   onChange: (next: { container: string; template: string }) => void
 }) {
-  const { rootdir, vztmpl, state } = useStoragePools(hostId, node)
+  const { rootdir, vztmpl, state } = useStoragePools(hostId, node, clusterName)
 
   // `state`, not just the lists. pools.ts carries it for exactly this reason
   // and says so: the snapshot is EMPTY until the first poll after a backend

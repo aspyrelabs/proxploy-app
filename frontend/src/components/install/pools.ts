@@ -4,6 +4,13 @@ import { api } from '../../api/client'
 export type StorageRow = {
   host_id: number; node: string; storage: string; content: string[]; status: string
   shared: boolean
+  /** The cluster of the host whose poll produced this row, null when that host
+   *  is standalone. GET /storage collapses a cluster's datastores to ONE row
+   *  per (cluster, node, storage) and keeps whichever host polled first, so the
+   *  row's host_id is NOT the only host that can serve it. This is how a
+   *  caller tells "a sibling node of my cluster reported it" (usable) from
+   *  "an unrelated host reported it" (not). */
+  cluster_name: string | null
 }
 
 export type Pools = {
@@ -55,19 +62,49 @@ export type Pools = {
  * such a host cannot install at all (_storage_pools raises on it), so there is
  * nothing better to show than the deduped host-wide set.
  */
-export function useStoragePools(hostId: number | null,
-                                node: string | null | undefined): Pools {
-  const q = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
-  const names = (content: string) => [...new Set(
-    (q.data ?? [])
-      .filter((r) => r.host_id === hostId
+/**
+ * Whether `row` was reported by a host that can actually serve it to `hostId`.
+ *
+ * NOT `row.host_id === hostId`, which is what this used to be and was wrong on
+ * every cluster. GET /storage keys its dedupe on (cluster, node, storage) with
+ * host_id deliberately absent, because both nodes of a cluster report the whole
+ * cluster's storage and either can serve it; the surviving row carries
+ * whichever host polled first. On a two-node cluster that meant the host which
+ * lost the race saw NO pools at all, so Advanced install could not be
+ * configured on it, and which host that was flipped on every backend restart.
+ *
+ * A standalone host keeps the strict identity check: its cluster_name is null,
+ * and null means "not clustered" rather than "unknown", so two standalone hosts
+ * must never match each other through it.
+ */
+export function servedTo(row: StorageRow, hostId: number | null,
+                         clusterName: string | null | undefined): boolean {
+  if (row.host_id === hostId) return true
+  return row.cluster_name != null && row.cluster_name === clusterName
+}
+
+/** The pure computation behind useStoragePools, exported so the filtering can
+ *  be tested without a query client. */
+export function poolsFrom(rows: StorageRow[] | undefined, hostId: number | null,
+                          node: string | null | undefined,
+                          clusterName: string | null | undefined,
+                          content: string): string[] {
+  return [...new Set(
+    (rows ?? [])
+      .filter((r) => servedTo(r, hostId, clusterName)
         && (!node || r.node === node || r.shared)
         && r.status === 'available'
         && r.content.includes(content))
       .map((r) => r.storage))].sort()
+}
+
+export function useStoragePools(hostId: number | null,
+                                node: string | null | undefined,
+                                clusterName?: string | null): Pools {
+  const q = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
   return {
-    rootdir: names('rootdir'),
-    vztmpl: names('vztmpl'),
+    rootdir: poolsFrom(q.data, hostId, node, clusterName, 'rootdir'),
+    vztmpl: poolsFrom(q.data, hostId, node, clusterName, 'vztmpl'),
     state: q.isError ? 'error' : q.isPending ? 'loading' : 'ok',
   }
 }
