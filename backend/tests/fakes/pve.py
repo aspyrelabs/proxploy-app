@@ -323,6 +323,8 @@ class _TermproxyLeaf:
     def post(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
+        if self._owner.proxy_error is not None:
+            raise self._owner.proxy_error
         if self._vmid is None:
             self._owner.last_node_termproxy_call = self._node
         else:
@@ -337,6 +339,8 @@ class _VncproxyLeaf:
     def post(self, **kwargs):
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
+        if self._owner.proxy_error is not None:
+            raise self._owner.proxy_error
         self._owner.last_vncproxy_call = (self._node, self._vmid)
         return self._owner.vncproxy_response
 
@@ -710,6 +714,11 @@ class FakePVE:
         # console calls (Phase 5)
         self.termproxy_response: dict = {}
         self.vncproxy_response: dict = {}
+        # An exception for termproxy/node_termproxy/vncproxy to raise, so a
+        # token too narrow for the console (no Sys.Console) can be modelled.
+        # `fail` already covers "node unreachable"; this covers "node answered,
+        # and said no".
+        self.proxy_error: Exception | None = None
         self.last_termproxy_call = None
         self.last_node_termproxy_call = None
         self.last_vncproxy_call = None

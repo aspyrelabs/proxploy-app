@@ -346,3 +346,89 @@ def test_console_ticket_allows_a_guest_whose_status_is_unknown(tmp_path, csrf_he
         r = client.post(f"/api/v1/apps/{app_id}/console/tickets",
                         headers=csrf_header(client))
         assert r.status_code == 200, r.text
+
+
+# --- a token too narrow for the console: PVE says no, and it must not be a 500 -
+#
+# Every one of these three routes called termproxy/node_termproxy/vncproxy
+# OUTSIDE the `except ProxmoxError` block that wraps client_for_host above it,
+# so a 403 from a token lacking Sys.Console escaped the route entirely. The
+# message was never the problem: services/proxmox.py::_permission_detail
+# already turns Proxmox's own "Permission check failed (/nodes/pve1,
+# Sys.Console)" into a readable sentence. Nothing was catching it to deliver.
+#
+# This is the node-shell opt-in's real failure shape. `node_shell_enabled` can
+# be switched on for a host whose token cannot open a shell (nothing checks
+# Sys.Console at the toggle, deliberately: doc 08 §9 makes the toggle a second
+# gate on top of RBAC, not a privilege probe), so the honest place to find out
+# is here, when the shell is actually opened.
+
+_DENIED = "Permission check failed (/nodes/pve1, Sys.Console)"
+
+
+def _permission_error():
+    from proxploy.services.proxmox import ProxmoxError
+
+    return ProxmoxError(f"node termproxy failed on pve1: 403 Forbidden: {_DENIED}",
+                        kind="permission")
+
+
+def test_node_shell_ticket_reports_a_denied_privilege_instead_of_500(
+        tmp_path, csrf_header, bootstrap_admin):
+    fake = FakePVE()
+    fake.proxy_error = _permission_error()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            host_id = host.id
+        _seed_credential(app, host)
+        r = client.patch(f"/api/v1/hosts/{host_id}", json={"node_shell_enabled": True},
+                         headers=csrf_header(client))
+        assert r.status_code == 200
+
+        r = client.post(f"/api/v1/hosts/{host_id}/shell/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 409, r.text
+        assert "Sys.Console" in r.text
+
+
+def test_app_console_ticket_reports_a_denied_privilege_instead_of_500(
+        tmp_path, csrf_header, bootstrap_admin):
+    fake = FakePVE()
+    fake.proxy_error = _permission_error()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            a = _seed_app(db, host)
+            app_id = a.id
+        _seed_credential(app, host)
+        r = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 409, r.text
+        assert "Sys.Console" in r.text
+
+
+def test_vm_console_ticket_reports_a_denied_privilege_instead_of_500(
+        tmp_path, csrf_header, bootstrap_admin):
+    from proxploy.models import Vm
+
+    fake = FakePVE()
+    fake.proxy_error = _permission_error()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            v = Vm(host_id=host.id, vmid=100, name="win11", status="running")
+            db.add(v)
+            db.commit()
+            vm_id = v.id
+        _seed_credential(app, host)
+        r = client.post(f"/api/v1/vms/{vm_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 409, r.text
+        assert "Sys.Console" in r.text

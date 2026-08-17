@@ -40,12 +40,21 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
     if host is None:
         raise HTTPException(404, "host not found")
     _refuse_if_not_running(a.status_cached, a.name)
+    # Both the client build AND the proxy call are wrapped. The proxy call
+    # used to sit outside this block, so a token too narrow for the console
+    # (Proxmox answering "Permission check failed (/nodes/pve1,
+    # Sys.Console)") escaped the route as an unhandled ProxmoxError. The
+    # message was never missing: services/proxmox.py::_permission_detail
+    # already names the privilege. Nothing was catching it to deliver.
     try:
         client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
-    upstream = client.termproxy("lxc", node, a.ctid)
+    try:
+        upstream = client.termproxy("lxc", node, a.ctid)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     raw, expires_at = mint_ticket(
         db, user_id=user.id, kind="app_console", target_id=a.id, node=node,
         guest_kind="lxc", vmid=a.ctid, upstream_user=upstream["user"],
@@ -191,7 +200,10 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
-    upstream = client.node_termproxy(node)
+    try:
+        upstream = client.node_termproxy(node)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     raw, expires_at = mint_ticket(
         db, user_id=user.id, kind="node_shell", target_id=host.id, node=node,
         guest_kind=None, vmid=None, upstream_user=upstream["user"],
@@ -224,7 +236,10 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
     node = host.node_name or ""
-    upstream = client.vncproxy(node, v.vmid)
+    try:
+        upstream = client.vncproxy(node, v.vmid)
+    except ProxmoxError as e:
+        raise HTTPException(409, str(e)) from e
     raw, expires_at = mint_ticket(
         db, user_id=user.id, kind="vm_vnc", target_id=v.id, node=node,
         guest_kind="qemu", vmid=v.vmid, upstream_user=upstream["user"],

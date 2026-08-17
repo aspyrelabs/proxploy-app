@@ -547,9 +547,33 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    on 2026-08-17 had already moved to the new value and would have flagged the
    change as legitimate automatically.
 
-Still carried from 2026-08-15: the swallowed error detail, the node shell
-toggle that can be enabled without `Sys.Console`, and the SSH enrolment
-checkbox granting the key silently.
+Still carried from 2026-08-15: the swallowed error detail, and the SSH
+enrolment checkbox granting the key silently.
+
+8. **The node shell toggle and `Sys.Console`: fixed 2026-08-17, at the point of
+   use rather than at the toggle.** The carried item read "the node shell
+   toggle can be enabled without `Sys.Console`", and the obvious reading is
+   that `PATCH /hosts/{id}` should refuse. It should not, and that is worth
+   recording so it is not "fixed" that way later: doc 08 §9 makes the toggle a
+   second deliberate gate ON TOP OF RBAC, not a privilege probe, and
+   `pveum.py` keeps `Sys.Console` out of the console capability on purpose. A
+   toggle that reached out to Proxmox to validate a privilege would also have
+   to decide what to do when `/access/permissions` is unreadable, which is the
+   tri-state `_missing_privileges` exists to handle.
+
+   The actual defect was downstream, and worse than a missing check. All three
+   console routes called `termproxy` / `node_termproxy` / `vncproxy` OUTSIDE
+   the `except ProxmoxError` block that wrapped `client_for_host` on the line
+   above, so a 403 from a narrow token escaped the route unhandled. The message
+   was never missing: `_permission_detail` already turns Proxmox's own
+   "Permission check failed (/nodes/pve1, Sys.Console)" into a readable
+   sentence. Nothing was catching it to deliver.
+
+   So enabling the toggle with a token that lacks `Sys.Console` is allowed, as
+   designed, and opening the shell now says which privilege Proxmox refused
+   instead of failing opaquely. Fixed at all three call sites, not just the node
+   shell one, because the same gap sat in the app console and VM VNC routes.
+   Three tests, one per route.
 
 7. **The committed `master.key`: assessed 2026-08-17, and the answer is do not
    rewrite history.** This sat on the carried list as an open purge decision,
