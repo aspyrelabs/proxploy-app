@@ -1,6 +1,10 @@
 logs/
 packaging/tests/DEV_ONLY_release_key.pem
 pve-testing.env
+
+# Personal permission grants for this checkout. Never committed: they are one
+# operator's trust decision about their own machine, not a team-wide policy.
+.claude/settings.local.json
 .superpowers/
 node_modules/
 
