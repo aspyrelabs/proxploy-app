@@ -839,8 +839,52 @@ exercise any of it and the script says so and stops.
     operator experiences is: rejoin, host unreachable, Edit, Test connection,
     Accept.
 
-    Still open, narrowly: whether that refusal is surfaced usefully in the
-    BROWSER mid-enrolment, rather than as a connection error afterwards.
+    **THE BROWSER HALF PASSED 2026-08-17**, against a real certificate change
+    on real hardware, which is what doc 11 item 2 asked for. `node1`'s
+    certificate was regenerated deliberately (`rm
+    /etc/pve/nodes/node1/pve-ssl.{pem,key}`, `pvecm updatecerts --force`,
+    `systemctl restart pveproxy`), taking it from `29:F9:DA:00:...` to
+    `F5:35:81:E8:...`. Then the real Edit dialog, in a real browser, against the
+    real node:
+
+    - it showed "node1.lab.local's TLS certificate has changed",
+    - printed BOTH fingerprints in full and in monospace, the pinned one and the
+      presented one, so they can be compared against the node,
+    - offered "Accept the new certificate",
+    - and after accepting, re-pinned and reported "Connected, PVE 9.2.10". The
+      stored pin afterwards is the one the node presents.
+
+    **Two things worth knowing about how it looks.** While the pin is stale the
+    page logs three `502 Bad Gateway` console errors, which is correct (the
+    host genuinely refuses) but would trip any "clean console" assertion that
+    ever ran in this state. And the dialog is a SCROLLING dialog: at 1440x900
+    and 1280x800 there are 337px and 407px of content below its fold, the
+    warning text is cut mid-sentence at the fold, and "Accept the new
+    certificate" is reached by scrolling. At 1920x1080 it is visible without
+    scrolling. That is a long dialog behaving normally, not a defect, but the
+    most security-critical control in the product being below the fold on a
+    laptop is worth a deliberate decision rather than an accident.
+
+    **A measurement lesson, recorded because it cost two wrong conclusions
+    here.** This section's own advice is to measure rather than eyeball, and
+    `boundingBox()` is the wrong instrument for "can the operator see this":
+    it reports layout position and is blind to clipping by an ancestor scroll
+    container, so it called the control visible while a screenshot showed it
+    cut off. Worse, Playwright AUTO-SCROLLS an element into view before
+    interacting, so anything measured after a click reflects a scrolled state.
+    Read the nearest scrollable ancestor's `scrollTop` / `scrollHeight` /
+    `clientHeight` and say which one you mean. `document.elementFromPoint` is
+    also useless without care: the overlay `div` contains the whole dialog, so
+    a naive "does the hit target contain my element" test is always true.
+
+    **How this was driven at all**, since it needs an authenticated session and
+    the shared driver has none: log in over the API (password plus a TOTP code
+    generated from the stored secret), then inject the resulting `pp_session`
+    and `pp_csrf` cookies into a Playwright context with `addCookies`. That
+    works and is the way to reach any behind-login page against a real cluster,
+    which the Frontend geometry section below records as unreachable. Note the
+    session cookie is `httponly`, so curl writes it into its jar prefixed
+    `#HttpOnly_` and a naive comment-stripping parse loses it.
 
 **Run in both directions, 2026-08-17, PVE 9.2.10.** All of 13 to 16 were run
 twice, once with each node as the origin, and passed both times. That is worth
