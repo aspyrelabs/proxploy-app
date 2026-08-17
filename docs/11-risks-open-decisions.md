@@ -572,6 +572,26 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    the control never appears. CA validation is the trust anchor in that mode.
    That is deliberate, not a consequence of this item.
 
+   **The SSH host key pin has the same problem and, unlike the TLS pin, no way
+   back at all. Found 2026-08-17.** Rejoining `node1` to the cluster rotated its
+   SSH host key too, and every App Store install on it then failed. Grepping
+   every write site: `Host.ssh_host_key_fingerprint` is only ever set through
+   `on_new_fingerprint`, which fires ONLY when the stored pin is already None.
+   Nothing re-pins it. `POST /hosts/{id}/ssh/verify` reports
+   `{"error": "host_key_mismatch"}` and stops there.
+
+   So a legitimately rotated SSH host key bricks installs, updates and the
+   transfer-strategy migration for that host, permanently, with the only fix
+   being a manual database write. The TLS side has "Accept the new certificate";
+   this side has nothing. The asymmetry is the bug, and the cheap fix is the same
+   control: show pinned versus presented and let the operator accept, reusing the
+   shape `HostEditDialog` already has.
+
+   Worth pairing with the executor fix committed the same day (8b40161): the
+   mismatch was additionally being reported as "saw None", because asyncssh had
+   not called `validate_host_public_key` at all on that node, so an unread key
+   was phrased as a rotated one.
+
 9. **The swallowed error detail: fixed 2026-08-17.** Located in
    `HostForm.tsx::errText`. When the server named a known error kind,
    `KIND_COPY[kind]` was returned and `body.detail` was dropped on the floor.
