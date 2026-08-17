@@ -458,8 +458,40 @@ message.
      downtime."
 
    So every helper in the non-clustered branch ran against live data. **Still
-   open: the data-movement half**, `migrate_app`'s vzdump -> SFTP -> restore,
-   which needs a `JobContext` and the job runner rather than direct calls.
+   open: the TRANSFER strategy's data movement**, `migrate_app`'s vzdump ->
+   SFTP -> restore, which needs the pair unclustered AND the shared pool
+   detached, as above.
+
+   **The CLUSTER strategy's data movement DID run, 2026-08-17, through the real
+   job runner.** Not check 7 (this pair is clustered, so `preflight` correctly
+   picked `cluster`), but the job wrapper around a migration had never run on
+   hardware either, and it is the same handler. `POST /apps/{id}/migrate` on the
+   throwaway app from check 3a, node1 -> node2:
+
+   - the preflight it echoed back was honest: `cluster`, ctid preserved at 120
+     on both sides, no blockers, no warnings, `capacity_ok: true`;
+   - the job announced the downtime AND the rollback position before doing
+     anything ("source CT 120 ... is left stopped and intact");
+   - stop -> `vzmigrate` -> start, each with its real PVE UPID in the
+     transcript;
+   - PVE reported `volume 'nfs-shared:120/vm-120-disk-0.raw' is on shared
+     storage 'nfs-shared'` and finished the migrate in **one second**;
+   - the app row moved to host 2, the guest came up on `node2` from the same
+     volume, and the audit row is `app.migrate ... ok`.
+
+   **The number worth keeping: estimated 30s, measured 47.0s.** The estimate is
+   a hardcoded 30 whose note called it "network-bound", and on shared storage
+   that is the wrong cause as well as the wrong magnitude: the transfer took one
+   second, and the 47s was the guest stopping and starting. The note now says
+   so, and the operator sentence calls 30 a floor rather than a promise. The
+   constant itself is unchanged: one measurement is not a basis for a new one,
+   and the job reports the real figure afterwards either way.
+
+   Two smaller observations. `progress_pct` was `None` on every event of this
+   path, so the 0-100 slicing the module docstring describes did not produce
+   anything here. And the uninstall that cleaned the fixture up demanded the
+   app name typed back, the same guardrail shape as `apply_network`, then
+   destroyed the container and left no volume behind on either node.
 
    **Three traps for anyone re-running this.**
 

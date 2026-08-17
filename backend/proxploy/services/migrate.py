@@ -163,7 +163,17 @@ def _transfer_bytes(db, src_client, source_host_id: int,
 def _downtime_estimate(strategy: str, transfer_bytes: int | None,
                        assumed_bps: float) -> tuple[int | None, str]:
     if strategy == STRATEGY_CLUSTER:
-        return 30, "offline migrate; restart-scale downtime, network-bound"
+        # Measured 47s on real hardware (2026-08-17, doc 12 check 7) against
+        # this estimate of 30. The note deliberately no longer says
+        # "network-bound": PVE reported the volume as being on shared storage
+        # and `vzmigrate` finished in ONE second, so the downtime was stopping
+        # and starting the guest, not moving it. On non-shared storage in a
+        # cluster the transfer does dominate, hence both halves below. The 30
+        # stands: one measurement is not a basis for a new constant, and the
+        # job reports the real number afterwards either way.
+        return 30, ("offline migrate; downtime is the guest stopping and "
+                    "starting, plus the disk copy when the storage is not "
+                    "shared. Measured downtime is reported by the job")
     if transfer_bytes is None:
         return None, ("no measured backup and no live disk size were available "
                       "for this guest; downtime cannot be honestly estimated")
@@ -177,7 +187,8 @@ def _downtime_statement(strategy: str, est_downtime_s: int | None) -> str:
         if est_downtime_s is None:
             return "This is a live cluster migration; downtime cannot be estimated."
         return (f"This is a live cluster migration; expect roughly {est_downtime_s} "
-               f"seconds of downtime, network-bound.")
+               f"seconds of downtime. On real hardware with shared storage it "
+               f"measured 47s, so treat this as a floor rather than a promise.")
     if est_downtime_s is None:
         return ("This is stop → backup → transfer → restore → start. "
                "Downtime cannot be estimated: no measured backup size and no live "
