@@ -741,8 +741,32 @@ message.
     That is the part only real hardware could answer: what a genuinely
     restricted token reports. What is still open is the null branch, which
     needs a token REFUSED `/access/permissions` and PVE grants that read to
-    everyone for their own permissions, and the UI half, that the warning
-    appears ahead of a power action rather than the action refusing.
+    everyone for their own permissions.
+
+    **THE UI HALF PASSED 2026-08-17, PVE 9.2.10.** A throwaway `pp-power@pve!
+    probe` holding only `PVEAuditor` at `/` (which carries `Sys.Audit` but NOT
+    `Sys.PowerMgmt`) was swapped in as host 1's monitoring credential, so the
+    degradation path this lab's root token never reaches was genuinely entered:
+    `POST /hosts/1/test` returned `status=connected node_power_missing=True`.
+    A connected host that cannot power itself is exactly the state the warning
+    exists for.
+
+    Selecting **Reboot** in the real actions menu then produced:
+
+        Proxploy cannot power this node yet.
+        The API token is missing Sys.PowerMgmt on this node. See
+        docs.proxploy.com/getting-started/proxmox-token for how to grant it,
+        then try again.
+
+    and **no dialog opened**, which is the whole claim: the warning comes ahead
+    of the action instead of the action opening a dialog that could only fail on
+    Proxmox's own 403. The menu items were not greyed out either, matching
+    `HostActionsMenu`'s stated intent that a disabled control reads as broken
+    rather than as "ask first".
+
+    Restored afterwards: the original credential blob byte for byte, a re-probe
+    returning `node_power_missing=False`, and the throwaway user, token and ACL
+    grant all deleted.
 
     **Worth recording about this lab specifically:** both hosts authenticate as
     `root@pam!proxploy`, a root token holding every privilege. So in this
