@@ -299,3 +299,71 @@ def test_a_host_key_mismatch_is_not_reworded_as_unreachable():
         asyncio.run(SSHExecutor(connect_factory=boom).run(
             "10.0.0.9", b"pem", "hostname",
             pinned_fingerprint="SHA256:X", on_new_fingerprint=lambda fp: None))
+
+
+def test_the_pin_comes_from_the_connection_not_only_the_callback():
+    """asyncssh does not always call validate_host_public_key. Against the real
+    `lab-cluster` cluster it fired on the node negotiating ssh-rsa and not on the one
+    negotiating ssh-ed25519, and an empty capture compared against a pin was
+    reported as a host key CHANGE ("saw None") rather than as an unread key.
+    So the fingerprint must come from conn.get_server_host_key(), which
+    answered correctly on both nodes.
+
+    Asserting the captured pin IS the server's real host key fingerprint is what
+    holds that: it fails if the code ever goes back to trusting only a callback
+    that may not run.
+    """
+
+    async def scenario():
+        host_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        expected = host_key.convert_to_public().get_fingerprint()
+
+        server = await asyncssh.create_server(
+            lambda: _AcceptAnyKeyServer(client_key.convert_to_public()),
+            "127.0.0.1", 0, server_host_keys=[host_key])
+        try:
+            port = server.sockets[0].getsockname()[1]
+            seen: list[str] = []
+            conn = await default_connect_factory(
+                "127.0.0.1", client_key.export_private_key(),
+                pinned_fingerprint=None, on_new_fingerprint=seen.append, port=port)
+            conn.close()
+            await conn.wait_closed()
+            assert seen == [expected]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
+
+
+def test_a_changed_host_key_names_both_fingerprints_and_never_says_none():
+    """The operator has to be able to compare the two values against the node,
+    and "saw None" is not a value. It also must not be phrased as a change when
+    nothing was compared."""
+
+    async def scenario():
+        host_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        real = host_key.convert_to_public().get_fingerprint()
+
+        server = await asyncssh.create_server(
+            lambda: _AcceptAnyKeyServer(client_key.convert_to_public()),
+            "127.0.0.1", 0, server_host_keys=[host_key])
+        try:
+            port = server.sockets[0].getsockname()[1]
+            with pytest.raises(SSHHostKeyMismatch) as ei:
+                await default_connect_factory(
+                    "127.0.0.1", client_key.export_private_key(),
+                    pinned_fingerprint="SHA256:stale-pin-from-before-a-rotation",
+                    on_new_fingerprint=lambda fp: None, port=port)
+            msg = str(ei.value)
+            assert "SHA256:stale-pin-from-before-a-rotation" in msg
+            assert real in msg
+            assert "None" not in msg
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
