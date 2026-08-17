@@ -534,18 +534,35 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    a host that was pinned stops working the moment it rejoins a cluster. The
    same applies to `pvenode cert set` and to an ACME renewal.
 
-   The guard behaving correctly is not the problem. The problem is what an
-   operator sees: a host that worked five minutes ago now fails with a
-   fingerprint mismatch phrased as a possible attack, with no affordance saying
-   "this changed legitimately, here is the new one, re-pin it". Nothing in the
-   product mentions that joining a cluster will do this.
+   **Correction, same day: the second half of this item was wrong when first
+   written, and the affordance it asks for already exists.** It claimed there
+   was "no affordance saying this changed legitimately, re-pin it". There is,
+   and it is exactly the shape this item went on to propose: `HostEditDialog`
+   runs Test connection, and when `POST /hosts/{id}/test` comes back with
+   `tls_fingerprint_seen` differing from `tls_fingerprint` it says
+   "<host>'s TLS certificate has changed", prints BOTH fingerprints in full
+   (never truncated, so they can be compared against the node), and offers
+   "Accept the new certificate", which PATCHes the new pin and confirms with
+   "<host> is now pinned to the certificate it is presenting."
+   `tests/host-edit-dialog.test.tsx` covers both that flow and the case where
+   the two match and nothing is offered.
 
-   Decide this before pinning is relied on in anger. The cheap version is a
-   re-pin action on the host's Edit dialog that shows the old and new
-   fingerprints side by side and makes the operator confirm; the expensive
-   version is corroborating against `pve_fp` from `/cluster/config/join`, which
-   on 2026-08-17 had already moved to the new value and would have flagged the
-   change as legitimate automatically.
+   The claim came from watching a pinned client refuse a connection in a
+   script and inferring the product had no recovery, rather than from reading
+   the product. Recorded rather than quietly deleted, because "I hit the guard
+   and assumed there was no way back" is the mistake worth not repeating.
+
+   **What genuinely remains is small.** Nothing warns AHEAD of time that
+   joining a cluster regenerates the certificate and will invalidate the pin,
+   so the sequence is: rejoin, host goes unreachable, operator opens Edit, runs
+   Test connection, accepts. That works and is one dialog away, so this is a
+   documentation note rather than a gap. The `pvecm add` fact itself is the
+   useful part and is now in doc 12 check 16.
+
+   Separately, and already documented in `api/hosts.py`: with `verify_tls` true
+   the pin is not enforced at all, so a changed certificate never raises and
+   the control never appears. CA validation is the trust anchor in that mode.
+   That is deliberate, not a consequence of this item.
 
 9. **The swallowed error detail: fixed 2026-08-17.** Located in
    `HostForm.tsx::errText`. When the server named a known error kind,

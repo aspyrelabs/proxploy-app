@@ -825,13 +825,19 @@ exercise any of it and the script says so and stops.
     value, so the two independent sources agree on the new certificate as well
     as they did on the old one.
 
-    **It also exposes a real operational gap.** Joining a cluster silently
-    invalidates a pin, and re-pinning is the only way back. Nothing in the
-    product says so, and there is no "the certificate legitimately changed,
-    re-pin it" affordance: the host simply stops working with a mismatch error
-    that reads like an attack. Anything that regenerates a node certificate
-    (`pvecm add`, `pvenode cert set`, an ACME renewal) does the same. Worth a
-    decision before pinning is relied on in anger.
+    **The operational note, corrected.** This entry first said there was no
+    "the certificate legitimately changed, re-pin it" affordance. That was
+    wrong: `HostEditDialog` already offers exactly one. Test connection reports
+    `tls_fingerprint_seen`, the dialog prints both fingerprints in full and
+    offers "Accept the new certificate", which re-pins. So the recovery path is
+    one dialog away and is tested.
+
+    What is worth carrying from this is the fact rather than the alarm:
+    **anything that regenerates a node certificate invalidates the pin**, and
+    `pvecm add` is one of those things, along with `pvenode cert set` and an
+    ACME renewal. Nothing warns ahead of the change, so the sequence an
+    operator experiences is: rejoin, host unreachable, Edit, Test connection,
+    Accept.
 
     Still open, narrowly: whether that refusal is surfaced usefully in the
     BROWSER mid-enrolment, rather than as a connection error afterwards.
