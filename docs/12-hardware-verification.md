@@ -344,6 +344,52 @@ message.
    instances plus a fake SFTP layer driving the real preflight, handler and
    route code. Never against two real non-clustered hosts. See
    `docs/11-risks-open-decisions.md` section 2.
+
+   **STILL OPEN, and 2026-08-17 established that it is harder to reach from
+   here than it looks.** Two independent reasons, both worth writing down so
+   nobody plans an afternoon around it again:
+
+   - **Leaving a PVE cluster has no clean API.** `pvecm delnode`, and its
+     `DELETE /cluster/config/nodes/{node}` equivalent, only removes the node
+     from the REMAINING node's view. The removed node still believes it is
+     clustered, and cleaning it means a shell on that node: stop
+     `pve-cluster`, delete `/etc/pve/corosync.conf` and `/var/lib/corosync/*`,
+     restart pmxcfs locally. PVE's own guidance is to wipe and reinstall a
+     removed node rather than reuse it. So unclustering this pair is a one-way
+     trip unless someone is at the nodes.
+   - **Unclustering alone would not reach this strategy anyway.** With
+     `nfs-shared` attached to both nodes, `preflight` finds a shared pool in
+     common and picks `STRATEGY_SHARED`. Confirmed against the real API on
+     2026-08-17: unclustered, this pair would select `shared_storage`, shared
+     in common `['nfs-shared']`. Reaching `STRATEGY_TRANSFER` needs the nodes
+     unclustered AND the shared pool detached.
+
+   **What was verified instead, 2026-08-17, PVE 9.2.10.** The parts of this
+   code reachable on a clustered pair, all previously fake-only:
+
+   - **Strategy selection against real API output.** `_cluster_name` over real
+     `cluster_status()` returned `'lab-cluster'` for both nodes and selected
+     `STRATEGY_CLUSTER`, and `_storage_names` over real `cluster_storage()`
+     found `nfs-shared` shared on both. So the selection logic agrees with real
+     data, not just with fixtures.
+   - **`migrate_guest()` against a real guest.** A throwaway alpine CT moved
+     `node2` -> `node1` and came up on the target from the same volume.
+   - **A container rootfs on the shared NFS pool.** Created as
+     `nfs-shared:100/vm-100-disk-0.raw,size=1G`, started on `node2`, migrated,
+     and started again on `node1` from that same volume. This is the PVE-level
+     half of 3a's open install question: the shared pool really does accept and
+     boot a container rootfs. It is NOT 3a's App Store half, which still needs
+     the install dialog.
+
+   **Two things about measurement, so these numbers are not misread.** The
+   task waiter polls every 2s, so every "2.1s" in that run is the polling
+   floor and not a timing: create, start, stop, migrate and delete all
+   completed inside one poll. The one real measurement is the first boot on the
+   target, **45.0s**, against an under-2s boot on the source. And
+   `/cluster/resources` reported `status=unknown` for the guest immediately
+   after start and after migration before settling, which is the same lag
+   check 12 found: that endpoint trails reality, and code that reads it
+   straight after an action sees a state that is not yet true.
 8. **Network apply on a real bridge.** Applying a NIC change to a live guest,
    including the failure path where the change costs connectivity to the node
    performing it.
