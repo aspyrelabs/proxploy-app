@@ -119,6 +119,7 @@ vi.mock('../components/charts/Sparkline', () => ({
 }))
 
 import { NetworkPage } from '../routes/network'
+import { NicForm } from '../components/NicForm'
 
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -259,5 +260,42 @@ describe('NetworkPage host config', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Confirm$/ }))
     await waitFor(() => expect(calls.length).toBe(2))
     expect(calls[1].body).toEqual({ confirm: 'pve1' })
+  })
+})
+
+// One NIC row each way, shaped like GET /network/bridges' `attachments`.
+const NIC_PLAIN = {
+  host_id: 1, node: 'pve1', guest_type: 'app', guest_id: 1, name: 'Immich',
+  vmid: 150, iface: 'net0', raw: 'virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0',
+  model: 'virtio', mac: 'AA:BB:CC:DD:EE:FF', bridge: 'vmbr0', tag: null,
+  firewall: false, rate: null, mtu: null, link_down: false,
+}
+const NIC_FIREWALLED = { ...NIC_PLAIN, firewall: true }
+
+const wrapNic = (ui: React.ReactNode) => render(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {ui}
+  </QueryClientProvider>)
+
+describe('NicForm has no firewall toggle', () => {
+  it('offers bridge and VLAN only, and never sends a firewall key', async () => {
+    // Proxploy has no firewall feature: no rules, groups, aliases or IP sets at
+    // any level. A toggle here would imply one, and enabling it can leave a
+    // guest unreachable with nothing in this product able to permit traffic
+    // again. doc 11 carries the decision.
+    wrapNic(<NicForm nic={NIC_PLAIN as never} bridges={['vmbr0', 'vmbr1']}
+                     onClose={() => {}} />)
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByText(/firewall enabled on this nic/i)).toBeNull()
+    expect(screen.getByLabelText(/vlan tag/i)).toBeInTheDocument()
+  })
+
+  it('states the flag when Proxmox has it on, so a filtered guest is not a mystery', async () => {
+    wrapNic(<NicForm nic={NIC_FIREWALLED as never} bridges={['vmbr0']}
+                     onClose={() => {}} />)
+    expect(screen.getByText(/firewall is enabled on this NIC/i)).toBeInTheDocument()
+    expect(screen.getByText(/managed in the Proxmox web UI/i)).toBeInTheDocument()
+    // Still no control: it is information, not a switch.
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 })

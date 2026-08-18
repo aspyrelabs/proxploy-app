@@ -7,7 +7,10 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 
 /**
- * Edit one guest NIC: bridge, VLAN tag, firewall. Nothing else.
+ * Edit one guest NIC: bridge and VLAN tag. Nothing else.
+ *
+ * Deliberately NOT the firewall flag, even though the API accepts it: see the
+ * comment beside the state line below.
  *
  * The NIC's model and MAC are shown but never submitted. Proxmox stores them in
  * the netN head token (`virtio=AA:BB:CC:DD:EE:FF`), and the backend edits the
@@ -20,7 +23,6 @@ export function NicForm({ nic, bridges, onClose }: {
   const set = useSetNic()
   const [bridge, setBridge] = useState(nic.bridge ?? '')
   const [tag, setTag] = useState(nic.tag == null ? '' : String(nic.tag))
-  const [firewall, setFirewall] = useState(nic.firewall)
   const [error, setError] = useState('')
 
   const submit = (e: React.FormEvent) => {
@@ -30,7 +32,6 @@ export function NicForm({ nic, bridges, onClose }: {
     if (bridge && bridge !== nic.bridge) patch.bridge = bridge
     const nextTag = tag.trim() === '' ? null : Number(tag)
     if (nextTag !== nic.tag) patch.tag = nextTag   // explicit null clears the key
-    if (firewall !== nic.firewall) patch.firewall = firewall
     if (Object.keys(patch).length === 0) { onClose(); return }
     set.mutate({ guestType: nic.guest_type, guestId: nic.guest_id, iface: nic.iface, patch }, {
       onSuccess: (r) => {
@@ -74,11 +75,23 @@ export function NicForm({ nic, bridges, onClose }: {
         <input id="nic-tag" type="number" min={1} max={4094} className={inputCls}
                value={tag} onChange={(e) => setTag(e.target.value)} />
       </div>
-      <label className="flex items-center gap-2 text-[13px] text-text-2">
-        <input type="checkbox" checked={firewall}
-               onChange={(e) => setFirewall(e.target.checked)} />
-        Firewall enabled on this NIC
-      </label>
+      {/* No firewall TOGGLE. Proxploy has no firewall feature: there is no rule,
+          security group, alias or IP set management anywhere in it, at guest,
+          node or cluster level. A switch here would read as though there were
+          one, and turning it on can leave a guest unreachable with nothing in
+          this product able to permit traffic again. Removed 2026-08-18, doc 11
+          carries the decision. Proxmox's own UI is where the firewall lives.
+
+          The STATE is still shown, and only when it is on, because a guest whose
+          traffic is being filtered by a flag nobody can see here is worse than
+          one line of explanation. Same principle as the sidebar health line:
+          speak when it matters, stay quiet otherwise. */}
+      {nic.firewall && (
+        <p className="rounded-ctl border border-line-soft bg-elev p-2 text-[12px] text-text-3">
+          Proxmox&apos;s firewall is enabled on this NIC. Its rules are managed in
+          the Proxmox web UI, not here.
+        </p>
+      )}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

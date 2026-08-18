@@ -53,6 +53,12 @@ class NicIn(BaseModel):
     rate limit is cleared). Absent != null here, hence exclude_unset below."""
     bridge: str | None = None
     tag: int | None = None
+    # Accepted, and deliberately NOT offered by the UI (components/NicForm.tsx).
+    # Proxploy has no firewall feature: no rules, security groups, aliases or IP
+    # sets at guest, node or cluster level. A toggle implies one exists, and
+    # enabling the flag can leave a guest unreachable with nothing in this
+    # product able to permit traffic again. The field stays so an API caller can
+    # still clear a flag PVE set, and so the read path can report it (doc 11).
     firewall: bool | None = None
     rate: float | None = None
     mtu: int | None = None

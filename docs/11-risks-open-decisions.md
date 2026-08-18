@@ -1012,6 +1012,34 @@ any suite could have caught. What that run leaves open:
 
 ---
 
+## Networking: what exists, and the one control that was removed
+
+Node network config (bridge create, edit, delete, stage, apply, revert) and guest
+NIC editing (bridge, VLAN tag) are built. Apply is hardware-verified both ways,
+including the case where it costs the node its network (doc 12 check 8).
+
+**There is no firewall feature, and the toggle that implied one is gone
+(2026-08-18).** What existed was a single per-NIC boolean that flips PVE's
+`firewall=1` flag. Nothing else: no rules, no security groups, no aliases, no IP
+sets, at guest, node or cluster level. So the switch could turn filtering ON for a
+guest and this product had no way to then permit any traffic, which is a control
+that can strand a guest with no in-product recovery.
+
+The test applied was simple: nobody could state what the toggle would do without
+going and checking PVE's default policy first, and if we cannot say it, an operator
+cannot. Hidden rather than fixed, because making it safe means rule management,
+which is a feature to scope deliberately rather than a gap to patch.
+
+`NicIn.firewall` stays in the API so a caller can clear a flag PVE set, and the
+NIC form still SHOWS the flag when it is on, because a guest whose traffic is being
+filtered by something invisible is worse than one line of explanation. The rules
+live in Proxmox's own web UI for now. Revisit on demand.
+
+**Also absent, and worth knowing before someone assumes otherwise:** a guest's IP
+and gateway cannot be set from Proxploy at all. PVE carries them on the same
+`netN` string this form edits (`ip=`, `gw=`), so it is the property an operator
+would most expect to find here. Not started, not scoped.
+
 ## Summary table
 
 | # | Risk | Likelihood | Impact | Posture |

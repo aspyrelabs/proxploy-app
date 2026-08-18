@@ -167,7 +167,7 @@ documented endpoint callable with an API key (`api_keys` table,
 | GET | `/api/v1/network/bridges` | Bridges/interfaces per node (live passthrough), plus the guest NIC attachment map | viewer | `network.view` |
 | GET | `/api/v1/network/throughput` | Cluster + per-node in/out rates (from MetricsStore) | viewer | `network.view` |
 | GET | `/api/v1/apps/{id}/network` | Guest NICs for a CT (live read, no cache) | viewer | `network.guest_config` |
-| PUT | `/api/v1/apps/{id}/network/{iface}` | Read-modify-write one CT `netN` (bridge, tag, firewall, rate, mtu, link_down) | operator | `network.guest_config` |
+| PUT | `/api/v1/apps/{id}/network/{iface}` | Read-modify-write one CT `netN` (bridge, tag, firewall, rate, mtu, link_down). The UI offers bridge and tag only: there is no firewall feature to back a toggle, see doc 11 | operator | `network.guest_config` |
 | GET | `/api/v1/vms/{id}/network` | Guest NICs for a VM (live read, no cache) | viewer | `network.guest_config` |
 | PUT | `/api/v1/vms/{id}/network/{iface}` | Read-modify-write one VM `netN` | operator | `network.guest_config` |
 | POST | `/api/v1/network/bridges` | Create a host bridge/bond/VLAN, stages into `/etc/network/interfaces.new`, not applied | admin | `network.host_config` |
