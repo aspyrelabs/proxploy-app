@@ -934,10 +934,25 @@ any suite could have caught. What that run leaves open:
    Verified on hardware both ways: with `SDN.Use` removed from node2's role the
    probe returned `{"lifecycle": ["SDN.Use"]}`, and `{}` once granted again.
 
-   What it still does not do is warn WITHOUT being asked. A host enrolled long
-   ago sits quietly broken until someone opens Edit and presses Test connection.
-   Folding the check into enrolment, or into the first failed job's message,
-   would close that.
+   **Closed the same day: it warns without being asked.** `hosts.capability_gaps`
+   (migration `f1c86b4a2d05`) stores the probe's answer, `POST /hosts/{id}/test`
+   writes it as well as returning it, and the poll loop refreshes it every 30
+   minutes (`CAPABILITY_GAP_INTERVAL_S`, kept in memory so a restart re-checks
+   immediately). The host page shows "N tokens missing privileges" in amber
+   beside the status pill, linking to Settings.
+
+   Every-cycle was rejected on cost: it is one `/access/permissions` per
+   configured token, and privileges change when an operator re-runs the setup
+   script, not every 30 seconds. The probe is also best-effort in both
+   directions: a failure inside it must not cost the poll cycle, since it is a
+   warning about tokens rather than the poll itself.
+
+   Verified on hardware end to end: `SDN.Use` and `VM.Config.HWType` were dropped
+   from node2's role, the stored value was cleared, and the poll loop wrote
+   `{"lifecycle": ["SDN.Use", "VM.Config.HWType"]}` for both hosts with nobody
+   pressing anything; the chip rendered on the real page; and granting them back
+   returned `{}`. Note both hosts report it, because a cluster shares one role
+   definition.
 
 ---
 

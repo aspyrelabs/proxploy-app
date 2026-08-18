@@ -16,12 +16,21 @@ from datetime import datetime
 
 from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, to_iso, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.hostclient import (cluster_identity_from,
+from proxploy.services.hostclient import (capability_gaps,
+                                          cluster_identity_from,
                                           cluster_quorate)
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
 POLL_BACKOFF_CAP_S = 300
+
+# How often the poll loop re-checks each host's tokens against their roles.
+# Not every cycle: it costs one /access/permissions per configured token, and
+# privileges change when an operator re-runs the setup script, not every 30
+# seconds. Half an hour is slow enough to be free and fast enough that a
+# re-generated token clears the warning without anyone pressing a button. Kept
+# in memory, so a restart re-checks immediately, which is the useful direction.
+CAPABILITY_GAP_INTERVAL_S = 1800
 
 
 log = logging.getLogger(__name__)
@@ -426,6 +435,9 @@ class Poller:
         self.app = app
         self.snapshots: dict[int, HostSnapshot] = {}
         self._tasks: dict[int, asyncio.Task] = {}
+        # host_id -> when its tokens were last checked against their roles. In
+        # memory on purpose: a restart re-checks straight away.
+        self._gaps_checked_at: dict[int, datetime] = {}
 
     async def run(self) -> None:
         interval = self.app.state.settings.poll_interval_s
@@ -578,6 +590,19 @@ class Poller:
                 quorate = cluster_quorate(rows)
             except ProxmoxError:
                 node_name, cluster_name, quorate = None, UNREAD, UNREAD
+
+            # Privilege drift, on a slow cadence (see the interval above). Best
+            # effort in every direction: a failure here must not cost the cycle,
+            # since this is a warning about tokens, not the poll itself.
+            last = self._gaps_checked_at.get(host_id)
+            if last is None or (utcnow() - last).total_seconds() >= CAPABILITY_GAP_INTERVAL_S:
+                try:
+                    host.capability_gaps = capability_gaps(app, db, host)
+                    self._gaps_checked_at[host_id] = utcnow()
+                    db.commit()
+                except Exception:  # noqa: BLE001
+                    log.debug("capability gap probe failed for host %s", host_id,
+                              exc_info=True)
 
             prev = self.snapshots.get(host_id)
             result = ingest_cycle(db, host, resources, rrd, utcnow(),

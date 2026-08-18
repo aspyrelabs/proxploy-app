@@ -304,3 +304,35 @@ def test_a_token_refused_access_permissions_reports_unknown_not_clean(
         gaps = r.json()["capability_gaps"]
 
     assert gaps["lifecycle"] is None and gaps["monitoring"] is None
+
+
+def test_the_probe_result_is_stored_so_the_warning_is_not_only_on_demand(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Pressing Test connection must not be the only way to learn this.
+
+    The stored value is what the host page reads, and the poll loop refreshes it
+    every half hour, so a host enrolled long ago surfaces its stale token without
+    anyone going looking (doc 12 checks 17, 18).
+    """
+    from proxploy.models import Host
+    from proxploy.services.pveum import CAPABILITIES
+
+    lifecycle = set(CAPABILITIES["lifecycle"].privileges)
+    monitoring = set(CAPABILITIES["monitoring"].privileges)
+    stale = lifecycle - {"SDN.Use"}
+    perms = {"/": {p: 1 for p in stale | monitoring}}
+
+    c = _client(tmp_path, permissions=perms)
+    with c:
+        bootstrap_admin(c)
+        host_id = _host_with_tokens(c.app, ("monitoring", "lifecycle"))
+        with c.app.state.sessionmaker() as db:
+            assert db.get(Host, host_id).capability_gaps is None  # never probed
+
+        c.post(f"/api/v1/hosts/{host_id}/test", headers=csrf_header(c))
+
+        with c.app.state.sessionmaker() as db:
+            assert db.get(Host, host_id).capability_gaps == {"lifecycle": ["SDN.Use"]}
+        # and it reaches the payload the host page reads
+        listed = c.get("/api/v1/hosts").json()
+        assert listed[0]["capability_gaps"] == {"lifecycle": ["SDN.Use"]}

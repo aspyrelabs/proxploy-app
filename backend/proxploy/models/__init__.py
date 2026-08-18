@@ -181,6 +181,13 @@ class Host(TimestampMixin, Base):
     # for real on 2026-08-18 (doc 12 check 12) with every host still reading
     # `connected`, which is the lie this column exists to stop telling.
     quorate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # {capability: [missing privilege, ...]}, {} when every configured token is
+    # fully granted, NULL when never probed. A capability mapped to null means
+    # PVE refused /access/permissions for that token: "could not tell", not
+    # clean. Refreshed by the poll loop on a slow cadence and by
+    # POST /hosts/{id}/test, because a role gains privileges over time and an
+    # old token's only other symptom is a 403 mid-job (doc 12 checks 17, 18).
+    capability_gaps: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     # The pools this host's operator chose, remembered so the question is asked
     # once rather than on every install. NULL means "not chosen yet", which is

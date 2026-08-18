@@ -415,6 +415,9 @@ type HostDetail = {
   // standalone node or a host not polled since the field existed, neither of
   // which is a warning.
   quorate?: boolean | null
+  // {capability: [missing privilege]}, {} when clean, undefined/null when never
+  // probed. A capability mapped to null means its token could not be read.
+  capability_gaps?: Record<string, string[] | null> | null
 }
 
 function useHostDetail(id: number) {
@@ -502,6 +505,10 @@ const TABS = [
  *  tabs. The body is a routed child, matching the app and VM detail pages. */
 export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
   const { id, node, host, pending } = useNodeContext()
+  // Capabilities whose token is short of a privilege its role now carries, or
+  // whose token could not be read at all (null, "could not tell"). {} is the
+  // clean case and undefined means never probed; both count as zero.
+  const gapCount = Object.keys(host?.capability_gaps ?? {}).length
   // Before this check, a cold load of /hosts/1/pve showed "Node not found, it
   // may have been removed" for as long as /nodes took to answer, and then the
   // node appeared. Of the four answers, that was the page picking the most
@@ -570,6 +577,20 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
               perfectly and refuses every WRITE, so "Connected" on its own is a
               lie an operator acts on (doc 12 check 12). Sits beside the status
               rather than replacing it, because reads really do work. */}
+          {/* Privilege drift, shown WITHOUT anyone pressing Test connection: a
+              role gains privileges over time (SDN.Use and VM.Config.HWType both
+              landed on 2026-08-18) and a token generated earlier fails with a
+              403 partway through a job. The poll loop refreshes this every half
+              hour. */}
+          {gapCount > 0 && (
+            <Link to={'/settings/hosts' as never}
+              title="Re-run the setup script from Settings to grant them."
+              className="rounded-ctl border border-amber/30 bg-amber-dim px-2 py-0.5
+                         text-[12px] text-amber">
+              {gapCount === 1 ? '1 token missing privileges'
+                : `${gapCount} tokens missing privileges`}
+            </Link>
+          )}
           {host?.quorate === false && (
             <span title="Proxmox reports this cluster has lost quorum. /etc/pve is
                          read-only, so installs, guest edits and storage changes will

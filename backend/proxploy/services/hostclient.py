@@ -30,6 +30,7 @@ import json as jsonlib
 
 from proxploy.models import Host, HostCredential
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
+from proxploy.services.pveum import CAPABILITIES
 
 
 class CapabilityNotConfigured(ProxmoxError):
@@ -116,6 +117,60 @@ def dedupe_vms(rows, hosts: dict) -> list:
         if key not in best or r < best[key][0]:
             best[key] = (r, v)
     return [v for _r, v in best.values()]
+
+
+def granted_privileges(client) -> set[str] | None:
+    """Every privilege this token holds anywhere, or None if that could not
+    be determined (some setups refuse /access/permissions to a token).
+
+    Shared by both privilege checks below so there is exactly one place that
+    reads /access/permissions and exactly one meaning for "could not tell".
+    """
+    try:
+        granted: set[str] = set()
+        for privs in (client.permissions() or {}).values():
+            granted.update(p for p, on in (privs or {}).items() if on)
+        return granted
+    except Exception:  # noqa: BLE001  (unknown, never fatal)
+        return None
+
+
+def capability_gaps(app, db, host) -> dict[str, list[str] | None]:
+    """Per configured capability token, which of its role's privileges it lacks.
+
+    `api/hosts.py::_missing_privileges` only ever checked the MONITORING set,
+    because that is the one a poll cycle needs. The other three tokens were never
+    checked against anything, and privilege drift is not hypothetical: two
+    privileges were added to the Lifecycle role on 2026-08-18 alone
+    (`SDN.Use` for a guest NIC on a PVE 9 bridge, `VM.Config.HWType` for a VM
+    create), each found only when a real token met real PVE (doc 12 checks 7,
+    17 and 18). Every token an operator generated before that is short of them
+    and nothing said so: the symptom is a 403 halfway through a job.
+
+    A value of None for a capability means "could not tell" (the token is
+    refused `/access/permissions`), never "nothing missing", the same rule
+    `_missing_privileges` follows. A capability with no token configured is
+    absent from the result rather than reported as fully missing, since not
+    configuring one is a legitimate choice.
+
+    Costs one `/access/permissions` per configured token, so callers control
+    the cadence: the test route runs it per press, and the poll loop runs it
+    at a slow interval rather than every cycle.
+    """
+    gaps: dict[str, list[str] | None] = {}
+    for key, cap in CAPABILITIES.items():
+        try:
+            client = client_for_host(app, db, host, capability=key)
+        except ProxmoxError:
+            continue                      # not configured: not a gap
+        granted = granted_privileges(client)
+        if granted is None:
+            gaps[key] = None
+            continue
+        missing = [p for p in cap.privileges if p not in granted]
+        if missing:
+            gaps[key] = missing
+    return gaps
 
 
 def cluster_quorate(rows: list[dict]) -> bool | None:

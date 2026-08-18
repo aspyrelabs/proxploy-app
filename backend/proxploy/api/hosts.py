@@ -13,8 +13,9 @@ from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        tls_fingerprint_sha256, token_public_meta)
-from proxploy.services.hostclient import (client_for_host, cluster_identity,
-                                          cluster_quorate)
+from proxploy.services.hostclient import (capability_gaps, client_for_host,
+                                          cluster_identity, cluster_quorate,
+                                          granted_privileges)
 from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
 
@@ -164,22 +165,6 @@ from proxploy.services.pveum import (CAPABILITIES, MONITORING_PRIVILEGES,
                                      NODE_POWER_PRIVILEGE, generate_script)
 
 
-def _granted_privileges(client) -> set[str] | None:
-    """Every privilege this token holds anywhere, or None if that could not
-    be determined (some setups refuse /access/permissions to a token).
-
-    Shared by both privilege checks below so there is exactly one place that
-    reads /access/permissions and exactly one meaning for "could not tell".
-    """
-    try:
-        granted: set[str] = set()
-        for privs in (client.permissions() or {}).values():
-            granted.update(p for p, on in (privs or {}).items() if on)
-        return granted
-    except Exception:  # noqa: BLE001  (unknown, never fatal)
-        return None
-
-
 def _missing_privileges(client) -> list[str] | None:
     """Which monitoring privileges this token does not hold anywhere.
 
@@ -191,48 +176,10 @@ def _missing_privileges(client) -> list[str] | None:
     a pool by granting the roles on /pool/<name> instead of /, so requiring
     them at "/" would report a working pool-scoped install as broken.
     """
-    granted = _granted_privileges(client)
+    granted = granted_privileges(client)
     if granted is None:
         return None
     return [p for p in MONITORING_PRIVILEGES if p not in granted]
-
-
-def _capability_gaps(app, db, host) -> dict[str, list[str] | None]:
-    """Per configured capability token, which of its role's privileges it lacks.
-
-    `_missing_privileges` above only ever checked the MONITORING set, because
-    that is the one a poll cycle needs. The other three tokens were never
-    checked against anything, and privilege drift is not hypothetical: two
-    privileges were added to the Lifecycle role on 2026-08-18 alone
-    (`SDN.Use` for a guest NIC on a PVE 9 bridge, `VM.Config.HWType` for a VM
-    create), each found only when a real token met real PVE (doc 12 checks 7,
-    17 and 18). Every token an operator generated before that is short of them
-    and nothing said so: the symptom is a 403 halfway through a job.
-
-    A value of None for a capability means "could not tell" (the token is
-    refused `/access/permissions`), never "nothing missing", the same rule
-    `_missing_privileges` follows. A capability with no token configured is
-    absent from the result rather than reported as fully missing, since not
-    configuring one is a legitimate choice.
-
-    Only ever called from the explicit test route: it costs one
-    `/access/permissions` per configured token, which is fine for an operator
-    pressing a button and is not something to add to the poll loop.
-    """
-    gaps: dict[str, list[str] | None] = {}
-    for key, cap in CAPABILITIES.items():
-        try:
-            client = client_for_host(app, db, host, capability=key)
-        except ProxmoxError:
-            continue                      # not configured: not a gap
-        granted = _granted_privileges(client)
-        if granted is None:
-            gaps[key] = None
-            continue
-        missing = [p for p in cap.privileges if p not in granted]
-        if missing:
-            gaps[key] = missing
-    return gaps
 
 
 def _node_power_missing(client) -> bool | None:
@@ -244,7 +191,7 @@ def _node_power_missing(client) -> bool | None:
     optional capabilities were chosen, so this is checked the same way
     monitoring is, not gated behind an opt-in capability having been picked.
     """
-    granted = _granted_privileges(client)
+    granted = granted_privileges(client)
     if granted is None:
         return None
     return NODE_POWER_PRIVILEGE not in granted
@@ -424,6 +371,9 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              # only False says PVE reported an unwritable cluster (doc 12
              # check 12).
              "quorate": h.quorate,
+             # {} means probed and clean, null means never probed, and a
+             # capability mapped to null means its token could not be read.
+             "capability_gaps": h.capability_gaps,
              "team_id": h.team_id,
              # The install dialog's Default mode reads these to decide
              # whether it has already learned this host's storage pools
@@ -475,7 +425,7 @@ def host_detail(host_id: int, db=Depends(get_db),
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
             "node_shell_enabled": h.node_shell_enabled,
             "node_power_missing": h.node_power_missing, "quorate": h.quorate,
-            "team_id": h.team_id,
+            "capability_gaps": h.capability_gaps, "team_id": h.team_id,
             "capabilities": _capability_state(c.kind for c in creds),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": to_iso(c.last_used_at)} for c in creds]}
@@ -665,7 +615,10 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
         # against MONITORING_PRIVILEGES: this is where an operator finds out
         # that a token predating a privilege the product now needs is short of
         # it, instead of finding out from a 403 mid-job.
-        gaps = _capability_gaps(request.app, db, h)
+        gaps = capability_gaps(request.app, db, h)
+        # Stored, not just returned: an operator who presses Test connection
+        # should not be the only one who ever sees this.
+        h.capability_gaps = gaps
         cred.last_used_at = utcnow()
         result = "ok"
     except ProxmoxError as e:
