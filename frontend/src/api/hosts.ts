@@ -20,6 +20,13 @@ export type HostTaskLog = { upid: string; lines: string[] }
 export type HostTestResult = {
   id: number; status: string; pve_version: string | null
   node_power_missing?: boolean | null
+  quorate?: boolean | null
+  // Per configured capability token, which of its role's privileges it lacks.
+  // A capability is absent when it is fully granted or has no token at all;
+  // null means PVE refused /access/permissions, which is "could not tell", not
+  // a clean bill of health. Privileges do get added to a role (SDN.Use and
+  // VM.Config.HWType both landed on 2026-08-18), so an old token drifts.
+  capability_gaps?: Record<string, string[] | null>
   tls_fingerprint: string | null; tls_fingerprint_seen: string | null
 }
 

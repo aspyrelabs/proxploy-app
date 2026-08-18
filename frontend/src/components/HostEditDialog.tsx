@@ -114,6 +114,10 @@ export function HostEditDialog({ hostId, host, onClose }: {
   const certificateChanged = !!pinned && !!presented
     && pinned.toUpperCase() !== presented.toUpperCase()
 
+  // Object.entries of undefined throws, and an empty object is the healthy
+  // case, so this collapses to [] for both.
+  const gapEntries = Object.entries(testResult?.capability_gaps ?? {})
+
   const nameChanged = name.trim() !== host.name
   const addressChanged = address.trim() !== host.address
   const nothingToSave = !nameChanged && !addressChanged
@@ -294,6 +298,34 @@ export function HostEditDialog({ hostId, host, onClose }: {
             its own discovery. The cluster name is not on that response, and
             discovery reports it anyway. */}
         <PeerEnrolmentPanel hostId={hostId} node={capsQuery.data?.node_name ?? host.name} />
+        {/* Privilege drift: a token generated before a privilege the product now
+            needs is short of it, and the only other symptom is a 403 partway
+            through a job. Reported per capability, and an unreadable
+            /access/permissions is stated as unknown rather than shown as
+            clean. */}
+        {gapEntries.length > 0 && (
+          <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+            <p className="text-[12.5px] text-amber">
+              This host&rsquo;s API tokens are missing privileges Proxploy needs.
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {gapEntries.map(([cap, missing]) => (
+                <li key={cap} className="text-[12.5px] text-text-2">
+                  <span className="capitalize">{cap}</span>:{' '}
+                  {missing === null
+                    ? 'could not check, this token may not read /access/permissions'
+                    : <code className="break-all font-mono text-[11.5px]">
+                        {missing.join(', ')}
+                      </code>}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[12px] text-text-3">
+              Re-run the setup script from Settings &rarr; Hosts to grant them;
+              affected actions fail with a 403 until you do.
+            </p>
+          </div>
+        )}
         {certificateChanged && (
           <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
             <p className="text-[12.5px] text-amber">

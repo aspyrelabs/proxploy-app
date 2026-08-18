@@ -750,7 +750,8 @@ Doc 12 check 7's data movement passed today, on the third attempt, and the two
 attempts that failed are the value: three defects and one leak, none of which
 any suite could have caught. What that run leaves open:
 
-1. **A storage's `nodes` restriction is invisible to the migration preflight.**
+1. **A storage's `nodes` restriction is invisible to the migration preflight.
+   FIXED 2026-08-18.**
    `services/migrate.py::_storage_names` reads `cluster_storage()`, which is
    `GET /storage`, the cluster-wide CONFIG list. A PVE storage may carry
    `nodes <a,b>` restricting which nodes serve it, and that field is never
@@ -765,14 +766,14 @@ any suite could have caught. What that run leaves open:
    path available refuses on a storage error instead. A disabled row (`disable
    1`) is the same shape, since `/storage` reports config rather than state.
 
-   Not fixed today: the run only needed the pool gone from node1, and the fix
-   wants a decision about which read is authoritative. Two candidates.
-   `/nodes/{node}/storage` answers per node and already backs
-   `storage_for_content`, but costs one call per host. Or filter the config rows
-   on `nodes` and `disable`, which is free but trusts config over state. The
-   second is closer to what the rest of the file does; the first is what
-   `pvesm status` agrees with. Either way `_storage_names` is the one place, and
-   the fixtures carry no `nodes` field at all, so the test comes first.
+   **Fixed by filtering the config rows**, the second of the two candidates
+   considered: `_serves(row, node)` drops a storage whose `nodes` excludes this
+   node or whose `disable` is set, and `_storage_names`/`_dir_storage` take the
+   node. That reproduces PVE's own decision (it is why `pvesm status` called the
+   pool disabled on node1) and costs no extra call, where
+   `/nodes/{node}/storage` would have cost one per host. Two tests carry the
+   exact row shape the real cluster returned, including `nodes: "pve-tgt"`, and
+   both were confirmed to fail with the filter removed.
 
 2. **The transfer strategy picks the target rootfs pool by first match, and
    preflight checks capacity on the wrong pool.** The restored guest landed on
@@ -865,12 +866,30 @@ any suite could have caught. What that run leaves open:
    `/cluster/resources`'s `template` flag onto `Vm`, then refuse locally with a
    sentence naming templates, or hide the radio when the source is not one.
 
-5. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
-   added to the generated script today, so an operator who ran the old script
-   has a token that 403s on any NIC write until they re-run it. Nothing detects
-   that: `_missing_privileges` checks the monitoring five only. A "your
-   lifecycle token is missing SDN.Use" probe would be the honest fix, and it is
-   the same tri-state shape check 10 describes.
+5. **Every existing Lifecycle token predates `SDN.Use`. PROBE ADDED
+   2026-08-18.** The privilege was
+   added to the generated script today, along with `VM.Config.HWType`, so an
+   operator who ran the old script has a token that 403s on any NIC write or VM
+   create until they re-run it.
+
+   `POST /hosts/{id}/test` now checks EVERY configured token against its own
+   role, not just monitoring against `MONITORING_PRIVILEGES`, and returns
+   `capability_gaps`. The Edit dialog lists them and says to re-run the script.
+   Same tri-state discipline as the rest: a capability is absent when fully
+   granted or unconfigured, and null when PVE refused `/access/permissions`,
+   which renders as "could not check" rather than as clean.
+
+   Deliberately not in the poll loop: it costs one `/access/permissions` per
+   configured token, which is fine for an operator pressing a button and is not
+   something to spend every 30 seconds per host.
+
+   Verified on hardware both ways: with `SDN.Use` removed from node2's role the
+   probe returned `{"lifecycle": ["SDN.Use"]}`, and `{}` once granted again.
+
+   What it still does not do is warn WITHOUT being asked. A host enrolled long
+   ago sits quietly broken until someone opens Edit and presses Test connection.
+   Folding the check into enrolment, or into the first failed job's message,
+   would close that.
 
 ---
 

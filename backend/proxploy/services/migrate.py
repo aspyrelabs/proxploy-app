@@ -89,12 +89,42 @@ def _cluster_name(status_rows: list[dict]) -> str | None:
     return None
 
 
+def _serves(row: dict, node: str | None) -> bool:
+    """Does `node` actually serve this storage?
+
+    `cluster_storage()` is `GET /storage`, the cluster-wide CONFIGURATION, so
+    it lists every definition regardless of which nodes carry it. Two fields
+    decide, and neither was read: `nodes` restricts a storage to named nodes,
+    and `disable` switches one off entirely.
+
+    Found on real hardware (doc 12 check 7): with `nfs-shared` set to
+    `--nodes node2`, preflight offered it as the shared storage for a migration
+    off `node1`, while `pvesm status` on `node1` reported that same pool
+    `disabled` in the same minute. A STRATEGY_SHARED migration would then vzdump
+    to a pool the source cannot write, refusing on a storage error when a
+    working transfer path was available. No fixture carries either field.
+
+    `node` None means "do not filter", which is what a caller that genuinely
+    wants the cluster's whole config passes.
+    """
+    if row.get("disable"):
+        return False
+    if node is None:
+        return True
+    allowed = row.get("nodes")
+    if not allowed:
+        return True
+    if isinstance(allowed, str):
+        allowed = [n.strip() for n in allowed.split(",")]
+    return node in allowed
+
+
 def _storage_names(rows: list[dict], *, types: frozenset[str] | None,
-                   dir_only: bool) -> set[str]:
+                   dir_only: bool, node: str | None = None) -> set[str]:
     out = set()
     for r in rows:
         name = r.get("storage")
-        if not name or not _has_backup_content(r):
+        if not name or not _has_backup_content(r) or not _serves(r, node):
             continue
         rtype = r.get("type")
         if dir_only:
@@ -105,13 +135,13 @@ def _storage_names(rows: list[dict], *, types: frozenset[str] | None,
     return out
 
 
-def _dir_storage(rows: list[dict]) -> str | None:
+def _dir_storage(rows: list[dict], node: str | None = None) -> str | None:
     """Same pick as preflight's `capacity_storage` for the transfer strategy:
-    the lexicographically-first dir-type backup storage. Recomputed here
-    (rather than threaded through `preflight()`'s return dict) because
-    `preflight()` already discards this name once it has used it for the
+    the lexicographically-first dir-type backup storage this NODE serves.
+    Recomputed here (rather than threaded through `preflight()`'s return dict)
+    because `preflight()` already discards this name once it has used it for the
     capacity check, and route callers never need it."""
-    names = _storage_names(rows, types=None, dir_only=True)
+    names = _storage_names(rows, types=None, dir_only=True, node=node)
     return next(iter(sorted(names)), None)
 
 
@@ -251,16 +281,20 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
     else:
         src_storage = src_client.cluster_storage()
         tgt_storage = tgt_client.cluster_storage()  # single read, reused below
-        src_shared = _storage_names(src_storage, types=_SHARED_TYPES, dir_only=False)
-        tgt_shared = _storage_names(tgt_storage, types=_SHARED_TYPES, dir_only=False)
+        src_shared = _storage_names(src_storage, types=_SHARED_TYPES, dir_only=False,
+                                    node=source_host.node_name)
+        tgt_shared = _storage_names(tgt_storage, types=_SHARED_TYPES, dir_only=False,
+                                    node=target_host.node_name)
         common = sorted(src_shared & tgt_shared)
         if common:
             strategy = STRATEGY_SHARED
             shared_storage = capacity_storage = common[0]
         else:
             strategy = STRATEGY_TRANSFER
-            src_dirs = _storage_names(src_storage, types=None, dir_only=True)
-            tgt_dirs = _storage_names(tgt_storage, types=None, dir_only=True)
+            src_dirs = _storage_names(src_storage, types=None, dir_only=True,
+                                      node=source_host.node_name)
+            tgt_dirs = _storage_names(tgt_storage, types=None, dir_only=True,
+                                      node=target_host.node_name)
             if not src_dirs:
                 blockers.append(f"no dir-type backup storage on {source_host.name}")
             if not tgt_dirs:
@@ -593,8 +627,8 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         ssh = loaded["ssh"]
         src_storage_rows = await asyncio.to_thread(src_backup_client.cluster_storage)
         tgt_storage_rows = await asyncio.to_thread(tgt_backup_client.cluster_storage)
-        src_storage = _dir_storage(src_storage_rows)
-        tgt_storage = _dir_storage(tgt_storage_rows)
+        src_storage = _dir_storage(src_storage_rows, source_node)
+        tgt_storage = _dir_storage(tgt_storage_rows, target_node)
         if src_storage is None or tgt_storage is None:
             missing = source_host_name if src_storage is None else target_host_name
             raise JobFailed(

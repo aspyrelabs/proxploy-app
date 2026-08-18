@@ -21,6 +21,7 @@ let hostCapabilities: Record<string, boolean> | undefined
 const PINNED = 'AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:9F'
 const PRESENTED = '12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:EF'
 let fingerprints: { tls_fingerprint: string | null; tls_fingerprint_seen: string | null }
+let capabilityGaps: Record<string, string[] | null> | undefined
 // GET /hosts/{id}/peers, which the peer panel in this dialog fires on mount.
 // Standalone by default, so every test that is not about peers behaves exactly
 // as it did before the panel was mounted here: no panel at all.
@@ -64,7 +65,8 @@ vi.mock('../api/client', async (importOriginal) => ({
         ssh_host_key_fingerprint_seen: SSH_PRESENTED }))
     }
     if (path.endsWith('/test')) {
-      return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1', ...fingerprints })
+      return Promise.resolve({ id: 1, status: testResult, pve_version: '8.4.1',
+                               capability_gaps: capabilityGaps, ...fingerprints })
     }
     if (path.endsWith('/credentials')) {
       return Promise.resolve({ id: 1, rotated: ['api_token'] })
@@ -98,6 +100,7 @@ describe('HostEditDialog', () => {
     testResult = 'connected'; calls.length = 0; toastSuccess.mockClear(); hostCapabilities = undefined
     sshVerify = 'ok'
     fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: null }
+    capabilityGaps = undefined
     peersResult = STANDALONE; nodeName = 'pve1'
   })
   afterEach(() => vi.restoreAllMocks())
@@ -365,5 +368,46 @@ describe('HostEditDialog SSH host key pin', () => {
     fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
     expect(await screen.findByText(/Connected, PVE 8\.4\.1/i)).toBeInTheDocument()
     expect(await screen.findByText(/SSH host key has changed/i)).toBeInTheDocument()
+  })
+})
+
+describe('HostEditDialog capability gaps', () => {
+  beforeEach(() => {
+    testResult = 'connected'; calls.length = 0; toastSuccess.mockClear()
+    hostCapabilities = undefined; sshVerify = 'ok'
+    fingerprints = { tls_fingerprint: PINNED, tls_fingerprint_seen: null }
+    capabilityGaps = undefined
+    peersResult = STANDALONE; nodeName = 'pve1'
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('names the privileges a token is missing, per capability', async () => {
+    // The drift case: SDN.Use and VM.Config.HWType were added to the Lifecycle
+    // role on 2026-08-18, so every token generated before that is short of them
+    // and the only other symptom is a 403 partway through a job.
+    capabilityGaps = { lifecycle: ['SDN.Use', 'VM.Config.HWType'] }
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/missing privileges Proxploy needs/i)).toBeInTheDocument())
+    expect(screen.getByText(/SDN\.Use, VM\.Config\.HWType/)).toBeInTheDocument()
+    expect(screen.getByText(/lifecycle/i)).toBeInTheDocument()
+  })
+
+  it('says "could not check" for a token that cannot read its own permissions', async () => {
+    capabilityGaps = { lifecycle: null }
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/could not check/i)).toBeInTheDocument())
+  })
+
+  it('says nothing when every token is fully granted', async () => {
+    capabilityGaps = {}
+    wrap()
+    fireEvent.click(screen.getByRole('button', { name: /test connection/i }))
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === '/hosts/1/test')).toBe(true))
+    expect(screen.queryByText(/missing privileges/i)).toBeNull()
   })
 })

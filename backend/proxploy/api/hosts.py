@@ -197,6 +197,44 @@ def _missing_privileges(client) -> list[str] | None:
     return [p for p in MONITORING_PRIVILEGES if p not in granted]
 
 
+def _capability_gaps(app, db, host) -> dict[str, list[str] | None]:
+    """Per configured capability token, which of its role's privileges it lacks.
+
+    `_missing_privileges` above only ever checked the MONITORING set, because
+    that is the one a poll cycle needs. The other three tokens were never
+    checked against anything, and privilege drift is not hypothetical: two
+    privileges were added to the Lifecycle role on 2026-08-18 alone
+    (`SDN.Use` for a guest NIC on a PVE 9 bridge, `VM.Config.HWType` for a VM
+    create), each found only when a real token met real PVE (doc 12 checks 7,
+    17 and 18). Every token an operator generated before that is short of them
+    and nothing said so: the symptom is a 403 halfway through a job.
+
+    A value of None for a capability means "could not tell" (the token is
+    refused `/access/permissions`), never "nothing missing", the same rule
+    `_missing_privileges` follows. A capability with no token configured is
+    absent from the result rather than reported as fully missing, since not
+    configuring one is a legitimate choice.
+
+    Only ever called from the explicit test route: it costs one
+    `/access/permissions` per configured token, which is fine for an operator
+    pressing a button and is not something to add to the poll loop.
+    """
+    gaps: dict[str, list[str] | None] = {}
+    for key, cap in CAPABILITIES.items():
+        try:
+            client = client_for_host(app, db, host, capability=key)
+        except ProxmoxError:
+            continue                      # not configured: not a gap
+        granted = _granted_privileges(client)
+        if granted is None:
+            gaps[key] = None
+            continue
+        missing = [p for p in cap.privileges if p not in granted]
+        if missing:
+            gaps[key] = missing
+    return gaps
+
+
 def _node_power_missing(client) -> bool | None:
     """Whether this token lacks Sys.PowerMgmt anywhere. None means "could not
     tell", same reasoning as _missing_privileges.
@@ -601,6 +639,10 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
         host_id=h.id, kind="api_token:monitoring").one()
     tok = jsonlib.loads(request.app.state.secretstore.decrypt(cred.encrypted_blob))
     seen = None
+    # Empty, not None, when the host never connected: "no gaps found" and "could
+    # not look" are different, and an unreachable host is the latter for every
+    # capability at once, which the status field already says.
+    gaps: dict[str, list[str] | None] = {}
     try:
         client = ProxmoxClient(h.address, tok["token_id"], tok["token_secret"],
                                verify_tls=h.verify_tls, tls_fingerprint=h.tls_fingerprint,
@@ -619,6 +661,11 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
             h.quorate = cluster_quorate(client.cluster_status())
         except ProxmoxError:
             pass
+        # Every configured token against its own role, not just monitoring
+        # against MONITORING_PRIVILEGES: this is where an operator finds out
+        # that a token predating a privilege the product now needs is short of
+        # it, instead of finding out from a 403 mid-job.
+        gaps = _capability_gaps(request.app, db, h)
         cred.last_used_at = utcnow()
         result = "ok"
     except ProxmoxError as e:
@@ -641,6 +688,7 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
                 target_type="host", target_id=h.id, result=result)
     return {"id": h.id, "status": h.status, "pve_version": h.pve_version,
             "node_power_missing": h.node_power_missing, "quorate": h.quorate,
+            "capability_gaps": gaps,
             "tls_fingerprint": h.tls_fingerprint, "tls_fingerprint_seen": seen}
 
 

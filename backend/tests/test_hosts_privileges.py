@@ -227,3 +227,80 @@ def test_the_test_endpoint_rechecks_node_power(tmp_path, csrf_header, bootstrap_
 
         detail = c.get(f"/api/v1/hosts/{host_id}").json()
         assert detail["node_power_missing"] is False
+
+
+# --- capability gaps: every token against its OWN role ----------------------
+
+def _host_with_tokens(app, caps, permissions_by_cap=None):
+    """One host carrying a token per capability in `caps`."""
+    import json as _json
+
+    from proxploy.models import Host, HostCredential
+    with app.state.sessionmaker() as db:
+        host = Host(name="host-01", address="https://10.0.0.7:8006",
+                    node_name="pve1", status="connected", pve_version="9.2.10")
+        db.add(host)
+        db.commit()
+        for cap in caps:
+            blob, ver = app.state.secretstore.encrypt(_json.dumps(
+                {"token_id": f"proxploy@pve!{cap}",
+                 "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=host.id, kind=f"api_token:{cap}",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta=f"proxploy@pve!{cap}"))
+        db.commit()
+        return host.id
+
+
+def test_test_route_reports_a_lifecycle_token_missing_a_newly_added_privilege(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The drift case, which is not hypothetical.
+
+    `SDN.Use` and `VM.Config.HWType` were added to the Lifecycle role on
+    2026-08-18 after a real NIC write and a real VM create refused without them
+    (doc 12 checks 7, 17, 18). Every token generated before that is short of
+    them, and until this probe existed the only symptom was a 403 partway
+    through a job.
+    """
+    from proxploy.services.pveum import CAPABILITIES
+
+    lifecycle = set(CAPABILITIES["lifecycle"].privileges)
+    monitoring = set(CAPABILITIES["monitoring"].privileges)
+    # An "old" lifecycle token: everything except the two added that day.
+    stale = lifecycle - {"SDN.Use", "VM.Config.HWType"}
+    perms = {"/": {p: 1 for p in stale | monitoring}}
+
+    c = _client(tmp_path, permissions=perms)
+    with c:
+        bootstrap_admin(c)
+        host_id = _host_with_tokens(c.app, ("monitoring", "lifecycle"))
+        r = c.post(f"/api/v1/hosts/{host_id}/test", headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        gaps = r.json()["capability_gaps"]
+
+    assert sorted(gaps["lifecycle"]) == ["SDN.Use", "VM.Config.HWType"]
+    # monitoring is fully granted here, so it must not appear at all
+    assert "monitoring" not in gaps
+    # console and backup have no token configured: not configuring one is a
+    # choice, not a gap.
+    assert "console" not in gaps and "backup" not in gaps
+
+
+def test_a_token_refused_access_permissions_reports_unknown_not_clean(
+        tmp_path, csrf_header, bootstrap_admin):
+    """None means "could not tell". Reporting unknown as a clean bill of health
+    is exactly how the monitoring probe failed silently before it existed."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_app
+    from fastapi.testclient import TestClient
+
+    fake = FakePVE(resources=[{"type": "node", "node": "pve1", "status": "online"}])
+    fake.permissions_fail = True           # /access/permissions refused
+    c = TestClient(make_app(tmp_path, fake=fake))
+    with c:
+        bootstrap_admin(c)
+        host_id = _host_with_tokens(c.app, ("monitoring", "lifecycle"))
+        r = c.post(f"/api/v1/hosts/{host_id}/test", headers=csrf_header(c))
+        gaps = r.json()["capability_gaps"]
+
+    assert gaps["lifecycle"] is None and gaps["monitoring"] is None

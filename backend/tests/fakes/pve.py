@@ -26,9 +26,24 @@ class _KwLeaf:
         return self._value
 
 
+class _PermissionsLeaf:
+    """`/access/permissions`, which a real PVE may refuse to a token even while
+    /version succeeds. `_missing_privileges` and `_capability_gaps` both treat
+    that as "could not tell" rather than "nothing missing", so it needs to be
+    reachable in a test without failing the whole fake."""
+
+    def __init__(self, owner, permissions, fail):
+        self._owner, self._value, self._fail = owner, permissions, fail
+
+    def get(self, **kwargs):
+        if self._fail or getattr(self._owner, "permissions_fail", False):
+            raise ConnectionError("fake PVE refused /access/permissions")
+        return self._value
+
+
 class _Access:
-    def __init__(self, permissions, fail):
-        self.permissions = _Leaf(permissions, fail)
+    def __init__(self, owner, permissions, fail):
+        self.permissions = _PermissionsLeaf(owner, permissions, fail)
 
 
 class _AttrLeaf:
@@ -672,7 +687,8 @@ class FakePVE:
         # cannot express.
         self.hardware_fail_sections: set[str] = set()
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
-        self.access = _Access(permissions or {}, fail)
+        self.permissions_fail = False
+        self.access = _Access(self, permissions or {}, fail)
         # infra reads (Phase 6): set before the namespaces below, which read
         # them lazily so a test can reassign any of these post-construction
         # Set to a PVE error sentence to make a guest ACTION (start/stop/...)

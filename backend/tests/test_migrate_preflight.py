@@ -346,3 +346,72 @@ def test_route_does_not_get_shadowed_by_the_lifecycle_wildcard(tmp_path, csrf_he
         assert r.status_code == 200
         assert "strategy" in r.json()
         assert "action must be one of" not in r.text
+
+
+def test_a_shared_pool_the_source_does_not_serve_is_not_the_shared_strategy(
+        tmp_path, csrf_header, bootstrap_admin):
+    """`nodes` on a storage restricts which nodes carry it, and `GET /storage`
+    reports the whole cluster's CONFIG regardless.
+
+    Real shape, from the `lab-cluster` cluster on 2026-08-18 (doc 12 check 7): the
+    NFS pool `nfs-shared` was restricted with `--nodes node2`, and preflight
+    answered `shared_storage: nfs-shared` for a migration OFF node1, which
+    cannot see it. `pvesm status` on node1 called that same pool `disabled` in
+    the same minute. STRATEGY_SHARED would then vzdump to a pool the source
+    cannot write, refusing on a storage error while a working transfer path
+    existed. No fixture had ever carried the field.
+    """
+    from tests.fakes.pve import FakePVE
+
+    a, b = FakePVE(), FakePVE()
+    # One NFS pool, defined cluster-wide, served by the TARGET node only, plus
+    # a local dir store on each side so the transfer path is available.
+    restricted = {"storage": "nfs-shared", "type": "nfs", "content": "backup",
+                  "nodes": "pve-tgt"}
+    for fake in (a, b):
+        fake.cluster_storage_rows = [
+            dict(restricted),
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "path": "/var/lib/vz"},
+        ]
+
+    app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        src_id, tgt_id, app_id = _seed(app)
+        r = _preflight(client, csrf_header, app_id, tgt_id)
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+    assert body["strategy"] == "transfer", (
+        f"picked {body['strategy']} on {body['shared_storage']!r}, a pool the "
+        f"source node does not serve")
+    assert body["shared_storage"] is None
+    assert body["blockers"] == []
+
+
+def test_a_disabled_shared_pool_is_not_the_shared_strategy_either(
+        tmp_path, csrf_header, bootstrap_admin):
+    """`disable: 1` is the same class of lie: `GET /storage` keeps reporting a
+    switched-off definition, and check 3b already proved a disabled pool
+    vanishes from `/cluster/resources` while its config row stays."""
+    from tests.fakes.pve import FakePVE
+
+    a, b = FakePVE(), FakePVE()
+    for fake in (a, b):
+        fake.cluster_storage_rows = [
+            {"storage": "pbs-ds", "type": "pbs", "content": "backup", "disable": 1},
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "path": "/var/lib/vz"},
+        ]
+
+    app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        src_id, tgt_id, app_id = _seed(app)
+        r = _preflight(client, csrf_header, app_id, tgt_id)
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+    assert body["strategy"] == "transfer"
+    assert body["shared_storage"] is None
