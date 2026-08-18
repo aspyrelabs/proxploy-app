@@ -1032,12 +1032,12 @@ What remains unproven in a browser is anything requiring an authenticated
 session: `/store` and every page behind login cannot be reached by the driver,
 which has no way to log in.
 
-## Known bug: SPA deep links 404 in production
+## Fixed: SPA deep links 404 in production
 
-`main.py` mounts `StaticFiles(directory=dist, html=True)` at `/`. That serves
+`main.py` mounted `StaticFiles(directory=dist, html=True)` at `/`. That serves
 `index.html` for a DIRECTORY, never for a client-side route, and every route in
 this product is client-side. So refreshing on `/settings` or `/store/plex`
-against the backend returns the app's 404 problem+json instead of the page.
+against the backend returned the app's 404 problem+json instead of the page.
 Verified 2026-08-13: `:8000/settings` is 404 while `:5173/settings` is 200,
 because Vite does the fallback in dev and nothing does it in production.
 
@@ -1049,3 +1049,25 @@ structured detail that the replacement flattened away. Reverted.
 
 The fix must leave every non-SPA 404 exactly as it is, which means delegating to
 the app's existing handler rather than re-implementing its shape.
+
+**FIXED in `5ca8605`, and verified 2026-08-18 against the real mount.** The fix
+is a `StaticFiles` subclass, `_SPAStatic` in `main.py`, rather than a handler:
+it only ever runs for a path the API router did not claim, so no route's own 404
+can reach it and the reverted attempt's regression cannot recur.
+
+Three discriminators, each one a behaviour worth keeping:
+
+- **`Accept`, not the path shape.** A navigation sends `text/html` and gets
+  `index.html`; a fetch for a missing module sends `*/*` and keeps its 404,
+  because handing a module loader HTML fails further from the cause.
+- **`/api/` is never a page**, even from a browser. An unmatched API path is a
+  caller error.
+- **`StaticFiles` RAISES `HTTPException(404)`** rather than returning a 404
+  response, so the fallback has to catch rather than inspect.
+
+Verified by driving the real `create_app()` with `frontend/dist` present, which
+is the mount production uses: `/settings` and `/store/plex` return 200 and
+`index.html`, `/api/v1/nope` stays 404 `application/problem+json` even with
+`accept: text/html`, and `/missing.js` stays 404. `tests/test_spa_fallback.py`
+covers all four plus the reverted attempt's regression, a route's structured
+`{"error": ...}` detail surviving untouched. Six tests, green.
