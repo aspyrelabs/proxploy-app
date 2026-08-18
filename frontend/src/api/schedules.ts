@@ -19,7 +19,10 @@ export type ScheduleRow = {
  *  KeyError at every fire. Add it once the form grows a datastore + keep-rule
  *  picker (the retention-preview UI on the Backups page is the model). */
 export const SCHEDULABLE: { kind: string; label: string; needs: 'host' | 'app' | null }[] = [
-  { kind: 'backup.run', label: 'Backup guests on a host', needs: 'host' },
+  // Spelled out rather than "Backup guests on a host": on the Settings page
+  // this label is the only description of the job, and "guests" is Proxmox's
+  // word, not an operator's.
+  { kind: 'backup.run', label: 'Back up every container and VM on a host', needs: 'host' },
   { kind: 'app.update', label: 'Update an app', needs: 'app' },
   { kind: 'catalog.refresh', label: 'Refresh the app catalog', needs: null },
   { kind: 'metrics.maintain', label: 'Roll up and prune metrics', needs: null },

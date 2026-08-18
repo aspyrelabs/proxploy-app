@@ -50,3 +50,43 @@ export function fmtBps(n?: number | null): string {
   while (Math.abs(v) >= 1000 && i < units.length - 1) { v /= 1000; i++ }
   return `${v.toFixed(1)} ${units[i]}`
 }
+
+const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
+             'Saturday', 'Sunday']  // cron accepts both 0 and 7 for Sunday
+
+/**
+ * A 5-field cron expression → the sentence it means ("every day at 02:00").
+ *
+ * The schedules table stores cron and nothing else (models.Schedule.cron, and
+ * jobs/scheduler.py hands it straight to APScheduler's CronTrigger), so this
+ * translates rather than replaces it: whatever an operator typed, or a preset
+ * built, is described from the stored value itself and cannot drift from what
+ * will actually fire.
+ *
+ * Deliberately partial. It covers the shapes the form's presets produce plus
+ * the handful people write by hand, and anything else falls through to naming
+ * the expression instead of guessing at it: a wrong sentence about when a
+ * backup runs is worse than no sentence.
+ */
+export function fmtCron(cron: string): string {
+  const f = cron.trim().split(/\s+/)
+  const plain = `on the cron schedule ${cron.trim()}`
+  if (f.length !== 5) return plain
+  const [min, hour, dom, mon, dow] = f
+  if (dom !== '*' || mon !== '*') return plain
+  const every = /^\*\/(\d+)$/.exec(min)
+  if (every && hour === '*' && dow === '*') {
+    return `every ${every[1]} minutes`
+  }
+  if (!/^\d{1,2}$/.test(min)) return plain
+  const at = (h: string) => `${h.padStart(2, '0')}:${min.padStart(2, '0')}`
+  if (hour === '*') {
+    if (dow !== '*') return plain  // "hourly but only on Tuesdays" is a rule, not a preset
+    return Number(min) === 0 ? 'every hour, on the hour'
+      : `every hour, ${Number(min)} minutes past`
+  }
+  if (!/^\d{1,2}$/.test(hour) || Number(hour) > 23 || Number(min) > 59) return plain
+  if (dow === '*') return `every day at ${at(hour)}`
+  if (/^[0-7]$/.test(dow)) return `every ${DOW[Number(dow)]} at ${at(hour)}`
+  return plain
+}

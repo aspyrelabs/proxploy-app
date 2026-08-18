@@ -5,10 +5,12 @@ import { shellRoute } from './shell'
 import { notify } from '../lib/notify'
 import { api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import type { AppRow, VmRow } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
 import { useSchedules } from '../api/schedules'
+import { useStorage } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { LockVeil } from '../components/LockVeil'
@@ -62,12 +64,61 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   const hosts = useQuery({
     queryKey: ['hosts'], queryFn: () => api<{ id: number; name: string }[]>('/hosts'),
   })
+  // The two honest preconditions for a backup, neither of which is "a Proxmox
+  // Backup Server is connected": vzdump writes to ANY storage carrying `backup`
+  // content (a plain directory store and an NFS share both qualify, and a lab
+  // with no PBS at all backs up perfectly well), and it needs at least one
+  // guest to dump. The second one is what went wrong: a run over a node with
+  // no containers and no VMs dumped nothing and reported success, so the
+  // dialog now says so before the click rather than after it
+  // (services/backupjobs.py::run_backup carries the same check server-side,
+  // because a schedule fires with no dialog in front of it).
+  //
+  // Same query keys the Apps, VMs and Storage pages already fetch under, so
+  // this shares their cache rather than adding three requests.
+  const apps = useQuery({ queryKey: ['apps', {}], queryFn: () => api<AppRow[]>('/apps') })
+  const vms = useQuery({ queryKey: ['vms', {}], queryFn: () => api<VmRow[]>('/vms') })
+  const storage = useStorage()
   const run = useRunBackup()
   const [picked, setPicked] = useState<number | null>(null)
+  const [store, setStore] = useState('')
   const [jobId, setJobId] = useState<number | null>(null)
   // One vzdump task runs on one node, so the backend requires host_id whenever
   // more than one host is registered; with exactly one there is nothing to ask.
   const hostId = picked ?? (hosts.data?.length === 1 ? hosts.data[0].id : null)
+
+  const hostName = hosts.data?.find((h) => h.id === hostId)?.name ?? 'that host'
+  // Named, not just counted. The scope of this button is every guest on the
+  // node, which the code has always known (see this function's own comment)
+  // and the dialog never said, so an operator could not tell whether it was
+  // about their apps and VMs or about Proxploy's own data. It is the former:
+  // vzdump captures containers and virtual machines, and an installed app IS a
+  // container, so listing them by name is the whole answer.
+  const named = hostId == null ? []
+    : [...(apps.data ?? []).filter((a) => a.host_id === hostId)
+        .map((a) => `${a.name} (CT ${a.ctid})`),
+       ...(vms.data ?? []).filter((v) => v.host_id === hostId)
+        .map((v) => `${v.name} (VM ${v.vmid})`)]
+  const guests = named.length
+  const stores = hostId == null ? []
+    : (storage.data ?? []).filter((s) => s.host_id === hostId && s.content.includes('backup'))
+  // Nothing is concluded while those three are still in flight: an empty list
+  // means "not fetched yet" exactly as readily as "nothing there", and this
+  // page must not state a finding before it has looked (StatCard's rule).
+  const checking = apps.isPending || vms.isPending || storage.isPending
+  // Reset to the first eligible store whenever the chosen host changes, so a
+  // leftover name from the previous host is never sent to a node that has no
+  // such store. Never left empty while a store exists: an unset storage is
+  // exactly the "PVE picked, nobody knows which" case this dialog now avoids.
+  const target = stores.some((s) => s.storage === store) ? store : (stores[0]?.storage ?? '')
+  const blocked = checking || hostId == null ? null
+    : guests === 0
+      ? `${hostName} has no containers and no virtual machines, so a backup would `
+        + `write nothing.`
+      : stores.length === 0
+        ? `No storage on ${hostName} accepts backups. Add one on the Storage page, or `
+          + `connect a Proxmox Backup Server.`
+        : null
 
   return (
     <Dialog title={'Run a backup now'} width={480} onClose={onClose}>
@@ -79,12 +130,14 @@ function RunDialog({ onClose }: { onClose: () => void }) {
     ) : (
       <>
         <p className="mt-2 text-[12.5px] text-text-3">
-          Backs up every guest on the selected host in snapshot mode, to that host&apos;s
-          default backup datastore.
+          Backs up <strong className="text-text-2">every container and virtual machine</strong>{' '}
+          on the selected host, in snapshot mode, so the guests keep running. That is your
+          installed apps (each one is a container) and your VMs. It does not back up
+          Proxploy&apos;s own settings or database.
         </p>
         <select className={`${inputCls} mt-4`} value={hostId ?? ''}
                 aria-label="Host" disabled={hosts.isError || hosts.isLoading}
-                onChange={(e) => setPicked(Number(e.target.value) || null)}>
+                onChange={(e) => { setPicked(Number(e.target.value) || null); setStore('') }}>
           {hosts.isError
             ? <option value="">Could not load hosts</option>
             : hosts.isLoading
@@ -92,10 +145,38 @@ function RunDialog({ onClose }: { onClose: () => void }) {
               : <option value="">Select a host…</option>}
           {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
         </select>
+        {blocked ? (
+          <p className="mt-3 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
+            {blocked}
+          </p>
+        ) : hostId != null && !checking && (
+          <>
+            {/* The scope, before the click. "One vzdump over every guest on the
+                chosen host" was only ever in this file's comments; naming the
+                guests is what stops "Run now" reading as an unqualified
+                "backup" of something unspecified. */}
+            <p className="mt-3 text-[12.5px] text-text-3">
+              {guests} {guests === 1 ? 'guest' : 'guests'} on {hostName} will be backed up:{' '}
+              <span className="text-text-2">{named.slice(0, 6).join(', ')}</span>
+              {named.length > 6 && ` and ${named.length - 6} more`}.
+            </p>
+            <label className="mt-4 block text-[11px] uppercase tracking-wide text-text-3"
+                   htmlFor="bk-store">Archive lands on</label>
+            <select id="bk-store" className={inputCls} value={target}
+                    onChange={(e) => setStore(e.target.value)}>
+              {stores.map((s) => (
+                <option key={s.storage} value={s.storage}>
+                  {s.storage}{s.type ? ` (${s.type})` : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={hostId == null || run.isPending}
-                  onClick={() => run.mutate({ hostId }, {
+          <Button disabled={hostId == null || blocked != null || run.isPending}
+                  title={blocked ?? undefined}
+                  onClick={() => run.mutate({ hostId, storage: target }, {
                     onSuccess: (r) => setJobId(r.job.id),
                     onError: () => notify.error('Could not start the backup, try again.'),
                   })}>
@@ -112,6 +193,15 @@ function RunDialog({ onClose }: { onClose: () => void }) {
 function ScheduleDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title={'New scheduled backup job'} width={480} onClose={onClose}>
+    {/* Same sentence as RunDialog, for the same reason: "backup" on its own
+        reads as an unqualified backup of something unspecified, and an operator
+        reasonably wondered whether these buttons were about Proxploy's own
+        data. They are about the guests. */}
+    <p className="mt-2 text-[12.5px] text-text-3">
+      Runs on a schedule and backs up{' '}
+      <strong className="text-text-2">every container and virtual machine</strong> on the
+      host you choose: your installed apps and your VMs, not Proxploy&apos;s own settings.
+    </p>
     <div className="mt-4">
       <ScheduleForm jobKind="backup.run" onSaved={onClose} />
     </div>

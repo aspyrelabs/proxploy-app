@@ -44,6 +44,14 @@ let backupsStale = false
 /** The one `backup.sync` job GET /jobs?status=running&kind=backup.sync
  *  reports back, or null for "nothing running". */
 let syncJob: Record<string, unknown> | null = null
+/** What Run now can see on host-01. Mutable so the "nothing to back up" case
+ *  can empty them; the defaults are a normal node with one app and one VM. */
+let apps: any[] = [{ id: 7, host_id: 1, name: 'Immich', ctid: 150 }]
+let vms: any[] = [{ id: 9, host_id: 1, name: 'win11', vmid: 201 }]
+let stores: any[] = [
+  { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
+  { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+]
 
 vi.mock('../api/client', () => {
   class ApiError extends Error {
@@ -67,6 +75,12 @@ vi.mock('../api/client', () => {
       }
       if (path === '/schedules') return Promise.resolve([])
       if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+      // The Run now dialog's two honest preconditions: guests to dump, and a
+      // storage that carries `backup` content. Not PBS: `local` below is a
+      // plain directory store and vzdump writes there perfectly well.
+      if (path === '/apps') return Promise.resolve(apps)
+      if (path === '/vms') return Promise.resolve(vms)
+      if (path === '/storage') return Promise.resolve(stores)
       if (path.startsWith('/backups/prune-preview')) return Promise.resolve(PRUNE)
       if (path === '/backups/run') {
         return Promise.resolve({ job: { id: 31, kind: 'backup.run', status: 'queued' } })
@@ -134,7 +148,11 @@ describe('BackupsPage', () => {
     const btn = await screen.findByRole('button', { name: /new job/i })
     expect(btn).not.toBeDisabled()
     fireEvent.click(btn)
-    await waitFor(() => expect(screen.getByLabelText(/cron/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText(/how often/i)).toBeInTheDocument())
+    // "Backup" on its own reads as an unqualified backup of something
+    // unspecified, and an operator reasonably asked whether these buttons were
+    // about Proxploy's own data rather than their apps and VMs.
+    expect(screen.getByText(/not Proxploy's own settings/)).toBeInTheDocument()
   })
 
   it('runs a backup and swaps the dialog body for the job log', async () => {
@@ -148,8 +166,64 @@ describe('BackupsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
     await waitFor(() => expect(calls.length).toBe(1))
     expect(calls[0].path).toBe('/backups/run')
-    expect(calls[0].body).toEqual({ guests: 'all', host_id: 1 })
+    // `storage` is sent, not left for PVE to pick: without it nothing on the
+    // page or in the transcript could say where the archive went.
+    expect(calls[0].body).toEqual({ guests: 'all', host_id: 1, storage: 'local' })
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('names the guests and the storage before the run, not after it', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    // The scope was only ever in the source comments: one vzdump over every
+    // guest on the chosen node. Saying so is what answers "what is it backing
+    // up?" before the click instead of leaving it to be inferred from a
+    // success line.
+    expect(await screen.findByText(/2 guests on host-01 will be backed up/))
+      .toBeInTheDocument()
+    expect(screen.getByText(/Immich \(CT 150\), win11 \(VM 201\)/)).toBeInTheDocument()
+    // Only the store that carries `backup` content is on offer.
+    const target = screen.getByLabelText(/archive lands on/i)
+    expect(within(target as HTMLElement).getByRole('option', { name: /local \(dir\)/ }))
+      .toBeInTheDocument()
+    expect(within(target as HTMLElement).queryByRole('option', { name: /local-lvm/ })).toBeNull()
+  })
+
+  it('refuses to run over a host with no containers or VMs, and says why', async () => {
+    // The real bug: host 1 was node1, which has no guests at all. vzdump was
+    // sent `all: 1`, dumped nothing, and PVE closed the task with exitstatus
+    // OK, so the run reported plain success. Nothing about PBS: `local` is
+    // still a perfectly good backup target below.
+    calls.length = 0
+    apps = []; vms = []
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    expect(await screen.findByText(/no containers and no virtual machines/))
+      .toBeInTheDocument()
+    const start = screen.getByRole('button', { name: 'Start backup' })
+    expect(start).toBeDisabled()
+    // A disabled button with no stated reason is the other half of the same
+    // problem, so the reason is on the control itself as well as on the page.
+    expect(start).toHaveAttribute('title', expect.stringContaining('write nothing'))
+    fireEvent.click(start)
+    expect(calls.length).toBe(0)
+    apps = [{ id: 7, host_id: 1, name: 'Immich', ctid: 150 }]
+    vms = [{ id: 9, host_id: 1, name: 'win11', vmid: 201 }]
+  })
+
+  it('refuses to run when no storage on the host accepts backups', async () => {
+    calls.length = 0
+    stores = [{ host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir'] }]
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    expect(await screen.findByText(/No storage on host-01 accepts backups/))
+      .toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start backup' })).toBeDisabled()
+    stores = [
+      { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
+      { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+    ]
   })
 
   it('asks for confirmation before deleting an archive, then fires the job', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBps, fmtBytes, fmtEta, fmtPct, fmtUptime } from '../lib/format'
+import { fmtBps, fmtBytes, fmtCron, fmtEta, fmtPct, fmtUptime } from '../lib/format'
 
 describe('format helpers', () => {
   it('formats bytes with binary units', () => {
@@ -36,5 +36,25 @@ describe('format helpers', () => {
     expect(fmtEta(120)).toBe('2m')
     expect(fmtEta(null)).toBe('unknown')
     expect(fmtEta(-1)).toBe('unknown')
+  })
+  it('describes a cron expression in plain language', () => {
+    expect(fmtCron('0 2 * * *')).toBe('every day at 02:00')
+    expect(fmtCron('30 3 * * 2')).toBe('every Tuesday at 03:30')
+    expect(fmtCron('0 0 * * 0')).toBe('every Sunday at 00:00')
+    expect(fmtCron('0 0 * * 7')).toBe('every Sunday at 00:00')   // cron takes both
+    expect(fmtCron('0 * * * *')).toBe('every hour, on the hour')
+    expect(fmtCron('15 * * * *')).toBe('every hour, 15 minutes past')
+    expect(fmtCron('*/5 * * * *')).toBe('every 5 minutes')
+    expect(fmtCron('  0   2  *  *  * ')).toBe('every day at 02:00')
+  })
+  it('names an expression it cannot describe instead of guessing at it', () => {
+    // A wrong sentence about when a backup runs is worse than no sentence, so
+    // every shape outside the presets falls through to the expression itself.
+    expect(fmtCron('0 2 1 * *')).toBe('on the cron schedule 0 2 1 * *')
+    expect(fmtCron('0 2 * 6 *')).toBe('on the cron schedule 0 2 * 6 *')
+    expect(fmtCron('0 2 * * 1-5')).toBe('on the cron schedule 0 2 * * 1-5')
+    expect(fmtCron('0 * * * 2')).toBe('on the cron schedule 0 * * * 2')
+    expect(fmtCron('0 2 * *')).toBe('on the cron schedule 0 2 * *')
+    expect(fmtCron('99 99 * * *')).toBe('on the cron schedule 99 99 * * *')
   })
 })

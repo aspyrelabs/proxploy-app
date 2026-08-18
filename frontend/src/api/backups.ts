@@ -67,13 +67,26 @@ const jobSettled = (qc: ReturnType<typeof useQueryClient>) => () => {
   qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
 }
 
+/**
+ * `storage` is sent, not left out. POST /backups/run defaults it to null and
+ * vzdump then writes to whichever backup store PVE picks, so the operator had
+ * no way to know where the archive landed: the same class of problem the
+ * migration preflight had before it started naming its target pool, and the
+ * reason services/backupjobs.py::restore_backup stopped letting PVE guess.
+ * The dialog chooses from the stores that actually carry `backup` content and
+ * says which one, so "where did it go" is answered before the run.
+ */
 export function useRunBackup() {
   const qc = useQueryClient()
-  return useMutation<{ job: JobRow }, ApiError, { hostId: number | null }>({
+  return useMutation<{ job: JobRow }, ApiError, { hostId: number | null; storage?: string | null }>({
     mutationFn: (v) =>
       api<{ job: JobRow }>('/backups/run', {
         method: 'POST',
-        body: JSON.stringify({ guests: 'all', ...(v.hostId ? { host_id: v.hostId } : {}) }),
+        body: JSON.stringify({
+          guests: 'all',
+          ...(v.hostId ? { host_id: v.hostId } : {}),
+          ...(v.storage ? { storage: v.storage } : {}),
+        }),
       }),
     onSettled: jobSettled(qc),
   })

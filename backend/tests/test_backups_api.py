@@ -10,7 +10,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from proxploy.models import App, Backup, Host, HostCredential, Job, Vm
+from proxploy.models import (App, Backup, Host, HostCredential, Job, JobEvent, Vm,
+                             utcnow)
 
 VOLID_CT = "local:backup/vzdump-lxc-150-2026_07_30-02_00_00.tar.zst"
 VOLID_VM = "local:backup/vzdump-qemu-201-2026_07_30-03_00_00.vma.zst"
@@ -35,10 +36,15 @@ def _fake():
     return fake
 
 
-def _seed(app, ct_status="stopped"):
+def _seed(app, ct_status="stopped", *, guests=True, polled=False):
+    """`guests=False` is a node with no CT and no VM, `polled=True` is a host the
+    poll loop has already written a snapshot for (`last_seen_at`). Together they
+    are the "nothing to back up" shape, which the defaults deliberately are not:
+    every pre-existing test wants a host with guests on it."""
     with app.state.sessionmaker() as db:
         host = Host(name="host-01", address="https://10.0.0.7:8006", node_name="pve1",
-                    status="connected", pve_version="8.4.1")
+                    status="connected", pve_version="8.4.1",
+                    last_seen_at=utcnow() if polled else None)
         db.add(host)
         db.commit()
         blob, ver = app.state.secretstore.encrypt(json.dumps(
@@ -52,18 +58,21 @@ def _seed(app, ct_status="stopped"):
         db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!lc"))
-        a = App(host_id=host.id, ctid=150, name="Immich", slug="immich",
-                status_cached=ct_status)
-        v = Vm(host_id=host.id, vmid=201, name="win11", status="stopped")
-        db.add_all([a, v])
-        db.commit()
+        a = v = None
+        if guests:
+            a = App(host_id=host.id, ctid=150, name="Immich", slug="immich",
+                    status_cached=ct_status)
+            v = Vm(host_id=host.id, vmid=201, name="win11", status="stopped")
+            db.add_all([a, v])
+            db.commit()
         b_ct = Backup(host_id=host.id, storage="local", volid=VOLID_CT,
                       guest_type="ct", guest_vmid=150, guest_name="Immich")
         b_vm = Backup(host_id=host.id, storage="local", volid=VOLID_VM,
                       guest_type="vm", guest_vmid=201, guest_name="win11")
         db.add_all([b_ct, b_vm])
         db.commit()
-        return {"host_id": host.id, "app_id": a.id, "vm_id": v.id,
+        return {"host_id": host.id, "app_id": a.id if a else None,
+                "vm_id": v.id if v else None,
                 "ct_backup": b_ct.id, "vm_backup": b_vm.id}
 
 
@@ -113,7 +122,8 @@ def test_restore_guest_posts_to_the_guest_create_endpoint(tmp_path):
 
 # --- job handlers ----------------------------------------------------------
 
-def _run_job(tmp_path, kind, params, seed_status="stopped", storages=None):
+def _run_job(tmp_path, kind, params, seed_status="stopped", storages=None,
+             guests=True, polled=False):
     from proxploy.jobs import JobBackend
     from tests.support import make_job_app
 
@@ -125,7 +135,7 @@ def _run_job(tmp_path, kind, params, seed_status="stopped", storages=None):
         import proxploy.services.backupjobs  # noqa: F401  (registers backup.*)
 
         backend = JobBackend(app)
-        ids = _seed(app, ct_status=seed_status)
+        ids = _seed(app, ct_status=seed_status, guests=guests, polled=polled)
         with app.state.sessionmaker() as db:
             jid = backend.enqueue(db, kind=kind, params={k: (ids[v] if isinstance(v, str)
                                                              and v in ids else v)
@@ -134,6 +144,34 @@ def _run_job(tmp_path, kind, params, seed_status="stopped", storages=None):
         with app.state.sessionmaker() as db:
             return fake, db.get(Job, jid).status, db.get(Job, jid).result, \
                 db.get(Job, jid).error
+
+    return asyncio.run(go())
+
+
+def _transcript(tmp_path, kind, params, **kw):
+    """Same as _run_job but hands back the job's own log lines, which is what an
+    operator actually reads (components/JobLog.tsx renders job_events, never the
+    result blob)."""
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app
+
+    async def go():
+        fake = _fake()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.backupjobs  # noqa: F401
+
+        backend = JobBackend(app)
+        ids = _seed(app, **kw)
+        with app.state.sessionmaker() as db:
+            jid = backend.enqueue(db, kind=kind,
+                                  params={k: (ids[v] if isinstance(v, str) and v in ids
+                                              else v) for k, v in params.items()}).id
+        await backend.wait(jid, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, jid)
+            lines = [e.message for e in db.query(JobEvent).filter_by(job_id=jid)
+                     .order_by(JobEvent.seq)]
+            return fake, job.status, job.result, job.error, lines
 
     return asyncio.run(go())
 
@@ -152,10 +190,66 @@ def test_backup_run_calls_vzdump_with_the_selected_vmids(tmp_path):
 
 def test_backup_run_with_no_vmids_backs_up_all_guests(tmp_path):
     fake, status, _, error = _run_job(tmp_path, "backup.run",
-                                      {"host_id": "host_id", "vmids": []})
+                                      {"host_id": "host_id", "vmids": []},
+                                      polled=True)
     assert status == "succeeded", error
     _node, kwargs = fake.vzdumps[0]
     assert kwargs["all"] == 1 and "vmid" not in kwargs
+
+
+def test_backup_run_on_a_node_with_no_guests_says_nothing_was_written(tmp_path):
+    """The bug behind "Run now says successful, what is it backing up?".
+
+    Found on hardware 2026-08-18: node1 holds no CT and no VM, an empty
+    selection sent `all: 1`, vzdump had nothing to dump, PVE closed the task
+    with exitstatus OK and the job reported a plain success while the `backups`
+    table gained zero rows. The run must state that instead.
+    """
+    fake, status, result, error, lines = _transcript(
+        tmp_path, "backup.run", {"host_id": "host_id", "vmids": []},
+        guests=False, polled=True)
+    assert status == "succeeded", error       # an empty node is not a failure
+    assert fake.vzdumps == [], "asked Proxmox to back up nothing anyway"
+    assert result["guests"] == 0 and result["vmids"] == []
+    assert "exitstatus" not in result, "an OK from a task that never ran"
+    said = " ".join(lines)
+    assert "nothing to back up" in said and "No archive was written" in said
+
+
+def test_backup_run_names_in_the_transcript_what_all_guests_means(tmp_path):
+    """"All guests" on its own answers neither "what is it backing up?" nor
+    "where did it go?", which is what an operator asked of a run that had
+    already finished."""
+    _fake_, status, _result, error, lines = _transcript(
+        tmp_path, "backup.run", {"host_id": "host_id", "vmids": [], "storage": "local"},
+        polled=True)
+    assert status == "succeeded", error
+    said = " ".join(lines)
+    assert "every container and virtual machine on the node" in said
+    assert "150" in said and "201" in said
+    assert "onto local" in said
+
+
+def test_backup_run_admits_when_no_storage_was_chosen(tmp_path):
+    """PVE picks a backup store when none is named, so the transcript must not
+    imply the operator knows which one it was."""
+    _fake_, status, _result, error, lines = _transcript(
+        tmp_path, "backup.run", {"host_id": "host_id", "vmids": [150]})
+    assert status == "succeeded", error
+    assert "none was chosen" in " ".join(lines)
+
+
+def test_backup_run_on_a_never_polled_host_still_asks_for_every_guest(tmp_path):
+    """`last_seen_at` NULL means Proxploy has not looked yet, so an empty
+    `apps`/`vms` pair is not evidence of an empty node and must not skip a real
+    backup. The window is one poll cycle wide, right after a host is added."""
+    fake, status, _result, error, lines = _transcript(
+        tmp_path, "backup.run", {"host_id": "host_id", "vmids": []},
+        guests=False, polled=False)
+    assert status == "succeeded", error
+    _node, kwargs = fake.vzdumps[0]
+    assert kwargs["all"] == 1, "skipped a backup on a host it had never polled"
+    assert "has not polled it" in " ".join(lines)
 
 
 def test_restore_as_new_takes_a_fresh_vmid_and_never_forces(tmp_path):

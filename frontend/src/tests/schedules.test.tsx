@@ -65,6 +65,9 @@ describe('ScheduleForm', () => {
     // matching <option> is a silent no-op (mirrors alerts.test.tsx's app pick).
     await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())
     fireEvent.change(screen.getByLabelText(/host/i), { target: { value: '1' } })
+    // Cron is still the stored format, so the escape hatch still posts it
+    // verbatim; the presets below are just another way of writing one.
+    fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'custom' } })
     fireEvent.change(screen.getByLabelText(/cron/i), { target: { value: '0 2 * * *' } })
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
@@ -80,6 +83,52 @@ describe('ScheduleForm', () => {
     wrap(<ScheduleForm onSaved={() => {}} />)
     const tz = (screen.getByLabelText(/timezone/i) as HTMLInputElement).value
     expect(tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
+
+  it('offers the browser\'s own zone list, with no bundled dependency', () => {
+    posted.length = 0
+    const { container } = wrap(<ScheduleForm onSaved={() => {}} />)
+    const field = screen.getByLabelText(/timezone/i)
+    // Suggestions, not a closed select: any valid IANA name can still be typed
+    // and the backend validates it.
+    expect(field).toHaveAttribute('list', 'sc-tz-list')
+    const offered = [...container.querySelectorAll('#sc-tz-list option')]
+      .map((o) => o.getAttribute('value'))
+    expect(offered.length).toBeGreaterThan(100)
+    expect(offered).toContain('Europe/London')
+    // A browser that resolves to a legacy alias (Asia/Calcutta) while the list
+    // carries only the canonical name must still find its own zone in there.
+    expect(offered).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
+
+  it('builds the cron from a preset, so nobody has to know cron', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'week' } })
+    fireEvent.change(screen.getByLabelText(/^at$/i), { target: { value: '03:30' } })
+    fireEvent.change(screen.getByLabelText(/^on$/i), { target: { value: '2' } })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'host-01' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    // Still cron on the wire: `Schedule.cron` is the stored format and
+    // jobs/scheduler.py parses nothing else, so the presets write one rather
+    // than introducing a second format.
+    expect(posted[0].body.cron).toBe('30 3 * * 2')
+  })
+
+  it('previews in plain language whichever cron is in effect', () => {
+    posted.length = 0
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    // The default preset.
+    expect(screen.getByText('every day at 02:00')).toBeInTheDocument()
+    // And a hand-typed expression, described by the same sentence: the preview
+    // reads the string that gets posted, so it cannot describe one schedule
+    // while another is saved.
+    fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText(/cron/i), { target: { value: '15 6 * * 5' } })
+    expect(screen.getByText('every Friday at 06:15')).toBeInTheDocument()
   })
 
   it('asks which host a backup schedule targets', async () => {

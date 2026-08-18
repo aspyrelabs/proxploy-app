@@ -238,6 +238,32 @@ async def _resync(ctx: JobContext, host_id: int) -> None:
     app.state.bus.publish("resource", {"type": "backup", "change": "list"})
 
 
+def guests_on_host(app, host_id: int) -> tuple[list[int], bool]:
+    """Blocking: (vmids Proxploy knows on this host, whether it was ever polled).
+
+    The poller's own `apps`/`vms` rows, not a live Proxmox read, and that is
+    deliberate: the backup token carries VM.Backup, Datastore.AllocateSpace and
+    Datastore.Audit and no VM.Audit (services/pveum.py), so
+    `cluster_resources()` on that token answers with zero guests for a node
+    that is full of them. These are the same rows
+    api/backups.py::_resolve_guests turns a guest selection into, and
+    sync_host_backups already reads them for archive names, so no new source of
+    truth is introduced here.
+
+    The second element is the honesty guard. A Host row exists before the first
+    poll cycle writes its guests, and "no rows yet" must never be read as "no
+    guests": `last_seen_at` is set by the poller, so NULL means Proxploy has
+    not looked and the caller must not draw a conclusion from an empty list.
+    """
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        if host is None:
+            raise JobFailed(f"host {host_id} not found")
+        vmids = [a.ctid for a in db.query(App).filter_by(host_id=host_id)]
+        vmids += [v.vmid for v in db.query(Vm).filter_by(host_id=host_id)]
+        return sorted(int(v) for v in vmids if v is not None), host.last_seen_at is not None
+
+
 async def run_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.run`, one vzdump task over the selected guests, or all of them."""
     app = ctx.backend.app
@@ -248,12 +274,51 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
             "compress": params.get("compress") or "zstd"}
     if params.get("storage"):
         call["storage"] = params["storage"]
+    # Named in every line below. With no storage chosen PVE picks a backup store
+    # itself and the transcript then could not say where the archive went, which
+    # is the same gap the migration preflight closed by naming its target pool.
+    lands = f"onto {call['storage']}" if call.get("storage") else \
+        "onto whichever backup storage Proxmox picks, none was chosen"
     if vmids:
         call["vmid"] = ",".join(str(v) for v in vmids)
+        ctx.log(f"vzdump on {host_name}/{node} {lands}: "
+                f"{', '.join(str(v) for v in vmids)}")
     else:
+        # `all: 1` over a node with no guests is what made a backup of nothing
+        # report plain success. vzdump is handed an empty set, PVE finishes the
+        # task with exitstatus OK, and not one byte is written. Found on
+        # hardware 2026-08-18 on node1, whose `pct list` and `qm list` are both
+        # empty: job 157 stored {"exitstatus": "OK", "vmids": []} and the
+        # `backups` table gained zero rows, and the page reported a successful
+        # backup.
+        #
+        # This succeeds and says so rather than raising JobFailed. An empty node
+        # is not an operator error and it is not a Proxmox failure, and a red
+        # `backup.run` job here would raise a `backup_failed` alert, which reads
+        # the latest finished `backup.run` for the host (services/alerts.py), on
+        # a node that is simply empty. The harm was never the exit status, it was
+        # a bare success line that implies an archive now exists.
+        #
+        # The vzdump call is SKIPPED rather than made and then explained: PVE's
+        # OK for an empty job cannot be made to mean anything else, so not
+        # making the call is what leaves the transcript free to state what
+        # actually happened.
+        known, polled = await asyncio.to_thread(guests_on_host, app, host_id)
+        if polled and not known:
+            detail = (f"{host_name} (node {node}) has no containers and no "
+                      f"virtual machines, so there was nothing to back up. No "
+                      f"archive was written.")
+            ctx.log(detail)
+            ctx.progress(100)
+            return {"vmids": [], "guests": 0, "detail": detail}
         call["all"] = 1  # empty selection means every guest on the node
-    ctx.log(f"vzdump on {host_name}/{node}: "
-            f"{'all guests' if not vmids else ', '.join(str(v) for v in vmids)}")
+        # Naming them answers "what is it backing up?" in the transcript
+        # itself. `all: 1` is still what PVE is asked for, so a guest the last
+        # poll has not seen yet is included even though it is not listed here.
+        ctx.log(f"vzdump on {host_name}/{node} {lands}: every container and virtual "
+                f"machine on the node"
+                + (f", {len(known)} known here ({', '.join(str(v) for v in known)})"
+                   if known else ", none known here yet, Proxploy has not polled it"))
     upid = await asyncio.to_thread(client.vzdump, node, call)
     status = await await_task(ctx, client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
