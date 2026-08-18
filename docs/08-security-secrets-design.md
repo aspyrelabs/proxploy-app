@@ -245,12 +245,39 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
   request_id, job_id)`; full schema in doc 04. Written for every state-changing operation,
   every auth event, every SSH invocation, every policy change, every denied
   attempt (denials are evidence too).
-- **No delete path in the API or UI.** No endpoint, no admin button; the
-  only deletion the app ever performs on this table is the verified
-  post-archive prune below. `params` is written through a redaction filter so
-  secrets never enter the log in the first place (nothing sensitive to purge
-  later).
-- Retention **by archival, not deletion**; and off by default (doc 04:
+- **One delete path, and it is itself audited.** `DELETE /audit`
+  (`api/audit.py::clear_audit`) is the only endpoint that removes rows.
+  Amended from "no delete path in the API or UI": operators asked to be able to
+  clear the log, and a product that answers that by telling them to open the
+  SQLite file gets a worse outcome than one that puts the capability behind a
+  gate and records its use. The gate, in full:
+  - **Owner only.** `("audit", "clear")` in `services/authz.py`, the same floor
+    as `host.remove`. An admin can read and export the log; erasing it is a
+    different question. A refused attempt is recorded as `audit.clear` +
+    `denied`, which is why it is its own permission and not a reuse of
+    `("audit", "export")`.
+  - **Typed confirmation.** The caller must send `confirm: "clear audit log"`,
+    the same 409 `confirm_required` shape the app uninstall and the in-place
+    restore use, so a single click cannot empty the trail.
+  - **The clear is audited, and the row survives it.** One `audit.clear` row is
+    written *after* the delete, naming the actor, the count removed and whether
+    the scope was `all` or everything `before` a given instant. Written before
+    the delete it would sit inside the range it describes and go with it,
+    leaving an empty table and no author.
+  - **Not wired to the screen's filters.** `before` is the only narrowing the
+    route accepts. "Clear what I am looking at" stops being unambiguous the
+    moment a filter is a substring match.
+  - Retention (clear entries older than a date) is the intended use and is
+    strictly less destructive than emptying the table; both are offered, and
+    the audit row says which was used.
+- `params` is written through a redaction filter so secrets never enter the log
+  in the first place (nothing sensitive to purge later).
+- Retention **by archival, not deletion** is still the design, and is still
+  unbuilt: there is no `audit.retention` setting and no archival job today, and
+  the only pruning job that exists ("Usage cleanup", `metrics.maintain`) touches
+  metric samples and rollups, never `audit_events`. Until it lands, `DELETE
+  /audit` with `before` is the only retention an operator has, and it deletes
+  without archiving. Off by default (doc 04:
   operator-initiated `proxploy audit export`). When the operator opts into a
   retention window (`audit.retention`), a scheduled job exports rows older
   than the window to compressed JSONL files in an archive directory, then
@@ -297,7 +324,7 @@ All authenticated randomness comes from `secrets`; all secret comparisons use
 | 9 | Console misuse (a console is a root shell in the CT; node shell is root on the node) | Separate `Sys.Console` opt-in token; admin+ RBAC for node shells; every console open audited; idle timeout; single-use short-TTL bridge handles | Console I/O contents are not recorded (a deliberate privacy call); the audit log shows who had a shell where and when, not what they typed. |
 | 10 | Catalog upstream compromise (poisoned metadata/scripts) | Server-side fetch over TLS from the pinned upstream repo; cached copies mean a compromised upstream doesn't instantly propagate; pin+diff surfaces unexpected changes before any run | We do not cryptographically verify upstream authorship (upstream doesn't sign); a compromised upstream repo plus a user clicking through the diff runs attacker code as root, see threat 1. |
 | 11 | Entitlement forgery / tampering | Ed25519-signed tokens (PyJWT), public-key-only in the app, offline verification, `kid` rotation | Self-hosted code can be patched to bypass gates entirely. Accepted per brief §11, the moat is signed tokens + honesty, not DRM. |
-| 12 | Malicious insider with a legitimate role | Least-privilege roles, append-only audit (denials included), archival off-box recommended | An owner is trusted by definition; the log is evidence, not prevention. |
+| 12 | Malicious insider with a legitimate role | Least-privilege roles, append-only audit (denials included), archival off-box recommended; the one clear path is owner-only, typed-confirmed and records its own use (§7) | An owner is trusted by definition and can clear the log, leaving one `audit.clear` row naming them; the log is evidence, not prevention. |
 | 13 | Supply chain (our own dependencies) | Pinned + hash-locked dependency versions, small curated set (doc 03), license/provenance review per brief §3, no post-install script execution from deps | Same residual every Python app has; pinning narrows the window, doesn't close it. |
 | 14 | Proxploy stops/deletes/migrates its own CT or host | Self-detection recorded at install (CT id + hostname, doc 02 §9); destructive actions against a detected match are refused, or gated behind a typed-confirmation dialog with an explicit warning | Detection can miss edge cases (Proxploy relocated without re-detection, ambiguous hostname); the typed-confirmation prompt is the backstop even when automatic detection fails. |
 

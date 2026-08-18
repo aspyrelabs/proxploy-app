@@ -16,9 +16,9 @@ export type TrayItem = {
 }
 
 /**
- * GET /jobs (server truth, survives a reload) merged with the client-side
- * store (notify.tsx's action notifications, LiveProvider's SSE job/alert
- * pushes -- gone on reload). `toJobItem` builds a job's card fields; it is a
+ * GET /jobs and GET /alerts?state=firing (server truth, both survive a reload)
+ * merged with the client-side store (notify.tsx's action notifications,
+ * LiveProvider's SSE job/alert pushes -- gone on reload). `toJobItem` builds a job's card fields; it is a
  * parameter rather than baked in here so BellPopover's existing
  * severityOf/messageOf/footerOf/progressOf stay exactly where they are.
  *
@@ -36,10 +36,21 @@ export function mergeNotifications(
   jobs: JobRow[],
   storeItems: StoreNotification[],
   toJobItem: (job: JobRow) => TrayItem,
+  alertItems: TrayItem[] = [],
 ): TrayItem[] {
   const jobIds = new Set(jobs.map((j) => j.id))
+  // Same rule as jobs, one source up: LiveProvider pushes a firing alert into
+  // the store as `alert:<id>:<ts>:<seq>` the moment its SSE event lands, and
+  // GET /alerts?state=firing carries the same alert from then on. Server truth
+  // wins and the store copy is dropped, so an alert does not render twice.
+  // Without the server source at all, an alert that fired before the tab was
+  // opened was in no tray anywhere, and a reload lost the ones that had.
+  const alertPrefixes = alertItems
+    .filter((a) => a.id.startsWith('alert:'))
+    .map((a) => `${a.id.split(':').slice(0, 2).join(':')}:`)
   const fromStore: TrayItem[] = storeItems
     .filter((n) => n.jobId == null || !jobIds.has(n.jobId))
+    .filter((n) => !alertPrefixes.some((prefix) => n.id.startsWith(prefix)))
     .map((n) => ({
       id: n.id,
       severity: n.severity,
@@ -49,5 +60,6 @@ export function mergeNotifications(
       timestamp: n.createdAt,
     }))
   const fromJobs = jobs.map(toJobItem)
-  return [...fromStore, ...fromJobs].sort((a, b) => b.timestamp - a.timestamp)
+  return [...fromStore, ...alertItems, ...fromJobs]
+    .sort((a, b) => b.timestamp - a.timestamp)
 }

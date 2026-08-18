@@ -228,3 +228,59 @@ def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
         c.app.state.entitlements._features = {}
         assert c.get("/api/v1/alert-rules").status_code == 401
         assert c.post("/api/v1/alert-rules", json={}, headers=h).status_code == 401
+
+
+# --- default rules on a fresh install ---------------------------------------
+
+def test_a_fresh_install_gets_rules_for_both_unusable_host_conditions(tmp_path):
+    """Neither condition moved any metric, and neither had a rule, so a dead or
+    unwritable host notified nobody: the only signal was a red dot in the
+    sidebar (doc 12 check 12).
+    """
+    from proxploy.models import AlertRule
+    from proxploy.services.alerts import seed_default_alert_rules
+    from tests.support import make_db
+
+    db = make_db(tmp_path)
+    assert seed_default_alert_rules(db) == 2
+    rules = {r.metric: r for r in db.query(AlertRule).all()}
+    assert set(rules) == {"host_offline", "quorum_lost"}
+    assert all(r.severity == "critical" for r in rules.values())
+    assert all(r.enabled and r.target_type == "any" for r in rules.values())
+    # A restart blip is not an outage; quorum loss has no timestamp to measure
+    # against, so it fires at once rather than pretending to wait.
+    assert rules["host_offline"].duration_s == 300
+    assert rules["quorum_lost"].duration_s == 0
+    # No channel exists on a fresh install, so these are in-app until one does.
+    assert all(r.channel_ids == [] for r in rules.values())
+
+
+def test_seeding_is_one_way_so_a_deleted_rule_stays_deleted(tmp_path):
+    """Same rule as seed_system_schedules: re-adding on every boot would make
+    "stop telling me about unreachable hosts" impossible to express."""
+    from proxploy.models import AlertRule
+    from proxploy.services.alerts import seed_default_alert_rules
+    from tests.support import make_db
+
+    db = make_db(tmp_path)
+    seed_default_alert_rules(db)
+    db.query(AlertRule).filter_by(metric="host_offline").delete()
+    db.commit()
+
+    assert seed_default_alert_rules(db) == 0, "reseeded over the operator"
+    assert {r.metric for r in db.query(AlertRule).all()} == {"quorum_lost"}
+
+
+def test_the_seeded_rules_are_accepted_by_the_routes_own_validator(client,
+                                                                  csrf_header,
+                                                                  bootstrap_admin):
+    """The seeder writes rows directly, so nothing would have caught a spec the
+    API itself would reject as unfireable."""
+    from proxploy.services.alerts import DEFAULT_RULES
+
+    bootstrap_admin(client)
+    h = csrf_header(client)
+    for spec in DEFAULT_RULES:
+        r = client.post("/api/v1/alert-rules", headers=h, json={
+            "target_type": "any", "target_id": None, **spec})
+        assert r.status_code == 201, f"{spec['metric']}: {r.text}"

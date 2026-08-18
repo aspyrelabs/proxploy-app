@@ -55,6 +55,10 @@ let dismissedState: { cleared_through_job_id: number | null; dismissed_job_ids: 
 let dismissWriteFails = false
 const dismissCalls: Array<{ path: string; method?: string }> = []
 
+/** Firing alerts the tray now reads from the server, so an alert that fired
+ *  before the tab opened is still in the list and survives a reload. */
+let firingAlerts: unknown[] = []
+
 vi.mock('../api/client', () => ({
   ApiError,
   api: vi.fn((path: string, opts?: RequestInit) => {
@@ -98,6 +102,9 @@ vi.mock('../api/client', () => ({
     if (path === '/notifications/dismissed') {
       return Promise.resolve(dismissedState)
     }
+    if (path === '/alerts?state=firing') {
+      return Promise.resolve(firingAlerts)
+    }
     return Promise.resolve(null)
   }),
 }))
@@ -139,6 +146,7 @@ describe('BellPopover', () => {
     dismissWriteFails = false
     dismissCalls.length = 0
     toastError.mockClear()
+    firingAlerts = []
     resetNotificationStore()
   })
 
@@ -619,5 +627,32 @@ describe('BellPopover', () => {
     // and once it lands they are still gone, because they really were cleared
     await waitFor(() => expect(screen.getByText(/Nothing to report/i)).toBeInTheDocument())
     expect(within(bell).queryByText(/^[0-9]+$/)).not.toBeInTheDocument()
+  })
+})
+
+describe('BellPopover shows firing alerts from the server', () => {
+  beforeEach(() => {
+    jobsResult = 'empty'
+    dismissedState = { cleared_through_job_id: null, dismissed_job_ids: [] }
+    dismissWriteFails = false
+    firingAlerts = []
+    resetNotificationStore()
+  })
+
+  it('shows an alert that fired before the tab was ever opened', async () => {
+    // Nothing pushed this into the store: no SSE event was received by this tab.
+    // Before the tray read /alerts?state=firing it was invisible here, and the
+    // only signal was the sidebar footer.
+    firingAlerts = [{
+      id: 7, rule_id: 1, rule_name: 'Host unreachable', severity: 'critical',
+      target_type: 'host', target_id: 1, target_label: 'node1',
+      state: 'firing', value: 1, message: 'node1 has been offline for 5m',
+      fired_at: '2026-08-12T09:00:00Z', resolved_at: null,
+      acked_by: null, acked_by_email: null, acked_at: null,
+    }]
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Activity' }))
+    expect(await screen.findByText('Host unreachable')).toBeInTheDocument()
+    expect(screen.getByText(/offline for 5m/)).toBeInTheDocument()
   })
 })

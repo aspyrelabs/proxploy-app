@@ -71,3 +71,48 @@ describe('mergeNotifications', () => {
     expect(merged.map((m) => m.id)).toEqual(['b', 'a'])
   })
 })
+
+describe('mergeNotifications with firing alerts', () => {
+  const alertItem = (id: number, ts = 5000): TrayItem => ({
+    id: `alert:${id}`, severity: 'destructive', title: 'Host unreachable',
+    description: 'node1 has been offline', timestamp: ts,
+  })
+
+  it('includes a firing alert that arrived from the server, not only over SSE', () => {
+    // The case this exists for: the alert fired before the tab was opened, so
+    // nothing ever pushed it into the store, and the tray showed nothing at all.
+    const merged = mergeNotifications([], [], toJobItem, [alertItem(7)])
+    expect(merged.map((m) => m.id)).toEqual(['alert:7'])
+  })
+
+  it('an alert in both the store and the server list appears once', () => {
+    // notificationStore keys its SSE push `alert:<id>:<ts>:<seq>`, so the dedupe
+    // is on the `alert:<id>:` prefix rather than on an exact id.
+    const store = [storeItem({ id: 'alert:7:1699999999999:3', title: 'Host unreachable' })]
+    const merged = mergeNotifications([], store, toJobItem, [alertItem(7)])
+    expect(merged).toHaveLength(1)
+    // Server truth wins, same rule as jobs.
+    expect(merged[0].id).toBe('alert:7')
+  })
+
+  it('keeps a store alert the server list does not carry yet', () => {
+    // SSE beat the next poll of /alerts. Dropping it would blink a notification
+    // out of existence before the tray was ever opened.
+    const store = [storeItem({ id: 'alert:9:1699999999999:4', title: 'Cluster lost quorum' })]
+    const merged = mergeNotifications([], store, toJobItem, [alertItem(7)])
+    expect(merged.map((m) => m.id).sort()).toEqual(['alert:7', 'alert:9:1699999999999:4'])
+  })
+
+  it('sorts alerts among jobs by time, newest first', () => {
+    const jobs = [job({ id: 1, created_at: '2026-08-12T08:00:00Z' })]
+    const jobTs = new Date('2026-08-12T08:00:00Z').getTime()
+    const merged = mergeNotifications(jobs, [], toJobItem, [alertItem(7, jobTs + 1000)])
+    expect(merged.map((m) => m.id)).toEqual(['alert:7', 'job:1'])
+  })
+
+  it('an unrelated store item is untouched by the alert dedupe', () => {
+    const store = [storeItem({ id: 'action:1', title: 'Settings saved' })]
+    const merged = mergeNotifications([], store, toJobItem, [alertItem(7)])
+    expect(merged).toHaveLength(2)
+  })
+})

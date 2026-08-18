@@ -513,7 +513,7 @@ Indexes: `ux_backups(host_id, volid)`, `ix_backups_guest(guest_type, guest_vmid)
 ## Audit, entitlements, settings
 
 ### audit_events: **append-only**
-Every state-changing action (brief §8). The application exposes **no UPDATE or DELETE path** for this table, no ORM model method, no endpoint, no admin tool. Archival is export-then-truncate, operator-initiated or via the opt-in `audit.retention` policy (see retention). BIGINT PK.
+Every state-changing action (brief §8). The application exposes **no UPDATE path** for this table, and exactly one DELETE: owner-only `DELETE /api/v1/audit`, which needs a typed confirmation and writes its own `audit.clear` row after the rows go (doc 08 §7). No ORM model method, no other endpoint, no admin tool. Archival is export-then-truncate, operator-initiated or via the opt-in `audit.retention` policy (see retention). BIGINT PK.
 
 | Column | Type | Notes |
 |---|---|---|

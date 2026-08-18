@@ -193,6 +193,15 @@ def create_app(
         app.state.poller = Poller(app)
         app.state.scheduler = Scheduler(app)
         poller_task = scheduler_task = None
+        if settings.alerts_enabled:
+            # Evaluation rides the poll loop (pollers/__init__.py), so the rules
+            # are seeded on the same flag, matching how the scheduler seeds its
+            # own rows below. A fresh install otherwise had no rule for either
+            # condition that means "this host cannot be used", so a dead or
+            # unwritable host notified nobody.
+            from proxploy.services.alerts import seed_default_alert_rules
+            with app.state.sessionmaker() as db:
+                seed_default_alert_rules(db)
         if settings.poll_enabled:
             poller_task = asyncio.create_task(app.state.poller.run())
         if settings.scheduler_enabled:

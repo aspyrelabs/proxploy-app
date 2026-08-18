@@ -66,6 +66,36 @@ def test_export_honours_the_same_filters_as_the_viewer(tmp_path, csrf_header,
         assert exported[0]["action"] == "host.remove"
 
 
+def test_export_honours_the_item_or_action_search_too(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    """Every filter the table shows has to reach the export, or the file
+    answers a different question than the screen did."""
+    app, c = _app_with_events(tmp_path, csrf_header, bootstrap_admin)
+    with c:
+        listed = c.get("/api/v1/audit", params={"search": "uninstall"}).json()
+        exported = list(csv.DictReader(io.StringIO(
+            c.get("/api/v1/audit/export", params={"search": "uninstall"}).text)))
+        assert len(exported) == len(listed) == 1
+        assert exported[0]["action"] == "app.uninstall"
+
+
+def test_export_columns_are_not_touched_by_the_screens_labels(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """EXPORT_COLUMNS is a machine-readable contract. The Date/User/Action/Item
+    renaming was about the screen, and the human labels the screen needs are
+    added to the LIST payload only: a JSONL line gaining two keys would change
+    a file someone else already parses."""
+    from proxploy.api.audit import EXPORT_COLUMNS
+
+    app, c = _app_with_events(tmp_path, csrf_header, bootstrap_admin)
+    with c:
+        reader = csv.DictReader(io.StringIO(c.get("/api/v1/audit/export").text))
+        assert tuple(reader.fieldnames) == EXPORT_COLUMNS
+        line = json.loads(c.get("/api/v1/audit/export",
+                                params={"format": "jsonl"}).text.strip().split("\n")[0])
+        assert set(line) == set(EXPORT_COLUMNS)
+
+
 def test_export_is_not_paginated(tmp_path, csrf_header, bootstrap_admin):
     """An export that stops at page one is a trap."""
     from fastapi.testclient import TestClient

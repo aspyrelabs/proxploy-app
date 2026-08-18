@@ -408,6 +408,28 @@ the query plan rather than a timing.
 
 ---
 
+## 12. The audit log can now be cleared from the product
+
+Doc 08 §7 used to promise "no delete path in the API or UI". `DELETE /audit`
+breaks that promise on purpose, because the alternative operators had was
+`sqlite3` against the app's own database, which is worse in every direction:
+unrecorded, unbounded, and one typo from taking other tables with it. The
+capability is real, so it is gated rather than hidden: owner only
+(`("audit", "clear")`, the same floor as `host.remove`), a typed confirmation
+of `clear audit log`, and one `audit.clear` row written *after* the delete
+naming who did it, how many rows went, and whether the scope was everything or
+everything older than a given instant. A refused attempt is recorded too.
+
+Residual risk, stated plainly: an owner can erase the trail and the only thing
+left behind is a single row saying they did. That is evidence, not prevention,
+and it is the same posture as row 12 of doc 08's threat model. Anyone who needs
+tamper evidence has to ship the export off-box, which is unchanged advice.
+Archival-based retention (doc 08 §7) is still unbuilt, so `before` deletes
+rather than archives; the "Usage cleanup" system schedule prunes metrics only
+and has never touched `audit_events`.
+
+---
+
 ## Open at the end of 2026-08-15
 
 Not risks so much as the shortlist a fresh session should start from.
@@ -1005,6 +1027,7 @@ any suite could have caught. What that run leaves open:
 | 9 | Master-key loss | Medium | High | Backup guidance, rotation, recovery runbook |
 | 10 | Self-update failure | Medium | High | Snapshot + switch-over + rollback; manual path always works |
 | 11 | Backups list cap hides an older datastore's host id | Low | Low | Accepted; nullable already, degrades to null not to a wrong host |
+| 12 | An owner can clear the audit log | Low | High | Owner-only + typed confirmation + the clear is itself audited; evidence, not prevention |
 
 Open decisions carried: admin-approval policy for installs (1), delta
 pre-copy migration (2), agent timing (3), Postgres recommendation threshold

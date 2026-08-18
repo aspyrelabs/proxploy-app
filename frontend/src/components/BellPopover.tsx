@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { Icon } from './ui/icon'
 import { useJobs } from '../api/jobs'
+import { useFiringAlerts } from '../api/alerts'
+import { alertToastSeverity } from '../api/live'
 import type { JobRow } from '../api/jobs'
 import { actionLabel, ago } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
@@ -282,6 +284,7 @@ export function BellPopover() {
   // Always enabled, not only while open: the badge counts what the tray holds,
   // and it cannot know that if the list is only fetched on opening.
   const jobsQuery = useJobs()
+  const firingAlerts = useFiringAlerts()
 
   // Server-side memory of what THIS user already cleared, so a clear
   // survives a reload, a reboot, and a login from a different browser (the
@@ -308,10 +311,28 @@ export function BellPopover() {
     timestamp: new Date(j.created_at).getTime(),
   })
 
+  // Firing alerts, from the server rather than only from SSE. A host the poller
+  // cannot reach and a cluster that has lost quorum both raise one (both have
+  // seeded rules), and until this was here they reached the tray only if the tab
+  // happened to be open when the event fired, and vanished on reload. The
+  // severity mapping is `alertToastSeverity`, the same one LiveProvider uses, so
+  // one alert cannot look different before and after a refresh.
+  const alertItems: TrayItem[] = (firingAlerts.data ?? []).map((a) => ({
+    // Prefixed `alert:<id>` so notificationMerge can drop the SSE copy of the
+    // same alert; the shape matches notificationStore's own ids.
+    id: `alert:${a.id}`,
+    severity: alertToastSeverity('err', a.severity),
+    title: a.rule_name ?? 'Alert',
+    description: a.message ?? undefined,
+    footer: a.target_label ?? undefined,
+    timestamp: a.fired_at ? new Date(a.fired_at).getTime() : Date.now(),
+  }))
+
   // A job delivered once over SSE (LiveProvider pushes it into the store the
   // instant it lands) and again the next time GET /jobs is polled must
   // render once, not twice; see notificationMerge.ts.
-  const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem)
+  const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem,
+                                    alertItems)
   const undismissed = merged.filter((m) => !dismissed.has(m.id)
     && !(m.jobId != null && isPersistedDismissed(dismissedQuery.data, m.jobId)))
   // Fail open on the LIST, hold on the FILTER. isPersistedDismissed answers

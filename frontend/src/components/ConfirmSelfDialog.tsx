@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-dialog'
 
@@ -11,7 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-di
  * behaviour; what counts as a correct phrase, and the fact that the confirm
  * control stays disabled until it matches, is product logic.
  */
-export function ConfirmSelfDialog({ phrase, detail, title, onConfirm, onCancel }: {
+export function ConfirmSelfDialog({ phrase, detail, title, children, onConfirm, onCancel }: {
   phrase: string
   detail: string
   /** Defaults to the self-CT heading. Phase 6's network apply and in-place
@@ -19,6 +19,11 @@ export function ConfirmSelfDialog({ phrase, detail, title, onConfirm, onCancel }
    *  and a false heading above the most destructive button in the product is
    *  worse than a prop. */
   title?: string
+  /** Rendered above the typed field, for the one caller that needs the operator
+   *  to choose HOW MUCH as well as confirm: the audit log clear takes an
+   *  "older than" cutoff. It belongs inside this dialog rather than beside the
+   *  table's own date filters, where it would read as a fifth filter. */
+  children?: ReactNode
   onConfirm: (typed: string) => void
   onCancel: () => void
 }) {
@@ -36,6 +41,7 @@ export function ConfirmSelfDialog({ phrase, detail, title, onConfirm, onCancel }
       // safe, not the focus order.
       onOpenAutoFocus={(event) => { event.preventDefault(); input.current?.focus() }}
     >
+      {children}
       <label className="mt-4 block text-[12px] text-text-3" htmlFor="self-confirm">
         Type <span className="font-mono text-text">{phrase}</span> to confirm
       </label>

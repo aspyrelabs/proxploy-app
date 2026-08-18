@@ -103,6 +103,49 @@ def render_message(rule_name: str, label: str, metric: str, operator: str,
     return f"Resolved: {body}" if state == "resolved" else body
 
 
+# The two conditions an operator should never have to configure to be told
+# about, because both mean "Proxploy cannot do its job on this host" and neither
+# moves any other metric: a host the poller cannot reach at all, and a cluster
+# that answers every read and refuses every write (doc 12 check 12).
+#
+# `operator`/`threshold` are required columns and meaningless for a status
+# metric, which is why the API's own validator skips them here; the values below
+# are the inert defaults the create route uses for the same reason.
+DEFAULT_RULES: tuple[dict, ...] = (
+    {"name": "Host unreachable", "metric": "host_offline", "severity": "critical",
+     # Five minutes, so a PVE restart or a brief network blip is not an incident.
+     # _status_state reads Host.last_seen_at to honour this.
+     "duration_s": 300},
+    {"name": "Cluster lost quorum", "metric": "quorum_lost", "severity": "critical",
+     # No duration: nothing records WHEN quorum was lost, so a duration here
+     # could not be honoured and pretending otherwise would be worse than
+     # firing immediately. Quorum loss is also not a blip on a two-node cluster
+     # with `two_node` set, which is the shape that flaps most.
+     "duration_s": 0},
+)
+
+
+def seed_default_alert_rules(db) -> int:
+    """Create the default rules on a genuinely fresh install. Returns how many.
+
+    Seeded ONLY when no rule exists at all, which makes this one-way in the same
+    sense `seed_system_schedules` is: a rule the operator deleted stays deleted,
+    and "I do not want to be told about unreachable hosts" remains expressible.
+
+    Without this, `alerts` fired for nothing on a new install: both conditions
+    were available as metrics and neither had a rule, so a dead host produced a
+    red sidebar footer and no notification anywhere (and nothing at all for
+    anyone not looking at that corner of the screen).
+    """
+    if db.query(AlertRule.id).first() is not None:
+        return 0
+    for spec in DEFAULT_RULES:
+        db.add(AlertRule(target_type="any", target_id=None, operator="gt",
+                         threshold=0.0, channel_ids=[], enabled=True, **spec))
+    db.commit()
+    return len(DEFAULT_RULES)
+
+
 def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
     """Concrete `(target_type, target_id, label)` triples this rule covers.
 

@@ -1,9 +1,13 @@
 import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
-import { AUDIT_PER_PAGE, auditExportUrl, useAuditLog } from '../api/audit'
-import type { AuditFilters } from '../api/audit'
+import { AUDIT_PER_PAGE, CLEAR_PHRASE, auditExportUrl, clearAuditLog, useAuditLog } from '../api/audit'
+import type { AuditFilters, AuditRow } from '../api/audit'
+import { apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { useUsers } from '../api/teams'
+import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
 import { inputCls } from '../components/LoginForm'
 import { LockVeil } from '../components/LockVeil'
 import { actionLabel, statusLabel } from '../lib/activityDisplay'
@@ -14,6 +18,32 @@ import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'text-[10.5px] uppercase tracking-wide text-text-3'
 const label = 'mb-1 block text-[10.5px] uppercase tracking-wide text-text-3'
+
+/** The raw shape the User and Item columns fall back to: "host #2". Ugly on
+ *  purpose, and never blank: it is what is left when the thing a row is about
+ *  has been deleted, and the removal is usually the row someone came to read. */
+const rawRef = (kind: string | null, id: number | null) =>
+  kind == null ? '' : id == null ? kind : `${kind} #${id}`
+
+/** Who did it. A person's name where a person did it, and the truth otherwise:
+ *  a schedule tick writes actor_type "system" with no id at all, and an API
+ *  call writes the key's id, so calling either one a person would be a false
+ *  attribution on the one screen that gets read after an incident. */
+function actorName(r: AuditRow): string {
+  if (r.actor_type === 'system') return 'System'
+  if (!r.actor_label) return rawRef(r.actor_type, r.actor_id)
+  return r.actor_type === 'user' ? r.actor_label : `${r.actor_label} (API key)`
+}
+
+/** Performed-by option values. A user id is a bare number so it goes straight
+ *  into the `actor` param; the two non-person choices are prefixed because they
+ *  set `actor_type` instead, and one select cannot send two shapes of value
+ *  without saying which is which. */
+const PERFORMED_BY = [
+  { value: '', text: 'Anyone' },
+  { value: 'type:system', text: 'System (Proxploy itself)' },
+  { value: 'type:api_key', text: 'Any API key' },
+]
 
 export function AuditPage() {
   const ent = useEntitlements()
@@ -26,11 +56,52 @@ export function AuditPage() {
   const [filters, setFilters] = useState<AuditFilters>({})
   const [page, setPage] = useState(1)
   const audit = useAuditLog(filters, page, allowed)
+  // GET /users needs ("user", "read"), which is the same admin floor as
+  // ("audit", "read"), so anyone who can see this page can fill the select.
+  const users = useUsers(allowed)
 
   const setFilter = (k: keyof AuditFilters, v: string) => {
     setPage(1)
     setFilters((f) => ({ ...f, [k]: v || undefined }))
   }
+
+  // One control, two params: a user id narrows `actor`, the non-person choices
+  // narrow `actor_type`. Both are cleared on every change so the two can never
+  // be sent together and silently intersect to nothing.
+  const setPerformedBy = (v: string) => {
+    setPage(1)
+    setFilters((f) => ({
+      ...f,
+      actor: v && !v.startsWith('type:') ? v : undefined,
+      actor_type: v.startsWith('type:') ? v.slice('type:'.length) : undefined,
+    }))
+  }
+
+  // Clearing the log. Owner-only and typed-confirmed at the backend
+  // (api/audit.py::clear_audit); this side offers the gate, never a way past
+  // it, and reports back what the server said it did.
+  const qc = useQueryClient()
+  const [clearOpen, setClearOpen] = useState(false)
+  const [clearBefore, setClearBefore] = useState('')
+  const [clearNote, setClearNote] = useState('')
+  const clear = useMutation({
+    mutationFn: clearAuditLog,
+    onSuccess: (r) => {
+      setClearOpen(false)
+      setPage(1)
+      qc.invalidateQueries({ queryKey: ['audit'] })
+      setClearNote(`Cleared ${r.deleted} ${r.deleted === 1 ? 'entry' : 'entries'}`
+        + `${r.before ? ' older than ' + new Date(r.before).toLocaleString() : ''}.`
+        + ' The clear itself is recorded in the log.')
+    },
+    // The backend's own sentence, not a guess at it: a 403 here means the
+    // role is admin and not owner, and saying "try again" to that would be
+    // a lie.
+    onError: (e) => {
+      setClearOpen(false)
+      setClearNote(apiErrorDetail(e, 'Could not clear the audit log, try again.'))
+    },
+  })
 
   // A real navigation, not api(): the export is a file download
   // (Content-Disposition), and api()'s JSON wrapper would just throw the
@@ -51,14 +122,28 @@ export function AuditPage() {
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label htmlFor="audit-action" className={label}>Action</label>
-                <input id="audit-action" className={inputCls} placeholder="host.remove"
-                  value={filters.action ?? ''} onChange={(e) => setFilter('action', e.target.value)} />
+                <label htmlFor="audit-search" className={label}>Item or action</label>
+                {/* One box for both halves: the backend matches it against the
+                    stored action or against the item's name (audit.py::
+                    _search_clause), so "pve-lab-01" and "remove" both find
+                    something. */}
+                <input id="audit-search" className={inputCls} placeholder="pve-lab-01 or host.remove"
+                  value={filters.search ?? ''} onChange={(e) => setFilter('search', e.target.value)} />
               </div>
               <div>
-                <label htmlFor="audit-actor" className={label}>Actor id</label>
-                <input id="audit-actor" className={inputCls} placeholder="1"
-                  value={filters.actor ?? ''} onChange={(e) => setFilter('actor', e.target.value)} />
+                <label htmlFor="audit-actor" className={label}>Performed by</label>
+                <select id="audit-actor" className={inputCls}
+                  value={filters.actor_type ? `type:${filters.actor_type}` : (filters.actor ?? '')}
+                  onChange={(e) => setPerformedBy(e.target.value)}>
+                  {PERFORMED_BY.map((o) => (
+                    <option key={o.value} value={o.value}>{o.text}</option>
+                  ))}
+                  {(users.data ?? []).map((u) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.display_name || u.email}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label htmlFor="audit-from" className={label}>From</label>
@@ -74,8 +159,14 @@ export function AuditPage() {
             <div className="flex gap-2">
               <Button variant="ghost" onClick={() => download('csv')}>Export CSV</Button>
               <Button variant="ghost" onClick={() => download('jsonl')}>Export JSONL</Button>
+              <Button variant="danger" disabled={clear.isPending}
+                      onClick={() => { setClearNote(''); setClearOpen(true) }}>
+                Clear log…
+              </Button>
             </div>
           </div>
+
+          {clearNote && <p className="mb-4 text-[12.5px] text-text-2">{clearNote}</p>}
 
           <QueryState query={audit}
                       // The filters above stay live and the table below is
@@ -84,7 +175,7 @@ export function AuditPage() {
                       // page going away. Every re-filter and every page turn
                       // comes back through here.
                       loading={<SkeletonGroup label="Loading audit events">
-                        {/* When, Actor, Action, Target, Result, IP. */}
+                        {/* Date, User, Action, Item, Result, IP. */}
                         <SkeletonTable cols={['w-32', 'w-20', 'w-28', 'w-20', 'w-12', 'w-24']} />
                       </SkeletonGroup>}
                       emptyTitle="No audit events match."
@@ -101,17 +192,15 @@ export function AuditPage() {
               <>
                 <table className="w-full text-left text-[13px]">
                   <thead><tr className={th}>
-                    <th className="pb-2">When</th><th>Actor</th><th>Action</th>
-                    <th>Target</th><th>Result</th><th>IP</th></tr></thead>
+                    <th className="pb-2">Date</th><th>User</th><th>Action</th>
+                    <th>Item</th><th>Result</th><th>IP</th></tr></thead>
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
                         <td className="py-2 font-mono text-[11.5px] text-text-3">
                           {new Date(r.ts).toLocaleString()}
                         </td>
-                        <td className="font-mono text-text-2">
-                          {r.actor_type}{r.actor_id != null ? ` #${r.actor_id}` : ''}
-                        </td>
+                        <td className="text-text-2">{actorName(r)}</td>
                         {/* Friendly name on top, raw identifier under it: the
                             filter, the export and the API all still speak the
                             stored value, so hiding it would make this page
@@ -130,8 +219,12 @@ export function AuditPage() {
                           {actionLabel(r.action, r.result, r.job_id != null)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>
-                        <td className="font-mono text-[12px] text-text-3">
-                          {r.target_type ?? ''}{r.target_id != null ? ` #${r.target_id}` : ''}
+                        {/* The item by name where there is one, the raw
+                            `host #2` where there is not. Not blank: the label
+                            is missing exactly when the target was deleted, and
+                            that deletion is usually the row being looked for. */}
+                        <td className="text-[12px] text-text-3">
+                          {r.target_label ?? rawRef(r.target_type, r.target_id)}
                         </td>
                         {/* Green is for `ok` and nothing else. Keyed on
                             failure before ("error" only) it painted `denied`
@@ -160,6 +253,32 @@ export function AuditPage() {
           </QueryState>
         </section>
       </LockVeil>
+
+      {clearOpen && (
+        <ConfirmSelfDialog
+          title="Clear the audit log"
+          phrase={CLEAR_PHRASE}
+          detail={'This deletes audit entries for good. Proxploy records who '
+            + 'cleared the log, and how many entries went, as the first entry '
+            + 'afterwards. Leave the date empty to clear everything. Nothing '
+            + 'here follows the filters above.'}
+          onConfirm={(typed) => clear.mutate({
+            confirm: typed,
+            // Midnight local, so "older than the 31st" keeps the 31st.
+            before: clearBefore ? `${clearBefore}T00:00:00` : undefined,
+          })}
+          onCancel={() => setClearOpen(false)}
+        >
+          {/* Retention, not erasure, is the everyday reason to be here, so the
+              cutoff is offered first. A native date input: no picker library,
+              and the browser already validates it. */}
+          <label className="mt-4 block text-[12px] text-text-3" htmlFor="audit-clear-before">
+            Clear entries older than
+          </label>
+          <input id="audit-clear-before" type="date" className={`mt-1 ${inputCls}`}
+            value={clearBefore} onChange={(e) => setClearBefore(e.target.value)} />
+        </ConfirmSelfDialog>
+      )}
     </div>
   )
 }

@@ -2,14 +2,30 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 
 // Mirrors backend/proxploy/api/audit.py::row_dict.
+//
+// `actor_label` and `target_label` are the human names GET /audit joins in for
+// the User and Item columns (api/audit.py::_labels). Either is null when
+// nothing answers to that id any more, which is the whole point: a host that
+// was removed still has to list, reading "host #2".
 export type AuditRow = {
   id: number; ts: string; actor_type: string; actor_id: number | null
+  actor_label: string | null
   action: string; target_type: string | null; target_id: number | null
+  target_label: string | null
   params: Record<string, unknown> | null; result: string; ip: string | null
   job_id: number | null
 }
 
-export type AuditFilters = { action?: string; actor?: string; from_?: string; to?: string }
+export type AuditFilters = {
+  /** One box, matched against the action OR the item (substring, either half). */
+  search?: string
+  /** A user id, from the Performed by select. */
+  actor?: string
+  /** "system" or "api_key": the rows no person wrote, which an id cannot reach. */
+  actor_type?: string
+  from_?: string
+  to?: string
+}
 
 export const AUDIT_PER_PAGE = 50
 
@@ -18,8 +34,9 @@ export const AUDIT_PER_PAGE = 50
 // showing. Note the literal `from_` key (audit.py's query param, no alias).
 function filterEntries(f: AuditFilters): [string, string][] {
   const out: [string, string][] = []
-  if (f.action) out.push(['action', f.action])
+  if (f.search) out.push(['search', f.search])
   if (f.actor) out.push(['actor', f.actor])
+  if (f.actor_type) out.push(['actor_type', f.actor_type])
   if (f.from_) out.push(['from_', f.from_])
   if (f.to) out.push(['to', f.to])
   return out
@@ -42,11 +59,31 @@ export function useAuditLog(filters: AuditFilters, page: number, enabled = true)
       p.set('per_page', String(AUDIT_PER_PAGE + 1))
       return api<AuditRow[]>(`/audit?${p.toString()}`)
     },
-    // Four filter inputs feed this key, so it changes per keystroke and per
+    // The filter inputs feed this key, so it changes per keystroke and per
     // page step. Holding the previous rows keeps the table from blanking
     // between them.
     placeholderData: keepPreviousData,
     enabled,
+  })
+}
+
+/** The phrase the backend demands before it deletes anything
+ *  (api/audit.py::CLEAR_PHRASE). Hard-coded here as well because the button
+ *  has to render the gate before there is a response to read it from; the 409
+ *  reply carries the authoritative copy if the two ever diverge. */
+export const CLEAR_PHRASE = 'clear audit log'
+
+/**
+ * DELETE /audit. `before` clears only entries older than that instant, omitted
+ * clears everything, and the backend refuses either without `confirm`.
+ *
+ * Deliberately NOT given the active filters: the route only understands a
+ * cutoff, and "clear what I am looking at" is ambiguous the moment a filter is
+ * a substring match.
+ */
+export function clearAuditLog(body: { before?: string; confirm: string }) {
+  return api<{ deleted: number; before: string | null }>('/audit', {
+    method: 'DELETE', body: JSON.stringify(body),
   })
 }
 

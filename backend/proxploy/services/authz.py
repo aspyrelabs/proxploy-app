@@ -95,6 +95,13 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("metric", "read"): "viewer",
     ("audit", "read"): "admin",
     ("audit", "export"): "owner",
+    # Erasing the trail sits with host.remove and vm.remove at owner. Reusing
+    # ("audit", "export") would have avoided a row here, but authorize() writes
+    # the DENIED audit row as f"{resource}.{action}", so a refused clear would
+    # have been recorded as a refused export: the wrong sentence on the one
+    # surface this control exists to protect. The clear is itself audited, see
+    # api/audit.py::clear_audit and doc 08 §7.
+    ("audit", "clear"): "owner",
     ("settings", "read"): "admin",
     ("settings", "manage"): "admin",
     ("user", "read"): "admin",

@@ -651,7 +651,10 @@ class Backup(TimestampMixin, Base):
 # --- Audit, entitlements, settings ----------------------------------------
 
 class AuditEvent(Base):
-    """Append-only. No ORM update/delete path exists anywhere in the app (doc 04)."""
+    """Append-only, with one deliberate exception. No ORM update path exists
+    anywhere in the app (doc 04), and the only delete is api/audit.py::
+    clear_audit: owner-only, typed-confirmed, and it writes its own audit.clear
+    row AFTER the delete so the erasure has an author (doc 08 §7)."""
     __tablename__ = "audit_events"
     id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
