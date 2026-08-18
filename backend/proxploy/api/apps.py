@@ -547,6 +547,9 @@ def app_network_update(request: Request, app_id: int, iface: str, body: NicIn,
 
 class MigratePreflightIn(BaseModel):
     target_host_id: int
+    # So the dialog can preview the operator's chosen pool, including its
+    # capacity, before committing to it.
+    storage: str | None = None
 
 
 # Above the lifecycle wildcard (WARNING further down): this is a 3-segment
@@ -573,7 +576,8 @@ def migrate_preflight(request: Request, app_id: int, body: MigratePreflightIn,
         raise HTTPException(409, "target host is unknown, is the app's current "
                                  "host, or is not connected")
     try:
-        return migrate_service.preflight(request.app, db, a, body.target_host_id)
+        return migrate_service.preflight(request.app, db, a, body.target_host_id,
+                                         body.storage)
     except ProxmoxError as e:
         raise HTTPException(502, str(e))
 
@@ -581,6 +585,11 @@ def migrate_preflight(request: Request, app_id: int, body: MigratePreflightIn,
 class MigrateIn(BaseModel):
     target_host_id: int
     confirm: str | None = None
+    # Where the guest's disk should land on the target. None takes preflight's
+    # default (the first pool that can hold a rootfs), which is every migration
+    # before this existed. A name that cannot hold one is a preflight blocker,
+    # never a silent swap.
+    storage: str | None = None
 
 
 # Above the lifecycle wildcard, same reasoning as /migrate/preflight above; 
@@ -607,7 +616,8 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
         raise HTTPException(409, "target host is unknown, is the app's current "
                                  "host, or is not connected")
     try:
-        pf = migrate_service.preflight(request.app, db, a, body.target_host_id)
+        pf = migrate_service.preflight(request.app, db, a, body.target_host_id,
+                                       body.storage)
     except ProxmoxError as e:
         raise HTTPException(502, str(e))
     if pf["blockers"]:
@@ -644,7 +654,8 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
     result = enqueue_and_audit(request, db, user, kind="migrate.app",
                                target_type="app", target_id=app_id,
                                params={"app_id": app_id,
-                                       "target_host_id": body.target_host_id},
+                                       "target_host_id": body.target_host_id,
+                                       "storage": body.storage},
                                action="app.migrate")
     return {**result, "preflight": pf}
 

@@ -21,6 +21,9 @@ export type Preflight = {
    *  room while the pool the disk needed was full. */
   rootfs_storage?: string | null
   staging_storage?: string | null
+  /** Every pool on the target that could hold the disk, so the dialog can offer
+   *  the choice without a second round trip. */
+  rootfs_options?: string[]
   /** null when neither a measured backup nor a live disk size exists, never fabricated. */
   transfer_bytes: number | null
   estimate_basis: 'last_backup' | 'allocated_disk' | null
@@ -36,25 +39,34 @@ export type Preflight = {
 }
 
 export function usePreflight() {
-  return useMutation<Preflight, ApiError, { appId: number; targetHostId: number }>({
-    mutationFn: ({ appId, targetHostId }) =>
+  return useMutation<Preflight, ApiError,
+                     { appId: number; targetHostId: number; storage?: string | null }>({
+    // `storage` previews the operator's chosen rootfs pool, including its
+    // capacity, before anything is committed. Omitted means "the default", which
+    // is what every preflight sent before the field existed.
+    mutationFn: ({ appId, targetHostId, storage }) =>
       api<Preflight>(`/apps/${appId}/migrate/preflight`, {
         method: 'POST',
-        body: JSON.stringify({ target_host_id: targetHostId }),
+        body: JSON.stringify({ target_host_id: targetHostId,
+                               ...(storage ? { storage } : {}) }),
       }),
   })
 }
 
-export type MigrateVars = { appId: number; targetHostId: number; confirm?: string }
+export type MigrateVars = { appId: number; targetHostId: number; confirm?: string
+                            storage?: string | null }
 
 export function useMigrate() {
   const qc = useQueryClient()
   return useMutation<{ job: JobRow; preflight: Preflight }, ApiError, MigrateVars>({
-    mutationFn: ({ appId, targetHostId, confirm }) =>
+    mutationFn: ({ appId, targetHostId, confirm, storage }) =>
       api(`/apps/${appId}/migrate`, {
         method: 'POST',
-        body: JSON.stringify(
-          confirm ? { target_host_id: targetHostId, confirm } : { target_host_id: targetHostId }),
+        body: JSON.stringify({
+          target_host_id: targetHostId,
+          ...(confirm ? { confirm } : {}),
+          ...(storage ? { storage } : {}),
+        }),
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })

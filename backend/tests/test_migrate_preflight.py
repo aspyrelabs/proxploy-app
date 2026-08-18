@@ -486,3 +486,52 @@ def test_capacity_checks_the_pool_the_DISK_lands_on_not_only_the_archive_pool(
     assert body["capacity_ok"] is False, (
         "reported room because the archive fits, while the disk does not")
     assert any("free space" in w for w in body["warnings"])
+
+
+def test_a_chosen_rootfs_pool_is_honoured_and_a_bad_one_is_named(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The pick was "first active pool carrying rootdir" and nothing else, so a
+    guest whose source disk was on local-lvm could land on NFS with no way to say
+    otherwise (doc 12 check 7). The choice is now the operator's, and a name that
+    cannot hold a rootfs is reported rather than silently swapped.
+    """
+    from tests.fakes.pve import FakePVE
+
+    a, b = FakePVE(), FakePVE()
+    for fake in (a, b):
+        fake.cluster_storage_rows = [{"storage": "local", "type": "dir",
+                                      "content": "backup,iso", "path": "/var/lib/vz"}]
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "active": 1, "avail": 10 * 1024 ** 4},
+            {"storage": "fast-lvm", "type": "lvmthin", "content": "rootdir",
+             "active": 1, "avail": 10 * 1024 ** 4},
+            {"storage": "bulk-nfs", "type": "nfs", "content": "rootdir,backup",
+             "active": 1, "avail": 10 * 1024 ** 4},
+        ]}
+    a.add_ct(150, node="pve-src", maxdisk=1_000_000)
+
+    app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        _src, tgt_id, app_id = _seed(app)
+
+        default = _preflight(client, csrf_header, app_id, tgt_id).json()
+        # Alphabetical first, which is exactly the arbitrariness this replaces.
+        assert default["rootfs_storage"] == "bulk-nfs"
+        assert default["rootfs_options"] == ["bulk-nfs", "fast-lvm"]
+
+        chosen = client.post(f"/api/v1/apps/{app_id}/migrate/preflight",
+                             json={"target_host_id": tgt_id, "storage": "fast-lvm"},
+                             headers=csrf_header(client)).json()
+        assert chosen["rootfs_storage"] == "fast-lvm"
+        assert chosen["blockers"] == []
+
+        bad = client.post(f"/api/v1/apps/{app_id}/migrate/preflight",
+                          json={"target_host_id": tgt_id, "storage": "local"},
+                          headers=csrf_header(client)).json()
+        # `local` is real, and carries backups, but cannot hold a rootfs.
+        assert bad["rootfs_storage"] is None
+        assert any("cannot hold a container rootfs" in b for b in bad["blockers"])
+        assert any("fast-lvm" in b for b in bad["blockers"]), "did not say what to pick"

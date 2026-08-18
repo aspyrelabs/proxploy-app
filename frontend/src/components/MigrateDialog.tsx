@@ -69,20 +69,34 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
   })
   const measuredDowntime = job.data?.result?.downtime_s as number | undefined
 
-  const runPreflight = (hostId: number) => {
+  // The rootfs pool the operator picked. Null means "whatever preflight
+  // defaults to", which is every migration before this choice existed; the
+  // default is the first candidate and was previously the ONLY outcome, so a
+  // guest could land on NFS when its source disk was on local-lvm.
+  const [storage, setStorage] = useState<string | null>(null)
+
+  const runPreflight = (hostId: number, pick: string | null = null) => {
     setTargetHostId(hostId)
     setPf(null)
     setError('')
-    preflight.mutate({ appId: app.id, targetHostId: hostId }, {
+    preflight.mutate({ appId: app.id, targetHostId: hostId, storage: pick }, {
       onSuccess: (r) => setPf(r),
       onError: (e) => setError(String(errBody(e)?.detail ?? 'Could not run preflight, try again.')),
     })
   }
 
+  // Re-previews on the new pool: capacity is per pool, so the answer above the
+  // button has to be about the pool that is actually selected.
+  const pickStorage = (name: string) => {
+    const pick = name || null
+    setStorage(pick)
+    if (targetHostId != null) runPreflight(targetHostId, pick)
+  }
+
   const fire = (confirm?: string) => {
     if (targetHostId == null) return
     setError('')
-    migrate.mutate({ appId: app.id, targetHostId, confirm }, {
+    migrate.mutate({ appId: app.id, targetHostId, confirm, storage }, {
       onSuccess: (r) => { setGuard(null); setJobId(r.job.id); setProgress(r.job.progress_pct ?? null) },
       onError: (e) => {
         const b = errBody(e)
@@ -174,17 +188,22 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                   est. downtime: {pf.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
                 </div>
                 <div className="text-text-3">{pf.downtime_statement}</div>
-                {pf.rootfs_storage && (
-                  <div>
-                    lands on:{' '}
-                    <span className="font-mono text-[11.5px] text-text">
-                      {pf.rootfs_storage}
-                    </span>
+                {(pf.rootfs_options?.length ?? 0) > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="migrate-storage">lands on:</label>
+                    <select id="migrate-storage" value={storage ?? pf.rootfs_storage ?? ''}
+                      onChange={(e) => pickStorage(e.target.value)}
+                      className="rounded-ctl border border-line bg-panel px-2 py-1
+                                 font-mono text-[11.5px] text-text">
+                      {pf.rootfs_options?.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                     {pf.staging_storage && pf.staging_storage !== pf.rootfs_storage && (
-                      <>
-                        {' '}(staged via{' '}
-                        <span className="font-mono text-[11.5px]">{pf.staging_storage}</span>)
-                      </>
+                      <span>
+                        staged via{' '}
+                        <span className="font-mono text-[11.5px]">{pf.staging_storage}</span>
+                      </span>
                     )}
                   </div>
                 )}

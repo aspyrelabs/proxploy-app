@@ -241,7 +241,27 @@ def _capacity_ok(tgt_client, target_node: str, storage_name: str | None,
     return None
 
 
-def preflight(app, db, app_row, target_host_id: int) -> dict:
+def rootfs_candidates(client, node: str) -> list[str]:
+    """Every active storage on `node` that can hold a container rootfs.
+
+    `storage_for_content` answers "the first one", which is what the restore
+    needs a default for; this is the whole set, so preflight can offer the
+    choice and the route can refuse a name that is not in it. Same read, same
+    `active` rule.
+    """
+    out = []
+    for row in client.storages(node):
+        if not row.get("active", 1):
+            continue
+        content = row.get("content") or ""
+        parts = content if isinstance(content, list) else content.split(",")
+        if "rootdir" in [str(p).strip() for p in parts] and row.get("storage"):
+            out.append(str(row["storage"]))
+    return sorted(out)
+
+
+def preflight(app, db, app_row, target_host_id: int,
+              chosen_storage: str | None = None) -> dict:
     """Blocking, called in-request, like api/hosts.py::test_host's own probe.
 
     `app_row` and `target_host_id` are assumed already validated by the route
@@ -332,12 +352,27 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
     # only that one could read `capacity_ok: true` while the pool the disk
     # actually needs is full (doc 12 check 7). Named here so an operator sees it
     # before committing, and so the job restores where the preview said it would.
-    rootfs_storage = (None if strategy == STRATEGY_CLUSTER else
-                      storage_for_content(tgt_client, target_host.node_name,
-                                          "rootdir"))
-    if strategy != STRATEGY_CLUSTER and rootfs_storage is None:
-        blockers.append(f"no storage on {target_host.name} accepts container "
-                        f"rootfs")
+    rootfs_options = ([] if strategy == STRATEGY_CLUSTER else
+                      rootfs_candidates(tgt_client, target_host.node_name))
+    # The operator's pick wins when it is one of the real candidates; otherwise
+    # the first candidate is the default. An unusable name is reported rather
+    # than quietly swapped, because silently migrating a guest onto a pool
+    # nobody chose is how it ended up on NFS when its source was local-lvm.
+    rootfs_storage = None
+    if strategy != STRATEGY_CLUSTER:
+        if chosen_storage:
+            if chosen_storage in rootfs_options:
+                rootfs_storage = chosen_storage
+            else:
+                blockers.append(
+                    f"{chosen_storage!r} cannot hold a container rootfs on "
+                    f"{target_host.name}" + (f"; choose one of "
+                    f"{', '.join(rootfs_options)}" if rootfs_options else ""))
+        else:
+            rootfs_storage = next(iter(rootfs_options), None)
+        if rootfs_storage is None and not blockers:
+            blockers.append(f"no storage on {target_host.name} accepts container "
+                            f"rootfs")
 
     if strategy == STRATEGY_CLUSTER:
         capacity_ok = True
@@ -365,6 +400,9 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
         # the archive is staged in. Both named so the preview is checkable
         # against the result rather than being an unexplained number.
         "rootfs_storage": rootfs_storage,
+        # Every pool the disk COULD land on, so the dialog can offer the choice
+        # without a second round trip and the route can refuse a name outside it.
+        "rootfs_options": rootfs_options,
         "staging_storage": capacity_storage if strategy == STRATEGY_TRANSFER else None,
         "transfer_bytes": transfer_bytes,
         "estimate_basis": estimate_basis,
@@ -407,7 +445,8 @@ TRANSFER_RESTORE_PCT = (80, 90)
 START_PCT = (90, 100)
 
 
-def _load(app, app_id: int, target_host_id: int) -> dict:
+def _load(app, app_id: int, target_host_id: int,
+          chosen_storage: str | None = None) -> dict:
     """Blocking: fresh in-handler preflight (never the route's stale one) +
     every client the chosen strategy needs, in one db session. Returns only
     plain values/client objects, no ORM instance escapes the closed session.
@@ -436,7 +475,7 @@ def _load(app, app_id: int, target_host_id: int) -> dict:
             raise JobFailed(f"app {app_id} not found")
         app_name = app_row.name
         try:
-            pf = preflight(app, db, app_row, target_host_id)
+            pf = preflight(app, db, app_row, target_host_id, chosen_storage)
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
         if pf["blockers"]:
@@ -559,7 +598,11 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     app_id = int(params["app_id"])
     target_host_id = int(params["target_host_id"])
 
-    loaded = await asyncio.to_thread(_load, app, app_id, target_host_id)
+    # The pool the operator picked, carried through so the job restores where the
+    # dialog said it would rather than re-guessing. None means "use the default",
+    # which is what every migration before this parameter existed sent.
+    loaded = await asyncio.to_thread(_load, app, app_id, target_host_id,
+                                     params.get("storage"))
     pf = loaded["pf"]
     src_client, tgt_client = loaded["src_client"], loaded["tgt_client"]
     src_mon_client, tgt_mon_client = loaded["src_mon_client"], loaded["tgt_mon_client"]

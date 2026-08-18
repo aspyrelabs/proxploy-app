@@ -796,11 +796,25 @@ any suite could have caught. What that run leaves open:
    own preflight, so the pool named in the preview is the pool the restore uses,
    and the dialog shows "lands on X (staged via Y)".
 
-   **Still open: the pick itself, and any way to override it.** It is the first
-   active pool carrying `rootdir`, so a guest whose source rootfs was `local-lvm`
-   can land on NFS, and nothing preserves the storage class. Preflight reporting
-   where it will go makes that visible rather than surprising, but choosing still
-   means a `storage` field on the migrate call and a select in the dialog.
+   **The pick is now the operator's, 2026-08-18.** `rootfs_candidates` returns
+   every active pool on the target that can hold a rootfs, preflight reports the
+   set as `rootfs_options` alongside the chosen `rootfs_storage`, and both the
+   preflight and migrate routes take a `storage` field. A name that cannot hold a
+   rootfs is a blocker naming the real options, never a silent swap onto
+   something else. The dialog is a select that re-previews on change, because
+   capacity is per pool and the number above the button has to be about the pool
+   actually selected. Omitting the field keeps the old behaviour exactly.
+
+   **The hardware run supplied better evidence than the tests did.** Asked about
+   the same cluster, `node1` and `node2` both offer `['local-lvm',
+   'nfs-shared']` and both correctly exclude `local` (backups and templates, no
+   `rootdir`), but the DEFAULT differs per node, `nfs-shared` on one and
+   `local-lvm` on the other, purely because PVE returns the rows in a different
+   order. Same code, same cluster, two different destinations depending on which
+   node was asked. That is precisely the arbitrariness this closes, and it is
+   also why the default is still first-match rather than "preserve the source's
+   storage class": matching class across two hosts that need not share pool names
+   is a guess, where naming the choice is not.
 
    Verified on hardware only for the cluster strategy, where both fields are
    correctly null because no restore happens. The transfer path's pool naming was

@@ -120,7 +120,11 @@ def test_migrate_enqueues_a_migrate_app_job_and_returns_preflight(tmp_path, csrf
             job = db.get(Job, body["job"]["id"])
             assert job is not None
             assert job.kind == "migrate.app"
-            assert job.params == {"app_id": app_id, "target_host_id": tgt_id}
+            # `storage` is the operator's chosen rootfs pool, None when they did
+            # not choose: the handler then takes preflight's own default, which
+            # is what every migration sent before the parameter existed.
+            assert job.params == {"app_id": app_id, "target_host_id": tgt_id,
+                                  "storage": None}
 
 
 # --- blockers refuse before a job is ever enqueued -----------------------------

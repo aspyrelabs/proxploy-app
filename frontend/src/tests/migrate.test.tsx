@@ -29,6 +29,7 @@ const PREFLIGHT_OK: Preflight = {
   // Two different pools on a stock layout: the archive is staged on a dir
   // backup store, the disk lands on one carrying rootdir.
   rootfs_storage: 'local-lvm',
+  rootfs_options: ['bulk-nfs', 'local-lvm'],
   staging_storage: 'local',
   transfer_bytes: 2_147_483_648, // 2 GiB
   estimate_basis: 'last_backup',
@@ -235,13 +236,24 @@ describe('MigrateDialog', () => {
 })
 
 describe('MigrateDialog names where the disk lands', () => {
-  it('shows the rootfs pool and the staging pool separately', async () => {
+  it('offers the target pools and names the staging one separately', async () => {
     // capacity_ok used to be measured on the staging pool alone, so it could
-    // read OK while the pool the disk needed was full (doc 12 check 7). Naming
-    // both is what makes that number checkable.
+    // read OK while the pool the disk needed was full, and the pool itself was
+    // "first match" with no way to choose (doc 12 check 7).
     await openWithTarget()
-    expect(screen.getByText('local-lvm')).toBeInTheDocument()
-    expect(screen.getByText('local')).toBeInTheDocument()
-    expect(screen.getByText(/lands on/i)).toBeInTheDocument()
+    const select = screen.getByLabelText(/lands on/i) as HTMLSelectElement
+    expect(select.value).toBe('local-lvm')
+    expect([...select.options].map((o) => o.value)).toEqual(['bulk-nfs', 'local-lvm'])
+    expect(screen.getByText(/staged via/i)).toBeInTheDocument()
+  })
+
+  it('re-previews on the chosen pool, because capacity is per pool', async () => {
+    await openWithTarget()
+    calls.length = 0
+    fireEvent.change(screen.getByLabelText(/lands on/i), { target: { value: 'bulk-nfs' } })
+    // The mock already parses the body for us.
+    await waitFor(() => expect(calls.some((c) =>
+      c.path.endsWith('/migrate/preflight')
+      && c.body?.storage === 'bulk-nfs')).toBe(true))
   })
 })
