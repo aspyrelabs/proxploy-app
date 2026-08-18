@@ -119,10 +119,33 @@ def test_bearer_post_needs_no_csrf_header(app_client, csrf_header):
     app, c = app_client
     raw = _create_key(c, csrf_header).json()["key"]
     c.cookies.clear()
-    # no X-CSRF-Token at all: middleware.py exempts any Authorization header
+    # no X-CSRF-Token at all: middleware.py exempts the API-key scheme
     r = c.post("/api/v1/api-keys", json={"name": "second"},
               headers={"Authorization": f"Bearer {raw}"})
     assert r.status_code == 201
+
+
+@pytest.mark.parametrize("header", [
+    "Basic YWRtaW46YWRtaW4=",       # a stale same-origin credential the browser still sends
+    "Bearer not-a-proxploy-key",    # right scheme, not our token shape
+    "bearer ppk_wrong_case",        # deps.py's Bearer match is case-sensitive; so is ours
+])
+def test_csrf_exemption_needs_the_api_key_scheme_not_just_any_authorization(
+        app_client, csrf_header, header):
+    """PXP-34: the exemption used to be `"authorization" not in headers`, so
+    ANY Authorization header bought a full CSRF bypass on every mutating
+    route. A cross-site page cannot make a browser attach `Bearer ppk_...`,
+    but it can ride along on a Basic credential the user once entered for the
+    same origin. Each header below must now be refused by CSRF (403), never
+    reach the route, and never come back as a 401 from authentication --
+    a 401 would mean the middleware let it through.
+    """
+    app, c = app_client
+    c.cookies.clear()
+    r = c.post("/api/v1/api-keys", json={"name": "nope"},
+               headers={"Authorization": header})
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "CSRF token missing or invalid"
 
 
 def test_revoked_key_is_401(app_client, csrf_header):

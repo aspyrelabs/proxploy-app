@@ -7,8 +7,22 @@ from starlette.responses import JSONResponse
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+# Byte-for-byte what api/deps.py::current_user accepts, so a header that
+# skips CSRF here cannot then fail to authenticate there, or the reverse.
+API_KEY_SCHEME = "Bearer ppk_"
+
+
 class CSRFMiddleware(BaseHTTPMiddleware):
-    """Double-submit CSRF (doc 08 §5). API-key (Authorization header) clients are exempt."""
+    """Double-submit CSRF (doc 08 §5). API-key clients are exempt.
+
+    The exemption is keyed on the API-key scheme, not on the mere presence of
+    an Authorization header. A browser can be made to send an Authorization
+    header it did not choose the value of (a stale `Basic` credential the user
+    once entered for the same origin, an extension, a proxy), and any such
+    header used to buy a full CSRF bypass on every mutating route. Only
+    `Bearer ppk_...` does now, which is a value a cross-site page cannot make
+    the browser attach on its own.
+    """
 
     def __init__(self, app, cookie_name: str = "pp_csrf", secure: bool = False):
         super().__init__(app)
@@ -16,8 +30,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         self.secure = secure
 
     async def dispatch(self, request, call_next):
+        auth = request.headers.get("authorization", "")
         if (request.url.path.startswith("/api/") and request.method in MUTATING
-                and "authorization" not in request.headers):
+                and not auth.startswith(API_KEY_SCHEME)):
             cookie = request.cookies.get(self.cookie_name, "")
             header = request.headers.get("x-csrf-token", "")
             if not cookie or not hmac.compare_digest(cookie, header):
