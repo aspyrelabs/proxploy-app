@@ -72,7 +72,17 @@ CAPABILITIES: dict[str, Capability] = {
                     # vmbr0, SDN.Use)" (doc 12 check 7). That is guest create,
                     # guest restore and every NIC edit, so it belongs to the
                     # capability that already owns VM.Config.Network.
-                    "SDN.Use"),
+                    "SDN.Use",
+                    # VM create sets `scsihw` and a `virtio` NIC model, which
+                    # PVE counts as hardware-TYPE config rather than disk or
+                    # network config, so POST /nodes/{node}/qemu refused with
+                    # "403 (/vms/100, VM.Config.HWType)" on the first real VM
+                    # create ever run from this environment (doc 12 check 17).
+                    # Isolated in both directions on PVE 9.2.10: the create
+                    # fails without it and succeeds with it. VM.Config.CDROM is
+                    # NOT needed even with an ISO attached, checked the same
+                    # way, so it is deliberately absent.
+                    "VM.Config.HWType"),
         why="Start/stop/restart, resource edits, snapshots, clone, migration, "
             "VM create/destroy, guest restore, and node-level network/storage "
             "config (bridges, storage pools, storage content)."),

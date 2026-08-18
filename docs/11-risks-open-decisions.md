@@ -796,13 +796,21 @@ any suite could have caught. What that run leaves open:
    route gates could check the capability up front the way
    `api/catalog.py::install_catalog_entry` checks for an `ssh_key`.
 
-4. **A real VM create has never run on hardware, and it now depends on a
-   privilege only a container restore proved.** `SDN.Use` was added to the
-   lifecycle role because a restore's NIC needed it; `services/guestjobs.py`
-   creates VMs with the same lifecycle client and the same bridge, so the fix
-   should cover it and nothing has checked. Every guest create in doc 12 is a
-   container (checks 4 and 5), and the VM wizard's own journey runs against a
-   fake. Cheap to close: one throwaway VM on the lab.
+4. **A real VM create was never run until today, and it was broken.** Closed
+   the same day it was written: `VM.Config.HWType` was missing from the
+   lifecycle role, so the first real `POST /nodes/{node}/qemu` from this
+   environment refused outright. `scsihw` and a `virtio` NIC model are
+   hardware-TYPE config to PVE, which `VM.Config.Disk` and `VM.Config.Network`
+   do not cover. Added, and isolated in both directions; `VM.Config.CDROM`
+   turned out NOT to be needed even with an ISO, so it stayed out. Doc 12 check
+   17 carries the detail.
+
+   What this leaves is the pattern rather than the bug: **two capability gaps in
+   one day, both found the first time a code path met real PVE, and both
+   invisible to a fake that accepts any token for any call.** Whatever is still
+   unexercised against a real token is the place to look next: VM clone, guest
+   resize, snapshot rollback, and the node-network apply routes all spend the
+   lifecycle token on calls no hardware run has made.
 
 5. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
    added to the generated script today, so an operator who ran the old script

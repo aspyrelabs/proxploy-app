@@ -893,6 +893,42 @@ message.
     real discovery document, real PKCE, and RS256 tokens verified against a real
     JWKS endpoint. Everything except a third-party implementation on the wire.
     See `docs/superpowers/plans/2026-08-05-phase-8-scale.md`.
+17. **A VM create on a real node.** Every guest create in this document is a
+    CONTAINER (checks 4 and 5), created by community-scripts over root SSH. The
+    VM wizard posts `POST /nodes/{node}/qemu` with the LIFECYCLE token instead,
+    a completely different privilege path, and its journey runs against a fake
+    that accepts any token for any call. Pass: a VM is created with a NIC on a
+    real bridge. Fail: PVE refuses, which says the lifecycle role is short a
+    privilege nothing has ever exercised.
+
+    **RUN 2026-08-18, PVE 9.2.10, AND IT FAILED, then passed after one
+    privilege was added.** The first real VM create ever attempted from this
+    environment refused with:
+
+        403 Forbidden: Permission check failed (/vms/100, VM.Config.HWType)
+        -- the API token is missing VM.Config.HWType on /vms/100. This will
+        fail until it is granted
+
+    `_create_params` sets `scsihw: virtio-scsi-single` and a `virtio` NIC model,
+    and PVE counts those as hardware-TYPE config rather than as disk or network
+    config, so `VM.Config.Disk` and `VM.Config.Network` are not enough.
+    `VM.Config.HWType` is now in the lifecycle capability.
+
+    **Isolated in both directions, which is the part worth trusting.** The
+    create fails with the privilege absent and succeeds with it present, on the
+    same role and the same call. And `VM.Config.CDROM` is NOT required even when
+    an ISO is attached: a create carrying `ide2 ... media=cdrom` succeeded
+    without it, so it is deliberately absent from the role rather than added on
+    the reasonable-sounding assumption that a cdrom device needs it. Checked
+    with a 1 MB placeholder ISO, since the create never boots the guest.
+
+    The error text is worth recording as a positive: `_permission_detail` named
+    the path AND the privilege AND what to do, which is exactly what doc 11
+    item 9's swallowed-detail fix was for. Compare check 7's restore refusal,
+    where PVE itself said only "Permission check failed" and there was nothing
+    to name.
+
+    Both throwaway VMs and the placeholder ISO were removed afterwards.
 
 ## Cluster peer enrolment
 
