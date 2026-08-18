@@ -222,7 +222,7 @@ export function AuditPage() {
                               these rows entirely, the audit log keeps them, so
                               this is the only surface that has to say which it
                               is. */}
-                          {actionLabel(r.action, r.result, r.job_id != null)}
+                          {actionLabel(r.action, r.result)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>
                         {/* The item by name where there is one, the raw

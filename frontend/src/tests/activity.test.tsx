@@ -128,10 +128,12 @@ describe('ActivityFeed', () => {
     wrap(<ActivityFeed />)
     // app.migrate carries the neutral "App Migrate", not doc 13's "Migration
     // Refused": that identifier is written for real migrations too, so the
-    // doc's label made a success read "Migration Refused Requested" and this
-    // refusal read "Blocked Migration Refused", colliding with the prefix its
-    // own rule 6 forbids colliding with. The prefix carries the refusal.
-    expect(await screen.findByText('Blocked App Migrate')).toBeInTheDocument()
+    // doc's label would make a success read as a refusal. The label is neutral
+    // and nothing is prefixed onto it, so a refused row reads by its own name
+    // and its status carries the verdict. A FAILED job still takes the verdict
+    // word, which is the one affix doc 13 rule 2 allows.
+    expect(await screen.findByText('App Migrate')).toBeInTheDocument()
+    expect(screen.queryByText(/^Blocked/)).not.toBeInTheDocument()
     expect(screen.getByText('VM Delete Failed')).toBeInTheDocument()
     expect(screen.queryByText('App Migrated')).not.toBeInTheDocument()
     expect(screen.queryByText('VM Deleted')).not.toBeInTheDocument()

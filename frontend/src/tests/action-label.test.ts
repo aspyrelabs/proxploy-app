@@ -47,23 +47,20 @@ describe('actionLabel', () => {
     expect(statusLabel('failed')).toBe('Failed')
   })
 
-  // Doc 13's structural fix: a refusal is PREFIXED, so the first word of the
-  // title says nothing happened, instead of the name of the destructive thing
-  // that did not happen.
-  it('prefixes a denied row with Blocked', () => {
-    expect(actionLabel('host.remove', 'denied')).toBe('Blocked Host Disconnect')
-    expect(actionLabel('vm.delete', 'denied')).toBe('Blocked VM Delete')
-    // Unmapped identifiers get the prefix too: it is one render rule, not a
-    // per-action map, so an action added backend-side tomorrow is covered.
-    expect(actionLabel('widget.self_destruct', 'denied')).toBe('Blocked Widget Self Destruct')
-    // A denied row carrying a job_id (there should be none: a refusal never
-    // enqueues) must still read as blocked, not as requested.
-    expect(actionLabel('app.install', 'denied', true)).toBe('Blocked App Install')
+  // A denied row keeps its own name. The Blocked prefix that used to go here
+  // took every label to three words, which doc 13 rule 1 forbids, and the
+  // refusal is the Result column's job: it renders `denied` in red, and that is
+  // the column a reader scans for the verdict.
+  it('leaves a denied row reading as itself', () => {
+    expect(actionLabel('host.remove', 'denied')).toBe('Host Disconnect')
+    expect(actionLabel('vm.delete', 'denied')).toBe('VM Delete')
+    expect(actionLabel('widget.self_destruct', 'denied')).toBe('Widget Self Destruct')
 
-    // One rule, not a list of special cases: no mapped label survives a
-    // non-success result unchanged, whichever action it belongs to.
+    // One rule, not a list of special cases: `denied` changes no label, and the
+    // three verdict words rule 2 allows change every one of them.
     for (const raw of Object.keys(ACTION_LABEL)) {
-      for (const bad of ['denied', 'error', 'failed', 'canceled', 'interrupted']) {
+      expect(actionLabel(raw, 'denied'), `${raw} @ denied`).toBe(ACTION_LABEL[raw])
+      for (const bad of ['error', 'failed', 'canceled', 'interrupted']) {
         expect(actionLabel(raw, bad), `${raw} @ ${bad}`).not.toBe(ACTION_LABEL[raw])
       }
     }
@@ -142,7 +139,7 @@ it('keeps a renamed label consistent however the job ended', () => {
   expect(actionLabel('metrics.maintain', 'succeeded')).toBe('Usage Cleanup')
   expect(actionLabel('metrics.maintain', 'failed')).toBe('Usage Cleanup Failed')
   expect(actionLabel('metrics.maintain', 'running')).toBe('Usage Cleanup')
-  expect(actionLabel('metrics.maintain', 'denied')).toBe('Blocked Usage Cleanup')
+  expect(actionLabel('metrics.maintain', 'denied')).toBe('Usage Cleanup')
 })
 
 describe('statusLabel', () => {
@@ -179,24 +176,39 @@ describe('statusLabel', () => {
 
 // enqueue_and_audit writes its audit row the moment the job is QUEUED, with
 // result ok, because what succeeded is the REQUEST. The activity feed hides
-// these rows (api/cluster.py filters on job_id, since the job row beside them
-// carries the real outcome), so the audit log is the only place that has to
-// say the row records an asking rather than a finishing.
-describe('job-backed audit rows', () => {
-  it('says a job was requested, not that it finished', () => {
-    expect(actionLabel('app.install', 'ok', true)).toBe('App Install Requested')
-    expect(actionLabel('backup.run', 'ok', true)).toBe('Backup Run Requested')
+// Doc 13 rules 1 and 2, enforced on the RENDERED label and not only on the map.
+// Two affixes used to be added at render time and both broke the rules while
+// escaping the map test below: "Blocked" on a denied row and "Requested" on a
+// job-backed one, each taking a two-word label to three, and "Requested" past
+// tense while not being a verdict. Removed, so a label is the map entry plus at
+// most a verdict word.
+describe('no affix is added to a label', () => {
+  it('reads a denied row by its own name, the Result column carries the refusal', () => {
+    expect(actionLabel('app.install', 'denied')).toBe('App Install')
+    expect(actionLabel('host.remove', 'denied')).toBe('Host Disconnect')
   })
 
-  it('leaves rows with no job alone', () => {
-    expect(actionLabel('app.install', 'denied', false)).toBe('Blocked App Install')
-    expect(actionLabel('app.install', 'ok', false)).toBe('App Install')
+  it('reads a job-backed row by its own name', () => {
+    // These rows record the ASKING, written when the job was queued. That is
+    // real information and it no longer lives in the name.
     expect(actionLabel('app.install', 'ok')).toBe('App Install')
+    expect(actionLabel('backup.run', 'ok')).toBe('Backup Run')
   })
 
-  it('does not let a job-backed row outrank a failure', () => {
-    // If a job-linked row ever carries a failing result, the failure wins:
-    // "Requested" would be the less alarming of the two readings.
-    expect(actionLabel('app.install', 'failed', true)).toBe('App Install Failed')
+  it('still appends the verdict word doc 13 rule 2 allows', () => {
+    expect(actionLabel('app.install', 'failed')).toBe('App Install Failed')
+    expect(actionLabel('app.install', 'canceled')).toBe('App Install Canceled')
+    expect(actionLabel('app.install', 'interrupted')).toBe('App Install Interrupted')
+  })
+
+  it('keeps every rendered label inside the rules, verdict word aside', () => {
+    // The gap that hid both affixes: the map test below checks ACTION_LABEL,
+    // and neither affix was in the map. This checks what a reader actually sees.
+    for (const raw of Object.keys(ACTION_LABEL)) {
+      for (const status of ['ok', 'denied', 'queued', 'running', null]) {
+        const rendered = actionLabel(raw, status)
+        expect(rendered, `${raw} @ ${status}`).toBe(actionLabel(raw))
+      }
+    }
   })
 })

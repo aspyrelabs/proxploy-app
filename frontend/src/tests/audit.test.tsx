@@ -170,8 +170,12 @@ describe('AuditPage pagination boundary', () => {
       return Promise.resolve(null)
     })
     wrap()
-    expect(await screen.findByText('Blocked Host Disconnect')).toBeInTheDocument()
-    expect(screen.queryByText('Host Disconnect')).not.toBeInTheDocument()
+    // The Action column names the action, always, with no prefix. The refusal is
+    // the Result column's job and it renders `denied` in red there, which is the
+    // column a reader scans for the verdict.
+    expect(await screen.findByText('Host Disconnect')).toBeInTheDocument()
+    expect(screen.queryByText(/^Blocked/)).not.toBeInTheDocument()
+    expect(screen.getByText('Refused')).toBeInTheDocument()
     // The stored identifier still shows: the filter and the exports match on it.
     expect(screen.getByText('host.remove')).toBeInTheDocument()
   })

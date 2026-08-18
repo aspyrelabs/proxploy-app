@@ -7,6 +7,13 @@ it should carry.
 
 1. Two words. Never more. The only exception is the API Key pair, where the
    product name itself is two words.
+
+   The rule is about what a reader SEES, not about the map entry. Nothing is
+   prefixed or suffixed onto a label at render time except the verdict word rule
+   2 allows. Two affixes once were, "Blocked" on a denied row and "Requested" on
+   a job-backed one, and both took two-word labels to three on screen while the
+   test that enforces this rule looked only at the map and passed. Removed
+   2026-08-18, and that test now asserts on the rendered label.
 2. Neutral, not past tense. A label must read correctly whether the row is
    waiting, running, done, failed or blocked. "App Install" plus "failed" reads
    right; "App Installed" plus "failed" contradicts itself.
@@ -131,7 +138,7 @@ it should carry.
 |---|---|---|---|
 | `app.migrate` | App Migrated | Written for BOTH a refused migrate (self-target guard, `result: denied`) and every real one: `api/apps.py` passes `action="app.migrate"` to `enqueue_and_audit`, so a successful request carries `result: ok` and a job id. `migrate.app` is the JOB KIND, not a second audit action. | App Migrate |
 | `schedule.disable` | Schedule Disabled | Always the system, never a user. The scheduler turned a schedule off because it could not run it. | Schedule Auto-Disable |
-| audit result `denied` | reuses the success label | A destructive action was blocked by permissions or a failed typed confirmation. Nothing happened. | Title: prefix with "Blocked", e.g. Blocked Host Disconnect. Result cell: Refused |
+| audit result `denied` | reuses the success label | A destructive action was blocked by permissions or a failed typed confirmation. Nothing happened. | Title: the label itself, unprefixed, e.g. Host Disconnect. Result cell: Refused, which is the column that carries the verdict |
 | audit result `error` | error | The handler raised before finishing. | Error |
 | job status `failed` | failed | The handler raised. The job's error field carries the reason. | Failed |
 | host status `unreachable` | unreachable | Last poll of the host's API failed. | Host Unreachable |
@@ -157,15 +164,16 @@ the error text underneath them. HTTP 502 keeps Proxmox's own message under the
    real migrations logged as `migrate.app`; neither half is true. `api/apps.py`
    passes `action="app.migrate"` to `enqueue_and_audit` for every real
    migration, and `migrate.app` is the job kind. Both identifiers therefore
-   carry App Migrate, because they are one event seen twice, and the Blocked
-   prefix carries the refusal. Labelling `app.migrate` "Migration Refused" made
+   carry App Migrate, because they are one event seen twice, and the Result
+   column carries the refusal (it was the Blocked prefix until 2026-08-18). Labelling `app.migrate` "Migration Refused" made
    a successful migration read "Migration Refused Requested".
 
 2. **`schedule.disable` read like a user flipped a switch.** It is always the
    scheduler disabling something it cannot run. Now Schedule Auto-Disable.
 
 3. **Every denied row reused its success label.** Fixed at render time by
-   prefixing "Blocked", not with new map entries.
+   prefixing "Blocked", not with new map entries. That prefix was itself removed
+   on 2026-08-18 for breaking rule 1; see the structural fixes section.
 
 4. **`app.reaped` read "App Removed"**, identical in voice to two real user
    actions. It is the poller deleting its own record. Now App Unlink, the same
@@ -211,9 +219,14 @@ the error text underneath them. HTTP 502 keeps Proxmox's own message under the
 
 ## Two structural fixes
 
-1. **Denied rows must not reuse success labels.** Prefix "Blocked" at render
-   time whenever `result` is denied. One change covers every destructive action,
-   now and future.
+1. **Denied rows must not reuse success labels.** Superseded 2026-08-18: they
+   do reuse them, and the Result column carries the refusal instead. Prefixing
+   "Blocked" at render time was the original fix and it broke rule 1 on every
+   denied row, three words where two are allowed, so the affix went and the
+   verdict stayed where a verdict belongs. Recorded rather than deleted because
+   the reasoning that produced the prefix is sound and someone will propose it
+   again: the answer is that a refusal is a RESULT, and the Action column names
+   the action.
 
 2. **Keep the derived fallback for unmapped identifiers.** New actions will keep
    arriving and a half-map looks worse than no map. The fallback is the safety

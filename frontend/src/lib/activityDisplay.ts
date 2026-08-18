@@ -43,8 +43,9 @@ export function ago(iso: string): string {
  * none of them.
  *
  * Because the label claims nothing about the outcome, one entry serves every
- * state of the row. actionLabel() only decorates it: "Blocked" in front of a
- * denied row, the verdict word after a failed one.
+ * state of the row. actionLabel() adds only the verdict word after a failed,
+ * canceled or interrupted one, and nothing else: no prefix, no suffix. A denied
+ * row reads by its own name and the Result column carries the refusal.
  *
  * Covers every `action=` written by write_audit and every key registered in
  * HANDLERS; anything newer falls through to derive()'s word splitting, which
@@ -276,22 +277,22 @@ const OUTCOME: Record<string, string> = {
  * at a glance.
  */
 export function actionLabel(raw: string | null | undefined,
-                            status?: string | null,
-                            jobLinked = false): string {
+                            status?: string | null): string {
   if (!raw) return 'Unknown'
   const label = derive(raw)
-  // One rule for every action, present and future, rather than a map entry
-  // per denied action. hasOwn on OUTCOME for the prototype-key reason above.
-  if (status === 'denied') return `Blocked ${label}`
-  if (status != null && Object.hasOwn(OUTCOME, status)) return `${label} ${OUTCOME[status]}`
-  // A job-backed audit row is written by enqueue_and_audit the moment the job
-  // is QUEUED, with result ok, because what succeeded is the REQUEST. The row
-  // is a record of the asking, and the job beside it carries the real outcome,
-  // so this says so rather than letting the audit log imply the work is done.
+  // NO affix is ever added to a label beyond the verdict words below. The two
+  // that used to be, "Blocked" on a denied row and "Requested" on a job-backed
+  // one, are gone: both broke doc 13 rule 1 by taking a label to three words,
+  // "Requested" broke rule 2 as well by being past tense while not being a
+  // verdict, and neither was in the map, so the test that enforces the
+  // two-word rule over ACTION_LABEL could not see either of them.
   //
-  // The activity feed never shows these rows (api/cluster.py filters audit
-  // rows that carry a job_id), so the audit log is the only surface that needs
-  // the distinction.
-  if (jobLinked) return `${label} Requested`
+  // What carried the information instead:
+  //   denied  -> the Result column already renders `denied` in red, and it is
+  //              the column whose job is the verdict.
+  //   queued  -> a job-backed audit row records the ASKING, written when the
+  //              job was queued. The job beside it carries the real outcome,
+  //              and that distinction now belongs anywhere but the name.
+  if (status != null && Object.hasOwn(OUTCOME, status)) return `${label} ${OUTCOME[status]}`
   return label
 }
