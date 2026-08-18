@@ -62,6 +62,9 @@ export type NodeRow = {
   disk_total_bytes: number | null
   uptime_s: number | null; apps: number; apps_running: number
   vms: number; vms_running: number; last_seen_at: string | null
+  // Host-level: quorum belongs to the cluster behind the endpoint. False only
+  // when PVE reported it lost; null is standalone or not yet polled.
+  quorate?: boolean | null
 }
 
 export type AppRow = {

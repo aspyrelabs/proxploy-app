@@ -102,6 +102,11 @@ export function UpdateAllButton() {
  *  cluster twice. */
 function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
   const down = rows.filter((n) => n.status !== 'connected').length
+  // Every node connected is not the same as the cluster being usable: without
+  // quorum /etc/pve is read-only and every write fails while every read
+  // answers (doc 12 check 12). "all healthy" was the third place this read as
+  // fine on a cluster that could not accept an install.
+  const noQuorum = rows.some((n) => n.quorate === false)
   return (
     <section className="mb-5">
       <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -113,7 +118,9 @@ function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
         </h2>
         <span className="text-[11px] text-text-3">
           {rows.length} node{rows.length === 1 ? '' : 's'} ·{' '}
-          {down === 0 ? 'all healthy' : `${down} unreachable`}
+          {noQuorum
+            ? <span className="text-red">no quorum</span>
+            : down === 0 ? 'all healthy' : `${down} unreachable`}
         </span>
       </div>
       <div className={nodeGrid}>
@@ -398,6 +405,10 @@ export function HostsPage() {
 type HostDetail = {
   id: number; name: string; address: string; node_shell_enabled: boolean
   node_power_missing?: boolean | null
+  // False ONLY when PVE reported its cluster non-quorate. Null/undefined is a
+  // standalone node or a host not polled since the field existed, neither of
+  // which is a warning.
+  quorate?: boolean | null
 }
 
 function useHostDetail(id: number) {
@@ -549,6 +560,19 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
             </a>
           )}
           {node && <StatusPill status={node.status} />}
+          {/* A node without quorum answers /version and /cluster/resources
+              perfectly and refuses every WRITE, so "Connected" on its own is a
+              lie an operator acts on (doc 12 check 12). Sits beside the status
+              rather than replacing it, because reads really do work. */}
+          {host?.quorate === false && (
+            <span title="Proxmox reports this cluster has lost quorum. /etc/pve is
+                         read-only, so installs, guest edits and storage changes will
+                         fail until quorum returns."
+              className="rounded-ctl border border-red/30 bg-red-dim px-2 py-0.5
+                         text-[12px] text-red">
+              No quorum: writes will fail
+            </span>
+          )}
           {/* Node-scoped (Reboot/Power off target THIS node) and host-scoped
               (Edit changes the Host record, shared across every node of its
               cluster) both live behind one trigger, so both need to be

@@ -42,6 +42,30 @@ describe('HealthFooter', () => {
     expect(screen.getByText(/3 nodes · 0 alerts/i)).toBeInTheDocument()
   })
 
+  it('says a cluster has no quorum, even with every node connected and no alerts', async () => {
+    // The state that made this footer lie on real hardware (doc 12 check 12):
+    // quorum lost, so /etc/pve is read-only and every write fails, while every
+    // read answers perfectly. No node is unreachable and nothing is firing.
+    state.alerts = []
+    state.hosts = [{ status: 'connected', quorate: false },
+                   { status: 'connected', quorate: false }]
+    const { container } = wrap(<HealthFooter />)
+    await waitFor(() =>
+      expect(screen.getByText(/cluster has no quorum/i)).toBeInTheDocument())
+    expect(screen.getByText(/writes will fail until quorum returns/i)).toBeInTheDocument()
+    expect(container.querySelector('.bg-red')).not.toBeNull()
+    expect(screen.queryByText(/all systems healthy/i)).toBeNull()
+  })
+
+  it('treats a null quorate as standalone, not as quorum loss', async () => {
+    state.alerts = []
+    state.hosts = [{ status: 'connected', quorate: null },
+                   { status: 'connected' }]
+    wrap(<HealthFooter />)
+    await waitFor(() =>
+      expect(screen.getByText(/all systems healthy/i)).toBeInTheDocument())
+  })
+
   it('counts firing alerts and turns the dot red', async () => {
     state.alerts = [
       { id: 1, state: 'firing', severity: 'critical', message: 'host-02 CPU' },

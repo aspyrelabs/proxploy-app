@@ -106,6 +106,44 @@ def test_vms_upserted_and_apps_cached_refreshed(tmp_path):
                                             target_id=vm.id).count() == 3
 
 
+def test_quorum_loss_is_recorded_and_an_unreadable_probe_does_not_clear_it(tmp_path):
+    """A host that cannot accept a single write must stop reading as healthy.
+
+    Reached for real on 2026-08-18 (doc 12 check 12): quorum genuinely lost,
+    /etc/pve read-only, every write refused with "cluster not ready - no
+    quorum?", and every host in Proxploy still read `connected` because nothing
+    looked at the one field that said so.
+
+    The second half is the more subtle rule: a cycle that could not ask must
+    leave the last answer alone. UNREAD is not None, because None is a real
+    value here (standalone).
+    """
+    from proxploy.models import utcnow
+    from proxploy.pollers import UNREAD, ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    resources, rrd = _fixtures()
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), quorate=True)
+    assert host.quorate is True
+
+    ingest_cycle(db, host, resources, rrd, utcnow(), quorate=False)
+    assert host.quorate is False
+    # Status is deliberately untouched: reads genuinely still work, which is
+    # exactly why the flag has to carry this rather than `status`.
+    assert host.status == "connected"
+
+    # /cluster/status unreadable this cycle: keep the known answer
+    ingest_cycle(db, host, resources, rrd, utcnow(), quorate=UNREAD)
+    assert host.quorate is False
+
+    # standalone is a legitimate answer to write, and clears the warning
+    ingest_cycle(db, host, resources, rrd, utcnow(), quorate=None)
+    assert host.quorate is None
+
+
 def test_a_vm_on_another_cluster_node_records_that_node(tmp_path):
     """The mirror records where the guest RUNS, not who reported it.
 

@@ -827,10 +827,60 @@ message.
     reachable without breaking quorum at all, which makes it the more useful
     finding of the two.
 
-    **Still open: actual quorum loss.** Reaching it means removing `two_node`
-    from `/etc/pve/corosync.conf` and bumping `config_version`, a cluster
-    config edit with real risk of leaving the pair unable to form a cluster.
-    Not attempted.
+    **ACTUAL QUORUM LOSS REACHED 2026-08-18, PVE 9.2.10, and the check both
+    passed and failed.** `two_node: 1` was removed from
+    `/etc/pve/corosync.conf` with `config_version` bumped, which took the pair
+    from `Quorum: 1  Flags: 2Node Quorate WaitForAll` to `Quorum: 2  Flags:
+    Quorate`, so one node alone is genuinely short of quorum. Stopping corosync
+    on `node2` then put `node1` in the documented state:
+
+        Quorate:          No
+        Quorum:           2 Activity blocked
+        touch /etc/pve/quorum-probe -> Permission denied
+
+    **The write half PASSED, and better than this entry feared.** A VM create on
+    `node1` failed in seconds with PVE's own sentence, which names the cause:
+    `500 Internal Server Error: cluster not ready - no quorum?`. No hang, and
+    not the anonymous read-only-filesystem error the Fail criterion describes.
+
+    **The health half FAILED, exactly as predicted.** With `/etc/pve`
+    read-only and every write refused, Proxploy reported:
+
+    - both hosts `status: connected`;
+    - `POST /hosts/1/test` -> `connected`, `pve_version 9.2.10`, no warning;
+    - `/cluster/resources` still listing the guest on the departed node;
+    - the sidebar footer, whose own docstring calls it "the one piece of UI
+      that must never lie", reading **All systems healthy**;
+    - and the Nodes header reading **2 nodes · all healthy**.
+
+    **The honest signal was there and nothing read it.** Both nodes reported
+    `quorate: 0` on the cluster row of `/cluster/status`, including the node
+    whose own corosync was stopped. One field, from either end.
+
+    **FIXED the same day.** `hosts.quorate` (migration `a4d2e8b71c39`) is read
+    off that row every poll cycle and by `POST /hosts/{id}/test`, tri-state
+    exactly like `node_power_missing`: NULL is standalone or not-yet-polled,
+    False only when PVE said so. `status` is deliberately left alone, because
+    reads genuinely do work and calling the host unreachable would be a
+    different lie. Surfaced in all three places that were wrong: a red
+    "No quorum: writes will fail" beside the host's status pill, "Cluster has
+    no quorum / writes will fail until quorum returns" in the footer, and
+    "no quorum" in the cluster group header.
+
+    **Verified against real quorum loss, not a fixture**: quorum was broken a
+    second time after the fix, and `POST /hosts/1/test` returned
+    `quorate: false` with `status: connected`, the poller wrote the same for
+    both hosts, and the two screenshots show the warning rendering on the real
+    page. Restored afterwards: corosync started, `two_node: 1` back,
+    `config_version` 13, both hosts polling `quorate: true`.
+
+    **Two things worth recording from the screenshots.** The cluster stat rings
+    read `0 / 20 cores` and `0.0 B / 0.0 B` storage while non-quorate, so the
+    fleet aggregate degrades to zero rather than to "unknown", which is its own
+    small version of this same problem and is not fixed. And the run needed an
+    authenticated browser session, so `e2e/driver.mjs` now takes
+    `PROXPLOY_SESSION`: the Frontend geometry section's "pages behind login
+    cannot be reached by the driver" is no longer true.
 
 ## Privileges and identity
 
@@ -1249,9 +1299,17 @@ measures both in real Chromium against the built CSS and fails CI on overflow,
 unequal heights, or a panel exceeding its cap. It needs no host, so it is
 automated rather than pending.
 
-What remains unproven in a browser is anything requiring an authenticated
-session: `/store` and every page behind login cannot be reached by the driver,
-which has no way to log in.
+What remains unproven in a browser was anything requiring an authenticated
+session: `/store` and every page behind login could not be reached by the
+driver, which had no way to log in.
+
+**Closed 2026-08-18.** `e2e/driver.mjs` accepts `PROXPLOY_SESSION` (and
+`PROXPLOY_CSRF`, which is double-submit so any matching value works) and injects
+both as cookies on the browser context, so `shot`, `text` and `measure` all
+reach pages behind login. A session comes from `services/authn.py`'s own
+`create_session` against the dev database, which needs no password and no TOTP
+code. Check 12's screenshots were taken this way, and check 16's cookie
+injection no longer needs its own script.
 
 ## Fixed: SPA deep links 404 in production
 

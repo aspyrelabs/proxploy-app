@@ -60,16 +60,25 @@ export function HealthFooter({ collapsed = false }: { collapsed?: boolean }) {
   const rows = dedupeNodes(nodes.data ?? [])
   const down = rows.filter((n) => n.status !== 'connected').length
   const critical = (alerts.data ?? []).some((a) => a.severity === 'critical')
-  const unhealthy = firing > 0 || down > 0
+  // A cluster without quorum answers every READ perfectly and refuses every
+  // write, so no node is "unreachable" and no alert need be firing while
+  // nothing can be installed, edited or moved. Reached for real on 2026-08-18
+  // (doc 12 check 12) with this footer reading "All systems healthy", which is
+  // the one thing its own docstring says it must never do. Ranked first
+  // because it blocks every write in the product, not just one node's.
+  const noQuorum = rows.some((n) => n.quorate === false)
+  const unhealthy = firing > 0 || down > 0 || noQuorum
 
-  const headline = firing > 0
-    ? `${firing} alert${firing === 1 ? '' : 's'} firing`
-    : down > 0
-      ? `${down} node${down === 1 ? '' : 's'} unreachable`
-      : 'All systems healthy'
+  const headline = noQuorum
+    ? 'Cluster has no quorum'
+    : firing > 0
+      ? `${firing} alert${firing === 1 ? '' : 's'} firing`
+      : down > 0
+        ? `${down} node${down === 1 ? '' : 's'} unreachable`
+        : 'All systems healthy'
 
   const dot = !unhealthy ? 'bg-green shadow-[0_0_6px_rgba(63,207,142,.6)]'
-    : critical || down > 0 ? 'bg-red shadow-[0_0_6px_rgba(232,90,90,.6)]'
+    : critical || down > 0 || noQuorum ? 'bg-red shadow-[0_0_6px_rgba(232,90,90,.6)]'
     : 'bg-amber shadow-[0_0_6px_rgba(245,181,68,.6)]'
 
   if (collapsed) return <CollapsedStatus headline={headline} dot={dot} />
@@ -80,7 +89,9 @@ export function HealthFooter({ collapsed = false }: { collapsed?: boolean }) {
       <span className={`mr-2 inline-block h-2 w-2 rounded-full ${dot}`} />
       {headline}
       <span className="mt-0.5 block font-mono text-[11px] text-text-3">
-        {rows.length} node{rows.length === 1 ? '' : 's'} · {firing} alert{firing === 1 ? '' : 's'}
+        {noQuorum
+          ? 'writes will fail until quorum returns'
+          : `${rows.length} node${rows.length === 1 ? '' : 's'} · ${firing} alert${firing === 1 ? '' : 's'}`}
       </span>
     </Link>
   )

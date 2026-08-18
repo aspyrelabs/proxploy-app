@@ -837,7 +837,25 @@ any suite could have caught. What that run leaves open:
    choose a host and the migration handler repoints the row, but wrong the moment
    someone migrates a CT in the Proxmox UI instead.
 
-6. **A linked clone can always be chosen and can never work.** PVE permits
+6. **Hardware check 12 is closed, and it cost the health model a column.**
+   Actual quorum loss was reached on 2026-08-18. The write half passed (PVE's
+   own "cluster not ready - no quorum?" names the cause and the job fails in
+   seconds), the health half failed exactly as doc 12 predicted: every host read
+   `connected`, the test endpoint returned a version, and the sidebar said "All
+   systems healthy" while `/etc/pve` was read-only. `hosts.quorate` now carries
+   PVE's own `quorate` field and three surfaces show it. What that leaves:
+
+   - the cluster stat rings degrade to `0 / 20 cores` and `0.0 B` storage while
+     non-quorate, rather than to "unknown", so the dashboard understates instead
+     of abstaining;
+   - nothing refuses a write AHEAD of time on a host known to be non-quorate. A
+     job is queued, the source guest may be stopped, and then PVE refuses. The
+     flag is informational, deliberately, the same as `node_power_missing`, but
+     a migration is the case where "ask first" would be worth it;
+   - alerting has no quorum rule, so an unattended cluster losing quorum
+     notifies nobody.
+
+7. **A linked clone can always be chosen and can never work.** PVE permits
    `full=false` only from a template, `CloneDialog` offers Full and Linked as
    radio buttons on every VM, and the failure is a raw
    `500 Linked clone feature is not supported for '<volume>' (scsi0)` that never

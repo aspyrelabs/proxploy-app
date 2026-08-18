@@ -98,3 +98,31 @@ def test_a_host_with_no_tokens_at_all_still_names_the_capability(tmp_path):
     with pytest.raises(CapabilityNotConfigured) as ei:
         client_for_host(app, db, host, capability="backup")
     assert ei.value.capability == "backup"
+
+
+# --- quorum (doc 12 check 12) -----------------------------------------------
+
+def test_cluster_quorate_reads_the_cluster_row():
+    """False is only ever what PVE said, and None is not False.
+
+    On real hardware with quorum genuinely lost, BOTH nodes reported
+    `quorate: 0` on this row while /version and /cluster/resources answered
+    perfectly and every write failed with "cluster not ready - no quorum?"
+    (PVE 9.2.10, 2026-08-18). This one field is the whole signal.
+    """
+    from proxploy.services.hostclient import cluster_quorate
+
+    lost = [{"type": "cluster", "name": "lab-cluster", "quorate": 0},
+            {"type": "node", "name": "node1", "online": 1, "local": 1},
+            {"type": "node", "name": "node2", "online": 0}]
+    healthy = [{"type": "cluster", "name": "lab-cluster", "quorate": 1},
+               {"type": "node", "name": "node1", "online": 1, "local": 1}]
+    standalone = [{"type": "node", "name": "pve1", "online": 1, "local": 1}]
+
+    assert cluster_quorate(lost) is False
+    assert cluster_quorate(healthy) is True
+    # No cluster row: the question does not apply, and answering False would
+    # warn every standalone host that its writes are about to fail.
+    assert cluster_quorate(standalone) is None
+    # Present but empty: unknown, not quorate.
+    assert cluster_quorate([{"type": "cluster", "name": "lab-cluster"}]) is None

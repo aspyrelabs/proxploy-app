@@ -170,6 +170,17 @@ class Host(TimestampMixin, Base):
     # is never used to refuse a power attempt, only to warn ahead of one
     # (services/pveum.py NODE_POWER_PRIVILEGE, doc 08 §2/§9).
     node_power_missing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Whether this host's cluster has quorum, read straight off the `quorate`
+    # field of its /cluster/status cluster row every poll cycle. NULL for a
+    # standalone node (no cluster row, so the question does not apply) and for
+    # a host not polled since this existed; False ONLY when PVE said so.
+    #
+    # It is a health fact, not a privilege one: without quorum /etc/pve is
+    # read-only, so every install, storage edit and guest config write fails,
+    # while /cluster/resources and /version keep answering perfectly. Reached
+    # for real on 2026-08-18 (doc 12 check 12) with every host still reading
+    # `connected`, which is the lie this column exists to stop telling.
+    quorate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     # The pools this host's operator chose, remembered so the question is asked
     # once rather than on every install. NULL means "not chosen yet", which is

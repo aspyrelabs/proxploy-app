@@ -13,7 +13,8 @@ from proxploy.services.audit import write_audit
 from proxploy.executor import SSHExecutor, SSHHostKeyMismatch
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_id,
                                        tls_fingerprint_sha256, token_public_meta)
-from proxploy.services.hostclient import client_for_host, cluster_identity
+from proxploy.services.hostclient import (client_for_host, cluster_identity,
+                                          cluster_quorate)
 from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
 
@@ -381,6 +382,10 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              "last_error": h.last_error,
              "pve_version": h.pve_version, "node_shell_enabled": h.node_shell_enabled,
              "node_power_missing": h.node_power_missing,
+             # NULL means standalone or not-yet-polled, never "quorum lost":
+             # only False says PVE reported an unwritable cluster (doc 12
+             # check 12).
+             "quorate": h.quorate,
              "team_id": h.team_id,
              # The install dialog's Default mode reads these to decide
              # whether it has already learned this host's storage pools
@@ -431,7 +436,8 @@ def host_detail(host_id: int, db=Depends(get_db),
             "last_error": h.last_error,
             "pve_version": h.pve_version, "verify_tls": h.verify_tls,
             "node_shell_enabled": h.node_shell_enabled,
-            "node_power_missing": h.node_power_missing, "team_id": h.team_id,
+            "node_power_missing": h.node_power_missing, "quorate": h.quorate,
+            "team_id": h.team_id,
             "capabilities": _capability_state(c.kind for c in creds),
             "credentials": [{"kind": c.kind, "public_meta": c.public_meta,
                              "last_used_at": to_iso(c.last_used_at)} for c in creds]}
@@ -605,6 +611,14 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
         # the extra pveum commands for node power should see it reflected
         # here, not only on the next full enrolment.
         h.node_power_missing = _node_power_missing(client)
+        # A host that answers /version perfectly can still be unable to accept
+        # a single write, which is what quorum loss looks like from here (doc
+        # 12 check 12). Best effort: a token that cannot read /cluster/status
+        # leaves the previous answer alone rather than claiming standalone.
+        try:
+            h.quorate = cluster_quorate(client.cluster_status())
+        except ProxmoxError:
+            pass
         cred.last_used_at = utcnow()
         result = "ok"
     except ProxmoxError as e:
@@ -626,7 +640,7 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="host.test",
                 target_type="host", target_id=h.id, result=result)
     return {"id": h.id, "status": h.status, "pve_version": h.pve_version,
-            "node_power_missing": h.node_power_missing,
+            "node_power_missing": h.node_power_missing, "quorate": h.quorate,
             "tls_fingerprint": h.tls_fingerprint, "tls_fingerprint_seen": seen}
 
 

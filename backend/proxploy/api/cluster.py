@@ -133,6 +133,11 @@ def cluster_nodes(request: Request, db=Depends(get_db),
         shared = {
             "host_id": h.id, "name": h.name, "cluster": h.cluster_name,
             "pve_version": h.pve_version,
+            # Host-level, like the counts below: quorum belongs to the cluster
+            # behind this endpoint, not to one node of it. False ONLY when PVE
+            # said so, so the sidebar's "All systems healthy" can stop being
+            # true for a cluster that cannot accept a write (doc 12 check 12).
+            "quorate": h.quorate,
             "apps": len(apps),
             "apps_running": sum(1 for a in apps if a.status_cached == "running"),
             "vms": len(vms),

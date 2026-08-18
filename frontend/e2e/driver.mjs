@@ -28,9 +28,27 @@ const API = process.env.PROXPLOY_API ?? 'http://127.0.0.1:8000'
 
 const [cmd, ...args] = process.argv.slice(2)
 
+// Every page behind login renders its signed-out state under the driver,
+// because a fresh context has no session cookie. Doc 12 records that as the
+// reason authenticated pages were unreachable here, and the workaround it
+// describes (inject the cookies into the context) belongs in the shared driver
+// rather than in a one-off script. Set PROXPLOY_SESSION to a pp_session value;
+// the CSRF cookie is double-submit, so any matching value works and only
+// mutating requests read it.
+const SESSION = process.env.PROXPLOY_SESSION ?? ''
+const CSRF = process.env.PROXPLOY_CSRF ?? 'driver-csrf'
+
 async function withPage(fn) {
   const browser = await chromium.launch()
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  if (SESSION) {
+    const { hostname } = new URL(WEB)
+    await context.addCookies([
+      { name: 'pp_session', value: SESSION, domain: hostname, path: '/' },
+      { name: 'pp_csrf', value: CSRF, domain: hostname, path: '/' },
+    ])
+  }
+  const page = await context.newPage()
   const errors = []
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))

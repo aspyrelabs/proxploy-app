@@ -67,6 +67,27 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
                          factory=app.state.proxmox_factory)
 
 
+def cluster_quorate(rows: list[dict]) -> bool | None:
+    """Is this cluster quorate, per its own `/cluster/status` cluster row?
+
+    None for a standalone node (no cluster row, so the question does not
+    apply) and None if the field is absent rather than guessing True.
+
+    This exists because on 2026-08-18 a real cluster was driven into actual
+    quorum loss (doc 12 check 12) and NOTHING in the product noticed: every
+    host still read `connected`, `POST /hosts/{id}/test` still returned a PVE
+    version, and `/cluster/resources` still listed guests, while `/etc/pve`
+    was read-only and every write failed with "cluster not ready - no quorum?".
+    The one honest signal was `quorate: 0` on this row, from BOTH nodes, and no
+    code read it.
+    """
+    for row in rows:
+        if row.get("type") == "cluster":
+            value = row.get("quorate")
+            return None if value is None else bool(value)
+    return None
+
+
 def guest_node(host, row=None) -> str:
     """The node a GUEST runs on, which is not always its host's own node.
 
@@ -109,7 +130,13 @@ def cluster_identity(client) -> tuple[str | None, str | None]:
     standalone until something else happened to fix it. Enrolment still cannot
     fail on a probe hiccup; it catches this itself.
     """
-    rows = client.cluster_status()
+    return cluster_identity_from(client.cluster_status())
+
+
+def cluster_identity_from(rows: list[dict]) -> tuple[str | None, str | None]:
+    """The rows half of `cluster_identity`, split out so a caller that needs
+    more than one answer from `/cluster/status` (the poll loop also wants
+    `cluster_quorate`) spends one call rather than two."""
     cluster = next((r.get("name") for r in rows
                     if r.get("type") == "cluster"), None)
     nodes = [r for r in rows if r.get("type") == "node"]

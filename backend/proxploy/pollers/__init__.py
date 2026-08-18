@@ -16,7 +16,8 @@ from datetime import datetime
 
 from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, to_iso, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.hostclient import cluster_identity
+from proxploy.services.hostclient import (cluster_identity_from,
+                                          cluster_quorate)
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
@@ -130,6 +131,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  version: str | None = None,
                  node_name: str | None = None,
                  cluster_name: str | None | object = UNREAD,
+                 quorate: bool | None | object = UNREAD,
                  degraded: bool = False) -> CycleResult:
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
@@ -216,6 +218,16 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # legitimate value to write.
     if cluster_name is not UNREAD and cluster_name != host.cluster_name:
         host.cluster_name = cluster_name
+
+    # Quorum, from the same /cluster/status read as the two above. UNREAD when
+    # that read failed, since "we could not ask" must not overwrite a known
+    # answer; None is a legitimate value to write (standalone, no cluster row).
+    # Without quorum /etc/pve is read-only and every write fails while
+    # /cluster/resources answers perfectly, so this is the only thing that
+    # makes an unwritable host look different from a healthy one (doc 12
+    # check 12).
+    if quorate is not UNREAD and quorate != host.quorate:
+        host.quorate = quorate
 
     # guests map ----------------------------------------------------------------
     guests: dict[tuple[str, int], dict] = {}
@@ -555,14 +567,16 @@ class Poller:
             # constant-cost call per host per cycle, which the doc 02 section 3
             # budget allows (it forbids per-GUEST calls, not per-host ones).
             try:
-                node_name, cluster_name = cluster_identity(client)
+                rows = client.cluster_status()
+                node_name, cluster_name = cluster_identity_from(rows)
+                quorate = cluster_quorate(rows)
             except ProxmoxError:
-                node_name, cluster_name = None, UNREAD
+                node_name, cluster_name, quorate = None, UNREAD, UNREAD
 
             prev = self.snapshots.get(host_id)
             result = ingest_cycle(db, host, resources, rrd, utcnow(),
                                   version=version, node_name=node_name,
-                                  cluster_name=cluster_name,
+                                  cluster_name=cluster_name, quorate=quorate,
                                   degraded=bool(degraded))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
