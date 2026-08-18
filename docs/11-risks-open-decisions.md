@@ -441,6 +441,13 @@ Not risks so much as the shortlist a fresh session should start from.
    it, 9 needs backups that exist, 11 needs a real IdP, 12 means deliberately
    breaking quorum.
 
+   **All five closed by 2026-08-18.** Worth recording what the estimates got
+   wrong, since the same reasoning will show up again: "11 needs a real IdP" was
+   read as needing someone's cloud account for three days, when the App Store
+   carries five self-hostable identity providers and a Keycloak on the lab is a
+   third-party implementation on the wire. The blocker was never access, it was
+   the assumption.
+
 ## Open at the end of 2026-08-16
 
 Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:

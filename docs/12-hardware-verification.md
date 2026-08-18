@@ -943,6 +943,65 @@ message.
     real discovery document, real PKCE, and RS256 tokens verified against a real
     JWKS endpoint. Everything except a third-party implementation on the wire.
     See `docs/superpowers/plans/2026-08-05-phase-8-scale.md`.
+
+    **PASSED 2026-08-18 against Keycloak 26.7.1**, and this entry sat open for
+    the wrong reason: it was read as needing someone's cloud IdP, when the
+    catalog carries five self-hostable ones (authentik, Keycloak, Zitadel,
+    Authelia, Pocket ID). A real Keycloak on the lab is a third-party
+    implementation on the wire, and it makes the check repeatable rather than
+    dependent on an account.
+
+    Reproduction, about five minutes end to end:
+
+    - install `keycloak` through the App Store onto a lab node (this run put it
+      on `node1`, 2.5 minutes: Temurin JDK 21, PostgreSQL 16, Keycloak 26.7.1);
+    - the bootstrap admin is in the unit file the install writes
+      (`KC_BOOTSTRAP_ADMIN_USERNAME` / `_PASSWORD` in
+      `/etc/systemd/system/keycloak.service`), which is worth knowing because
+      the install prints no credentials;
+    - through Keycloak's admin REST API: a realm, a CONFIDENTIAL client with
+      `pkce.code.challenge.method: S256` (so the IdP requires the challenge
+      rather than ignoring it), the redirect URI
+      `http://127.0.0.1:8000/api/v1/auth/oidc/callback`, and one user with a
+      password and a verified email;
+    - `PUT /auth/oidc/config` with the issuer, client id and secret. Note the
+      `parentId` of a Keycloak key-provider component must be the realm's
+      internal UUID, not its name: the same POST with the name returns 201 and
+      silently creates nothing.
+
+    Driven server-side, because that is where the unproven part lives. The only
+    browser-shaped step is Keycloak's own login form, which is a plain POST.
+    What each step proved:
+
+    - `GET /auth/oidc/login` redirected to the real authorize endpoint carrying
+      `code_challenge_method=S256`, a nonce, and `scope=openid email profile`;
+    - Keycloak served its login page and, on POST, returned a real
+      authorization code;
+    - the callback exchanged that code with the stored verifier and verified an
+      RS256 `id_token` against Keycloak's own JWKS;
+    - **first login: `/login?error=oidc_pending`**, and the user row it wrote is
+      the documented deny-by-default: `is_active=0`, `password_hash` NULL,
+      `oidc_issuer` and `oidc_sub` recorded, `display_name` from the `name`
+      claim, email from the `email` claim. Reaching that outcome is itself the
+      proof that signature, nonce and claims all verified, since any failure
+      returns the generic `error=oidc` instead;
+    - **after activating the account: `307 -> /` with a session cookie**, and
+      `/auth/me` returned the OIDC identity as `viewer`;
+    - **a replayed state and code was refused** with the generic
+      `/login?error=oidc`, no session issued;
+    - and the login page really does offer "Sign in with SSO" once configured,
+      with `oidc: true` on the public onboarding endpoint.
+
+    **The one a mock cannot do at all: the IdP rotated its signing key
+    mid-session.** A second RSA provider was added to the realm at priority
+    200, so Keycloak's active RS256 `kid` changed to one the app's cached JWKS
+    had never seen (`/admin/realms/{realm}/keys` confirmed the new kid ACTIVE
+    at priority 200). The next login succeeded, so `services/oidc.py`'s
+    `_jwks(..., refresh=True)` path is real rather than aspirational. That is
+    the check worth re-running against any future IdP.
+
+    Removed afterwards: the OIDC config, the provisioned user, and the Keycloak
+    container.
 17. **A VM create on a real node.** Every guest create in this document is a
     CONTAINER (checks 4 and 5), created by community-scripts over root SSH. The
     VM wizard posts `POST /nodes/{node}/qemu` with the LIFECYCLE token instead,
