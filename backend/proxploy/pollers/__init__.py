@@ -288,13 +288,17 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         v = existing.get(vmid)
         if v is None:
             v = Vm(host_id=host.id, vmid=vmid, name=g["name"] or f"vm-{vmid}",
-                   status=g["status"])
+                   status=g["status"], node_name=g["node"])
             db.add(v)
             membership_changed = True
         elif v.status != g["status"]:
             events.append(("resource", {"type": "vm", "id": v.id,
                                         "change": "status", "status": g["status"]}))
         v.name = g["name"] or v.name
+        # Refreshed every cycle, not only on insert: a cluster migration moves
+        # the guest to another node and this is the only record of where it is
+        # (doc 12 check 18).
+        v.node_name = g["node"] or v.node_name
         v.status, v.uptime_s, v.synced_at = g["status"], g["uptime_s"], now
         v.cpu_cores, v.mem_bytes, v.disk_bytes = (
             g["cpu_cores"], g["mem_total_bytes"], g["disk_bytes"])

@@ -16,7 +16,7 @@ import asyncio
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Host, Vm
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import TASK_POLL_S, TASK_TIMEOUT_S, await_task
 
@@ -58,7 +58,7 @@ def _resolve(app, target_type: str, target_id: int):
             raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
         vmid = row.ctid if target_type == "app" else row.vmid
-        node = host.node_name or ""
+        node = guest_node(host, row)
         return client, kind, node, int(vmid), row.name
 
 

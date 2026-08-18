@@ -67,6 +67,23 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
                          factory=app.state.proxmox_factory)
 
 
+def guest_node(host, row=None) -> str:
+    """The node a GUEST runs on, which is not always its host's own node.
+
+    `/cluster/resources` answers for the whole cluster from any member, so on a
+    cluster every polled host mirrors every VM, and using the host's node
+    reaches the wrong one for every row but the owning node's: PVE answers
+    `500 Configuration file 'nodes/<other>/qemu-server/<id>.conf' does not
+    exist`, observed on PVE 9.2.10 (doc 12 check 18).
+
+    `Vm.node_name` carries the answer; `App` has no such column and does not
+    need one today, because an app's row is repointed by the migration handler
+    and installs choose their host. Falls back to the host's node, which is
+    both correct for a standalone host and the behaviour that predates this.
+    """
+    return getattr(row, "node_name", None) or host.node_name or ""
+
+
 def cluster_identity(client) -> tuple[str | None, str | None]:
     """(node name, cluster name) for this address.
 

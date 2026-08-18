@@ -29,7 +29,7 @@ from proxploy.api.deps import (authorize, cluster_scope, get_db,
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.metrics import pick_resolution, query_series
 from proxploy.services.netconfig import build_net, nic_identity, parse_net
 from proxploy.services.proxmox import ProxmoxError
@@ -70,11 +70,17 @@ def _nic_out(iface: str, raw: str) -> dict:
     }
 
 
-def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[dict]:
-    """Every netN on one guest, newest PVE config read (no cache)."""
+def guest_nics(request: Request, db, host: Host, kind: str, vmid: int,
+               row=None) -> list[dict]:
+    """Every netN on one guest, newest PVE config read (no cache).
+
+    `row` is the App or Vm being read, and it is what supplies the guest's own
+    node: on a cluster the host's node is the wrong one for a mirrored VM
+    (see services/hostclient.py::guest_node).
+    """
     try:
         cfg = client_for_host(request.app, db, host).guest_config(
-            kind, host.node_name or "", vmid)
+            kind, guest_node(host, row), vmid)
     except ProxmoxError as e:
         raise HTTPException(502, str(e))
     return [_nic_out(k, str(cfg[k])) for k in sorted(cfg) if NET_KEY.match(k)]
@@ -82,25 +88,31 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int) -> list[d
 
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                   target_id: int, host: Host, kind: str, vmid: int,
-                  iface: str, body: NicIn) -> dict:
+                  iface: str, body: NicIn, row=None) -> dict:
     """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update.
 
-    `capability="lifecycle"`, not the module default: the read half
-    (`guest_config`) only needs monitoring's VM.Audit, but the write half
-    (`guest_config_update`) needs VM.Config.Network, a lifecycle privilege,
-    and both halves run through the SAME client here. Found during the
-    per-capability token sweep (host-token-privileges-step-one-report.md):
-    before per-capability tokens existed this always worked because the one
-    token in play was over-scoped; a monitoring-only token would 403 on the
-    write with no useful message.
+    TWO clients, and the split is load-bearing. The read half
+    (`guest_config`) needs monitoring's VM.Audit; the write half
+    (`guest_config_update`) needs VM.Config.Network, a lifecycle privilege.
+    Neither role carries the other's, so running both halves through one
+    client 403s whichever half that client is not entitled to.
+
+    This used to run both on the lifecycle client, on the reasoning that the
+    write is the privileged half. Against a real narrow token that fails at the
+    READ, before anything is even attempted on the guest:
+    `403 (/vms/100, VM.Audit)`, PVE 9.2.10, 2026-08-18 (doc 12 check 18).
+    Reads on monitoring is what services/migrate.py already does and monitoring
+    is the one capability every enrolled host is guaranteed to have, so this
+    also needs no token regenerated.
     """
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
-    node = host.node_name or ""
+    node = guest_node(host, row)
     ip = request.client.host if request.client else None
     try:
         client = client_for_host(request.app, db, host, capability="lifecycle")
-        cfg = client.guest_config(kind, node, vmid)
+        cfg = client_for_host(request.app, db, host,
+                              capability="monitoring").guest_config(kind, node, vmid)
     except ProxmoxError as e:
         # A DIFFERENT action from the two below, and the reason is the whole
         # point of an audit log: nothing has been sent to the guest at this

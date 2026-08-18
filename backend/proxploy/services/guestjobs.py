@@ -16,7 +16,7 @@ import asyncio
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import Host, Vm
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 
@@ -142,7 +142,14 @@ def _vm_target(app, vm_id: int):
             client = client_for_host(app, db, host, capability="lifecycle")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
-        return (client, host.node_name or "",
+        # The GUEST's node, not the host's. On a cluster every polled host
+        # mirrors every VM (/cluster/resources answers for the whole cluster),
+        # so host.node_name is the wrong node for every row but the owning
+        # one, and PVE answered each action with `500 Configuration file
+        # 'nodes/<other>/qemu-server/<id>.conf' does not exist` (doc 12 check
+        # 18). Falls back to the host's node for a row not polled since
+        # vms.node_name existed, which is exactly the old behaviour.
+        return (client, guest_node(host, v),
                 int(v.vmid), v.name or f"VM {v.vmid}", host.id)
 
 

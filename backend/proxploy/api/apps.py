@@ -530,7 +530,7 @@ def _app_and_host(db, app_id: int):
 def app_network(request: Request, app_id: int, db=Depends(get_db),
                 user: User = Depends(_read_scoped)):
     a, host = _app_and_host(db, app_id)
-    return guest_nics(request, db, host, "lxc", a.ctid)
+    return guest_nics(request, db, host, "lxc", a.ctid, a)
 
 
 @router.put("/{app_id}/network/{iface}",
@@ -540,7 +540,8 @@ def app_network_update(request: Request, app_id: int, iface: str, body: NicIn,
                        db=Depends(get_db), user: User = Depends(_configure)):
     a, host = _app_and_host(db, app_id)
     return set_guest_nic(request, db, user, target_type="app", target_id=a.id,
-                         host=host, kind="lxc", vmid=a.ctid, iface=iface, body=body)
+                         host=host, kind="lxc", vmid=a.ctid, iface=iface, body=body,
+                         row=a)
 
 
 class MigratePreflightIn(BaseModel):

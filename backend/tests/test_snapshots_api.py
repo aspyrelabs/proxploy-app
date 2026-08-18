@@ -300,6 +300,74 @@ def _run_job(tmp_path, kind, params_from_ids):
     return asyncio.run(go())
 
 
+def test_a_vm_on_another_cluster_node_runs_on_ITS_node(tmp_path):
+    """The guest's node decides where the call goes, not its host's node.
+
+    `/cluster/resources` answers for the whole cluster from any member, so on a
+    cluster every polled host mirrors every VM, and the row under the host that
+    does NOT own the guest used to send its snapshot to the wrong node. PVE
+    answered `500 Configuration file 'nodes/node1/qemu-server/100.conf' does not
+    exist`, observed on PVE 9.2.10 (doc 12 check 18). A cluster-wide token can
+    act on another node's guest through any member, which is why the fix routes
+    to the right node rather than hiding the guest.
+    """
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app
+
+    async def go():
+        fake = _fake()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+
+        backend = JobBackend(app)
+        ids = _seed(app)
+        with app.state.sessionmaker() as db:
+            # host-01 is pve1; this guest lives on pve2, the other member
+            db.get(Vm, ids["vm_id"]).node_name = "pve2"
+            db.commit()
+            jid = backend.enqueue(db, kind="vm.snapshot_create", target_type="vm",
+                                  target_id=ids["vm_id"],
+                                  params={"vm_id": ids["vm_id"], "name": "x"}).id
+        await backend.wait(jid, timeout=10)
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, jid)
+            assert job.status == "succeeded", job.error
+        kind, node, vmid, _kwargs = fake.snapshot_creates[0]
+        assert (kind, node, vmid) == ("qemu", "pve2", 201), (
+            f"snapshot went to {node!r}, not the node the guest runs on")
+
+    asyncio.run(go())
+
+
+def test_a_vm_never_polled_since_node_name_existed_uses_its_host_node(tmp_path):
+    """NULL node_name means "not polled yet", not "standalone".
+
+    The fallback is the behaviour that predates the column, so an upgraded
+    install is never worse off between the migration and the next poll cycle.
+    """
+    from proxploy.jobs import JobBackend
+    from tests.support import make_job_app
+
+    async def go():
+        fake = _fake()
+        db_dir = tmp_path / "fallback"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        app = make_job_app(db_dir, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+
+        backend = JobBackend(app)
+        ids = _seed(app)
+        with app.state.sessionmaker() as db:
+            assert db.get(Vm, ids["vm_id"]).node_name is None
+            jid = backend.enqueue(db, kind="vm.snapshot_create", target_type="vm",
+                                  target_id=ids["vm_id"],
+                                  params={"vm_id": ids["vm_id"], "name": "x"}).id
+        await backend.wait(jid, timeout=10)
+        assert fake.snapshot_creates[0][1] == "pve1"
+
+    asyncio.run(go())
+
+
 def test_snapshot_jobs_run_end_to_end(tmp_path):
     from proxploy.jobs import HANDLERS
 

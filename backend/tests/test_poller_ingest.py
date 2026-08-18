@@ -106,6 +106,40 @@ def test_vms_upserted_and_apps_cached_refreshed(tmp_path):
                                             target_id=vm.id).count() == 3
 
 
+def test_a_vm_on_another_cluster_node_records_that_node(tmp_path):
+    """The mirror records where the guest RUNS, not who reported it.
+
+    Every fixture in this file puts every guest on the polling host's own node,
+    which is the shape a fake falls into and a cluster never has:
+    /cluster/resources answers for the whole cluster from any member. Without
+    the node, every action on a mirrored VM went to the polling host's node and
+    PVE answered `500 Configuration file 'nodes/<other>/qemu-server/<id>.conf'
+    does not exist` (doc 12 check 18, PVE 9.2.10).
+    """
+    from proxploy.models import Vm, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)          # node_name pve1
+    resources, rrd = _fixtures()
+    for r in resources:               # the VM lives on the OTHER member
+        if r.get("type") == "qemu":
+            r["node"] = "pve2"
+    ingest_cycle(db, host, resources, rrd, utcnow())
+
+    vm = db.query(Vm).filter_by(host_id=host.id, vmid=100).one()
+    assert vm.node_name == "pve2"
+
+    # and a later cycle follows the guest when it moves
+    for r in resources:
+        if r.get("type") == "qemu":
+            r["node"] = "pve1"
+    ingest_cycle(db, host, resources, rrd, utcnow())
+    db.refresh(vm)
+    assert vm.node_name == "pve1", "a migrated guest kept its old node"
+
+
 def test_vm_removed_upstream_is_deleted(tmp_path):
     from proxploy.models import Vm
     from tests.support import make_db, seed_host_row

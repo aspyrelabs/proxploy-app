@@ -13,7 +13,7 @@ from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm, to_iso
 from proxploy.services.audit import write_audit
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.lifecycle import VM_ACTIONS
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import is_self
@@ -90,7 +90,7 @@ def _vm_and_host(db, vm_id: int):
 def vm_network(request: Request, vm_id: int, db=Depends(get_db),
                user: User = Depends(_read)):
     v, host = _vm_and_host(db, vm_id)
-    return guest_nics(request, db, host, "qemu", v.vmid)
+    return guest_nics(request, db, host, "qemu", v.vmid, v)
 
 
 @router.put("/{vm_id}/network/{iface}",
@@ -100,7 +100,8 @@ def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
                       db=Depends(get_db), user: User = Depends(_configure)):
     v, host = _vm_and_host(db, vm_id)
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
-                         host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body)
+                         host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body,
+                         row=v)
 
 
 # PVE's own name rule for a guest: a DNS-ish label, since it becomes the
@@ -240,7 +241,7 @@ def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
     v, host = _vm_and_host(db, vm_id)
     client = client_for_host(request.app, db, host)
     try:
-        rows = client.snapshots("qemu", host.node_name or "", v.vmid)
+        rows = client.snapshots("qemu", guest_node(host, v), v.vmid)
     except ProxmoxError as e:
         raise HTTPException(502, str(e)) from e
     return [_snapshot_out(s) for s in rows if s.get("name") != "current"]

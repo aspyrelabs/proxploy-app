@@ -17,7 +17,7 @@ from proxploy.services import ptybridge
 from proxploy.services.audit import write_audit
 from proxploy.services.consoleproxy import ConsoleProxyError, bridge_binary, connect_upstream_vnc
 from proxploy.services.consoletickets import mint_ticket, redeem_ticket
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.ptybridge import PtyBridgeError, bridge_pty
 from proxploy.services.proxmox import ProxmoxError
 
@@ -235,7 +235,7 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
         client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
-    node = host.node_name or ""
+    node = guest_node(host, v)
     try:
         upstream = client.vncproxy(node, v.vmid)
     except ProxmoxError as e:

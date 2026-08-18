@@ -258,6 +258,11 @@ class Vm(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     host_id: Mapped[int] = mapped_column(ForeignKey("hosts.id", ondelete="CASCADE"))
     vmid: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The node the guest actually RUNS on, which is not the polling host's node
+    # on a cluster: /cluster/resources answers for the whole cluster from any
+    # member. NULL means "not polled since this column existed"; callers fall
+    # back to Host.node_name, which is the behaviour that predates it.
+    node_name: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
     os_type: Mapped[str | None] = mapped_column(Text)

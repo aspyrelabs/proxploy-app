@@ -929,6 +929,77 @@ message.
     to name.
 
     Both throwaway VMs and the placeholder ISO were removed afterwards.
+18. **The lifecycle calls no run had ever made: snapshot, rollback, clone,
+    guest NIC edit.** Every one of these spends the lifecycle token on a call
+    only a fake had ever answered. Swept together on 2026-08-18 because checks 7
+    and 17 had just found two capability gaps the same way.
+
+    **PASSED: `VM.Snapshot`, `VM.Snapshot.Rollback`, `VM.Clone`.** A snapshot of
+    a real VM, a rollback to it (which correctly demanded the VM name typed back
+    first, a 409 raised before any job existed), and a full clone to a new vmid,
+    each with a real UPID on `node2`.
+
+    **PASSED after a fix: the guest NIC edit.** `PUT /vms/{id}/network/net0`
+    failed with `403 (/vms/100, VM.Audit)` on the READ half. `set_guest_nic`
+    does a read-modify-write and ran BOTH halves on the lifecycle client; its
+    docstring even noted the read "only needs monitoring's VM.Audit" and used
+    lifecycle for it anyway. Lifecycle carries no audit privilege, so the
+    refusal landed before anything was attempted on the guest. The read is now
+    on monitoring and the write stays on lifecycle, which is what
+    `services/migrate.py` already does and needs no token regenerated. Verified
+    after the fix by setting `tag=42`, reading `qm config 100` on the node, then
+    clearing it with an explicit null and reading again: `NicIn`'s "absent is
+    not null" contract holds against real PVE.
+
+    **A LINKED CLONE IS REFUSED BY PVE, and the `ponytail:` note on the clone
+    route predicted exactly this.** Its deferral said to revisit "if PVE's
+    rejection proves confusing in practice". It is: `500 Linked clone feature is
+    not supported for 'local-lvm:vm-100-disk-0' (scsi0)`, raw, with no mention
+    of templates. `CloneDialog` offers Full and Linked as radio buttons on any
+    VM, so the option can always be chosen and always fails on a non-template.
+    The upgrade path that note names (mirror `/cluster/resources`'s `template`
+    flag onto `Vm`, then refuse locally) is now evidenced rather than
+    hypothetical.
+
+    **AND THE SWEEP FOUND A WORSE BUG THAN ANY PRIVILEGE, in its first minute:
+    one VM appeared TWICE and half of every action failed.** `GET /vms` returned
+    two rows for one guest, `host_id` 1 and 2, same vmid. Cause:
+    `/cluster/resources` answers for the whole cluster from any member, so every
+    polled host mirrors every VM in the cluster, and the `vms` table had no
+    column for which node a guest runs on. `_vm_target` substituted
+    `host.node_name`, the node of whichever host's credentials the row belongs
+    to.
+
+    Isolated by snapshotting both rows of the same guest:
+
+    - row under host 2 (`node2`, which owns VM 100): `exitstatus: OK`;
+    - row under host 1 (`node1`): `500 Internal Server Error: Configuration
+      file 'nodes/node1/qemu-server/100.conf' does not exist`.
+
+    So on any cluster every VM is listed once per enrolled host, and every row
+    but the owning one answers every lifecycle action with a raw PVE 500 about a
+    path the operator never mentioned. Nothing in the frontend dedupes.
+
+    **Fixed by recording the guest's node** (`vms.node_name`, migration
+    `c17f4a9be350`, refreshed every cycle so a migrated guest follows) and
+    resolving it through one `guest_node(host, row)` helper at every VM call
+    site: both job resolvers, the snapshot list, the VNC console and both NIC
+    routes. NULL falls back to the host's node, which is correct for a standalone
+    host and is exactly the behaviour that predates the column.
+
+    **Verified on hardware after the fix:** the same row that failed, unchanged
+    but for the fix, snapshotted `exitstatus: OK` with a UPID on `node2` while
+    spending `node1`'s credentials. That settles something worth knowing on its
+    own: a cluster-wide token really can act on another member's guest through
+    any node, which is why the fix routes to the right node rather than hiding
+    guests on nodes Proxploy has not enrolled.
+
+    **What is still open from this** is in doc 11: the duplicate ROWS remain, one
+    per enrolled host, so a cluster still lists each VM more than once. That is
+    now cosmetic rather than broken, and the precedent for fixing it is
+    `api/storage.py::list_storage`, which already collapses cluster-wide rows.
+    The App side has the same latent shape with no column to fix it: a CT
+    migrated outside Proxploy leaves `host.node_name` wrong for that app.
 
 ## Cluster peer enrolment
 

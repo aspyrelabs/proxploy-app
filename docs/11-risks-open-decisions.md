@@ -805,12 +805,47 @@ any suite could have caught. What that run leaves open:
    turned out NOT to be needed even with an ISO, so it stayed out. Doc 12 check
    17 carries the detail.
 
-   What this leaves is the pattern rather than the bug: **two capability gaps in
-   one day, both found the first time a code path met real PVE, and both
-   invisible to a fake that accepts any token for any call.** Whatever is still
-   unexercised against a real token is the place to look next: VM clone, guest
-   resize, snapshot rollback, and the node-network apply routes all spend the
-   lifecycle token on calls no hardware run has made.
+   What this leaves is the pattern rather than the bug: **capability gaps are
+   found the first time a code path meets real PVE, and are invisible to a fake
+   that accepts any token for any call.** So the rest of those calls were swept
+   the same day (doc 12 check 18): snapshot, rollback and clone passed, the
+   guest NIC edit did not, and a third gap fell out of it. `set_guest_nic` ran
+   its config READ on the lifecycle token, which has no `VM.Audit`, so a NIC
+   edit 403'd before touching the guest. Fixed in the code rather than the role,
+   deliberately: reads move to monitoring, which every host has, and no operator
+   has to regenerate a token.
+
+5. **One VM appears once per enrolled host on a cluster.** Found by check 18 and
+   half-fixed the same day. `/cluster/resources` answers for the whole cluster
+   from any member, so every polled host mirrors every VM. The dangerous half is
+   fixed: `vms.node_name` now records where a guest actually runs, so actions
+   reach the right node instead of answering `500 Configuration file
+   'nodes/<other>/qemu-server/<id>.conf' does not exist`.
+
+   The duplicate ROWS remain, so a cluster lists each VM more than once and each
+   copy has its own id. Now cosmetic, and the precedent for the fix is
+   `api/storage.py::list_storage`, which collapses cluster-wide rows and keeps
+   whichever host's poll was seen first, with the frontend matching on
+   `cluster_name`. Doing the same for guests is a read-layer change, but it wants
+   one decision first: whether a guest on a cluster node Proxploy has NOT
+   enrolled should stay visible. It is visible and now fully actionable today,
+   because a cluster-wide token works through any member, so the honest answer is
+   probably yes and the dedupe key is `(cluster_name, vmid)`.
+
+   The App side has the same shape latent, with no column to fix it: an app's
+   `host.node_name` is assumed to be its CT's node. True today because installs
+   choose a host and the migration handler repoints the row, but wrong the moment
+   someone migrates a CT in the Proxmox UI instead.
+
+6. **A linked clone can always be chosen and can never work.** PVE permits
+   `full=false` only from a template, `CloneDialog` offers Full and Linked as
+   radio buttons on every VM, and the failure is a raw
+   `500 Linked clone feature is not supported for '<volume>' (scsi0)` that never
+   says "template". The `ponytail:` note on the clone route already deferred
+   this with a trigger, "if PVE's rejection proves confusing in practice", and
+   check 18 is that evidence. Its own upgrade path is the fix: mirror
+   `/cluster/resources`'s `template` flag onto `Vm`, then refuse locally with a
+   sentence naming templates, or hide the radio when the source is not one.
 
 5. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
    added to the generated script today, so an operator who ran the old script
