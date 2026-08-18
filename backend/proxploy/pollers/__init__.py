@@ -237,6 +237,8 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         guests[(r["type"], int(r["vmid"]))] = {
             "name": r.get("name"), "node": r.get("node"),
             "status": r.get("status", "unknown"),
+            # PVE reports 1 for a template and omits the key otherwise.
+            "template": bool(r.get("template")),
             "cpu_pct": round(float(r.get("cpu") or 0.0) * 100, 1),
             "cpu_cores": int(r.get("maxcpu") or 0),
             "mem_bytes": int(r.get("mem") or 0),
@@ -300,7 +302,8 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         v = existing.get(vmid)
         if v is None:
             v = Vm(host_id=host.id, vmid=vmid, name=g["name"] or f"vm-{vmid}",
-                   status=g["status"], node_name=g["node"])
+                   status=g["status"], node_name=g["node"],
+                   template=g["template"])
             db.add(v)
             membership_changed = True
         elif v.status != g["status"]:
@@ -311,6 +314,9 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # the guest to another node and this is the only record of where it is
         # (doc 12 check 18).
         v.node_name = g["node"] or v.node_name
+        # Refreshed every cycle: `qm template <id>` converts a guest in place,
+        # so this changes without the row being recreated.
+        v.template = g["template"]
         v.status, v.uptime_s, v.synced_at = g["status"], g["uptime_s"], now
         v.cpu_cores, v.mem_bytes, v.disk_bytes = (
             g["cpu_cores"], g["mem_total_bytes"], g["disk_bytes"])

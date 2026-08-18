@@ -290,3 +290,25 @@ describe('CloneDialog', () => {
     expect(calls[0].body).toMatchObject({ full: false })
   })
 })
+
+describe('CloneDialog linked mode needs a template', () => {
+  beforeEach(() => { calls.length = 0; cloneRejects = false; cloneHeld = false; releaseClone = null })
+
+  it('disables the linked option for an ordinary guest', () => {
+    // PVE accepts a linked clone only from a template, and its refusal never
+    // says so: `500 Linked clone feature is not supported for '<volume>'
+    // (scsi0)`, seen on real hardware (doc 12 check 18). The option used to be
+    // offered on every VM and always failed.
+    wrap(<CloneDialog vm={VM as never} onClose={() => {}} />)
+    const linked = screen.getByLabelText(/linked clone/i)
+    expect(linked).toBeDisabled()
+    expect(screen.getByText(/needs a template source/i)).toBeInTheDocument()
+  })
+
+  it('offers the linked option for a template', () => {
+    wrap(<CloneDialog vm={{ ...VM, template: true } as never} onClose={() => {}} />)
+    const linked = screen.getByLabelText(/linked clone/i)
+    expect(linked).not.toBeDisabled()
+    expect(screen.queryByText(/needs a template source/i)).toBeNull()
+  })
+})

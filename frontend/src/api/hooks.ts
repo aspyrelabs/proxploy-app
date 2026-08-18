@@ -92,6 +92,11 @@ export type VmRow = {
   status: string; os_type: string | null; cpu_cores: number | null
   cpu_pct: number | null; mem_bytes: number | null; disk_bytes: number | null
   uptime_s: number | null; synced_at: string | null
+  // PVE accepts a linked clone only FROM a template, so the clone dialog gates
+  // that option on this rather than letting PVE refuse every time.
+  template?: boolean
+  // The node the guest runs on, which is not its host's node on a cluster.
+  node?: string | null
 }
 
 export type UpdateInfo = {

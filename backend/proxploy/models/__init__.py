@@ -274,6 +274,11 @@ class Vm(TimestampMixin, Base):
     # member. NULL means "not polled since this column existed"; callers fall
     # back to Host.node_name, which is the behaviour that predates it.
     node_name: Mapped[str | None] = mapped_column(Text)
+    # A PVE TEMPLATE, per /cluster/resources' own flag. PVE allows a linked
+    # clone only from one of these, and without knowing, the UI offered Linked
+    # on every guest and PVE refused every time (doc 12 check 18). NULL means
+    # not polled since this column existed and is treated as "not a template".
+    template: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
     os_type: Mapped[str | None] = mapped_column(Text)

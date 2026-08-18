@@ -874,15 +874,20 @@ any suite could have caught. What that run leaves open:
    - alerting has no quorum rule, so an unattended cluster losing quorum
      notifies nobody.
 
-7. **A linked clone can always be chosen and can never work.** PVE permits
-   `full=false` only from a template, `CloneDialog` offers Full and Linked as
-   radio buttons on every VM, and the failure is a raw
-   `500 Linked clone feature is not supported for '<volume>' (scsi0)` that never
-   says "template". The `ponytail:` note on the clone route already deferred
-   this with a trigger, "if PVE's rejection proves confusing in practice", and
-   check 18 is that evidence. Its own upgrade path is the fix: mirror
-   `/cluster/resources`'s `template` flag onto `Vm`, then refuse locally with a
-   sentence naming templates, or hide the radio when the source is not one.
+7. **A linked clone can always be chosen and can never work. FIXED
+   2026-08-18**, by taking the upgrade path the clone route's own `ponytail:`
+   note described: `vms.template` mirrors `/cluster/resources`'s flag every poll
+   cycle (refreshed, not written once, since `qm template <id>` converts a guest
+   in place), the route refuses `full=false` on a non-template with a 409 naming
+   templates, and the dialog disables the Linked radio instead of offering
+   something that always fails. The radio is disabled and labelled rather than
+   removed, so an operator who has used linked clones before sees why it is not
+   available.
+
+   Verified on hardware both ways: `qm template 100` then a linked clone through
+   the app returned `exitstatus: OK` with `full: False`, and a linked clone of
+   the resulting non-template guest was refused with
+   `linked_clone_needs_template`.
 
 5. **Every existing Lifecycle token predates `SDN.Use`. PROBE ADDED
    2026-08-18.** The privilege was

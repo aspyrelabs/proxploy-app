@@ -42,9 +42,8 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
     setError('')
     clone.mutate(undefined, {
       onSuccess: (r) => setJobId(r.job.id),
-      // Linked clone is only valid from a template and Proxploy does not track
-      // template-ness, so the option is offered unconditionally and PVE's own
-      // rejection is shown verbatim rather than guessed at up front.
+      // The linked-clone case is refused by the route now, not by PVE, so the
+      // detail this shows names templates instead of a volume path.
       onError: (e) => setError(
         e instanceof ApiError
           ? String((e.body as any)?.detail ?? (e.body as any)?.error ?? e.message)
@@ -77,10 +76,20 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
                 onChange={() => setFull(true)} />
               Full clone, an independent copy of every disk
             </label>
-            <label htmlFor="clone-linked" className="flex items-center gap-2 text-[13px] text-text-2">
+            {/* Only for a template. PVE accepts a linked clone from nothing
+                else and its refusal never says so, so offering the choice on an
+                ordinary guest is offering something that always fails (doc 12
+                check 18). The row still appears, disabled and explained,
+                because silently dropping it would leave an operator who has
+                used linked clones before wondering where it went. */}
+            <label htmlFor="clone-linked"
+              className={`flex items-center gap-2 text-[13px] ${
+                vm.template ? 'text-text-2' : 'cursor-not-allowed text-text-3'}`}>
               <input id="clone-linked" type="radio" name="clone-mode" checked={!full}
+                disabled={!vm.template}
                 onChange={() => setFull(false)} />
-              Linked clone, shares the base disk, template sources only
+              Linked clone, shares the base disk
+              {vm.template ? '' : ', needs a template source'}
             </label>
           </fieldset>
           <div>
@@ -103,9 +112,8 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
           </div>
           {!full && (
             <p className="text-[12px] text-text-3">
-              Proxmox only accepts a linked clone when the source is a template.
-              Proxploy does not track template-ness, so if this VM is not one,
-              Proxmox&apos;s own error is shown here unchanged.
+              Shares the template&apos;s base disk, so the clone is quick and small
+              and stays tied to it.
             </p>
           )}
           {error && <p className="text-[12.5px] text-red">{error}</p>}

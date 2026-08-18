@@ -476,3 +476,46 @@ def test_vm_mutations_require_auth(tmp_path, csrf_header):
                       headers=h).status_code == 401
         assert c.request("DELETE", f"/api/v1/vms/{ids['vm_id']}", json={},
                          headers=h).status_code == 401
+
+
+# --- linked clone needs a template (doc 12 check 18) -----------------------
+
+def test_a_linked_clone_of_an_ordinary_guest_is_refused_by_name(
+        tmp_path, csrf_header, bootstrap_admin):
+    """PVE allows a linked clone only from a template, and its own refusal never
+    says so: `500 Linked clone feature is not supported for '<volume>' (scsi0)`,
+    seen on real hardware 2026-08-18. Refused here instead, with a sentence that
+    names templates and offers the full clone, and nothing is queued.
+    """
+    from proxploy.models import Job
+
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post(f"/api/v1/vms/{ids['vm_id']}/clone",
+                   json={"name": "web-02", "full": False}, headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        # FastAPI nests a dict detail under "detail"; a string detail lands
+        # there too, so assert on the shape the route actually returns.
+        body = r.json()
+        detail = body.get("detail") if isinstance(body.get("detail"), dict) else body
+        assert detail["error"] == "linked_clone_needs_template", body
+        assert "template" in detail["detail"]
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).count() == 0, "a refused clone still queued a job"
+
+
+def test_a_linked_clone_of_a_template_is_allowed(tmp_path, csrf_header,
+                                                bootstrap_admin):
+    """The flag is the only thing that changes, so a template must still work:
+    refusing every linked clone would be its own bug."""
+    from proxploy.models import Vm
+
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        with app.state.sessionmaker() as db:
+            db.get(Vm, ids["vm_id"]).template = True
+            db.commit()
+        r = c.post(f"/api/v1/vms/{ids['vm_id']}/clone",
+                   json={"name": "web-02", "full": False}, headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        assert r.json()["job"]["params"]["full"] is False

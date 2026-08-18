@@ -47,6 +47,10 @@ def _vm_out(v: Vm, host: Host, snapshots) -> dict:
         "cpu_pct": g["cpu_pct"] if g else None,
         "mem_bytes": v.mem_bytes, "disk_bytes": v.disk_bytes,
         "uptime_s": v.uptime_s,
+        # A linked clone is only possible FROM a template, so the clone dialog
+        # needs this to stop offering an option PVE always refuses.
+        "template": bool(v.template),
+        "node": v.node_name,
         "synced_at": to_iso(v.synced_at),
     }
 
@@ -344,18 +348,32 @@ class VmCloneIn(BaseModel):
 def clone_vm_route(request: Request, vm_id: int,
                    body: VmCloneIn = Body(default=VmCloneIn()), db=Depends(get_db),
                    user: User = Depends(_clone)):
-    """`full` is passed through to PVE unvalidated.
+    """A linked clone is refused here, not by PVE.
 
-    ponytail: PVE permits a linked clone (`full=false`) only from a template,
-    and Proxploy cannot tell templates apart, the `vms` table has no `template`
-    column and this phase adds no migration. Pre-validating would mean guessing.
-    Upgrade path if PVE's rejection proves confusing in practice: have the
-    poller mirror `/cluster/resources`'s `template` flag onto `Vm`, then refuse
-    a linked clone of a non-template here with a message naming the reason.
+    The upgrade path this docstring used to describe is now taken: the poller
+    mirrors `/cluster/resources`'s `template` flag onto `Vm`, so a linked clone
+    of an ordinary guest is refused with a sentence naming templates instead of
+    PVE's `500 Linked clone feature is not supported for '<volume>' (scsi0)`,
+    which never mentions them. Its trigger condition was "if PVE's rejection
+    proves confusing in practice", and doc 12 check 18 is that evidence.
+
+    Historical note, kept because it explains the shape: PVE permits a linked
+    clone (`full=false`) only from a template, and Proxploy could not tell
+    templates apart, so `full` was passed through unvalidated.
     """
     v, host = _vm_and_host(db, vm_id)
     if body.name is not None and not VM_NAME_RE.match(body.name):
         raise HTTPException(422, "name must be a hostname-shaped label")
+    if not body.full and not v.template:
+        # 409, not 422: the request is well formed and would be valid against a
+        # template, so this is a state conflict rather than a bad field. The
+        # error names what to do, which PVE's own refusal does not.
+        raise HTTPException(409, {
+            "error": "linked_clone_needs_template",
+            "detail": (f"{v.name or f'VM {v.vmid}'} is not a template, and PVE "
+                       f"can only make a linked clone from one. Choose a full "
+                       f"clone, or convert this guest to a template first."),
+        })
     newid = body.newid
     if newid is None:
         client = client_for_host(request.app, db, host, capability="lifecycle")
