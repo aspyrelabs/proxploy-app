@@ -18,6 +18,7 @@ from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
 from proxploy.services.catalog_icons import served_icon_url
+from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
@@ -624,6 +625,22 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
                            f"Migrating it can strand its own recovery path. "
                            f"Type the name to confirm."),
             })
+    # Resolve every token this job will spend, BEFORE queueing it. Without this
+    # a host missing its lifecycle or backup token accepted the migration and
+    # discovered the gap inside the handler, which for a transfer means AFTER the
+    # source guest has been stopped. No network call happens here:
+    # client_for_host raises CapabilityNotConfigured on a missing credential
+    # alone, and main.py turns that into a 409 naming the capability and where to
+    # add it (doc 11 open item 3). The strategy decides which tokens are needed,
+    # which is why this sits after the preflight above rather than in a
+    # dependency.
+    needed = ("lifecycle",) if pf["strategy"] == migrate_service.STRATEGY_CLUSTER \
+        else ("lifecycle", "backup")
+    for host in (db.get(Host, a.host_id), target):
+        if host is None:
+            continue
+        for capability in needed:
+            client_for_host(request.app, db, host, capability=capability)
     result = enqueue_and_audit(request, db, user, kind="migrate.app",
                                target_type="app", target_id=app_id,
                                params={"app_id": app_id,

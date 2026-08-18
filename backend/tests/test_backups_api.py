@@ -471,3 +471,31 @@ def test_selfguard_destructive_set_is_unchanged():
     from proxploy.services.selfguard import DESTRUCTIVE
 
     assert DESTRUCTIVE == frozenset({"stop", "shutdown", "restart", "pause"})
+
+
+def test_restore_is_refused_before_queueing_when_the_host_has_no_lifecycle_token(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A restore creates a guest, so it needs Lifecycle, and finding that out
+    inside the handler means a queued job that cannot run (doc 11 open item 3).
+    """
+    from fastapi.testclient import TestClient
+
+    from proxploy.models import HostCredential, Job
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_fake())
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        ids = _seed(app)
+        with app.state.sessionmaker() as db:
+            (db.query(HostCredential)
+             .filter_by(host_id=ids["host_id"], kind="api_token:lifecycle").delete())
+            db.commit()
+            backup_id = ids["ct_backup"]
+
+        r = c.post(f"/api/v1/backups/{backup_id}/restore", json={"mode": "new"},
+                   headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        assert "lifecycle" in r.json()["detail"]
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).count() == 0

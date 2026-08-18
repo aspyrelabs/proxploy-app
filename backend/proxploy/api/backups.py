@@ -280,6 +280,18 @@ def restore_backup_route(request: Request, backup_id: int,
             raise HTTPException(409, {
                 "error": "guest_running",
                 "detail": f"stop {name} before restoring over it"})
+    # Resolve the tokens the handler will spend, BEFORE queueing. A restore
+    # reads the archive on `backup` and writes the guest on `lifecycle` (it
+    # creates one, so PVE checks VM.Allocate and SDN.Use), and a host missing
+    # either used to accept the job and fail inside the handler. No network call
+    # happens here: client_for_host raises CapabilityNotConfigured on a missing
+    # credential alone, and main.py turns that into a 409 naming the capability
+    # and where to add it. Same shape as catalog.py checking for an `ssh_key`
+    # before an install (doc 11 open item 3).
+    host = db.get(Host, b.host_id)
+    if host is not None:
+        for capability in ("backup", "lifecycle"):
+            client_for_host(request.app, db, host, capability=capability)
     return enqueue_and_audit(request, db, user, kind="backup.restore",
                              target_type="backup", target_id=b.id,
                              params={"backup_id": b.id, "mode": body.mode,

@@ -817,13 +817,24 @@ any suite could have caught. What that run leaves open:
    route gates could check the capability up front the way
    `api/catalog.py::install_catalog_entry` checks for an `ssh_key`.
 
-   **Partly mitigated 2026-08-18, still open as written.** The stored
-   `capability_gaps` warn that a token is short of a privilege it should hold,
-   which is the drift case; this item is the different one where a capability has
-   no token AT ALL, and the route still accepts the job and discovers it in the
-   handler. Small to close: `client_for_host` already raises
-   `CapabilityNotConfigured` with the sentence to show, so the gate is one
-   resolve attempt in the route before `enqueue_and_audit`.
+   **CLOSED 2026-08-18**, and it was as small as it looked: the route now
+   resolves every token the job will spend before `enqueue_and_audit`.
+   `client_for_host` raises `CapabilityNotConfigured` on a missing credential
+   alone, with no network call, and `main.py` already turns that into a 409
+   naming the capability and where to add it, so the gate is a loop and no new
+   error shape.
+
+   Which tokens are needed depends on the strategy, which is why the check sits
+   after the preflight rather than in a dependency: a native cluster migrate
+   never dumps anything, so demanding `backup` there would refuse a migration
+   that would have worked. Both cases are tested. The backup restore route got
+   the same treatment for `backup` + `lifecycle`.
+
+   Verified on hardware against the real app: with node1's lifecycle token lifted
+   out, `POST /apps/1/migrate` answered
+   `409 node1.lab.local has no lifecycle API token configured; add one in
+   Settings -> Hosts before this operation can run.`, zero jobs were queued, and
+   CT 101 was still running on its own host.
 
 4. **A real VM create was never run until today, and it was broken.** Closed
    the same day it was written: `VM.Config.HWType` was missing from the

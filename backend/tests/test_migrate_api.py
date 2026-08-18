@@ -262,3 +262,60 @@ def test_route_does_not_get_shadowed_by_the_lifecycle_wildcard(tmp_path, csrf_he
         r = _migrate(c, csrf_header, app_id, tgt_id)
         assert r.status_code == 202
         assert "action must be one of" not in r.text
+
+
+def test_a_host_missing_its_backup_token_is_refused_before_the_job_is_queued(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The source guest must not be stopped to discover a missing token.
+
+    A transfer or shared-storage migration spends `backup` (vzdump, archive
+    reads) and `lifecycle` (stop, restore, start). Resolving both in the route
+    costs no network call, since client_for_host raises on a missing credential
+    alone, and turns "the handler failed after stopping the guest" into a 409
+    naming the capability (doc 11 open item 3).
+    """
+    from proxploy.models import HostCredential, Job
+
+    fake_src, fake_tgt = _fake_pair()
+    app = _make_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        src_id, tgt_id, app_id = _seed(app)
+        with app.state.sessionmaker() as db:
+            (db.query(HostCredential)
+             .filter_by(host_id=tgt_id, kind="api_token:backup").delete())
+            db.commit()
+
+        r = _migrate(c, csrf_header, app_id, tgt_id)
+        assert r.status_code == 409, r.text
+        assert "backup" in r.json()["detail"]
+
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).count() == 0, "queued a job it could not run"
+
+
+def test_the_cluster_strategy_does_not_demand_a_backup_token(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A native cluster migrate never dumps anything, so requiring `backup`
+    there would refuse a migration that would have worked."""
+    from proxploy.models import HostCredential
+
+    fake_src, fake_tgt = _fake_pair()
+    rows = [{"type": "cluster", "name": "lab-cluster", "nodes": 2, "quorate": 1},
+            {"type": "node", "name": "pve-src"}, {"type": "node", "name": "pve-tgt"}]
+    fake_src.cluster_status_rows = list(rows)
+    fake_tgt.cluster_status_rows = list(rows)
+
+    app = _make_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt})
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        src_id, tgt_id, app_id = _seed(app)
+        with app.state.sessionmaker() as db:
+            for hid in (src_id, tgt_id):
+                (db.query(HostCredential)
+                 .filter_by(host_id=hid, kind="api_token:backup").delete())
+            db.commit()
+
+        r = _migrate(c, csrf_header, app_id, tgt_id)
+        assert r.status_code == 202, r.text
+        assert r.json()["preflight"]["strategy"] == "cluster"
