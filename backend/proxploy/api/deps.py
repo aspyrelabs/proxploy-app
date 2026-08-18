@@ -85,50 +85,58 @@ def require_entitlement(key: str):
 
 def _team_of_host(db, host_id) -> int | None:
     from proxploy.models import Host
-    h = db.get(Host, int(host_id))
+    h = db.get(Host, host_id)   # always an int: callers go through _as_id
     if h is None:
         return None          # let the handler 404; never an existence oracle
     return h.team_id if h.team_id is not None else default_team(db).id
 
 
+def _as_id(raw) -> int | None:
+    """The path param as an int, or None if it is not one.
+
+    These resolvers run as sub-dependencies and read `request.path_params`,
+    which holds the raw matched string: the route signature's `int` annotation
+    is validated separately and does not reach here first. A bare `int(raw)`
+    therefore turned `/hosts/abc/...` into a ValueError escaping the dependency
+    as a 500. None means "no scope", which is the same answer these resolvers
+    already give for a target row that does not exist, and it lets the route's
+    own validation return the 422 the client should have got.
+    """
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scope_by_host_of(model_name: str, param: str):
+    """Team of the host owning the `model_name` row named by `param`."""
+    def resolve(db, path_params) -> int | None:
+        import proxploy.models as models
+        ident = _as_id(path_params.get(param))
+        if ident is None:
+            return None
+        row = db.get(getattr(models, model_name), ident)
+        return _team_of_host(db, row.host_id) if row else None
+    return resolve
+
+
 def scope_host(param: str = "host_id"):
     def resolve(db, path_params) -> int | None:
-        raw = path_params.get(param)
-        return _team_of_host(db, raw) if raw is not None else None
+        ident = _as_id(path_params.get(param))
+        return _team_of_host(db, ident) if ident is not None else None
     return resolve
 
 
 def scope_app(param: str = "app_id"):
-    def resolve(db, path_params) -> int | None:
-        from proxploy.models import App
-        raw = path_params.get(param)
-        if raw is None:
-            return None
-        a = db.get(App, int(raw))
-        return _team_of_host(db, a.host_id) if a else None
-    return resolve
+    return _scope_by_host_of("App", param)
 
 
 def scope_vm(param: str = "vm_id"):
-    def resolve(db, path_params) -> int | None:
-        from proxploy.models import Vm
-        raw = path_params.get(param)
-        if raw is None:
-            return None
-        v = db.get(Vm, int(raw))
-        return _team_of_host(db, v.host_id) if v else None
-    return resolve
+    return _scope_by_host_of("Vm", param)
 
 
 def scope_backup(param: str = "backup_id"):
-    def resolve(db, path_params) -> int | None:
-        from proxploy.models import Backup
-        raw = path_params.get(param)
-        if raw is None:
-            return None
-        b = db.get(Backup, int(raw))
-        return _team_of_host(db, b.host_id) if b else None
-    return resolve
+    return _scope_by_host_of("Backup", param)
 
 
 def authorize(resource: str, action: str, *, scope_of=None):

@@ -664,3 +664,20 @@ def test_ssh_verify_hands_back_both_fingerprints_on_a_mismatch(tmp_path,
         assert body["error"] == "host_key_mismatch"
         assert body["ssh_host_key_fingerprint"] == "SHA256:A"
         assert body["ssh_host_key_fingerprint_seen"] == "SHA256:B"
+
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/hosts/abc",
+    "/api/v1/apps/abc",
+    "/api/v1/vms/abc",
+])
+def test_a_non_numeric_id_is_a_422_not_a_crash(pve_client, path):
+    """PXP-30: the scope resolvers in api/deps.py run as sub-dependencies and
+    read `request.path_params`, which holds the raw matched string, so the
+    route signature's `int` annotation has not been applied yet. A bare
+    `int(raw)` there turned a typo'd URL into a ValueError escaping the
+    dependency. The route's own validation should answer instead.
+    """
+    c, _ = pve_client
+    r = c.get(path)
+    assert r.status_code == 422, r.text
