@@ -1103,12 +1103,18 @@ message.
     any node, which is why the fix routes to the right node rather than hiding
     guests on nodes Proxploy has not enrolled.
 
-    **What is still open from this** is in doc 11: the duplicate ROWS remain, one
-    per enrolled host, so a cluster still lists each VM more than once. That is
-    now cosmetic rather than broken, and the precedent for fixing it is
-    `api/storage.py::list_storage`, which already collapses cluster-wide rows.
-    The App side has the same latent shape with no column to fix it: a CT
-    migrated outside Proxploy leaves `host.node_name` wrong for that app.
+    **The duplication was closed the same day**, at every read rather than in the
+    mirror: `dedupe_vms` keys on `cluster_scope` and keeps the row belonging to
+    the host registered at the guest's node. It mattered in five places, not one,
+    which is the part worth remembering: the VM list, the cluster summary counts,
+    the search palette, ALERT target expansion (an "any vm" rule fired and
+    notified once per enrolled host for a single breach), and this same network
+    topology route.
+
+    **Still open, and latent rather than observed:** an App's node is assumed to
+    be its host's, and `App` has no node column. True today because installs
+    choose a host and the migration handler repoints the row, wrong the moment a
+    CT is migrated in the Proxmox UI instead of through Proxploy.
 
 ## Cluster peer enrolment
 

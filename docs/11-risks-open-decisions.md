@@ -817,6 +817,14 @@ any suite could have caught. What that run leaves open:
    route gates could check the capability up front the way
    `api/catalog.py::install_catalog_entry` checks for an `ssh_key`.
 
+   **Partly mitigated 2026-08-18, still open as written.** The stored
+   `capability_gaps` warn that a token is short of a privilege it should hold,
+   which is the drift case; this item is the different one where a capability has
+   no token AT ALL, and the route still accepts the job and discovers it in the
+   handler. Small to close: `client_for_host` already raises
+   `CapabilityNotConfigured` with the sentence to show, so the gate is one
+   resolve attempt in the route before `enqueue_and_audit`.
+
 4. **A real VM create was never run until today, and it was broken.** Closed
    the same day it was written: `VM.Config.HWType` was missing from the
    lifecycle role, so the first real `POST /nodes/{node}/qemu` from this
@@ -914,7 +922,7 @@ any suite could have caught. What that run leaves open:
    the resulting non-template guest was refused with
    `linked_clone_needs_template`.
 
-5. **Every existing Lifecycle token predates `SDN.Use`. PROBE ADDED
+8. **Every existing Lifecycle token predates `SDN.Use`. PROBE ADDED
    2026-08-18.** The privilege was
    added to the generated script today, along with `VM.Config.HWType`, so an
    operator who ran the old script has a token that 403s on any NIC write or VM
