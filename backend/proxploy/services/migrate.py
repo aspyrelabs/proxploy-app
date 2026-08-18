@@ -312,9 +312,31 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
 
     est_downtime_s, est_note = _downtime_estimate(
         strategy, transfer_bytes, app.state.settings.migrate_assumed_bps)
-    capacity_ok = (True if strategy == STRATEGY_CLUSTER
-                   else _capacity_ok(tgt_client, target_host.node_name,
-                                     capacity_storage, transfer_bytes))
+
+    # Where the restored ROOTFS lands, which is not where the archive is staged:
+    # `capacity_storage` above is the pool that holds the dump, and on a stock
+    # layout that is a dir store carrying no `rootdir` content at all. Checking
+    # only that one could read `capacity_ok: true` while the pool the disk
+    # actually needs is full (doc 12 check 7). Named here so an operator sees it
+    # before committing, and so the job restores where the preview said it would.
+    rootfs_storage = (None if strategy == STRATEGY_CLUSTER else
+                      storage_for_content(tgt_client, target_host.node_name,
+                                          "rootdir"))
+    if strategy != STRATEGY_CLUSTER and rootfs_storage is None:
+        blockers.append(f"no storage on {target_host.name} accepts container "
+                        f"rootfs")
+
+    if strategy == STRATEGY_CLUSTER:
+        capacity_ok = True
+    else:
+        # Both pools have to fit: the archive on the staging store, the disk on
+        # the rootfs pool. Unknown (None) on either stays unknown overall rather
+        # than being rounded up to a pass.
+        checks = [_capacity_ok(tgt_client, target_host.node_name, name,
+                               transfer_bytes)
+                  for name in (capacity_storage, rootfs_storage) if name]
+        capacity_ok = (False if False in checks
+                       else None if (not checks or None in checks) else True)
     if capacity_ok is False:
         warnings.append("target free space is insufficient for the estimated "
                         "transfer size")
@@ -326,6 +348,11 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
         "target": {"host_id": target_host.id, "host_name": target_host.name,
                    "node": target_host.node_name, "ctid": target_ctid},
         "shared_storage": shared_storage,
+        # The pool the guest's disk will land on, and (transfer only) the pool
+        # the archive is staged in. Both named so the preview is checkable
+        # against the result rather than being an unexplained number.
+        "rootfs_storage": rootfs_storage,
+        "staging_storage": capacity_storage if strategy == STRATEGY_TRANSFER else None,
         "transfer_bytes": transfer_bytes,
         "estimate_basis": estimate_basis,
         "est_downtime_s": est_downtime_s,
@@ -534,23 +561,18 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         target["ctid"], target["node"], target["host_name"])
     timeout_s = app.state.settings.pve_task_timeout_s
 
-    async def _restore_storage() -> str:
+    def _restore_storage() -> str:
         """Where the restored rootfs lands on the target.
 
-        Sending no storage at all lets PVE fall back to `local`, which on a
-        stock layout is a dir store carrying no `rootdir` content, so the
-        restore dies on "storage 'local' does not support container
-        directories". backupjobs.py::restore_backup already hit exactly this
-        and picks deliberately; the migration path did not, and on real
-        hardware that was the whole failure after the archive had already
-        crossed the network (doc 12 check 7).
-
-        Read on MONITORING: listing a node's storages needs Datastore.Audit,
-        which Lifecycle does not carry, and monitoring is the one capability
-        every enrolled host is guaranteed to have.
+        Taken from this job's OWN preflight rather than recomputed, so the pool
+        named in the preview is the pool the restore uses. Sending no storage at
+        all lets PVE fall back to `local`, which on a stock layout is a dir
+        store carrying no `rootdir` content, so the restore dies on "storage
+        'local' does not support container directories": that was the whole
+        failure on real hardware after the archive had already crossed the
+        network (doc 12 check 7).
         """
-        picked = await asyncio.to_thread(storage_for_content, tgt_mon_client,
-                                         target_node, "rootdir")
+        picked = pf.get("rootfs_storage")
         if picked is None:
             raise JobFailed(
                 f"no active storage on {target_host_name} accepts container "
@@ -609,7 +631,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 f"{source_host_name} is stopped but intact")
         volid = candidates[-1]["volid"]
 
-        restore_storage = await _restore_storage()
+        restore_storage = _restore_storage()
         ctx.log(f"restoring {volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}, rootfs on {restore_storage}")
         # LIFECYCLE, not backup, and the reason is doc 12 check 7: a restore to
@@ -730,7 +752,7 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             ) from e
         ctx.progress(TRANSFER_BYTES_PCT[1])
 
-        restore_storage = await _restore_storage()
+        restore_storage = _restore_storage()
         ctx.log(f"restoring {dst_volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}, rootfs on {restore_storage}")
         try:

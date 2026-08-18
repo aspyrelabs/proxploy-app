@@ -83,6 +83,17 @@ def _fake_pair(shared_storage=None, dir_storage=None, cluster=None):
             if present:
                 fake.cluster_storage_rows.append(
                     {"storage": "local", "type": "dir", "content": "backup,iso"})
+    # Node-scoped storages, which is a DIFFERENT read from the cluster config
+    # above and the one preflight uses to find where a restored rootfs can land.
+    # A dir backup store cannot hold one, so a stock layout needs both (doc 12
+    # check 7).
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "active": 1, "avail": 10 * 1024 ** 4},
+            {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir,images",
+             "active": 1, "avail": 10 * 1024 ** 4},
+        ]}
     return a, b
 
 
@@ -374,6 +385,13 @@ def test_a_shared_pool_the_source_does_not_serve_is_not_the_shared_strategy(
             {"storage": "local", "type": "dir", "content": "backup,iso",
              "path": "/var/lib/vz"},
         ]
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "active": 1, "avail": 10 * 1024 ** 4},
+            {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir",
+             "active": 1, "avail": 10 * 1024 ** 4},
+        ]}
 
     app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
     with TestClient(app) as client:
@@ -404,6 +422,13 @@ def test_a_disabled_shared_pool_is_not_the_shared_strategy_either(
             {"storage": "local", "type": "dir", "content": "backup,iso",
              "path": "/var/lib/vz"},
         ]
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            {"storage": "local", "type": "dir", "content": "backup,iso",
+             "active": 1, "avail": 10 * 1024 ** 4},
+            {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir",
+             "active": 1, "avail": 10 * 1024 ** 4},
+        ]}
 
     app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
     with TestClient(app) as client:
@@ -415,3 +440,49 @@ def test_a_disabled_shared_pool_is_not_the_shared_strategy_either(
 
     assert body["strategy"] == "transfer"
     assert body["shared_storage"] is None
+
+
+def test_capacity_checks_the_pool_the_DISK_lands_on_not_only_the_archive_pool(
+        tmp_path, csrf_header, bootstrap_admin):
+    """`capacity_ok` used to measure only the staging store.
+
+    The transfer path writes twice: the archive into a dir backup store, and the
+    restored rootfs into a pool carrying `rootdir`. On a stock layout those are
+    two different pools, so checking one could answer `capacity_ok: true` while
+    the pool the disk actually needs was full (doc 12 check 7). Both are named in
+    the response now, and either one being short is a false.
+    """
+    from tests.fakes.pve import FakePVE
+
+    a, b = FakePVE(), FakePVE()
+    for fake in (a, b):
+        fake.cluster_storage_rows = [{"storage": "local", "type": "dir",
+                                      "content": "backup,iso", "path": "/var/lib/vz"}]
+    a.storages_by_node = {"pve-src": [
+        {"storage": "local", "type": "dir", "content": "backup,iso", "active": 1,
+         "avail": 10 * 1024 ** 4},
+        {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir",
+         "active": 1, "avail": 10 * 1024 ** 4}]}
+    # Plenty of room for the ARCHIVE, almost none on the pool the rootfs needs.
+    b.storages_by_node = {"pve-tgt": [
+        {"storage": "local", "type": "dir", "content": "backup,iso", "active": 1,
+         "avail": 10 * 1024 ** 4},
+        {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir",
+         "active": 1, "avail": 1024}]}
+
+    a.add_ct(150, node="pve-src", maxdisk=8_000_000_000)  # a size to compare against
+
+    app = _make_app(tmp_path, {SRC_HOSTNAME: a, TGT_HOSTNAME: b})
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        _src_id, tgt_id, app_id = _seed(app)
+        r = _preflight(client, csrf_header, app_id, tgt_id)
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+    assert body["strategy"] == "transfer"
+    assert body["rootfs_storage"] == "local-lvm"
+    assert body["staging_storage"] == "local"
+    assert body["capacity_ok"] is False, (
+        "reported room because the archive fits, while the disk does not")
+    assert any("free space" in w for w in body["warnings"])

@@ -26,6 +26,10 @@ const PREFLIGHT_OK: Preflight = {
   source: { host_id: 1, host_name: 'pve-a', node: 'pve-a', ctid: 150 },
   target: { host_id: 2, host_name: 'pve-b', node: 'pve-b', ctid: 999 },
   shared_storage: null,
+  // Two different pools on a stock layout: the archive is staged on a dir
+  // backup store, the disk lands on one carrying rootdir.
+  rootfs_storage: 'local-lvm',
+  staging_storage: 'local',
   transfer_bytes: 2_147_483_648, // 2 GiB
   estimate_basis: 'last_backup',
   est_downtime_s: 120,
@@ -227,5 +231,17 @@ describe('MigrateDialog', () => {
 
     expect(screen.getByText(/est\. downtime: 120s/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText(/actual downtime: 143\.2s \(measured\)/)).toBeInTheDocument())
+  })
+})
+
+describe('MigrateDialog names where the disk lands', () => {
+  it('shows the rootfs pool and the staging pool separately', async () => {
+    // capacity_ok used to be measured on the staging pool alone, so it could
+    // read OK while the pool the disk needed was full (doc 12 check 7). Naming
+    // both is what makes that number checkable.
+    await openWithTarget()
+    expect(screen.getByText('local-lvm')).toBeInTheDocument()
+    expect(screen.getByText('local')).toBeInTheDocument()
+    expect(screen.getByText(/lands on/i)).toBeInTheDocument()
   })
 })

@@ -533,9 +533,10 @@ def test_transfer_strategy_success_cleanup_spends_the_backup_token(tmp_path, mon
 def test_transfer_strategy_target_with_no_rootdir_storage_refuses_before_restoring(tmp_path):
     """A target that can hold the archive but not the rootfs is named as such.
 
-    The failure has to say which host and leave the source intact, rather than
-    letting PVE answer "storage 'local' does not support container directories"
-    about a pool nobody chose.
+    Now caught by the job's own preflight, which BLOCKS before the source is
+    stopped rather than failing after the archive has crossed the network. The
+    handler still carries its own refusal for the same condition, since it reads
+    the pool from that preflight.
     """
     async def go():
         fake_src, fake_tgt = _no_shared_storage_pair()
@@ -565,7 +566,15 @@ def test_transfer_strategy_target_with_no_rootdir_storage_refuses_before_restori
             await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
                                                 "target_host_id": tgt_id})
         assert "accepts container rootfs" in str(e.value)
-        assert "intact" in str(e.value)
+        # Refused as a preflight BLOCKER, before anything is touched, so there is
+        # deliberately no "stopped but intact" in the message: nothing was
+        # stopped and there is nothing to roll back. Previously this condition
+        # was only discovered after the source had been stopped and a 19 MB
+        # archive had crossed the network.
+        assert "intact" not in str(e.value)
+        assert fake_src.vzdumps == [], "the source was dumped before the refusal"
+        assert not any(a == "stop" for _k, _v, a in fake_src.actions), \
+            "the source was stopped before the refusal"
         assert fake_tgt.creates == []
 
         host_id, ctid = _app_row(app, app_id)

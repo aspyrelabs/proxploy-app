@@ -15,6 +15,12 @@ export type Preflight = {
   source: { host_id: number; host_name: string; node: string; ctid: number }
   target: { host_id: number; host_name: string; node: string; ctid: number }
   shared_storage: string | null
+  /** Where the guest's DISK lands on the target, and (transfer only) where the
+   *  archive is staged on the way. Two different pools on a stock layout, and
+   *  `capacity_ok` covers both: checking only the staging one used to report
+   *  room while the pool the disk needed was full. */
+  rootfs_storage?: string | null
+  staging_storage?: string | null
   /** null when neither a measured backup nor a live disk size exists, never fabricated. */
   transfer_bytes: number | null
   estimate_basis: 'last_backup' | 'allocated_disk' | null

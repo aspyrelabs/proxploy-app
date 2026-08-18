@@ -174,7 +174,22 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                   est. downtime: {pf.est_downtime_s != null ? `${pf.est_downtime_s}s` : 'unknown'} (estimate)
                 </div>
                 <div className="text-text-3">{pf.downtime_statement}</div>
+                {pf.rootfs_storage && (
+                  <div>
+                    lands on:{' '}
+                    <span className="font-mono text-[11.5px] text-text">
+                      {pf.rootfs_storage}
+                    </span>
+                    {pf.staging_storage && pf.staging_storage !== pf.rootfs_storage && (
+                      <>
+                        {' '}(staged via{' '}
+                        <span className="font-mono text-[11.5px]">{pf.staging_storage}</span>)
+                      </>
+                    )}
+                  </div>
+                )}
                 <div>
+                  {/* Covers BOTH pools now: the archive's and the disk's. */}
                   target capacity:{' '}
                   {pf.capacity_ok == null ? 'unknown' : pf.capacity_ok ? 'OK' : 'insufficient'}
                 </div>

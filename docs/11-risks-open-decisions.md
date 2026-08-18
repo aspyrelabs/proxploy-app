@@ -783,17 +783,30 @@ any suite could have caught. What that run leaves open:
    both were confirmed to fail with the filter removed.
 
 2. **The transfer strategy picks the target rootfs pool by first match, and
-   preflight checks capacity on the wrong pool.** The restored guest landed on
-   `nfs-shared` (NFS) when its source rootfs was `local-lvm`, because the pick
-   is "first active pool carrying rootdir" and nothing preserves the source's
-   storage class or lets the operator choose. Separately `capacity_ok` measures
-   free space on the DIR storage that stages the ARCHIVE, not on the pool the
-   rootfs lands on, so it can read true while the destination is full.
+   preflight checked capacity on the wrong pool. THE CAPACITY HALF IS FIXED
+   2026-08-18.** `capacity_ok` measured free space on the DIR storage that stages
+   the ARCHIVE, not on the pool the rootfs lands on, so it could read true while
+   the destination was full.
 
-   Both are honest gaps rather than bugs today, and both want the same fix:
-   preflight should name the target rootfs storage, check capacity there, and
-   let the migrate call override it. That is a route/UI change as well as a
-   service one, which is why it is written down rather than done.
+   Preflight now names both pools, `rootfs_storage` and `staging_storage`, and
+   `capacity_ok` is false if EITHER is short and unknown if either is unknown,
+   rather than rounding up to a pass. A target with no pool carrying `rootdir` is
+   a blocker, which moves that refusal to before the source is stopped instead of
+   after the archive has crossed the network. The handler takes the pool from its
+   own preflight, so the pool named in the preview is the pool the restore uses,
+   and the dialog shows "lands on X (staged via Y)".
+
+   **Still open: the pick itself, and any way to override it.** It is the first
+   active pool carrying `rootdir`, so a guest whose source rootfs was `local-lvm`
+   can land on NFS, and nothing preserves the storage class. Preflight reporting
+   where it will go makes that visible rather than surprising, but choosing still
+   means a `storage` field on the migrate call and a select in the dialog.
+
+   Verified on hardware only for the cluster strategy, where both fields are
+   correctly null because no restore happens. The transfer path's pool naming was
+   observed in the morning's real run ("rootfs on nfs-shared" in the job
+   transcript); the preflight fields themselves are covered by tests, not by a
+   second split-cluster run.
 
 3. **A restore now needs the Lifecycle capability, and nothing warns before the
    job runs.** `VM.Allocate` and `SDN.Use` are lifecycle privileges, so

@@ -65,6 +65,16 @@ def _fake_pair(shared_storage="pbs-ds"):
     row = {"storage": shared_storage, "type": "pbs", "content": "backup"}
     a.cluster_storage_rows = [dict(row)]
     b.cluster_storage_rows = [dict(row)]
+    # A PBS datastore holds the ARCHIVE and cannot hold a rootfs, so the target
+    # also needs a pool carrying `rootdir` or preflight blocks: it now names
+    # where the restored disk lands rather than checking only the archive's pool
+    # (doc 12 check 7).
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            dict(row, active=1, avail=10 * 1024 ** 4),
+            {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir",
+             "active": 1, "avail": 10 * 1024 ** 4},
+        ]}
     return a, b
 
 
