@@ -339,8 +339,13 @@ class CatalogEntry(TimestampMixin, Base):
     # real columns rather than reads out of raw["metadata"] because the Store
     # SORTS on them, and an ORDER BY over json_extract is neither indexable
     # nor cheap over 585 rows.
-    script_created: Mapped[datetime | None] = mapped_column(DateTime)
-    script_updated: Mapped[datetime | None] = mapped_column(DateTime)
+    # `index=True` matches the indexes migration a4d70e9c31b8 already created
+    # (`ix_catalog_entries_script_created` / `_updated`, which is the name
+    # SQLAlchemy derives here). They were in the database but not declared here,
+    # so `alembic check` proposed dropping two indexes the Store's "newest" and
+    # "updated" sorts depend on.
+    script_created: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    script_updated: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     # The tags community-scripts shows on a card. All FOUR are tri-state and
     # the third state is load bearing: NULL means WE DO NOT KNOW, never "no".
     # The 9 `unlisted` rows have no upstream record at all, so rendering them
@@ -735,7 +740,16 @@ class NotificationDismissal(TimestampMixin, Base):
     """
     __tablename__ = "notification_dismissals"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    # Declared in __table_args__ below rather than as `unique=True, index=True`
+    # here: that spelling makes SQLAlchemy derive the name
+    # `ix_notification_dismissals_user_id`, while migration d8a1c9f4b2e6 created
+    # it as `ux_notification_dismissals_user_id`, which is this schema's
+    # convention for a unique index (`ux_users_oidc`, `ux_team_members`). Same
+    # column and same uniqueness either way; naming it here is what stops
+    # `alembic check` proposing a drop-and-recreate of an index that is already
+    # correct.
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     cleared_through_job_id: Mapped[int | None] = mapped_column(Integer)
     dismissed_job_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    __table_args__ = (
+        Index("ux_notification_dismissals_user_id", "user_id", unique=True),)
