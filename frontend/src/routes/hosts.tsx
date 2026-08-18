@@ -255,17 +255,23 @@ export function HostsPage() {
         {/* summaryQuery.isError -> unknown: a failed /cluster/summary must not
             draw a calm 0% gauge, which reads as "nothing is being used"
             rather than "we could not check". */}
-        <Ring label="CPU" pct={summary?.cpu.pct ?? 0} unknown={summaryQuery.isError}
-          sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores` : 'unknown'}
+        {/* `pct == null` joins isError as unknown: the backend sends null when
+            nothing was measured, so a degraded poll no longer draws a calm 0%
+            gauge over a cluster that cannot even accept a write. */}
+        <Ring label="CPU" pct={summary?.cpu.pct ?? 0}
+          unknown={summaryQuery.isError || summary?.cpu.pct == null}
+          sub={summaryQuery.isError || summary?.cpu.pct == null ? 'unknown'
+            : `${summary.cpu.used_cores} / ${summary.cpu.total_cores} cores`}
           stops={['#F5B544', '#E0862B']} />
-        <Ring label="Memory" pct={summary?.mem.pct ?? 0} unknown={summaryQuery.isError}
-          sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}` : 'unknown'}
+        <Ring label="Memory" pct={summary?.mem.pct ?? 0}
+          unknown={summaryQuery.isError || summary?.mem.pct == null}
+          sub={summaryQuery.isError || summary?.mem.pct == null ? 'unknown'
+            : `${fmtBytes(summary.mem.used_bytes)} / ${fmtBytes(summary.mem.total_bytes)}`}
           stops={['#34D3C6', '#5B9DF9']} />
-        <Ring label="Storage" pct={summary?.storage.pct ?? 0} unknown={summaryQuery.isError}
-          sub={summaryQuery.isError ? 'unknown'
-            : summary ? `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}` : 'unknown'}
+        <Ring label="Storage" pct={summary?.storage.pct ?? 0}
+          unknown={summaryQuery.isError || summary?.storage.pct == null}
+          sub={summaryQuery.isError || summary?.storage.pct == null ? 'unknown'
+            : `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}`}
           stops={['#A78BFA', '#6D5AE6']} />
         </>
         )}

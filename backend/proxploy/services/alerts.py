@@ -43,18 +43,26 @@ METRIC_TARGETS: dict[str, tuple[str, ...]] = {
     "disk_pct": ("host",),
     "host_offline": ("host",),
     "backup_failed": ("host",),
+    # Quorum loss is host-shaped here because that is where the flag lives, but
+    # the condition belongs to the CLUSTER behind the host, so every enrolled
+    # member of one cluster reports it and an "any host" rule fires once per
+    # member. Added because a cluster losing quorum is invisible otherwise: it
+    # answers every read, refuses every write, and no existing metric moves
+    # (doc 12 check 12).
+    "quorum_lost": ("host",),
 }
 SUPPORTED_METRICS: tuple[str, ...] = tuple(METRIC_TARGETS)
 
 # Metrics answered from a status column rather than from metric_samples.
-STATUS_METRICS = ("host_offline", "backup_failed")
+STATUS_METRICS = ("host_offline", "backup_failed", "quorum_lost")
 
 # Extra history fetched beyond `duration_s` so the sample that ESTABLISHES the
 # start of a breach is inside the window. Two poll intervals of slack.
 _WINDOW_SLACK_S = 120
 
 _METRIC_LABEL = {"cpu_pct": "CPU", "mem_pct": "memory", "disk_pct": "disk",
-                 "host_offline": "host", "backup_failed": "backup"}
+                 "host_offline": "host", "backup_failed": "backup",
+                 "quorum_lost": "quorum"}
 _OP_LABEL = {"gt": ">", "lt": "<"}
 
 
@@ -78,6 +86,11 @@ def render_message(rule_name: str, label: str, metric: str, operator: str,
             body += f" for {_human_duration(duration_s)}"
     elif metric == "backup_failed":
         body = f"{label}: last backup failed"
+    elif metric == "quorum_lost":
+        # Says what it MEANS, not just what it is: an operator reading this at
+        # 3am needs to know writes are refused, not to look up votequorum.
+        body = (f"{label}: cluster has lost quorum, so installs, guest edits "
+                f"and storage changes will fail")
     else:
         unit = "%" if metric.endswith("_pct") else ""
         body = (f"{label} {_METRIC_LABEL.get(metric, metric)} "
@@ -174,6 +187,14 @@ def _status_state(db, rule: AlertRule, target_id: int,
             if down_for < rule.duration_s:
                 return False, 1.0
         return True, 1.0
+
+    if rule.metric == "quorum_lost":
+        host = db.get(Host, target_id)
+        # False ONLY when PVE said so: NULL is standalone (the question does not
+        # apply) or not yet polled, and firing on either would alert every
+        # standalone host in the fleet.
+        lost = host is not None and host.quorate is False
+        return lost, 1.0 if lost else 0.0
 
     # backup_failed: only the LATEST finished backup.run for this host counts.
     # An old failure that has since been fixed is not a live alert.

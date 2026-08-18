@@ -296,6 +296,51 @@ def test_host_offline_resolves_when_the_host_comes_back(tmp_path):
     assert evaluate(db, now + timedelta(seconds=30))[0]["state"] == "resolved"
 
 
+def test_quorum_lost_fires_and_says_what_it_means(tmp_path):
+    """A cluster without quorum answers every read and refuses every write, so
+    no other metric moves: cpu, memory and disk all look normal, the host is
+    `connected`, and nothing is offline. Reached for real on 2026-08-18 (doc 12
+    check 12), where nothing in the product noticed.
+    """
+    db = make_db(tmp_path)
+    host = seed_host_row(db)          # connected, healthy
+    host.quorate = False
+    db.commit()
+    _rule(db, name="No quorum", metric="quorum_lost", target_id=host.id,
+          severity="critical")
+
+    out = evaluate(db, utcnow())
+    assert len(out) == 1
+    assert out[0]["severity"] == "critical"
+    # The message has to say what it costs, not name a corosync concept.
+    assert "quorum" in out[0]["message"].lower()
+    assert "will fail" in out[0]["message"].lower()
+
+
+def test_quorum_lost_does_not_fire_for_a_standalone_or_unpolled_host(tmp_path):
+    """NULL is "the question does not apply" (standalone) or "not polled yet",
+    and firing on either would alert every standalone host in the fleet."""
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    assert host.quorate is None
+    _rule(db, metric="quorum_lost", target_id=host.id)
+    assert evaluate(db, utcnow()) == []
+
+
+def test_quorum_lost_resolves_when_quorum_returns(tmp_path):
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    host.quorate = False
+    db.commit()
+    _rule(db, metric="quorum_lost", target_id=host.id)
+    now = utcnow()
+    evaluate(db, now)
+
+    host.quorate = True
+    db.commit()
+    assert evaluate(db, now + timedelta(seconds=30))[0]["state"] == "resolved"
+
+
 def test_backup_failed_fires_on_the_hosts_latest_failed_backup_job(tmp_path):
     db = make_db(tmp_path)
     host = seed_host_row(db)

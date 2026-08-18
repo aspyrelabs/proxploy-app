@@ -267,6 +267,19 @@ def preflight(app, db, app_row, target_host_id: int) -> dict:
 
     warnings: list[str] = []
     blockers: list[str] = []
+
+    # Quorum, before anything else: without it /etc/pve is read-only, so the
+    # restore or the native migrate cannot write a guest config at all, while
+    # /version and /cluster/resources answer perfectly and every other check
+    # here passes (doc 12 check 12). A blocker rather than a warning because the
+    # alternative is stopping the source and finding out afterwards. False only,
+    # never None: NULL means standalone or not yet polled, neither of which is
+    # quorum loss.
+    for host, side in ((source_host, "source"), (target_host, "target")):
+        if host.quorate is False:
+            blockers.append(
+                f"{host.name} ({side}) has lost cluster quorum, so Proxmox will "
+                f"refuse every configuration write until quorum returns")
     shared_storage: str | None = None
     capacity_storage: str | None = None
 

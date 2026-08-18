@@ -198,10 +198,14 @@ def test_metrics_catalogue_describes_every_supported_metric(client, csrf_header,
     body = client.get("/api/v1/alert-rules/metrics").json()
     by = {m["metric"]: m for m in body["metrics"]}
     assert set(by) == {"cpu_pct", "mem_pct", "disk_pct", "host_offline",
-                       "backup_failed"}
+                       "backup_failed", "quorum_lost"}
     assert by["disk_pct"]["targets"] == ["host"]
     assert by["cpu_pct"]["needs_threshold"] is True
     assert by["host_offline"]["needs_threshold"] is False
+    # quorum_lost is a status metric: there is nothing to compare, so the form
+    # must not ask for a threshold.
+    assert by["quorum_lost"]["needs_threshold"] is False
+    assert by["quorum_lost"]["targets"] == ["host"]
 
 
 def test_alerts_rules_entitlement_gates_reads_and_writes(tmp_path, csrf_header,

@@ -877,15 +877,27 @@ any suite could have caught. What that run leaves open:
    systems healthy" while `/etc/pve` was read-only. `hosts.quorate` now carries
    PVE's own `quorate` field and three surfaces show it. What that leaves:
 
-   - the cluster stat rings degrade to `0 / 20 cores` and `0.0 B` storage while
-     non-quorate, rather than to "unknown", so the dashboard understates instead
-     of abstaining;
-   - nothing refuses a write AHEAD of time on a host known to be non-quorate. A
-     job is queued, the source guest may be stopped, and then PVE refuses. The
-     flag is informational, deliberately, the same as `node_power_missing`, but
-     a migration is the case where "ask first" would be worth it;
-   - alerting has no quorum rule, so an unattended cluster losing quorum
-     notifies nobody.
+   - **the stat rings, fixed:** `_pct` returned 0.0 for a total of zero, so a
+     degraded poll drew calm 0% gauges and `0.0 B / 0.0 B` storage over an
+     unwritable cluster. It returns None now, and the Ring component's existing
+     `unknown` state (added for a failed query) covers the empty-answer case
+     too;
+   - **migration, fixed:** a host whose `quorate` is False is a preflight
+     BLOCKER on either side, so the migration is refused before the source is
+     stopped rather than after PVE rejects the write. Only False blocks: NULL is
+     standalone or not yet polled. Other writes still fail at PVE, which is
+     acceptable because they fail fast with PVE's own "cluster not ready - no
+     quorum?" and nothing has been stopped first;
+   - **alerting, fixed:** `quorum_lost` is a status metric alongside
+     `host_offline` and `backup_failed`, so it needed no new machinery: no
+     threshold, host-scoped, fires only when PVE said `quorate: 0`, resolves
+     when quorum returns, and its message says installs and edits will fail
+     rather than naming votequorum. The rule form renders from
+     `/alert-rules/metrics`, so it appeared there with no frontend change.
+
+     Verified at the unit level over a flag whose False state was itself
+     hardware-verified; watching the alert fire would mean breaking the lab
+     cluster a third time for little extra confidence.
 
 7. **A linked clone can always be chosen and can never work. FIXED
    2026-08-18**, by taking the upgrade path the clone route's own `ponytail:`

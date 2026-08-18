@@ -37,9 +37,12 @@ export function useEntitlements() {
 // ---- Phase 2 (Observe) row types, mirror the backend response shapes -------
 export type Summary = {
   updated_at: string | null
-  cpu: { pct: number; used_cores: number; total_cores: number }
-  mem: { pct: number; used_bytes: number; total_bytes: number }
-  storage: { pct: number; used_bytes: number; total_bytes: number }
+  // pct is null when nothing was measured, which is not the same claim as 0%:
+  // a degraded poll used to draw calm 0% rings over an unwritable cluster
+  // (doc 12 check 12).
+  cpu: { pct: number | null; used_cores: number; total_cores: number }
+  mem: { pct: number | null; used_bytes: number; total_bytes: number }
+  storage: { pct: number | null; used_bytes: number; total_bytes: number }
   net: { in_bps: number; out_bps: number }
   counts: { hosts: number; hosts_online: number; nodes: number; apps: number
     apps_running: number; vms: number; vms_running: number }
