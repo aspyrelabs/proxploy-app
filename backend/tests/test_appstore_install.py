@@ -675,3 +675,42 @@ def test_install_reports_the_running_container_when_db_recording_fails(tmp_path)
             assert db.query(App).filter_by(host_id=host_id, ctid=150).count() == 1
 
     asyncio.run(scenario())
+
+
+def test_a_hostile_script_path_cannot_break_out_of_the_curl_command(tmp_path):
+    """PXP-38: the install command interpolated the catalog's script_path
+    straight into `bash -c "$(curl -fsSL ...)"`. script_path comes from the
+    upstream community-scripts repo, so a path carrying shell metacharacters
+    ran as a second command on the operator's node, as root, before the
+    install script was even fetched. The update path already used
+    shlex.quote; the install path now does too.
+    """
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+            entry = db.query(CatalogEntry).filter_by(slug="redis").one()
+            entry.script_path = "ct/redis.sh; touch /tmp/pwned"
+            db.commit()
+
+        fake = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=[],
+                                 stderr_lines=[], exit_status=0,
+                                 on_create_process=lambda command: pve.add_ct(
+                                     150, node="pve1", name="redis", status="running"))
+        app.state.ssh_connect_factory = make_fake_connect_factory(fake)
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                "name": "Redis", "ctid": 150, "overrides": {}})
+
+        cmd = fake.last_command
+        # The whole URL, semicolon and all, is one quoted word inside the
+        # substitution: curl gets a 404, nothing else runs.
+        assert "'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/" \
+               f"{SHA}/ct/redis.sh; touch /tmp/pwned'" in cmd
+        assert not cmd.endswith("touch /tmp/pwned)\"")
+
+    asyncio.run(scenario())

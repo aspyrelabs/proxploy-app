@@ -241,9 +241,13 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # it names is still fetched live from `main` at execution time, one level
     # down. Full transitive vendoring of the community-scripts framework is a
     # separate, larger piece of work: see docs/notes/phase-4-store.md.
-    command = (
-        f"bash -c \"$(curl -fsSL {raw_url(entry.upstream_sha, entry.script_path)})\""
-    )
+    # The URL is quoted, the `$(...)` around it is not: `bash -c "$(curl ...)"`
+    # runs the downloaded script, while quoting the whole substitution would
+    # make its output a command *word* instead, which is a different thing.
+    # script_path comes from the upstream catalog, so it is not ours to trust
+    # as a bare word inside the substitution.
+    _url = shlex.quote(raw_url(entry.upstream_sha, entry.script_path))
+    command = f"bash -c \"$(curl -fsSL {_url})\""
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, host_id, host.address, command,
