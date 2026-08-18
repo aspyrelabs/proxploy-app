@@ -133,7 +133,7 @@ gets; the installer and Docker image override the relevant ones.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PROXPLOY_DB_URL` | `sqlite:///./data/proxploy.db` | Database DSN. SQLite (WAL) by default; any SQLAlchemy-supported Postgres DSN also works. |
+| `PROXPLOY_DB_URL` | `sqlite:///./data/proxploy.db` | Database DSN. SQLite (WAL) only. Proxploy is a single-box, self-hosted product and is not tested on any other engine; `SecretStore.ensure_key_file`'s guard against minting a fresh master key over a populated database keys off the SQLite file's existence, so a non-SQLite DSN silently loses that protection. |
 | `PROXPLOY_DATA_DIR` | `./data` | Root for the SQLite file, uploads, and other on-disk state. |
 | `PROXPLOY_MASTER_KEY_FILE` | `./data/master.key` | Root-only Fernet key file backing `SecretStore` (encrypts stored credentials). |
 | `PROXPLOY_SESSION_COOKIE` | `pp_session` | Session cookie name. |
