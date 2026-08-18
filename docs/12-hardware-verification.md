@@ -539,6 +539,29 @@ message.
    `progress_pct` was `None` on every event of this run too, the same as the
    cluster strategy's run on 2026-08-17.
 
+   **THE SHARED STRATEGY PASSED THE SAME DAY, and it is the third of three.**
+   Not strictly check 7 (this check is the no-cluster-no-shared-pool case), but
+   `STRATEGY_SHARED`'s data movement had never run on hardware either, and the
+   restore fixes above touch that branch as well, so verifying one and shipping
+   both would have been shipping an unverified fix. Same setup as above with one
+   difference: `nfs-shared` left attached to BOTH nodes, so with `node1`
+   separated `preflight` chose `shared_storage: nfs-shared` and the pool really
+   was served at both ends this time.
+
+   - vzdump straight onto the shared pool,
+     `/mnt/pve/nfs-shared/dump/vzdump-lxc-100-...tar.zst`, 48 MiB at 230 MiB/s;
+   - restore on `node2` FROM that same volid, on the lifecycle token, extracting
+     at 296 MiB/s: no transfer step at all, which is the whole point of the
+     strategy;
+   - **estimated 25s, measured 11.1s**;
+   - and no cleanup events, correctly: the shared branch leaves its archive in
+     place and returns the volid, because on a shared pool that archive is a
+     real backup rather than transfer plumbing. Only the transfer branch has
+     scratch files to remove.
+
+   So all three strategies have now moved a real container on real hardware:
+   cluster (2026-08-17), transfer and shared (2026-08-18).
+
    **The CLUSTER strategy's data movement DID run, 2026-08-17, through the real
    job runner.** Not check 7 (this pair is clustered, so `preflight` correctly
    picked `cluster`), but the job wrapper around a migration had never run on

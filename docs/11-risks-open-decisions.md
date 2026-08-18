@@ -796,7 +796,15 @@ any suite could have caught. What that run leaves open:
    route gates could check the capability up front the way
    `api/catalog.py::install_catalog_entry` checks for an `ssh_key`.
 
-4. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
+4. **A real VM create has never run on hardware, and it now depends on a
+   privilege only a container restore proved.** `SDN.Use` was added to the
+   lifecycle role because a restore's NIC needed it; `services/guestjobs.py`
+   creates VMs with the same lifecycle client and the same bridge, so the fix
+   should cover it and nothing has checked. Every guest create in doc 12 is a
+   container (checks 4 and 5), and the VM wizard's own journey runs against a
+   fake. Cheap to close: one throwaway VM on the lab.
+
+5. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
    added to the generated script today, so an operator who ran the old script
    has a token that 403s on any NIC write until they re-run it. Nothing detects
    that: `_missing_privileges` checks the monitoring five only. A "your
