@@ -772,6 +772,38 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster storage config read failed", e) from e
 
+    def agent_addresses(self, node: str, vmid: int) -> list[str] | None:
+        """The addresses a VM's guest agent says it actually has, or None.
+
+        None means "cannot tell", and the two reasons are not worth telling
+        apart to a caller: the agent is not installed, or it is installed and not
+        running. Either way Proxploy has no truthful answer, and None is what the
+        UI renders as unknown rather than as "no address".
+
+        This is the only honest read of a VM's address. PVE keeps a container's
+        address on its netN string, so that one is a config read, but a VM's
+        address lives inside the guest: `ipconfigN` is a cloud-init datasource,
+        which a Windows guest ignores entirely unless Cloudbase-Init is installed
+        (see api/network.py::ADDRESS_KEYS). Asking the guest is the difference
+        between reporting what is and reporting what was requested.
+
+        Loopback is dropped: every guest has 127.0.0.1 and it answers nothing.
+        """
+        try:
+            raw = (self._connect().nodes(node).qemu(vmid)
+                   .agent("network-get-interfaces").get())
+        except Exception:  # noqa: BLE001  (no agent is the common case, not an error)
+            return None
+        out: list[str] = []
+        for iface in (raw or {}).get("result", raw) or []:
+            if not isinstance(iface, dict):
+                continue
+            for addr in iface.get("ip-addresses") or []:
+                value = str(addr.get("ip-address") or "")
+                if value and not value.startswith(("127.", "::1")):
+                    out.append(value)
+        return out
+
     def node_networks(self, node: str, iface_type: str | None = None) -> list[dict]:
         """GET /nodes/{node}/network -> [{iface, type, method, cidr, gateway,
         bridge_ports, active, autostart, ...}]. `iface_type` is PVE's `type`

@@ -18,6 +18,7 @@ key defaults ON).
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 from datetime import timedelta
 
@@ -47,12 +48,66 @@ _read = authorize("network", "read")
 NET_KEY = re.compile(r"^net\d+$")
 
 
+# Where a guest's address actually lives, which is NOT the same key for the two
+# guest types. Read off PVE 9.2.10 itself rather than from memory:
+#
+#   pct set --net[n]  ... [,gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>]
+#                         [,ip=<(IPv4/CIDR|dhcp|manual)>]
+#                         [,ip6=<(IPv6/CIDR|auto|dhcp|manual)>]
+#   qm  set --net[n]  ... no ip, no gw, at all
+#   qm  set --ipconfig[n]  [gw=] [,gw6=] [,ip=<IPv4/CIDR>] [,ip6=]
+#                          "cloud-init: Specify IP addresses and gateways"
+#
+# So a container carries its address ON the NIC, and a VM carries it in a
+# cloud-init key beside the NIC. The consequence that matters: `ipconfigN` is
+# inert unless the VM has a cloud-init drive AND runs cloud-init, so writing it
+# to a VM without one changes a config file and nothing inside the guest. That is
+# refused rather than written, see _ipconfig_target below.
+ADDRESS_KEYS = ("ip", "gw", "ip6", "gw6")
+
+
+def _valid_address(key: str, value: str) -> bool:
+    """Shape check only, so a typo is a clean 422 here instead of PVE's own 400
+    relayed as a 502. stdlib `ipaddress`, no dependency: PVE's grammar is
+    literally a CIDR or one of a few words."""
+    if key == "ip":
+        if value in ("dhcp", "manual"):
+            return True
+        try:
+            ipaddress.IPv4Interface(value)
+        except ValueError:
+            return False
+        return "/" in value          # PVE wants CIDR, not a bare address
+    if key == "ip6":
+        if value in ("dhcp", "auto", "manual"):
+            return True
+        try:
+            ipaddress.IPv6Interface(value)
+        except ValueError:
+            return False
+        return "/" in value
+    version = 4 if key == "gw" else 6
+    try:
+        return ipaddress.ip_address(value).version == version
+    except ValueError:
+        return False
+
+
 class NicIn(BaseModel):
     """Every field optional; only fields PRESENT in the request body are
     applied, and an explicit null removes the key (that is how a VLAN tag or a
-    rate limit is cleared). Absent != null here, hence exclude_unset below."""
+    rate limit is cleared). Absent != null here, hence exclude_unset below.
+
+    `ip`/`gw`/`ip6`/`gw6` are the guest's address. They land on a different
+    Proxmox key depending on the guest type (see ADDRESS_KEYS above), which the
+    caller does not have to know about: this route routes them.
+    """
     bridge: str | None = None
     tag: int | None = None
+    ip: str | None = None
+    gw: str | None = None
+    ip6: str | None = None
+    gw6: str | None = None
     # Accepted, and deliberately NOT offered by the UI (components/NicForm.tsx).
     # Proxploy has no firewall feature: no rules, security groups, aliases or IP
     # sets at guest, node or cluster level. A toggle implies one exists, and
@@ -69,6 +124,10 @@ def _nic_out(iface: str, raw: str) -> dict:
     parts = parse_net(raw)
     return {
         "iface": iface, "raw": raw, **nic_identity(parts),
+        # Present on a container's netN, absent on a VM's by PVE's own schema, so
+        # these are None for a VM rather than a claim of "no address set".
+        "ip": parts.get("ip"), "gw": parts.get("gw"),
+        "ip6": parts.get("ip6"), "gw6": parts.get("gw6"),
         "bridge": parts.get("bridge"),
         "tag": int(parts["tag"]) if parts.get("tag") else None,
         "firewall": parts.get("firewall") == "1",
@@ -137,6 +196,36 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         raise HTTPException(404, f"{iface} is not configured on this guest")
     parts = parse_net(str(cfg[iface]))
     changes = body.model_dump(exclude_unset=True)
+
+    # Addressing, and the guest type decides whether it is even expressible.
+    # A container carries ip/gw on this very netN string, so it merges in below
+    # like any other key. A VM's netN has no such field: PVE addresses VMs
+    # through the cloud-init key `ipconfigN`, which does nothing unless the VM
+    # has a cloud-init drive AND something in the guest reads it. Windows has no
+    # cloud-init at all (Cloudbase-Init is a third-party port), and nothing here
+    # can see inside a guest to know. So this refuses rather than writing a key
+    # whose effect it cannot state. The VM path is READ ONLY today: guest_nics
+    # reports the addresses the agent says the guest actually has.
+    addressing = [k for k in ADDRESS_KEYS if k in changes]
+    if addressing and kind != "lxc":
+        raise HTTPException(409, {
+            "error": "vm_addressing_not_editable",
+            "detail": ("Proxmox does not keep a virtual machine's address on its "
+                       "NIC. It uses cloud-init, which only takes effect when the "
+                       "VM has a cloud-init drive and the guest reads it, so "
+                       "Proxploy does not write it. Set the address inside the "
+                       "guest, or with a DHCP reservation."),
+        })
+    bad = [k for k in addressing
+           if changes[k] is not None and not _valid_address(k, str(changes[k]))]
+    if bad:
+        raise HTTPException(422, {
+            "error": "invalid_address",
+            "detail": (f"{', '.join(bad)}: an address is CIDR notation "
+                       f"(192.168.1.50/24), or dhcp or manual. A gateway is a "
+                       f"plain address."),
+        })
+
     for key, val in changes.items():
         if val is None:
             parts.pop(key, None)
@@ -249,10 +338,17 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
                                          key=lambda v: (v.name or "", v.id))])
             for gtype, gid, gname, kind, vmid, gnode in guests:
                 cfg = client.guest_config(kind, gnode, vmid)
+                # A VM's address is not in its config, so ask the guest. One call
+                # per VM, on a route that is already one config read per guest and
+                # explicitly human-triggered (see the ponytail note above). None
+                # when there is no agent to ask, which the UI renders as unknown.
+                agent_ips = (client.agent_addresses(gnode, vmid)
+                             if kind == "qemu" else None)
                 for key in sorted(k for k in cfg if NET_KEY.match(k)):
                     attachments.append({"host_id": h.id, "node": gnode,
                                         "guest_type": gtype, "guest_id": gid,
                                         "name": gname, "vmid": vmid,
+                                        "agent_ips": agent_ips,
                                         **_nic_out(key, str(cfg[key]))})
         except ProxmoxError as e:
             errors.append({"host_id": h.id, "host_name": h.name, "error": str(e)})

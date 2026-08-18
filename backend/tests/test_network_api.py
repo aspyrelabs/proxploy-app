@@ -479,3 +479,116 @@ def test_missing_session_is_401_not_403(tmp_path, csrf_header):
         assert c.get("/api/v1/network/bridges").status_code == 401
         assert c.put(f"/api/v1/vms/{vm_id}/network/net0", json={"bridge": "vmbr0"},
                      headers=csrf_header(c)).status_code == 401
+
+
+# --- guest addressing: a container's is on its NIC, a VM's is not -------------
+
+def test_a_container_ip_and_gateway_are_written_onto_its_netN(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """PVE's own schema: `pct set --net[n] ... [,gw=<GatewayIPv4>]
+    [,ip=<(IPv4/CIDR|dhcp|manual)>]`. So this is a normal key merge onto the same
+    string, and the MAC and every unmodelled option survive it.
+    """
+    from fastapi.testclient import TestClient
+    from tests.support import make_app
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _hid, app_id, _vm_id = _seed(app)
+        r = c.put(f"/api/v1/apps/{app_id}/network/net0",
+                  json={"ip": "192.168.1.50/24", "gw": "192.168.1.1"},
+                  headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        value = r.json()["value"]
+
+    assert "ip=192.168.1.50/24" in value and "gw=192.168.1.1" in value
+    # The identity tokens are untouched: a dropped hwaddr means PVE mints a new
+    # MAC at next start and every DHCP reservation for that guest breaks.
+    assert "hwaddr=BC:24:11:00:11:22" in value
+    assert "name=eth0" in value
+
+
+def test_dhcp_and_clearing_are_both_expressible_on_a_container(tmp_path, csrf_header,
+                                                               bootstrap_admin):
+    from fastapi.testclient import TestClient
+    from tests.support import make_app
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _hid, app_id, _vm_id = _seed(app)
+        dhcp = c.put(f"/api/v1/apps/{app_id}/network/net0", json={"ip": "dhcp"},
+                     headers=csrf_header(c))
+        assert dhcp.status_code == 200, dhcp.text
+        assert "ip=dhcp" in dhcp.json()["value"]
+
+        # An explicit null clears the key, which is "not configured", a state PVE
+        # has and an operator can want back. Not the same as dhcp.
+        cleared = c.put(f"/api/v1/apps/{app_id}/network/net0", json={"ip": None},
+                        headers=csrf_header(c))
+        assert cleared.status_code == 200, cleared.text
+        assert "ip=" not in cleared.json()["value"]
+
+
+def test_a_vm_address_is_refused_with_the_reason_not_written_to_netN(
+        tmp_path, csrf_header, bootstrap_admin):
+    """`qm set --net[n]` has NO ip or gw field. PVE addresses a VM through the
+    cloud-init key `ipconfigN`, which does nothing unless the VM has a cloud-init
+    drive and the guest reads it, and Windows has no cloud-init at all. Writing
+    it would be a config change with no stateable effect, so it is refused.
+    """
+    from fastapi.testclient import TestClient
+    from proxploy.models import AuditEvent
+    from tests.support import make_app
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _hid, _app_id, vm_id = _seed(app)
+        r = c.put(f"/api/v1/vms/{vm_id}/network/net0",
+                  json={"ip": "192.168.1.50/24"}, headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        body = r.json()
+        detail = body.get("detail") if isinstance(body.get("detail"), dict) else body
+        assert detail["error"] == "vm_addressing_not_editable"
+        assert "cloud-init" in detail["detail"]
+
+        # Nothing reached the guest, and no row claims a NIC was configured.
+        assert fake.config_updates == []
+        with app.state.sessionmaker() as db:
+            assert db.query(AuditEvent).filter_by(action="network.guest_config").count() == 0
+
+    # A VM's other NIC fields still work: only addressing is refused.
+    fake2 = _fake()
+    app2 = make_app(tmp_path / "second", fake=fake2)
+    with TestClient(app2) as c:
+        bootstrap_admin(c)
+        _hid, _app_id, vm_id = _seed(app2)
+        ok = c.put(f"/api/v1/vms/{vm_id}/network/net0", json={"tag": 42},
+                   headers=csrf_header(c))
+        assert ok.status_code == 200, ok.text
+
+
+def test_a_malformed_address_is_a_422_here_not_a_502_from_proxmox(tmp_path, csrf_header,
+                                                                 bootstrap_admin):
+    """A bare address without a prefix is the mistake an operator actually makes,
+    and PVE answers it with a 400 that this would relay as a 502. Shape-checked
+    locally so the message can name what a valid one looks like."""
+    from fastapi.testclient import TestClient
+    from tests.support import make_app
+
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _hid, app_id, _vm_id = _seed(app)
+        for bad in ({"ip": "192.168.1.50"}, {"ip": "not-an-ip"},
+                    {"gw": "192.168.1.0/24"}, {"ip6": "192.168.1.50/24"}):
+            r = c.put(f"/api/v1/apps/{app_id}/network/net0", json=bad,
+                      headers=csrf_header(c))
+            assert r.status_code == 422, f"{bad}: {r.text}"
+        assert fake.config_updates == []

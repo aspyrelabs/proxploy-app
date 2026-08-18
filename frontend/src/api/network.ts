@@ -32,6 +32,14 @@ export type Attachment = {
   iface: string; raw: string
   model: string | null; macaddr: string | null
   bridge: string | null; tag: number | null; firewall: boolean
+  /** A container's address, off its own netN string. Always null for a VM:
+   *  PVE's VM netN has no ip or gw field at all. */
+  ip: string | null; gw: string | null
+  ip6: string | null; gw6: string | null
+  /** What a VM's guest agent says the guest actually has. null means there was
+   *  no agent to ask, which is unknown, not "no address". Always null for a
+   *  container, whose address is in its config and needs no agent. */
+  agent_ips?: string[] | null
   rate: string | null; mtu: string | null; link_down: boolean
 }
 
@@ -89,7 +97,13 @@ export function useThroughput(hours = 1) {
  * byte-for-byte, and a regenerated MAC breaks every DHCP reservation and
  * MAC-bound licence pointed at that guest.
  */
-export type NicPatch = { bridge?: string; tag?: number | null; firewall?: boolean }
+export type NicPatch = {
+  bridge?: string; tag?: number | null; firewall?: boolean
+  // Containers only. The backend refuses these for a VM with a 409 naming
+  // cloud-init, because a VM's address is not on its NIC.
+  ip?: string | null; gw?: string | null
+  ip6?: string | null; gw6?: string | null
+}
 
 export type NicResult = {
   iface: string; value: string; upid: string | null

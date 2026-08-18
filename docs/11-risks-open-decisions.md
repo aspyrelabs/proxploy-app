@@ -1052,10 +1052,24 @@ now says the apply did not complete from here and may still have taken effect, a
 the job transcript says the same BEFORE the call, so the warning survives even when
 the job never writes another line.
 
-**Also absent, and worth knowing before someone assumes otherwise:** a guest's IP
-and gateway cannot be set from Proxploy at all. PVE carries them on the same
-`netN` string this form edits (`ip=`, `gw=`), so it is the property an operator
-would most expect to find here. Not started, not scoped.
+**Guest addressing: containers editable, VMs read-only (2026-08-18).** PVE's own
+schemas decided the split, read off the lab rather than from memory:
+`pct set --net[n]` carries `ip=<IPv4/CIDR|dhcp|manual>`, `gw=`, `ip6=`, `gw6=`,
+while `qm set --net[n]` has no address field at all. A VM's address is
+`--ipconfig[n]`, which PVE labels cloud-init.
+
+So a container can be given a static address, DHCP, manual, or have it cleared,
+and it is applied for real. A VM cannot: `ipconfigN` is inert unless the VM has a
+cloud-init drive AND something in the guest reads it, and Windows has no
+cloud-init (Cloudbase-Init is a third-party port), which nothing out here can
+detect. Writing it would be a config change with no stateable effect, so the route
+refuses it with the reason. What a VM shows instead is what its QEMU guest agent
+reports it actually has, and `null` renders as unknown rather than as "no
+address", because no agent means no answer.
+
+Still open, deliberately: writing `ipconfigN` for a Linux VM that does have a
+cloud-init drive. It would work, and it needs a "takes effect on next boot" story
+plus a Windows caveat, so it is a scoped feature rather than a field to add.
 
 ## Summary table
 

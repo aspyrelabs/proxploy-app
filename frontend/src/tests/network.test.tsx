@@ -271,6 +271,14 @@ const NIC_PLAIN = {
   firewall: false, rate: null, mtu: null, link_down: false,
 }
 const NIC_FIREWALLED = { ...NIC_PLAIN, firewall: true }
+const NIC_CT_STATIC = { ...NIC_PLAIN, ip: '192.168.1.50/24', gw: '192.168.1.1' }
+// A VM NIC: PVE keeps no address on it, so ip/gw are null whatever the guest has,
+// and the only honest source is what the agent reports.
+const NIC_VM = {
+  ...NIC_PLAIN, guest_type: 'vm', name: 'win11', vmid: 201,
+  ip: null, gw: null, agent_ips: ['192.168.50.77'],
+}
+const NIC_VM_NO_AGENT = { ...NIC_VM, agent_ips: null }
 
 const wrapNic = (ui: React.ReactNode) => render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -297,5 +305,48 @@ describe('NicForm has no firewall toggle', () => {
     expect(screen.getByText(/managed in the Proxmox web UI/i)).toBeInTheDocument()
     // Still no control: it is information, not a switch.
     expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+})
+
+describe('NicForm addressing', () => {
+  it('offers a container an address mode, and a prefix hint with it', () => {
+    wrapNic(<NicForm nic={NIC_CT_STATIC as never} bridges={['vmbr0']} onClose={() => {}} />)
+    const mode = screen.getByLabelText(/IPv4 address/i) as HTMLSelectElement
+    expect(mode.value).toBe('static')
+    expect((screen.getByLabelText(/address and prefix/i) as HTMLInputElement).value)
+      .toBe('192.168.1.50/24')
+    expect((screen.getByLabelText(/gateway/i) as HTMLInputElement).value)
+      .toBe('192.168.1.1')
+    // Said in the form, not only in the error: PVE rejects a bare address, and
+    // learning that from a round trip is a worse way to find out.
+    expect(screen.getByText(/does not accept a bare address/i)).toBeInTheDocument()
+  })
+
+  it('hides the address fields behind the mode, so DHCP asks for nothing', () => {
+    wrapNic(<NicForm nic={{ ...NIC_PLAIN, ip: 'dhcp' } as never} bridges={['vmbr0']}
+                     onClose={() => {}} />)
+    expect((screen.getByLabelText(/IPv4 address/i) as HTMLSelectElement).value).toBe('dhcp')
+    expect(screen.queryByLabelText(/address and prefix/i)).toBeNull()
+    expect(screen.queryByLabelText(/gateway/i)).toBeNull()
+  })
+
+  it('gives a VM no address field, and says where a VM address lives', () => {
+    // qm set --netN has no ip or gw at all. A field here would silently do
+    // nothing, and cloud-init cannot be promised either: Windows has no
+    // cloud-init, and nothing out here can see inside a guest.
+    wrapNic(<NicForm nic={NIC_VM as never} bridges={['vmbr0']} onClose={() => {}} />)
+    expect(screen.queryByLabelText(/IPv4 address/i)).toBeNull()
+    expect(screen.queryByLabelText(/address and prefix/i)).toBeNull()
+    expect(screen.getByText(/192\.168\.192\.77/)).toBeInTheDocument()
+    expect(screen.getByText(/reported by the guest agent/i)).toBeInTheDocument()
+    expect(screen.getByText(/through cloud-init/i)).toBeInTheDocument()
+  })
+
+  it('says unknown, not "no address", when there is no agent to ask', () => {
+    wrapNic(<NicForm nic={NIC_VM_NO_AGENT as never} bridges={['vmbr0']} onClose={() => {}} />)
+    // "unknown" also appears in the model/MAC line above, so assert on the
+    // sentence that carries the meaning rather than on the word.
+    expect(screen.getByText(/guest agent is not answering/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Unknown\./i)).toBeInTheDocument()
   })
 })
