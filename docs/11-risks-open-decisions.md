@@ -1035,6 +1035,23 @@ NIC form still SHOWS the flag when it is on, because a guest whose traffic is be
 filtered by something invisible is worse than one line of explanation. The rules
 live in Proxmox's own web UI for now. Revisit on demand.
 
+**The apply preview does not exist yet, and there is a rule waiting for it.**
+`GET /network/bridges` returns interfaces and nothing else, so nothing previews an
+apply today. Whoever builds one must show PVE's own `changes` diff rather than a
+rendering of the operator's edit: staging one unused bridge on real hardware made
+PVE rewrite unrelated stanzas in the same `.new` file, and all of them get promoted
+by the same Apply (doc 12 check 8). The rule is stated at the site in
+`api/network.py` so it cannot be missed by whoever gets there.
+
+**And an apply that fails is genuinely ambiguous, which the UI now says.** A
+network change can cut the connection carrying it, so the request fails while the
+change has fully taken effect: on hardware the very same UPID reported TASK OK once
+the node came back. The toast used to read "the node was not changed", which is the
+one reading that sends an operator to re-apply something that already applied. It
+now says the apply did not complete from here and may still have taken effect, and
+the job transcript says the same BEFORE the call, so the warning survives even when
+the job never writes another line.
+
 **Also absent, and worth knowing before someone assumes otherwise:** a guest's IP
 and gateway cannot be set from Proxploy at all. PVE carries them on the same
 `netN` string this form edits (`ip=`, `gw=`), so it is the property an operator

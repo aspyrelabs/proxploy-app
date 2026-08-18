@@ -58,6 +58,16 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     client, host_name = await asyncio.to_thread(
         _resolve_host, app, host_id, "lifecycle")
     ctx.log(f"applying staged network config on node {node} ({host_name})")
+    # Said BEFORE the call, so the transcript carries it even if this job never
+    # gets to write another line. On real hardware an apply that moved vmbr0's
+    # address returned a UPID in 0.1 seconds and the node then vanished for 193
+    # seconds, and the very same UPID reported TASK OK once it returned (doc 12
+    # check 8). So a failure below is genuinely ambiguous, and the transcript has
+    # to say which readings are possible rather than leaving the operator to
+    # assume the safest one.
+    ctx.log("if this change costs the node its own network, this job will report "
+            "a failure it cannot distinguish from a real one: the apply may have "
+            "succeeded. The task id above is readable on the node itself.")
     ctx.progress(5)
     upid = await asyncio.to_thread(client.network_apply, node)
     status = await await_task(ctx, client, node, upid, start_pct=10, end_pct=100,

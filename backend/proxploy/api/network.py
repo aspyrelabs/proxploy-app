@@ -337,6 +337,20 @@ class ApplyIn(BaseModel):
 # unchanged config), so the cost of not knowing is one wasted ifreload.
 # Upgrade path: a raw-response accessor on ProxmoxClient if the UI ever needs a
 # "you have unsaved changes" badge.
+#
+# THE RULE FOR WHOEVER BUILDS THAT PREVIEW, and it is not optional: show PVE's
+# OWN `changes` diff, never a rendering of the fields the operator edited. On
+# real hardware (doc 12 check 8) staging one unused bridge produced a `.new`
+# file in which PVE had ALSO rewritten unrelated stanzas: it added
+# `iface nic1 inet manual` and `iface wlp0s20f3 inet manual`, added a comment
+# block, and moved `nic1` above `vmbr0`. None of that was asked for, and all of
+# it gets promoted by the same Apply. A preview showing only the edited field
+# would therefore hide most of what is about to happen, on the one action in this
+# product that can take a node off the network.
+#
+# Verified 2026-08-18 that `changes` is still absent from what this route
+# returns: GET /network/bridges answers host_id, host_name, interfaces, node and
+# nothing else, so there is no preview here yet, honest or otherwise.
 
 
 @router.post("/bridges", status_code=201,

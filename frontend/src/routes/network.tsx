@@ -258,7 +258,19 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
                      detail: String(b.detail ?? '') })
           return
         }
-        notify.error('Could not apply the staged config, the node was not changed.')
+        // NOT "the node was not changed": this cannot know that. Applying a
+        // network config can cost the node its own connectivity, and when it
+        // does, the request fails while the change has fully taken effect. On
+        // real hardware an apply that moved vmbr0's address returned a UPID in
+        // 0.1s, then the node vanished for 193 seconds, and the task reported
+        // TASK OK once it came back (doc 12 check 8). Claiming nothing changed
+        // is the one reading that sends an operator to re-apply something that
+        // already applied.
+        notify.error('The apply did not complete from here.', {
+          description: 'It may still have taken effect: a network change can cut '
+            + 'this connection off mid-request. Check the node once it is back '
+            + 'before applying again.',
+        })
       },
     })
 

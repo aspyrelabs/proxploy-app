@@ -705,6 +705,26 @@ message.
    the added stanzas are `manual` with no `auto`, but it means the diff an
    operator should be shown is PVE's `changes`, not the one field they edited.
 
+   **REVERT PASSED 2026-08-18, PVE 9.2.10**, and it was the half still resting on
+   unit tests alone. Revert is the RECOVERY path, so "it worked against a fake"
+   is least comforting there of anywhere in this product: the fake cannot show
+   what a real `interfaces.new` promotion does, which is exactly what the apply
+   half of this check proved. Staged `vmbr98` on `node1` through
+   `POST /network/bridges`, then:
+
+   - `/etc/network/interfaces.new` appeared, 813 bytes, and `vmbr98` was NOT
+     live: `ip -br a` never listed it, so staging really is inert;
+   - `POST /network/{host}/{node}/revert` returned `{"reverted": true}`;
+   - `interfaces.new` was GONE afterwards, `vmbr98` never reached
+     `/etc/network/interfaces`, and `vmbr0` still held 192.168.50.199/24
+     throughout.
+
+   So the stage-then-discard cycle is real, and it costs the running config
+   nothing. Note what this did NOT test: reverting a staged change that PVE had
+   already normalised into unrelated stanzas (see the apply half below), where the
+   question is whether discarding also discards PVE's own rewrites. Same file, so
+   it should, but it was not observed.
+
    **THE LOCKOUT HALF PASSED 2026-08-17, PVE 9.2.10**, and it is the more
    interesting half. Run on `node1` after arming recovery on the node itself as
    a transient systemd timer (`systemd-run --on-active=150`) that restores the
