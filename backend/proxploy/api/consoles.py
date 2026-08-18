@@ -123,18 +123,22 @@ _HOST_ID_RESOLVERS = {
 }
 
 
-async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *, expected_kind: str):
+async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *,
+                      expected_kind: str, target_id: int):
     if ticket is None:
         await websocket.close(code=4401)
         return
     db = websocket.app.state.sessionmaker()
     try:
         row = redeem_ticket(db, ticket)
-        if row is None or row.kind != expected_kind:
-            # No row, or a ticket minted for a different kind of console (e.g. a
-            # node_shell ticket redeemed at /apps/{id}/console/ws) -- reject the
-            # same way an absent/expired ticket does, never trusting a ticket
-            # kind this route didn't itself mint.
+        if row is None or row.kind != expected_kind or row.target_id != target_id:
+            # No row; a ticket minted for a different kind of console (e.g. a
+            # node_shell ticket redeemed at /apps/{id}/console/ws); or a ticket
+            # for a different target of the same kind. The URL's id used to be
+            # parsed and then ignored, so a ticket for app A opened app A's
+            # console at /apps/B/console/ws -- the session went somewhere the
+            # URL, the audit trail and the operator all disagreed about.
+            # Reject all three the same way an absent ticket does.
             await websocket.close(code=4401)
             return
         host_id = _HOST_ID_RESOLVERS[row.kind](db, row)
@@ -181,7 +185,8 @@ async def _run_pty_ws(websocket: WebSocket, ticket: str | None, *, expected_kind
 
 @router.websocket("/apps/{app_id}/console/ws")
 async def app_console_ws(websocket: WebSocket, app_id: int, ticket: str | None = None):
-    await _run_pty_ws(websocket, ticket, expected_kind="app_console")
+    await _run_pty_ws(websocket, ticket, expected_kind="app_console",
+                      target_id=app_id)
 
 
 @router.post("/hosts/{host_id}/shell/tickets",
@@ -217,7 +222,8 @@ def node_shell_ticket(request: Request, host_id: int, db=Depends(get_db),
 
 @router.websocket("/hosts/{host_id}/shell/ws")
 async def node_shell_ws(websocket: WebSocket, host_id: int, ticket: str | None = None):
-    await _run_pty_ws(websocket, ticket, expected_kind="node_shell")
+    await _run_pty_ws(websocket, ticket, expected_kind="node_shell",
+                      target_id=host_id)
 
 
 @router.post("/vms/{vm_id}/console/tickets",
@@ -259,7 +265,9 @@ async def vm_vnc_ws(websocket: WebSocket, vm_id: int, ticket: str | None = None)
     db = websocket.app.state.sessionmaker()
     try:
         row = redeem_ticket(db, ticket)
-        if row is None or row.kind != "vm_vnc":
+        if row is None or row.kind != "vm_vnc" or row.target_id != vm_id:
+            # Same three rejections as _run_pty_ws, including the URL's vm_id,
+            # which this route also used to accept and ignore.
             await websocket.close(code=4401)
             return
         v = db.get(Vm, row.target_id)

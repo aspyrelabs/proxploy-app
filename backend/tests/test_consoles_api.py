@@ -220,6 +220,39 @@ def test_mismatched_ticket_kind_is_rejected(tmp_path, csrf_header, bootstrap_adm
                 pass
 
 
+def test_a_ticket_is_bound_to_the_target_id_in_the_url(tmp_path, csrf_header, bootstrap_admin):
+    """PXP-35: the WS routes parsed the URL's id and then ignored it, checking
+    only the ticket's `kind`. A ticket minted for app A therefore opened app
+    A's console at /apps/B/console/ws: the shell went one place while the URL,
+    the audit trail and the operator watching all said another. The id in the
+    URL must now match the id the ticket was minted for.
+    """
+    fake = FakePVE()
+    fake.termproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:abc",
+                                "port": "5900", "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            from proxploy.models import App as AppModel
+            host = seed_host_row(db)
+            a = _seed_app(db, host)
+            other = AppModel(host_id=host.id, ctid=151, name="other",
+                             status_cached="running", slug="other-1")
+            db.add(other)
+            db.commit()
+            app_id, other_id = a.id, other.id
+        _seed_credential(app, host)
+
+        ticket = client.post(f"/api/v1/apps/{app_id}/console/tickets",
+                             headers=csrf_header(client)).json()["ticket"]
+
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                    f"/api/v1/apps/{other_id}/console/ws?ticket={ticket}"):
+                pass
+
+
 def test_deleted_app_during_ticket_ttl_closes_cleanly_not_500(tmp_path, csrf_header, bootstrap_admin):
     """Finding #17: if the App row a ticket points at is deleted during the
     ticket's short TTL window, redemption must not AttributeError-crash on
