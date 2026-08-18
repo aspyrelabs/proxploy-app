@@ -315,7 +315,12 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
                 node_power_missing=node_power_missing,
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
-    db.commit()
+    # flush, not commit: this needs host.id for the credential rows below, and
+    # they belong to the same enrolment. Committing here left a window where a
+    # crash, or any failure in the ssh_enroll branch, produced a host row with
+    # no credential at all -- a host that shows up enrolled in the UI and
+    # cannot be talked to, with no route that repairs it.
+    db.flush()
 
     ss = request.app.state.secretstore
     blob, ver = ss.encrypt(jsonlib.dumps(

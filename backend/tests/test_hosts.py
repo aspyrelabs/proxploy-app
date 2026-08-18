@@ -681,3 +681,23 @@ def test_a_non_numeric_id_is_a_422_not_a_crash(pve_client, path):
     c, _ = pve_client
     r = c.get(path)
     assert r.status_code == 422, r.text
+def test_a_failed_ssh_enrolment_leaves_no_half_built_host(pve_client, csrf_header,
+                                                          monkeypatch):
+    """PXP-39: enrolment committed the Host row before minting its credentials,
+    so anything that failed afterwards left a host that shows as enrolled in
+    the UI and has nothing to authenticate with, and no route repairs it.
+    One transaction means a failure leaves no host at all, which is a state
+    the operator can act on: add it again.
+    """
+    import proxploy.api.hosts as hosts_api
+
+    c, _ = pve_client
+    monkeypatch.setattr(hosts_api, "generate_ed25519",
+                        lambda _c: (_ for _ in ()).throw(RuntimeError("no entropy")))
+    with pytest.raises(RuntimeError):
+        c.post("/api/v1/hosts", json={**HOST, "ssh_enroll": True, "ssh_consent": True},
+               headers=csrf_header(c))
+
+    r = c.get("/api/v1/hosts")
+    assert r.status_code == 200, r.text
+    assert r.json() == [] or r.json() == {"items": []}
