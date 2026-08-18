@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, apiErrorDetail, ApiError } from '../api/client'
 import { fetchOnboarding } from '../api/account'
 import { Button } from './ui/button'
@@ -24,11 +24,21 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [oidc, setOidc] = useState(false)
+  const codeRef = useRef<HTMLInputElement>(null)
 
   // Plain effect + one-off fetch, not react-query: this page renders
   // pre-session (no QueryClientProvider guaranteed above it in every
   // caller/test) and needs nothing beyond "does the SSO button show".
   useEffect(() => { fetchOnboarding().then(o => setOidc(o.oidc)).catch(() => {}) }, [])
+
+  // Both branches below return a <form> with the same child element types in
+  // the same positions and no key, so React reuses the DOM nodes and patches
+  // the email input into the code input rather than mounting a new one.
+  // autoFocus only fires on mount, so it never ran and the operator had to
+  // click the box. Focusing from a ref does not depend on mount timing, and
+  // it is the only mechanism here now: autoFocus was dropped rather than
+  // left as a second path a browser may decline to honour anyway.
+  useEffect(() => { codeRef.current?.focus() }, [pending])
 
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault()
@@ -61,6 +71,14 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       // re-shows this same screen, matching the backend's attempt-capped
       // pending store, only 5 wrong guesses burn it, not 1 (Task 9).
       setError('That code was not accepted, try again or use a recovery code.')
+      // The same annoyance as the first step, one screen later: submitting put
+      // focus on the Verify button, so a retry meant clicking back into the box.
+      // The effect above cannot cover this, `pending` is unchanged by a rejected
+      // code (deliberately, see the comment above). Selected rather than
+      // cleared, so typing replaces a stale code while a recovery code can still
+      // be pasted over it.
+      codeRef.current?.focus()
+      codeRef.current?.select()
     } finally { setBusy(false) }
   }
 
@@ -69,7 +87,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       <form onSubmit={submitCode} className="w-[360px] max-w-[92vw] rounded-card border border-line-soft bg-panel p-7 shadow-2xl">
         <div className="mb-6 flex justify-center"><Brand /></div>
         <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3" htmlFor="totp-code">Authentication code</label>
-        <input id="totp-code" type="text" inputMode="numeric" autoComplete="one-time-code" autoFocus required
+        <input id="totp-code" ref={codeRef} type="text" inputMode="numeric" autoComplete="one-time-code" required
           value={code} onChange={e => setCode(e.target.value)} className={inputCls + ' mb-2'} />
         <p className="mb-4 text-[12px] text-text-3">Use a recovery code if you do not have your authenticator app.</p>
         {error && <p className="mb-3 text-[12.5px] text-red">{error}</p>}

@@ -116,6 +116,16 @@ describe('LoginForm, TOTP step', () => {
     expect(screen.getByText(/recovery code/i)).toBeInTheDocument()
   })
 
+  // Both branches of LoginForm return the same element shape in the same
+  // positions with no key, so React patches the email input into the code
+  // input instead of mounting it, and a mount-only autoFocus never fires.
+  it('puts the cursor in the code input as soon as the TOTP step shows', async () => {
+    totpRequired = true
+    await loginWithPassword()
+    const codeInput = await screen.findByLabelText(/authentication code/i)
+    expect(document.activeElement).toBe(codeInput)
+  })
+
   it('posts {pending, code} to /auth/totp and navigates on success', async () => {
     totpRequired = true
     const onSuccess = vi.fn()
@@ -136,10 +146,19 @@ describe('LoginForm, TOTP step', () => {
     await loginWithPassword()
     const codeInput = await screen.findByLabelText(/authentication code/i)
     fireEvent.change(codeInput, { target: { value: '000000' } })
-    fireEvent.click(screen.getByRole('button', { name: /verify/i }))
+    const verify = screen.getByRole('button', { name: /verify/i })
+    // jsdom does not move focus on click the way a browser does, so the browser's
+    // state is set up explicitly: after a real click the button holds focus, which
+    // is why retyping a rejected code used to need a click back into the box.
+    verify.focus()
+    expect(document.activeElement).toBe(verify)
+    fireEvent.click(verify)
     expect(await screen.findByText(/code was not accepted.*recovery code/i)).toBeInTheDocument()
     // still on the code screen, the pending token was not discarded, no re-login required
     expect(screen.getByLabelText(/authentication code/i)).toBeInTheDocument()
+    // And the cursor is pulled back to the box. The mount effect cannot do this:
+    // `pending` is unchanged by a rejected code, deliberately.
+    expect(document.activeElement).toBe(codeInput)
   })
 
   it('does not render an SSO link when onboarding reports oidc: false', async () => {
