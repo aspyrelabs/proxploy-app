@@ -428,13 +428,32 @@ describe('AuditPage clear log', () => {
     expect(screen.getByText(/recorded in the log/)).toBeInTheDocument()
   })
 
-  it('repeats the backend refusal when the role does not allow it', async () => {
+  it('names the rule on a refusal and keeps the server sentence under it', async () => {
+    // The owner-only gate holding is a RULE, not a fault. The server's raw
+    // sentence alone reads like a bug to the admin who just pressed the button,
+    // so the refusal is labelled and the real text is kept underneath: act on
+    // the first sentence, verify with the second. Same shape as the host errors.
     await serve()
     fail = { status: 403, body: { detail: 'Your role does not allow this.' } }
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Clear log…' }))
     fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'clear audit log' } })
     fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
-    expect(await screen.findByText('Your role does not allow this.')).toBeInTheDocument()
+    const note = await screen.findByText(/only the owner can clear the audit log/i)
+    // The backend's own words survive, they are not replaced by the label.
+    expect(note).toHaveTextContent('Your role does not allow this.')
+  })
+
+  it('does not add the owner line to a failure that is not a refusal', async () => {
+    // A 500 is a fault, not a rule, and claiming the owner restriction caused it
+    // would send the operator after the wrong thing.
+    await serve()
+    fail = { status: 500, body: { detail: 'database is locked' } }
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear log…' }))
+    fireEvent.change(screen.getByLabelText(/type/i), { target: { value: 'clear audit log' } })
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
+    expect(await screen.findByText(/database is locked/)).toBeInTheDocument()
+    expect(screen.queryByText(/only the owner/i)).toBeNull()
   })
 })

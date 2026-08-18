@@ -94,7 +94,14 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("channel", "manage"): "admin",
     ("metric", "read"): "viewer",
     ("audit", "read"): "admin",
-    ("audit", "export"): "owner",
+    # admin, matching the route that has always enforced it: GET /audit/export
+    # is gated on ("audit", "read"), and nothing has ever called
+    # authorize("audit", "export"). This entry read "owner" and was therefore a
+    # stale claim rather than a control: it granted a policy row nobody checked
+    # while doc 05 told operators the export needed owner. Corrected to what the
+    # code does rather than tightening the route, because admins can already
+    # export and nobody asked for the restriction.
+    ("audit", "export"): "admin",
     # Erasing the trail sits with host.remove and vm.remove at owner. Reusing
     # ("audit", "export") would have avoided a row here, but authorize() writes
     # the DENIED audit row as f"{resource}.{action}", so a refused clear would

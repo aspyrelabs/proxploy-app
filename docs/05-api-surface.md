@@ -249,7 +249,7 @@ documented endpoint callable with an API key (`api_keys` table,
 | Method | Path | Purpose | Role | Entitlement |
 |---|---|---|---|---|
 | GET | `/api/v1/audit` | Query events (filter `?search=` item name or action, `?actor=` user id, `?actor_type=` system\|api_key, `?action=` exact, `?from_=`, `?to=`) | admin | `audit.log` |
-| GET | `/api/v1/audit/export` | CSV/JSONL export stream for archival, honours every filter above | owner | `audit.log` |
+| GET | `/api/v1/audit/export` | CSV/JSONL export stream for archival, honours every filter above | admin | `audit.log` |
 | DELETE | `/api/v1/audit` | Clear the log. Body `{before, confirm}`: `before` clears only entries older than that instant, omitted clears everything, and `confirm` must be `clear audit log` or it 409s. Writes its own `audit.clear` row after the delete | owner | `audit.log` |
 
 (No POST/PATCH exists for audit, append happens only server-side. The one

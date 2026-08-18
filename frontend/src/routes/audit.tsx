@@ -4,7 +4,7 @@ import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
 import { AUDIT_PER_PAGE, CLEAR_PHRASE, auditExportUrl, clearAuditLog, useAuditLog } from '../api/audit'
 import type { AuditFilters, AuditRow } from '../api/audit'
-import { apiErrorDetail } from '../api/client'
+import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useUsers } from '../api/teams'
 import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
@@ -94,12 +94,18 @@ export function AuditPage() {
         + `${r.before ? ' older than ' + new Date(r.before).toLocaleString() : ''}.`
         + ' The clear itself is recorded in the log.')
     },
-    // The backend's own sentence, not a guess at it: a 403 here means the
-    // role is admin and not owner, and saying "try again" to that would be
-    // a lie.
+    // A 403 here is the owner-only gate holding, which is a RULE, not a fault,
+    // and the server's raw sentence reads like a bug to the admin who just
+    // pressed the button. So it gets a legible line on top with the real text
+    // underneath, the same shape the host errors use: act on the first
+    // sentence, verify with the second. Every other failure keeps the backend's
+    // own sentence, because saying "try again" to a refusal would be a lie.
     onError: (e) => {
       setClearOpen(false)
-      setClearNote(apiErrorDetail(e, 'Could not clear the audit log, try again.'))
+      const raw = apiErrorDetail(e, 'Could not clear the audit log, try again.')
+      setClearNote(e instanceof ApiError && e.status === 403
+        ? `Only the owner can clear the audit log. ${raw}`
+        : raw)
     },
   })
 
