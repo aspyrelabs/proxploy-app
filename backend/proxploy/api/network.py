@@ -29,7 +29,8 @@ from proxploy.api.deps import (authorize, cluster_scope, get_db,
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import App, Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.hostclient import client_for_host, guest_node
+from proxploy.services.hostclient import (client_for_host, dedupe_vms,
+                                          guest_node)
 from proxploy.services.metrics import pick_resolution, query_series
 from proxploy.services.netconfig import build_net, nic_identity, parse_net
 from proxploy.services.proxmox import ProxmoxError
@@ -213,6 +214,9 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
                      for h in all_hosts if h.node_name}
     nodes, attachments, errors = [], [], []
     reported_nodes: set[tuple] = set()
+    vms_by_host: dict[int, list] = {}
+    for v in dedupe_vms(db.query(Vm).all(), {h.id: h for h in db.query(Host).all()}):
+        vms_by_host.setdefault(v.host_id, []).append(v)
     for h in hosts:
         try:
             client = client_for_host(request.app, db, h)
@@ -226,14 +230,21 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
                 nodes.append({"host_id": owner.id, "host_name": owner.name, "node": node,
                               "interfaces": [_iface_out(r) for r in client.node_networks(node)]})
             node = h.node_name or ""
-            guests = ([("app", a.id, a.name, "lxc", a.ctid)
+            # Apps are read at their host's node (an app row IS its host's).
+            # VMs carry their own node and are deduped across the cluster: the
+            # mirror holds one row per (host, vmid), so this used to read the
+            # same guest once per enrolled host AND read it at the wrong node
+            # for every host but the owning one, which raised and dropped that
+            # whole host's attachments into `errors` (doc 12 check 18).
+            guests = ([("app", a.id, a.name, "lxc", a.ctid, node)
                        for a in db.query(App).filter_by(host_id=h.id).order_by(App.name)]
-                      + [("vm", v.id, v.name, "qemu", v.vmid)
-                         for v in db.query(Vm).filter_by(host_id=h.id).order_by(Vm.name)])
-            for gtype, gid, gname, kind, vmid in guests:
-                cfg = client.guest_config(kind, node, vmid)
+                      + [("vm", v.id, v.name, "qemu", v.vmid, guest_node(h, v))
+                         for v in sorted(vms_by_host.get(h.id, []),
+                                         key=lambda v: (v.name or "", v.id))])
+            for gtype, gid, gname, kind, vmid, gnode in guests:
+                cfg = client.guest_config(kind, gnode, vmid)
                 for key in sorted(k for k in cfg if NET_KEY.match(k)):
-                    attachments.append({"host_id": h.id, "node": node,
+                    attachments.append({"host_id": h.id, "node": gnode,
                                         "guest_type": gtype, "guest_id": gid,
                                         "name": gname, "vmid": vmid,
                                         **_nic_out(key, str(cfg[key]))})

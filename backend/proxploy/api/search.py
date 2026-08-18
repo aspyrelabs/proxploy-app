@@ -27,7 +27,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import or_
 
-from proxploy.api.deps import authorize, get_db
+from proxploy.api.deps import authorize, dedupe_vms, get_db
 from proxploy.models import App, CatalogEntry, Host, User, Vm
 from proxploy.services.catalog_metadata import store_visible
 from proxploy.services.authz import enforce
@@ -104,8 +104,13 @@ def search(request: Request, q: str = "", db=Depends(get_db),
                         "status": a.status_cached})
 
     if palette and _visible(request, db, user, "vm", "read"):
-        for v in (db.query(Vm).filter(Vm.name.ilike(like))
-                  .order_by(Vm.name).limit(PER_KIND)):
+        # Deduped before the limit, not after: the mirror holds one row per
+        # (host, vmid), so on a cluster the palette showed every VM twice and a
+        # PER_KIND of 5 could be 5 copies of 3 guests (doc 12 check 18).
+        matches = dedupe_vms(db.query(Vm).filter(Vm.name.ilike(like)).all(),
+                             {h.id: h for h in db.query(Host).all()})
+        matches.sort(key=lambda v: (v.name or "", v.id))
+        for v in matches[:PER_KIND]:
             out.append({"kind": "vm", "id": v.id, "label": v.name,
                         "sublabel": f"VM {v.vmid}", "href": f"/vms/{v.id}",
                         "status": v.status})

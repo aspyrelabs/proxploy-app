@@ -67,6 +67,57 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
                          factory=app.state.proxmox_factory)
 
 
+def cluster_scope(host: Host) -> tuple:
+    """Groups Hosts that are genuinely the same Proxmox cluster, for any
+    dedupe/lookup keyed on a node name or a ctid: both are only unique WITHIN
+    a cluster, not across two registered clusters (or two standalone hosts).
+
+    `cluster_name` is None for a standalone host, and None is a real value
+    meaning "not clustered" (pollers/__init__.py's UNREAD comment), not
+    "unknown cluster", two standalone hosts must never merge with each
+    other just because they share that None. Keyed by host.id in that case,
+    since a standalone host is its own one-node cluster and nothing else
+    can legitimately share its scope.
+    """
+    return (host.cluster_name,) if host.cluster_name is not None else ("standalone", host.id)
+
+
+def dedupe_vms(rows, hosts: dict) -> list:
+    """One row per real guest, from a `vms` table that holds one per (host, vmid).
+
+    `/cluster/resources` answers for the whole cluster from any member, so every
+    polled host mirrors every VM in the cluster: a two-host cluster produced two
+    rows for one guest, each with its own id. Observed on real hardware, where
+    it also made half of every action fail before `vms.node_name` existed (doc 12
+    check 18).
+
+    Keyed on `cluster_scope`, not on host id, for the reason that helper exists:
+    a vmid is unique only within a cluster. The row kept is the one belonging to
+    the host registered AT the node the guest runs on, falling back to the lowest
+    id, so the choice is deterministic rather than dependent on which host's poll
+    landed first.
+
+    A guest on a cluster node Proxploy has not enrolled is still returned, by
+    whichever host reported it: hiding it would remove working functionality,
+    since a cluster-wide token acts on any member's guest through any node
+    (proven when the node fix was verified).
+    """
+    def rank(v, host) -> tuple:
+        owns = bool(v.node_name) and host.node_name == v.node_name
+        return (0 if owns else 1, v.id)
+
+    best: dict[tuple, tuple] = {}
+    for v in rows:
+        host = hosts.get(v.host_id)
+        if host is None:
+            continue
+        key = (cluster_scope(host), v.vmid)
+        r = rank(v, host)
+        if key not in best or r < best[key][0]:
+            best[key] = (r, v)
+    return [v for _r, v in best.values()]
+
+
 def cluster_quorate(rows: list[dict]) -> bool | None:
     """Is this cluster quorate, per its own `/cluster/status` cluster row?
 

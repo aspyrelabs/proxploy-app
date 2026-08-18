@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from proxploy.api.deps import authorize, cluster_scope, get_db, require_entitlement
+from proxploy.api.deps import (authorize, cluster_scope, dedupe_vms, get_db,
+                               require_entitlement)
 from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm, to_iso
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
@@ -57,7 +58,9 @@ def cluster_summary(request: Request, db=Depends(get_db),
 
     hosts = db.query(Host).all()
     apps = db.query(App).all()
-    vms = db.query(Vm).all()
+    # Deduped: one row per (host, vmid) means a clustered pair counted every
+    # guest twice, so "2 VMs" for one VM (doc 12 check 18).
+    vms = dedupe_vms(db.query(Vm).all(), {h.id: h for h in hosts})
     return {
         "updated_at": to_iso(updated),
         "cpu": {"pct": _pct(used_cores, total_cores),

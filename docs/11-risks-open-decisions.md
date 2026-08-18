@@ -830,15 +830,26 @@ any suite could have caught. What that run leaves open:
    reach the right node instead of answering `500 Configuration file
    'nodes/<other>/qemu-server/<id>.conf' does not exist`.
 
-   The duplicate ROWS remain, so a cluster lists each VM more than once and each
-   copy has its own id. Now cosmetic, and the precedent for the fix is
-   `api/storage.py::list_storage`, which collapses cluster-wide rows and keeps
-   whichever host's poll was seen first, with the frontend matching on
-   `cluster_name`. Doing the same for guests is a read-layer change, but it wants
-   one decision first: whether a guest on a cluster node Proxploy has NOT
-   enrolled should stay visible. It is visible and now fully actionable today,
-   because a cluster-wide token works through any member, so the honest answer is
-   probably yes and the dedupe key is `(cluster_name, vmid)`.
+   **The duplicate rows are now collapsed at every read, 2026-08-18.**
+   `dedupe_vms(rows, hosts)` keys on `cluster_scope`, keeps the row belonging to
+   the host registered AT the guest's node (lowest id as the tiebreak, so the
+   choice is deterministic rather than whichever poll landed first), and leaves a
+   guest on an unenrolled node visible: hiding it would remove working
+   functionality, since a cluster-wide token acts on any member's guest.
+
+   It turned out to matter in five places, not one: the VM list, the cluster
+   summary counts, the search palette (where PER_KIND of 5 could be 5 copies of
+   3 guests), the alert target expansion (an "any vm" rule fired and NOTIFIED
+   once per enrolled host for one breach), and the network topology route, which
+   read the same guest twice and read it at the wrong node for every host but the
+   owning one, dropping that whole host's attachments into `errors`. Verified on
+   the real cluster: two mirror rows, one API row attributed to the owning host,
+   `vms: 1` in the summary, and `/network/bridges` returning each guest once with
+   no errors.
+
+   The helper moved to `services/hostclient.py` alongside `cluster_scope` so
+   `services/alerts.py` could use it without importing from the API layer;
+   `api/deps.py` re-exports both.
 
    The App side has the same shape latent, with no column to fix it: an app's
    `host.node_name` is assumed to be its CT's node. True today because installs

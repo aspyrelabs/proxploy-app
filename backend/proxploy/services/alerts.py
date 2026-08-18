@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
+from proxploy.services.hostclient import dedupe_vms
 from proxploy.models import Alert, AlertRule, App, Host, Job, MetricSample, Vm, utcnow
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,11 @@ def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
     if "app" in kinds:
         out += [("app", a.id, a.name) for a in db.query(App).all()]
     if "vm" in kinds:
-        out += [("vm", v.id, v.name) for v in db.query(Vm).all()]
+        # Deduped: the mirror holds one row per (host, vmid), so on a cluster an
+        # "any vm" rule expanded to the same guest once per enrolled host and
+        # would fire, and notify, twice for one breach (doc 12 check 18).
+        out += [("vm", v.id, v.name) for v in
+                dedupe_vms(db.query(Vm).all(), {h.id: h for h in db.query(Host).all()})]
     return out
 
 

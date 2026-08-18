@@ -239,3 +239,67 @@ def test_vms_list_and_detail(tmp_path, csrf_header, bootstrap_admin):
         assert c.get(f"/api/v1/vms/{vm['id']}").json()["vmid"] == 100
         assert c.get("/api/v1/vms?host=999").json() == []
         assert c.get("/api/v1/vms/99999").status_code == 404
+
+
+def test_a_vm_is_listed_once_per_cluster_not_once_per_host(tmp_path, csrf_header,
+                                                          bootstrap_admin):
+    """The `vms` mirror holds one row per (host, vmid), and every host of a
+    cluster reports every guest, so one VM had two rows with two ids.
+
+    Observed on real hardware, where it was worse than cosmetic: the row under
+    the host that does not own the guest failed every action with
+    `500 Configuration file 'nodes/node1/qemu-server/100.conf' does not exist`
+    (doc 12 check 18). The row kept is the one belonging to the host registered
+    AT the guest's node.
+    """
+    from fastapi.testclient import TestClient
+    from proxploy.models import Host, Vm
+    from tests.support import make_app, seed_host_row
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            for hid in (hid1, hid2):
+                db.get(Host, hid).cluster_name = "lab-cluster"
+            # One guest, on pve2, mirrored by both hosts' polls.
+            for hid in (hid1, hid2):
+                db.add(Vm(host_id=hid, vmid=100, name="win11", status="running",
+                          node_name="pve2"))
+            db.commit()
+
+        rows = c.get("/api/v1/vms").json()
+        assert len(rows) == 1, f"one guest listed {len(rows)} times"
+        assert rows[0]["host_id"] == hid2, "kept the non-owning host's row"
+
+        # and the cluster summary counts it once
+        counts = c.get("/api/v1/cluster/summary").json()["counts"]
+        assert counts["vms"] == 1 and counts["vms_running"] == 1
+
+
+def test_two_standalone_hosts_with_the_same_vmid_are_both_listed(tmp_path, csrf_header,
+                                                                bootstrap_admin):
+    """The dedupe key is the CLUSTER, not the vmid: a vmid is unique only within
+    one cluster, so two unrelated standalone hosts each running VM 100 are two
+    real guests and both must survive."""
+    from fastapi.testclient import TestClient
+    from proxploy.models import Vm
+    from tests.support import make_app, seed_host_row
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid1 = seed_host_row(db, name="host-01", node="pve1").id
+            hid2 = seed_host_row(db, name="host-02", node="pve2").id
+            db.add(Vm(host_id=hid1, vmid=100, name="win11", status="running",
+                      node_name="pve1"))
+            db.add(Vm(host_id=hid2, vmid=100, name="ubuntu", status="running",
+                      node_name="pve2"))
+            db.commit()
+
+        rows = c.get("/api/v1/vms").json()
+        assert len(rows) == 2, "two standalone hosts merged into one guest"
+        assert {r["host_id"] for r in rows} == {hid1, hid2}

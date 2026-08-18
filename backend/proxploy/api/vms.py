@@ -8,7 +8,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
-from proxploy.api.deps import authorize, get_db, require_entitlement, scope_vm
+from proxploy.api.deps import (authorize, dedupe_vms, get_db,
+                               require_entitlement, scope_vm)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm, to_iso
@@ -57,8 +58,14 @@ def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
     query = db.query(Vm)
     if host is not None:
         query = query.filter(Vm.host_id == host)
+    # Deduped for the same reason the Hosts page and the health footer are: the
+    # mirror holds one row per (host, vmid) and a cluster reports every guest to
+    # every member, so this listed each VM once per enrolled host (doc 12 check
+    # 18).
+    rows = dedupe_vms(query.all(), hosts)
+    rows.sort(key=lambda v: (v.name or "", v.id))
     return [_vm_out(v, hosts[v.host_id], request.app.state.poller.snapshots)
-            for v in query.order_by(Vm.name).all() if v.host_id in hosts]
+            for v in rows]
 
 
 @router.get("/{vm_id}")
