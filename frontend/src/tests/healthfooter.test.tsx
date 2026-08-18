@@ -32,14 +32,29 @@ const wrap = (ui: React.ReactNode) => {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
+/** Both queries have answered. The healthy footer renders nothing, and so does
+ *  a pending one, so "empty" only means "nothing is wrong" once these landed. */
+const fetched = async () => {
+  const { api } = await import('../api/client')
+  const paths = (api as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+  return paths.some((p) => p.startsWith('/alerts')) && paths.includes('/cluster/nodes')
+}
+
 describe('HealthFooter', () => {
-  it('reads "All systems healthy" with nodes and no firing alerts', async () => {
+  it('renders nothing at all when nothing is wrong', async () => {
+    // It used to say "All systems healthy". A standing reassurance derived from
+    // three checks asserts health on everything it does not look at, which is
+    // how it came to read healthy over a cluster that had lost quorum and could
+    // not accept a write (doc 12 check 12). Silence cannot fail that way.
     state.alerts = []
     state.hosts = [{ status: 'connected' }, { status: 'connected' },
                    { status: 'connected' }]
-    wrap(<HealthFooter />)
-    await waitFor(() => expect(screen.getByText(/all systems healthy/i)).toBeInTheDocument())
-    expect(screen.getByText(/3 nodes · 0 alerts/i)).toBeInTheDocument()
+    const { container } = wrap(<HealthFooter />)
+    // Waited for, not asserted on the first paint: the queries have to land
+    // before "nothing rendered" means "nothing is wrong" rather than "pending".
+    await waitFor(async () => expect(await fetched()).toBe(true))
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText(/healthy/i)).toBeNull()
   })
 
   it('says a cluster has no quorum, even with every node connected and no alerts', async () => {
@@ -58,12 +73,15 @@ describe('HealthFooter', () => {
   })
 
   it('treats a null quorate as standalone, not as quorum loss', async () => {
+    // NULL is a standalone host or one not yet polled. Reading either as quorum
+    // loss would put a red warning under every standalone install.
     state.alerts = []
     state.hosts = [{ status: 'connected', quorate: null },
                    { status: 'connected' }]
-    wrap(<HealthFooter />)
-    await waitFor(() =>
-      expect(screen.getByText(/all systems healthy/i)).toBeInTheDocument())
+    const { container } = wrap(<HealthFooter />)
+    await waitFor(async () => expect(await fetched()).toBe(true))
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText(/quorum/i)).toBeNull()
   })
 
   it('counts firing alerts and turns the dot red', async () => {
@@ -100,15 +118,23 @@ describe('HealthFooter', () => {
 // there is no room for any of it here: see CRITICAL 1 of the phase-fix
 // report this covers. Collapsed drops to the dot alone.
 describe('HealthFooter collapsed', () => {
-  it('renders the dot alone, with the headline as the link\'s accessible name', async () => {
+  it('renders nothing collapsed either when nothing is wrong', async () => {
     state.alerts = []
     state.hosts = [{ status: 'connected' }, { status: 'connected' }, { status: 'connected' }]
     const { container } = wrap(<HealthFooter collapsed />)
-    const link = await screen.findByRole('link', { name: 'All systems healthy' })
-    // The headline lives only in the accessible name, not as visible text:
-    // a truncated fragment of it would be worse than nothing.
+    await waitFor(async () => expect(await fetched()).toBe(true))
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders the dot alone, with the headline as the link\'s accessible name', async () => {
+    // The unhealthy case is what the rail has to fit: dot only, headline as the
+    // accessible name, because a truncated fragment of it is worse than nothing.
+    state.alerts = []
+    state.hosts = [{ status: 'connected' }, { status: 'unreachable' }]
+    const { container } = wrap(<HealthFooter collapsed />)
+    const link = await screen.findByRole('link', { name: '1 node unreachable' })
     expect(link.textContent).toBe('')
-    expect(container.querySelector('.bg-green')).not.toBeNull()
+    expect(container.querySelector('.bg-red')).not.toBeNull()
   })
 
   it('turns the dot red and renames the link when alerts are firing', async () => {
@@ -131,12 +157,14 @@ describe('HealthFooter collapsed', () => {
   })
 
   it('repeats the headline in a Radix tooltip on focus', async () => {
+    // Unhealthy, because that is the only state the collapsed rail renders now,
+    // and the tooltip is the only place the headline is readable there.
     state.alerts = []
-    state.hosts = [{ status: 'connected' }]
+    state.hosts = [{ status: 'unreachable' }]
     wrap(<HealthFooter collapsed />)
-    const link = await screen.findByRole('link', { name: 'All systems healthy' })
+    const link = await screen.findByRole('link', { name: '1 node unreachable' })
     fireEvent.focus(link)
     const tooltip = await screen.findByRole('tooltip')
-    expect(tooltip).toHaveTextContent('All systems healthy')
+    expect(tooltip).toHaveTextContent('1 node unreachable')
   })
 })

@@ -69,16 +69,28 @@ export function HealthFooter({ collapsed = false }: { collapsed?: boolean }) {
   const noQuorum = rows.some((n) => n.quorate === false)
   const unhealthy = firing > 0 || down > 0 || noQuorum
 
+  // Nothing at all when nothing is wrong. This used to say "All systems
+  // healthy", and a standing reassurance is the one thing this footer cannot
+  // make safely: it is derived from three checks, so it asserts health on
+  // everything it does not look at. On 2026-08-18 it read healthy over a cluster
+  // that had lost quorum and could not accept a single write (doc 12 check 12),
+  // which is exactly that failure. Speaking only when something IS wrong cannot
+  // fail in that direction, and it gives the sidebar its two lines back.
+  //
+  // The error branch above stays, because "Status unknown" is not a claim of
+  // health: it says the opposite, that this cannot currently tell.
+  if (!unhealthy) return null
+
   const headline = noQuorum
     ? 'Cluster has no quorum'
     : firing > 0
       ? `${firing} alert${firing === 1 ? '' : 's'} firing`
-      : down > 0
-        ? `${down} node${down === 1 ? '' : 's'} unreachable`
-        : 'All systems healthy'
+      : `${down} node${down === 1 ? '' : 's'} unreachable`
 
-  const dot = !unhealthy ? 'bg-green shadow-[0_0_6px_rgba(63,207,142,.6)]'
-    : critical || down > 0 || noQuorum ? 'bg-red shadow-[0_0_6px_rgba(232,90,90,.6)]'
+  // No green: this only renders when something is wrong, so the healthy colour
+  // has nothing left to mean.
+  const dot = critical || down > 0 || noQuorum
+    ? 'bg-red shadow-[0_0_6px_rgba(232,90,90,.6)]'
     : 'bg-amber shadow-[0_0_6px_rgba(245,181,68,.6)]'
 
   if (collapsed) return <CollapsedStatus headline={headline} dot={dot} />
