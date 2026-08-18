@@ -31,7 +31,7 @@ from proxploy.executor.transfer import sftp_copy
 from proxploy.jobs import HANDLERS, JobBackend, JobContext, JobFailed
 from proxploy.models import App, Host, HostCredential, Job, JobEvent
 from proxploy.services import migrate as migrate_mod  # registers migrate.app
-from proxploy.services.proxmox import ProxmoxClient
+from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 from tests.fakes.pve import FakePVE, make_addressed_factory
 from tests.fakes.ssh import FakeSSHConnection, make_addressed_connect_factory
 from tests.support import make_job_app
@@ -174,6 +174,18 @@ def _no_shared_storage_pair():
                               "content": "backup,iso", "path": "/mnt/src"}]
     b.cluster_storage_rows = [{"storage": "local-tgt", "type": "dir",
                               "content": "backup,iso", "path": "/mnt/tgt"}]
+    # A dir-type backup store holds the ARCHIVE; the restored rootfs needs a
+    # pool that carries `rootdir`, which is a different pool on a stock layout
+    # and is what the handler now asks the target for. Modelled per node
+    # because that is the read it makes (GET /nodes/{node}/storage).
+    a.storages_by_node = {"pve-src": [
+        {"storage": "local-src", "type": "dir", "content": "backup,iso", "active": 1},
+        {"storage": "rootfs-src", "type": "lvmthin", "content": "rootdir,images",
+         "active": 1}]}
+    b.storages_by_node = {"pve-tgt": [
+        {"storage": "local-tgt", "type": "dir", "content": "backup,iso", "active": 1},
+        {"storage": "rootfs-tgt", "type": "lvmthin", "content": "rootdir,images",
+         "active": 1}]}
     return a, b
 
 
@@ -225,6 +237,10 @@ def test_transfer_strategy_copies_archive_restores_on_target_and_cleans_up(tmp_p
         assert restore_params["vmid"] == 500
         assert restore_params["restore"] == 1
         assert restore_params["ostemplate"] == DST_VOLID
+        # Named, never left to PVE: the fallback is `local`, a dir store with no
+        # rootdir content, and the restore dies on "does not support container
+        # directories" (hit on real hardware, doc 12 check 7).
+        assert restore_params["storage"] == "rootfs-tgt"
 
         # source stopped, never destroyed; target started
         assert ("lxc", 150, "stop") in fake_src.actions
@@ -510,5 +526,151 @@ def test_transfer_strategy_success_cleanup_spends_the_backup_token(tmp_path, mon
             ("proxploy@pve!src-backup", "pve-src", "local-src", SRC_VOLID),
             ("proxploy@pve!tgt-backup", "pve-tgt", "local-tgt", DST_VOLID),
         ], f"scratch archives cleaned up with the wrong host tokens: {seen}"
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_target_with_no_rootdir_storage_refuses_before_restoring(tmp_path):
+    """A target that can hold the archive but not the rootfs is named as such.
+
+    The failure has to say which host and leave the source intact, rather than
+    letting PVE answer "storage 'local' does not support container directories"
+    about a pool nobody chose.
+    """
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        # backup store only: nothing on the target carries rootdir
+        fake_tgt.storages_by_node = {"pve-tgt": [
+            {"storage": "local-tgt", "type": "dir", "content": "backup,iso",
+             "active": 1}]}
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        with pytest.raises(JobFailed) as e:
+            await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                                "target_host_id": tgt_id})
+        assert "accepts container rootfs" in str(e.value)
+        assert "intact" in str(e.value)
+        assert fake_tgt.creates == []
+
+        host_id, ctid = _app_row(app, app_id)
+        assert (host_id, ctid) == (src_id, 150)
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_restore_spends_the_lifecycle_token(tmp_path, monkeypatch):
+    """The restore runs on the target's LIFECYCLE token, not its backup one.
+
+    A restore to a ctid that does not exist yet CREATES a guest, so PVE checks
+    VM.Allocate, which the Backup role deliberately does not carry (a leaked
+    backup token must not be able to create or destroy guests). Run against
+    real hardware on 2026-08-18 the backup token got `403 Permission check
+    failed` here with no privilege named, and the whole transfer died after the
+    archive had already crossed the network (doc 12 check 7). FakePVE accepts
+    any token for any call, which is exactly why this asserts at the
+    ProxmoxClient seam instead.
+    """
+    seen: list[tuple[str, str, int]] = []
+    real_restore = ProxmoxClient.restore_guest
+
+    def spy(self, kind, node, vmid, params):
+        seen.append((self.token_id, node, vmid))
+        return real_restore(self, kind, node, vmid, params)
+
+    monkeypatch.setattr(ProxmoxClient, "restore_guest", spy)
+
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+        fake_tgt.add_ct(500, node="pve-tgt", name="immich", status="running")
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                            "target_host_id": tgt_id})
+
+        assert seen == [("proxploy@pve!tgt-lifecycle", "pve-tgt", 500)], (
+            f"the restore spent the wrong token: {seen}")
+
+    asyncio.run(go())
+
+
+def test_transfer_strategy_refused_restore_still_cleans_both_archives(tmp_path,
+                                                                     monkeypatch):
+    """A restore PVE refuses outright must not leave the scratch archives.
+
+    `await_task` raises JobFailed for a task that ran and failed, but
+    `restore_guest` raises ProxmoxError when the call never becomes a task at
+    all, and the cleanup used to catch only the first. On real hardware that
+    left a 19 MB dump on each of two hosts after a 403, which is the outcome
+    the cleanup exists to prevent (doc 12 check 7).
+    """
+    def refuse(self, kind, node, vmid, params):
+        raise ProxmoxError(f"restore of {kind}/{vmid} failed on {node}: "
+                           f"403 Forbidden: Permission check failed",
+                           kind="permission")
+
+    monkeypatch.setattr(ProxmoxClient, "restore_guest", refuse)
+
+    async def go():
+        fake_src, fake_tgt = _no_shared_storage_pair()
+        fake_src.add_ct(150, node="pve-src", name="immich", status="running")
+        fake_src.content_by_storage["local-src"] = [{
+            "volid": SRC_VOLID, "content": "backup", "ctime": 1785000000,
+            "size": len(PAYLOAD)}]
+        fake_tgt.nextid = "500"
+
+        store: dict[str, bytes] = {"/mnt/src/dump/" + FILENAME: PAYLOAD}
+        ssh_src = FakeSSHConnection(host_key_fingerprint="SHA256:src", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+        ssh_tgt = FakeSSHConnection(host_key_fingerprint="SHA256:tgt", stdout_lines=[],
+                                    stderr_lines=[], exit_status=0, sftp_store=store)
+
+        app = _two_host_app(tmp_path, {SRC_HOSTNAME: fake_src, TGT_HOSTNAME: fake_tgt},
+                            {SRC_HOSTNAME: ssh_src, TGT_HOSTNAME: ssh_tgt})
+        src_id, tgt_id, app_id = _seed(app)
+        job_id = _job(app, app_id, tgt_id)
+        ctx = JobContext(app.state.jobs, job_id)
+
+        with pytest.raises(ProxmoxError):
+            await HANDLERS["migrate.app"](ctx, {"app_id": app_id,
+                                                "target_host_id": tgt_id})
+
+        assert ("pve-src", "local-src", SRC_VOLID) in fake_src.deleted_volumes
+        assert ("pve-tgt", "local-tgt", DST_VOLID) in fake_tgt.deleted_volumes
+
+        # the app row never moved: the source guest is still authoritative
+        host_id, ctid = _app_row(app, app_id)
+        assert (host_id, ctid) == (src_id, 150)
 
     asyncio.run(go())

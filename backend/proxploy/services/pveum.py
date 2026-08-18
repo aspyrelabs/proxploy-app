@@ -62,10 +62,20 @@ CAPABILITIES: dict[str, Capability] = {
                     # so every one of those calls 403'd no matter which
                     # token was pasted -- confirmed the same class of gap
                     # as Sys.PowerMgmt (see node-power-privilege-report.md).
-                    "Sys.Modify", "Datastore.Allocate", "Datastore.AllocateSpace"),
+                    "Sys.Modify", "Datastore.Allocate", "Datastore.AllocateSpace",
+                    # PVE 9 puts every bridge behind an SDN ACL
+                    # (/sdn/zones/localnetwork/vmbr0), so attaching a guest NIC
+                    # to a bridge checks SDN.Use. Nothing here granted it, and
+                    # the audit role's SDN.Audit is a read: on real hardware a
+                    # container restore that carried a net0 died mid-task with
+                    # "403 Permission check failed (/sdn/zones/localnetwork/
+                    # vmbr0, SDN.Use)" (doc 12 check 7). That is guest create,
+                    # guest restore and every NIC edit, so it belongs to the
+                    # capability that already owns VM.Config.Network.
+                    "SDN.Use"),
         why="Start/stop/restart, resource edits, snapshots, clone, migration, "
-            "VM create/destroy, and node-level network/storage config "
-            "(bridges, storage pools, storage content)."),
+            "VM create/destroy, guest restore, and node-level network/storage "
+            "config (bridges, storage pools, storage content)."),
     "console": Capability(
         key="console", label="Console", role="ProxployConsole", token="console",
         privileges=("VM.Console",),
@@ -73,7 +83,13 @@ CAPABILITIES: dict[str, Capability] = {
     "backup": Capability(
         key="backup", label="Backup", role="ProxployBackup", token="backup",
         privileges=("VM.Backup", "Datastore.AllocateSpace", "Datastore.Audit"),
-        why="vzdump/PBS backup and restore jobs, and backup listing."),
+        # No VM.Allocate and no SDN.Use on purpose: this role reads and writes
+        # ARCHIVES. Putting a guest back is guest creation and runs on
+        # Lifecycle (services/backupjobs.py, services/migrate.py), so a leaked
+        # backup token still cannot create or destroy a guest.
+        why="vzdump/PBS backups, backup listing and pruning. Restoring a "
+            "backup also needs the Lifecycle capability, because it creates "
+            "the guest."),
 }
 
 # Sys.Console is effectively root on the node, so it is never folded into the

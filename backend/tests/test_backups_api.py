@@ -45,6 +45,13 @@ def _seed(app, ct_status="stopped"):
             {"token_id": "proxploy@pve!bk", "token_secret": "s3cret"}).encode())
         db.add(HostCredential(host_id=host.id, kind="api_token:backup", encrypted_blob=blob,
                               key_version=ver, public_meta="proxploy@pve!bk"))
+        # A restore runs on LIFECYCLE, not on the backup token that wrote the
+        # archive: it creates a guest, so PVE checks VM.Allocate (and SDN.Use
+        # for the NIC), neither of which the Backup role carries. Real hardware
+        # 403'd the backup token here, doc 12 check 7.
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
+                              encrypted_blob=blob, key_version=ver,
+                              public_meta="proxploy@pve!lc"))
         a = App(host_id=host.id, ctid=150, name="Immich", slug="immich",
                 status_cached=ct_status)
         v = Vm(host_id=host.id, vmid=201, name="win11", status="stopped")

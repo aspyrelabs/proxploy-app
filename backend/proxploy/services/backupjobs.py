@@ -182,14 +182,19 @@ HANDLERS["backup.sync"] = sync_backups
 
 # --- backup mutations (Phase 6 Task 9) --------------------------------------
 
-def _host_target(app, host_id: int):
-    """Blocking: host id -> (client, node, host name)."""
+def _host_target(app, host_id: int, capability: str = "backup"):
+    """Blocking: host id -> (client, node, host name).
+
+    `capability` is a parameter because a restore is not a backup call: it
+    creates a guest, so it needs Lifecycle (see restore_backup).
+    """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
         if host is None:
             raise JobFailed(f"host {host_id} not found")
         try:
-            return client_for_host(app, db, host, capability="backup"), host.node_name or "", host.name
+            return (client_for_host(app, db, host, capability=capability),
+                    host.node_name or "", host.name)
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 
@@ -259,9 +264,13 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
 HANDLERS["backup.run"] = run_backup
 
 
-def _storage_for_content(client, node: str, want: str) -> str | None:
+def storage_for_content(client, node: str, want: str) -> str | None:
     """Blocking: first active storage on `node` whose `content` list includes
     `want` ("rootdir" for a CT, "images" for a VM).
+
+    Public because services/migrate.py needs the same pick for the same
+    reason: PVE defaults a restore to `local`, which on a stock layout holds
+    no rootfs.
 
     ponytail: first match wins, in whatever order PVE lists them. A host with
     several eligible pools gets an arbitrary one of them, which is still
@@ -305,7 +314,7 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
         # that was every restore-as-new. Pick a store on this node that can
         # actually hold the guest instead of letting PVE guess wrong.
         want = "rootdir" if kind == "lxc" else "images"
-        picked = await asyncio.to_thread(_storage_for_content, client, node, want)
+        picked = await asyncio.to_thread(storage_for_content, client, node, want)
         if picked is None:
             raise JobFailed(
                 f"no active storage on {node} accepts {want} content; "
@@ -316,8 +325,14 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
         call["force"] = 1  # overwrite the existing guest; PVE requires it stopped
     ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "
             f"({'in place' if in_place else 'as new'})")
-    upid = await asyncio.to_thread(client.restore_guest, kind, node, vmid, call)
-    status = await await_task(ctx, client, node, upid,
+    # The restore itself runs on LIFECYCLE, not on the backup client that read
+    # the archive above: a restore writes a guest config, so PVE checks
+    # VM.Allocate for a fresh vmid and SDN.Use for the NIC it carries, neither
+    # of which the Backup role holds. Proven on real hardware, doc 12 check 7.
+    lifecycle_client, _, _ = await asyncio.to_thread(
+        _host_target, app, int(info["host_id"]), "lifecycle")
+    upid = await asyncio.to_thread(lifecycle_client.restore_guest, kind, node, vmid, call)
+    status = await await_task(ctx, lifecycle_client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, info["host_id"])
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,

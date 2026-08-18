@@ -744,6 +744,65 @@ Cluster peer auto-enrolment shipped in seven phases today. What it leaves open:
    procedure can no longer produce a committable directory. Verified with
    `git check-ignore`.
 
+## Open at the end of 2026-08-18
+
+Doc 12 check 7's data movement passed today, on the third attempt, and the two
+attempts that failed are the value: three defects and one leak, none of which
+any suite could have caught. What that run leaves open:
+
+1. **A storage's `nodes` restriction is invisible to the migration preflight.**
+   `services/migrate.py::_storage_names` reads `cluster_storage()`, which is
+   `GET /storage`, the cluster-wide CONFIG list. A PVE storage may carry
+   `nodes <a,b>` restricting which nodes serve it, and that field is never
+   consulted, so a pool restricted AWAY from a host still counts as "shared in
+   common" for that host. Observed on hardware: with `nfs-shared` set to
+   `--nodes node2`, `preflight` answered `strategy: shared_storage,
+   shared_storage: nfs-shared` for a migration off node1, while `pvesm status`
+   on node1 reported that same pool `disabled` in the same minute.
+
+   The consequence is worse than a wrong label: STRATEGY_SHARED would vzdump to
+   a pool the source cannot write, so a migration that had a working transfer
+   path available refuses on a storage error instead. A disabled row (`disable
+   1`) is the same shape, since `/storage` reports config rather than state.
+
+   Not fixed today: the run only needed the pool gone from node1, and the fix
+   wants a decision about which read is authoritative. Two candidates.
+   `/nodes/{node}/storage` answers per node and already backs
+   `storage_for_content`, but costs one call per host. Or filter the config rows
+   on `nodes` and `disable`, which is free but trusts config over state. The
+   second is closer to what the rest of the file does; the first is what
+   `pvesm status` agrees with. Either way `_storage_names` is the one place, and
+   the fixtures carry no `nodes` field at all, so the test comes first.
+
+2. **The transfer strategy picks the target rootfs pool by first match, and
+   preflight checks capacity on the wrong pool.** The restored guest landed on
+   `nfs-shared` (NFS) when its source rootfs was `local-lvm`, because the pick
+   is "first active pool carrying rootdir" and nothing preserves the source's
+   storage class or lets the operator choose. Separately `capacity_ok` measures
+   free space on the DIR storage that stages the ARCHIVE, not on the pool the
+   rootfs lands on, so it can read true while the destination is full.
+
+   Both are honest gaps rather than bugs today, and both want the same fix:
+   preflight should name the target rootfs storage, check capacity there, and
+   let the migrate call override it. That is a route/UI change as well as a
+   service one, which is why it is written down rather than done.
+
+3. **A restore now needs the Lifecycle capability, and nothing warns before the
+   job runs.** `VM.Allocate` and `SDN.Use` are lifecycle privileges, so
+   `backup.restore` and `migrate.app` both resolve a lifecycle client. A host
+   carrying only a Backup token gets `CapabilityNotConfigured` from the job,
+   which names the fix ("add one in Settings -> Hosts") but only after the job
+   is queued and, for a migration, only after the source has been stopped. The
+   route gates could check the capability up front the way
+   `api/catalog.py::install_catalog_entry` checks for an `ssh_key`.
+
+4. **Every existing Lifecycle token predates `SDN.Use`.** The privilege was
+   added to the generated script today, so an operator who ran the old script
+   has a token that 403s on any NIC write until they re-run it. Nothing detects
+   that: `_missing_privileges` checks the monitoring five only. A "your
+   lifecycle token is missing SDN.Use" probe would be the honest fix, and it is
+   the same tri-state shape check 10 describes.
+
 ---
 
 ## Summary table

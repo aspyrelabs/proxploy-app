@@ -457,10 +457,87 @@ message.
      backup -> transfer -> restore -> start. Expect roughly 1 minute(s) of
      downtime."
 
-   So every helper in the non-clustered branch ran against live data. **Still
-   open: the TRANSFER strategy's data movement**, `migrate_app`'s vzdump ->
-   SFTP -> restore, which needs the pair unclustered AND the shared pool
-   detached, as above.
+   So every helper in the non-clustered branch ran against live data.
+
+   **THE DATA MOVEMENT HALF PASSED 2026-08-18, PVE 9.2.10, and it took three
+   code fixes to get there.** This is the entry this check was written for:
+   `migrate_app`'s vzdump -> SFTP -> restore, node1 (separated, standalone) ->
+   node2 (still cluster `lab-cluster`), through `POST /apps/{id}/migrate` and the
+   real job runner. A throwaway Alpine app was installed on node1 AFTER the
+   separation, per the trap below.
+
+   Reaching STRATEGY_TRANSFER needed one thing beyond separating the pair, and
+   it is a bug rather than a setup step: restricting `nfs-shared` to node2
+   (`pvesm set nfs-shared --nodes node2`) was NOT enough. `preflight` still
+   chose `shared_storage: nfs-shared` for a pool node1 cannot serve, because
+   `_storage_names` reads `GET /storage`, the cluster-wide CONFIG list, and
+   never looks at each row's `nodes` restriction. `pvesm status` on node1
+   reported that same pool `disabled` at the same moment. No fixture carries a
+   `nodes` field, so no suite could see it. Recorded as its own item in doc 11;
+   the run continued by removing the definition from node1's own (by then
+   standalone) `storage.cfg`.
+
+   The three fixes the run then forced, each invisible to a fake:
+
+   - **The restore spent the BACKUP token, which cannot create a guest.**
+     `403 Forbidden: Permission check failed`, naming no privilege, after the
+     archive had already crossed the network. `ProxployBackup` is
+     `VM.Backup` + `Datastore.AllocateSpace` + `Datastore.Audit` on purpose, and
+     a restore to a ctid that does not exist yet CREATES a guest, so PVE checks
+     `VM.Allocate`. Now on the lifecycle client, in both the shared and transfer
+     branches, and in `backupjobs.py::restore_backup` for the same reason.
+   - **No Proxploy role granted `SDN.Use`, and PVE 9 needs it for a NIC.** With
+     the lifecycle token the API call was accepted and the TASK then died:
+     `403 Permission check failed (/sdn/zones/localnetwork/vmbr0, SDN.Use)`.
+     PVE 9 puts every bridge behind an SDN ACL; the audit role's `SDN.Audit` is
+     a read. Added to the lifecycle capability, which already owns
+     `VM.Config.Network`. This affects guest create and every NIC edit, not just
+     restore, so it was live for more than this check.
+   - **The restore named no storage, so PVE fell back to `local`.**
+     `400 storage 'local' does not support container directories`.
+     `backupjobs.py` had already learned this and picks deliberately; the
+     migration path never got it. Both now ask the target for a pool carrying
+     `rootdir`, via the same helper, read on the monitoring token because
+     listing a node's storages needs `Datastore.Audit` and Lifecycle has none.
+
+   **A fourth defect surfaced on the way and is fixed: a refused restore leaked
+   both scratch archives.** The cleanup was under `except JobFailed`, but
+   `await_task` raises JobFailed only for a task that RAN and failed;
+   `restore_guest` raises `ProxmoxError` when PVE refuses the call outright. So
+   the 403 above left a 19 MB dump on each of two hosts, the exact outcome the
+   cleanup exists to prevent. The re-run after the fix logged both removals.
+
+   The passing run, and the numbers worth keeping:
+
+   - vzdump on node1 to `local`, 48 MiB written at 247 MiB/s, an 18 MB archive;
+   - `streaming vzdump-lxc-100-...tar.zst (19447966 bytes) node1 -> node2 over
+     SFTP`, then a restore whose transcript shows PVE formatting the new volume
+     and extracting the archive at 808 MiB/s;
+   - both scratch archives deleted on both hosts, each with that host's BACKUP
+     token, which is what `test_transfer_strategy_success_cleanup_spends_the_backup_token`
+     asserts and now also true on hardware;
+   - `pct config 100` on node2 afterwards: `rootfs:
+     nfs-shared:100/vm-100-disk-0.raw,size=1G`, a NEW MAC
+     (`BC:24:11:CC:BB:E9`), which is what preflight's IP/MAC warning promises;
+   - the app row repointed to host 2 only after the target passed its health
+     check, and source CT 100 on node1 was left **stopped and intact**, the
+     documented rollback position;
+   - **estimated 38s, measured 14.6s.** The estimate assumes 80 MB/s sustained;
+     19 MB over this LAN plus a local restore beat it, so the estimate is
+     conservative here rather than optimistic. One measurement, on a 1 GiB
+     rootfs.
+
+   **Two things about the restore's storage pick, worth a deliberate decision
+   rather than discovering them later.** The helper takes the first active pool
+   carrying `rootdir`, so the guest landed on `nfs-shared` (NFS) when its
+   source rootfs was on `local-lvm`: the transfer strategy does not preserve the
+   source's storage class and offers no way to choose. And `capacity_ok` checks
+   free space on the DIR storage that holds the archive, not on the pool the
+   rootfs actually lands on, so it can read true while the destination pool is
+   full.
+
+   `progress_pct` was `None` on every event of this run too, the same as the
+   cluster strategy's run on 2026-08-17.
 
    **The CLUSTER strategy's data movement DID run, 2026-08-17, through the real
    job runner.** Not check 7 (this pair is clustered, so `preflight` correctly
@@ -516,6 +593,20 @@ message.
    host so the executor can install, and that is enough to run the documented
    separate-and-rejoin procedure.
 
+   **The separate-and-rejoin ran a second time on 2026-08-18 and all three traps
+   held**, so this is a repeatable procedure rather than a one-off. Two
+   additions from that run. `node2` stayed **quorate alone** the whole time
+   `node1` was out, on `two_node: 1` with `Quorum: 1`, so `pvecm delnode node1`
+   had the quorum it needs (see check 12 for why that setting makes quorum loss
+   unreachable here). And the rejoin regenerated node1's TLS certificate again,
+   `F5:35:81:E8:...` -> `43:5D:29:D8:...`, so the pin `POST /hosts/1/test` had
+   written earlier in the session went stale and the host read `unreachable`
+   with both fingerprints reported: recovered through the product's own re-pin,
+   one PATCH, exactly what check 16's dialog does. The SSH host key did NOT
+   rotate this time and `POST /hosts/1/ssh/verify` still returned
+   `verified: true`, which is worth knowing because doc 11 item 6 recorded a
+   rejoin rotating it: `pvecm add` is not guaranteed to touch both.
+
    **What is still true about the difficulty**, and was why this sat open:
 
    - **Leaving a PVE cluster has no clean API.** `pvecm delnode`, and its
@@ -547,8 +638,8 @@ message.
      `nfs-shared:100/vm-100-disk-0.raw,size=1G`, started on `node2`, migrated,
      and started again on `node1` from that same volume. This is the PVE-level
      half of 3a's open install question: the shared pool really does accept and
-     boot a container rootfs. It is NOT 3a's App Store half, which still needs
-     the install dialog.
+     boot a container rootfs. It was NOT 3a's App Store half, which needed the
+     install dialog and passed separately later the same day.
 
    **Two things about measurement, so these numbers are not misread.** The
    task waiter polls every 2s, so every "2.1s" in that run is the polling

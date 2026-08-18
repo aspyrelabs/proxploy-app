@@ -99,6 +99,15 @@ def _app_row(app, app_id):
 
 def _shared_pair(cluster=None):
     a, b = FakePVE(), FakePVE()
+    # `pbs-ds` above holds the ARCHIVE and cannot hold a rootfs, which is the
+    # whole reason the restore has to name a storage: PVE otherwise falls back
+    # to `local` and refuses with "does not support container directories".
+    # Modelled per node because that is the read the handler makes.
+    for fake, node in ((a, "pve-src"), (b, "pve-tgt")):
+        fake.storages_by_node = {node: [
+            dict(SHARED_ROW, active=1),
+            {"storage": f"rootfs-{node}", "type": "lvmthin",
+             "content": "rootdir,images", "active": 1}]}
     if cluster:
         rows = [{"type": "cluster", "name": cluster, "nodes": 2, "quorate": 1},
                {"type": "node", "name": "pve-src"}, {"type": "node", "name": "pve-tgt"}]

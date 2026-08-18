@@ -58,7 +58,7 @@ import asyncio
 from proxploy.executor.transfer import sftp_copy_for_hosts
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, utcnow
-from proxploy.services.backupjobs import parse_volid
+from proxploy.services.backupjobs import parse_volid, storage_for_content
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
@@ -500,6 +500,30 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         target["ctid"], target["node"], target["host_name"])
     timeout_s = app.state.settings.pve_task_timeout_s
 
+    async def _restore_storage() -> str:
+        """Where the restored rootfs lands on the target.
+
+        Sending no storage at all lets PVE fall back to `local`, which on a
+        stock layout is a dir store carrying no `rootdir` content, so the
+        restore dies on "storage 'local' does not support container
+        directories". backupjobs.py::restore_backup already hit exactly this
+        and picks deliberately; the migration path did not, and on real
+        hardware that was the whole failure after the archive had already
+        crossed the network (doc 12 check 7).
+
+        Read on MONITORING: listing a node's storages needs Datastore.Audit,
+        which Lifecycle does not carry, and monitoring is the one capability
+        every enrolled host is guaranteed to have.
+        """
+        picked = await asyncio.to_thread(storage_for_content, tgt_mon_client,
+                                         target_node, "rootdir")
+        if picked is None:
+            raise JobFailed(
+                f"no active storage on {target_host_name} accepts container "
+                f"rootfs, source CT {source_ctid} on {source_host_name} is "
+                f"stopped but intact")
+        return picked
+
     ctx.log(pf["downtime_statement"])
     ctx.log(f"if this migration fails at any point, source CT {source_ctid} "
             f"on {source_host_name} is left stopped and intact, nothing is "
@@ -551,11 +575,19 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 f"{source_host_name} is stopped but intact")
         volid = candidates[-1]["volid"]
 
+        restore_storage = await _restore_storage()
         ctx.log(f"restoring {volid} as CT {target_ctid} on "
-                f"{target_host_name}/{target_node}")
-        upid = await asyncio.to_thread(tgt_backup_client.restore_guest, "lxc", target_node,
-                                       target_ctid, {"ostemplate": volid, "restore": 1})
-        await await_task(ctx, tgt_backup_client, target_node, upid, timeout_s=timeout_s,
+                f"{target_host_name}/{target_node}, rootfs on {restore_storage}")
+        # LIFECYCLE, not backup, and the reason is doc 12 check 7: a restore to
+        # a ctid that does not exist yet CREATES a guest, so PVE checks
+        # VM.Allocate, which the Backup role deliberately does not carry. On
+        # real hardware the backup token got a bare "403 Permission check
+        # failed" here, naming no privilege, which is PVE's own message for
+        # this endpoint rather than anything _permission_detail can improve.
+        upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
+                                       target_ctid, {"ostemplate": volid, "restore": 1,
+                                                     "storage": restore_storage})
+        await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
                          start_pct=SHARED_RESTORE_PCT[0], end_pct=SHARED_RESTORE_PCT[1])
     else:  # STRATEGY_TRANSFER, vzdump locally, SFTP the archive, restore
         ssh = loaded["ssh"]
@@ -664,15 +696,25 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             ) from e
         ctx.progress(TRANSFER_BYTES_PCT[1])
 
+        restore_storage = await _restore_storage()
         ctx.log(f"restoring {dst_volid} as CT {target_ctid} on "
-                f"{target_host_name}/{target_node}")
+                f"{target_host_name}/{target_node}, rootfs on {restore_storage}")
         try:
-            upid = await asyncio.to_thread(tgt_backup_client.restore_guest, "lxc", target_node,
+            # LIFECYCLE, same reason as the shared branch above: this creates a
+            # guest at a ctid that does not exist yet, so it needs VM.Allocate.
+            upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
                                            target_ctid, {"ostemplate": dst_volid,
-                                                         "restore": 1})
-            await await_task(ctx, tgt_backup_client, target_node, upid, timeout_s=timeout_s,
+                                                         "restore": 1,
+                                                         "storage": restore_storage})
+            await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
                              start_pct=TRANSFER_RESTORE_PCT[0], end_pct=TRANSFER_RESTORE_PCT[1])
-        except JobFailed:
+        # ProxmoxError as well as JobFailed: await_task raises JobFailed for a
+        # task that RAN and failed, but restore_guest itself raises
+        # ProxmoxError when PVE refuses the call outright. Catching only the
+        # first left both scratch archives on disk, 19 MB each on two hosts,
+        # the exact outcome the cleanup below exists to prevent (observed on
+        # real hardware, doc 12 check 7).
+        except (JobFailed, ProxmoxError):
             await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
             await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
