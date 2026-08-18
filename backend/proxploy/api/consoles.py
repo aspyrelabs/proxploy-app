@@ -50,7 +50,7 @@ def app_console_ticket(request: Request, app_id: int, db=Depends(get_db),
         client = client_for_host(request.app, db, host, capability="console")
     except ProxmoxError as e:
         raise HTTPException(409, str(e)) from e
-    node = host.node_name or ""
+    node = guest_node(host, a)
     try:
         upstream = client.termproxy("lxc", node, a.ctid)
     except ProxmoxError as e:

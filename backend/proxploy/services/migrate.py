@@ -59,7 +59,7 @@ from proxploy.executor.transfer import sftp_copy_for_hosts
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, utcnow
 from proxploy.services.backupjobs import parse_volid, storage_for_content
-from proxploy.services.hostclient import client_for_host
+from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
 from proxploy.services.selfguard import is_self
@@ -391,8 +391,12 @@ def preflight(app, db, app_row, target_host_id: int,
 
     return {
         "strategy": strategy,
+        # The GUEST's node on the source side: a CT migrated in the Proxmox UI
+        # sits on a different node than its host row implies, and every stop and
+        # vzdump below is aimed at this value (doc 12 check 18). The target side
+        # is the host's node by definition, since that is where it is going.
         "source": {"host_id": source_host.id, "host_name": source_host.name,
-                   "node": source_host.node_name, "ctid": app_row.ctid},
+                   "node": guest_node(source_host, app_row), "ctid": app_row.ctid},
         "target": {"host_id": target_host.id, "host_name": target_host.name,
                    "node": target_host.node_name, "ctid": target_ctid},
         "shared_storage": shared_storage,

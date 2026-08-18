@@ -381,3 +381,51 @@ def test_a_cluster_status_read_that_failed_does_not_erase_the_node_name(tmp_path
     ingest_cycle(db, host, resources, rrd, utcnow(), node_name=None)
     assert host.node_name == "pve2"
     assert host.status == "connected"
+
+
+def test_an_app_follows_its_ct_to_another_node(tmp_path):
+    """An app's node was assumed to be its HOST's node.
+
+    True while installs choose the host and the migration handler repoints the
+    row, wrong the moment a CT is migrated in the Proxmox UI: every stop, console
+    and vzdump then aims at the wrong node, which is the failure the VM side hit
+    on real hardware (doc 12 check 18).
+    """
+    from proxploy.models import App, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)           # node_name pve1
+    db.add(App(host_id=host.id, ctid=150, name="Immich", slug="immich",
+               status_cached="stopped"))
+    db.commit()
+
+    resources, rrd = _fixtures()       # CT 150 is on pve1 here
+    ingest_cycle(db, host, resources, rrd, utcnow())
+    app_row = db.query(App).filter_by(ctid=150).one()
+    assert app_row.node_name == "pve1"
+
+    # Somebody moves it in the Proxmox UI.
+    for r in resources:
+        if r.get("type") == "lxc" and r.get("vmid") == 150:
+            r["node"] = "pve2"
+    ingest_cycle(db, host, resources, rrd, utcnow())
+    db.refresh(app_row)
+    assert app_row.node_name == "pve2", "the app kept its host's node"
+
+
+def test_guest_node_prefers_the_row_and_falls_back_to_the_host():
+    """One helper serves apps and VMs, and NULL must mean "ask the host" so an
+    unpolled row behaves exactly as it did before either column existed."""
+    from proxploy.services.hostclient import guest_node
+
+    class Row:
+        def __init__(self, node): self.node_name = node
+
+    class H:
+        node_name = "pve1"
+
+    assert guest_node(H(), Row("pve2")) == "pve2"
+    assert guest_node(H(), Row(None)) == "pve1"
+    assert guest_node(H(), None) == "pve1"

@@ -231,6 +231,13 @@ class App(TimestampMixin, Base):
     # (`column name "ctid" conflicts with a system column name`). The Python
     # attribute, the API field and the frontend type all stay `ctid`.
     ctid: Mapped[int] = mapped_column("ct_id", Integer, nullable=False)
+    # The node the CT actually runs on, refreshed every poll cycle. Assumed to be
+    # the host's node before this existed, which is true while installs pick the
+    # host and the migration handler repoints the row, and wrong the moment a CT
+    # is migrated in the Proxmox UI instead (doc 12 check 18, where the VM side of
+    # the same shape broke every action on a clustered pair). NULL falls back to
+    # Host.node_name, so an unpolled row behaves exactly as before.
+    node_name: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     catalog_slug: Mapped[str | None] = mapped_column(Text)

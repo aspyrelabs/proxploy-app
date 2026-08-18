@@ -285,6 +285,10 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                         "change": "status", "status": g["status"]}))
         a.status_cached, a.cpu_pct_cached = g["status"], g["cpu_pct"]
         a.mem_bytes_cached, a.uptime_s_cached = g["mem_bytes"], g["uptime_s"]
+        # Follows the guest: a CT migrated in the Proxmox UI rather than through
+        # Proxploy changes node without the app row being rewritten, and every
+        # call site then aimed at the host's node instead (doc 12 check 18).
+        a.node_name = g["node"] or a.node_name
         samples.append(MetricSample(target_type="app", target_id=a.id,
                                     metric="cpu_pct", value=g["cpu_pct"], ts=now))
         samples.append(MetricSample(target_type="app", target_id=a.id,

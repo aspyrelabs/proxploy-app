@@ -897,10 +897,11 @@ any suite could have caught. What that run leaves open:
    `services/alerts.py` could use it without importing from the API layer;
    `api/deps.py` re-exports both.
 
-   The App side has the same shape latent, with no column to fix it: an app's
-   `host.node_name` is assumed to be its CT's node. True today because installs
-   choose a host and the migration handler repoints the row, but wrong the moment
-   someone migrates a CT in the Proxmox UI instead.
+   **The App side is closed too, 2026-08-18.** `apps.node_name` follows the CT
+   every cycle and `guest_node` needed no change, since it already reads
+   `node_name` off whatever row it is given. Verified on the real app by making
+   its row claim the wrong node: the preflight followed the row, and the next poll
+   corrected it back.
 
 6. **Hardware check 12 is closed, and it cost the health model a column.**
    Actual quorum loss was reached on 2026-08-18. The write half passed (PVE's

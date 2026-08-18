@@ -1111,10 +1111,18 @@ message.
     notified once per enrolled host for a single breach), and this same network
     topology route.
 
-    **Still open, and latent rather than observed:** an App's node is assumed to
-    be its host's, and `App` has no node column. True today because installs
-    choose a host and the migration handler repoints the row, wrong the moment a
-    CT is migrated in the Proxmox UI instead of through Proxploy.
+    **The App side of the same shape is closed too, 2026-08-18.**
+    `apps.node_name` (migration `b52e7d09af13`) follows the CT every poll cycle,
+    and `guest_node(host, row)` needed no change at all because it already reads
+    `node_name` off whatever row it is handed. Preflight's source node and the
+    app console now come from the guest rather than from its host.
+
+    Verified against the real app: its row was set to claim `node1` while CT 101
+    was really on `node2`, and the preflight's `source.node` followed the row
+    rather than the host, which is the behaviour a UI-side migration needs. The
+    next poll cycle corrected the value back to `node2` on its own, which is the
+    other half: the column tracks Proxmox rather than becoming a second thing to
+    keep in sync.
 
 ## Cluster peer enrolment
 
