@@ -60,6 +60,11 @@ describe('ScheduleForm', () => {
     wrap(<ScheduleForm onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly backup' } })
     fireEvent.change(screen.getByLabelText(/what to run/i), { target: { value: 'backup.run' } })
+    // The picker only exists once the job kind above sets `needs`
+    // (ScheduleForm's `{needs && ...}`), so check that first: if the change
+    // above ever stops taking effect, this says so instead of leaving the
+    // wait below to time out with no hint of which step broke.
+    expect(screen.getByLabelText(/host/i)).toBeInTheDocument()
     // Wait for the host list itself (not just the label), the picker's
     // <select> exists before its options do, and setting a value with no
     // matching <option> is a silent no-op (mirrors alerts.test.tsx's app pick).
@@ -131,11 +136,15 @@ describe('ScheduleForm', () => {
     expect(screen.getByText('every Friday at 06:15')).toBeInTheDocument()
   })
 
-  it('asks which host a backup schedule targets', async () => {
+  it('asks which host a backup schedule targets', () => {
     posted.length = 0
     wrap(<ScheduleForm onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/what to run/i), { target: { value: 'backup.run' } })
-    await waitFor(() => expect(screen.getByLabelText(/host/i)).toBeInTheDocument())
+    // Not waitFor: the picker is behind `{needs && ...}`, and `needs` is set
+    // by the line above with no query in between, so it is there on the next
+    // render or not at all. Waiting for a thing that cannot arrive late only
+    // buys a one-second timeout in place of an immediate, named failure.
+    expect(screen.getByLabelText(/host/i)).toBeInTheDocument()
   })
 
   it('honours a pinned job kind and hides the picker', () => {
