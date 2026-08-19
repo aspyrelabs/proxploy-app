@@ -1,6 +1,6 @@
 """Notification channels (doc 05 §Notifications).
 
-The Apprise URL is write-only: it goes in encrypted and never comes back out, 
+The Apprise URL is write-only: it goes in encrypted and never comes back out:
 not in a response, not in an audit row, not in an error message.
 """
 from __future__ import annotations

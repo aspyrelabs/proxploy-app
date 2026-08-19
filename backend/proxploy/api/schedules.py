@@ -80,7 +80,7 @@ def _check_auto_update(request: Request, job_kind: str) -> None:
 
 def _validated(cron: str, tz: str, job_kind: str) -> None:
     """Same checks as `validate()` (Task 1), but discriminating which of the
-    three axes failed, a flat `str(BadSchedule)` doesn't always name the
+    three axes failed, because a flat `str(BadSchedule)` doesn't always name the
     axis (e.g. a bad cron's message never contains the word "cron"), and a
     human (or a test) needs to know whether to fix the trigger or the kind."""
     if job_kind not in HANDLERS:
@@ -187,7 +187,7 @@ def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
                      user: User = Depends(_run)):
     """An extra run, not a reschedule: `next_run_at` deliberately does not move.
 
-    Unlike a tick-fired run this one carries `requested_by`, a human asked for
+    Unlike a tick-fired run this one carries `requested_by`; a human asked for
     it, and the audit trail should say so.
     """
     row = _get(db, schedule_id)

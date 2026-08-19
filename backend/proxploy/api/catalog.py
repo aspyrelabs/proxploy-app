@@ -357,7 +357,7 @@ class InstallIn(BaseModel):
 
 # This route triggers the single most security-relevant action in the whole
 # phase: SSH as root into a node and run a community-scripts.org script. Two
-# independent gates, either can 400 first (order doesn't matter, both are
+# independent gates, and either can 400 first (order doesn't matter; both are
 # exercised in tests/test_catalog_install_api.py): root-consent for THIS HOST
 # (mirrors hosts.py's CONSENT_NOTE shape, but asked once per host and
 # remembered on Host.install_consent_at rather than re-ticked on every

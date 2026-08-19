@@ -4,7 +4,7 @@
 Doc 05 calls /network/bridges a "live passthrough" and this is exactly that:
 no model, no cache, no migration; one GET /nodes/{node}/network per node of
 the requested host(s), served straight back. Throughput is the opposite: it is
-NOT a passthrough, it comes from the `host` target's existing `net_in_bps` /
+NOT a passthrough; it comes from the `host` target's existing `net_in_bps` /
 `net_out_bps` MetricSample rows the poller has been writing since Phase 2,
 read through services/metrics.py::query_series, the same reader
 api/metrics.py::metrics_query uses. There is deliberately no second metrics
@@ -250,7 +250,7 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         # Honest, not reassuring: PVE handed back a UPID, which for a config
         # write means it filed the change under the guest's PENDING section.
         # The running guest still has the old NIC.
-        "detail": ("Proxmox recorded this as a pending change, the guest keeps its "
+        "detail": ("Proxmox recorded this as a pending change; the guest keeps its "
                    "current NIC until it is rebooted (a shutdown/start, not a reset)."
                    if upid is not None else
                    "Applied immediately; no reboot needed."),

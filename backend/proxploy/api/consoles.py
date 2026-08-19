@@ -1,6 +1,6 @@
 """Console ticket + websocket routes (doc 05 §2/§3, doc 02 §5 PtyBridge/
 ConsoleProxy). Every ticket-issuing POST is a normal cookie+CSRF+entitlement
-route; every WS route below takes NO cookie, the one-time ticket already
+route; every WS route below takes NO cookie; the one-time ticket already
 proves auth (doc 05 "Auth model for streams"), so these follow jobs.py's
 "manual auth inside the handler" idiom only where the SSE precedent doesn't
 apply (session auth is not needed at all on the WS side)."""

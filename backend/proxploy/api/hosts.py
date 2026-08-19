@@ -89,14 +89,14 @@ class HostPatchIn(BaseModel):
     # is the normal case for a stock node with a self-signed certificate, so it
     # is the only integrity those connections have. Nothing could change one
     # before this, so a routine certificate renewal left a host row nobody
-    # could fix from the UI. Setting it re-pins, setting it to null clears the
+    # could fix from the UI. Setting it re-pins; setting it to null clears the
     # pin (see model_fields_set in patch_host: omitted and null differ here the
     # same way they do for team_id).
     tls_fingerprint: str | None = None
     # The SSH re-pin path, and the reason it exists is the same one: nothing
     # could change this before, so a node whose host key rotated (rejoining a
     # cluster does it) failed every install with no way back but a manual
-    # database write. Omitted leaves it alone, null clears the pin so the next
+    # database write. Omitted leaves it alone; null clears the pin so the next
     # connection re-learns it (TOFU).
     ssh_host_key_fingerprint: str | None = None
 
@@ -392,7 +392,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              "default_template_storage": h.default_template_storage,
              # Same reason (Task 6): the install dialog asks the root-execution
              # tick only while this is null. Re-asking a host that already
-             # acknowledged surfaces no new information, it is just friction.
+             # acknowledged surfaces no new information; it is just friction.
              "install_consent_at": to_iso(h.install_consent_at),
              "capabilities": _capability_state(kinds.get(h.id, ())),
              "last_seen_at": to_iso(h.last_seen_at)}
@@ -845,7 +845,7 @@ def remove_host(request: Request, host_id: int,
         is_own_host = False  # malformed setting fails open, as in selfguard
 
     # One query before the delete: credentials only ever disappear via a host
-    # removal (CASCADE, no route deletes a single credential), so this is the
+    # removal (CASCADE: no route deletes a single credential), so this is the
     # only place "my token vanished" can ever be answered from.
     kinds_removed = sorted(c.kind for c in
                            db.query(HostCredential).filter_by(host_id=h.id).all())
@@ -1498,7 +1498,7 @@ async def sync_host(request: Request, host_id: int, db=Depends(get_db),
 
     Runs the poller's own cycle rather than a parallel implementation, so a
     forced sync and a scheduled one cannot disagree about what they ingest.
-    Operator-level: it changes no configuration, it only refreshes cache.
+    Operator-level: it changes no configuration; it only refreshes cache.
     """
     import asyncio
 

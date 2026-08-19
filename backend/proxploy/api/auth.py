@@ -177,7 +177,7 @@ def me(db=Depends(get_db), user: User = Depends(get_current_user)):
 # anonymous caller 401s, never a flag-leaking 403), plus get_current_user
 # again as a function parameter to get the User back (cached per-request,
 # not a second DB hit). No authorize() call: this isn't an RBAC-gated admin
-# action, it's a user managing their own 2FA, so it isn't in
+# action; it's a user managing their own 2FA, so it isn't in
 # services/authz.py's PERMISSIONS matrix either.
 _totp_ent = require_entitlement("auth.totp")
 
@@ -302,7 +302,7 @@ def revoke_session_route(request: Request, sid: int, db=Depends(get_db),
 # PXP-37: two concurrent first-run POSTs could both observe
 # `db.query(User).count() == 0` before either committed, and both would
 # mint themselves an owner account. This is a LOCK, not a constraint: it
-# closes the race by serializing the check-then-create below, it does not
+# closes the race by serializing the check-then-create below; it does not
 # stop a second owner row from existing if something else ever bypasses
 # create_user (a migration/seed script, say).
 #

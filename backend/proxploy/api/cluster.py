@@ -13,7 +13,7 @@ router = APIRouter(prefix="/cluster", tags=["cluster"])
 #; there is no ("cluster", "read") entry in PERMISSIONS, so this reuses
 # ("host", "read"). Same singleton for the route-level dependencies=[...] copy
 # and the parameter-level copy (see _read's use on /activity below) so
-# FastAPI's dependency cache collapses them into one call that runs first, 
+# FastAPI's dependency cache collapses them into one call that runs first:
 # ordering fix, doc 10 "auth before entitlement" invariant.
 _read = authorize("host", "read")
 
@@ -228,12 +228,12 @@ def activity(limit: int = 20, db=Depends(get_db),
 
     An audit row that spawned a job is skipped: the job entry already represents
     it, and showing both would double every lifecycle action. Alerts are the
-    third source, the `kind` discriminator lets the frontend distinguish all
+    third source; the `kind` discriminator lets the frontend distinguish all
     three without extra endpoints.
 
     Paging: each source is independently queried with `LIMIT limit` (not
     `limit // 3`), so the merged-then-sliced result is always the true
-    top-`limit` rows across all three kinds, the top `limit` merged rows can
+    top-`limit` rows across all three kinds; the top `limit` merged rows can
     contain at most `limit` rows from any one source, and each source already
     supplies that many. A source can only return fewer than `limit` rows
     (including zero) than the feed asks for when it genuinely has fewer

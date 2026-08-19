@@ -110,7 +110,7 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
             dependencies=[Depends(_read),
                           Depends(require_entitlement("alerts.rules"))])
 def list_metrics(user: User = Depends(_read)):
-    """One source of truth for the metric enum, the rule form renders this."""
+    """One source of truth for the metric enum: the rule form renders this."""
     return {"metrics": [
         {"metric": m, "targets": list(targets),
          "needs_threshold": m not in STATUS_METRICS}
@@ -258,7 +258,7 @@ def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
 def ack_alert(request: Request, alert_id: int, db=Depends(get_db),
               user: User = Depends(_ack)):
     """Acknowledging silences; it never resolves. The evaluator still flips an
-    acked alert to `resolved` on recovery (services/alerts.py), an operator
+    acked alert to `resolved` on recovery (services/alerts.py); an operator
     saying "I know" must not make the system stop tracking whether it is fixed.
     """
     row = db.get(Alert, alert_id)

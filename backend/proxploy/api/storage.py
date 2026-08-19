@@ -214,7 +214,7 @@ def _refuse_silent_overwrite(request, db, host, node: str, storage: str,
     wins (observed on PVE 9.2.6, 2026-08-10). An ISO a VM is booting from can be
     swapped out from under it that way.
 
-    A brand-new name stays frictionless, nothing is being destroyed there. A
+    A brand-new name stays frictionless; nothing is being destroyed there. A
     collision stops and asks once, and `overwrite=true` is the whole answer:
     deliberately a plain boolean the UI drives from a Replace/Skip/Cancel
     dialog, NOT the typed confirm_phrase that backups.py and vms.py use. Those
@@ -312,7 +312,7 @@ def upload_content(request: Request, host_id: int, name: str,
 def delete_content(request: Request, host_id: int, name: str, volid: str,
                    node: str | None = None, db=Depends(get_db),
                    user: User = Depends(_content)):
-    """`:path` because a volid is `local:iso/ubuntu.iso`, it carries a slash,
+    """`:path` because a volid is `local:iso/ubuntu.iso`; it carries a slash,
     which a plain `{volid}` converter would refuse to match."""
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)

@@ -337,7 +337,7 @@ def prune_preview_route(request: Request, host_id: int, storage: str,
                         keep_monthly: int | None = None, keep_yearly: int | None = None,
                         guest_type: str | None = None, vmid: int | None = None,
                         db=Depends(get_db), user: User = Depends(_manage)):
-    """Dry run. Calls the GET verb only, this endpoint cannot delete anything;
+    """Dry run. Calls the GET verb only: this endpoint cannot delete anything;
     POST /backups/prune is the one that does."""
     host = db.get(Host, host_id)
     if host is None:

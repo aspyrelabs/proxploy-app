@@ -188,7 +188,7 @@ def export_audit(db=Depends(get_db), format: str = "csv",
     """The export half of doc 01's audit row and docs 04/05's audit export.
 
     Streams and is deliberately NOT paginated: an audit export that stops at
-    page one is a trap, someone hands the file over believing it is complete.
+    page one is a trap; someone hands the file over believing it is complete.
     `yield_per` keeps a multi-year table off the heap while doing it.
 
     Registered before the `/{...}`-free list route is irrelevant, but it MUST

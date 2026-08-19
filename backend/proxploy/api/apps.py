@@ -120,7 +120,7 @@ def discovered(request: Request, db=Depends(get_db),
     returns the whole cluster from either one, so every host's snapshot
     lists the same unadopted CT, each carrying `node`, the CT's real owning
     node (already correct in the payload; see pollers/__init__.py). Deduped
-    here by (cluster, ctid), a ctid is only unique WITHIN a cluster, so two
+    here by (cluster, ctid): a ctid is only unique WITHIN a cluster, so two
     different clusters (or two standalone hosts, see cluster_scope) can
     legitimately both have a CT 101 and both must be offered, and
     attributed to the Host actually registered at that node, not whichever
@@ -220,7 +220,7 @@ def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
     order exactly, so a bulk run and a single-app run never disagree about
     why a given app didn't get a job:
 
-    1. Edited script first, an edited row's `upstream_ref` is NULL, so
+    1. Edited script first: an edited row's `upstream_ref` is NULL, so
        checking "no pinned script" before "edited" would misreport an
        edited app as having no upstream at all. Enqueueing anyway would
        spray a guaranteed-`JobFailed` job (services/appstore.py::
@@ -278,7 +278,7 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
 def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)):
     """Doc 05: 'Recent CT log lines (journal tail via pct exec / console
     channel)'. No such exec/journal channel exists anywhere in this codebase
-    yet, services/lifecycle.py and executor/ only ever run install/update
+    yet; services/lifecycle.py and executor/ only ever run install/update
     scripts over SSH on the HOST, never a command inside a guest CT, and
     ProxmoxClient has no pct-exec-equivalent call. Rather than fabricate log
     lines, this is a real, deliberate 501 so the frontend can render an honest
@@ -380,7 +380,7 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
     sourced "upstream", so pinned_ref reads the catalog sha again and the
     guard clears.
 
-    Never mutates or deletes the edited row being reverted from, the version
+    Never mutates or deletes the edited row being reverted from: the version
     history is the record, same rule put_app_script already follows.
     """
     a = db.get(App, app_id)
@@ -449,7 +449,7 @@ def get_app_update(app_id: int, db=Depends(get_db)):
     """What an update would do: which commit to which, and the script diff.
 
     Doc 10 Phase 7 requires the same diff/consent surface install has, so the
-    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders, 
+    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders:
     one implementation, one answer, no chance of the two disagreeing about
     what is about to run.
 
