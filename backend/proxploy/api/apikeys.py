@@ -27,17 +27,24 @@ from proxploy.services.authz import PERMISSIONS
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
-# "read" or "<matrix-resource-name>:write": e.g. "app:write", "vm:write".
+# "read", "<matrix-resource-name>:write" (all of that resource's actions,
+# PXP-32 keeps this as shorthand so an existing key never regresses), or
+# "<resource>:<action>" for one of the (resource, action) pairs in the matrix.
 # Doc 04's example ("apps:write") is plural; the matrix's resource name is
 # singular ("app"), so that string is normalised here, not copied verbatim.
-_SCOPE_RE = re.compile(r"^(read|[a-z]+:write)$")
+_SCOPE_RE = re.compile(r"^(read|[a-z]+:[a-z_]+)$")
 _RESOURCES = {resource for resource, _ in PERMISSIONS}
+_ACTION_SCOPES = {f"{resource}:{action}" for resource, action in PERMISSIONS}
 
 
 def _validate_scopes(scopes: list[str]) -> None:
     for s in scopes:
+        if s == "read":
+            continue
         m = _SCOPE_RE.match(s)
-        if not m or (s != "read" and s.split(":", 1)[0] not in _RESOURCES):
+        resource = m.group(0).split(":", 1)[0] if m else None
+        is_write_shorthand = m and s.endswith(":write") and resource in _RESOURCES
+        if not m or not (is_write_shorthand or s in _ACTION_SCOPES):
             raise HTTPException(422, f"unknown scope: {s!r}")
 
 

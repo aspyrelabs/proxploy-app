@@ -92,6 +92,19 @@ def test_unknown_scope_string_422s_at_creation(app_client, csrf_header):
     app, c = app_client
     assert _create_key(c, csrf_header, scopes=["gizmo:write"]).status_code == 422
     assert _create_key(c, csrf_header, scopes=["admin"]).status_code == 422
+    # PXP-32: a real resource with an action that isn't in the matrix is
+    # still unknown, "host:write" being valid does not make every
+    # "host:<anything>" string valid.
+    assert _create_key(c, csrf_header, scopes=["host:teleport"]).status_code == 422
+
+
+def test_per_action_scope_string_is_accepted_at_creation(app_client, csrf_header):
+    """PXP-32: each of the matrix's 57 (resource, action) pairs is now a
+    grantable scope string on its own, not just '<resource>:write'."""
+    app, c = app_client
+    assert _create_key(c, csrf_header, scopes=["host:remove"]).status_code == 201
+    assert _create_key(c, csrf_header, scopes=["vm:snapshot"]).status_code == 201
+    assert _create_key(c, csrf_header, scopes=["app:install"]).status_code == 201
 
 
 def test_revoke_is_404_for_someone_elses_key(app_client, csrf_header):
@@ -251,6 +264,44 @@ def test_read_scope_key_cannot_write_and_is_audited_as_api_key(app_client, csrf_
         row = (db.query(AuditEvent)
                .filter_by(action="app.lifecycle", result="denied").one())
         assert row.actor_type == "api_key"
+
+
+def test_host_write_scope_still_authorizes_every_host_action(app_client, csrf_header):
+    """PXP-32 backward compat: 'resource:write' stays shorthand for every
+    action on that resource. A key holding 'host:write' must keep
+    authorizing host:manage (PATCH) AND host:remove (DELETE), the two host
+    actions doc PXP-32 names by example, after per-action scopes landed."""
+    app, c = app_client
+    with app.state.sessionmaker() as db:
+        host_id = seed_host_row(db).id
+    raw = _create_key(c, csrf_header, scopes=["host:write"]).json()["key"]
+    c.cookies.clear()
+    h = {"Authorization": f"Bearer {raw}"}
+    r = c.patch(f"/api/v1/hosts/{host_id}",
+               json={"node_shell_enabled": True}, headers=h)
+    assert r.status_code == 200, r.text
+    r2 = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                   json={"confirm": "host-01"}, headers=h)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["removed"] is True
+
+
+def test_per_action_scope_authorizes_only_that_action(app_client, csrf_header):
+    """PXP-32: a key scoped to exactly one action ('host:manage') authorizes
+    that action but not a sibling action on the same resource
+    ('host:remove'), unlike 'host:write' above."""
+    app, c = app_client
+    with app.state.sessionmaker() as db:
+        host_id = seed_host_row(db).id
+    raw = _create_key(c, csrf_header, scopes=["host:manage"]).json()["key"]
+    c.cookies.clear()
+    h = {"Authorization": f"Bearer {raw}"}
+    r = c.patch(f"/api/v1/hosts/{host_id}",
+               json={"node_shell_enabled": True}, headers=h)
+    assert r.status_code == 200, r.text
+    r2 = c.request("DELETE", f"/api/v1/hosts/{host_id}",
+                   json={"confirm": "host-01"}, headers=h)
+    assert r2.status_code == 403, r2.text
 
 
 def test_write_scope_key_matches_matrix_resource_name(app_client, csrf_header):

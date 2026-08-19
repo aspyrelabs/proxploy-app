@@ -104,6 +104,35 @@ describe('ApiKeysCard', () => {
     expect(screen.getByLabelText('team:write')).toBeInTheDocument()
   })
 
+  it('shows a per-action checkbox for a matrix action alongside its resource:write', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'New key' }))
+    expect(screen.getByLabelText('host:write')).toBeInTheDocument()
+    expect(screen.getByLabelText('host:remove')).toBeInTheDocument()
+    expect(screen.getByLabelText('vm:snapshot')).toBeInTheDocument()
+  })
+
+  it('checking resource:write disables and visually covers its individual actions', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'New key' }))
+    fireEvent.click(screen.getByLabelText('host:write'))
+    const remove = screen.getByLabelText('host:remove') as HTMLInputElement
+    expect(remove.disabled).toBe(true)
+    expect(remove.checked).toBe(true)
+  })
+
+  it('posts only the resource:write scope, not its individual actions, when write is selected', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'New key' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'CI runner' } })
+    fireEvent.click(screen.getByLabelText('host:write'))
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
+    await waitFor(() => expect(calls.some((c) =>
+      c.path === '/api-keys' && c.method === 'POST'
+      && JSON.stringify(c.body) === JSON.stringify({ name: 'CI runner', scopes: ['host:write'] })
+    )).toBe(true))
+  })
+
   it('posts the name, selected scopes and optional expiry on create', async () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'New key' }))

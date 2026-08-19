@@ -164,8 +164,13 @@ def authorize(resource: str, action: str, *, scope_of=None):
         # below, which is keyed on the *user*, not the key.
         key = getattr(request.state, "api_key", None)
         if key is not None and key.scopes:
+            # PXP-32: resource:write is shorthand for every action on that
+            # resource (backward compat: a pre-existing key holding it keeps
+            # authorizing everything it always did), resource:action grants
+            # only that one action.
             allowed = ("read" in key.scopes and action == "read") or \
-                      (f"{resource}:write" in key.scopes)
+                      (f"{resource}:write" in key.scopes) or \
+                      (f"{resource}:{action}" in key.scopes)
             if not allowed:
                 write_audit(db, actor_type="api_key", actor_id=key.id,
                             action=f"{resource}.{action}", result="denied",

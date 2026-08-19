@@ -9,16 +9,35 @@ import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
 
-// Mirrors backend/proxploy/services/authz.py::PERMISSIONS' resource column.
-// A key's scope can only narrow its owner's role, never widen it (doc 04) --
-// "read" plus one "<resource>:write" per matrix resource is the full set of
-// strings apikeys.py::_validate_scopes accepts.
-const SCOPE_RESOURCES = [
-  'host', 'app', 'vm', 'storage', 'network', 'backup', 'catalog', 'job',
-  'schedule', 'alert', 'channel', 'metric', 'audit', 'settings', 'user',
-  'team', 'entitlement', 'meta',
-] as const
-const SCOPE_OPTIONS = ['read', ...SCOPE_RESOURCES.map((r) => `${r}:write`)]
+// Mirrors backend/proxploy/services/authz.py::PERMISSIONS: resource -> its
+// actions (PXP-32). A key's scope can only narrow its owner's role, never
+// widen it (doc 04). apikeys.py::_validate_scopes accepts "read", one
+// "<resource>:write" per matrix resource (shorthand for every action below
+// it, kept so a pre-PXP-32 key still authorizes everything it always did),
+// or any single "<resource>:<action>" pair.
+const RESOURCE_ACTIONS: Record<string, string[]> = {
+  host: ['read', 'sync', 'manage', 'credentials', 'remove', 'power', 'console'],
+  app: ['read', 'lifecycle', 'configure', 'update', 'script_read', 'script',
+        'console', 'install', 'adopt', 'remove', 'migrate'],
+  vm: ['read', 'lifecycle', 'configure', 'snapshot', 'rollback', 'create',
+       'clone', 'remove', 'console'],
+  storage: ['read', 'content', 'manage', 'remove'],
+  network: ['read', 'guest', 'host'],
+  backup: ['read', 'run', 'restore', 'manage'],
+  catalog: ['read', 'refresh'],
+  job: ['read', 'cancel'],
+  schedule: ['read', 'manage', 'run'],
+  alert: ['read', 'ack', 'manage'],
+  channel: ['manage'],
+  metric: ['read'],
+  audit: ['read', 'export', 'clear'],
+  settings: ['read', 'manage'],
+  user: ['read', 'manage'],
+  team: ['read', 'manage'],
+  entitlement: ['read', 'manage'],
+  meta: ['read', 'update'],
+}
+const SCOPE_RESOURCES = Object.keys(RESOURCE_ACTIONS)
 
 export function ApiKeysCard() {
   const ent = useEntitlements()
@@ -203,13 +222,39 @@ export function ApiKeysCard() {
                 <legend className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
                   Scopes (empty = full rights of your role, a key can only narrow that, never widen it)
                 </legend>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {SCOPE_OPTIONS.map((s) => (
-                    <label key={s} className="inline-flex items-center gap-1 text-[12px] text-text-2">
-                      <input type="checkbox" checked={scopes.has(s)} onChange={() => toggleScope(s)} />
-                      {s}
-                    </label>
-                  ))}
+                <label className="mb-2 inline-flex items-center gap-1 text-[12px] text-text-2">
+                  <input type="checkbox" checked={scopes.has('read')} onChange={() => toggleScope('read')} />
+                  read
+                </label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {SCOPE_RESOURCES.map((r) => {
+                    const writeScope = `${r}:write`
+                    const allSelected = scopes.has(writeScope)
+                    return (
+                      <div key={r} className="rounded-ctl border border-line-soft p-2">
+                        <div className="mb-1 text-[10px] uppercase tracking-wide text-text-3">{r}</div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                          <label className="inline-flex items-center gap-1 text-[12px] font-semibold text-text-2">
+                            <input type="checkbox" checked={allSelected}
+                              onChange={() => toggleScope(writeScope)} />
+                            {writeScope}
+                          </label>
+                          {RESOURCE_ACTIONS[r].map((a) => {
+                            const s = `${r}:${a}`
+                            return (
+                              <label key={s}
+                                className={`inline-flex items-center gap-1 text-[12px] ${
+                                  allSelected ? 'text-text-3 opacity-50' : 'text-text-2'}`}>
+                                <input type="checkbox" checked={allSelected || scopes.has(s)}
+                                  disabled={allSelected} onChange={() => toggleScope(s)} />
+                                {s}
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </fieldset>
             </div>
