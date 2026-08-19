@@ -380,36 +380,6 @@ def test_migration_backfills_consent_only_for_hosts_with_an_enrolled_ssh_key(tmp
     assert rows["without-key"] is None
 
 
-def test_the_chosen_pool_is_never_written_back_to_the_host(client, csrf_header, bootstrap_admin):
-    """PXP-86 decision: no remembering the last placement. A pool the
-    operator supplied for THIS install must never land on
-    Host.default_container_storage / default_template_storage -- there is no
-    escape hatch to ask for because there is nothing to opt out of."""
-    bootstrap_admin(client)
-    with client.app.state.sessionmaker() as db:
-        db.add(CatalogEntry(slug="redis", name="Redis", installable=True))
-        db.commit()
-    from tests.support import seed_host_row
-    with client.app.state.sessionmaker() as db:
-        host = seed_host_row(db)
-        db.add(HostCredential(host_id=host.id, kind="ssh_key",
-                              encrypted_blob=b"x", key_version=1, public_meta="ssh-ed25519 AAAA"))
-        db.commit()
-        host_id = host.id
-
-    r = client.post("/api/v1/catalog/redis/install",
-                    json={"host_id": host_id, "name": "Redis", "ctid": 150, "consent": True,
-                         "overrides": {"container_storage": "lvm-b", "template_storage": "local"}},
-                    headers=csrf_header(client))
-    assert r.status_code == 202, r.text
-
-    with client.app.state.sessionmaker() as db:
-        from proxploy.models import Host
-        h = db.get(Host, host_id)
-        assert h.default_container_storage is None
-        assert h.default_template_storage is None
-
-
 def test_install_refuses_a_non_ct_entry(client, csrf_header, bootstrap_admin):
     """A vm/pve/addon/turnkey entry must never be installable through this
     route, even if somehow requested directly by slug."""

@@ -384,13 +384,8 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              # capability mapped to null means its token could not be read.
              "capability_gaps": h.capability_gaps,
              "team_id": h.team_id,
-             # The install dialog's Default mode reads these to decide
-             # whether it has already learned this host's storage pools
-             # (Task 13): a value here means the question was asked once and
-             # is now shown rather than asked again.
-             "default_container_storage": h.default_container_storage,
-             "default_template_storage": h.default_template_storage,
-             # Same reason (Task 6): the install dialog asks the root-execution
+             # Same reason the storage defaults used to be here (Task 6): the
+             # install dialog asks the root-execution
              # tick only while this is null. Re-asking a host that already
              # acknowledged surfaces no new information; it is just friction.
              "install_consent_at": to_iso(h.install_consent_at),

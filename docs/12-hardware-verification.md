@@ -296,6 +296,15 @@ because a code review found both cases reachable and neither provable offline.
    `nfs-shared` as fact. The template question settled back to `local` as the
    sole survivor. Re-enabling restored all of it.
 
+   **This check is now historical, 2026-08-19.** PXP-86 (48fbbb2) removed
+   remembering a host's last placement, and the two columns it was varied
+   through are dropped (migration c3f81a6d0e47). Both halves above passed
+   against a mechanism the product no longer has: a host with an ambiguous
+   pool list is asked every time, so "a remembered value presented as fact"
+   is no longer a state that can occur. Kept rather than deleted because the
+   OTHER half, a pool disappearing from the pickers when it is disabled, is
+   still live behaviour and still passes.
+
    **STATUS HALF PASSED 2026-08-14**, but only after finding that the obvious
    way to run it does not work. A DISABLED pool does not come back from
    `/cluster/resources` with a non-`available` status, it does not come back

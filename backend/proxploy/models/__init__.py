@@ -221,8 +221,6 @@ class Host(TimestampMixin, Base):
     # resolution order treats NULL as "fall through", and a stored name as an
     # answer to re-validate. Per content type, because a node can have one
     # rootdir candidate and several vztmpl ones.
-    default_container_storage: Mapped[str | None] = mapped_column(Text)
-    default_template_storage: Mapped[str | None] = mapped_column(Text)
     # When this host's operator acknowledged that installs run third-party
     # scripts as root here. Per host rather than per install: the acknowledgement
     # is about the host, and re-asking on every install is friction that
