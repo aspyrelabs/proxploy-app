@@ -1,3 +1,5 @@
+import asyncio
+import random
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -58,6 +60,71 @@ def apply_new_token(request: Request, db, token: str, cert: str) -> None:
     db.commit()
 
 
+async def _refresh_loop(app) -> None:
+    while True:
+        await asyncio.sleep(3600 * 24 + random.uniform(0, 600))  # ~half of 72h exp is fine at Phase 1 granularity; jittered
+        try:
+            with app.state.sessionmaker() as db:
+                row = (db.query(AppSetting)
+                       .filter_by(key="license.refresh_credential.enc").one_or_none())
+                if not row:
+                    # continue, not return: an owner who removes the
+                    # license and activates a new one later would
+                    # otherwise get no auto-refresh until a restart,
+                    # and the token lapses to builtin after grace.
+                    continue
+                install_row = (db.query(AppSetting)
+                               .filter_by(key="license.install_id").one_or_none())
+                cred = app.state.secretstore.decrypt(row.value.encode()).decode()
+                # refresh() is synchronous httpx with a 10s timeout.
+                # On the loop it stalls SSE pings, console frames and
+                # every job's await_task poll with it, the same reason
+                # the poller and scheduler hand their blocking calls to
+                # a thread.
+                out = await asyncio.to_thread(
+                    app.state.license_client.refresh,
+                    cred, install_row.value if install_row else None)
+                # apply via a fake-request shim: the helper only needs .app
+                class _Req:  # noqa: N801  (minimal shim)
+                    pass
+                req = _Req(); req.app = app
+                apply_new_token(req, db, out["token"], out.get("cert"))
+        except Exception:
+            continue  # doc 07 §8: transient failure = keep serving, retry later
+
+
+async def _create_refresh_task(app) -> None:
+    app.state.refresh_task = asyncio.create_task(_refresh_loop(app))
+
+
+def start_refresh_loop(app) -> None:
+    """Start the background entitlement-refresh loop, unless one is already running.
+
+    Called from two places: the app lifespan at boot (only when a license is
+    already on file), and set_license below (so activating a fresh license
+    gets auto-refresh right away instead of waiting for a restart). Idempotent
+    by design: a handle already on app.state that has not finished means a
+    loop is already running, so activating twice never starts a second one.
+
+    set_license is a sync route, which FastAPI runs in a worker thread with
+    no event loop of its own, so asyncio.create_task would raise "no running
+    event loop" there. Hop onto the app's own loop (app.state.loop, set in
+    main.py's lifespan) via run_coroutine_threadsafe and wait for that hop to
+    land, so the task exists before the response is sent. The lifespan calls
+    this from the loop directly, so no hop is needed there.
+    """
+    existing = getattr(app.state, "refresh_task", None)
+    if existing is not None and not existing.done():
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        future = asyncio.run_coroutine_threadsafe(_create_refresh_task(app), app.state.loop)
+        future.result()
+    else:
+        app.state.refresh_task = asyncio.create_task(_refresh_loop(app))
+
+
 @router.post("/license")
 def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
                 user=Depends(_manage)):
@@ -87,6 +154,11 @@ def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
     if cred:
         enc, _ = request.app.state.secretstore.encrypt(cred.encode())
         _set_setting(db, "license.refresh_credential.enc", enc.decode())
+    # PXP-31: boot only starts the loop when a license is already on file, so
+    # an install that just activated its first license would otherwise get no
+    # auto-refresh until a restart. start_refresh_loop is idempotent, so this
+    # is a no-op on a reactivation that finds the loop already running.
+    start_refresh_loop(request.app)
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="entitlement.license.set")
     return {"ok": True, "tier": request.app.state.entitlements.status().tier}

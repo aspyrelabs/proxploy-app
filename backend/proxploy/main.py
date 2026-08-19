@@ -126,45 +126,20 @@ def create_app(
 
         import asyncio
 
-        async def _refresh_loop():
-            import random
-
-            from proxploy.api.entitlements import apply_new_token  # helper reuse
-            while True:
-                await asyncio.sleep(3600 * 24 + random.uniform(0, 600))  # ~half of 72h exp is fine at Phase 1 granularity; jittered
-                try:
-                    with app.state.sessionmaker() as db:
-                        row = (db.query(AppSetting)
-                               .filter_by(key="license.refresh_credential.enc").one_or_none())
-                        if not row:
-                            # continue, not return: an owner who removes the
-                            # license and activates a new one later would
-                            # otherwise get no auto-refresh until a restart,
-                            # and the token lapses to builtin after grace.
-                            continue
-                        install_row = (db.query(AppSetting)
-                                       .filter_by(key="license.install_id").one_or_none())
-                        cred = app.state.secretstore.decrypt(row.value.encode()).decode()
-                        # refresh() is synchronous httpx with a 10s timeout.
-                        # On the loop it stalls SSE pings, console frames and
-                        # every job's await_task poll with it, the same reason
-                        # the poller and scheduler hand their blocking calls to
-                        # a thread.
-                        out = await asyncio.to_thread(
-                            app.state.license_client.refresh,
-                            cred, install_row.value if install_row else None)
-                        # apply via a fake-request shim: the helper only needs .app
-                        class _Req:  # noqa: N801  (minimal shim)
-                            pass
-                        req = _Req(); req.app = app
-                        apply_new_token(req, db, out["token"], out.get("cert"))
-                except Exception:
-                    continue  # doc 07 §8: transient failure = keep serving, retry later
+        # PXP-31: the loop itself now lives in api/entitlements.py next to
+        # apply_new_token, with a start_refresh_loop(app) entry point that is
+        # idempotent (skips if app.state.refresh_task is already running).
+        # Boot only starts it when a license is already on file; the
+        # license-activation route (api/entitlements.py:set_license) calls
+        # the same function so a fresh activation gets auto-refresh without
+        # waiting for a restart.
+        from proxploy.api.entitlements import start_refresh_loop
 
         with app.state.sessionmaker() as db:
             licensed = (db.query(AppSetting)
                         .filter_by(key="license.refresh_credential.enc").one_or_none())
-        refresh_task = asyncio.create_task(_refresh_loop()) if licensed else None
+        if licensed:
+            start_refresh_loop(app)
 
         from proxploy.events import EventBus
 
@@ -225,6 +200,7 @@ def create_app(
                     set_setting(db, "self.ctid", settings.self_ctid)
 
         yield
+        refresh_task = getattr(app.state, "refresh_task", None)
         if refresh_task:
             refresh_task.cancel()
         if poller_task:
