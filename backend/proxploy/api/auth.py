@@ -1,4 +1,5 @@
 import secrets
+import threading
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -6,6 +7,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
                                get_db, require_entitlement, user_role)
@@ -297,39 +299,63 @@ def revoke_session_route(request: Request, sid: int, db=Depends(get_db),
     return {"ok": True}
 
 
+# PXP-37: two concurrent first-run POSTs could both observe
+# `db.query(User).count() == 0` before either committed, and both would
+# mint themselves an owner account. This is a LOCK, not a constraint: it
+# closes the race by serializing the check-then-create below, it does not
+# stop a second owner row from existing if something else ever bypasses
+# create_user (a migration/seed script, say).
+#
+# Proxploy ships as a single process either way (packaging/proxploy.service
+# and packaging/docker/entrypoint.sh both start uvicorn with no --workers
+# flag), so a plain in-process lock closes the race for every deployment
+# shape this project actually builds, SQLite (the default) included, since
+# SQLite has no advisory-lock primitive to take instead. Postgres is a
+# genuinely supported PROXPLOY_DB_URL override (README, dual-DB migration
+# tests), so on that engine we additionally take a transaction-scoped
+# advisory lock, which also covers a Postgres deployment that ends up
+# multi-process even though that isn't a shape this project packages.
+_first_run_lock = threading.Lock()
+_FIRST_RUN_LOCK_KEY = 0x50585031  # arbitrary int64, spells "PXP1"
+
+
 @users_router.post("", status_code=201)
 def create_user(request: Request, body: UserIn, db=Depends(get_db)):
-    first_run = db.query(User).count() == 0
-    if first_run:
-        role = "owner"  # doc 08 §8: forced owner-account creation on first visit
-        actor_id = None
-    else:
-        raw = request.cookies.get(request.app.state.settings.session_cookie)
-        actor = authn.resolve_session(db, raw) if raw else None
-        if not actor:
-            raise HTTPException(401, "Sign in again to continue.")
-        if not enforce(request.app.state.authz, db, actor, "user", "manage"):
-            raise HTTPException(403, "Your role does not allow this.")
-        if body.role == "owner" and user_role(db, actor) != "owner":
-            raise HTTPException(403, "only an owner may grant owner")
-        role = body.role
-        actor_id = actor.id
-    if body.role not in ROLE_ORDER:
-        raise HTTPException(422, "unknown role")
-    if db.query(User).filter_by(email=body.email).one_or_none():
-        raise HTTPException(409, "email already exists")
-    user = User(email=body.email, display_name=body.display_name,
-                password_hash=authn.hash_password(body.password))
-    db.add(user)
-    db.commit()
-    db.add(TeamMember(team_id=default_team(db).id, user_id=user.id, role=role))
-    db.commit()
-    from proxploy.services.authz import sync_user
-    sync_user(request.app.state.authz, db, user.id)
-    write_audit(db, actor_type="user", actor_id=actor_id, action="user.create",
-                target_type="user", target_id=user.id, params={"email": body.email,
-                "role": role})
-    return _user_out(db, user)
+    with _first_run_lock:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text("SELECT pg_advisory_xact_lock(:key)"),
+                      {"key": _FIRST_RUN_LOCK_KEY})
+        first_run = db.query(User).count() == 0
+        if first_run:
+            role = "owner"  # doc 08 §8: forced owner-account creation on first visit
+            actor_id = None
+        else:
+            raw = request.cookies.get(request.app.state.settings.session_cookie)
+            actor = authn.resolve_session(db, raw) if raw else None
+            if not actor:
+                raise HTTPException(401, "Sign in again to continue.")
+            if not enforce(request.app.state.authz, db, actor, "user", "manage"):
+                raise HTTPException(403, "Your role does not allow this.")
+            if body.role == "owner" and user_role(db, actor) != "owner":
+                raise HTTPException(403, "only an owner may grant owner")
+            role = body.role
+            actor_id = actor.id
+        if body.role not in ROLE_ORDER:
+            raise HTTPException(422, "unknown role")
+        if db.query(User).filter_by(email=body.email).one_or_none():
+            raise HTTPException(409, "email already exists")
+        user = User(email=body.email, display_name=body.display_name,
+                    password_hash=authn.hash_password(body.password))
+        db.add(user)
+        db.commit()
+        db.add(TeamMember(team_id=default_team(db).id, user_id=user.id, role=role))
+        db.commit()
+        from proxploy.services.authz import sync_user
+        sync_user(request.app.state.authz, db, user.id)
+        write_audit(db, actor_type="user", actor_id=actor_id, action="user.create",
+                    target_type="user", target_id=user.id, params={"email": body.email,
+                    "role": role})
+        return _user_out(db, user)
 
 
 @users_router.get("")
