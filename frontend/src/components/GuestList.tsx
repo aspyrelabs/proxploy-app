@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow, VmRow } from '../api/hooks'
 import { fmtBytes, fmtPct } from '../lib/format'
+import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
@@ -97,7 +98,6 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
 function GuestRow({ guest: g }: { guest: Guest }) {
   const navigate = useNavigate()
   const detail = g.kind === 'app' ? '/apps/$appId' : '/vms/$vmId'
-  const consolePath = g.kind === 'app' ? '/apps/$appId/console' : '/vms/$vmId/console'
   const params = g.kind === 'app'
     ? { appId: String(g.id) }
     : { vmId: String(g.id) }
@@ -132,8 +132,11 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       <span className="font-mono text-[11px] text-text-2">{g.mem}</span>
       <div className="ml-auto flex items-center gap-2">
         <LifecycleActions target={g.kind} id={g.id} name={g.name} status={g.status} hostId={g.host_id} size="sm" />
+        {/* A window of its own, never a route: the in-page console tabs are
+            gone (lib/console-window.ts). g.kind is already 'app' | 'vm', which
+            is exactly the ConsoleKind the opener takes. */}
         <ConsoleButton hostId={g.host_id}
-          onClick={() => navigate({ to: consolePath as never, params: params as never })} />
+          onClick={() => openConsoleWindow(g.kind, g.id)} />
       </div>
     </div>
   )

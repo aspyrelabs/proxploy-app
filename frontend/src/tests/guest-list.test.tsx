@@ -1,6 +1,6 @@
 /** One list, two kinds of guest. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Both guests below share host_id: 1, so one row here controls both.
@@ -128,5 +128,27 @@ describe('GuestList', () => {
     wrap()
     expect(screen.getByRole('list')).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+})
+
+describe('GuestList console button', () => {
+  it('opens a console window instead of navigating to a route', async () => {
+    // Regression: consoles moved out of in-page tabs and into windows of their
+    // own, and those tab routes were deleted. This button still navigated to
+    // /apps/$appId/console, so clicking Console on the Hosts page answered
+    // "not found". Every ConsoleButton caller has to go through
+    // lib/console-window.ts, not just the ones on the VM and app pages.
+    const open = vi.fn()
+    vi.stubGlobal('open', open)
+    wrap(toGuests([app()], [vm()]))
+
+    const buttons = await screen.findAllByRole('button', { name: /^console$/i })
+    expect(buttons.length).toBe(2)          // one app, one VM
+    fireEvent.click(buttons[0])
+    fireEvent.click(buttons[1])
+
+    expect(open.mock.calls.map((c) => c[0]).sort())
+      .toEqual(['/shell/app/7', '/shell/vm/3'])
+    vi.unstubAllGlobals()
   })
 })

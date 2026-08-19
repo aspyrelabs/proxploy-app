@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtPct } from '../lib/format'
+import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { IconTile } from './IconTile'
 import { StatusPill } from './StatusPill'
@@ -59,8 +60,10 @@ export function AppCard({ app }: { app: AppRow }) {
       </div>
       <div className="mt-3 border-t border-line-soft pt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} size="sm" />
+        {/* A window of its own, never a route: the in-page console tab is
+            gone (lib/console-window.ts). */}
         <ConsoleButton hostId={app.host_id}
-          onClick={() => navigate({ to: '/apps/$appId/console' as never, params: { appId: String(app.id) } as never })} />
+          onClick={() => openConsoleWindow('app', app.id)} />
       </div>
     </div>
   )
