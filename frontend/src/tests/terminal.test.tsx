@@ -191,3 +191,62 @@ describe('AppLogs', () => {
     expect(apiMock.mock.calls.length - callsBefore).toBe(1)
   })
 })
+
+describe('Terminal stylesheet', () => {
+  it('imports xterm.css, without which typed text escapes the terminal box', async () => {
+    // Reported from real use 2026-08-18: the console worked, input reached the
+    // container and output came back, but what was typed rendered OUTSIDE the
+    // black box, with spacing and overlay wrong around it.
+    //
+    // xterm ships its layout as a stylesheet rather than inline styles, and it
+    // was never imported. Four rules in @xterm/xterm/css/xterm.css, each one a
+    // symptom in that report:
+    //
+    //   .xterm                  position: relative  -- without it every
+    //                           absolutely positioned child escapes to the
+    //                           nearest positioned ancestor instead
+    //   .xterm-viewport         position: absolute + overflow-y: scroll
+    //   .xterm-screen canvas    position: absolute  -- the render layers are
+    //                           meant to OVERLAY, and stack in flow without it
+    //   .xterm-helper-textarea  position: absolute, opacity 0, left -9999em
+    //
+    // The last one is the headline. That textarea is the element keystrokes
+    // actually land in; the stylesheet is the only thing hiding it. Unstyled
+    // it is a visible, in-flow textarea, so what you type appears next to the
+    // terminal rather than only in its rendered rows.
+    //
+    // Asserted against the source because Vitest stubs CSS imports, so there
+    // is no computed style here to read and no way to catch this at runtime.
+    // A missing stylesheet is invisible to every other test in this file:
+    // they all pass with the console looking exactly as broken as it did.
+    const src = await import('../components/terminal/Terminal.tsx?raw')
+    expect(src.default).toContain('@xterm/xterm/css/xterm.css')
+  })
+})
+
+describe('Terminal refits when its own box changes', () => {
+  it('observes the container, not just the window', async () => {
+    // A window resize is not the only way this terminal changes width: it
+    // lives inside the app shell, and collapsing the sidebar resizes it with
+    // no window event at all. xterm keeps whatever column count it last
+    // computed, so the text then wraps at a column the box no longer has.
+    const observed: Element[] = []
+    let disconnects = 0
+    class RO {
+      constructor(_cb: () => void) { /* callback unused: wiring is the claim */ }
+      observe(el: Element) { observed.push(el) }
+      unobserve() {}
+      disconnect() { disconnects += 1 }
+    }
+    vi.stubGlobal('ResizeObserver', RO)
+
+    const { container, unmount } = render(<Terminal wsUrl="ws://test/console" />)
+    await flushDeferredOpen()
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(container.firstChild)
+
+    unmount()
+    expect(disconnects).toBe(1)   // no observer left behind on a closed console
+    vi.unstubAllGlobals()
+  })
+})

@@ -1,5 +1,17 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as XTerm } from '@xterm/xterm'
+// xterm ships its layout as a stylesheet, not inline styles, and nothing is
+// positioned without it. Colocated here rather than in main.tsx so it travels
+// with the only component that opens a terminal.
+//
+// The rule that made this a bug report rather than a cosmetic gap is
+// `.xterm-helper-textarea`, which the stylesheet parks at `left: -9999em`,
+// `opacity: 0`. That textarea is where keystrokes actually land, so without
+// the stylesheet it is a visible, in-flow textarea and what the operator types
+// renders OUTSIDE the black box. `.xterm` also stops being `position:
+// relative`, so the absolutely positioned viewport and the render canvases,
+// which are meant to overlay, stack in normal flow instead.
+import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 
 const THEME = {
@@ -71,11 +83,21 @@ export function Terminal({ wsUrl, onDrop }:
 
     const onWindowResize = () => fit.fit()
     window.addEventListener('resize', onWindowResize)
+    // A window resize is not the only thing that changes this box. The console
+    // sits inside the app shell, and collapsing the sidebar re-lays it out with
+    // no window event, after which xterm is still using the column count it
+    // computed at the old width and the text wraps where the box no longer
+    // ends. Same guard and same shape as charts/TimeChart.tsx, which watches
+    // its own element for the same reason.
+    const ro = typeof ResizeObserver === 'undefined' ? null
+      : new ResizeObserver(() => fit.fit())
+    if (ro && box.current) ro.observe(box.current)
 
     return () => {
       unmounting = true
       clearTimeout(openTimer)
       window.removeEventListener('resize', onWindowResize)
+      ro?.disconnect()
       sub.dispose()
       resizeSub.dispose()
       ws?.close()
