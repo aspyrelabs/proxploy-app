@@ -28,17 +28,29 @@ vi.mock('../lib/notify', () => ({
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
-  useParams: () => ({ hostId: '7', node: 'pve1' }),
+  // The window route is /shell/$kind/$id now; one route serves the node
+  // shell, the app console and the VM console.
+  useParams: () => params,
   useNavigate: () => vi.fn(),
   useSearch: () => ({}),
   Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
   Outlet: () => null,
 }))
 
-// xterm needs a real canvas; the window under test only has to prove which
-// state it renders, never that a terminal drew.
+// The window route is /shell/$kind/$id: one route serves the node shell, the
+// app console and the VM console. Mutable so a test can point it at each.
+// Carries hostId/node as well: the host-page tests further down render the
+// hosts route through this same useParams mock.
+const DEFAULT_PARAMS = { hostId: '7', node: 'pve1', kind: 'host', id: '7' }
+let params: Record<string, string> = { ...DEFAULT_PARAMS }
+
+// xterm needs a real canvas and noVNC needs a socket; the window under test
+// only has to prove WHICH renderer it mounts, never that either one drew.
 vi.mock('../components/terminal/Terminal', () => ({
   Terminal: () => <div data-testid="terminal" />,
+}))
+vi.mock('../components/console/VncConsole', () => ({
+  VncConsole: () => <div data-testid="vnc" />,
 }))
 
 const withQuery = (ui: React.ReactNode) => {
@@ -50,6 +62,7 @@ let shellEnabled = true
 let features: Record<string, boolean> = { 'terminal.node': true }
 
 beforeEach(() => {
+  params = { ...DEFAULT_PARAMS }
   shellEnabled = true
   features = { 'terminal.node': true }
   toastError.mockClear()
@@ -147,8 +160,8 @@ describe('the node shell window', () => {
       }
       return Promise.resolve({ id: 7, name: 'pve1' })
     })
-    const { NodeShellWindow } = await import('../routes/nodeshell')
-    withQuery(<NodeShellWindow />)
+    const { ConsoleWindow } = await import('../routes/console-window')
+    withQuery(<ConsoleWindow />)
     expect(await screen.findByTestId('terminal')).toBeInTheDocument()
   })
 
@@ -160,8 +173,8 @@ describe('the node shell window', () => {
       }
       return Promise.resolve({ id: 7, name: 'pve1' })
     })
-    const { NodeShellWindow } = await import('../routes/nodeshell')
-    withQuery(<NodeShellWindow />)
+    const { ConsoleWindow } = await import('../routes/console-window')
+    withQuery(<ConsoleWindow />)
     expect(await screen.findByText(/Sys\.Console/)).toBeInTheDocument()
   })
 
@@ -173,8 +186,45 @@ describe('the node shell window', () => {
       }
       return Promise.resolve({ id: 7, name: 'pve1' })
     })
-    const { NodeShellWindow } = await import('../routes/nodeshell')
-    withQuery(<NodeShellWindow />)
+    const { ConsoleWindow } = await import('../routes/console-window')
+    withQuery(<ConsoleWindow />)
     expect(await screen.findByText(/not enabled for this host/i)).toBeInTheDocument()
+  })
+})
+
+
+describe('one window route, three kinds', () => {
+  it('mounts a terminal for a host and for an app', async () => {
+    const { ConsoleWindow } = await import('../routes/console-window')
+    for (const kind of ['host', 'app']) {
+      params = { ...DEFAULT_PARAMS, kind, id: '42' }
+      const { unmount } = withQuery(<ConsoleWindow />)
+      expect(await screen.findByTestId('terminal')).toBeInTheDocument()
+      // The ticket is minted for the kind in the URL, not always for a host.
+      expect(vi.mocked(api).mock.calls.some(
+        (c) => String(c[0]).includes(`/${kind}s/42/console/ticket`)
+          || String(c[0]).includes(`/${kind === 'host' ? 'hosts' : 'apps'}/42/`),
+      )).toBe(true)
+      unmount()
+    }
+  })
+
+  it('mounts VNC for a VM, because a VM console is a screen and not a shell', async () => {
+    params = { ...DEFAULT_PARAMS, kind: 'vm', id: '9' }
+    const { ConsoleWindow } = await import('../routes/console-window')
+    withQuery(<ConsoleWindow />)
+    expect(await screen.findByTestId('vnc')).toBeInTheDocument()
+    expect(screen.queryByTestId('terminal')).toBeNull()
+  })
+
+  it('refuses a kind it does not serve rather than guessing one', async () => {
+    // The address bar is reachable; a typo must not silently open a console
+    // against some other object with the same id.
+    params = { ...DEFAULT_PARAMS, kind: 'switch', id: '9' }
+    const { ConsoleWindow } = await import('../routes/console-window')
+    withQuery(<ConsoleWindow />)
+    expect(await screen.findByText(/no such console/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('terminal')).toBeNull()
+    expect(screen.queryByTestId('vnc')).toBeNull()
   })
 })

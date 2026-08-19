@@ -1,9 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api/client'
 import { notify } from '../lib/notify'
-import { consoleFailure, consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { AppCard, AppCardSkeleton } from '../components/AppCard'
@@ -13,14 +12,14 @@ import { EmptyState } from '../components/EmptyState'
 import { IconTile } from '../components/IconTile'
 import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
-import { LifecycleActions } from '../components/LifecycleActions'
+import { openConsoleWindow } from '../lib/console-window'
+import { ConsoleButton, LifecycleActions } from '../components/LifecycleActions'
 import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
 import { Skeleton, SkeletonAvatar, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { ReconfigureDialog } from '../components/ReconfigureDialog'
 import { UninstallDialog } from '../components/UninstallDialog'
 import { Loading } from '../components/ui/loading'
-import { Terminal } from '../components/terminal/Terminal'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
@@ -175,10 +174,10 @@ export function AppsPage() {
   )
 }
 
+// No Console tab: it opens in a window of its own (lib/console-window.ts).
 const TABS = [
   { path: '.', label: 'Overview' },
   { path: 'logs', label: 'Logs' },
-  { path: 'console', label: 'Console' },
   { path: 'config', label: 'Config' },
 ] as const
 
@@ -274,6 +273,11 @@ export function AppDetail() {
               </div>
               <div className="ml-auto flex items-center gap-3">
                 <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} />
+                {/* A window of its own, not a tab: same as the node shell and
+                    the VM console (lib/console-window.ts). Navigating away
+                    from a tab kills the session behind it. */}
+                <ConsoleButton hostId={app.host_id}
+                  onClick={() => openConsoleWindow('app', app.id)} />
                 {app.catalog_port != null && (
                   <Button variant="go" disabled={openUiDenied || openWebUi.isPending}
                     title={openUiDenied ? 'Not included in your plan' : undefined}
@@ -488,30 +492,6 @@ export const appOverviewRoute = createRoute({
   path: '/',
   component: AppOverview,
 })
-export function AppConsole({ appId }: { appId: number }) {
-  const { ticket, failed, start, reconnect, giveUp } = useReconnectingTicket('app', appId)
-  useEffect(() => { start() }, [appId])
-  if (ticket.isError) {
-    const { title, note } = consoleFailure(ticket.error)
-    return <EmptyState title={title} note={note} />
-  }
-  if (failed) {
-    return <EmptyState title="Console connection failed"
-      note="Gave up after repeated attempts. Reload the page to try again." />
-  }
-  if (!ticket.data) return <EmptyState title="Opening console…" note="" />
-  return (
-    <Terminal key={ticket.data.ticket}
-      wsUrl={consoleWsUrl('app', appId, ticket.data.ticket)}
-      onDrop={({ fatal }) => (fatal ? giveUp() : reconnect())} />
-  )
-}
-
-function AppConsoleTab() {
-  const { appId } = useParams({ strict: false }) as { appId: string }
-  return <AppConsole appId={Number(appId)} />
-}
-
 export function AppLogs({ appId }: { appId: number }) {
   const { data, isError } = useQuery({
     queryKey: ['apps', appId, 'logs'],
@@ -536,10 +516,6 @@ function AppLogsTab() {
 
 export const appLogsRoute = createRoute({
   getParentRoute: () => appDetailRoute, path: 'logs', component: AppLogsTab,
-})
-
-export const appConsoleRoute = createRoute({
-  getParentRoute: () => appDetailRoute, path: 'console', component: AppConsoleTab,
 })
 
 const AppConfigTab = () => {

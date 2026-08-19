@@ -1,6 +1,7 @@
 import { render, waitFor, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { Terminal } from '../components/terminal/Terminal'
+import { CONSOLE_THEMES, setConsolePrefs } from '../lib/console-prefs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('../api/client', () => ({ api: vi.fn().mockResolvedValue({ ticket: 'tix', expires_at: '2026-01-01T00:00:00Z' }) }))
@@ -108,20 +109,6 @@ describe('Terminal', () => {
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0))
     await flushDeferredOpen()
     expect(FakeWebSocket.instances).toHaveLength(1)
-  })
-})
-
-describe('AppConsole', () => {
-  it('requests a ticket on mount and opens the terminal at the ticketed url', async () => {
-    const { AppConsole } = await import('../routes/apps')
-    const qc = new QueryClient()
-    render(
-      <QueryClientProvider client={qc}>
-        <AppConsole appId={42} />
-      </QueryClientProvider>,
-    )
-    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
-    expect(FakeWebSocket.instances[0].url).toContain('/apps/42/console/ws?ticket=tix')
   })
 })
 
@@ -248,5 +235,56 @@ describe('Terminal refits when its own box changes', () => {
     unmount()
     expect(disconnects).toBe(1)   // no observer left behind on a closed console
     vi.unstubAllGlobals()
+  })
+})
+
+describe('Terminal appearance', () => {
+  it('drops every bit of chrome in bare mode', async () => {
+    // The node shell opens in a window of its own and should read like a
+    // terminal on your own machine: no card border, no rounding, no inset, no
+    // fixed height. The app console tab is the opposite case and keeps them.
+    const { container: bare } = render(<Terminal wsUrl="ws://test/a" bare />)
+    const bareBox = bare.firstChild as HTMLElement
+    expect(bareBox.className).not.toMatch(/border|rounded|p-2|h-\[420px\]/)
+    expect(bareBox.className).toMatch(/h-full/)
+
+    const { container: boxed } = render(<Terminal wsUrl="ws://test/b" />)
+    const boxedBox = boxed.firstChild as HTMLElement
+    expect(boxedBox.className).toMatch(/border/)
+    expect(boxedBox.className).toMatch(/h-\[420px\]/)
+  })
+
+  it('paints the stored theme, so the page behind it has no seam', async () => {
+    setConsolePrefs({ theme: 'solarized-light', fontSize: 18 })
+    const { container } = render(<Terminal wsUrl="ws://test/c" bare />)
+    const box = container.firstChild as HTMLElement
+    // The element's own background matches the terminal's, or a full-bleed
+    // console shows a strip of the old colour before xterm paints. Compared as
+    // rgb() because jsdom v30 normalises hex when it serialises an inline
+    // style, the same way storage.test.tsx's gradient assertions have to.
+    const hex = CONSOLE_THEMES['solarized-light'].theme.background as string
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    expect(box.style.background).toBe(`rgb(${r}, ${g}, ${b})`)
+  })
+})
+
+describe('Terminal addons', () => {
+  it('loads the addons and survives a WebGL context that will not start', async () => {
+    // jsdom has no WebGL, so this run IS the fallback path: WebglAddon's
+    // constructor throws without a context. Unguarded that takes the whole
+    // console down at mount, which is a worse console than a slower one, so
+    // the terminal must still be here afterwards.
+    const { container } = render(<Terminal wsUrl="ws://test/gl" bare />)
+    await flushDeferredOpen()
+    expect(container.firstChild).toBeTruthy()
+    expect(FakeWebSocket.instances).toHaveLength(1)   // still reached the socket
+  })
+
+  it('opens links in a new tab with no referrer', async () => {
+    // A node shell prints URLs from package managers and installers. Clicking
+    // one must not hand the destination this app's URL, which carries host ids.
+    const src = await import('../components/terminal/Terminal.tsx?raw')
+    expect(src.default).toContain('noopener')
+    expect(src.default).toContain('noreferrer')
   })
 })

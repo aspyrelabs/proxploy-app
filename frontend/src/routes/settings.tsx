@@ -20,6 +20,7 @@ import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
 import { UsersCard } from '../components/UsersCard'
 import { TotpCard } from '../components/TotpCard'
+import { ConsoleCard } from '../components/ConsoleCard'
 import { SessionsCard } from '../components/SessionsCard'
 import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
@@ -529,6 +530,8 @@ export function SettingsPage() {
       <SessionsCard />
 
       <TrustedDevicesCard />
+
+      <ConsoleCard />
 
       <UpdateCard />
     </div>

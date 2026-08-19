@@ -1,4 +1,9 @@
+import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import { SerializeAddon } from '@xterm/addon-serialize'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal as XTerm } from '@xterm/xterm'
 // xterm ships its layout as a stylesheet, not inline styles, and nothing is
 // positioned without it. Colocated here rather than in main.tsx so it travels
@@ -13,24 +18,62 @@ import { Terminal as XTerm } from '@xterm/xterm'
 // which are meant to overlay, stack in normal flow instead.
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
-
-const THEME = {
-  background: '#0a0e14', foreground: '#E8EDF4',
-  red: '#F26D6D', green: '#3FCF8E', yellow: '#F5B544', blue: '#5B9DF9',
-}
+import { CONSOLE_THEMES, readConsolePrefs } from '../../lib/console-prefs'
 
 export type TerminalDropInfo = { fatal: boolean }
 
-export function Terminal({ wsUrl, onDrop }:
-  { wsUrl: string; onDrop?: (info: TerminalDropInfo) => void }) {
+export function Terminal({ wsUrl, onDrop, bare = false }:
+  { wsUrl: string; onDrop?: (info: TerminalDropInfo) => void
+    /** Full bleed: no border, no rounding, no inset, no fixed height, for the
+     *  node shell, which owns a window of its own and should read like a
+     *  terminal on the operator's own machine. The app console is an in-page
+     *  tab and keeps the card chrome. */
+    bare?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  // Read once, at mount. An already-open console keeps the settings it started
+  // with: the node shell is a fresh popup every time and the app console tab
+  // remounts on navigation, so there is no case where a stale console is the
+  // only one an operator has.
+  const prefs = readConsolePrefs()
+  const theme = CONSOLE_THEMES[prefs.theme].theme
 
   useEffect(() => {
     if (!box.current) return
-    const term = new XTerm({ theme: THEME, fontFamily: 'JetBrains Mono, monospace', fontSize: 12.5 })
+    const term = new XTerm({ theme, fontFamily: 'JetBrains Mono, monospace',
+                             fontSize: prefs.fontSize })
     const fit = new FitAddon()
     term.loadAddon(fit)
+    // Addons that cannot fail: no context to acquire, no work at load time.
+    // NOT addon-attach, deliberately. It pipes the socket straight into the
+    // terminal, and this socket is not raw: the bridge sends JSON control
+    // frames for `exit` (carrying the code and the actionable error the
+    // reconnect logic reads). Attaching would print those frames as visible
+    // text and take the drop handling with them.
+    term.loadAddon(new ClipboardAddon())
+    term.loadAddon(new SearchAddon())
+    term.loadAddon(new SerializeAddon())
+    // A shell prints URLs constantly (apt, installers, community-scripts).
+    // Opened with noopener + noreferrer: the destination has no handle on this
+    // window and is not told the URL it came from, which carries host ids.
+    term.loadAddon(new WebLinksAddon((event, uri) => {
+      event.preventDefault()
+      window.open(uri, '_blank', 'noopener,noreferrer')
+    }))
     term.open(box.current)
+
+    // WebGL last, and guarded twice. Its constructor throws where there is no
+    // context (a locked-down browser, a VM with no GPU, and jsdom in the
+    // tests), and a live context can be lost afterwards, at which point the
+    // addon must be disposed or the canvas stays blank. Either way the canvas
+    // renderer takes over: a slower console beats no console.
+    let webgl: WebglAddon | null = null
+    try {
+      webgl = new WebglAddon()
+      webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
+      term.loadAddon(webgl)
+    } catch {
+      webgl = null
+    }
     fit.fit()
 
     if (typeof WebSocket === 'undefined') return  // jsdom without a WS stub
@@ -100,10 +143,18 @@ export function Terminal({ wsUrl, onDrop }:
       ro?.disconnect()
       sub.dispose()
       resizeSub.dispose()
+      webgl?.dispose()
       ws?.close()
       term.dispose()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prefs are read
+    // once at mount on purpose (see above); re-running on them would tear down
+    // a live session and its single-use ticket.
   }, [wsUrl])
 
-  return <div ref={box} style={{ background: '#0a0e14' }} className="h-[420px] rounded-ctl border border-line-soft p-2" />
+  // The element carries the terminal's own background, not a page token: in
+  // bare mode it fills the window, and any other colour shows as a strip
+  // before xterm paints.
+  return <div ref={box} style={{ background: theme.background }}
+    className={bare ? 'h-full' : 'h-[420px] rounded-ctl border border-line-soft p-2'} />
 }

@@ -2,7 +2,13 @@ import RFB from '@novnc/novnc'
 import { useEffect, useRef } from 'react'
 import { Button } from '../ui/button'
 
-export function VncConsole({ wsUrl, onDisconnect }: { wsUrl: string; onDisconnect?: () => void }) {
+export function VncConsole({ wsUrl, onDisconnect, bare = false }:
+  { wsUrl: string; onDisconnect?: () => void
+    /** Full bleed for the console window: the canvas takes whatever is left
+     *  under the Ctrl+Alt+Del row instead of a fixed 480px box with a border.
+     *  Those two buttons stay in both modes, they are the only way to send
+     *  Ctrl+Alt+Del to a guest that has taken the keystroke itself. */
+    bare?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const rfb = useRef<InstanceType<typeof RFB> | null>(null)
 
@@ -30,7 +36,7 @@ export function VncConsole({ wsUrl, onDisconnect }: { wsUrl: string; onDisconnec
   }, [wsUrl])
 
   return (
-    <div>
+    <div className={bare ? 'flex h-full flex-col p-2' : undefined}>
       <div className="mb-2 flex gap-2">
         <Button variant="ghost" className="px-2 py-1 text-[11px]"
           onClick={() => rfb.current?.sendCtrlAltDel()}>
@@ -41,7 +47,8 @@ export function VncConsole({ wsUrl, onDisconnect }: { wsUrl: string; onDisconnec
           Fullscreen
         </Button>
       </div>
-      <div ref={box} style={{ background: '#0a0e14' }} className="h-[480px] rounded-ctl border border-line-soft" />
+      <div ref={box} style={{ background: '#0a0e14' }}
+        className={bare ? 'flex-1 min-h-0' : 'h-[480px] rounded-ctl border border-line-soft'} />
     </div>
   )
 }

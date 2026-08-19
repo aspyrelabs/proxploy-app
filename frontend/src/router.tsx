@@ -11,14 +11,14 @@ export const indexRoute = createRoute({
 })
 
 import { loginRoute } from './routes/login'
-import { nodeShellRoute } from './routes/nodeshell'
+import { consoleWindowRoute } from './routes/console-window'
 import { onboardingRoute } from './routes/onboarding'
 import { alertsRoute } from './routes/alerts'
 import { settingsRoute } from './routes/settings'
 import { hostsRoute, nodeDetailRoute, hostEntryRoute, hostOverviewRoute, hostHardwareRoute } from './routes/hosts'
 import { profileRoute } from './routes/profile'
-import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute } from './routes/apps'
-import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute } from './routes/vms'
+import { appsRoute, appDetailRoute, appOverviewRoute, appLogsRoute, appConfigRoute } from './routes/apps'
+import { vmsRoute, vmDetailRoute, vmOverviewRoute, vmSnapshotsRoute } from './routes/vms'
 import { storeRoute } from './routes/store'
 import { storeDetailRoute } from './routes/store-detail'
 import { storageRoute } from './routes/storage'
@@ -27,13 +27,15 @@ import { backupsRoute } from './routes/backups'
 import { auditRoute } from './routes/audit'
 
 const nodeDetailTree = nodeDetailRoute.addChildren([hostOverviewRoute, hostHardwareRoute])
-const appDetailTree = appDetailRoute.addChildren([appOverviewRoute, appLogsRoute, appConsoleRoute, appConfigRoute])
-const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmConsoleRoute, vmSnapshotsRoute])
+const appDetailTree = appDetailRoute.addChildren([appOverviewRoute, appLogsRoute, appConfigRoute])
+// No console child: consoles open in a window of their own
+// (lib/console-window.ts), not as a tab under the detail page.
+const vmDetailTree = vmDetailRoute.addChildren([vmOverviewRoute, vmSnapshotsRoute])
 
 export const routeTree = rootRoute.addChildren([
-  // nodeShellRoute hangs off the root, not the shell: it is opened in a window
+  // consoleWindowRoute hangs off the root, not the shell: it is opened in a window
   // of its own and a terminal there does not want the sidebar and topbar.
-  indexRoute, loginRoute, onboardingRoute, nodeShellRoute,
+  indexRoute, loginRoute, onboardingRoute, consoleWindowRoute,
   shellRoute.addChildren([hostsRoute, nodeDetailTree, hostEntryRoute, appsRoute, appDetailTree, storeRoute, storeDetailRoute, vmsRoute, vmDetailTree,
                           storageRoute, networkRoute, backupsRoute, alertsRoute, settingsRoute, auditRoute, profileRoute]),
 ])

@@ -1,16 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { notify } from '../lib/notify'
-import { consoleFailure, consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { api, ApiError, apiErrorDetail } from '../api/client'
+import { openConsoleWindow } from '../lib/console-window'
 import type { VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
-import { VncConsole } from '../components/console/VncConsole'
 import { CloneDialog } from '../components/CloneDialog'
 import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
-import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { KVGrid } from '../components/KVGrid'
 import { ConsoleButton, LifecycleActions } from '../components/LifecycleActions'
@@ -105,7 +103,7 @@ export function VmsPage() {
                     <td className="py-2.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <LifecycleActions target="vm" id={v.id} name={v.name} status={v.status} hostId={v.host_id} size="sm" />
                       <ConsoleButton hostId={v.host_id}
-                        onClick={() => navigate({ to: '/vms/$vmId/console' as never, params: { vmId: String(v.id) } as never })} />
+                        onClick={() => openConsoleWindow('vm', v.id)} />
                       {/* doc 06 §e rule 2: a table-cell button is a "small inline
                           action", so the Pro treatment here is disabled+tooltip,
                           not LockVeil, veiling a 60px cell blurs nothing legible,
@@ -131,9 +129,11 @@ export function VmsPage() {
   )
 }
 
+// No Console tab: a console opens in a window of its own (lib/console-window.ts),
+// the way the node shell always has. A tab would be a second, different way to
+// reach the same thing, and navigating off it kills the session behind it.
 const TABS = [
   { path: '.', label: 'Overview' },
-  { path: 'console', label: 'Console' },
   { path: 'snapshots', label: 'Snapshots' },
 ] as const
 
@@ -347,40 +347,6 @@ export const vmOverviewRoute = createRoute({
   path: '/',
   component: VmOverview,
 })
-function VmConsole() {
-  const { vmId } = useParams({ strict: false }) as { vmId: string }
-  const id = Number(vmId)
-  const { ticket, failed, start, reconnect } = useReconnectingTicket('vm', id)
-  useEffect(() => { start() }, [id])
-  if (ticket.isError) {
-    const { title, note } = consoleFailure(ticket.error)
-    return <EmptyState title={title} note={note} />
-  }
-  if (failed) {
-    return <EmptyState title="Console connection failed"
-      note="Gave up after repeated attempts. Reload the page to try again." />
-  }
-  if (!ticket.data) return <EmptyState title="Opening console…" note="" />
-  // VncConsole has no onDrop today (Task 9 doesn't add one, noVNC's RFB
-  // class exposes its own 'disconnect' event for this instead of a generic
-  // prop); wire the same reconnect-with-cap behavior via that event. VNC has
-  // no JSON control-frame channel (unlike Terminal), so there is no "fatal"
-  // signal to short-circuit on here, every drop just counts against the cap.
-  return <VncConsoleWithReconnect vmId={id} ticket={ticket.data.ticket} onNeedNewTicket={reconnect} />
-}
-
-function VncConsoleWithReconnect({ vmId, ticket, onNeedNewTicket }:
-  { vmId: number; ticket: string; onNeedNewTicket: () => void }) {
-  return (
-    <VncConsole key={ticket} wsUrl={consoleWsUrl('vm', vmId, ticket)}
-      onDisconnect={onNeedNewTicket} />
-  )
-}
-
-export const vmConsoleRoute = createRoute({
-  getParentRoute: () => vmDetailRoute, path: 'console', component: VmConsole,
-})
-
 function VmSnapshots() {
   const { vmId } = useParams({ strict: false }) as { vmId: string }
   const id = Number(vmId)

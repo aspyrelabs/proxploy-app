@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../api/client'
+import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
@@ -460,10 +461,12 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
           })
           return
         }
-        // A terminal wants its own window rather than a tab: it is a working
+        // A console wants its own window rather than a tab: it is a working
         // surface you keep beside the page, not a place you navigate to.
-        window.open(`/shell/host/${hostId}`, `proxploy-shell-${hostId}`,
-                    'width=1040,height=660,noopener,noreferrer')
+        // Shared with the VM and app consoles (lib/console-window.ts), which
+        // is what makes the window naming consistent enough that a second
+        // click focuses the first window instead of opening another session.
+        openConsoleWindow('host', hostId)
       }}>
       Node shell ↗
     </button>

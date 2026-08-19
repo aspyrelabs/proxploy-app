@@ -2,8 +2,12 @@ import { useEffect, useRef } from 'react'
 
 export type TermLine = { stream: string; message: string }
 
-// Doc 06 §c: terminal panels stay #0a0e14 in BOTH themes, consoles are dark,
-// full stop. Do not swap these for theme tokens.
+// Doc 06 §c: log panels stay #0a0e14 in BOTH themes. Do not swap these for
+// theme tokens, and do not wire them to the Console setting either: this is a
+// transcript, not a terminal. A job log that changed colour under the operator
+// because they set their SHELL to Solarized Light would be a surprise, and
+// there is no per-panel control to change it back with. The interactive
+// console (terminal/Terminal.tsx) is the one that follows that setting.
 const STREAM_CLASS: Record<string, string> = {
   stdout: 'text-text-2',
   stderr: 'text-red',
