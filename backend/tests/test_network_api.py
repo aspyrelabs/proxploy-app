@@ -592,3 +592,136 @@ def test_a_malformed_address_is_a_422_here_not_a_502_from_proxmox(tmp_path, csrf
                       headers=csrf_header(c))
             assert r.status_code == 422, f"{bad}: {r.text}"
         assert fake.config_updates == []
+
+
+def _addr_fake(qemu_cfg, agent=None):
+    """A fake whose VM 201 carries the config under test."""
+    from tests.fakes.pve import FakePVE
+
+    f = FakePVE()
+    f.networks_by_node = dict(NETWORKS)
+    f.guest_configs = {
+        ("lxc", 150): {"hostname": "immich",
+                       "net0": "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,"
+                               "ip=192.168.1.9/24,gw=192.168.1.1,type=veth"},
+        ("qemu", 201): {"name": "win11", **qemu_cfg},
+    }
+    if agent is not None:
+        f.agent_interfaces = {201: agent}
+    return f
+
+
+def _vm_nics(app, c, iface="net0"):
+    from tests.support import seed_snapshot
+
+    host_id, _, _ = _seed(app)
+    seed_snapshot(app, host_id, nodes=[{"node": "pve1", "status": "online"}])
+    body = c.get("/api/v1/network/bridges").json()
+    return {a["iface"]: a for a in body["attachments"] if a["guest_type"] == "vm"}
+
+
+def test_a_static_cloudinit_address_is_reported_without_any_agent(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Measured on PVE 9.2.10 on 2026-08-19: a VM with a cloud-init drive
+    returns `ipconfig0: ip=192.168.50.77/24,gw=192.168.50.1` from a plain
+    config read, no agent involved. Proxmox knows this address, so we show it."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "ide2": "local-lvm:vm-201-cloudinit,media=cdrom",
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+        "ipconfig0": "ip=192.168.50.77/24,gw=192.168.50.1",
+    }))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert _vm_nics(app, c)["net0"]["addresses"] == ["192.168.50.77/24"]
+
+
+def test_dhcp_is_not_an_address_so_nothing_is_reported(
+        tmp_path, csrf_header, bootstrap_admin):
+    """PVE stores the literal word `dhcp` and never learns the lease: it is not
+    a DHCP server. Showing "dhcp" where an address goes would be showing a
+    setting and calling it an address."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "ide2": "local-lvm:vm-201-cloudinit,media=cdrom",
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+        "ipconfig0": "ip=dhcp",
+    }))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert _vm_nics(app, c)["net0"]["addresses"] is None
+
+
+def test_ipconfig_without_a_cloudinit_drive_is_inert_and_not_reported(
+        tmp_path, csrf_header, bootstrap_admin):
+    """PVE stores ipconfigN happily on a VM with no cloud-init drive, where it
+    does nothing at all: confirmed on hardware. Reporting it would invent an
+    address for a guest that has no way of ever receiving one."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+        "ipconfig0": "ip=192.168.50.77/24,gw=192.168.50.1",
+    }))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert _vm_nics(app, c)["net0"]["addresses"] is None
+
+
+def test_ipconfig_is_paired_with_its_own_nic_index(tmp_path, csrf_header,
+                                                   bootstrap_admin):
+    """net1 takes ipconfig1, not ipconfig0. Getting this wrong reports one
+    NIC's address on another."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "ide2": "local-lvm:vm-201-cloudinit,media=cdrom",
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+        "net1": "e1000=DE:AD:BE:EF:00:01,bridge=vmbr1",
+        "ipconfig0": "ip=10.0.0.5/24",
+        "ipconfig1": "ip=10.9.9.9/24",
+    }))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        nics = _vm_nics(app, c)
+        assert nics["net0"]["addresses"] == ["10.0.0.5/24"]
+        assert nics["net1"]["addresses"] == ["10.9.9.9/24"]
+
+
+def test_the_agent_wins_over_what_cloudinit_asked_for(tmp_path, csrf_header,
+                                                      bootstrap_admin):
+    """cloud-init records what was REQUESTED; the agent reports what the guest
+    HAS. A Windows VM with no Cloudbase-Init has a configured address it is not
+    using, so when the agent answers, the agent is the truthful source."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "ide2": "local-lvm:vm-201-cloudinit,media=cdrom",
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+        "ipconfig0": "ip=192.168.50.77/24,gw=192.168.50.1",
+    }, agent=[{"name": "eth0", "ip-addresses": [
+        {"ip-address": "10.44.0.12"}, {"ip-address": "127.0.0.1"}]}]))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert _vm_nics(app, c)["net0"]["addresses"] == ["10.44.0.12"]
+
+
+def test_a_container_reports_no_addresses_field_of_its_own(tmp_path, csrf_header,
+                                                           bootstrap_admin):
+    """A container's address is already on its netN, in `ip`/`gw`. This field is
+    the VM answer and must not duplicate that one."""
+    from tests.support import make_app
+    from tests.support import seed_snapshot
+
+    app = make_app(tmp_path, fake=_addr_fake({
+        "net0": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0"}))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id, _, _ = _seed(app)
+        seed_snapshot(app, host_id, nodes=[{"node": "pve1", "status": "online"}])
+        ct = [a for a in c.get("/api/v1/network/bridges").json()["attachments"]
+              if a["guest_type"] == "app"][0]
+        assert ct["addresses"] is None
+        assert ct["ip"] == "192.168.1.9/24" and ct["gw"] == "192.168.1.1"

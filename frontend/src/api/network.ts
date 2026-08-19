@@ -36,10 +36,13 @@ export type Attachment = {
    *  PVE's VM netN has no ip or gw field at all. */
   ip: string | null; gw: string | null
   ip6: string | null; gw6: string | null
-  /** What a VM's guest agent says the guest actually has. null means there was
-   *  no agent to ask, which is unknown, not "no address". Always null for a
-   *  container, whose address is in its config and needs no agent. */
-  agent_ips?: string[] | null
+  /** A VM's address, when Proxmox knows one, and null when it does not.
+   *  Two sources, in that order: what the guest agent reports it actually has,
+   *  else the static address cloud-init is configured to give it. Neither is
+   *  available for a DHCP VM with no agent, because PVE stores the word `dhcp`
+   *  and never learns the lease. Always null for a container, whose address is
+   *  on its own netN in `ip`/`gw` above. */
+  addresses?: string[] | null
   rate: string | null; mtu: string | null; link_down: boolean
 }
 

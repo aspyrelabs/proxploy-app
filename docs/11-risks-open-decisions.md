@@ -1067,9 +1067,48 @@ refuses it with the reason. What a VM shows instead is what its QEMU guest agent
 reports it actually has, and `null` renders as unknown rather than as "no
 address", because no agent means no answer.
 
-Still open, deliberately: writing `ipconfigN` for a Linux VM that does have a
-cloud-init drive. It would work, and it needs a "takes effect on next boot" story
-plus a Windows caveat, so it is a scoped feature rather than a field to add.
+**Closed 2026-08-19, and not the way it was framed.** The open item was
+"writing `ipconfigN` for a Linux VM that does have a cloud-init drive". Probing
+a real PVE 9.2.10 first (doc 12) turned up a cheaper answer to the question the
+write was meant to serve, which was only ever "show the operator the VM's
+address".
+
+What a throwaway VM with a cloud-init drive returns from a plain config read,
+no guest agent anywhere:
+
+| configured | what PVE reports |
+|---|---|
+| static | `ipconfig0: ip=192.168.50.77/24,gw=192.168.50.1` |
+| DHCP | `ipconfig0: ip=dhcp`, the literal word |
+
+So for a STATIC cloud-init VM, Proxmox already knows the address and Proxploy
+simply was not reading it. For a DHCP VM it does not and cannot: PVE is not the
+DHCP server and never sees the lease. The only other source is the guest agent,
+which is the same `network-get-interfaces` call the Proxmox web UI's Summary
+panel makes, and which `agent_addresses()` has always made.
+
+**Built instead: the read, not the write.** `GET /network/bridges` reports one
+`addresses` field per VM NIC. The agent first, because it reports what the guest
+HAS; the static cloud-init address second, because that is what PVE was ASKED to
+give it; null when neither knows, which the UI renders as no address block at
+all rather than as an explanation nobody asked for.
+
+Three things the hardware probe settled that guesswork would not have:
+
+- The drive is detected by the volume name `vm-<vmid>-cloudinit`, not by "the
+  config mentions cloudinit". The loose check also matched the probe VM's own
+  `name`.
+- `ipconfigN` on a VM with no cloud-init drive is stored happily by PVE and does
+  nothing, so it is ignored rather than reported. Reporting it would invent an
+  address for a guest with no way to receive one.
+- The index pairs: `net1` takes `ipconfig1`.
+
+**The write stays unbuilt, deliberately.** A static `ipconfigN` is what was
+requested, not what the guest took, and a Windows guest ignores it entirely
+without the third-party Cloudbase-Init. Reading it is honest because the agent
+outranks it whenever the agent answers; writing it would put Proxploy back to
+promising an effect it cannot confirm. If it is ever wanted, it still needs the
+"takes effect on next boot" story and the Windows caveat.
 
 ## Summary table
 

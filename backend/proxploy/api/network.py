@@ -65,6 +65,49 @@ NET_KEY = re.compile(r"^net\d+$")
 # refused rather than written, see _ipconfig_target below.
 ADDRESS_KEYS = ("ip", "gw", "ip6", "gw6")
 
+def _has_cloudinit_drive(cfg: dict, vmid: int) -> bool:
+    """PVE writes the drive as a CDROM whose volume is named for the VM.
+    Measured on PVE 9.2.10, 2026-08-19 (doc 12): creating one with
+    `ide2: local-lvm:cloudinit` reads back as
+    `ide2: local-lvm:vm-9911-cloudinit,media=cdrom`.
+
+    Matched on that volume name, which carries the vmid, rather than on "does
+    any value mention cloudinit": the loose version also matched a VM someone
+    had called `probe-cloudinit`, which is how the probe found this out.
+    """
+    return any(f"vm-{vmid}-cloudinit" in str(v) for v in cfg.values())
+
+
+def _configured_address(cfg: dict, iface: str, vmid: int) -> str | None:
+    """The address PVE is configured to hand this VM's NIC, or None.
+
+    This is the answer to "does Proxmox know this VM's address": for a STATIC
+    cloud-init config it does, in `ipconfigN`, and no guest agent is needed to
+    read it. Measured on hardware, PVE 9.2.10, 2026-08-19.
+
+    None in the three cases where it does not know:
+
+      * no cloud-init drive. PVE stores `ipconfigN` on a VM without one
+        perfectly happily and it does nothing, so reading it back would invent
+        an address the guest has no way of ever receiving.
+      * `ip=dhcp`. PVE keeps the literal word; it is not a DHCP server and
+        never learns the lease. That is a setting, not an address.
+      * no `ipconfigN` for this NIC at all.
+
+    Paired by index: net1 takes ipconfig1. Sharing index 0 across every NIC
+    would report one NIC's address on another.
+    """
+    if not _has_cloudinit_drive(cfg, vmid):
+        return None
+    raw = cfg.get(f"ipconfig{iface[3:]}")
+    if not raw:
+        return None
+    for part in str(raw).split(","):
+        key, _, value = part.partition("=")
+        if key.strip() == "ip" and value not in ("dhcp", "manual", ""):
+            return value
+    return None
+
 
 def _valid_address(key: str, value: str) -> bool:
     """Shape check only, so a typo is a clean 422 here instead of PVE's own 400
@@ -338,17 +381,27 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
                                          key=lambda v: (v.name or "", v.id))])
             for gtype, gid, gname, kind, vmid, gnode in guests:
                 cfg = client.guest_config(kind, gnode, vmid)
-                # A VM's address is not in its config, so ask the guest. One call
-                # per VM, on a route that is already one config read per guest and
-                # explicitly human-triggered (see the ponytail note above). None
-                # when there is no agent to ask, which the UI renders as unknown.
+                # A VM's address is not on its netN the way a container's is, so
+                # there are two places Proxmox might know it, and the agent is
+                # asked first because it is the only one that reports what the
+                # guest HAS rather than what was asked for. One call per VM, on
+                # a route that is already one config read per guest and
+                # explicitly human-triggered (see the ponytail note above).
                 agent_ips = (client.agent_addresses(gnode, vmid)
                              if kind == "qemu" else None)
                 for key in sorted(k for k in cfg if NET_KEY.match(k)):
+                    # Falls back to the cloud-init config only when the agent
+                    # gave us nothing, and stays None when neither source has an
+                    # address: the UI shows nothing at all rather than
+                    # explaining an absence nobody asked about.
+                    addresses = agent_ips or None
+                    if addresses is None and kind == "qemu":
+                        configured = _configured_address(cfg, key, vmid)
+                        addresses = [configured] if configured else None
                     attachments.append({"host_id": h.id, "node": gnode,
                                         "guest_type": gtype, "guest_id": gid,
                                         "name": gname, "vmid": vmid,
-                                        "agent_ips": agent_ips,
+                                        "addresses": addresses,
                                         **_nic_out(key, str(cfg[key]))})
         except ProxmoxError as e:
             errors.append({"host_id": h.id, "host_name": h.name, "error": str(e)})

@@ -130,36 +130,20 @@ export function NicForm({ nic, bridges, onClose }: {
           )}
         </>
       ) : (
-        /* A VM's address is not editable here, and saying so beats a field that
-           silently does nothing. PVE addresses VMs through cloud-init, which a
-           Windows guest ignores unless Cloudbase-Init is installed, and nothing
-           out here can see inside a guest. What CAN be said honestly is what the
-           guest agent reports, so that is what is shown. */
-        <div className="rounded-ctl border border-line-soft bg-elev p-2">
-          <div className={label}>Address</div>
-          {nic.agent_ips == null ? (
-            <p className="text-[12.5px] text-text-3">
-              Unknown. The QEMU guest agent is not answering on this VM, and a
-              virtual machine keeps its address inside the guest.
-            </p>
-          ) : nic.agent_ips.length === 0 ? (
-            <p className="text-[12.5px] text-text-3">
-              The guest agent reports no address on this VM.
-            </p>
-          ) : (
+        /* A VM's address is not editable here: qm set --netN has no ip or gw
+           field at all, so a field would silently do nothing. It is shown when
+           Proxmox knows it (the guest agent, else a static cloud-init address)
+           and the whole block is absent when Proxmox does not. A DHCP VM with
+           no agent is the ordinary case, and it has nothing to say for itself:
+           an explanation of an absence nobody asked about is still clutter. */
+        nic.addresses?.length ? (
+          <div className="rounded-ctl border border-line-soft bg-elev p-2">
+            <div className={label}>Address</div>
             <p className="font-mono text-[12.5px] text-text-2">
-              {nic.agent_ips.join(', ')}
-              <span className="ml-1 font-sans text-[11.5px] text-text-3">
-                (reported by the guest agent, across all its interfaces)
-              </span>
+              {nic.addresses.join(', ')}
             </p>
-          )}
-          <p className="mt-1 text-[11.5px] text-text-3">
-            Proxmox sets a virtual machine&apos;s address through cloud-init, which
-            Proxploy does not write yet. Set it inside the guest, or with a DHCP
-            reservation.
-          </p>
-        </div>
+          </div>
+        ) : null
       )}
       {/* No firewall TOGGLE. Proxploy has no firewall feature: there is no rule,
           security group, alias or IP set management anywhere in it, at guest,

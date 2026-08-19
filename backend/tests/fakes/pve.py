@@ -403,6 +403,27 @@ class _MigrateLeaf:
         return self._owner._record_action(self._kind, self._vmid, "migrate")
 
 
+class _AgentLeaf:
+    """nodes(n).qemu(vmid).agent("network-get-interfaces").get().
+
+    Raising when the vmid is not in `agent_interfaces` IS the common case on
+    real hardware: a VM without the guest agent answers with an error, not an
+    empty list, which is why agent_addresses() returns None rather than [].
+    """
+
+    def __init__(self, owner, vmid):
+        self._owner, self._vmid = owner, vmid
+
+    def __call__(self, _command):
+        return self
+
+    def get(self):
+        rows = self._owner.agent_interfaces.get(self._vmid)
+        if rows is None:
+            raise ConnectionError("QEMU guest agent is not running")
+        return {"result": rows}
+
+
 class _GuestNS:
     def __init__(self, owner, kind, node, vmid):
         self._owner, self._kind, self._node, self._vmid = owner, kind, node, vmid
@@ -414,6 +435,7 @@ class _GuestNS:
         if kind == "qemu":
             self.vncproxy = _VncproxyLeaf(owner, node, vmid)
             self.clone = _CloneLeaf(owner, node, vmid)
+            self.agent = _AgentLeaf(owner, vmid)
 
     def delete(self, **kwargs):
         if self._owner.fail:
@@ -710,6 +732,9 @@ class FakePVE:
         # host network staging (Phase 6 Task 7): (op, node, iface|None, config)
         self.network_calls: list[tuple[str, str, str | None, dict]] = []
         self.guest_configs: dict[tuple[str, int], dict] = {}
+        # vmid -> the rows `agent network-get-interfaces` returns. A vmid that
+        # is absent has no agent, which raises rather than answering empty.
+        self.agent_interfaces: dict[int, list] = {}
         # guest config writes (Phase 6 Task 6)
         self.config_updates: list[tuple[str, int, dict]] = []
         self.config_update_upid: str | None = None

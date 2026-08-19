@@ -272,13 +272,13 @@ const NIC_PLAIN = {
 }
 const NIC_FIREWALLED = { ...NIC_PLAIN, firewall: true }
 const NIC_CT_STATIC = { ...NIC_PLAIN, ip: '192.168.1.50/24', gw: '192.168.1.1' }
-// A VM NIC: PVE keeps no address on it, so ip/gw are null whatever the guest has,
-// and the only honest source is what the agent reports.
+// A VM NIC: PVE keeps no address on it, so ip/gw are null whatever the guest
+// has. `addresses` is whatever Proxmox knows, from the agent or from cloud-init.
 const NIC_VM = {
   ...NIC_PLAIN, guest_type: 'vm', name: 'win11', vmid: 201,
-  ip: null, gw: null, agent_ips: ['192.168.50.77'],
+  ip: null, gw: null, addresses: ['192.168.50.77'],
 }
-const NIC_VM_NO_AGENT = { ...NIC_VM, agent_ips: null }
+const NIC_VM_NO_ADDRESS = { ...NIC_VM, addresses: null }
 
 const wrapNic = (ui: React.ReactNode) => render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -330,23 +330,21 @@ describe('NicForm addressing', () => {
     expect(screen.queryByLabelText(/gateway/i)).toBeNull()
   })
 
-  it('gives a VM no address field, and says where a VM address lives', () => {
-    // qm set --netN has no ip or gw at all. A field here would silently do
-    // nothing, and cloud-init cannot be promised either: Windows has no
-    // cloud-init, and nothing out here can see inside a guest.
+  it('shows a VM address when Proxmox knows one, with no field to edit it', () => {
+    // qm set --netN has no ip or gw at all, so there is nothing to edit here.
     wrapNic(<NicForm nic={NIC_VM as never} bridges={['vmbr0']} onClose={() => {}} />)
     expect(screen.queryByLabelText(/IPv4 address/i)).toBeNull()
     expect(screen.queryByLabelText(/address and prefix/i)).toBeNull()
     expect(screen.getByText(/192\.168\.192\.77/)).toBeInTheDocument()
-    expect(screen.getByText(/reported by the guest agent/i)).toBeInTheDocument()
-    expect(screen.getByText(/through cloud-init/i)).toBeInTheDocument()
   })
 
-  it('says unknown, not "no address", when there is no agent to ask', () => {
-    wrapNic(<NicForm nic={NIC_VM_NO_AGENT as never} bridges={['vmbr0']} onClose={() => {}} />)
-    // "unknown" also appears in the model/MAC line above, so assert on the
-    // sentence that carries the meaning rather than on the word.
-    expect(screen.getByText(/guest agent is not answering/i)).toBeInTheDocument()
-    expect(screen.getByText(/^Unknown\./i)).toBeInTheDocument()
+  it('shows nothing at all when Proxmox does not know the address', () => {
+    // Not "unknown", not an explanation of why: a DHCP VM with no agent is the
+    // ordinary case and has nothing to say about it.
+    wrapNic(<NicForm nic={NIC_VM_NO_ADDRESS as never} bridges={['vmbr0']}
+                     onClose={() => {}} />)
+    expect(screen.queryByText(/^Address$/i)).toBeNull()
+    expect(screen.queryByText(/guest agent/i)).toBeNull()
+    expect(screen.queryByText(/cloud-init/i)).toBeNull()
   })
 })
