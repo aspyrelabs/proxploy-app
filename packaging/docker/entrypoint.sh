@@ -12,5 +12,12 @@
 # Task 10 verification. Let the app migrate itself.
 set -euo pipefail
 
+# --proxy-headers matches the systemd unit (packaging/proxploy.service) so the
+# two deployment shapes behave the same way. In the compose shape the port is
+# published directly, so the peer uvicorn sees is the bridge network gateway,
+# not 127.0.0.1: FORWARDED_ALLOW_IPS's default trusts nothing there, making
+# the flag a no-op unless an operator fronts the container with their own
+# proxy and sets FORWARDED_ALLOW_IPS to that proxy's address as the container
+# sees it.
 exec backend/venv/bin/uvicorn --factory proxploy.main:create_app \
-  --host 0.0.0.0 --port 8000
+  --host 0.0.0.0 --port 8000 --proxy-headers

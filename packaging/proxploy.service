@@ -9,7 +9,15 @@ Type=exec
 # a pointer move rather than a reinstall.
 WorkingDirectory=/opt/proxploy/current/backend
 EnvironmentFile=/etc/proxploy/proxploy.env
-ExecStart=/opt/proxploy/current/backend/venv/bin/uvicorn --factory proxploy.main:create_app --host 127.0.0.1 --port 8000
+# --proxy-headers trusts X-Forwarded-For/-Proto only from peers listed in
+# FORWARDED_ALLOW_IPS, which uvicorn defaults to 127.0.0.1 (config.py) if
+# unset, i.e. exactly where install.sh puts Caddy. Pinned here explicitly so
+# a future uvicorn default change cannot silently turn every audit row back
+# into 127.0.0.1. An operator whose proxy runs elsewhere sets
+# FORWARDED_ALLOW_IPS in /etc/proxploy/proxploy.env. The matching CLI flag
+# for that allow list is deliberately NOT set here: a CLI value would beat
+# the env var and kill the override.
+ExecStart=/opt/proxploy/current/backend/venv/bin/uvicorn --factory proxploy.main:create_app --host 127.0.0.1 --port 8000 --proxy-headers
 Restart=on-failure
 RestartSec=3
 User=proxploy

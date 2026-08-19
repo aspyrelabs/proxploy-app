@@ -347,6 +347,9 @@ PROXPLOY_DATA_DIR=/var/lib/proxploy
 PROXPLOY_MASTER_KEY_FILE=/var/lib/proxploy/master.key
 PROXPLOY_INSTALL_SHAPE=$SHAPE
 PROXPLOY_COOKIE_SECURE=true
+# Which peers are trusted to set X-Forwarded-For. The default, 127.0.0.1, is
+# already where this installer puts Caddy. Uncomment only if yours is elsewhere.
+# FORWARDED_ALLOW_IPS=127.0.0.1
 PROXPLOY_ENV=$PROXPLOY_ENV
 PROXPLOY_UPDATE_SCRIPT=/opt/proxploy/bin/proxploy-update
 EOF
