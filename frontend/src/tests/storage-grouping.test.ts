@@ -43,16 +43,16 @@ describe('groupStorage', () => {
 
   it('lifts a shared datastore out into one cluster group', () => {
     const groups = groupStorage(CLUSTER_ROWS, CLUSTER_HOSTS)
-    expect(namesIn(groups, 'Shared across lab-cluster')).toEqual(['nfs-shared'])
+    expect(namesIn(groups, 'Shared')).toEqual(['nfs-shared'])
     // Once, not once per node: which node it is reported under is arbitrary
     // and flips on a backend restart, so it must not decide where it appears.
     expect(groups.flatMap((g) => g.rows).filter((r) => r.storage === 'nfs-shared'))
       .toHaveLength(1)
   })
 
-  it('puts the shared group first, then hosts by name', () => {
+  it('puts hosts by name first and the shared group last', () => {
     expect(groupStorage(CLUSTER_ROWS, CLUSTER_HOSTS).map((g) => g.label))
-      .toEqual(['Shared across lab-cluster', 'node1.lab.local', 'node2.lab.local'])
+      .toEqual(['node1.lab.local', 'node2.lab.local', 'Shared'])
   })
 
   it('keeps a host with no datastores rather than dropping it', () => {

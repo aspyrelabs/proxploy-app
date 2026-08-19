@@ -101,9 +101,8 @@ describe('StoragePage', () => {
     // nothing about whether this page calls it.
     clusterShape = true
     withQuery(<StoragePage />)
-    expect(await screen.findByRole('heading', { name: 'Shared across lab' }))
-      .toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'host-01' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'host-01' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Shared' })).toBeInTheDocument()
     // host-02 owns none of the rows (host 1 polled first) and must still get
     // its own group with its own node's pool in it.
     expect(screen.getByRole('heading', { name: 'host-02' })).toBeInTheDocument()

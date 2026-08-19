@@ -27,11 +27,11 @@ export type StorageGroup = {
  * (see components/install/pools.ts::servedTo).
  *
  * So local datastores group on `row.node`, which is reliable for them, and
- * shared ones are lifted out entirely: a shared datastore is reported once per
- * node and GET /storage keeps whichever row it saw first, so the node on a
- * shared row is arbitrary and changes when the poller restarts. Grouping a
- * shared pool by it would move the pool between headings with nothing having
- * changed on the cluster.
+ * shared ones are lifted out entirely, into a group at the END: a shared
+ * datastore is reported once per node and GET /storage keeps whichever row it
+ * saw first, so the node on a shared row is arbitrary and changes when the
+ * poller restarts. Grouping a shared pool by it would move the pool between
+ * headings with nothing having changed on the cluster.
  *
  * A shared pool on a STANDALONE host stays with that host: `cluster_name` null
  * means not clustered rather than unknown, so it is shared with nobody and a
@@ -56,7 +56,7 @@ export function groupStorage(rows: StorageRow[], hosts: HostIdentity[]): Storage
     const cluster = hostByNode.get(r.node)?.cluster_name ?? r.cluster_name
     if (r.shared && cluster) {
       const g = shared.get(cluster)
-        ?? { key: `cluster:${cluster}`, label: `Shared across ${cluster}`, rows: [] }
+        ?? { key: `cluster:${cluster}`, label: 'Shared', rows: [] }
       // Deduped by name: a shared datastore should already arrive once, and if
       // it ever arrives twice it is still one datastore.
       if (!g.rows.some((x) => x.storage === r.storage)) g.rows.push(r)
@@ -77,6 +77,8 @@ export function groupStorage(rows: StorageRow[], hosts: HostIdentity[]): Storage
     nodeGroups.push({ key: `node:${node}`, label: node, rows: byNode.get(node) ?? [] })
   }
 
-  return [...[...shared.values()].sort((a, b) => a.label.localeCompare(b.label)),
-          ...nodeGroups]
+  // Hosts first, shared last: the per-host groups are what the page is for,
+  // and a shared datastore is the exception to read after them.
+  return [...nodeGroups,
+          ...[...shared.values()].sort((a, b) => a.key.localeCompare(b.key))]
 }
