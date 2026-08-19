@@ -403,6 +403,24 @@ class _MigrateLeaf:
         return self._owner._record_action(self._kind, self._vmid, "migrate")
 
 
+class _InterfacesLeaf:
+    """nodes(n).lxc(vmid).interfaces.get().
+
+    Raising when the vmid has no entry IS the real case: a stopped container
+    has no interfaces to report and PVE errors rather than answering empty.
+    """
+
+    def __init__(self, owner, vmid):
+        self._owner, self._vmid = owner, vmid
+
+    def get(self):
+        self._owner.lxc_interface_calls.append(self._vmid)
+        rows = self._owner.lxc_interfaces.get(self._vmid)
+        if rows is None:
+            raise ConnectionError("container is not running")
+        return rows
+
+
 class _AgentLeaf:
     """nodes(n).qemu(vmid).agent("network-get-interfaces").get().
 
@@ -431,6 +449,8 @@ class _GuestNS:
         self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
         self.config = _GuestConfigLeaf(owner, kind, vmid)
         self.snapshot = _SnapshotNS(owner, kind, node, vmid)
+        if kind == "lxc":
+            self.interfaces = _InterfacesLeaf(owner, vmid)
         self.migrate = _MigrateLeaf(owner, kind, node, vmid)
         if kind == "qemu":
             self.vncproxy = _VncproxyLeaf(owner, node, vmid)
@@ -735,6 +755,10 @@ class FakePVE:
         # vmid -> the rows `agent network-get-interfaces` returns. A vmid that
         # is absent has no agent, which raises rather than answering empty.
         self.agent_interfaces: dict[int, list] = {}
+        # vmid -> the rows /lxc/{vmid}/interfaces returns. Absent means PVE
+        # cannot answer (a stopped container), which raises.
+        self.lxc_interfaces: dict[int, list] = {}
+        self.lxc_interface_calls: list[int] = []
         # guest config writes (Phase 6 Task 6)
         self.config_updates: list[tuple[str, int, dict]] = []
         self.config_update_upid: str | None = None

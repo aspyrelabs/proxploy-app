@@ -179,6 +179,51 @@ def _nic_out(iface: str, raw: str) -> dict:
     }
 
 
+def _routable(raw) -> list[str]:
+    """The addresses off one /lxc/{vmid}/interfaces row that can actually be
+    reached. Loopback and IPv6 link-local are dropped: every container has both
+    on every interface and neither one opens a web UI. Same rule
+    ProxmoxClient.agent_addresses applies to a VM's agent answer."""
+    out: list[str] = []
+    for key in ("inet", "inet6"):
+        value = str(raw.get(key) or "")
+        if not value or value.startswith(("127.", "::1", "fe80:")):
+            continue
+        out.append(value)
+    return out
+
+
+def _container_addresses(client, node: str, vmid: int,
+                         nics: list[dict]) -> None:
+    """Fill each NIC's `addresses` with what the container actually holds.
+
+    A configured address needs no lookup: it IS the answer, and asking the
+    running guest as well would spend a per-guest call on something the config
+    already states. Only a NIC with no usable `ip` (`dhcp`, `manual`, or
+    nothing) sends us to PVE, and then ONE call serves every NIC on the guest.
+
+    Matched on hardware address, which the config and the runtime rows both
+    carry, rather than on interface name: `name=eth0` in a container's netN is
+    the name INSIDE the guest and nothing stops it being renamed there.
+    """
+    needs_lookup = [n for n in nics
+                    if not n.get("ip") or n["ip"] in ("dhcp", "manual")]
+    for n in nics:
+        ip = n.get("ip")
+        n["addresses"] = [ip] if ip and ip not in ("dhcp", "manual") else None
+    if not needs_lookup:
+        return
+    rows = client.lxc_interfaces(node, vmid)
+    if rows is None:
+        return                      # stopped, or PVE would not say: unknown
+    by_mac = {str(r.get("hwaddr") or r.get("hardware-address") or "").lower(): r
+              for r in rows}
+    for n in needs_lookup:
+        found = by_mac.get(str(n.get("macaddr") or "").lower())
+        addresses = _routable(found) if found else []
+        n["addresses"] = addresses or None
+
+
 def guest_nics(request: Request, db, host: Host, kind: str, vmid: int,
                row=None) -> list[dict]:
     """Every netN on one guest, newest PVE config read (no cache).
@@ -192,7 +237,11 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int,
             kind, guest_node(host, row), vmid)
     except ProxmoxError as e:
         raise HTTPException(502, str(e))
-    return [_nic_out(k, str(cfg[k])) for k in sorted(cfg) if NET_KEY.match(k)]
+    nics = [_nic_out(k, str(cfg[k])) for k in sorted(cfg) if NET_KEY.match(k)]
+    if kind == "lxc":
+        _container_addresses(client_for_host(request.app, db, host),
+                             guest_node(host, row), vmid, nics)
+    return nics
 
 
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,

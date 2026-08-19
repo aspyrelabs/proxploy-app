@@ -32,12 +32,19 @@ vi.mock('../api/client', () => ({
     // Live guest NIC read (services guest_nics, "no cache"): the address the
     // button must actually use.
     if (path === '/apps/1/network') {
-      return Promise.resolve([{ ip: '10.9.9.9/24' }])
+      // `addresses`, not `ip`: `ip` is the config, and a container on DHCP has
+      // the word `dhcp` there. `addresses` is what the guest actually holds.
+      return Promise.resolve([{ ip: dhcpGuest ? 'dhcp' : '10.9.9.9/24',
+                               addresses: ['10.9.9.9/24'] }])
     }
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},
 }))
+
+// A container whose CONFIG says dhcp but which holds a real lease, which is
+// the case that used to report "could not determine this app's address".
+let dhcpGuest = false
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
@@ -72,6 +79,23 @@ describe('AppDetail Open web UI', () => {
     await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
       'http://10.9.9.9:8096/', '_blank', 'noopener,noreferrer'))
     openSpy.mockRestore()
+  })
+
+  it('opens a DHCP container, whose config address is the word "dhcp"', async () => {
+    // Reported from real use: the app card knew the port, and clicking Open
+    // web UI said "Could not determine <app>'s address". The container was on
+    // DHCP, so its PVE config carries `ip=dhcp`, and the button filtered that
+    // out and gave up. The port was never the problem.
+    dhcpGuest = true
+    APP.catalog_port = 8000
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withQuery(<AppDetail />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open web UI' }))
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
+      'http://10.9.9.9:8000/', '_blank', 'noopener,noreferrer'))
+    openSpy.mockRestore()
+    dhcpGuest = false
   })
 
   it('hides the action entirely when the catalog names no port', async () => {

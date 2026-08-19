@@ -610,9 +610,10 @@ function Popularity({ entry, served }: {
 
 /** One upstream link. The whole row is the anchor, label AND address.
  *
- *  This used to make the LABEL the link and render the URL beside it as a
- *  plain span, so clicking the visible address, which is the part people
- *  actually aim at, did nothing at all.
+ *  The ADDRESS is the link; the label is plain text. It was the other way
+ *  round, so clicking the visible URL did nothing. Making BOTH the anchor
+ *  fixed that and introduced a worse one: a whole row of prose that turns out
+ *  to be a link once the pointer crosses it.
  *
  *  noopener as well as noreferrer: these point at third-party project sites,
  *  and a new tab opened without it gets a live `window.opener` handle back
@@ -621,12 +622,10 @@ function Popularity({ entry, served }: {
 export function LinkRow({ label, href }: { label: string; href: string }) {
   return (
     <li>
+      <span className="text-[12.5px] text-text-3">{label}</span>
       <a href={href} target="_blank" rel="noopener noreferrer"
-        className="group flex flex-wrap items-baseline gap-x-2">
-        <span className="text-[12.5px] text-amber group-hover:underline">{label}</span>
-        <span className="break-all font-mono text-[11px] text-text-3 group-hover:underline">
-          {href}
-        </span>
+        className="ml-2 break-all font-mono text-[11px] text-amber hover:underline">
+        {href}
       </a>
     </li>
   )

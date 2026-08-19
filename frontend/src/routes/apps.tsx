@@ -200,8 +200,13 @@ export function AppDetail() {
   const openWebUi = useMutation({
     mutationFn: async (tab: Window | null) => {
       const app = appQuery.data!
-      const nics = await api<{ ip: string | null }[]>(`/apps/${app.id}/network`)
-      const addr = nics.map((n) => n.ip).find((ip) => ip && ip !== 'dhcp')?.split('/')[0]
+      // `addresses`, not `ip`. `ip` is the CONFIG, and a container on DHCP has
+      // the literal word `dhcp` there, so this used to reject every DHCP guest
+      // and report that it could not determine the address. `addresses` is
+      // what the container actually holds: the configured address when there
+      // is one, else what PVE reports on /lxc/{vmid}/interfaces.
+      const nics = await api<{ addresses: string[] | null }[]>(`/apps/${app.id}/network`)
+      const addr = nics.flatMap((n) => n.addresses ?? [])[0]?.split('/')[0]
       if (!addr) { tab?.close(); throw new Error('no address') }
       const url = `${app.web_protocol || 'http'}://${addr}:${app.catalog_port}${app.web_path || '/'}`
       // The tab is opened by the click handler, not here. Looking the address

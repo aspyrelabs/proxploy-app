@@ -725,3 +725,101 @@ def test_a_container_reports_no_addresses_field_of_its_own(tmp_path, csrf_header
               if a["guest_type"] == "app"][0]
         assert ct["addresses"] is None
         assert ct["ip"] == "192.168.1.9/24" and ct["gw"] == "192.168.1.1"
+
+
+def test_a_dhcp_container_reports_the_address_it_actually_leased(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Reported from real use: "Could not determine <app>'s address" when
+    opening an app's web UI, on a container whose card knew its port.
+
+    The port was never the problem. The container is on DHCP, so its PVE CONFIG
+    says `ip=dhcp` (measured on CT 101, PVE 9.2.10, 2026-08-20) and a config
+    read can only ever return what was REQUESTED. PVE does know the lease, on
+    /nodes/{node}/lxc/{vmid}/interfaces, which nothing was calling.
+    """
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.guest_configs[("lxc", 150)] = {
+        "hostname": "immich",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,ip=dhcp,type=veth",
+    }
+    fake.lxc_interfaces = {150: [
+        {"name": "lo", "hwaddr": "00:00:00:00:00:00", "inet": "127.0.0.1/8"},
+        {"name": "eth0", "hwaddr": "bc:24:11:00:11:22", "inet": "192.168.50.179/24",
+         "inet6": "fe80::be24:11ff:fe00:1122/64"},
+    ]}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, app_id, _ = _seed(app)
+        nics = c.get(f"/api/v1/apps/{app_id}/network").json()
+        assert nics[0]["ip"] == "dhcp"          # the config, unchanged
+        assert nics[0]["addresses"] == ["192.168.50.179/24"]
+
+
+def test_a_static_container_needs_no_runtime_lookup(tmp_path, csrf_header,
+                                                    bootstrap_admin):
+    """A configured address is already the answer, and it is the one PVE will
+    hand the guest. Asking the running container as well would be a per-guest
+    call for something the config already states."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.guest_configs[("lxc", 150)] = {
+        "hostname": "immich",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,"
+                "ip=192.168.1.9/24,gw=192.168.1.1,type=veth",
+    }
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, app_id, _ = _seed(app)
+        nics = c.get(f"/api/v1/apps/{app_id}/network").json()
+        assert nics[0]["addresses"] == ["192.168.1.9/24"]
+        assert fake.lxc_interface_calls == []
+
+
+def test_loopback_and_link_local_are_not_an_address(tmp_path, csrf_header,
+                                                    bootstrap_admin):
+    """Every container has 127.0.0.1 and an fe80:: on every interface, and
+    neither one reaches a web UI. Same rule agent_addresses already applies to
+    VMs."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.guest_configs[("lxc", 150)] = {
+        "hostname": "immich",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,ip=dhcp,type=veth",
+    }
+    fake.lxc_interfaces = {150: [
+        {"name": "lo", "hwaddr": "00:00:00:00:00:00", "inet": "127.0.0.1/8"},
+        {"name": "eth0", "hwaddr": "bc:24:11:00:11:22",
+         "inet6": "fe80::be24:11ff:fe00:1122/64"},
+    ]}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, app_id, _ = _seed(app)
+        assert c.get(f"/api/v1/apps/{app_id}/network").json()[0]["addresses"] is None
+
+
+def test_a_container_pve_cannot_answer_for_reports_no_address(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A stopped container has no interfaces to ask about, and PVE errors
+    rather than answering empty. That is unknown, not "no address", and it must
+    not cost the whole NIC read."""
+    from tests.support import make_app
+
+    fake = _fake()
+    fake.guest_configs[("lxc", 150)] = {
+        "hostname": "immich",
+        "net0": "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:11:22,ip=dhcp,type=veth",
+    }
+    app = make_app(tmp_path, fake=fake)   # no lxc_interfaces entry: PVE raises
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, app_id, _ = _seed(app)
+        nics = c.get(f"/api/v1/apps/{app_id}/network").json()
+        assert nics[0]["addresses"] is None
+        assert nics[0]["ip"] == "dhcp"     # the rest of the row still arrives

@@ -804,6 +804,28 @@ class ProxmoxClient:
                     out.append(value)
         return out
 
+    def lxc_interfaces(self, node: str, vmid: int) -> list[dict] | None:
+        """What a RUNNING container's interfaces actually are, or None.
+
+        The counterpart to agent_addresses() for VMs, and the answer to the
+        same question: a config read reports what was REQUESTED, and for a
+        container on DHCP that is the literal word `dhcp`. PVE does know the
+        lease, and this is where it keeps it. No guest agent involved: the
+        container shares the host kernel, so the node can read its namespace
+        directly. Measured on PVE 9.2.10, 2026-08-20: a CT whose config says
+        `ip=dhcp` answers here with `eth0 ... inet 192.168.50.179/24`, and the
+        hwaddr matches the config's own.
+
+        None means cannot tell, which is the ordinary case for a STOPPED
+        container: there are no interfaces to report and PVE errors rather
+        than answering empty. Swallowed for the same reason agent_addresses
+        swallows its own: not being able to ask is not an outage.
+        """
+        try:
+            return self._connect().nodes(node).lxc(vmid).interfaces.get() or []
+        except Exception:  # noqa: BLE001  (a stopped CT is not an error)
+            return None
+
     def node_networks(self, node: str, iface_type: str | None = None) -> list[dict]:
         """GET /nodes/{node}/network -> [{iface, type, method, cidr, gateway,
         bridge_ports, active, autostart, ...}]. `iface_type` is PVE's `type`

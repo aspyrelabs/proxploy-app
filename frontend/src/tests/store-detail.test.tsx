@@ -498,8 +498,12 @@ describe('upstream links', () => {
     expect(link).toHaveAttribute('target', '_blank')
     expect(link.getAttribute('rel')).toContain('noreferrer')
     expect(link.getAttribute('rel')).toContain('noopener')
-    // The label is inside that same link rather than being a second one.
+    // ONE link, and it is the address only. The label is prose beside it: a
+    // whole clickable line means "Website", "Documentation", "Source" and
+    // "Last script change" all become links to somewhere, which reads as a
+    // mistake even though every one of them would navigate correctly.
     expect(screen.getAllByRole('link')).toHaveLength(1)
-    expect(link).toHaveTextContent('Website')
+    expect(link).not.toHaveTextContent('Website')
+    expect(screen.getByText('Website')).toBeInTheDocument()
   })
 })
