@@ -119,7 +119,23 @@ def _matched_step(secret: str, code: str, window: int = 1) -> int | None:
 
 
 def verify_login(db, secretstore, user: User, code: str) -> bool:
-    """Accepts a current TOTP code (valid_window=1, ~±30s) or an unused
+    """Did this code check out? See verify_login_kind for WHICH kind it was.
+
+    Kept as the bool it has always been because most callers only ask the
+    yes/no question, and because both are single use: calling one after the
+    other would burn two codes to answer one question.
+    """
+    return verify_login_kind(db, secretstore, user, code) is not None
+
+
+def verify_login_kind(db, secretstore, user: User, code: str) -> str | None:
+    """"totp", "recovery", or None.
+
+    The caller that needs the distinction is the login route: a spent recovery
+    code means the authenticator is gone, which is the moment every trusted
+    device has to lose its trust (services/authn.py::revoke_trusted_devices).
+
+    Accepts a current TOTP code (valid_window=1, ~±30s) or an unused
     recovery code. Both are single use: a matched recovery code is burned
     atomically, and a matched TOTP step is recorded so the same code cannot
     be presented again while it is still inside its window (RFC 6238 5.2).
@@ -127,7 +143,7 @@ def verify_login(db, secretstore, user: User, code: str) -> bool:
     second factor AND the confirm-your-identity gate on disabling two-factor,
     so without it one captured code does both."""
     if not user.totp_enabled or not user.totp_secret_enc:
-        return False
+        return None
     secret = secretstore.decrypt(user.totp_secret_enc).decode()
     step = _matched_step(secret, code)
     if step is not None:
@@ -135,14 +151,14 @@ def verify_login(db, secretstore, user: User, code: str) -> bool:
         # concurrent requests can both match, only one can move the watermark
         # forward, and the loser's rowcount is 0.
         if user.totp_last_step is not None and step <= user.totp_last_step:
-            return False
+            return None
         burned = (db.query(User)
                   .filter(User.id == user.id,
                           sa.or_(User.totp_last_step.is_(None),
                                  User.totp_last_step < step))
                   .update({"totp_last_step": step}))
         db.commit()
-        return burned > 0
+        return "totp" if burned > 0 else None
     for row in (db.query(TotpRecoveryCode)
                 .filter_by(user_id=user.id, used_at=None)
                 .order_by(TotpRecoveryCode.id)):
@@ -156,8 +172,8 @@ def verify_login(db, secretstore, user: User, code: str) -> bool:
                   .filter(TotpRecoveryCode.id == row.id, TotpRecoveryCode.used_at.is_(None))
                   .update({"used_at": utcnow()}))
         db.commit()
-        return burned > 0
-    return False
+        return "recovery" if burned > 0 else None
+    return None
 
 
 def disable(db, user: User) -> None:

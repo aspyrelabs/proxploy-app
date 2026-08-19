@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     master_key_file: Path = Path("./data/master.key")
     session_cookie: str = "pp_session"
+    # "Remember this device": how long a browser that has already proved the
+    # second factor may skip the code step.
+    trusted_cookie: str = "pp_trusted"
+    trusted_device_ttl_days: int = 30
     csrf_cookie: str = "pp_csrf"
     session_ttl_hours: int = 168
     cookie_secure: bool = False  # installer flips on when TLS terminates at the app

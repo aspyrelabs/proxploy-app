@@ -97,6 +97,32 @@ class SessionRow(TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class TrustedDevice(TimestampMixin, Base):
+    """A browser that has already proved the second factor, so the code step
+    can be skipped on this device until `expires_at`.
+
+    Deliberately the same shape as `sessions` above, and hashed the same way
+    (services/authn.py::_th): the expiry and revocation semantics of a session
+    are already proven, and a second, subtly different set of rules around a
+    credential that BYPASSES two-factor is exactly where a hole would open.
+
+    It is not a session and cannot become one. `resolve_session` reads the
+    sessions table only, so this token grants nothing on its own: it is checked
+    after a password has already been verified, and the most it can do is skip
+    the code. Bound to `user_id` so a device trusted for one account cannot
+    skip the second factor on another.
+    """
+    __tablename__ = "trusted_devices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    ip: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class ApiKey(TimestampMixin, Base):
     __tablename__ = "api_keys"
     id: Mapped[int] = mapped_column(primary_key=True)

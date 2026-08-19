@@ -21,6 +21,7 @@ import { ApiKeysCard } from '../components/ApiKeysCard'
 import { UsersCard } from '../components/UsersCard'
 import { TotpCard } from '../components/TotpCard'
 import { SessionsCard } from '../components/SessionsCard'
+import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
@@ -526,6 +527,8 @@ export function SettingsPage() {
       <TotpCard />
 
       <SessionsCard />
+
+      <TrustedDevicesCard />
 
       <UpdateCard />
     </div>

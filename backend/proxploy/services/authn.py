@@ -5,7 +5,7 @@ from datetime import timedelta
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-from proxploy.models import SessionRow, User, utcnow
+from proxploy.models import SessionRow, TrustedDevice, User, utcnow
 
 _ph = PasswordHasher()  # argon2id, library defaults (doc 08 §5)
 
@@ -50,6 +50,60 @@ def resolve_session(db, raw: str) -> User | None:
         return None
     user = db.get(User, row.user_id)
     return user if user and user.is_active else None
+
+
+def trust_device(db, user: User, ip: str | None, user_agent: str | None,
+                 ttl_days: int) -> str:
+    """Mint the token that lets THIS browser skip the second factor.
+
+    Same generation and same hashing as create_session above, deliberately:
+    the token is a bearer credential with the same theft profile, and the
+    difference is only in what it buys (skipping one step of a login that
+    still needs the password) and in how long it lives.
+    """
+    raw = secrets.token_urlsafe(32)
+    db.add(TrustedDevice(user_id=user.id, token_hash=_th(raw), ip=ip,
+                         user_agent=user_agent, last_seen_at=utcnow(),
+                         expires_at=utcnow() + timedelta(days=ttl_days)))
+    db.commit()
+    return raw
+
+
+def device_is_trusted(db, user: User, raw: str | None) -> TrustedDevice | None:
+    """The live trust row for this user and this browser, or None.
+
+    Filtered on `user_id` as well as the token, so a device trusted for one
+    account cannot skip the second factor on another: without that, one shared
+    browser would hand every account on it a bypass.
+    """
+    if not raw:
+        return None
+    row = (db.query(TrustedDevice)
+           .filter(TrustedDevice.token_hash == _th(raw),
+                   TrustedDevice.user_id == user.id,
+                   TrustedDevice.revoked_at.is_(None),
+                   TrustedDevice.expires_at > utcnow())
+           .one_or_none())
+    if row is not None:
+        row.last_seen_at = utcnow()
+        db.commit()
+    return row
+
+
+def revoke_trusted_devices(db, user_id: int) -> int:
+    """Every live trust for a user, gone.
+
+    Called wherever the evidence behind the trust stops holding: the password
+    changed, the second factor was disabled or re-enrolled, or a recovery code
+    was spent because the authenticator was lost. A trusted device that
+    survives any of those is a bypass the user believes they have closed.
+    """
+    rows = (db.query(TrustedDevice)
+            .filter(TrustedDevice.user_id == user_id,
+                    TrustedDevice.revoked_at.is_(None))
+            .update({"revoked_at": utcnow()}))
+    db.commit()
+    return rows
 
 
 def revoke_session(db, raw: str) -> None:

@@ -11,7 +11,8 @@ from sqlalchemy import text
 
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
                                get_db, require_entitlement, user_role)
-from proxploy.models import SessionRow, TeamMember, User, to_iso, utcnow
+from proxploy.models import (SessionRow, TeamMember, TrustedDevice, User,
+                             to_iso, utcnow)
 from proxploy.services import authn, oidc, totp
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import enforce
@@ -43,7 +44,12 @@ def _user_out(db, user: User) -> dict:
             "role": user_role(db, user), "totp_enabled": user.totp_enabled}
 
 
-def _issue_session(request: Request, response: Response, db, user: User) -> dict:
+def settings_of(request: Request):
+    return request.app.state.settings
+
+
+def _issue_session(request: Request, response: Response, db, user: User,
+                   *, via: str | None = None) -> dict:
     """The exact create_session + set_cookie + audit block both login paths
     (password-only, and the TOTP second factor below) need; extracted so
     the two cannot drift apart."""
@@ -51,7 +57,8 @@ def _issue_session(request: Request, response: Response, db, user: User) -> dict
     ip = request.client.host if request.client else None
     raw = authn.create_session(db, user, ip, request.headers.get("user-agent"),
                                settings.session_ttl_hours)
-    write_audit(db, actor_type="user", actor_id=user.id, action="auth.login", ip=ip)
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.login", ip=ip,
+                params={"via": via} if via else None)
     response.set_cookie(settings.session_cookie, raw, httponly=True, samesite="lax",
                         secure=settings.cookie_secure)
     return {"ok": True, "user": _user_out(db, user)}
@@ -90,6 +97,9 @@ class LoginIn(BaseModel):
 class TotpLoginIn(BaseModel):
     pending: str
     code: str
+    # "Remember this device for 30 days". Default False: skipping a factor is
+    # something the user asks for, never something a client gets by omission.
+    remember: bool = False
 
 
 @router.post("/login")
@@ -109,6 +119,16 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
                     action="auth.login", result="error", ip=ip)
         raise HTTPException(401, "invalid credentials")
     if user.totp_enabled:
+        # This browser may already have proved the second factor. Checked
+        # AFTER the password, never instead of it: the most a stolen trust
+        # cookie can do is skip the code on someone who also has the password.
+        # Audited as a distinct `via`, because a login that skipped a factor
+        # and a login that did not must not look the same afterwards.
+        trusted = authn.device_is_trusted(
+            db, user, request.cookies.get(settings_of(request).trusted_cookie))
+        if trusted is not None:
+            return _issue_session(request, response, db, user,
+                                  via="trusted_device")
         # No cookie: the password check alone never grants a session. The
         # pending token below is the only thing this response hands back,
         # and it is not usable for anything except POST /auth/totp.
@@ -132,12 +152,15 @@ def totp_login(request: Request, body: TotpLoginIn, response: Response, db=Depen
     key = authn._th(body.pending)
     entry = store.get(key)
     ok = False
+    used_recovery = False
     user = None
     if entry is not None:
         user_id, expires_at, attempts = entry
         user = db.get(User, user_id)
-        ok = bool(user and user.is_active and user.totp_enabled and totp.verify_login(
-            db, request.app.state.secretstore, user, body.code))
+        kind = (totp.verify_login_kind(db, request.app.state.secretstore, user, body.code)
+                if user and user.is_active and user.totp_enabled else None)
+        ok = kind is not None
+        used_recovery = kind == "recovery"
         if ok:
             del store[key]  # single-use: a second call with the same pending 401s
         else:
@@ -150,6 +173,26 @@ def totp_login(request: Request, body: TotpLoginIn, response: Response, db=Depen
         write_audit(db, actor_type="user", actor_id=user.id if user else None,
                     action="auth.login", result="error", ip=ip)
         raise HTTPException(401, "invalid or expired code")
+    settings = request.app.state.settings
+    if used_recovery:
+        # A spent recovery code means the authenticator is gone. Any device
+        # still trusted from before that is a bypass the user thinks they
+        # closed by recovering, so recovery revokes them all, INCLUDING one
+        # minted moments ago by this same request's `remember`.
+        revoked = authn.revoke_trusted_devices(db, user.id)
+        if revoked:
+            write_audit(db, actor_type="user", actor_id=user.id,
+                        action="auth.trusted_device.revoke_all",
+                        params={"reason": "recovery_code_used", "count": revoked}, ip=ip)
+        response.delete_cookie(settings.trusted_cookie)
+    elif body.remember:
+        raw = authn.trust_device(db, user, ip, request.headers.get("user-agent"),
+                                 settings.trusted_device_ttl_days)
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="auth.trusted_device.create", ip=ip)
+        response.set_cookie(settings.trusted_cookie, raw, httponly=True,
+                            samesite="lax", secure=settings.cookie_secure,
+                            max_age=settings.trusted_device_ttl_days * 86400)
     return _issue_session(request, response, db, user)
 
 
@@ -227,7 +270,13 @@ def totp_disable(request: Request, body: TotpDisableIn, db=Depends(get_db),
     if not ok:
         raise HTTPException(403, "Confirm your identity to continue.")
     totp.disable(db, user)
-    write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.disable")
+    # The trust every remembered device holds IS the second factor being
+    # disabled here, so it goes with it. Re-enrolling later starts from no
+    # trusted devices rather than silently inheriting the old ones, which
+    # would let a device skip a factor it never proved.
+    revoked = authn.revoke_trusted_devices(db, user.id)
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.totp.disable",
+                params={"trusted_devices_revoked": revoked} if revoked else None)
     return {"ok": True}
 
 
@@ -277,6 +326,44 @@ def list_sessions(request: Request, db=Depends(get_db),
     return [{"id": r.id, "ip": r.ip, "user_agent": r.user_agent,
              "created_at": to_iso(r.created_at), "last_seen_at": to_iso(r.last_seen_at),
              "current": r.token_hash == current_hash} for r in rows]
+
+
+@router.get("/trusted-devices")
+def list_trusted_devices(request: Request, db=Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """Same self-service idiom, and the same ownership filter, as /sessions.
+
+    A device that can skip the second factor is worth seeing and revoking, so
+    the list is the point of the feature rather than a nicety. The token hash
+    is never returned: it is the credential.
+    """
+    raw = request.cookies.get(request.app.state.settings.trusted_cookie)
+    current_hash = authn._th(raw) if raw else None
+    rows = (db.query(TrustedDevice)
+            .filter(TrustedDevice.user_id == user.id,
+                    TrustedDevice.revoked_at.is_(None),
+                    TrustedDevice.expires_at > utcnow())
+            .order_by(TrustedDevice.id))
+    return [{"id": r.id, "ip": r.ip, "user_agent": r.user_agent,
+             "created_at": to_iso(r.created_at), "last_seen_at": to_iso(r.last_seen_at),
+             "expires_at": to_iso(r.expires_at),
+             "current": r.token_hash == current_hash} for r in rows]
+
+
+@router.delete("/trusted-devices/{did}")
+def revoke_trusted_device_route(request: Request, did: int, db=Depends(get_db),
+                                user: User = Depends(get_current_user)):
+    row = db.query(TrustedDevice).filter_by(id=did, user_id=user.id).one_or_none()
+    if row is None:
+        raise HTTPException(404, "trusted device not found")  # 404 for another
+    if not row.revoked_at:                                    # user's too, as
+        row.revoked_at = utcnow()                             # /sessions does
+        db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="auth.trusted_device.revoke",
+                target_type="trusted_device", target_id=did,
+                ip=request.client.host if request.client else None)
+    return {"ok": True}
 
 
 @router.delete("/sessions/{sid}")
@@ -490,6 +577,14 @@ def _would_strand_the_install(db, target_id: int) -> bool:
     return not (active - {target_id})
 
 
+def _revoke_all_logins(db, user_id: int) -> tuple[int, int]:
+    """Sessions AND trusted devices. Every caller of _revoke_all_sessions wants
+    both: a password reset, a deactivation or a deletion that leaves a device
+    able to skip the second factor has not closed the account's access, it has
+    only made the next login slightly more inconvenient."""
+    return _revoke_all_sessions(db, user_id), authn.revoke_trusted_devices(db, user_id)
+
+
 def _revoke_all_sessions(db, user_id: int) -> int:
     """Every live session for a user, gone.
 
@@ -545,7 +640,7 @@ def patch_user(request: Request, user_id: int, body: UserPatchIn,
 
     revoked = 0
     if changed.get("is_active") is False:
-        revoked = _revoke_all_sessions(db, target.id)
+        revoked, _ = _revoke_all_logins(db, target.id)
     db.commit()
     write_audit(db, actor_type="user", actor_id=actor.id, action="user.update",
                 target_type="user", target_id=target.id,
@@ -570,7 +665,7 @@ def reset_password(request: Request, user_id: int, body: PasswordResetIn,
     # A password reset does not clear TOTP: the second factor is the user's,
     # not the admin's, and silently dropping it would weaken the account
     # while looking like a routine recovery.
-    revoked = _revoke_all_sessions(db, target.id)
+    revoked, _ = _revoke_all_logins(db, target.id)
     db.commit()
     write_audit(db, actor_type="user", actor_id=actor.id,
                 action="user.password_reset", target_type="user",
@@ -601,7 +696,7 @@ def delete_user(request: Request, user_id: int, db=Depends(get_db),
                       "owner first"})
 
     email = target.email
-    _revoke_all_sessions(db, target.id)
+    _revoke_all_logins(db, target.id)
     for m in db.query(TeamMember).filter_by(user_id=target.id):
         db.delete(m)
     db.flush()

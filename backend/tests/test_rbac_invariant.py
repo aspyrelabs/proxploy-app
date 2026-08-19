@@ -44,6 +44,16 @@ UNGOVERNED = {
     # same idiom api/apikeys.py uses for "my own API keys" below.
     ("GET", "/api/v1/auth/sessions"),
     ("DELETE", "/api/v1/auth/sessions/{sid}"),
+    # Self-service trusted devices ("remember this device for 30 days"), and
+    # the same reasoning verbatim: which browsers may skip MY second factor is
+    # my own login state, not a role question, so it has no (resource, action)
+    # pair either. Ownership is enforced the same way, by filtering on
+    # user_id=user.id in both the list and the revoke. Worth being explicit
+    # about since this credential SKIPS a factor: the exemption is from casbin,
+    # not from authentication, and both routes still require a session via
+    # get_current_user.
+    ("GET", "/api/v1/auth/trusted-devices"),
+    ("DELETE", "/api/v1/auth/trusted-devices/{did}"),
     ("GET", "/api/v1/auth/oidc/login"),      # public, pre-session (Task 11)
     ("GET", "/api/v1/auth/oidc/callback"),
     ("POST", "/api/v1/users"),               # first-run bootstrap; enforcer-checked inline
@@ -87,6 +97,10 @@ VIEWER_SELF = {
                                              # missing body before anything role-shaped
                                              # runs; there is no authorize() here to deny
     ("DELETE", "/api/v1/auth/sessions/{sid}"),  # own sessions; another user's id 404s
+    # Own trusted devices, same shape: the query filters on user_id, so another
+    # user's id 404s rather than 403s. Forgetting a device only ever makes a
+    # login stricter, so there is nothing here a viewer should be denied.
+    ("DELETE", "/api/v1/auth/trusted-devices/{did}"),
     ("POST", "/api/v1/api-keys"),            # key is capped by the viewer's own role
     ("DELETE", "/api/v1/api-keys/{key_id}"),
     ("POST", "/api/v1/users"),               # 403s inline anyway post-bootstrap; listed

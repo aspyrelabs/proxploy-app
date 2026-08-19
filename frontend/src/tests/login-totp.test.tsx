@@ -135,9 +135,27 @@ describe('LoginForm, TOTP step', () => {
     fireEvent.click(screen.getByRole('button', { name: /verify/i }))
     await waitFor(() => expect(posted.some(p =>
       p.path === '/auth/totp'
-      && JSON.stringify(p.body) === JSON.stringify({ pending: 'PEND-TOKEN', code: '123456' }),
+      && JSON.stringify(p.body) === JSON.stringify({
+        pending: 'PEND-TOKEN', code: '123456', remember: false,
+      }),
     )).toBe(true))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+  })
+
+  it('sends remember:true only when the box is ticked', async () => {
+    // Skipping a factor is something the user asks for, never something they
+    // get by not noticing a pre-ticked box.
+    totpRequired = true
+    await loginWithPassword(vi.fn())
+    const box = await screen.findByLabelText(/remember this device for 30 days/i)
+    expect((box as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(box)
+    fireEvent.change(await screen.findByLabelText(/authentication code/i),
+                     { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: /verify/i }))
+    await waitFor(() => expect(posted.some(p =>
+      p.path === '/auth/totp' && p.body?.remember === true,
+    )).toBe(true))
   })
 
   it('shows a retry message on a rejected code and keeps the pending token', async () => {

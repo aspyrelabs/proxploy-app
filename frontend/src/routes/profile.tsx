@@ -7,6 +7,7 @@ import { notify } from '../lib/notify'
 import { useMe } from '../api/hooks'
 import { inputCls } from '../components/LoginForm'
 import { SessionsCard } from '../components/SessionsCard'
+import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { TotpCard } from '../components/TotpCard'
 import { Button } from '../components/ui/button'
 import { SkeletonLine } from '../components/ui/skeleton'
@@ -146,6 +147,8 @@ export function ProfilePage() {
 
       <TotpCard />
       <SessionsCard />
+
+      <TrustedDevicesCard />
     </div>
   )
 }

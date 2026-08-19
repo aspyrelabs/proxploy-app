@@ -49,6 +49,19 @@ export function useSessions() {
   return useQuery({ queryKey: ['auth', 'sessions'], queryFn: () => api<SessionRow[]>('/auth/sessions') })
 }
 
+/** A browser that has already proved the second factor and may skip the code
+ *  step until `expires_at`. Not a session: it grants nothing on its own, the
+ *  password is still required at every login. */
+export type TrustedDeviceRow = SessionRow & { expires_at: string }
+
+export function useTrustedDevices(enabled: boolean) {
+  return useQuery({
+    queryKey: ['auth', 'trusted-devices'],
+    queryFn: () => api<TrustedDeviceRow[]>('/auth/trusted-devices'),
+    enabled,
+  })
+}
+
 // --- Task 14: Settings update card -------------------------------------------
 //
 // Mirrors backend/proxploy/api/meta.py's GET/POST /meta/update exactly (see

@@ -20,6 +20,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
+  const [remember, setRemember] = useState(false)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -64,7 +65,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     e.preventDefault()
     setBusy(true); setError('')
     try {
-      await api('/auth/totp', { method: 'POST', body: JSON.stringify({ pending, code }) })
+      await api('/auth/totp', { method: 'POST', body: JSON.stringify({ pending, code, remember }) })
       onSuccess()
     } catch {
       // Pending token is deliberately kept (not cleared): a wrong code
@@ -89,7 +90,15 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3" htmlFor="totp-code">Authentication code</label>
         <input id="totp-code" ref={codeRef} type="text" inputMode="numeric" autoComplete="one-time-code" required
           value={code} onChange={e => setCode(e.target.value)} className={inputCls + ' mb-2'} />
-        <p className="mb-4 text-[12px] text-text-3">Use a recovery code if you do not have your authenticator app.</p>
+        <p className="mb-3 text-[12px] text-text-3">Use a recovery code if you do not have your authenticator app.</p>
+        {/* Never pre-ticked: skipping a factor is something the operator asks
+            for. Says "this device" rather than "keep me signed in" because
+            that is what it does, the password is still required every time. */}
+        <label className="mb-4 flex items-center gap-2 text-[12.5px] text-text-2">
+          <input type="checkbox" checked={remember}
+                 onChange={e => setRemember(e.target.checked)} />
+          Remember this device for 30 days
+        </label>
         {error && <p className="mb-3 text-[12.5px] text-red">{error}</p>}
         <Button type="submit" disabled={busy} className="w-full">{busy ? 'Verifying…' : 'Verify'}</Button>
       </form>
