@@ -170,7 +170,8 @@ describe('VmCreateWizard, the enabled-gated ISO image select', () => {
     // below are the only thing under test.
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve1' } })
+    // host-01 has exactly one cluster node, so PXP-87 pre-fills it and skips
+    // the node select entirely; nothing to change here.
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 

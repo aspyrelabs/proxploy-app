@@ -34,8 +34,11 @@ vi.mock('../api/client', () => {
           if (vmsListResult === 'error') return Promise.reject(new ApiError(502, { detail: 'boom' }))
           return Promise.resolve(vmsListResult === 'empty' ? [] : [VM])
         }
-        if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
-        if (path === '/cluster/nodes') return Promise.resolve([{ host_id: 1, node: 'pve1' }])
+        if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }])
+        if (path === '/cluster/nodes') return Promise.resolve([
+          { host_id: 1, node: 'pve1' },
+          { host_id: 2, node: 'pve2a' }, { host_id: 2, node: 'pve2b' },
+        ])
         if (path === '/storage') return Promise.resolve([
           { host_id: 1, node: 'pve1', storage: 'local', content: ['iso', 'vztmpl'] },
           { host_id: 1, node: 'pve1', storage: 'local-lvm', content: ['images', 'rootdir'] },
@@ -98,8 +101,9 @@ describe('VmCreateWizard', () => {
     // option is a silent no-op in jsdom.
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
-    await screen.findByRole('option', { name: 'pve1' })
-    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve1' } })
+    // host-01 has exactly one cluster node, so PXP-87 pre-fills it and never
+    // shows a node select: asking would just repeat the host question.
+    expect(screen.queryByLabelText(/^node$/i)).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
     next()
 
@@ -141,13 +145,27 @@ describe('VmCreateWizard', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 
+  it('still asks for the node when the host is a real cluster with more than one', async () => {
+    // PXP-87: skipping the node question only holds when there is one answer.
+    // host-02 has two nodes, so this is a genuine choice and stays on screen.
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-02' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '2' } })
+    await screen.findByRole('option', { name: 'pve2a' })
+    expect(screen.getByRole('option', { name: 'pve2b' })).toBeInTheDocument()
+    // Nothing is pre-selected, and Next stays disabled, until a node is chosen.
+    expect(screen.getByLabelText(/^node$/i)).toHaveValue('')
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'x' } })
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve2b' } })
+    expect(screen.getByRole('button', { name: 'Next' })).not.toBeDisabled()
+  })
+
   it('asks the storage content endpoint for ISOs only', async () => {
     const { api } = await import('../api/client')
     wrap(<VmCreateWizard onClose={() => {}} />)
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
-    await screen.findByRole('option', { name: 'pve1' })
-    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve1' } })
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'x' } })
     next()
     await screen.findByRole('option', { name: 'local' })
@@ -194,8 +212,6 @@ describe('VmCreateWizard rail', () => {
     wrap(<VmCreateWizard onClose={() => {}} />)
     await screen.findByRole('option', { name: 'host-01' })
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
-    await screen.findByRole('option', { name: 'pve1' })
-    fireEvent.change(screen.getByLabelText(/^node$/i), { target: { value: 'pve1' } })
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
     next()
 

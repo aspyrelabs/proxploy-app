@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
 import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
@@ -81,6 +81,15 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
   })
 
   const nodeOpts = (nodes.data ?? []).filter((n) => n.host_id === hostId)
+
+  // PXP-87: a host is almost always a single PVE node, so asking for the node
+  // right under the host it just resolved from reads as the same question
+  // twice. Pre-fill it silently when there is only one answer; only a real
+  // cluster host (nodeOpts.length > 1) still gets the select below.
+  useEffect(() => {
+    if (nodeOpts.length === 1 && f.node !== nodeOpts[0].node) set('node', nodeOpts[0].node)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostId, nodeOpts.length, nodeOpts[0]?.node])
   const storeOpts = (kind: string) => (storages.data ?? [])
     .filter((s) => s.host_id === hostId && s.node === f.node && (s.content ?? []).includes(kind))
   const bridgeOpts = (bridges.data?.nodes ?? [])
@@ -178,18 +187,24 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                 {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
             </Field>
-            <Field id="vm-node" label="Node">
-              <select id="vm-node" className={inputCls} value={f.node}
-                disabled={nodes.isError || nodes.isLoading}
-                onChange={(e) => set('node', e.target.value)}>
-                {nodes.isError
-                  ? <option value="">Could not load nodes</option>
-                  : nodes.isLoading
-                    ? <option value="">Loading nodes…</option>
-                    : <option value="">Select a node…</option>}
-                {nodeOpts.map((n) => <option key={n.node} value={n.node}>{n.node}</option>)}
-              </select>
-            </Field>
+            {/* A host with exactly one PVE node has nothing to ask: the effect
+                above already filled f.node in, and this field would just be
+                the same question the host select answered a moment ago. Only
+                a real cluster host, with more than one node, gets asked. */}
+            {nodeOpts.length !== 1 && (
+              <Field id="vm-node" label="Node">
+                <select id="vm-node" className={inputCls} value={f.node}
+                  disabled={nodes.isError || nodes.isLoading}
+                  onChange={(e) => set('node', e.target.value)}>
+                  {nodes.isError
+                    ? <option value="">Could not load nodes</option>
+                    : nodes.isLoading
+                      ? <option value="">Loading nodes…</option>
+                      : <option value="">Select a node…</option>}
+                  {nodeOpts.map((n) => <option key={n.node} value={n.node}>{n.node}</option>)}
+                </select>
+              </Field>
+            )}
             <Field id="vm-name" label="VM name">
               <input id="vm-name" className={inputCls} placeholder="ubuntu-lab"
                 value={f.name} onChange={(e) => set('name', e.target.value)} />
