@@ -71,6 +71,11 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
         "icon_url": served_icon_url(entry),
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
+        # "Open web UI" target port (PXP-85): the catalog's own port, resolved
+        # through `entry` the same way the icon above is, never stored on the
+        # app row. No catalog entry / no port on it means no button, not a
+        # prompt for one, so None here is what hides the action client-side.
+        "catalog_port": entry.port if entry else None,
         "status": a.status_cached or "unknown", "ip": a.ip_cached,
         "cpu_pct": a.cpu_pct_cached, "mem_bytes": a.mem_bytes_cached,
         "mem_total_bytes": g["mem_total_bytes"] if g else None,

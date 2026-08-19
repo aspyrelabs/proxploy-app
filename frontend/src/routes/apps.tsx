@@ -193,6 +193,28 @@ export function AppDetail() {
     queryFn: () => api<AppRow>(`/apps/${appId}`),
     refetchInterval: 15_000,
   })
+  // Address is read live off the guest's own NIC config on click, never off
+  // a column set at install: a DHCP lease or a manual re-IP moves the guest
+  // and a value cached at install would silently point at the old one. Same
+  // endpoint the Network tab's edit path already reads through
+  // (api/apps.py::app_network / services guest_nics, "no cache").
+  const openWebUi = useMutation({
+    mutationFn: async (tab: Window | null) => {
+      const app = appQuery.data!
+      const nics = await api<{ ip: string | null }[]>(`/apps/${app.id}/network`)
+      const addr = nics.map((n) => n.ip).find((ip) => ip && ip !== 'dhcp')?.split('/')[0]
+      if (!addr) { tab?.close(); throw new Error('no address') }
+      const url = `${app.web_protocol || 'http'}://${addr}:${app.catalog_port}${app.web_path || '/'}`
+      // The tab is opened by the click handler, not here. Looking the address
+      // up first would put this window.open after an await, outside the user
+      // gesture, and a popup blocker would drop it: the one thing the button
+      // exists to do. So the tab is opened empty up front and pointed at the
+      // app once the address comes back.
+      if (tab) tab.location.href = url
+      else window.open(url, '_blank', 'noopener,noreferrer')
+    },
+    onError: () => notify.error(`Could not determine ${appQuery.data?.name ?? 'this app'}'s address.`),
+  })
   return (
     <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
                 // The header and the tab strip, which is the whole page
@@ -229,6 +251,7 @@ export function AppDetail() {
         const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
         const reconfigureDenied = ent.data != null && !ent.has('apps.reconfigure')
         const uninstallDenied = ent.data != null && !ent.has('apps.uninstall')
+        const openUiDenied = ent.data != null && !ent.has('apps.open_ui')
         return (
           <div>
             <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
@@ -251,6 +274,17 @@ export function AppDetail() {
               </div>
               <div className="ml-auto flex items-center gap-3">
                 <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} />
+                {app.catalog_port != null && (
+                  <Button variant="go" disabled={openUiDenied || openWebUi.isPending}
+                    title={openUiDenied ? 'Not included in your plan' : undefined}
+                    onClick={() => {
+                      const tab = window.open('', '_blank')
+                      if (tab) tab.opener = null
+                      openWebUi.mutate(tab)
+                    }}>
+                    Open web UI
+                  </Button>
+                )}
                 <Button variant="ghost" disabled={migrateDenied}
                   title={migrateDenied ? 'Not included in your plan' : undefined}
                   onClick={() => setMigrating(true)}>

@@ -95,6 +95,37 @@ def test_apps_carry_their_catalog_entrys_icon(tmp_path, csrf_header, bootstrap_a
         assert c.get(f"/api/v1/apps/{aid}").json()["icon_url"] == rows["immich"]
 
 
+def test_open_ui_port_comes_from_the_catalog_entry_not_the_app_row(tmp_path, csrf_header,
+                                                                   bootstrap_admin):
+    """PXP-85: the "Open web UI" button keys off `catalog_port`, resolved
+    through this app's catalog entry on every request, same as the icon
+    (test_apps_carry_their_catalog_entrys_icon). No entry, or an entry with
+    no port, must serve None -- that is what hides the button client-side,
+    never a fallback port and never a prompt."""
+    from proxploy.models import App, CatalogEntry
+
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        hid = seed()
+        with app.state.sessionmaker() as db:
+            db.add(CatalogEntry(slug="immich", name="Immich", port=2283))
+            db.add(CatalogEntry(slug="paperless", name="Paperless"))  # no port
+            for a in db.query(App).all():
+                a.catalog_slug = a.slug
+            db.add(App(host_id=hid, ctid=152, name="Gone", slug="gone",
+                       catalog_slug="removed-from-upstream"))
+            db.commit()
+        rows = {r["slug"]: r["catalog_port"] for r in c.get("/api/v1/apps").json()}
+        assert rows["immich"] == 2283
+        assert rows["paperless"] is None
+        assert rows["gone"] is None
+        # The detail route resolves it the same way.
+        aid = next(r["id"] for r in c.get("/api/v1/apps").json()
+                   if r["slug"] == "immich")
+        assert c.get(f"/api/v1/apps/{aid}").json()["catalog_port"] == 2283
+
+
 def test_discovered_lists_unadopted_cts(tmp_path, csrf_header, bootstrap_admin):
     app, c, seed = _seeded(tmp_path)
     with c:
