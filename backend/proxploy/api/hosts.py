@@ -32,6 +32,10 @@ _read = authorize("host", "read")                      # no host id yet (list)
 _read_scoped = authorize("host", "read", scope_of=scope_host())
 _manage = authorize("host", "manage", scope_of=scope_host())
 _manage_global = authorize("host", "manage")          # no host id yet (probe, create)
+# PUT /self writes an app setting, not a host row: ("settings", "manage") is
+# the same permission api/settings.py and api/meta.py already gate their own
+# setting writes on, not a host permission.
+_manage_self_host = authorize("settings", "manage")
 
 CONSENT_NOTE = ("This key gives Proxploy a root shell on the node, used only for "
                 "App Store install/update/migration scripts, exactly as if you ran "
@@ -415,6 +419,39 @@ def list_capabilities(user: User = Depends(_read)):
     """
     return [{"key": c.key, "label": c.label, "why": c.why, "required": c.required}
             for c in CAPABILITIES.values()]
+
+
+class SelfHostIn(BaseModel):
+    host_id: int | None = None
+
+
+@router.put("/self")
+def set_self_host(request: Request, body: SelfHostIn, db=Depends(get_db),
+                  user: User = Depends(_manage_self_host)):
+    """Which enrolled host, if any, Proxploy itself runs on (PXP-33):
+    selfguard.is_self_host_node()'s Host-record narrowing, and the second
+    condition inside is_self().
+
+    A dedicated route rather than a hole in PATCH /settings's allowlist
+    (api/settings.py, PXP-36 note): that route takes free-form values, and
+    self.host_id must name an actually-enrolled host or nothing at all, never
+    an arbitrary string. `host_id: null` is "none of these", the honest
+    answer when Proxploy is not running on any host it manages; set_setting
+    still writes the row (value None), so the onboarding wizard and the
+    settings screen can tell "answered none" apart from "never asked". Every
+    selfguard read already treats an absent key and a None value the same
+    way (fail open), so recording "none" changes nothing about detection,
+    only whether the question gets asked again.
+    """
+    if body.host_id is not None and db.get(Host, body.host_id) is None:
+        raise HTTPException(404, "host not found")
+    from proxploy.services.settings import set_setting
+    set_setting(db, "self.host_id", body.host_id)
+    ip = request.client.host if request.client else None
+    write_audit(db, actor_type="user", actor_id=user.id, action="settings.self_host",
+                target_type="host", target_id=body.host_id,
+                params={"host_id": body.host_id}, ip=ip)
+    return {"host_id": body.host_id}
 
 
 @router.get("/{host_id}")

@@ -162,6 +162,52 @@ export function SchedulesCard() {
   )
 }
 
+/** Which enrolled host, if any, Proxploy itself runs on (PXP-33). Onboarding
+ *  asks this once for a new install; an install that already finished
+ *  onboarding before this existed has no other prompt, so it lives here too.
+ *  "None of these" is a real, storable answer: not every install manages the
+ *  host it runs on, and self-detection already fails open (never blocks) when
+ *  nothing is recorded. */
+function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api<Record<string, unknown>>('/settings'),
+  })
+  const answered = settings.data != null
+    && Object.prototype.hasOwnProperty.call(settings.data, 'self.host_id')
+  const current = settings.data?.['self.host_id']
+  const setSelfHost = useMutation({
+    mutationFn: (hostId: number | null) =>
+      api('/hosts/self', { method: 'PUT', body: JSON.stringify({ host_id: hostId }) }),
+    onError: () => notify.error('Could not save that, try again.'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  })
+
+  if (settings.isPending) return null
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-ctl border
+                    border-line-soft bg-panel-2 px-3 py-2 text-[12.5px]">
+      <span className="text-text-2">
+        Which of these hosts is Proxploy itself running on?
+      </span>
+      <select aria-label="Proxploy's own host"
+        value={typeof current === 'number' ? String(current) : ''}
+        disabled={setSelfHost.isPending}
+        onChange={(e) => {
+          const v = e.target.value
+          setSelfHost.mutate(v ? Number(v) : null)
+        }}
+        className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
+        <option value="">None of these</option>
+        {hosts.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+      </select>
+      {!answered && <span className="text-text-3">Not answered yet</span>}
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const ent = useEntitlements()
   const { tier, grace, clockSkew } = ent
@@ -293,6 +339,7 @@ export function SettingsPage() {
       </Card>
 
       <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
+        {hosts.data && hosts.data.length > 0 && <SelfHostRow hosts={hosts.data} />}
         <QueryState query={hosts}
                     // Wrapped in the same overflow-x-auto the loaded branch
                     // uses, and the same min-w: seven columns do not fit a

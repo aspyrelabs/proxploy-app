@@ -26,11 +26,11 @@ export const onboardingRoute = createRoute({
   },
 })
 
-const STEPS = ['Account', 'Host', 'Install', 'Verify', 'Done'] as const
+const STEPS = ['Account', 'Host', 'Install', 'Verify', 'Self', 'Done'] as const
 
-// Index names, because five bare numbers scattered through the component is
+// Index names, because six bare numbers scattered through the component is
 // how off-by-one bugs get in.
-const S_ACCOUNT = 0, S_HOST = 1, S_INSTALL = 2, S_VERIFY = 3, S_DONE = 4
+const S_ACCOUNT = 0, S_HOST = 1, S_INSTALL = 2, S_VERIFY = 3, S_SELF = 4, S_DONE = 5
 
 type Onboarding = { admin_exists: boolean; host_added: boolean
                     ssh_pending: boolean; complete: boolean }
@@ -47,11 +47,17 @@ type MeOut = { id: number; email: string; display_name: string }
  *  operator has pasted the key" from "they have not", only whether the key
  *  works. So `stepFrom` lands on Install, and moving to Verify is a local
  *  acknowledgement. Both tick green together when ssh_pending flips false,
- *  which is the one thing the server does know. */
-function stepFrom(ob: Onboarding): number {
+ *  which is the one thing the server does know.
+ *
+ *  `selfAnswered` comes from GET /settings (self.host_id is a present key,
+ *  regardless of its value, once answered; see SelfHostStep). Only checked
+ *  once a host actually exists: with none enrolled the honest answer is
+ *  already "none of these" for free, nothing to ask (PXP-33). */
+function stepFrom(ob: Onboarding, selfAnswered: boolean): number {
   if (!ob.admin_exists) return S_ACCOUNT
   if (!ob.host_added) return S_HOST
   if (ob.ssh_pending) return S_INSTALL
+  if (!selfAnswered) return S_SELF
   return S_DONE
 }
 
@@ -59,10 +65,20 @@ export function Wizard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const ob = useQuery({ queryKey: ['onboarding'], queryFn: () => api<Onboarding>('/meta/onboarding') })
+  // Only fetched once a host exists: with none enrolled the Self step is
+  // never reached (stepFrom short-circuits on !host_added first), so there is
+  // nothing here worth a key to be "answered".
+  const settingsQ = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api<Record<string, unknown>>('/settings'),
+    enabled: !!ob.data?.host_added,
+  })
+  const selfAnswered = settingsQ.data != null
+    && Object.prototype.hasOwnProperty.call(settingsQ.data, 'self.host_id')
   // `serverStep` is where setup actually is; `view` is what is on screen and
   // is the only one of the two that may move backwards. Keeping them apart is
   // what makes Back possible without pretending a committed step can be undone.
-  const serverStep = ob.data ? stepFrom(ob.data) : 0
+  const serverStep = ob.data ? stepFrom(ob.data, selfAnswered) : 0
   const [view, setView] = useState<number | null>(null)
   const [skipped, setSkipped] = useState(false)
   const step = view ?? serverStep
@@ -71,9 +87,31 @@ export function Wizard() {
   const [removing, setRemoving] = useState(false)
   const [verifyError, setVerifyError] = useState('')
   const [verifying, setVerifying] = useState(false)
+  const [savingSelf, setSavingSelf] = useState(false)
 
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<MeOut>('/auth/me'),
     enabled: !!ob.data?.admin_exists })
+  // The Self step offers every enrolled host, not only the one this wizard
+  // run just added: an install can already have several by the time this
+  // step is reached (e.g. peers enrolled between sessions).
+  const allHosts = useQuery({
+    queryKey: ['onboarding-hosts-list'],
+    queryFn: () => api<{ id: number; name: string }[]>('/hosts'),
+    enabled: step === S_SELF,
+  })
+
+  async function saveSelfHost(hostId: number | null) {
+    setSavingSelf(true)
+    try {
+      await api('/hosts/self', { method: 'PUT', body: JSON.stringify({ host_id: hostId }) })
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      advance(S_DONE)
+    } catch {
+      // Left on the step; the select stays interactive to try again.
+    } finally {
+      setSavingSelf(false)
+    }
+  }
 
   function go(n: number) {
     setDir(n >= step ? 1 : -1)
@@ -120,6 +158,7 @@ export function Wizard() {
     !!ob.data?.host_added,
     sshDone,
     sshDone,
+    selfAnswered,
     false,
   ]
 
@@ -127,7 +166,7 @@ export function Wizard() {
     const status: RailStep['status'] =
       i === step ? 'current'
         : done[i] ? 'done'
-          : skipped && i >= S_HOST && i <= S_VERIFY ? 'skipped'
+          : skipped && i >= S_HOST && i <= S_SELF ? 'skipped'
             : 'todo'
     const detail = i === S_ACCOUNT && done[S_ACCOUNT] ? me.data?.email
       : i === S_HOST && done[S_HOST] ? storedHostName ?? undefined
@@ -150,7 +189,7 @@ export function Wizard() {
       const id = hostId ?? (await api<{ id: number }[]>('/hosts'))[0]?.id
       if (id == null) throw new Error('no host to verify')
       await api(`/hosts/${id}/ssh/verify`, { method: 'POST' })
-      advance(S_DONE)
+      advance(selfAnswered ? S_DONE : S_SELF)
     } catch (e) {
       // A mis-pasted key used to surface at the first app install instead of
       // here, far from its cause. host_key_mismatch is a security event,
@@ -262,7 +301,13 @@ export function Wizard() {
             </div>
           ) : (
             <div className="space-y-3">
-              <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? S_INSTALL : S_DONE) }} />
+              {/* selfAnswered is never true here: this branch only ever runs
+                  the FIRST time a host is added (host_added was still false),
+                  and there is no way to have answered which host is "self"
+                  before any host existed to pick, so S_SELF unconditionally
+                  follows a keyless host, same as S_INSTALL does for one with
+                  a key. */}
+              <HostForm onCreated={h => { setHost(h); advance(h.ssh_public_key ? S_INSTALL : S_SELF) }} />
               <Button variant="ghost" onClick={() => { setSkipped(true); advance(S_DONE) }}>Skip for now</Button>
               <p className="text-[12px] text-text-3">
                 You can add a host later from Settings. Everything except managing nodes works without one.
@@ -304,6 +349,34 @@ export function Wizard() {
                   shell either works or it does not, so this is the ring, not
                   a number pretending to know how far along it is. */}
               {verifying && <Loading label="Verifying access" size={18} />}
+            </div>
+          </div>
+        )}
+
+        {step === S_SELF && (
+          <div className="space-y-3">
+            <h1 className="text-[15px] font-semibold text-text">Which host is this?</h1>
+            <p className="text-[13px] text-text-2">
+              If Proxploy itself runs on one of the hosts it manages, picking it
+              here lets a reboot or power off warn before it cuts Proxploy off
+              from itself. Not every install does; "None of these" is a real
+              answer, and detection stays off (never blocking) until you say
+              otherwise here or in Settings.
+            </p>
+            <select aria-label="Proxploy's own host" disabled={savingSelf || allHosts.isPending}
+              defaultValue=""
+              onChange={(e) => {
+                const v = e.target.value
+                saveSelfHost(v ? Number(v) : null)
+              }}
+              className="rounded-ctl border border-line bg-panel px-2 py-1.5 text-[12.5px] text-text">
+              <option value="" disabled>Choose one…</option>
+              {(allHosts.data ?? []).map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+            <div>
+              <Button variant="ghost" disabled={savingSelf} onClick={() => saveSelfHost(null)}>
+                None of these
+              </Button>
             </div>
           </div>
         )}

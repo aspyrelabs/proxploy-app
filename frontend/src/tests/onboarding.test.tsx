@@ -9,9 +9,15 @@ type HostDetail = { id: number; name: string
 
 let onboarding: Onboarding = { admin_exists: false, host_added: false,
   ssh_pending: false, complete: false }
-let hostList: { id: number }[] = []
+let hostList: { id: number; name?: string }[] = []
 let hostDetail: Record<number, HostDetail> = {}
 let verifyOutcome: { ok: true } | { ok: false; body: unknown } = { ok: true }
+// self.host_id present (even null) by default: most of this file is not
+// about the Self step, and the wizard only shows it once a host exists AND
+// this key is still absent, so pre-answering it here keeps every test below
+// that predates PXP-33 landing exactly where it already expected to land.
+let settingsData: Record<string, unknown> = { 'self.host_id': null }
+let selfHostCalls: (number | null)[] = []
 let meAuthed = true
 let probeResult: unknown = { version: '9.2.10', release: '9.2', missing_privileges: [] }
 // GET /hosts/{id}/peers. The standalone answer by default: no cluster and no
@@ -55,12 +61,16 @@ function mockStoredHost(h: HostDetail) { hostList = [{ id: h.id }]; hostDetail[h
 function mockVerifyFailure(body: unknown) { verifyOutcome = { ok: false, body } }
 // The session died but the admin still exists: /auth/me 401s.
 function mockSignedOut() { meAuthed = false }
+// self.host_id never written yet: the Self step (PXP-33) has something to ask.
+function mockSelfHostUnanswered() { settingsData = {} }
 
 beforeEach(() => {
   onboarding = { admin_exists: false, host_added: false, ssh_pending: false, complete: false }
   hostList = []
   hostDetail = {}
   verifyOutcome = { ok: true }
+  settingsData = { 'self.host_id': null }
+  selfHostCalls = []
   meAuthed = true
   probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
   peersResult = STANDALONE_PEERS
@@ -96,6 +106,15 @@ vi.mock('../api/client', () => {
         return Promise.resolve({ id: 7, name: JSON.parse(String(init.body)).name })
       }
       if (path === '/hosts') return Promise.resolve(hostList)
+      if (path === '/settings' && (!init?.method || init.method === 'GET')) {
+        return Promise.resolve(settingsData)
+      }
+      if (path === '/hosts/self' && init?.method === 'PUT') {
+        const hostId = JSON.parse(String(init.body)).host_id
+        selfHostCalls.push(hostId)
+        settingsData = { ...settingsData, 'self.host_id': hostId }
+        return Promise.resolve({ host_id: hostId })
+      }
       if (path.endsWith('/peers')) return Promise.resolve(peersResult)
       if (path.endsWith('/ssh/verify')) {
         if (verifyHeld) return new Promise((resolve) => { releaseVerify = resolve })
@@ -537,8 +556,11 @@ describe('onboarding wizard', () => {
     expect(await screen.findByRole('checkbox', { name: /node2/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
 
-    // Skip is what ends the step, so nothing is added and the wizard moves on.
+    // Skip is what ends the step, so nothing is added and the wizard moves on
+    // to the Self step (a host now exists and self.host_id has never been
+    // answerable before this moment).
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    fireEvent.click(await screen.findByRole('button', { name: /none of these/i }))
     expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
   })
 
@@ -547,5 +569,60 @@ describe('onboarding wizard', () => {
     renderWizard()
     await screen.findByLabelText('Monitoring token id')
     expect(screen.getByRole('button', { name: /^Install/ })).toBeDisabled()
+  })
+
+  // PXP-33: the Self step is where the wizard asks which enrolled host (if
+  // any) Proxploy itself runs on, once, for a new install.
+  describe('self-host step', () => {
+    it('is asked once a host exists and self.host_id has never been answered', async () => {
+      mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+      mockSelfHostUnanswered()
+      renderWizard()
+      expect(await screen.findByText(/which host is this/i)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+    })
+
+    it('records "none of these" and reaches done', async () => {
+      mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+      mockSelfHostUnanswered()
+      renderWizard()
+      fireEvent.click(await screen.findByRole('button', { name: /none of these/i }))
+      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(selfHostCalls).toEqual([null])
+    })
+
+    it('records the chosen host and reaches done', async () => {
+      mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+      mockSelfHostUnanswered()
+      hostList = [{ id: 7, name: 'pve1' }]
+      renderWizard()
+      const select = await screen.findByLabelText(/proxploy.s own host/i)
+      // Wait for the host list to actually populate the <option> before
+      // picking it: jsdom refuses to set a <select>'s value to one that has
+      // no matching option yet.
+      await screen.findByRole('option', { name: 'pve1' })
+      fireEvent.change(select, { target: { value: '7' } })
+      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(selfHostCalls).toEqual([7])
+    })
+
+    it('reaches the self step from a fresh ssh verification, not straight to done', async () => {
+      mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: true, complete: false })
+      mockStoredHost({ id: 7, name: 'pve1', credentials: [{ kind: 'ssh_key', public_meta: 'ssh-ed25519 AAAA reload' }] })
+      mockSelfHostUnanswered()
+      renderWizard()
+      fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
+      fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
+      expect(await screen.findByText(/which host is this/i)).toBeInTheDocument()
+    })
+
+    it('is skipped entirely when no host was ever added', async () => {
+      mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
+      mockSelfHostUnanswered()
+      renderWizard()
+      fireEvent.click(await screen.findByRole('button', { name: /skip for now/i }))
+      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(selfHostCalls).toEqual([])
+    })
   })
 })
