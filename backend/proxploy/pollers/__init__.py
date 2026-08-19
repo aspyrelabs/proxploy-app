@@ -67,23 +67,85 @@ def _mem_pct(used: int, total: int) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
-def _disk_pct(host_node: str, storage_rows: list[dict]) -> float:
-    """Aggregate used/total across this host's datastores.
+# How long a datastore has to stay out of the reads before it stops counting
+# against disk_pct. 15 minutes, and for the same reason APP_REAP_AFTER_S is 15
+# minutes: far longer than any burst of bad reads, short enough that a pool an
+# operator really did remove is out of the percentage while they are still
+# looking at the graph.
+POOL_FORGET_AFTER_S = 900
+
+
+def _pool_key(row: dict) -> tuple:
+    """A SHARED datastore is reported once per node and is ONE pool; a LOCAL
+    datastore with the same name on two nodes is two distinct pools."""
+    return ((row.get("storage"),) if row.get("shared")
+            else (row.get("node"), row.get("storage")))
+
+
+class PoolMemory:
+    """Last-known size of every datastore, so a pool that drops out of one
+    /cluster/resources read does not silently leave disk_pct's denominator.
+
+    Reported from real use on 2026-08-18: the storage graph flapped between
+    ~29% and ~12% every few minutes while the disks sat untouched. Confirmed
+    against the real cluster on 2026-08-19 by restricting one empty 1.8 TB
+    pool away from its node; disk_pct went 11.6% -> 27.6% -> 11.6% with no
+    byte changed.
+
+    A cycle loses storage rows for reasons that have nothing to do with the
+    disks, and none of them look like an error at the call site:
+
+      * a cluster member drops out of /cluster/resources during a corosync
+        split. Its pools go with it, and the two Hosts of one cluster start
+        reporting different numbers for the same disks.
+      * PVE keeps listing a datastore whose mount is down but stops filling
+        in disk/maxdisk. Read literally that is a zero-byte pool, which
+        leaves both sums exactly like a missing row does.
+      * the monitoring token loses Datastore.Audit and EVERY storage row
+        disappears at once, which used to be recorded as a flat 0.0%.
+
+    A percentage is only a measurement if its denominator holds still, so a
+    pool absent from this cycle keeps the last size we actually measured: an
+    unreachable disk still holds the bytes it held. Kept in memory per host,
+    which is the useful direction on restart -- the first cycle after a
+    restart has nothing to carry forward and simply reports what it can read.
+    """
+
+    def __init__(self) -> None:
+        # key -> (last measured at, used bytes, total bytes)
+        self._pools: dict[tuple, tuple[datetime, int, int]] = {}
+
+    def measure(self, storage_rows: list[dict], now: datetime) -> dict[tuple, tuple[int, int]]:
+        """Fold this cycle's rows in and return every pool still counting."""
+        for r in storage_rows:
+            total = int(r.get("maxdisk") or 0)
+            if not total:
+                # Listed but unreadable. Not evidence of a zero-byte pool, so
+                # it neither updates nor refreshes what we last measured.
+                continue
+            self._pools[_pool_key(r)] = (now, int(r.get("disk") or 0), total)
+        self._pools = {
+            k: v for k, v in self._pools.items()
+            if (now - v[0]).total_seconds() < POOL_FORGET_AFTER_S}
+        return {k: (used, total) for k, (_, used, total) in self._pools.items()}
+
+
+def _disk_pct(storage_rows: list[dict], pools: PoolMemory,
+              now: datetime) -> float | None:
+    """Aggregate used/total across this host's datastores, over a pool set
+    that survives a bad read (see PoolMemory).
 
     Deduped correctly, unlike the cluster ring's deliberate shortcut in
-    api/cluster.py::cluster_summary: a SHARED datastore is reported once per
-    node and must count once, a LOCAL datastore with the same name on two
-    nodes is two distinct pools. Doing it wrong here is not a cosmetic ring
-    error; it is an alert that fires at the wrong number.
+    api/cluster.py::cluster_summary. Doing it wrong here is not a cosmetic
+    ring error; it is an alert that fires at the wrong number.
+
+    None means "no datastore has been readable recently", which is a gap in
+    the series rather than a host whose disks are 0% full.
     """
-    pools: dict[tuple, dict] = {}
-    for r in storage_rows:
-        key = (r.get("storage"),) if r.get("shared") else (r.get("node"),
-                                                           r.get("storage"))
-        pools[key] = r
-    used = sum(int(r.get("disk") or 0) for r in pools.values())
-    total = sum(int(r.get("maxdisk") or 0) for r in pools.values())
-    return round(used / total * 100, 1) if total else 0.0
+    counting = pools.measure(storage_rows, now)
+    used = sum(u for u, _ in counting.values())
+    total = sum(t for _, t in counting.values())
+    return round(used / total * 100, 1) if total else None
 
 
 # `None` is a real, meaningful cluster_name: it means "standalone". So a
@@ -141,7 +203,12 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  node_name: str | None = None,
                  cluster_name: str | None | object = UNREAD,
                  quorate: bool | None | object = UNREAD,
-                 degraded: bool = False) -> CycleResult:
+                 degraded: bool = False,
+                 pools: PoolMemory | None = None) -> CycleResult:
+    # A fresh PoolMemory has nothing to carry forward, so a caller that does
+    # not keep one across cycles (every test that drives a single cycle) gets
+    # exactly what this cycle's rows say.
+    pools = pools if pools is not None else PoolMemory()
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
     targets: list[dict] = []
@@ -195,8 +262,13 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                               ("mem_bytes", float(own["mem_bytes"])),
                               ("mem_pct", _mem_pct(own["mem_bytes"],
                                                    own["mem_total_bytes"])),
-                              ("disk_pct", _disk_pct(host.node_name, storage_rows)),
+                              ("disk_pct", _disk_pct(storage_rows, pools, now)),
                               ("net_in_bps", net_in), ("net_out_bps", net_out)):
+            # None is only ever disk_pct saying it has nothing readable to
+            # divide. A gap in the series is the honest answer; a 0.0 there
+            # reads as "the disks emptied" and fires every free-space alert.
+            if value is None:
+                continue
             samples.append(MetricSample(target_type="host", target_id=host.id,
                                         metric=metric, value=value, ts=now))
         targets.append({"t": "host", "id": host.id, "cpu_pct": own["cpu_pct"],
@@ -442,6 +514,10 @@ class Poller:
         # host_id -> when its tokens were last checked against their roles. In
         # memory on purpose: a restart re-checks straight away.
         self._gaps_checked_at: dict[int, datetime] = {}
+        # host_id -> the datastore sizes disk_pct divides by. Has to outlive a
+        # cycle or a pool that drops out of one read moves the percentage; see
+        # PoolMemory.
+        self._pools: dict[int, PoolMemory] = {}
 
     async def run(self) -> None:
         interval = self.app.state.settings.poll_interval_s
@@ -455,6 +531,7 @@ class Poller:
                     if hid not in ids:
                         self._tasks.pop(hid).cancel()
                         self.snapshots.pop(hid, None)
+                        self._pools.pop(hid, None)
             except Exception:  # noqa: BLE001  (supervisor never dies)
                 pass
             # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
@@ -612,7 +689,8 @@ class Poller:
             result = ingest_cycle(db, host, resources, rrd, utcnow(),
                                   version=version, node_name=node_name,
                                   cluster_name=cluster_name, quorate=quorate,
-                                  degraded=bool(degraded))
+                                  degraded=bool(degraded),
+                                  pools=self._pools.setdefault(host_id, PoolMemory()))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.

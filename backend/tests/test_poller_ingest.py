@@ -288,7 +288,12 @@ def test_ingest_persists_a_host_disk_pct_from_its_datastores(tmp_path):
     assert s.value == 25.0
 
 
-def test_disk_pct_is_zero_rather_than_a_crash_when_a_host_reports_no_storage(tmp_path):
+def test_a_host_reporting_no_storage_writes_no_disk_pct_at_all(tmp_path):
+    """This used to record a flat 0.0, which is what a monitoring token that
+    has lost Datastore.Audit produces: /cluster/resources answers fine and
+    every storage row is simply absent. "The disks emptied" and "we were not
+    allowed to look" are not the same reading, and only one of them should
+    fire a free-space alert. The other host metrics still land."""
     from proxploy.models import MetricSample, utcnow
     from proxploy.pollers import ingest_cycle
     from tests.support import make_db, seed_host_row
@@ -298,7 +303,8 @@ def test_disk_pct_is_zero_rather_than_a_crash_when_a_host_reports_no_storage(tmp
     ingest_cycle(db, host, [
         {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
          "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}], {"pve1": []}, utcnow())
-    assert db.query(MetricSample).filter_by(metric="disk_pct").one().value == 0.0
+    assert db.query(MetricSample).filter_by(metric="disk_pct").count() == 0
+    assert db.query(MetricSample).filter_by(metric="cpu_pct").count() == 1
 
 
 def test_mem_pct_and_disk_pct_are_queryable_metrics():
@@ -429,3 +435,95 @@ def test_guest_node_prefers_the_row_and_falls_back_to_the_host():
     assert guest_node(H(), Row("pve2")) == "pve2"
     assert guest_node(H(), Row(None)) == "pve1"
     assert guest_node(H(), None) == "pve1"
+
+
+def test_a_pool_that_drops_out_of_one_cycle_does_not_move_disk_pct(tmp_path):
+    """Reported from real use 2026-08-18: the storage graph flapped between
+    ~29% and ~12% every few minutes while the disks sat untouched.
+
+    Confirmed against the real cluster on 2026-08-19 by restricting one empty
+    1.8 TB pool away from its node: disk_pct went 11.6% -> 27.6% -> 11.6% with
+    no byte changed. A cycle loses storage rows for reasons that have nothing
+    to do with the disks (a cluster member drops out of /cluster/resources
+    during a corosync split, an NFS mount goes inactive), and a pool that
+    leaves BOTH sums moves the percentage sharply.
+    """
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import PoolMemory, ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    node = {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+            "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}
+    small = {"type": "storage", "storage": "local", "node": "pve1",
+             "disk": 30, "maxdisk": 100, "shared": 0}
+    # the big, nearly empty pool: losing it is what swings the ratio
+    big = {"type": "storage", "storage": "big", "node": "pve2",
+           "disk": 0, "maxdisk": 900, "shared": 0}
+    pools = PoolMemory()
+
+    ingest_cycle(db, host, [node, small, big], {"pve1": []}, utcnow(), pools=pools)
+    ingest_cycle(db, host, [node, small], {"pve1": []}, utcnow(), pools=pools)
+
+    values = [s.value for s in db.query(MetricSample)
+              .filter_by(metric="disk_pct").order_by(MetricSample.id).all()]
+    # 30/1000 both times. Without the carry-forward the second cycle reads
+    # 30/100 = 30.0%, which is the reported flap.
+    assert values == [3.0, 3.0]
+
+
+def test_a_pool_gone_for_good_eventually_leaves_the_denominator(tmp_path):
+    """Carrying a missing pool forever would mean a datastore somebody really
+    did remove counts against the percentage until the backend restarts."""
+    from datetime import timedelta
+
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import POOL_FORGET_AFTER_S, PoolMemory, ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    node = {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+            "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}
+    small = {"type": "storage", "storage": "local", "node": "pve1",
+             "disk": 30, "maxdisk": 100, "shared": 0}
+    big = {"type": "storage", "storage": "big", "node": "pve2",
+           "disk": 0, "maxdisk": 900, "shared": 0}
+    pools, now = PoolMemory(), utcnow()
+
+    ingest_cycle(db, host, [node, small, big], {"pve1": []}, now, pools=pools)
+    ingest_cycle(db, host, [node, small], {"pve1": []},
+                 now + timedelta(seconds=POOL_FORGET_AFTER_S + 1), pools=pools)
+
+    values = [s.value for s in db.query(MetricSample)
+              .filter_by(metric="disk_pct").order_by(MetricSample.id).all()]
+    assert values == [3.0, 30.0]
+
+
+def test_an_inactive_pool_keeps_its_last_known_size(tmp_path):
+    """PVE keeps listing a datastore whose mount is down but stops filling in
+    disk/maxdisk. Read literally that is a zero-byte pool, which drops it out
+    of both sums exactly like a missing row does."""
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import PoolMemory, ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    node = {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+            "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}
+    small = {"type": "storage", "storage": "local", "node": "pve1",
+             "disk": 30, "maxdisk": 100, "shared": 0}
+    nfs = {"type": "storage", "storage": "nfs", "node": "pve1",
+           "disk": 0, "maxdisk": 900, "shared": 1, "status": "available"}
+    dead = {"type": "storage", "storage": "nfs", "node": "pve1",
+            "shared": 1, "status": "unavailable"}
+    pools = PoolMemory()
+
+    ingest_cycle(db, host, [node, small, nfs], {"pve1": []}, utcnow(), pools=pools)
+    ingest_cycle(db, host, [node, small, dead], {"pve1": []}, utcnow(), pools=pools)
+
+    values = [s.value for s in db.query(MetricSample)
+              .filter_by(metric="disk_pct").order_by(MetricSample.id).all()]
+    assert values == [3.0, 3.0]
