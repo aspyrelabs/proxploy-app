@@ -161,7 +161,11 @@ describe('VmCreateWizard, the enabled-gated ISO image select', () => {
     const isos = deferred<unknown>()
     routes['/hosts'] = [{ id: 1, name: 'host-01' }]
     routes['/cluster/nodes'] = [{ host_id: 1, node: 'pve1' }]
-    routes['/storage'] = [{ host_id: 1, node: 'pve1', storage: 'local', content: ['iso'] }]
+    // status/shared/cluster_name are what GET /storage actually returns on
+    // every row; the wizard now filters through components/install/pools.ts,
+    // which reads them, so a row missing them is a shape the API never sends.
+    routes['/storage'] = [{ host_id: 1, node: 'pve1', storage: 'local', content: ['iso'],
+                            shared: false, status: 'available', cluster_name: null }]
     routes['/storage/1/local/content'] = isos.promise
     wrap(<VmCreateWizard onClose={() => {}} />)
 

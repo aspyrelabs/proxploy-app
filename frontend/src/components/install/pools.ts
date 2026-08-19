@@ -77,7 +77,8 @@ export type Pools = {
  * and null means "not clustered" rather than "unknown", so two standalone hosts
  * must never match each other through it.
  */
-export function servedTo(row: StorageRow, hostId: number | null,
+export function servedTo(row: { host_id: number; cluster_name: string | null },
+                         hostId: number | null,
                          clusterName: string | null | undefined): boolean {
   if (row.host_id === hostId) return true
   return row.cluster_name != null && row.cluster_name === clusterName

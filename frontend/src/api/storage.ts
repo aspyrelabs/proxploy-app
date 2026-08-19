@@ -7,6 +7,12 @@ import { ApiError, api } from './client'
 export type StorageRow = {
   host_id: number
   host_name: string
+  /** The cluster of the host whose poll produced this row, null when it is
+   *  standalone. GET /storage keeps one row per (cluster, node, storage) and
+   *  drops host_id from that key, so host_id names whichever host polled
+   *  first, NOT the only host that can serve the pool. Filter with
+   *  components/install/pools.ts::servedTo, never on host_id alone. */
+  cluster_name: string | null
   node: string
   storage: string
   type: string | null

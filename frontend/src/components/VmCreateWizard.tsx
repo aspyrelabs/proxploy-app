@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api/client'
+import { poolsFrom, type StorageRow } from './install/pools'
 import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
 import { KVGrid } from './KVGrid'
@@ -13,9 +14,8 @@ import { Loading } from './ui/loading'
 // Deliberately local, deliberately narrow row types: the wizard reads the
 // endpoints Tasks 3, 6 and 11 built, not Tasks 12/14's page hooks, so the
 // Storage and Network pages stay free to reshape their own hook signatures.
-type HostRow = { id: number; name: string }
+type HostRow = { id: number; name: string; cluster_name?: string | null }
 type NodeRow = { host_id: number; node: string }
-type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
 type ContentRow = { volid: string; size: number }
 type BridgesOut = { nodes: { host_id: number; node: string; interfaces: { iface: string; type: string }[] }[] }
 
@@ -90,8 +90,19 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
     if (nodeOpts.length === 1 && f.node !== nodeOpts[0].node) set('node', nodeOpts[0].node)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostId, nodeOpts.length, nodeOpts[0]?.node])
-  const storeOpts = (kind: string) => (storages.data ?? [])
-    .filter((s) => s.host_id === hostId && s.node === f.node && (s.content ?? []).includes(kind))
+  // poolsFrom, not a filter of its own. This used to be
+  // `s.host_id === hostId && s.node === f.node`, which no row GET /storage
+  // returns can satisfy for every host/node pair of a cluster: that endpoint
+  // drops host_id from its dedupe key, so every row is owned by whichever host
+  // polled first, and it collapses a SHARED datastore to a single row under
+  // whichever node was seen first. On the real two-node cluster that showed up
+  // as an attached NFS pool missing on one node and the OTHER host offering no
+  // datastore at all. components/install/pools.ts had already been fixed for
+  // exactly this (see its `servedTo` comment, which names this file); sharing
+  // the function is what stops the two drifting apart a third time.
+  const selectedHost = (hosts.data ?? []).find((h) => h.id === hostId)
+  const storeOpts = (kind: string) =>
+    poolsFrom(storages.data, hostId, f.node, selectedHost?.cluster_name, kind)
   const bridgeOpts = (bridges.data?.nodes ?? [])
     .filter((n) => n.node === f.node)
     .flatMap((n) => n.interfaces)
@@ -223,7 +234,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                   : storages.isLoading
                     ? <option value="">Loading datastores…</option>
                     : <option value="">Select a datastore…</option>}
-                {storeOpts('iso').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+                {storeOpts('iso').map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
             <Field id="vm-iso" label="ISO image">
@@ -274,7 +285,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                   : storages.isLoading
                     ? <option value="">Loading datastores…</option>
                     : <option value="">Select a datastore…</option>}
-                {storeOpts('images').map((s) => <option key={s.storage} value={s.storage}>{s.storage}</option>)}
+                {storeOpts('images').map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
           </div>

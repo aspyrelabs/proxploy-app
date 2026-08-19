@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, ApiError } from '../api/client'
+import { servedTo } from './install/pools'
 import type { VmRow } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
 import { JobLog } from './JobLog'
@@ -9,7 +10,8 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
 
-type StorageRow = { host_id: number; node: string; storage: string; content: string[] }
+type StorageRow = { host_id: number; node: string; storage: string; content: string[]
+                   cluster_name: string | null }
 
 /**
  * Clone a VM: new name, full vs linked, target storage. Same InstallDialog
@@ -24,8 +26,18 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
   const [error, setError] = useState('')
 
   const storages = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
+  // Shares the app-wide ['hosts'] cache; this is here only for cluster_name.
+  const hosts = useQuery({
+    queryKey: ['hosts'],
+    queryFn: () => api<{ id: number; cluster_name?: string | null }[]>('/hosts'),
+  })
+  // servedTo, not `s.host_id === vm.host_id`: GET /storage drops host_id from
+  // its dedupe key, so on a cluster every row is owned by whichever host polled
+  // first and a clone onto any other host of that cluster had nothing to offer.
   const storeOpts = (storages.data ?? [])
-    .filter((s) => s.host_id === vm.host_id && (s.content ?? []).includes('images'))
+    .filter((s) => servedTo(s, vm.host_id,
+                            (hosts.data ?? []).find((h) => h.id === vm.host_id)?.cluster_name)
+      && (s.content ?? []).includes('images'))
 
   const clone = useMutation<{ job: JobRow }, ApiError, void>({
     mutationFn: () => api<{ job: JobRow }>(`/vms/${vm.id}/clone`, {

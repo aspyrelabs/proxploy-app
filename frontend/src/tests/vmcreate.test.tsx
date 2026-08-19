@@ -1,11 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: { path: string; method: string; body: any }[] = []
 let features: Record<string, boolean> = { 'vms.create': true, 'vms.clone': true }
 let cloneRejects = false
 let vmsListResult: 'ok' | 'empty' | 'error' = 'ok'
+// A two-node cluster shaped exactly as GET /storage really answers for one:
+// its dedupe drops host_id from the key, so EVERY row comes back owned by
+// whichever host polled first, and a SHARED datastore comes back once, under
+// whichever node was seen first. Captured off the real `lab-cluster` cluster.
+let clusterFixture = false
 // Held open by the "shows the indeterminate ring" test below so it can
 // observe the pending state before the clone POST resolves.
 let cloneHeld = false
@@ -34,16 +39,46 @@ vi.mock('../api/client', () => {
           if (vmsListResult === 'error') return Promise.reject(new ApiError(502, { detail: 'boom' }))
           return Promise.resolve(vmsListResult === 'empty' ? [] : [VM])
         }
-        if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }])
-        if (path === '/cluster/nodes') return Promise.resolve([
-          { host_id: 1, node: 'pve1' },
-          { host_id: 2, node: 'pve2a' }, { host_id: 2, node: 'pve2b' },
-        ])
-        if (path === '/storage') return Promise.resolve([
-          { host_id: 1, node: 'pve1', storage: 'local', content: ['iso', 'vztmpl'] },
-          { host_id: 1, node: 'pve1', storage: 'local-lvm', content: ['images', 'rootdir'] },
-        ])
-        if (path.startsWith('/storage/1/local/content')) {
+        if (path === '/hosts') {
+          if (clusterFixture) return Promise.resolve([
+            { id: 1, name: 'node1', cluster_name: 'lab-cluster' },
+            { id: 2, name: 'node2', cluster_name: 'lab-cluster' },
+          ])
+          return Promise.resolve([{ id: 1, name: 'host-01' }, { id: 2, name: 'host-02' }])
+        }
+        if (path === '/cluster/nodes') {
+          if (clusterFixture) return Promise.resolve([
+            { host_id: 1, node: 'node1' }, { host_id: 2, node: 'node2' },
+          ])
+          return Promise.resolve([
+            { host_id: 1, node: 'pve1' },
+            { host_id: 2, node: 'pve2a' }, { host_id: 2, node: 'pve2b' },
+          ])
+        }
+        if (path === '/storage') {
+          if (clusterFixture) return Promise.resolve([
+            // every row owned by host 1, because host 1 polled first
+            { host_id: 1, node: 'node1', storage: 'local', content: ['iso', 'vztmpl'],
+              shared: false, status: 'available', cluster_name: 'lab-cluster' },
+            { host_id: 1, node: 'node1', storage: 'local-lvm', content: ['images', 'rootdir'],
+              shared: false, status: 'available', cluster_name: 'lab-cluster' },
+            { host_id: 1, node: 'node2', storage: 'local-lvm', content: ['images', 'rootdir'],
+              shared: false, status: 'available', cluster_name: 'lab-cluster' },
+            // shared, so ONE row, and under node2 here: which node wins is
+            // whichever the poller saw first, so node1 asking for it must not
+            // depend on having won that race.
+            { host_id: 1, node: 'node2', storage: 'nfs-shared',
+              content: ['iso', 'rootdir', 'vztmpl', 'backup', 'images'],
+              shared: true, status: 'available', cluster_name: 'lab-cluster' },
+          ])
+          return Promise.resolve([
+            { host_id: 1, node: 'pve1', storage: 'local', content: ['iso', 'vztmpl'],
+              shared: false, status: 'available', cluster_name: null },
+            { host_id: 1, node: 'pve1', storage: 'local-lvm', content: ['images', 'rootdir'],
+              shared: false, status: 'available', cluster_name: null },
+          ])
+        }
+        if (path.includes('/content?')) {
           return Promise.resolve([{ volid: 'local:iso/ubuntu-24.04.iso', size: 6000000000 }])
         }
         if (path.startsWith('/network/bridges')) {
@@ -90,7 +125,62 @@ describe('VmCreateWizard', () => {
   beforeEach(() => {
     calls.length = 0
     cloneRejects = false
+    clusterFixture = false
     features = { 'vms.create': true, 'vms.clone': true }
+  })
+
+  // Reported from real use 2026-08-18: an attached NFS datastore did not show
+  // up when deploying a VM, and on one node the target-storage select was
+  // empty altogether. Both fall out of GET /storage's dedupe, which drops
+  // host_id from its key and collapses a shared datastore to one row: the
+  // wizard filtered `s.host_id === hostId && s.node === f.node`, which no
+  // deduped row can satisfy for every host/node pair on a cluster.
+  const reachStorageStep = async (hostValue: string, hostLabel: string) => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: hostLabel })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: hostValue } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'x' } })
+    next()
+    // nfs-shared on purpose: it is shared, so it is the one ISO datastore
+    // offered to BOTH hosts, which is what lets one helper serve both cases.
+    await screen.findByLabelText(/iso storage/i)
+    await screen.findByRole('option', { name: 'nfs-shared' })
+    fireEvent.change(screen.getByLabelText(/iso storage/i), { target: { value: 'nfs-shared' } })
+    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(screen.getByLabelText(/iso image/i),
+      { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
+    return await screen.findByLabelText(/target storage/i)
+  }
+
+  it('offers a shared datastore on every node of the cluster', async () => {
+    clusterFixture = true
+    const select = await reachStorageStep('1', 'node1')
+    await waitFor(() => expect(
+      within(select).getByRole('option', { name: 'nfs-shared' })).toBeInTheDocument())
+    expect(within(select).getByRole('option', { name: 'local-lvm' })).toBeInTheDocument()
+  })
+
+  it('offers pools to the host of a cluster that did not win the poll race', async () => {
+    // Every row in the fixture is owned by host 1. Host 2 is the same cluster
+    // and can serve all of them, so it must not see an empty list.
+    clusterFixture = true
+    const select = await reachStorageStep('2', 'node2')
+    await waitFor(() => expect(
+      within(select).getByRole('option', { name: 'nfs-shared' })).toBeInTheDocument())
+    expect(within(select).getByRole('option', { name: 'local-lvm' })).toBeInTheDocument()
+  })
+
+  it('does not offer another node\'s local pool', async () => {
+    // local-lvm exists on both nodes and is NOT shared, so node2's row must
+    // not surface for node1 as a second, duplicate candidate.
+    clusterFixture = true
+    const select = await reachStorageStep('1', 'node1')
+    await waitFor(() => expect(
+      within(select).getByRole('option', { name: 'nfs-shared' })).toBeInTheDocument())
+    expect(within(select).getAllByRole('option', { name: 'local-lvm' })).toHaveLength(1)
+    // `local` carries no images content, so it is not a VM disk candidate
+    expect(within(select).queryByRole('option', { name: 'local' })).toBeNull()
   })
 
   it('walks Target → OS → Resources → Network → Confirm and posts the assembled spec', async () => {

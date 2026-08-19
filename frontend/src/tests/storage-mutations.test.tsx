@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const LOCAL = {
-  host_id: 1, host_name: 'host-01', node: 'pve1', storage: 'local', type: 'dir',
+  host_id: 1, host_name: 'host-01', cluster_name: null, node: 'pve1', storage: 'local', type: 'dir',
   content: ['iso', 'vztmpl', 'backup'], shared: false, status: 'available',
   used_bytes: 100, total_bytes: 400, used_pct: 25.0,
 }
@@ -11,7 +11,7 @@ const LOCAL = {
 // (Step 8b), which click through StoragePage to a real content row rather
 // than mounting VolumeTable directly.
 const LOCAL_LVM = {
-  host_id: 1, host_name: 'host-01', node: 'pve1', storage: 'local-lvm', type: 'lvmthin',
+  host_id: 1, host_name: 'host-01', cluster_name: null, node: 'pve1', storage: 'local-lvm', type: 'lvmthin',
   content: ['iso'], shared: false, status: 'available',
   used_bytes: 50, total_bytes: 200, used_pct: 25.0,
 }

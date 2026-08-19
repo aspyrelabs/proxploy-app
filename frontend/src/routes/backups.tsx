@@ -4,6 +4,7 @@ import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
 import { notify } from '../lib/notify'
 import { api } from '../api/client'
+import { servedTo } from '../components/install/pools'
 import { useEntitlements } from '../api/hooks'
 import type { AppRow, VmRow } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
@@ -62,7 +63,8 @@ function StatCard({ label, value, note, loading }: {
 /** Run now → one vzdump job over every guest on the chosen host, then the log. */
 function RunDialog({ onClose }: { onClose: () => void }) {
   const hosts = useQuery({
-    queryKey: ['hosts'], queryFn: () => api<{ id: number; name: string }[]>('/hosts'),
+    queryKey: ['hosts'],
+    queryFn: () => api<{ id: number; name: string; cluster_name?: string | null }[]>('/hosts'),
   })
   // The two honest preconditions for a backup, neither of which is "a Proxmox
   // Backup Server is connected": vzdump writes to ANY storage carrying `backup`
@@ -100,8 +102,14 @@ function RunDialog({ onClose }: { onClose: () => void }) {
        ...(vms.data ?? []).filter((v) => v.host_id === hostId)
         .map((v) => `${v.name} (VM ${v.vmid})`)]
   const guests = named.length
+  // servedTo, not `s.host_id === hostId`: GET /storage drops host_id from its
+  // dedupe key, so on a cluster every row comes back owned by whichever host
+  // polled first and the others matched nothing at all. Same defect the VM
+  // create wizard and the install dialog both had.
   const stores = hostId == null ? []
-    : (storage.data ?? []).filter((s) => s.host_id === hostId && s.content.includes('backup'))
+    : (storage.data ?? []).filter((s) =>
+        servedTo(s, hostId, (hosts.data ?? []).find((h) => h.id === hostId)?.cluster_name)
+        && s.content.includes('backup'))
   // Nothing is concluded while those three are still in flight: an empty list
   // means "not fetched yet" exactly as readily as "nothing there", and this
   // page must not state a finding before it has looked (StatCard's rule).
