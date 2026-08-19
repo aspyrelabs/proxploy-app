@@ -450,9 +450,9 @@ def _storage_pools(app, host_id: int, content: str) -> list[str]:
 
 
 _STORAGE_CLASSES = (
-    # (overrides key, Host column, build.func content type)
-    ("container_storage", "default_container_storage", "rootdir"),
-    ("template_storage", "default_template_storage", "vztmpl"),
+    # (overrides key, build.func content type)
+    ("container_storage", "rootdir"),
+    ("template_storage", "vztmpl"),
 )
 
 
@@ -467,23 +467,28 @@ def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
     picker cannot be answered, so the run hangs. The order tried here is:
 
       1. what the operator supplied for this install (`supplied`)
-      2. what the operator previously chose for this host, if it is still
-         valid (Host.default_*_storage)
-      3. the sole candidate, if the node has exactly one. This is not a pick:
+      2. the sole candidate, if the node has exactly one. This is not a pick:
          there is nothing to choose between.
-      4. refuse, naming the candidates so the operator can choose
+      3. refuse, naming the candidates so the operator can choose
 
-    Every value taken from (1) or (2), including a remembered one, is
-    revalidated against the node's current content list before use. A pool
-    name that is stale or was never valid reaches build.func's
-    resolve_storage_preselect, whose failure branch returns 238 and then spins
-    in a `while true` with an empty body: a real hang that our 1800 s SSH
-    timeout would surface as an opaque `TimeoutError: ` with no message.
-    Sending an unvalidated name is worse than sending none, so nothing here
-    is ever trusted without being checked against `_storage_pools` first.
+    Nothing here is remembered across installs (PXP-86 decision): a host
+    with two or more pools for a content type is asked every single time,
+    never silently answered from a prior install on the same host. That is
+    a deliberate simplification, not an oversight; an earlier version of
+    this function also tried a value remembered on Host.default_*_storage
+    between (1) and (2), and PXP-86 removed it.
+
+    Every value taken from (1) is revalidated against the node's current
+    content list before use. A pool name that is stale or was never valid
+    reaches build.func's resolve_storage_preselect, whose failure branch
+    returns 238 and then spins in a `while true` with an empty body: a real
+    hang that our 1800 s SSH timeout would surface as an opaque
+    `TimeoutError: ` with no message. Sending an unvalidated name is worse
+    than sending none, so nothing here is ever trusted without being checked
+    against `_storage_pools` first.
     """
     resolved = []
-    for key, column, content in _STORAGE_CLASSES:
+    for key, content in _STORAGE_CLASSES:
         candidates = _storage_pools(app, host_id, content)
         if not candidates:
             raise JobFailed(f"host has no storage carrying {content!r}")
@@ -501,20 +506,6 @@ def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
                     f"available: {', '.join(candidates)}")
             resolved.append(chosen)
             continue
-
-        with app.state.sessionmaker() as db:
-            host = db.get(Host, host_id)
-            remembered = getattr(host, column, None) if host else None
-        if remembered:
-            # A remembered choice that no longer carries this content is
-            # NEVER quietly swapped for another pool: that would move
-            # someone's container without telling them. Re-ask instead.
-            if remembered in candidates:
-                resolved.append(remembered)
-                continue
-            raise JobFailed(
-                f"this host's saved {content!r} storage {remembered!r} is no longer "
-                f"available; choose one of: {', '.join(candidates)}")
 
         if len(candidates) == 1:
             resolved.append(candidates[0])

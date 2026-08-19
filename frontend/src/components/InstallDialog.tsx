@@ -20,11 +20,6 @@ type HostRow = {
   // Needed to tell a sibling node of the same cluster apart from an unrelated
   // host when reading GET /storage, which does not key rows by host_id.
   cluster_name?: string | null
-  // Set once Default has asked the storage question and the operator has
-  // answered it (Task 13; written back by POST .../install). NULL/absent
-  // means "not chosen yet".
-  default_container_storage?: string | null
-  default_template_storage?: string | null
   // "connected" or "unreachable" (backend/proxploy/models: only two values,
   // "connected" the default). An unreachable host answers every job the
   // install would enqueue with a failure, so the picker below disables it
@@ -52,9 +47,8 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // check off this same field.
   const [mode, setMode] = useState<'default' | 'advanced'>('default')
   // Empty string means "let resolve_storage_pools decide" (backend/proxploy/
-  // services/appstore.py): its own fallbacks (remembered host default, then
-  // sole candidate) are honest defaults, so Default mode never has to touch
-  // this state at all.
+  // services/appstore.py): its one fallback, the sole candidate, is an
+  // honest default, so Default mode never has to touch this state at all.
   const [storage, setStorage] = useState({ container: '', template: '' })
   // Each field is null until the operator types into it, meaning "still
   // tracking the derived default computed below." cpu/ram/disk/os/version
@@ -171,30 +165,21 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   // submit: a form that cannot see the pools must not look complete.
   const storageUnknown = hostId != null && pools.state !== 'ok'
 
-  // Remembering must not become deciding silently: once the pool is known
-  // (remembered and still a candidate, or the sole candidate), DISPLAY it
-  // rather than asking again, so the operator can always see which pool an
-  // install will use.
-  const knownContainer = knownPool(host?.default_container_storage, pools.rootdir)
-  const knownTemplate = knownPool(host?.default_template_storage, pools.vztmpl)
+  // The sole candidate is not a real choice, so it is DISPLAYED rather than
+  // asked for. Nothing here is remembered across installs (PXP-86 decision):
+  // knownPool no longer consults anything saved on the host, only the
+  // current candidate list, so a host with two or more pools is asked every
+  // time, never silently answered from a prior install.
+  const knownContainer = knownPool(pools.rootdir)
+  const knownTemplate = knownPool(pools.vztmpl)
 
   // Default asks no question THAT HAS AN HONEST DEFAULT. Several candidates
-  // and no remembered answer has no default: build.func has none and we do
-  // not invent one, so these are the questions Default has to ask. BOTH
-  // content types get asked, not just rootdir: resolve_storage_pools refuses
-  // just as flatly on an ambiguous vztmpl (one rootdir pool plus `local` and
-  // any NFS/dir storage carrying vztmpl is an ordinary Proxmox layout), and
-  // a Default mode with no field for it fails there forever.
-  //
-  // `length >= 1`, not `> 1`: knownPool returning null no longer implies "0
-  // or 2+ candidates". A remembered value that is no longer a candidate
-  // resolves to null even with exactly one candidate left, because
-  // resolve_storage_pools refuses to quietly swap a remembered pool for the
-  // sole survivor, it re-asks. A `> 1` gate would swallow that one case
-  // (a field never rendering, canSubmit never requiring it, the job failing
-  // on the stale name with no way to fix it in Default mode), while still
-  // correctly asking nothing when there are zero real candidates (an empty
-  // select nobody could ever fill in).
+  // has no default: build.func has none and we do not invent one, so these
+  // are the questions Default has to ask. BOTH content types get asked, not
+  // just rootdir: resolve_storage_pools refuses just as flatly on an
+  // ambiguous vztmpl (one rootdir pool plus `local` and any NFS/dir storage
+  // carrying vztmpl is an ordinary Proxmox layout), and a Default mode with
+  // no field for it fails there forever.
   const asksContainer = !storageUnknown && knownContainer == null && pools.rootdir.length >= 1
   const asksTemplate = !storageUnknown && knownTemplate == null && pools.vztmpl.length >= 1
   const storageSummary = [

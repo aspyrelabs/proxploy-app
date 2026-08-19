@@ -23,8 +23,6 @@ type StorageRow = {
 }
 type HostRow = {
   id: number; name: string; node_name?: string
-  default_container_storage?: string | null
-  default_template_storage?: string | null
   install_consent_at?: string | null
 }
 
@@ -61,34 +59,6 @@ async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[
       job: { id: 9, kind: 'app.install', progress_pct: null },
     })
     if (path === '/jobs/9/events') return Promise.resolve([])
-    return Promise.resolve(null)
-  })
-}
-
-/** A host that has already answered the storage question once: two real
- *  rootdir candidates exist, but Host.default_container_storage /
- *  default_template_storage are already set, so Default must show the
- *  answer rather than ask again. */
-async function mockHostWithRememberedStorage(remembered: { container: string; template: string }) {
-  const { api } = await import('../api/client')
-  const hosts: HostRow[] = [
-    { id: 1, name: 'host-01', node_name: 'pve',
-      default_container_storage: remembered.container,
-      default_template_storage: remembered.template },
-    { id: 2, name: 'host-02', node_name: 'pve2' },
-  ]
-  const rows: StorageRow[] = [
-    { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
-    { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
-    { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
-  ]
-  vi.mocked(api).mockImplementation((path: string) => {
-    if (path === '/catalog/redis') return Promise.resolve({
-      slug: 'redis', name: 'Redis', default_cpu: 1, default_ram_mb: 1024,
-      default_disk_gb: 4, installable: true, raw: { install_script: 'msg_ok done' },
-    })
-    if (path === '/hosts') return Promise.resolve(hosts)
-    if (path === '/storage') return Promise.resolve(withStatus(rows))
     return Promise.resolve(null)
   })
 }
@@ -249,6 +219,31 @@ describe('InstallDialog', () => {
     // assigns the next free id (InstallIn.ctid).
     expect(screen.getByPlaceholderText('Container ID (CTID)')).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  // PXP-86: the default install asks only for what has no catalog default
+  // (host, node, storage); CPU, RAM, disk, OS and OS version come from the
+  // catalog entry untouched. Untouched means sent as NO override at all, so
+  // the script's own embedded defaults (what default_cpu/ram/disk/os were
+  // parsed FROM) run -- not a copy of the catalog figures re-sent as
+  // var_cpu/var_ram/etc, which could drift from the script if the two ever
+  // disagreed. This is the regression test for that: it fails if Default
+  // mode is ever changed to forward these fields as overrides.
+  it('sends none of the catalog defaults as overrides in Default mode', async () => {
+    await mockStorage()
+    renderDialog()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
+    await selectHost('host-01')
+
+    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+
+    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
+    const overrides = capturedSubmit().overrides
+    for (const key of ['cpu', 'ram', 'disk', 'os', 'version']) {
+      expect(overrides).not.toHaveProperty(key)
+    }
   })
 
   // services/appstore.py::run_install only calls ctx.progress(80) then (100):
@@ -418,9 +413,8 @@ describe('InstallDialog', () => {
   it('Default asks the storage question only when there is a real choice', async () => {
     // host-01 in DEFAULT_STORAGE has exactly one rootdir candidate
     // ('local-lvm'): one candidate is not a choice, so Default stays one
-    // click. It still shows what it resolved to, per "remembering must
-    // never become deciding silently" -- that applies to a sole candidate
-    // too, not only a remembered value.
+    // click, but still shows what it resolved to rather than deciding
+    // silently.
     await mockStorage()
     renderDialog()
     await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
@@ -452,18 +446,6 @@ describe('InstallDialog', () => {
 
     fireEvent.change(screen.getByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
-  })
-
-  it('shows the pools it will use, so remembering never becomes deciding silently', async () => {
-    await mockHostWithRememberedStorage({ container: 'lvm-a', template: 'local' })
-    renderDialog()
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
-    await selectHost('host-01')
-
-    // Displayed as text, not asked as a question -- even though this host
-    // genuinely has two rootdir candidates (lvm-a, lvm-b).
-    await waitFor(() => expect(screen.getByText(/lvm-a/)).toBeInTheDocument())
-    expect(screen.queryByLabelText(/Container storage/i)).not.toBeInTheDocument()
   })
 
   it('sends the pool the operator picked in Default mode', async () => {
@@ -538,8 +520,7 @@ describe('InstallDialog', () => {
 
   it('never offers a pool the node is not serving', async () => {
     // _storage_pools drops anything not enabled and active. Offering one here
-    // gets it chosen, remembered on the Host, and then every later Default
-    // install fails with "no longer available", with no UI to clear it.
+    // would get it chosen and sent as an override for an unavailable pool.
     await mockStorage([
       { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'], status: 'available' },
       { host_id: 1, node: 'pve', storage: 'lvm-dead', content: ['rootdir'], status: 'unavailable' },
@@ -549,23 +530,6 @@ describe('InstallDialog', () => {
     await openAdvanced()
 
     await waitFor(() => expect(containerOptions()).toEqual(['lvm-a']))
-  })
-
-  it('re-asks when a remembered pool is no longer a candidate', async () => {
-    // A wrong or stale memory is otherwise permanent: the prompt used to be
-    // gated on the column merely being set, and there is no PATCH field and
-    // no other UI that can clear it.
-    await mockStorage([
-      { host_id: 1, node: 'pve', storage: 'lvm-a', content: ['rootdir'] },
-      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
-      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
-    ], [{ id: 1, name: 'host-01', node_name: 'pve', default_container_storage: 'lvm-gone' }])
-    renderDialog()
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
-    await selectHost('host-01')
-
-    expect(await screen.findByLabelText(/Container storage/i)).toBeInTheDocument()
-    expect(screen.queryByText(/lvm-gone/)).not.toBeInTheDocument()
   })
 
   it('offers a shared pool even when its row names a node other than the host\'s own', async () => {
@@ -605,38 +569,6 @@ describe('InstallDialog', () => {
 
     // One real candidate is not a choice, even though the row appears twice.
     await waitFor(() => expect(containerOptions()).toEqual(['shared-a']))
-  })
-
-  it('re-asks a stale remembered pool even when exactly one valid candidate remains', async () => {
-    // resolve_storage_pools raises whenever `remembered` is set and is not
-    // among the candidates, REGARDLESS of how many candidates remain: a
-    // remembered choice is never quietly swapped for the sole survivor. The
-    // old knownPool fell through to "sole candidate" here, showing
-    // "Storage: container lvm-b" as settled with no field to change it, and
-    // the job then failed on the stale 'lvm-gone' name it never sent.
-    await mockStorage([
-      { host_id: 1, node: 'pve', storage: 'lvm-b', content: ['rootdir'] },
-      { host_id: 1, node: 'pve', storage: 'local', content: ['vztmpl'] },
-    ], [{ id: 1, name: 'host-01', node_name: 'pve', default_container_storage: 'lvm-gone' }])
-    renderDialog()
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
-    await selectHost('host-01')
-
-    expect(await screen.findByLabelText(/Container storage/i)).toBeInTheDocument()
-    // Never presented as a settled fact: the surviving pool must not appear
-    // in the "Storage: ..." summary while the question is unanswered.
-    expect(screen.queryByText(/Storage:.*lvm-b/)).not.toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
-    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
-
-    fireEvent.change(screen.getByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
-    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
-
-    await waitFor(() => expect(capturedSubmit()).toBeTruthy())
-    expect(capturedSubmit().overrides.container_storage).toBe('lvm-b')
   })
 
   it('will not submit while the storage snapshot cannot be read', async () => {
@@ -773,23 +705,18 @@ describe('InstallDialog', () => {
 })
 
 describe('knownPool', () => {
-  it('returns the remembered value when it is still a candidate', () => {
-    expect(knownPool('lvm-a', ['lvm-a', 'lvm-b'])).toBe('lvm-a')
+  // PXP-86 decision: no remembering the last placement. knownPool takes only
+  // the candidate list now; there is no remembered value to consult.
+  it('returns the sole candidate', () => {
+    expect(knownPool(['lvm-b'])).toBe('lvm-b')
   })
 
-  it('returns null for a remembered value that dropped out of candidates, even with one left', () => {
-    // resolve_storage_pools never quietly swaps a remembered pool for the
-    // sole survivor; it re-asks. `knownPool('lvm-gone', ['lvm-b'])` used to
-    // return 'lvm-b', indistinguishable from the no-memory case.
-    expect(knownPool('lvm-gone', ['lvm-b'])).toBeNull()
+  it('returns null with more than one candidate', () => {
+    expect(knownPool(['lvm-a', 'lvm-b'])).toBeNull()
   })
 
-  it('returns the sole candidate when nothing is remembered', () => {
-    expect(knownPool(null, ['lvm-b'])).toBe('lvm-b')
-  })
-
-  it('returns null with no memory and more than one candidate', () => {
-    expect(knownPool(null, ['lvm-a', 'lvm-b'])).toBeNull()
+  it('returns null with no candidates', () => {
+    expect(knownPool([])).toBeNull()
   })
 
   // pools.ts carries a `state` alongside the lists precisely because an empty

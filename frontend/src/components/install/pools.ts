@@ -110,21 +110,17 @@ export function useStoragePools(hostId: number | null,
 }
 
 /**
- * The pool an install will use without asking: a remembered choice
- * (Host.default_*_storage) that is STILL a candidate, else the sole candidate.
- * Null means there is either nothing to use or a real choice to make.
+ * The pool an install will use without asking: the sole candidate. Null
+ * means there is a real choice to make (0 candidates is Default's "cannot
+ * see the pools yet" / "host has none" case, handled elsewhere).
  *
- * A remembered value that has dropped out of `candidates` (renamed, detached,
- * or gone inactive) deliberately resolves to null rather than being shown as
- * fact: the install would fail on it with "no longer available", and the only
- * place that can be corrected is the question this un-answers. This holds no
- * matter how many candidates remain, including exactly one: matching
- * resolve_storage_pools (backend/proxploy/services/appstore.py), a remembered
- * choice is NEVER quietly swapped for another pool, sole survivor or not.
- * Re-ask instead.
+ * PXP-86 decision: no remembering the last placement. This used to also
+ * check a value remembered on Host.default_*_storage before falling back to
+ * the sole-candidate case; that branch is gone, matching
+ * resolve_storage_pools (backend/proxploy/services/appstore.py), which no
+ * longer reads that column either. A host with two or more candidates is
+ * asked every time, never silently answered from a prior install.
  */
-export function knownPool(remembered: string | null | undefined,
-                          candidates: string[]): string | null {
-  if (remembered) return candidates.includes(remembered) ? remembered : null
+export function knownPool(candidates: string[]): string | null {
   return candidates.length === 1 ? candidates[0] : null
 }

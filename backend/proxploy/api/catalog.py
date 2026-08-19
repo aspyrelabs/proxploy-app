@@ -341,15 +341,6 @@ class InstallIn(BaseModel):
     ctid: int | None = None
     overrides: dict = {}
     consent: bool = False
-    # Default mode asks the storage question at most once per host (Task
-    # 13): whatever pool the operator picks here gets written to
-    # Host.default_container_storage / default_template_storage below, so
-    # the next install on this host reads it back instead of asking again.
-    # True by default -- there is no UI to opt out today, and it is never a
-    # silent decision: a remembered value is only ever displayed back to the
-    # operator, never re-resolved on their behalf (resolve_storage_pools's
-    # docstring, services/appstore.py).
-    remember_storage: bool = True
 
     @field_validator("overrides")
     @classmethod
@@ -424,18 +415,6 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     # that installs nothing must not permanently record one.
     if host.install_consent_at is None and body.consent:
         host.install_consent_at = utcnow()
-    # Remember the operator's choice so Default asks the storage question at
-    # most once per host (Task 13; InstallDialog.tsx's knownPool reads it
-    # back). Only ever written from a value the operator actually supplied:
-    # this never records a pool that Proxploy resolved for them, because it
-    # never resolves one for them (resolve_storage_pools's docstring,
-    # services/appstore.py).
-    if body.remember_storage:
-        for key, column in (("container_storage", "default_container_storage"),
-                            ("template_storage", "default_template_storage")):
-            chosen = str(body.overrides.get(key) or "").strip()
-            if chosen and getattr(host, column) != chosen:
-                setattr(host, column, chosen)
     db.commit()
     job = request.app.state.jobs.enqueue(
         db, kind="app.install", requested_by=user.id,
