@@ -70,11 +70,14 @@ def test_onboarding_reports_ssh_pending_until_verified(tmp_path, csrf_header, bo
 
 
 def test_settings_crud_hides_enc_and_audits(client, csrf_header, bootstrap_admin):
+    # catalog.source stood in here for "any writable key" before PXP-36
+    # allowlisted PATCH /settings; onboarding.complete is on that allowlist
+    # and still exercises the same enc-hiding and audit-logging behavior.
     bootstrap_admin(client)
-    client.patch("/api/v1/settings", json={"catalog.source": "community-scripts"},
+    client.patch("/api/v1/settings", json={"onboarding.complete": True},
                  headers=csrf_header(client))
     body = client.get("/api/v1/settings").json()
-    assert body["catalog.source"] == "community-scripts"
+    assert body["onboarding.complete"] is True
     assert not any(k.endswith(".enc") for k in body)
 
     r = client.patch("/api/v1/settings", json={"license.refresh_credential.enc": "x"},
@@ -82,7 +85,7 @@ def test_settings_crud_hides_enc_and_audits(client, csrf_header, bootstrap_admin
     assert r.status_code == 422
 
     audit = client.get("/api/v1/audit", params={"action": "settings.update"}).json()
-    assert audit and "catalog.source" in audit[0]["params"]["keys"]
+    assert audit and "onboarding.complete" in audit[0]["params"]["keys"]
 
 
 def test_meta_version(client, csrf_header, bootstrap_admin):
