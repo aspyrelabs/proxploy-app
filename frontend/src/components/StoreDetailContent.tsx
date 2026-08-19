@@ -240,15 +240,25 @@ function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
  * fails or comes back negative. Withholding the button here only blocked
  * the one action that would have resolved the state.
  */
-export function InstallAction({ entry, installed, onInstall }: {
+export function InstallAction({ entry, installCount, onInstall }: {
   entry: { slug: string; installable: boolean | null }
-  installed: boolean
+  /** How many are already installed from this entry. Reported beside the
+   *  action, never in place of it: a second copy is an ordinary thing to want
+   *  (StoreCard carries the same reasoning). */
+  installCount: number
   onInstall: (slug: string) => void
 }) {
   if (entry.installable === false) return null
-  return installed
-    ? <Button variant="ghost" disabled>Installed</Button>
-    : <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>
+  return (
+    <div className="flex items-center gap-2">
+      {installCount > 0 && (
+        <span className="rounded-full border border-line-soft px-2 py-0.5 text-[11px] text-text-3">
+          {installCount === 1 ? 'Installed' : `Installed ×${installCount}`}
+        </span>
+      )}
+      <Button variant="primary" onClick={() => onInstall(entry.slug)}>Install</Button>
+    </div>
+  )
 }
 
 function Feasibility({ entry, onRecheck, rechecking }: {
@@ -598,14 +608,26 @@ function Popularity({ entry, served }: {
   )
 }
 
-function LinkRow({ label, href }: { label: string; href: string }) {
+/** One upstream link. The whole row is the anchor, label AND address.
+ *
+ *  This used to make the LABEL the link and render the URL beside it as a
+ *  plain span, so clicking the visible address, which is the part people
+ *  actually aim at, did nothing at all.
+ *
+ *  noopener as well as noreferrer: these point at third-party project sites,
+ *  and a new tab opened without it gets a live `window.opener` handle back
+ *  into Proxploy.
+ */
+export function LinkRow({ label, href }: { label: string; href: string }) {
   return (
     <li>
-      <a href={href} target="_blank" rel="noreferrer"
-        className="text-[12.5px] text-amber hover:underline">
-        {label}
+      <a href={href} target="_blank" rel="noopener noreferrer"
+        className="group flex flex-wrap items-baseline gap-x-2">
+        <span className="text-[12.5px] text-amber group-hover:underline">{label}</span>
+        <span className="break-all font-mono text-[11px] text-text-3 group-hover:underline">
+          {href}
+        </span>
       </a>
-      <span className="ml-2 break-all font-mono text-[11px] text-text-3">{href}</span>
     </li>
   )
 }
@@ -672,7 +694,10 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
   // error envelope, a shape change) would otherwise throw inside render and
   // take the whole popup down over a secondary detail. Not knowing whether
   // it is installed is survivable; a blank overlay is not.
-  const installed = Array.isArray(apps) && apps.some((a) => a.catalog_slug === slug)
+  // A count, not a boolean: a second copy of an app is an ordinary thing to
+  // install (see InstallAction), so this reports how many exist.
+  const installCount = Array.isArray(apps)
+    ? apps.filter((a) => a.catalog_slug === slug).length : 0
 
   if (entryQuery.isError) {
     // A 404 is a different answer from "the backend is down", and saying
@@ -756,7 +781,7 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
             both would put two controls named Install on one screen. */}
         {showHeaderAction && (
           <div className="shrink-0">
-            <InstallAction entry={entry} installed={installed} onInstall={onInstall} />
+            <InstallAction entry={entry} installCount={installCount} onInstall={onInstall} />
           </div>
         )}
       </div>

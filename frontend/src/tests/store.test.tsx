@@ -153,20 +153,45 @@ const REDIS: CatalogRow = {
 describe('StoreCard', () => {
   it('renders an Install button for an installable entry and fires onInstall', () => {
     const onInstall = vi.fn()
-    render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={vi.fn()} installCount={0} />)
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     expect(onInstall).toHaveBeenCalledWith('redis')
   })
 
-  it('shows a disabled Installed state', () => {
-    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed />)
-    expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
+  it('stays installable when it is already installed, and says how many', () => {
+    // An installed app must still be installable. People run their own naming
+    // scheme, and a test copy alongside a prod copy is the ordinary case; the
+    // store used to make that impossible by REPLACING the Install button with
+    // a disabled "Installed" one, so the status and the action were the same
+    // control and saying one meant losing the other.
+    const onInstall = vi.fn()
+    render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={vi.fn()}
+      installCount={1} />)
+    expect(screen.getByText('Installed')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'Install' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(onInstall).toHaveBeenCalledWith('redis')
+  })
+
+  it('counts the copies, because one is not the same question as two', () => {
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()}
+      installCount={2} />)
+    // "Installed" alone cannot answer "did I already make the prod one?"
+    expect(screen.getByText('Installed ×2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+  })
+
+  it('says nothing about installs when there are none', () => {
+    render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()}
+      installCount={0} />)
+    expect(screen.queryByText(/^Installed/)).toBeNull()
   })
 
   it('shows an honest note + upstream link for an unsupported entry, no Install control', () => {
     const unsupported = { ...REDIS, installable: false,
       unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
-    render(<StoreCard entry={unsupported} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unsupported} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
@@ -178,7 +203,7 @@ describe('StoreCard', () => {
     // card must never look broken just because none of it landed.
     const bare = { ...REDIS, description: null, icon_url: null, popularity: null,
       category: null, name: null }
-    render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText('redis')).toBeInTheDocument()  // falls back to slug
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
     expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge
@@ -192,7 +217,7 @@ describe('StoreCard', () => {
     // installable is tri-state: null means "not yet classified" (decision 2,
     // lazy classification). The card must not look broken or block install.
     const unclassified = { ...REDIS, installable: null }
-    render(<StoreCard entry={unclassified} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unclassified} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.queryByText(/Not installable/)).toBeNull()
   })
@@ -205,7 +230,7 @@ describe('StoreCard', () => {
     const enriched = { ...REDIS,
       icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/redis.webp',
       description: 'Redis is an open source, in-memory data structure store.' }
-    render(<StoreCard entry={enriched} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={enriched} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', enriched.icon_url)
     expect(img).toHaveAttribute('alt', 'Redis')
@@ -215,7 +240,7 @@ describe('StoreCard', () => {
 
   it('falls back to the initials tile when the scraped logo fails to load', () => {
     const withLogo = { ...REDIS, icon_url: 'https://example.com/redis.webp' }
-    render(<StoreCard entry={withLogo} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={withLogo} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     const img = screen.getByRole('img')
     fireEvent.error(img)
     expect(screen.queryByRole('img')).toBeNull()
@@ -225,11 +250,11 @@ describe('StoreCard', () => {
   const BADGE = 'Not listed upstream'
 
   it('badges nothing for a row upstream still lists, or has not classified', () => {
-    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByText(BADGE)).toBeNull()
     // null is the pre-sync state, not a signal: it must not badge either.
     rerender(<StoreCard entry={{ ...REDIS, upstream_state: null }}
-                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByText(BADGE)).toBeNull()
   })
 
@@ -239,7 +264,7 @@ describe('StoreCard', () => {
     // badge is a fact about upstream, never a block on installing.
     const gone = { ...REDIS, upstream_state: 'unlisted' as const,
       name: null, description: null, icon_url: null, category: null, popularity: null }
-    render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no icon to show
@@ -257,7 +282,7 @@ describe('StoreCard', () => {
     const soft = { ...REDIS, upstream_state: 'delisted' as const,
       icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/minio.webp',
       name: 'MinIO', description: 'S3 compatible object storage.' }
-    render(<StoreCard entry={soft} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={soft} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('img')).toHaveAttribute('src', soft.icon_url)
     expect(screen.getByText('S3 compatible object storage.')).toBeInTheDocument()
@@ -269,7 +294,7 @@ describe('StoreCard', () => {
     // instead, so both are buttons now and the card contains no anchor at all.
     const onOpenDetail = vi.fn()
     render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
-                      installed={false} />)
+                      installCount={0} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
     expect(onOpenDetail).toHaveBeenCalledWith('redis')
@@ -284,7 +309,7 @@ describe('StoreCard', () => {
   it('opens the popup from a click anywhere on the card body', () => {
     const onOpenDetail = vi.fn()
     const { container } = render(
-      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installed={false} />)
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installCount={0} />)
 
     // The description is card body, not a control.
     fireEvent.click(screen.getByText('Databases'))
@@ -303,7 +328,7 @@ describe('StoreCard', () => {
     const onOpenDetail = vi.fn()
     const onInstall = vi.fn()
     render(<StoreCard entry={REDIS} onInstall={onInstall} onOpenDetail={onOpenDetail}
-                      installed={false} />)
+                      installCount={0} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
@@ -315,7 +340,7 @@ describe('StoreCard', () => {
     const onOpenDetail = vi.fn()
     const unsupported = { ...REDIS, installable: false, unsupported_reason: 'x' }
     render(<StoreCard entry={unsupported} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
-                      installed={false} />)
+                      installCount={0} />)
 
     fireEvent.click(screen.getByRole('link', { name: /upstream/i }))
 
@@ -327,7 +352,7 @@ describe('StoreCard', () => {
     // click would run the child handler and then the container's.
     const onOpenDetail = vi.fn()
     render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
-                      installed={false} />)
+                      installCount={0} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
     expect(onOpenDetail).toHaveBeenCalledTimes(1)
@@ -340,7 +365,7 @@ describe('StoreCard', () => {
     // Select the description, release, and the popup must not open.
     const onOpenDetail = vi.fn()
     const { container } = render(
-      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installed={false} />)
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={onOpenDetail} installCount={0} />)
     const card = container.querySelector('.rounded-card')!
 
     fireEvent.pointerDown(card, { clientX: 100, clientY: 100 })
@@ -362,7 +387,7 @@ describe('StoreCard', () => {
     const bare = { ...REDIS, slug: 'readarr', name: null, description: null,
       upstream_state: 'unlisted' as const }
     render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={onOpenDetail}
-                      installed={false} />)
+                      installCount={0} />)
     fireEvent.click(screen.getByRole('button', { name: 'Read more' }))
     expect(onOpenDetail).toHaveBeenCalledWith('readarr')
   })
@@ -374,7 +399,7 @@ describe('StoreCard', () => {
     // card clickable" change has to deal with this test rather than silently
     // reintroducing the nesting.
     const { container } = render(
-      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+      <StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     const interactive = Array.from(container.querySelectorAll('a, button'))
     expect(interactive.length).toBeGreaterThan(2)
     for (const el of interactive) {
@@ -388,7 +413,7 @@ describe('StoreCard', () => {
     // implying a judgement the telemetry never made. The number is the part
     // that is actually quantifiable, so the number is what shows.
     const popular = { ...REDIS, popularity: 126196 }
-    render(<StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     // US grouping for every reader, by decision, and NOT abbreviated to
     // "126k": a rounded abbreviation is just a coarser band wearing a
     // number's clothes. Written out as a literal rather than computed with
@@ -410,7 +435,7 @@ describe('StoreCard', () => {
     // user rejected, so it should fail loudly if it creeps back.
     for (const popularity of [126196, 1001, 4, null]) {
       const { container, unmount } = render(
-        <StoreCard entry={{ ...REDIS, popularity }} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+        <StoreCard entry={{ ...REDIS, popularity }} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
       for (const word of ['Popular', 'Common', 'Top 10%', 'Niche']) {
         expect(container.textContent, `tier word "${word}" on the card`).not.toContain(word)
       }
@@ -423,7 +448,7 @@ describe('StoreCard', () => {
     // footnote, but a footnote, and the card has 284px to spend.
     const popular = { ...REDIS, popularity: 126196, popularity_synced_at: '2026-08-13T00:00:00' }
     const { container } = render(
-      <StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+      <StoreCard entry={popular} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     const mark = screen.getByTitle(/install runs recorded/i)
     // A screen reader gets the figure as text plus an sr-only prefix saying
     // what it counts, since Icon renders its glyph aria-hidden.
@@ -452,7 +477,7 @@ describe('StoreCard', () => {
     // Absence means upstream has no measurement, not zero installs. No icon,
     // no number, no placeholder.
     const unmeasured = { ...REDIS, popularity: null }
-    render(<StoreCard entry={unmeasured} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unmeasured} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByText('star_shine')).toBeNull()
     expect(screen.queryByTitle(/install runs recorded/i)).toBeNull()
     expect(screen.queryByText('0')).toBeNull()
@@ -463,14 +488,14 @@ describe('StoreCard', () => {
     // would be furniture. The exceptions carry the information.
     const ordinary = { ...REDIS, privileged: false, has_arm: true, updateable: true }
     const { rerender } = render(
-      <StoreCard entry={ordinary} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+      <StoreCard entry={ordinary} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByText('Privileged')).toBeNull()
     expect(screen.queryByText('Unprivileged')).toBeNull()  // dropped deliberately
     expect(screen.queryByText('x86 only')).toBeNull()
     expect(screen.queryByText('No in-place update')).toBeNull()
 
     rerender(<StoreCard entry={{ ...REDIS, privileged: true, has_arm: false, updateable: false }}
-                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText('Privileged')).toBeInTheDocument()
     expect(screen.getByText('x86 only')).toBeInTheDocument()
     expect(screen.getByText('No in-place update')).toBeInTheDocument()
@@ -483,7 +508,7 @@ describe('StoreCard', () => {
     // not said and we cannot know.
     const unknown = { ...REDIS, upstream_state: 'unlisted' as const,
       privileged: null, has_arm: null, updateable: null }
-    render(<StoreCard entry={unknown} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={unknown} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.queryByText('x86 only')).toBeNull()
     expect(screen.queryByText('No in-place update')).toBeNull()
     expect(screen.queryByText('Privileged')).toBeNull()
@@ -499,7 +524,7 @@ describe('StoreCard', () => {
     // still works.
     const both = { ...REDIS, upstream_state: 'unlisted' as const, installable: false,
       unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
-    render(<StoreCard entry={both} onInstall={vi.fn()} onOpenDetail={vi.fn()} installed={false} />)
+    render(<StoreCard entry={both} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
@@ -556,10 +581,12 @@ describe('StorePage', () => {
 
     withQuery(<StorePage />)
 
-    // redis is installed -> disabled "Installed"; gitea is not -> "Install"
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled())
-    expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
+    // redis is installed, gitea is not. BOTH stay installable: the count is
+    // reported beside the button, never in place of it.
+    await waitFor(() => expect(screen.getByText('Installed')).toBeInTheDocument())
+    const buttons = screen.getAllByRole('button', { name: 'Install' })
+    expect(buttons).toHaveLength(2)
+    for (const b of buttons) expect(b).toBeEnabled()
   })
 
   it('says the catalog could not be read rather than showing "no store entries"', async () => {
@@ -1151,14 +1178,15 @@ describe('Store grid sizing', () => {
     })
     const { container } = withQuery(<StorePage />)
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Installed' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Installed')).toBeInTheDocument())
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
     for (const card of cards) expect(card.className).toContain('h-[240px]')
-    // and the three states really are all present
-    expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Installed' })).toBeDisabled()
+    // and the three states really are all present: plain installable, the
+    // same plus an Installed chip, and not-installable with no control at all.
+    // The chip is the height risk now, since it sits on the button's own row.
+    expect(screen.getAllByRole('button', { name: 'Install' })).toHaveLength(2)
+    expect(screen.getByText('Installed')).toBeInTheDocument()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
   })
 

@@ -483,3 +483,23 @@ describe('StoreDetailPage, states other than a loaded row', () => {
     expect(screen.queryByText(/No app called/)).toBeNull()
   })
 })
+
+describe('upstream links', () => {
+  it('makes the URL itself clickable, not only the label beside it', async () => {
+    // The row rendered the label as the anchor and the URL as a plain span, so
+    // clicking the visible address, which is the thing people aim at, did
+    // nothing. Both halves are one link now.
+    const { LinkRow } = await import('../components/StoreDetailContent')
+    render(<ul><LinkRow label="Website" href="https://jellyfin.org" /></ul>)
+
+    const link = screen.getByRole('link', { name: /jellyfin\.org/ })
+    expect(link).toHaveAttribute('href', 'https://jellyfin.org')
+    // New tab, and no referrer or opener handed to an upstream project's site.
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+    expect(link.getAttribute('rel')).toContain('noopener')
+    // The label is inside that same link rather than being a second one.
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+    expect(link).toHaveTextContent('Website')
+  })
+})

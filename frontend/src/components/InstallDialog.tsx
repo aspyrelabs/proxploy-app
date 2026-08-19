@@ -293,8 +293,21 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               </option>
             ))}
           </select>
-          <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
-            placeholder="App name" value={name} onChange={(e) => setName(e.target.value)} />
+          {/* Labelled, not just placeheld, and asked in BOTH modes. This is
+              what tells two copies of the same app apart: a second install is
+              ordinary (a test one beside a prod one, or an operator's own
+              naming scheme), and once there are two, the name is the only
+              thing distinguishing them in every list Proxploy shows.
+              Deliberately NOT prefilled with the catalog name: the whole
+              reason for a second copy is that it differs from the first. */}
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3"
+              htmlFor="install-app-name">App name</label>
+            <input id="install-app-name" required
+              className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
+              placeholder="jellyfin-prod" value={name}
+              onChange={(e) => setName(e.target.value)} />
+          </div>
           <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             placeholder="Container ID (CTID)" value={ctid}
             onChange={(e) => setCtid(e.target.value)} />

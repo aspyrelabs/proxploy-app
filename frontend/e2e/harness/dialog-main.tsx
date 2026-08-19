@@ -82,7 +82,7 @@ createRoot(document.getElementById('root')!).render(
         own. The harness is what proves it stays put while the body scrolls. */}
     <Dialog title="Plex Media Server" width={936} scrollBody onClose={() => {}}
       headerRight={<InstallAction entry={{ slug: 'plex', installable: true }}
-        installed={false} onInstall={() => {}} />}>
+        installCount={0} onInstall={() => {}} />}>
       <StoreDetailContent slug="plex" showHeaderAction={false} onInstall={() => {}} />
     </Dialog>
   </QueryClientProvider>,

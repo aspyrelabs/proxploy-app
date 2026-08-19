@@ -71,8 +71,8 @@ function toPageSize(v: unknown): number | undefined {
 // second copy of that string would be free to drift from the reasoning.
 const STORE_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4'
 
-function StoreGrid({ entries, installedSlugs, onInstall, onOpenDetail }: {
-  entries: CatalogRow[]; installedSlugs: Set<string>; onInstall: (slug: string) => void
+function StoreGrid({ entries, installCounts, onInstall, onOpenDetail }: {
+  entries: CatalogRow[]; installCounts: Map<string, number>; onInstall: (slug: string) => void
   onOpenDetail: (slug: string) => void
 }) {
   /**
@@ -104,7 +104,7 @@ function StoreGrid({ entries, installedSlugs, onInstall, onOpenDetail }: {
   return (
     <div className={STORE_GRID}>
       {entries.map((e) => (
-        <StoreCard key={e.slug} entry={e} installed={installedSlugs.has(e.slug)}
+        <StoreCard key={e.slug} entry={e} installCount={installCounts.get(e.slug) ?? 0}
           onOpenDetail={onOpenDetail} onInstall={onInstall} />
       ))}
     </div>
@@ -175,8 +175,16 @@ export function StorePage() {
     queryKey: ['apps', {}],
     queryFn: () => api<AppRow[]>('/apps'),
   })
-  const installedSlugs = new Set(
-    (apps ?? []).map((a) => a.catalog_slug).filter((s): s is string => s != null))
+  // A COUNT per catalog entry, not a set of "has one". Installing a second
+  // copy is ordinary (a test one beside a prod one, or an operator's own
+  // naming scheme), so the card reports how many exist rather than hiding the
+  // Install button once one does. Keyed on catalog_slug: App.slug is the
+  // synthetic {catalog_slug}-{host_id}-{ctid} install identity, so counting on
+  // that would count every row exactly once and tell nobody anything.
+  const installCounts = new Map<string, number>()
+  for (const a of apps ?? []) {
+    if (a.catalog_slug) installCounts.set(a.catalog_slug, (installCounts.get(a.catalog_slug) ?? 0) + 1)
+  }
 
   const installableCount = (entries ?? []).filter((e) => e.installable === true).length
   const unsupportedCount = (entries ?? []).filter((e) => e.installable === false).length
@@ -433,7 +441,7 @@ export function StorePage() {
                   errorNote="Proxploy could not reach the backend to list the app catalog.">
         {() => (
           <>
-            <StoreGrid entries={pageEntries} installedSlugs={installedSlugs}
+            <StoreGrid entries={pageEntries} installCounts={installCounts}
                       onOpenDetail={(slug) => setDetailSlug(slug)}
                       onInstall={(slug) => setInstalling(slug)} />
 
@@ -511,7 +519,7 @@ export function StorePage() {
                 onClose={() => setDetailSlug(null)}
                 headerRight={detailEntry.data && (
                   <InstallAction entry={detailEntry.data}
-                    installed={installedSlugs.has(detailEntry.data.slug)}
+                    installCount={installCounts.get(detailEntry.data.slug) ?? 0}
                     onInstall={(slug) => { setDetailSlug(null); setInstalling(slug) }} />
                 )}>
           {/* showHeaderAction={false}: the action is pinned in the dialog's

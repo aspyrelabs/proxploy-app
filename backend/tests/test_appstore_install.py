@@ -714,3 +714,33 @@ def test_a_hostile_script_path_cannot_break_out_of_the_curl_command(tmp_path):
         assert not cmd.endswith("touch /tmp/pwned)\"")
 
     asyncio.run(scenario())
+
+
+def test_one_catalog_app_can_be_installed_more_than_once(tmp_path):
+    """A second copy of the same store app is an ordinary thing to want: a test
+    one beside a prod one, or an operator's own naming scheme. The name tells
+    them apart, and nothing in the schema stands in the way.
+
+    Pinned because it is easy to reintroduce a guard on the wrong column.
+    `App.slug` IS unique, but it is not the catalog slug: it is the synthetic
+    install identity `{catalog_slug}-{host_id}-{ctid}` (services/appstore.py),
+    which exists so two hosts can hold the same app. `catalog_slug` is the
+    column that links back to the store, and it is deliberately neither unique
+    nor NOT NULL.
+    """
+    from proxploy.models import App
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    db.add(App(host_id=host.id, ctid=150, name="jellyfin-prod",
+               slug=f"jellyfin-{host.id}-150", catalog_slug="jellyfin"))
+    db.add(App(host_id=host.id, ctid=151, name="jellyfin-test",
+               slug=f"jellyfin-{host.id}-151", catalog_slug="jellyfin"))
+    db.commit()
+
+    rows = db.query(App).filter_by(catalog_slug="jellyfin").all()
+    assert [r.name for r in rows] == ["jellyfin-prod", "jellyfin-test"]
+    # Same catalog app, same host, different CTIDs: the identities differ, so
+    # the unique constraint is satisfied without either install being refused.
+    assert len({r.slug for r in rows}) == 2

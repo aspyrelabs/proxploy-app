@@ -88,7 +88,7 @@ function Harness() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
           {STATES.map((s) => (
             <div key={s.entry.slug} data-state={s.label}>
-              <StoreCard entry={s.entry} installed={s.installed ?? false}
+              <StoreCard entry={s.entry} installCount={s.installed ? 1 : 0}
                 onInstall={() => {}} onOpenDetail={() => {}} />
             </div>
           ))}

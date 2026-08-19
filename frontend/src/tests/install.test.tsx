@@ -106,7 +106,7 @@ function capturedSubmit() {
  *  Storage pickers are deliberately left untouched: Task 9 already covers
  *  them and an unset picker is a valid, honest "let the backend decide". */
 async function fillEveryField() {
-  fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+  fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
   fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '150' } })
   // Exact matches, not regexes: the Advanced radio's own subtitle copy
   // ("Customize vCPU, RAM, disk, storage and more...") contains these same
@@ -129,7 +129,7 @@ async function fillEveryField() {
 async function startInstall() {
   await waitFor(() => expect(screen.getByText(/runs as root on/i)).toBeInTheDocument())
   fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
-  fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+  fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
   fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '105' } })
   fireEvent.click(screen.getByRole('checkbox'))
   fireEvent.click(screen.getByRole('button', { name: 'Install' }))
@@ -161,7 +161,7 @@ describe('InstallDialog', () => {
 
     // Fill host/name/ctid, button must stay disabled until consent is also checked.
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '105' } })
     expect(installBtn).toBeDisabled()
 
@@ -212,7 +212,7 @@ describe('InstallDialog', () => {
     await waitFor(() => expect(screen.getByText(/runs as root on/i)).toBeInTheDocument())
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox'))
 
     // No CTID typed, and Install is still enabled: blank means the node
@@ -235,7 +235,7 @@ describe('InstallDialog', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
     await selectHost('host-01')
 
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
@@ -372,7 +372,7 @@ describe('InstallDialog', () => {
     await mockStorage([])
     renderDialog()
     await openAdvanced()
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.change(screen.getByLabelText('vCPU'), { target: { value: '4' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
@@ -440,7 +440,7 @@ describe('InstallDialog', () => {
     // Fill in everything else the button needs; it must stay disabled until
     // the ambiguous pool is actually chosen -- this is the one question
     // Default is allowed to ask, and it is not optional.
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox'))
     expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled()
 
@@ -462,7 +462,7 @@ describe('InstallDialog', () => {
     await selectHost('host-01')
 
     fireEvent.change(await screen.findByLabelText(/Container storage/i), { target: { value: 'lvm-b' } })
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
@@ -485,7 +485,7 @@ describe('InstallDialog', () => {
     await selectHost('host-01')
 
     const templates = await screen.findByLabelText(/Template storage/i)
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
     // The rootdir side is settled (one candidate), so this is the only thing
     // still holding the button.
@@ -550,7 +550,7 @@ describe('InstallDialog', () => {
     await selectHost('host-01')
 
     fireEvent.change(await screen.findByLabelText(/Container storage/i), { target: { value: 'shared-b' } })
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 
@@ -594,7 +594,7 @@ describe('InstallDialog', () => {
     )
     await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
     await selectHost('host-01')
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /runs as root/i }))
 
     await screen.findByText(/could not read the storage pools/i)
@@ -609,7 +609,7 @@ describe('InstallDialog', () => {
     renderDialog()
     await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
     await selectHost('host-01')
-    fireEvent.change(screen.getByPlaceholderText('App name'), { target: { value: 'redis-1' } })
+    fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
 
     await waitFor(() =>
       expect(screen.queryByRole('checkbox', { name: /runs as root/i })).not.toBeInTheDocument())

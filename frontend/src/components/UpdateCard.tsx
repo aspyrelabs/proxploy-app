@@ -105,7 +105,7 @@ export function UpdateCard() {
               {poll === 'polling' ? 'Updating…' : `Update to ${s.latest}`}
             </Button>
             {s.notes_url && (
-              <a href={s.notes_url} target="_blank" rel="noreferrer"
+              <a href={s.notes_url} target="_blank" rel="noopener noreferrer"
                 className="ml-3 text-[12px] text-amber hover:underline">
                 Release notes
               </a>

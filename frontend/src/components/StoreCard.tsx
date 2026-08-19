@@ -126,8 +126,14 @@ function InstallCount({ count, syncedAt }: { count: number; syncedAt: string | n
   )
 }
 
-export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
-  entry: CatalogRow; onInstall: (slug: string) => void; installed: boolean
+export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
+  entry: CatalogRow; onInstall: (slug: string) => void
+  /** How many apps are already installed from this catalog entry. A COUNT and
+   *  not a flag: installing a second copy is ordinary (a test one beside a
+   *  prod one, or somebody's own naming scheme), so "installed" has to be
+   *  something the card SAYS rather than something it does by removing the
+   *  Install button. */
+  installCount: number
   /** Opens the detail popup. The card navigates nowhere: the same content is
    *  also a route (/store/$slug) for palette results and pasted links, but
    *  from here it opens in a Dialog. */
@@ -310,13 +316,11 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
               Not installable, {entry.unsupported_reason}
             </span>
             {entry.website && (
-              <a href={entry.website} target="_blank" rel="noreferrer"
+              <a href={entry.website} target="_blank" rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
                 className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
             )}
           </>
-        ) : installed ? (
-          <Button className="ml-auto" variant="ghost" size="xs" disabled>Installed</Button>
         ) : (
           /* size="xs" is the small size in ui/button.tsx: roughly 25px tall
              against md's ~35px, by request. Worth knowing: that is still well
@@ -324,8 +328,22 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installed }: {
              a deliberately small control on a touch screen. The LABEL is
              untouched: e2e/journey.spec.ts clicks
              getByRole('button', { name: 'Install', exact: true }). */
-          <Button className="ml-auto" variant="primary" size="xs"
-            onClick={(e) => { e.stopPropagation(); onInstall(entry.slug) }}>Install</Button>
+          <>
+            {/* Status, not a control: it reports what exists and never takes
+                the action away. The count is the useful half once two copies
+                are the point, since "Installed" alone cannot answer "is the
+                prod one already there". */}
+            {installCount > 0 && (
+              <span className="ml-auto shrink-0 rounded-full border border-line-soft
+                               px-2 py-0.5 text-[10.5px] text-text-3">
+                {installCount === 1 ? 'Installed' : `Installed ×${installCount}`}
+              </span>
+            )}
+            {/* Label stays exactly "Install" in every state: e2e/journey.spec.ts
+                clicks getByRole('button', { name: 'Install', exact: true }). */}
+            <Button className={installCount > 0 ? '' : 'ml-auto'} variant="primary" size="xs"
+              onClick={(e) => { e.stopPropagation(); onInstall(entry.slug) }}>Install</Button>
+          </>
         )}
       </div>
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5">
