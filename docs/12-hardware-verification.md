@@ -1443,3 +1443,50 @@ is the mount production uses: `/settings` and `/store/plex` return 200 and
 `accept: text/html`, and `/missing.js` stays 404. `tests/test_spa_fallback.py`
 covers all four plus the reverted attempt's regression, a route's structured
 `{"error": ...}` detail surviving untouched. Six tests, green.
+
+## What a cycle loses when a node or a datastore goes away
+
+Prompted by a report from real use on 2026-08-18: the storage graph flapped
+between roughly 29% and roughly 12% every few minutes while the underlying
+usage never changed. Measured against the real two-node cluster on 2026-08-19.
+
+**A datastore CAN disappear from `/cluster/resources`, and that alone moves
+`disk_pct` sharply.** Confirmed by restricting `local-lvm` to node2 with
+`PUT /storage/local-lvm nodes=node2`, which removed node1's row for it. That
+pool is 1.8 TB and empty, so dropping it out of both sums took the cluster
+figure from 11.6% to 27.6% and back with no byte written. The same arithmetic
+over the live rows reproduces the reported pair exactly: 12.2% with node1's
+rows missing, 29.3% with node2's. Fixed by `PoolMemory` in
+`pollers/__init__.py`, which holds each pool's last measured size for
+`POOL_FORGET_AFTER_S`; re-running the same removal against the live poller
+afterwards recorded 11.6% flat across every cycle of the outage.
+
+**A node going down does NOT remove its rows.** Measured by rebooting node2
+twice and sampling node1's view every five seconds. Throughout the ~30 seconds
+node2 was actually down:
+
+- `/cluster/status` kept `nodes: 2` on the cluster row, and node2's own row
+  stayed present with `online: 0`. This is what makes the configured member
+  count usable as the authority on what a complete read looks like.
+- `/cluster/resources` kept node2's node row, flipped to `status: "offline"`,
+  and kept all three of its storage rows.
+- `node_rrddata("node2")` asked of node1 kept answering, because RRD is
+  replicated cluster-wide rather than fetched from the node.
+
+So `_absence_is_trustworthy`'s existing `all(status == "online")` test already
+covers an ordinary node outage, which is the common case. The `complete` guard
+added alongside it covers a member that stops appearing in the response
+entirely; that has NOT been reproduced on this hardware, and it is recorded
+here as a guard rather than as a fix for an observed failure.
+
+**A token without `Datastore.Audit` gets `/cluster/resources` with zero
+storage rows** and no error. Confirmed accidentally, by driving the probe with
+the `lifecycle` token: the call succeeded and returned no storage at all,
+which the old `_disk_pct` recorded as a flat 0.0%. `disk_pct` now writes no
+sample rather than a zero.
+
+**Note for whoever reads this next:** the `monitoring` credential on host 1 is
+`root@pam!proxploy` and carries every privilege including `Sys.PowerMgmt`,
+while `lifecycle`, `console` and `backup` are properly scoped `proxploy@pve`
+tokens. The per-capability privilege separation is therefore not actually in
+force for the capability that every host is required to have.

@@ -527,3 +527,120 @@ def test_an_inactive_pool_keeps_its_last_known_size(tmp_path):
     values = [s.value for s in db.query(MetricSample)
               .filter_by(metric="disk_pct").order_by(MetricSample.id).all()]
     assert values == [3.0, 3.0]
+
+
+def _cluster_status(nodes: int, online: int | None = None) -> list[dict]:
+    online = nodes if online is None else online
+    return [{"type": "cluster", "name": "c", "nodes": nodes, "quorate": 1}] + [
+        {"type": "node", "name": f"pve{i}", "online": 1 if i <= online else 0,
+         "local": 1 if i == 1 else 0}
+        for i in range(1, nodes + 1)]
+
+
+def test_a_cycle_missing_a_cluster_member_writes_no_network_sample(tmp_path):
+    """net_in_bps/net_out_bps SUM the per-node rrd rows, so a member that drops
+    out of /cluster/resources halves the number with no traffic change.
+
+    Observed on 2026-08-18: the two Hosts of one cluster reported byte-identical
+    net_in every cycle until 08:33 and never agreed again after 08:35, because
+    each had fallen back to summing only its own node. Throughput is a rate,
+    not a level, so the honest answer is no sample rather than a carried-over
+    one: reporting last cycle's bytes invents traffic that never moved.
+    """
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    resources = [{"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+                  "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}]
+    rrd = {"pve1": [{"netin": 100.0, "netout": 50.0}]}
+
+    # the cluster has two members; only one is in this cycle's rows
+    ingest_cycle(db, host, resources, rrd, utcnow(),
+                 status_rows=_cluster_status(2))
+    assert db.query(MetricSample).filter_by(metric="net_in_bps").count() == 0
+    assert db.query(MetricSample).filter_by(metric="net_out_bps").count() == 0
+    # the metrics that are genuinely per-node still land
+    assert db.query(MetricSample).filter_by(metric="cpu_pct").count() == 1
+
+    # both members present: the sum is complete and gets recorded
+    resources.append({"type": "node", "node": "pve2", "status": "online",
+                      "cpu": 0.1, "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1})
+    rrd["pve2"] = [{"netin": 25.0, "netout": 5.0}]
+    ingest_cycle(db, host, resources, rrd, utcnow(),
+                 status_rows=_cluster_status(2))
+    assert db.query(MetricSample).filter_by(metric="net_in_bps").one().value == 125.0
+
+
+def test_a_degraded_cycle_writes_no_network_sample_rather_than_zero(tmp_path):
+    """A token that reads /cluster/resources can still 403 on rrddata. The node
+    is present, its rrd is not, and the sum silently contributed 0.0: a flat
+    zero line that reads as measured idle traffic."""
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    ingest_cycle(db, host, [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+         "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}], {}, utcnow(),
+        status_rows=_cluster_status(1), degraded=True)
+
+    assert db.query(MetricSample).filter_by(metric="net_in_bps").count() == 0
+    assert db.query(MetricSample).filter_by(metric="cpu_pct").count() == 1
+
+
+def test_a_vanished_cluster_member_is_not_proof_a_guest_is_gone(tmp_path):
+    """_absence_is_trustworthy guards VM/App rows against "a cluster member is
+    down" by testing `all(status == "online")` over the nodes PRESENT in the
+    read. Measured on hardware 2026-08-19: an ordinary node outage keeps the
+    row and marks it offline, so that check already handles the common case.
+    A member that stops appearing at all leaves no row to test, and VM rows
+    have no missing_since countdown, so one such cycle would delete every
+    guest on it and take their alert rules with them. Not reproduced on this
+    hardware; this pins the guard so it cannot regress."""
+    from proxploy.models import Vm, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    db.add(Vm(host_id=host.id, vmid=100, name="on-the-other-node",
+              status="running", node_name="pve2"))
+    db.commit()
+
+    # pve2 and its guest have dropped out of /cluster/resources entirely
+    ingest_cycle(db, host, [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+         "maxcpu": 4, "mem": 1, "maxmem": 2, "uptime": 1}], {"pve1": []},
+        utcnow(), status_rows=_cluster_status(2))
+
+    assert db.query(Vm).filter_by(vmid=100).count() == 1, \
+        "a partial read deleted a guest that is still running"
+
+
+def test_host_metrics_are_skipped_rather_than_taken_from_another_node(tmp_path):
+    """`own` fell back to snap_nodes[0] when this host's node was not in the
+    cycle, so cpu_pct/mem_pct for THIS host were recorded from whichever node
+    happened to come first: a different machine's numbers under this host's
+    identity."""
+    from proxploy.models import MetricSample, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db, node="pve1")
+    host.node_name = "pve1"
+    db.commit()
+
+    ingest_cycle(db, host, [
+        {"type": "node", "node": "pve9", "status": "online", "cpu": 0.99,
+         "maxcpu": 4, "mem": 8, "maxmem": 8, "uptime": 1}], {"pve9": []},
+        utcnow(), status_rows=_cluster_status(1))
+
+    got = [s.value for s in db.query(MetricSample).filter_by(
+        target_type="host", metric="cpu_pct").all()]
+    assert got == [], f"recorded another node's cpu as this host's: {got}"

@@ -194,6 +194,27 @@ def cluster_quorate(rows: list[dict]) -> bool | None:
     return None
 
 
+def cluster_member_count(rows: list[dict]) -> int | None:
+    """How many nodes this cluster is CONFIGURED to have, per its own
+    `/cluster/status` cluster row.
+
+    The point is that this number does not move when a node goes down: it
+    comes from corosync's config, not from liveness, so it is the only thing
+    that can tell "this cluster has two nodes and I can see one" from "this
+    cluster has one node". /cluster/resources cannot: a member that drops out
+    during a split leaves no row behind to notice, which is what let a partial
+    read pass as a complete one and halve every cluster-wide sum.
+
+    None for a standalone node (no cluster row, so nothing is missing by
+    definition) and None if the field is absent rather than guessing.
+    """
+    for row in rows:
+        if row.get("type") == "cluster":
+            value = row.get("nodes")
+            return None if value is None else int(value)
+    return None
+
+
 def guest_node(host, row=None) -> str:
     """The node a GUEST runs on, which is not always its host's own node.
 

@@ -18,6 +18,7 @@ from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSampl
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import (capability_gaps,
                                           cluster_identity_from,
+                                          cluster_member_count,
                                           cluster_quorate)
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
@@ -163,7 +164,8 @@ UNREAD = object()
 APP_REAP_AFTER_S = 900
 
 
-def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
+def _absence_is_trustworthy(node_rows: list[dict], degraded: bool,
+                            complete: bool = True) -> bool:
     """Can this cycle's guest list be used as PROOF that a CT is gone?
 
     Usually the honest answer is no, and getting this wrong deletes a user's
@@ -183,6 +185,19 @@ def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
         cannot tell "this app lived on the node that just went down" from
         "this app was destroyed"; the only safe move is to distrust the whole
         cycle unless every node in it reports online.
+
+        `complete` covers the remaining hole in that check. Measured against
+        real hardware on 2026-08-19 by rebooting a cluster member: a node that
+        goes down KEEPS its /cluster/resources row and flips it to
+        `status: "offline"`, and its storage rows stay too, so the online test
+        above already catches an ordinary outage and that is the common case.
+        What it cannot catch is a member that stops appearing in the response
+        at all, because then there is no row left to test: `all(... online)`
+        is trivially true for a read missing half the cluster. We have not
+        reproduced that on this hardware (a reboot does not do it), so treat
+        this as a guard rather than a fix for an observed failure. It costs
+        nothing when the count is unknown and it cannot invent a partial
+        cycle, since expected can only be compared against nodes we did see.
       * an empty or truncated response. A resource list with no node rows in
         it is a broken read, never a genuinely empty cluster.
 
@@ -193,7 +208,7 @@ def _absence_is_trustworthy(node_rows: list[dict], degraded: bool) -> bool:
     single row is removed. Restarting the backend does not shorten that
     window either -- the countdown lives in apps.missing_since, in the DB.
     """
-    return (bool(node_rows) and not degraded
+    return (bool(node_rows) and not degraded and complete
             and all(r.get("status") == "online" for r in node_rows))
 
 
@@ -204,7 +219,8 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  cluster_name: str | None | object = UNREAD,
                  quorate: bool | None | object = UNREAD,
                  degraded: bool = False,
-                 pools: PoolMemory | None = None) -> CycleResult:
+                 pools: PoolMemory | None = None,
+                 status_rows: list[dict] | None = None) -> CycleResult:
     # A fresh PoolMemory has nothing to carry forward, so a caller that does
     # not keep one across cycles (every test that drives a single cycle) gets
     # exactly what this cycle's rows say.
@@ -215,6 +231,16 @@ def ingest_cycle(db, host: Host, resources: list[dict],
 
     node_rows = [r for r in resources if r.get("type") == "node"]
     storage_rows = [r for r in resources if r.get("type") == "storage"]
+
+    # Did this cycle see the whole cluster? A member that stops appearing in
+    # /cluster/resources leaves no row behind to notice it by, so the only
+    # check available is against the configured member count. /cluster/status
+    # carries that whether or not the member is up: confirmed on hardware on
+    # 2026-08-19, where `nodes` stayed 2 across a node reboot while that node's
+    # own row read `online: 0`. Unknown (a standalone node, or a failed status
+    # read) counts as complete: this must never make a healthy host look partial.
+    expected = cluster_member_count(status_rows or [])
+    complete = expected is None or len(node_rows) >= expected
 
     # nodes + host-level samples ------------------------------------------------
     snap_nodes: list[dict] = []
@@ -232,6 +258,17 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         })
         net_in += float(last.get("netin") or 0.0)
         net_out += float(last.get("netout") or 0.0)
+
+    # These two are SUMS over the nodes, so they are only a measurement when
+    # every node is in them: a missing member halves the number and a node
+    # whose rrddata 403'd (degraded) contributes a silent 0.0. Unlike disk_pct
+    # there is nothing honest to carry forward, because throughput is a rate
+    # rather than a level: last cycle's bytes are traffic that did not happen.
+    # Only the recorded series is gated. The snapshot keeps the raw sum,
+    # because it answers "what can this host see right now", and zeroing it
+    # would trade a halved number in the cluster ring for an emptier one.
+    sample_net_in = None if (degraded or not complete) else net_in
+    sample_net_out = None if (degraded or not complete) else net_out
 
     # host.node_name is otherwise write-never: POST /hosts has no way to learn
     # it (PVE's /version carries no node name), so a host added through the
@@ -255,18 +292,26 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     elif not host.node_name and snap_nodes:
         host.node_name = snap_nodes[0]["node"]
 
-    own = next((n for n in snap_nodes if n["node"] == host.node_name),
-               snap_nodes[0] if snap_nodes else None)
+    # No fallback to snap_nodes[0]. host.node_name is always set by the block
+    # above when this cycle has any node at all, so the fallback could only
+    # ever fire when the named node was MISSING from the read -- and it then
+    # recorded whichever node happened to come first in /cluster/resources as
+    # this host's cpu_pct, mem_bytes and mem_pct. A different machine's numbers
+    # under this host's identity is worse than no numbers.
+    own = next((n for n in snap_nodes if n["node"] == host.node_name), None)
     if own:
         for metric, value in (("cpu_pct", own["cpu_pct"]),
                               ("mem_bytes", float(own["mem_bytes"])),
                               ("mem_pct", _mem_pct(own["mem_bytes"],
                                                    own["mem_total_bytes"])),
                               ("disk_pct", _disk_pct(storage_rows, pools, now)),
-                              ("net_in_bps", net_in), ("net_out_bps", net_out)):
-            # None is only ever disk_pct saying it has nothing readable to
-            # divide. A gap in the series is the honest answer; a 0.0 there
-            # reads as "the disks emptied" and fires every free-space alert.
+                              ("net_in_bps", sample_net_in),
+                              ("net_out_bps", sample_net_out)):
+            # None means this cycle could not measure that metric: disk_pct
+            # with no readable datastore, net_*_bps with a node missing from
+            # the sum. A gap in the series is the honest answer; a 0.0 there
+            # reads as measured (the disks emptied, the traffic stopped) and
+            # fires every alert written against it.
             if value is None:
                 continue
             samples.append(MetricSample(target_type="host", target_id=host.id,
@@ -329,7 +374,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         }
 
     # apps cache refresh (identity is ours; state is cached: doc 04) ----------
-    trustworthy = _absence_is_trustworthy(node_rows, degraded)
+    trustworthy = _absence_is_trustworthy(node_rows, degraded, complete)
     reaped: list[App] = []
     mapped_ctids: set[int] = set()
     for a in db.query(App).filter_by(host_id=host.id).all():
@@ -666,10 +711,11 @@ class Poller:
             # constant-cost call per host per cycle, which the doc 02 section 3
             # budget allows (it forbids per-GUEST calls, not per-host ones).
             try:
-                rows = client.cluster_status()
-                node_name, cluster_name = cluster_identity_from(rows)
-                quorate = cluster_quorate(rows)
+                status_rows = client.cluster_status()
+                node_name, cluster_name = cluster_identity_from(status_rows)
+                quorate = cluster_quorate(status_rows)
             except ProxmoxError:
+                status_rows = []
                 node_name, cluster_name, quorate = None, UNREAD, UNREAD
 
             # Privilege drift, on a slow cadence (see the interval above). Best
@@ -690,7 +736,8 @@ class Poller:
                                   version=version, node_name=node_name,
                                   cluster_name=cluster_name, quorate=quorate,
                                   degraded=bool(degraded),
-                                  pools=self._pools.setdefault(host_id, PoolMemory()))
+                                  pools=self._pools.setdefault(host_id, PoolMemory()),
+                                  status_rows=status_rows)
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.
