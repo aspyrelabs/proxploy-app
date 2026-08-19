@@ -24,6 +24,10 @@ const DUMP = {
 
 const calls: string[] = []
 let storageResult: 'ok' | 'empty' | 'error' = 'ok'
+// Switches the two fixtures to a real two-node cluster, shaped the way GET
+// /storage really answers for one: every row owned by whichever host polled
+// first, and the shared datastore under whichever node was seen first.
+let clusterShape = false
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string) => {
     calls.push(path)
@@ -35,9 +39,24 @@ vi.mock('../api/client', () => ({
     }
     if (path === '/storage') {
       if (storageResult === 'error') return Promise.reject(new Error('boom'))
-      return Promise.resolve(storageResult === 'empty' ? [] : [LOCAL, PBS])
+      if (storageResult === 'empty') return Promise.resolve([])
+      if (clusterShape) {
+        return Promise.resolve([
+          { ...LOCAL, cluster_name: 'lab', node: 'pve1' },
+          { ...LOCAL, cluster_name: 'lab', node: 'pve2', storage: 'local-lvm' },
+          { ...PBS, cluster_name: 'lab', node: 'pve1' },
+        ])
+      }
+      return Promise.resolve([LOCAL, PBS])
     }
-    if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+    if (path === '/hosts') {
+      if (clusterShape) return Promise.resolve([
+        { id: 1, name: 'host-01', node_name: 'pve1', cluster_name: 'lab' },
+        { id: 2, name: 'host-02', node_name: 'pve2', cluster_name: 'lab' },
+      ])
+      return Promise.resolve([
+        { id: 1, name: 'host-01', node_name: 'pve1', cluster_name: null }])
+    }
     if (path === '/entitlements') {
       return Promise.resolve({ tier: 'pro', features: { 'storage.manage': true }, grace: null, clock_skew: false })
     }
@@ -61,7 +80,7 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 describe('StoragePage', () => {
-  beforeEach(() => { storageResult = 'ok' })
+  beforeEach(() => { storageResult = 'ok'; clusterShape = false })
 
   it('says the datastores could not be read rather than showing "no datastores yet"', async () => {
     storageResult = 'error'
@@ -75,6 +94,22 @@ describe('StoragePage', () => {
     withQuery(<StoragePage />)
     expect(await screen.findByText('No datastores yet')).toBeInTheDocument()
     expect(screen.queryByText(/datastores not readable/i)).not.toBeInTheDocument()
+  })
+
+  it('splits the datastores per host, with shared ones lifted out once', async () => {
+    // The page, not just groupStorage: the pure function passing proves
+    // nothing about whether this page calls it.
+    clusterShape = true
+    withQuery(<StoragePage />)
+    expect(await screen.findByRole('heading', { name: 'Shared across lab' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'host-01' })).toBeInTheDocument()
+    // host-02 owns none of the rows (host 1 polled first) and must still get
+    // its own group with its own node's pool in it.
+    expect(screen.getByRole('heading', { name: 'host-02' })).toBeInTheDocument()
+    expect(screen.getByText('local-lvm')).toBeInTheDocument()
+    // the shared card drops the node, which on a shared row is arbitrary
+    expect(screen.getByText('pbs')).toBeInTheDocument()
   })
 
   it('counts the datastores in the header (doc 06 §a row 43)', async () => {

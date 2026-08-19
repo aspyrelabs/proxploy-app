@@ -8,8 +8,12 @@ import { DANGER_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 // decoration.
 const DANGER_PCT = 80
 
-export function StorageCard({ row, onOpen }:
-  { row: StorageRow; onOpen: (row: StorageRow) => void }) {
+export function StorageCard({ row, onOpen, showNode = true }:
+  { row: StorageRow; onOpen: (row: StorageRow) => void
+    /** False in the Storage page's shared group, where the node on the row is
+     *  whichever one the poller happened to see first and says nothing true
+     *  about where the datastore lives (routes/storage-groups.ts). */
+    showNode?: boolean }) {
   const hot = row.used_pct > DANGER_PCT
   return (
     <button
@@ -27,7 +31,7 @@ export function StorageCard({ row, onOpen }:
         <div className="min-w-0">
           <div className="truncate font-mono text-[14px] text-text">{row.storage}</div>
           <div className="truncate font-mono text-[11px] text-text-3">
-            {row.node} · {row.type ?? 'unknown'}
+            {showNode ? `${row.node} · ` : ''}{row.type ?? 'unknown'}
           </div>
         </div>
         <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 font-mono text-[10.5px] ${

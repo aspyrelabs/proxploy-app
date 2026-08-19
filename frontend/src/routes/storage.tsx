@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { createRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { useDeleteVolume, useStorage, useStorageContent, useStorageDetail } from '../api/storage'
+import { groupStorage, type HostIdentity } from './storage-groups'
 import type { StorageRow, VolumeRow } from '../api/storage'
 import { EmptyState } from '../components/EmptyState'
 import { KVGrid } from '../components/KVGrid'
@@ -182,6 +185,12 @@ export function ContentBrowser({ row, onClose, onManage }:
 
 export function StoragePage() {
   const storageQuery = useStorage()
+  // Shares the app-wide ['hosts'] cache. Needed for the grouping alone: the
+  // storage rows cannot say which host a datastore belongs to (see
+  // ./storage-groups.ts), so the host list is what supplies node -> host.
+  const hostsQuery = useQuery({
+    queryKey: ['hosts'], queryFn: () => api<HostIdentity[]>('/hosts'),
+  })
   const rows = storageQuery.data
   const [open, setOpen] = useState<StorageRow | null>(null)
   // 'new' = attach, a row = edit + detach. One dialog, two modes; a second
@@ -196,6 +205,10 @@ export function StoragePage() {
           <div className="text-[12px] text-text-3">
             {storageQuery.isPending
               ? <SkeletonLine className="w-48 text-[12px]" />
+              // Counts ROWS, not group memberships: a shared datastore is
+              // already deduped to a single row by GET /storage, so it is
+              // counted once here even though every host of its cluster can
+              // use it. Wording is doc 06 §a row 43's, verbatim.
               : rows ? `${rows.length} datastores across the cluster` : '…'}
           </div>
         </div>
@@ -211,9 +224,26 @@ export function StoragePage() {
                   errorTitle="Datastores not readable"
                   errorNote="Proxploy could not reach the backend to list your datastores.">
         {(list) => (
-          <div className={STORAGE_GRID}>
-            {list.map((r) => (
-              <StorageCard key={`${r.host_id}:${r.node}:${r.storage}`} row={r} onOpen={setOpen} />
+          <div className="space-y-7">
+            {groupStorage(list, hostsQuery.data ?? []).map((g) => (
+              <section key={g.key}>
+                <h2 className="mb-3 font-display text-[14px] font-semibold text-text-2">
+                  {g.label}
+                </h2>
+                {g.rows.length === 0
+                  // Said out loud rather than shown as an absent heading: a
+                  // host quietly missing from this page reads exactly like the
+                  // bug where one host of a cluster saw no datastores at all.
+                  ? <p className="text-[12.5px] text-text-3">No datastores attached.</p>
+                  : (
+                    <div className={STORAGE_GRID}>
+                      {g.rows.map((r) => (
+                        <StorageCard key={`${r.host_id}:${r.node}:${r.storage}`} row={r}
+                          onOpen={setOpen} showNode={!g.key.startsWith('cluster:')} />
+                      ))}
+                    </div>
+                  )}
+              </section>
             ))}
           </div>
         )}
