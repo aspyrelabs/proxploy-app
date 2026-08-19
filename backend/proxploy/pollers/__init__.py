@@ -43,7 +43,11 @@ class HostSnapshot:
     ts: datetime
     nodes: list[dict] = field(default_factory=list)
     storage: list[dict] = field(default_factory=list)
-    net: dict = field(default_factory=lambda: {"in_bps": 0.0, "out_bps": 0.0})
+    # No cluster-wide `net` total here. It used to carry one, and because every
+    # Host of a cluster reports the WHOLE cluster, /cluster/summary adding
+    # those up counted one cluster's traffic once per enrolled Host. The
+    # per-node figures on `nodes` are the same data in a shape that can be
+    # deduped, which is the only shape that adds up correctly.
     guests: dict[tuple[str, int], dict] = field(default_factory=dict)
     discovered: list[dict] = field(default_factory=list)
 
@@ -76,9 +80,14 @@ def _mem_pct(used: int, total: int) -> float:
 POOL_FORGET_AFTER_S = 900
 
 
-def _pool_key(row: dict) -> tuple:
+def pool_key(row: dict) -> tuple:
     """A SHARED datastore is reported once per node and is ONE pool; a LOCAL
-    datastore with the same name on two nodes is two distinct pools."""
+    datastore with the same name on two nodes is two distinct pools.
+
+    Takes either a raw /cluster/resources row or a snapshot storage dict:
+    both carry `storage`, `node` and `shared`. Shared so the cluster ring and
+    the host's disk_pct cannot drift apart on what counts as one pool.
+    """
     return ((row.get("storage"),) if row.get("shared")
             else (row.get("node"), row.get("storage")))
 
@@ -124,7 +133,7 @@ class PoolMemory:
                 # Listed but unreadable. Not evidence of a zero-byte pool, so
                 # it neither updates nor refreshes what we last measured.
                 continue
-            self._pools[_pool_key(r)] = (now, int(r.get("disk") or 0), total)
+            self._pools[pool_key(r)] = (now, int(r.get("disk") or 0), total)
         self._pools = {
             k: v for k, v in self._pools.items()
             if (now - v[0]).total_seconds() < POOL_FORGET_AFTER_S}
@@ -255,6 +264,12 @@ def ingest_cycle(db, host: Host, resources: list[dict],
             "mem_bytes": int(r.get("mem") or 0),
             "mem_total_bytes": int(r.get("maxmem") or 0),
             "uptime_s": int(r.get("uptime") or 0),
+            # Per node, not just folded into the host-level sum below: two
+            # Hosts of one cluster each report the WHOLE cluster's nodes, so
+            # the only way for /cluster/summary to add traffic up once is to
+            # dedupe by node first and sum after.
+            "net_in_bps": float(last.get("netin") or 0.0),
+            "net_out_bps": float(last.get("netout") or 0.0),
         })
         net_in += float(last.get("netin") or 0.0)
         net_out += float(last.get("netout") or 0.0)
@@ -539,7 +554,6 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     events.insert(0, ("metrics", {"targets": targets}))
     snapshot = HostSnapshot(host_id=host.id, ts=now, nodes=snap_nodes,
                             storage=snap_storage,
-                            net={"in_bps": net_in, "out_bps": net_out},
                             guests=guests, discovered=discovered)
     return CycleResult(snapshot=snapshot, events=events)
 

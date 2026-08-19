@@ -24,12 +24,11 @@ def _seed(app):
     seed_snapshot(app, hid, nodes=[{
         "node": "pve1", "status": "online", "cpu_pct": 42.0, "cpu_cores": 8,
         "mem_bytes": 13743895347, "mem_total_bytes": 33822867456,
-        "uptime_s": 864000}],
-        storage=[{"storage": "local", "node": "pve1",
+        "uptime_s": 864000, "net_in_bps": 1300000.0, "net_out_bps": 5000000.0}],
+        storage=[{"storage": "nfs", "node": "pve1", "shared": True,
                   "used_bytes": 100, "total_bytes": 400},
-                 {"storage": "local", "node": "pve2",
-                  "used_bytes": 100, "total_bytes": 400}],
-        net={"in_bps": 1300000.0, "out_bps": 5000000.0})
+                 {"storage": "nfs", "node": "pve2", "shared": True,
+                  "used_bytes": 100, "total_bytes": 400}])
     return hid
 
 
@@ -45,7 +44,10 @@ def test_summary_aggregates_and_dedupes_storage(tmp_path, csrf_header, bootstrap
         assert s["counts"] == {"hosts": 1, "hosts_online": 1, "nodes": 1,
                                "apps": 1, "apps_running": 1,
                                "vms": 1, "vms_running": 1}
-        # same-named storage counted once (shared-storage dedupe)
+        # a SHARED datastore is reported once per node and counts once. The
+        # fixture used to use `local` with no `shared` flag and assert the same
+        # 400, which is the undercount this dedupe used to have: two nodes'
+        # `local` are two pools, and there is now a test for that below.
         assert s["storage"]["total_bytes"] == 400
         assert s["net"]["in_bps"] == 1300000.0
         assert s["updated_at"] is not None
@@ -261,3 +263,94 @@ def test_cluster_requires_auth(tmp_path):
     _, c = _setup(tmp_path)
     with c:
         assert c.get("/api/v1/cluster/summary").status_code == 401
+
+
+def _node(name, **kw):
+    d = {"node": name, "status": "online", "cpu_pct": 10.0, "cpu_cores": 4,
+         "mem_bytes": 1, "mem_total_bytes": 2, "uptime_s": 1,
+         "net_in_bps": 100.0, "net_out_bps": 50.0}
+    d.update(kw)
+    return d
+
+
+def test_summary_counts_a_local_pool_per_node_and_a_shared_pool_once(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The ring keyed storage on NAME alone, so `local` on two nodes counted
+    once and the cluster looked smaller than it is. On the real cluster that
+    is 2936 GB against an actual 3161 GB, and the ring then disagreed with the
+    host page's disk_pct, which has always keyed on `shared`."""
+    app, c = _setup(tmp_path)
+    from tests.support import seed_host_row, seed_snapshot
+
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            hid = seed_host_row(db).id
+        seed_snapshot(app, hid, nodes=[_node("pve1")], storage=[
+            {"storage": "local", "node": "pve1", "shared": False,
+             "used_bytes": 10, "total_bytes": 100},
+            {"storage": "local", "node": "pve2", "shared": False,
+             "used_bytes": 20, "total_bytes": 200},
+            {"storage": "nfs", "node": "pve1", "shared": True,
+             "used_bytes": 5, "total_bytes": 50},
+            {"storage": "nfs", "node": "pve2", "shared": True,
+             "used_bytes": 5, "total_bytes": 50},
+        ])
+
+        s = c.get("/api/v1/cluster/summary").json()
+        # two distinct local pools (100 + 200) plus the shared one counted once
+        assert s["storage"]["total_bytes"] == 350
+        assert s["storage"]["used_bytes"] == 35
+
+
+def test_summary_does_not_double_count_traffic_across_hosts_of_one_cluster(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Every host's snapshot already sums the WHOLE cluster's per-node rrd, so
+    adding the snapshots together reported one cluster's traffic once per
+    enrolled Host. nodes, storage and vms are all deduped here; net was not."""
+    app, c = _setup(tmp_path)
+    from tests.support import seed_host_row, seed_snapshot
+
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            a = seed_host_row(db, name="h1", node="pve1")
+            b = seed_host_row(db, name="h2", node="pve2")
+            a.cluster_name = b.cluster_name = "lab-cluster"
+            db.commit()
+            aid, bid = a.id, b.id
+        # both Hosts see the same two nodes, which is what /cluster/resources
+        # returns from either member
+        both = [_node("pve1"), _node("pve2")]
+        for hid in (aid, bid):
+            seed_snapshot(app, hid, nodes=both, storage=[])
+
+        s = c.get("/api/v1/cluster/summary").json()
+        assert s["counts"]["nodes"] == 2
+        assert s["net"]["in_bps"] == 200.0, "counted one cluster's traffic twice"
+        assert s["net"]["out_bps"] == 100.0
+
+
+def test_summary_keeps_same_named_nodes_on_different_clusters_apart(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Nodes were deduped on bare name across every snapshot. A node name is
+    only unique WITHIN a cluster, and `pve` is the PVE installer's default, so
+    two standalone hosts collapsed into one node card's worth of capacity.
+    /cluster/nodes already keys on cluster_scope for exactly this reason."""
+    app, c = _setup(tmp_path)
+    from tests.support import seed_host_row, seed_snapshot
+
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            a = seed_host_row(db, name="h1", node="pve")
+            b = seed_host_row(db, name="h2", node="pve")
+            b.address = "https://10.0.0.10:8006"
+            db.commit()
+            aid, bid = a.id, b.id
+        for hid in (aid, bid):
+            seed_snapshot(app, hid, nodes=[_node("pve")], storage=[])
+
+        s = c.get("/api/v1/cluster/summary").json()
+        assert s["counts"]["nodes"] == 2, "two standalone hosts collapsed to one node"
+        assert s["cpu"]["total_cores"] == 8

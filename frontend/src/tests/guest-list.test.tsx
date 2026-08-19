@@ -34,7 +34,7 @@ const app = (over: Partial<AppRow> = {}): AppRow => ({
   id: 7, name: 'jellyfin', slug: 'jellyfin', host_id: 1, host_name: 'host-01',
   node: 'pve1', ctid: 104, category: null, catalog_slug: null,
   icon_initials: null, icon_colors: null, icon_url: null,
-  web_port: null, web_protocol: null,
+  web_port: null, web_protocol: null, catalog_port: null,
   web_path: null, status: 'running', ip: null, cpu_pct: 12,
   mem_bytes: 2161287168, mem_total_bytes: 4294967296, uptime_s: 100,
   update_available: null, adopted: false, ...over,

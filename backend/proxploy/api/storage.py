@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from proxploy.api.deps import (authorize, cluster_scope, get_db,
                                require_entitlement, scope_host)
 from proxploy.api.jobs import enqueue_and_audit
+from proxploy.pollers import pool_key
 from proxploy.models import Host, User
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
@@ -152,8 +153,7 @@ def list_storage(request: Request, db=Depends(get_db),
             # a datastore name are only unique within one cluster, so two
             # different clusters (or two standalone hosts) with a same-named
             # node or datastore must not collapse into one row.
-            key = ((cluster_scope(host), st.get("storage")) if st.get("shared")
-                   else (cluster_scope(host), st.get("node"), st.get("storage")))
+            key = (cluster_scope(host), pool_key(st))
             seen.setdefault(key, _row(host, st))
     return sorted(seen.values(),
                   key=lambda r: (r["storage"] or "", r["node"] or "", r["host_id"]))

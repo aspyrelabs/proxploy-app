@@ -37,7 +37,8 @@ def test_host_samples_and_snapshot(tmp_path):
     assert snap.nodes[0]["node"] == "pve1" and snap.nodes[0]["cpu_cores"] == 8
     assert snap.nodes[0]["cpu_pct"] == 42.0
     assert len(snap.storage) == 2
-    assert snap.net["in_bps"] == 1300000.0  # latest rrd row
+    # per node, not a cluster-wide total on the snapshot: see HostSnapshot
+    assert snap.nodes[0]["net_in_bps"] == 1300000.0  # latest rrd row
     # recovery from unreachable publishes a host resource event
     assert ("resource", {"type": "host", "id": host.id,
                          "change": "status", "status": "connected"}) in res.events

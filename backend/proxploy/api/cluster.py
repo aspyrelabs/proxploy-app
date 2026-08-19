@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 
 from proxploy.api.deps import (authorize, cluster_scope, dedupe_vms, get_db,
                                require_entitlement)
+from proxploy.pollers import pool_key
 from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm, to_iso
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
@@ -36,28 +37,36 @@ def _pct(used: float, total: float) -> float | None:
 def cluster_summary(request: Request, db=Depends(get_db),
                     user: User = Depends(_read)):
     snaps = request.app.state.poller.snapshots
-    nodes: dict[str, dict] = {}
-    storage: dict[str, dict] = {}
-    net_in = net_out = 0.0
+    nodes: dict[tuple, dict] = {}
+    storage: dict[tuple, dict] = {}
     updated = None
-    for snap in snaps.values():
+    # A node name and a datastore name are only unique WITHIN a cluster, so
+    # every key here is scoped the way /cluster/nodes below already scopes
+    # its own. Without it two standalone hosts collapse into one, and `pve`
+    # is the PVE installer's default node name rather than an exotic clash.
+    scopes = {h.id: cluster_scope(h) for h in db.query(Host).all()}
+    for host_id, snap in snaps.items():
+        scope = scopes.get(host_id, (host_id,))
         updated = max(updated, snap.ts) if updated else snap.ts
         for n in snap.nodes:
-            # dedupe by node name: two Host rows on one cluster count each node once
-            nodes[n["node"]] = n
+            # Two Host rows on one cluster each report the whole cluster, so
+            # every node must count once however many hosts saw it.
+            nodes[(scope, n["node"])] = n
         for st in snap.storage:
-            # ponytail: name-keyed dedupe, which is exact for a shared datastore
-            # (one datastore reported once per node) and undercounts a LOCAL
-            # storage that happens to share a name across nodes (`local` on pve1
-            # and pve2 is 2x the capacity, counted once). This is the cluster
-            # RING: a single number, and the snapshot dict now carries
-            # `shared`, so the fix is one line (`key = st["storage"] if
-            # st["shared"] else (st["node"], st["storage"])`) if the ring is ever
-            # shown to disagree with the page. Per-datastore truth, which does
-            # key on `shared`, is GET /storage (api/storage.py::list_storage).
-            storage.setdefault(st["storage"], st)
-        net_in += snap.net["in_bps"]
-        net_out += snap.net["out_bps"]
+            # Keyed the same way pollers.disk_pct keys it, so the ring and the
+            # host page cannot disagree about what one pool is: a SHARED
+            # datastore is reported once per node and counts once, a LOCAL one
+            # sharing a name across nodes is two pools. This used to key on the
+            # name alone, which undercounted every cluster with a same-named
+            # local pool on more than one node. Per-datastore truth is still
+            # GET /storage (api/storage.py::list_storage).
+            storage[(scope, pool_key(st))] = st
+
+    # Summed over the DEDUPED nodes, never over the snapshots: each snapshot's
+    # net is already a whole-cluster total, so adding those together reported
+    # one cluster's traffic once per enrolled Host.
+    net_in = sum(n.get("net_in_bps") or 0.0 for n in nodes.values())
+    net_out = sum(n.get("net_out_bps") or 0.0 for n in nodes.values())
 
     total_cores = sum(n["cpu_cores"] for n in nodes.values())
     used_cores = sum(n["cpu_pct"] / 100 * n["cpu_cores"] for n in nodes.values())
@@ -179,9 +188,13 @@ def cluster_nodes(request: Request, db=Depends(get_db),
             used, total = disk.get(st["node"], (0, 0))
             disk[st["node"]] = (used + st["used_bytes"],
                                 total + st["total_bytes"])
-        # Same fallback the poller uses for `own`: if node_name names nothing
-        # in this snapshot, the first node is the entry, so "exactly one entry
-        # per host" holds even for a surprising cluster shape.
+        # If node_name names nothing in this snapshot, the first node is the
+        # entry, so "exactly one entry per host" holds even for a surprising
+        # cluster shape. NOT the same as the poller, which used to fall back
+        # this way for `own` and no longer does: there the fallback attributed
+        # one node's cpu and memory to a host sitting on another, which is a
+        # false measurement. Here it only decides which card is flagged as the
+        # way in, so a nearby answer beats no answer.
         names = [n["node"] for n in nodes]
         entry = h.node_name if h.node_name in names else names[0]
         for n in nodes:
