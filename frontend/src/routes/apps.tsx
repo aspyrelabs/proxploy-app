@@ -7,12 +7,8 @@ import { useAppActionGates } from '../api/app-gates'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { useOpenWebUi } from '../api/open-web-ui'
-import { AppCard, AppCardSkeleton } from '../components/AppCard'
-import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
 import { AppTable, AppTableSkeleton } from '../components/AppTable'
-import { AppsViewSwitch } from '../components/AppsViewSwitch'
 import { UpdateAllButton } from '../components/UpdateAllButton'
-import { useAppsView } from '../lib/apps-view'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
@@ -37,7 +33,6 @@ import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted so the loading placeholder lays out in the SAME grid as the cards it
 // stands in for. Two copies of the string is one copy too many.
-const APP_GRID = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'
 const inputCls ='rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
 type HostRow = { id: number; name: string }
@@ -69,7 +64,6 @@ export function AppsPage() {
     refetchInterval: 30_000,
   })
   const apps = appsQuery.data
-  const [appsView, setAppsView] = useAppsView()
   const discoveredQuery = useQuery({
     queryKey: ['apps', 'discovered'],
     queryFn: () => api<DiscoveredRow[]>('/apps/discovered'),
@@ -89,13 +83,7 @@ export function AppsPage() {
             {apps ? `${apps.length} installed across ${hosts?.length ?? 0} hosts` : '…'}
           </div>
         </div>
-        {/* Both controls live here rather than on the Hosts page. This is the
-            page that owns the apps, and the Hosts section beside the VMs is a
-            glance at what is installed, not a place to operate on it. */}
-        <div className="flex items-center gap-3">
-          <AppsViewSwitch value={appsView} onChange={setAppsView} />
-          <UpdateAllButton />
-        </div>
+        <UpdateAllButton />
       </div>
 
       {discoveredQuery.isError && !dismissed && (
@@ -170,28 +158,18 @@ export function AppsPage() {
       </div>
 
       <QueryState query={appsQuery}
-                  loading={appsView === 'detailed'
-                    ? <SkeletonGroup label="Loading apps" className={APP_GRID}>
-                        {Array.from({ length: 8 }, (_, i) => <AppCardSkeleton key={i} />)}
-                      </SkeletonGroup>
-                    : appsView === 'list'
-                      ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={8} /></SkeletonGroup>
-                      : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={12} /></SkeletonGroup>}
+                  loading={<SkeletonGroup label="Loading apps">
+                    <AppTableSkeleton rows={8} />
+                  </SkeletonGroup>}
                   emptyTitle="No apps match your filter."
                   emptyNote="Install from the App Store, or adopt a container Proxploy already found."
                   errorTitle="Apps not readable"
                   errorNote="Proxploy could not reach the backend to list your apps.">
-        {(rows) => {
-          // The same filtered set in every view: the switch changes how the
-          // set is drawn, never which apps are in it.
-          if (appsView === 'list') return <AppTable apps={rows} />
-          if (appsView === 'icon') return <AppIconGrid apps={rows} />
-          return (
-            <div className={APP_GRID}>
-              {rows.map((a) => <AppCard key={a.id} app={a} />)}
-            </div>
-          )
-        }}
+        {/* One view, deliberately. This page is for scanning every app at
+            once, which is what a table is for; the Hosts page carries the
+            icon glance. A switcher here would offer two ways to read the
+            same thing on a page that only needs one. */}
+        {(rows) => <AppTable apps={rows} />}
       </QueryState>
 
       {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}

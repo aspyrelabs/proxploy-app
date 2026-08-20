@@ -219,9 +219,7 @@ describe('HostsPage', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}; appsResult = 'empty'
     navigate.mockClear()
-    // The view-switch test below writes pp_apps_view; clearing it here, not
-    // only in that test's own body, keeps every test in this file (including
-    // ones added later) starting from the same unset choice.
+    // No test in this file should inherit another's stored state.
     localStorage.clear()
   })
 
@@ -344,13 +342,11 @@ describe('HostsPage', () => {
     // Update all moved to the Apps page, so neither may appear here, and the
     // section renders the icon grid regardless of any stored preference.
     appsResult = 'ok'
-    localStorage.setItem('pp_apps_view', 'list')
     withQuery(<HostsPage />)
 
     // app-icon-<id> is AppIconGrid's own tile; nothing else renders it.
     expect(await screen.findByTestId('app-icon-7')).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
-    // A stored 'list' must not drag a table onto this page any more.
     expect(screen.queryByRole('table')).toBeNull()
     expect(screen.queryByRole('button', { name: 'List view' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Icon view' })).toBeNull()

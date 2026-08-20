@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const APP = {
@@ -50,28 +50,19 @@ const withQuery = (ui: React.ReactNode) => {
 describe('AppsPage', () => {
   beforeEach(() => { appsResult = 'ok'; appIcon = null; localStorage.clear() })
 
-  it('owns the view switch and Update all, and switches between the three views', async () => {
-    // Both controls moved here off the Hosts page, so this is where the
-    // wiring has to hold. fireEvent, not user-event: that is not a dependency
-    // of this repo and every existing suite drives clicks this way.
+  it('shows one view, a table, with each app carrying its icon', () => {
+    // This page has no view switcher on purpose: it exists for scanning every
+    // app at once, which is what a table is for. The Hosts page carries the
+    // icon glance instead.
     withQuery(<AppsPage />)
+    expect(screen.queryByRole('button', { name: 'List view' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Icon view' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Detailed view' })).toBeNull()
+  })
 
+  it('keeps Update all on this page', async () => {
+    withQuery(<AppsPage />)
     expect(await screen.findByRole('button', { name: /update all/i })).toBeInTheDocument()
-    // Detailed by default: AppCard's own meter labels. Awaited, because the
-    // header renders before the apps query resolves, so the Update all button
-    // above is present a tick earlier than the grid is.
-    expect(await screen.findByText(/CPU/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
-    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument())
-    expect(localStorage.getItem('pp_apps_view')).toBe('list')
-
-    // app-icon-<id> is AppIconGrid's own tile and nothing else renders it.
-    // Asserting the table is absent would be equally true of the detailed
-    // view, so it cannot tell the two apart.
-    fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
-    await waitFor(() => expect(screen.getByTestId('app-icon-1')).toBeInTheDocument())
-    expect(localStorage.getItem('pp_apps_view')).toBe('icon')
   })
 
   it('shows the icon of the catalog entry the app was installed from', async () => {

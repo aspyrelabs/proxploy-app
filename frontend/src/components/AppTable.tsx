@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
+import { IconTile } from './IconTile'
 import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
@@ -50,16 +51,23 @@ function AppTableRow({ app }: { app: AppRow }) {
   return (
     <tr className="border-b border-line-soft last:border-b-0">
       <td className={td}>
-        <button type="button"
-          className="text-left font-mono text-[13px] text-text transition hover:text-amber"
-          onClick={() => navigate({ to: '/apps/$appId' as never,
-                                    params: { appId: String(app.id) } as never })}>
-          {app.name}
-        </button>
-        {app.update_available && (
-          <span className="ml-2 rounded bg-amber-dim px-1.5 py-0.5 font-mono
-                           text-[9.5px] uppercase text-amber">update</span>
-        )}
+        {/* The same tile the icon grid and the app card draw, at the grid's
+            own 32px: an app is recognised by its logo before its name, and a
+            table that dropped it made every row look alike. */}
+        <div className="flex items-center gap-2.5">
+          <IconTile name={app.name} iconUrl={app.icon_url} size={32}
+                    initials={app.icon_initials} colors={app.icon_colors} />
+          <button type="button"
+            className="text-left font-mono text-[13px] text-text transition hover:text-amber"
+            onClick={() => navigate({ to: '/apps/$appId' as never,
+                                      params: { appId: String(app.id) } as never })}>
+            {app.name}
+          </button>
+          {app.update_available && (
+            <span className="rounded bg-amber-dim px-1.5 py-0.5 font-mono
+                             text-[9.5px] uppercase text-amber">update</span>
+          )}
+        </div>
       </td>
       <td className={`${td} font-mono text-[11px] text-text-3`}>
         {app.host_name} · CT {app.ctid}
@@ -110,7 +118,12 @@ export function AppTableSkeleton({ rows = 4 }: { rows?: number }) {
         <tbody>
           {Array.from({ length: rows }, (_, i) => (
             <tr key={i} className="border-b border-line-soft last:border-b-0">
-              <td className={td}><SkeletonLine className="w-28 text-[13px]" /></td>
+              <td className={td}>
+                <div className="flex items-center gap-2.5">
+                  <Skeleton className="h-8 w-8 shrink-0 rounded-tile" />
+                  <SkeletonLine className="w-28 text-[13px]" />
+                </div>
+              </td>
               <td className={td}><SkeletonLine className="w-32 text-[11px]" /></td>
               <td className={td}><Skeleton className="h-[19px] w-20 rounded-full" /></td>
               <td className={td}><Skeleton className="h-1.5 w-28 rounded-full" /></td>
