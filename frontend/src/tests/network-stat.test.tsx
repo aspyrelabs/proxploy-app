@@ -42,6 +42,22 @@ describe('NetworkStat', () => {
     }
   })
 
+  it('does not blink the two arrows as one', () => {
+    // animate-pulse alone runs off a shared document timeline, so two elements
+    // carrying it stay in lockstep and read as a single joined indicator.
+    // Upload and download are independent streams and must look it.
+    render(<NetworkStat inBps={1_200_000} outBps={88_000} />)
+    const up = arrow('upload').getAttribute('class') ?? ''
+    const down = arrow('download').getAttribute('class') ?? ''
+    const duration = (cls: string) => /\[animation-duration:([\d.]+)s\]/.exec(cls)?.[1]
+    expect(duration(up)).toBeDefined()
+    expect(duration(down)).toBeDefined()
+    expect(duration(up)).not.toBe(duration(down))
+    // One starts mid-cycle, so they are out of phase from the first frame
+    // rather than only drifting apart over time.
+    expect(down).toMatch(/\[animation-delay:-[\d.]+s\]/)
+  })
+
   it('turns the blink off for anyone who asked for less motion', () => {
     render(<NetworkStat inBps={1_200_000} outBps={88_000} />)
     for (const dir of ['upload', 'download'] as const) {

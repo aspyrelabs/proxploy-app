@@ -96,13 +96,26 @@ const ARROW = {
           + 'v280h-76l116 150Zm0-150Z',
 } as const
 
+// Upload and download are independent streams, so their arrows must not blink
+// as one. Tailwind's animate-pulse runs off a single document timeline, so two
+// elements carrying it start in lockstep and stay there, which reads as one
+// joined indicator rather than two. Giving each its own duration (and starting
+// one mid-cycle with a negative delay) puts them out of phase immediately and
+// lets them drift, so they never re-sync. The durations are deliberately not
+// multiples of each other, or they would meet again every few seconds.
+const BLINK = {
+  upload: 'animate-pulse [animation-duration:1.7s] motion-reduce:animate-none',
+  download: 'animate-pulse [animation-duration:2.3s] [animation-delay:-0.85s] '
+          + 'motion-reduce:animate-none',
+} as const
+
 function NetworkArrow({ dir, live }: { dir: 'upload' | 'download'; live: boolean }) {
   // Colour rides on the ARROW alone. The bar stays text-2 in every state, so
   // the tile reads as one of this row's labels rather than as a status light.
   const arrowCls = !live ? 'fill-text-2'
     : dir === 'upload'
-      ? 'fill-red animate-pulse motion-reduce:animate-none'
-      : 'fill-green animate-pulse motion-reduce:animate-none'
+      ? `fill-red ${BLINK.upload}`
+      : `fill-green ${BLINK.download}`
   return (
     <svg aria-hidden width="26" height="26" viewBox="0 -960 960 960" className="shrink-0">
       <path d={BAR} className="fill-text-2" />
