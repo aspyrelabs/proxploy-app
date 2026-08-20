@@ -276,6 +276,23 @@ class App(TimestampMixin, Base):
     cpu_pct_cached: Mapped[float | None] = mapped_column(Float)
     mem_bytes_cached: Mapped[int | None] = mapped_column(BigInteger)
     uptime_s_cached: Mapped[int | None] = mapped_column(Integer)
+    # Storage and network for the card, the table and the icon grid. All from
+    # the /cluster/resources row the poller already parses, so none of this
+    # costs a PVE call.
+    disk_bytes_cached: Mapped[int | None] = mapped_column(BigInteger)
+    disk_total_bytes_cached: Mapped[int | None] = mapped_column(BigInteger)
+    # netin/netout are counters since the container booted, not rates. The raw
+    # readings are kept because the next cycle's diff needs them, and
+    # net_sampled_at because the gap between two cycles is not
+    # poll_interval_s: the poll loop backs off exponentially on a failing
+    # host. TimestampMixin.updated_at cannot stand in for it either, since any
+    # other write to this row (a rename, a migration) would move it and
+    # silently shorten the window.
+    net_in_cached: Mapped[int | None] = mapped_column(BigInteger)
+    net_out_cached: Mapped[int | None] = mapped_column(BigInteger)
+    net_in_bps_cached: Mapped[float | None] = mapped_column(Float)
+    net_out_bps_cached: Mapped[float | None] = mapped_column(Float)
+    net_sampled_at: Mapped[datetime | None] = mapped_column(DateTime)
     update_available: Mapped[str | None] = mapped_column(Text)
     adopted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # When the poller first failed to find this app's CT in a cycle it was

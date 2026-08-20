@@ -645,3 +645,108 @@ def test_host_metrics_are_skipped_rather_than_taken_from_another_node(tmp_path):
     got = [s.value for s in db.query(MetricSample).filter_by(
         target_type="host", metric="cpu_pct").all()]
     assert got == [], f"recorded another node's cpu as this host's: {got}"
+
+
+def _ingest_at(db, host, now, netin, netout):
+    """One cycle with the CT-150 counters and the clock both pinned.
+
+    A rate needs two readings and the gap between them, so neither the
+    counters nor the timestamp can come from the shared fixture.
+    """
+    from proxploy.pollers import ingest_cycle
+
+    resources, rrd = _fixtures()
+    for r in resources:
+        if r.get("type") == "lxc" and r["vmid"] == 150:
+            r["netin"], r["netout"] = netin, netout
+    return ingest_cycle(db, host, resources, rrd, now)
+
+
+def _seed_app(db, host):
+    from proxploy.models import App
+
+    db.add(App(host_id=host.id, ctid=150, name="Immich", slug="immich"))
+    db.commit()
+    return db.query(App).filter_by(ctid=150).one()
+
+
+def test_app_caches_storage_from_the_bulk_read(tmp_path):
+    """`disk` and `maxdisk` are already in the row the poller parses. Storage
+    for an app therefore costs no extra PVE call, which is the only reason it
+    fits the poll budget at all."""
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    _ingest(db, host)
+
+    assert app.disk_bytes_cached == 5368709120
+    assert app.disk_total_bytes_cached == 17179869184
+
+
+def test_first_poll_stores_the_counters_but_cannot_make_a_rate(tmp_path):
+    """netin/netout are counters, not rates. One reading is one point, and a
+    point has no slope, so the rate stays None until there are two."""
+    from datetime import datetime
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    t0 = datetime(2026, 8, 20, 12, 0, 0)
+    _ingest_at(db, host, t0, netin=1_000_000, netout=200_000)
+
+    assert app.net_in_cached == 1_000_000
+    assert app.net_out_cached == 200_000
+    assert app.net_sampled_at == t0
+    assert app.net_in_bps_cached is None
+    assert app.net_out_bps_cached is None
+
+
+def test_second_poll_derives_the_rate_from_the_counter_delta(tmp_path):
+    """300000 bytes over 30 seconds is 10000 bytes/s. The elapsed time is
+    measured, not assumed to be poll_interval_s, because the poll loop backs
+    off exponentially on a failing host."""
+    from datetime import datetime, timedelta
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    t0 = datetime(2026, 8, 20, 12, 0, 0)
+    _ingest_at(db, host, t0, netin=1_000_000, netout=200_000)
+    _ingest_at(db, host, t0 + timedelta(seconds=30),
+               netin=1_300_000, netout=200_600)
+
+    assert app.net_in_bps_cached == 10_000.0
+    assert app.net_out_bps_cached == 20.0
+    # The counters advance too, so the NEXT cycle diffs against these.
+    assert app.net_in_cached == 1_300_000
+
+
+def test_a_counter_reset_yields_no_rate_rather_than_a_spike(tmp_path):
+    """Restarting a container zeroes netin/netout. Diffing across that
+    boundary gives a large negative number, and abs() would draw a fabricated
+    traffic spike at exactly the moment an operator is most likely to be
+    watching. A negative delta is read as the reset it is."""
+    from datetime import datetime, timedelta
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    t0 = datetime(2026, 8, 20, 12, 0, 0)
+    _ingest_at(db, host, t0, netin=1_000_000, netout=200_000)
+    _ingest_at(db, host, t0 + timedelta(seconds=30), netin=5_000, netout=900)
+
+    assert app.net_in_bps_cached is None
+    assert app.net_out_bps_cached is None
+    # Recovery: the reset reading becomes the new baseline, so the cycle
+    # after it produces a rate again.
+    _ingest_at(db, host, t0 + timedelta(seconds=60), netin=305_000, netout=1_500)
+    assert app.net_in_bps_cached == 10_000.0

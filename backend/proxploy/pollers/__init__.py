@@ -72,6 +72,33 @@ def _mem_pct(used: int, total: int) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
+def _update_net_rates(a: App, g: dict, now: datetime) -> None:
+    """Turn this cycle's netin/netout counters into a rate on the app row.
+
+    PVE reports bytes since the container booted, so a rate is a diff against
+    the previous reading over the time between the two. Both the reading and
+    its timestamp are stored for the next cycle to diff against.
+
+    Two cases produce no rate rather than a wrong one. The first reading has
+    nothing to diff against: one point has no slope. And a container restart
+    zeroes the counters, so the delta goes negative; taking its absolute value
+    would draw a fabricated traffic spike at exactly the moment an operator is
+    most likely to be watching. Either way the rate is None for one cycle and
+    recovers on the next, once there are two readings from the same boot.
+    """
+    prev_in, prev_out, prev_at = a.net_in_cached, a.net_out_cached, a.net_sampled_at
+    now_in, now_out = g["net_in"], g["net_out"]
+    elapsed = (now - prev_at).total_seconds() if prev_at else 0.0
+    if prev_in is None or prev_out is None or elapsed <= 0:
+        a.net_in_bps_cached = a.net_out_bps_cached = None
+    elif now_in < prev_in or now_out < prev_out:
+        a.net_in_bps_cached = a.net_out_bps_cached = None
+    else:
+        a.net_in_bps_cached = (now_in - prev_in) / elapsed
+        a.net_out_bps_cached = (now_out - prev_out) / elapsed
+    a.net_in_cached, a.net_out_cached, a.net_sampled_at = now_in, now_out, now
+
+
 # How long a datastore has to stay out of the reads before it stops counting
 # against disk_pct. 15 minutes, and for the same reason APP_REAP_AFTER_S is 15
 # minutes: far longer than any burst of bad reads, short enough that a pool an
@@ -385,6 +412,10 @@ def ingest_cycle(db, host: Host, resources: list[dict],
             "mem_bytes": int(r.get("mem") or 0),
             "mem_total_bytes": int(r.get("maxmem") or 0),
             "disk_bytes": int(r.get("maxdisk") or 0),
+            # `disk` is USED, against `disk_bytes` above which is ALLOCATED.
+            "disk_used_bytes": int(r.get("disk") or 0),
+            "net_in": int(r.get("netin") or 0),
+            "net_out": int(r.get("netout") or 0),
             "uptime_s": int(r.get("uptime") or 0),
         }
 
@@ -417,6 +448,12 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                         "change": "status", "status": g["status"]}))
         a.status_cached, a.cpu_pct_cached = g["status"], g["cpu_pct"]
         a.mem_bytes_cached, a.uptime_s_cached = g["mem_bytes"], g["uptime_s"]
+        # 0 from PVE means "no reading", not "zero bytes used": a stopped
+        # container reports 0 disk. None keeps that distinguishable from a
+        # container that genuinely uses nothing.
+        a.disk_bytes_cached = g["disk_used_bytes"] or None
+        a.disk_total_bytes_cached = g["disk_bytes"] or None
+        _update_net_rates(a, g, now)
         # Follows the guest: a CT migrated in the Proxmox UI rather than through
         # Proxploy changes node without the app row being rewritten, and every
         # call site then aimed at the host's node instead (doc 12 check 18).
@@ -429,10 +466,13 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                     metric="mem_pct",
                                     value=_mem_pct(g["mem_bytes"],
                                                    g["mem_total_bytes"]), ts=now))
-        # ponytail: no disk_pct for apps/vms: /cluster/resources' `disk` field
-        # is meaningful for LXC but routinely 0 for QEMU, so a guest disk_pct
-        # would be silently wrong for every VM. Task 12's rule validation
-        # rejects disk_pct on app/vm targets with an explanatory 422 instead.
+        # ponytail: no disk_pct SAMPLE for apps or VMs. Apps now cache a disk
+        # reading (disk_bytes_cached above), but that is a current value on
+        # the row, not a series: /cluster/resources' `disk` field is
+        # meaningful for LXC and routinely 0 for QEMU, so a guest disk_pct
+        # series would be silently wrong for every VM. Task 12's rule
+        # validation rejects disk_pct on app/vm targets with an explanatory
+        # 422 instead.
         targets.append({"t": "app", "id": a.id, "cpu_pct": g["cpu_pct"],
                         "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
 
