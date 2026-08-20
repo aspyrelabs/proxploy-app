@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAppActionGates } from '../api/app-gates'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { useHostCapabilities } from '../api/hosts'
@@ -27,11 +28,11 @@ type Guard = { phrase: string; detail: string; action: string }
 export function LifecycleActions({ target, id, name, status, hostId, size = 'md' }: {
   target: Target; id: number; name: string; status: string; hostId: number; size?: 'sm' | 'md'
 }) {
+  const gates = useAppActionGates(hostId)
   const ent = useEntitlements()
   const hostCaps = useHostCapabilities(hostId)
   const run = useLifecycle()
   const [guard, setGuard] = useState<Guard | null>(null)
-  const flag = target === 'app' ? 'apps.lifecycle' : 'vms.lifecycle'
   const pending = status === 'pending' || run.isPending
   // status === 'pending' is the optimistic patch itself, not a real lifecycle
   // state, RUNNING_ACTIONS/STOPPED_ACTIONS don't cover it, and falling
@@ -40,20 +41,16 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // of guessing which action set the pre-mutation status implied.
   const actions = status === 'pending' ? null : status === 'running' ? RUNNING_ACTIONS : STOPPED_ACTIONS
   const cls = size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
-  // useEntitlements().has() defaults to false until /entitlements resolves, 
-  // gating `disabled` on it directly would grey out (and swallow clicks on)
-  // every action for the entire first fetch, not just for plans that lack
-  // the flag. Only withhold access once the entitlements response has
-  // actually landed and said no.
-  const denied = ent.data != null && !ent.has(flag)
-  // Same guard as `denied` above (hostCaps.loaded gates the same way
-  // ent.data != null does): capabilities read undefined before GET /hosts
-  // resolves, and disabling on that alone would grey out a perfectly capable
-  // host for the whole first fetch. Only an explicit `false` withholds it.
-  const noLifecycle = hostCaps.loaded && hostCaps.capabilities?.lifecycle === false
-  const reason = noLifecycle
-    ? 'This host has no lifecycle API token configured. Add one in Settings → Hosts.'
-    : denied ? 'Not included in your plan' : undefined
+  // Why an unresolved fetch withholds nothing: api/app-gates.ts.
+  // App gates come from that shared hook; the VM path keeps its own
+  // derivation (vms.lifecycle isn't covered there, that's out of scope here).
+  const denied = target === 'app' ? gates.lifecycle.denied : ent.data != null && !ent.has('vms.lifecycle')
+  const noLifecycle = target === 'vm' && hostCaps.loaded && hostCaps.capabilities?.lifecycle === false
+  const reason = target === 'app'
+    ? gates.lifecycle.reason
+    : noLifecycle
+      ? 'This host has no lifecycle API token configured. Add one in Settings → Hosts.'
+      : denied ? 'Not included in your plan' : undefined
 
   const fire = (action: string, confirm?: string) =>
     run.mutate({ target, id, action, confirm }, {
@@ -113,11 +110,11 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
  * of being copied into each call site.
  */
 export function ConsoleButton({ hostId, onClick }: { hostId: number; onClick: () => void }) {
-  const hostCaps = useHostCapabilities(hostId)
-  const noConsole = hostCaps.loaded && hostCaps.capabilities?.console === false
+  // Why an unresolved fetch withholds nothing: api/app-gates.ts.
+  const gates = useAppActionGates(hostId)
   return (
-    <Button variant="ghost" className="px-2 py-1 text-[11px]" disabled={noConsole}
-      title={noConsole ? 'This host has no console API token configured. Add one in Settings → Hosts.' : undefined}
+    <Button variant="ghost" className="px-2 py-1 text-[11px]" disabled={gates.console.denied}
+      title={gates.console.reason}
       onClick={onClick}>
       Console
     </Button>
