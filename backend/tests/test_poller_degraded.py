@@ -179,11 +179,12 @@ def test_a_healthy_hosts_guests_are_untouched(tmp_path):
 
 
 def test_marking_unreachable_twice_does_not_republish_the_same_events(tmp_path):
+    from proxploy.models import App, Vm
     from tests.fakes.pve import FakePVE
 
     fake = FakePVE(fail=True)
     app, c, host_id = _app_with(tmp_path, fake)
-    _seed_guests(app, host_id)
+    app_id, vm_id = _seed_guests(app, host_id)
 
     first = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
     # host + one app + one vm, all transitioning for the first time
@@ -191,6 +192,93 @@ def test_marking_unreachable_twice_does_not_republish_the_same_events(tmp_path):
 
     second = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
     assert second == []
+
+    # Nothing left to clear, so the second call is a no-op: the guests still
+    # read exactly what the first call left them at.
+    with app.state.sessionmaker() as db:
+        a = db.get(App, app_id)
+        v = db.get(Vm, vm_id)
+        assert a.status_cached == "unknown"
+        assert a.cpu_pct_cached is None
+        assert v.status == "unknown"
+        assert v.uptime_s is None
+
+
+def test_a_host_already_marked_unreachable_still_sweeps_stale_guests(tmp_path):
+    """This is the test that would have caught the transition-only guard: a
+    host that was already unreachable before this call (a backend restart
+    landing on a host that was already down, or any later retry) must still
+    get its guests cleared, not just the host that is transitioning right
+    now. Before the fix, the early return on `already` skipped the sweep
+    entirely and these guests stayed on their stale, healthy-looking values
+    forever."""
+    from proxploy.models import App, Host, Vm
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    app_id, vm_id = _seed_guests(app, host_id)
+
+    # Simulate the host already being marked unreachable, with the guest
+    # sweep from that never having run (e.g. a restart between the two).
+    with app.state.sessionmaker() as db:
+        host = db.get(Host, host_id)
+        host.status = "unreachable"
+        db.commit()
+
+    events = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    with app.state.sessionmaker() as db:
+        a = db.get(App, app_id)
+        v = db.get(Vm, vm_id)
+        assert a.status_cached == "unknown"
+        assert a.cpu_pct_cached is None
+        assert a.mem_bytes_cached is None
+        assert a.uptime_s_cached is None
+        assert v.status == "unknown"
+        assert v.uptime_s is None
+    # No host event: the host was not transitioning. The two guest events are
+    # the actual fix.
+    assert ("resource", {"type": "app", "id": app_id,
+                         "change": "status", "status": "unknown"}) in events
+    assert ("resource", {"type": "vm", "id": vm_id,
+                         "change": "status", "status": "unknown"}) in events
+    assert not any(d.get("type") == "host" for _, d in events)
+
+
+def test_a_guest_already_unknown_with_a_stale_reading_gets_it_cleared(tmp_path):
+    """ingest_cycle's own absence path can leave status_cached == "unknown"
+    while a reading is still stale. The sweep must not skip a guest just
+    because its status already looks right."""
+    from proxploy.models import App
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    with app.state.sessionmaker() as db:
+        a = App(host_id=host_id, ctid=101, name="redis", slug="redis-101",
+               status_cached="unknown", cpu_pct_cached=12.0,
+               mem_bytes_cached=500_000_000, uptime_s_cached=3600,
+               disk_bytes_cached=1_000_000_000, disk_total_bytes_cached=5_000_000_000,
+               net_in_bps_cached=10.0, net_out_bps_cached=20.0)
+        db.add(a)
+        db.commit()
+        app_id = a.id
+
+    events = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    with app.state.sessionmaker() as db:
+        a = db.get(App, app_id)
+        assert a.status_cached == "unknown"
+        assert a.cpu_pct_cached is None
+        assert a.mem_bytes_cached is None
+        assert a.uptime_s_cached is None
+        assert a.disk_bytes_cached is None
+        assert a.disk_total_bytes_cached is None
+        assert a.net_in_bps_cached is None
+        assert a.net_out_bps_cached is None
+    # Its status did not change, so no app event, but the write still happened.
+    assert not any(d.get("type") == "app" for _, d in events)
 
 
 def test_recovery_after_unreachable_restores_real_values(tmp_path):

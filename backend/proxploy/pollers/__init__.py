@@ -821,6 +821,23 @@ class Poller:
         got there. Clearing the cache here, once, is correct for all four
         readers; a guard added at each of them instead could drift out of
         sync with the other three.
+
+        The host loop keeps retrying a dead host forever, just slower each
+        time (the backoff above), so this runs on every one of those retries,
+        including every retry after a backend restart that comes back to a
+        host still down. The host's own status flip to "unreachable" is only
+        worth an SSE event on the transition (the `already` check below), but
+        the guest sweep cannot use that same host-level flag to decide
+        whether it has work to do: a guest can be left stale by a restart
+        even though the host row already reads "unreachable" from before the
+        restart. So the sweep runs every call, and each guest is checked on
+        its own: a guest already fully cleared (status unknown and every
+        cached reading already null) is skipped with no write and no event,
+        which is what stops a dead host retrying every cycle from restating
+        the same rows or republishing the same events forever. A guest whose
+        status already reads unknown but still has a stale reading (set by
+        ingest_cycle's own absence path, or left over some other way) is not
+        considered cleared and gets its readings nulled too.
         """
         with self.app.state.sessionmaker() as db:
             host = db.get(Host, host_id)
@@ -832,22 +849,25 @@ class Poller:
             # between cycles (a timeout becoming a 403), and the operator needs
             # the current one, not the first one ever recorded.
             host.last_error = reason or None
-            if already:
-                # The host loop keeps retrying a dead host forever, just
-                # slower each time (the backoff above), so this runs on every
-                # one of those retries. The guests below were already marked
-                # unknown the first time the host went unreachable; sweeping
-                # them again on every retry would write every row and publish
-                # every event again for nothing having changed, which is the
-                # storm the idempotency requirement rules out.
-                db.commit()
-                return []
 
-            events: list[tuple[str, dict]] = [
-                ("resource", {"type": "host", "id": host_id,
-                              "change": "status", "status": "unreachable"})]
+            events: list[tuple[str, dict]] = []
+            if not already:
+                events.append(("resource", {"type": "host", "id": host_id,
+                                            "change": "status", "status": "unreachable"}))
 
             for a in db.query(App).filter_by(host_id=host_id).all():
+                already_cleared = (
+                    a.status_cached == "unknown"
+                    and a.cpu_pct_cached is None
+                    and a.mem_bytes_cached is None
+                    and a.uptime_s_cached is None
+                    and a.disk_bytes_cached is None
+                    and a.disk_total_bytes_cached is None
+                    and a.net_in_bps_cached is None
+                    and a.net_out_bps_cached is None
+                )
+                if already_cleared:
+                    continue
                 if a.status_cached != "unknown":
                     events.append(("resource", {"type": "app", "id": a.id,
                                                 "change": "status", "status": "unknown"}))
@@ -881,6 +901,8 @@ class Poller:
                 # the common case.
 
             for v in db.query(Vm).filter_by(host_id=host_id).all():
+                if v.status == "unknown" and v.uptime_s is None:
+                    continue
                 if v.status != "unknown":
                     events.append(("resource", {"type": "vm", "id": v.id,
                                                 "change": "status", "status": "unknown"}))
