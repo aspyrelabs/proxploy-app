@@ -8,6 +8,11 @@ import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { useOpenWebUi } from '../api/open-web-ui'
 import { AppCard, AppCardSkeleton } from '../components/AppCard'
+import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
+import { AppTable, AppTableSkeleton } from '../components/AppTable'
+import { AppsViewSwitch } from '../components/AppsViewSwitch'
+import { UpdateAllButton } from '../components/UpdateAllButton'
+import { useAppsView } from '../lib/apps-view'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
@@ -64,6 +69,7 @@ export function AppsPage() {
     refetchInterval: 30_000,
   })
   const apps = appsQuery.data
+  const [appsView, setAppsView] = useAppsView()
   const discoveredQuery = useQuery({
     queryKey: ['apps', 'discovered'],
     queryFn: () => api<DiscoveredRow[]>('/apps/discovered'),
@@ -76,12 +82,19 @@ export function AppsPage() {
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-semibold">Apps</h1>
           <div className="text-[12px] text-text-3">
             {apps ? `${apps.length} installed across ${hosts?.length ?? 0} hosts` : '…'}
           </div>
+        </div>
+        {/* Both controls live here rather than on the Hosts page. This is the
+            page that owns the apps, and the Hosts section beside the VMs is a
+            glance at what is installed, not a place to operate on it. */}
+        <div className="flex items-center gap-3">
+          <AppsViewSwitch value={appsView} onChange={setAppsView} />
+          <UpdateAllButton />
         </div>
       </div>
 
@@ -157,18 +170,28 @@ export function AppsPage() {
       </div>
 
       <QueryState query={appsQuery}
-                  loading={<SkeletonGroup label="Loading apps" className={APP_GRID}>
-                    {Array.from({ length: 8 }, (_, i) => <AppCardSkeleton key={i} />)}
-                  </SkeletonGroup>}
+                  loading={appsView === 'detailed'
+                    ? <SkeletonGroup label="Loading apps" className={APP_GRID}>
+                        {Array.from({ length: 8 }, (_, i) => <AppCardSkeleton key={i} />)}
+                      </SkeletonGroup>
+                    : appsView === 'list'
+                      ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={8} /></SkeletonGroup>
+                      : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={12} /></SkeletonGroup>}
                   emptyTitle="No apps match your filter."
                   emptyNote="Install from the App Store, or adopt a container Proxploy already found."
                   errorTitle="Apps not readable"
                   errorNote="Proxploy could not reach the backend to list your apps.">
-        {(rows) => (
-          <div className={APP_GRID}>
-            {rows.map((a) => <AppCard key={a.id} app={a} />)}
-          </div>
-        )}
+        {(rows) => {
+          // The same filtered set in every view: the switch changes how the
+          // set is drawn, never which apps are in it.
+          if (appsView === 'list') return <AppTable apps={rows} />
+          if (appsView === 'icon') return <AppIconGrid apps={rows} />
+          return (
+            <div className={APP_GRID}>
+              {rows.map((a) => <AppCard key={a.id} app={a} />)}
+            </div>
+          )
+        }}
       </QueryState>
 
       {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}

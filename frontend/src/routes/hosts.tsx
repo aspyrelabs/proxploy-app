@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../api/client'
 import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
-import { AppCard, AppCardSkeleton } from '../components/AppCard'
 import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
-import { AppTable, AppTableSkeleton } from '../components/AppTable'
-import { AppsViewSwitch } from '../components/AppsViewSwitch'
-import { useAppsView } from '../lib/apps-view'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
@@ -32,11 +28,6 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted because the loading placeholder has to lay out in the SAME grid as
 // the content it replaces; two copies of the string is one copy too many.
 const nodeGrid = 'grid grid-cols-1 gap-4 md:grid-cols-3'
-// Apps shares its row with Virtual machines, so the card grid tops out at
-// two across rather than four: at half a row, four columns leave each card
-// too narrow for its own meter labels.
-const appGrid = 'grid grid-cols-1 gap-4 xl:grid-cols-2'
-
 function useSummary() {
   return useQuery({
     queryKey: ['cluster', 'summary'],
@@ -53,52 +44,6 @@ function useNodes() {
   })
 }
 
-/** Doc 06 Cluster overview: the Apps section's "Update all" action. One
- *  confirm covers the whole batch, the backend still requires explicit
- *  consent, and enqueues one job per stale app so each has its own transcript. */
-export function UpdateAllButton() {
-  const ent = useEntitlements()
-  const qc = useQueryClient()
-  // ent.data != null, not a bare has(): has() is fail-closed and reads false
-  // while the first fetch is in flight, which disabled this button with a
-  // "Pro" tooltip for every plan on load, and permanently if the fetch
-  // failed. Same guard every other gate in the app uses.
-  const allowed = ent.data != null && ent.has('store.update_all')
-  const run = useMutation({
-    mutationFn: () => api<{ jobs: { id: number }[]; skipped: { reason: string }[] }>(
-      '/apps/update-all', { method: 'POST', body: JSON.stringify({ consent: true }) }),
-    onSuccess: (r) => {
-      if (r.jobs.length === 0) {
-        // Never a bare silence: "nothing happened" and "it is broken" look
-        // identical otherwise.
-        notify.info('Nothing to update, every app is on its catalog commit.')
-        return
-      }
-      notify.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
-                    + 'follow them in the notifications bell.')
-    },
-    onError: () => notify.error('Could not start the updates, try again.'),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['apps'] })
-      // ['cluster','activity'] used to be invalidated here too, to move the
-      // Recent activity feed that sat on this page. The feed is gone and
-      // nothing here reads that key any more, so invalidating it would be
-      // work with no reader. The toast now points at the bell, which
-      // LiveProvider fills from the SSE stream rather than from a query.
-      qc.invalidateQueries({ queryKey: ['jobs'] })
-    },
-  })
-  return (
-    <Button variant="ghost" disabled={run.isPending || !allowed}
-      title={!allowed ? 'Pro: Update all' : undefined}
-      onClick={() => {
-      if (window.confirm('Update every app that has a newer catalog commit? '
-                         + 'Each update runs a community script as root on its node.')) {
-        run.mutate()
-      }
-    }}>Update all</Button>
-  )
-}
 
 /** Nodes that share a cluster, under one heading carrying that cluster's own
  *  health.
@@ -223,7 +168,6 @@ export function HostsPage() {
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
   })
-  const [appsView, setAppsView] = useAppsView()
   const firstHost = nodes?.[0]?.host_id ?? null
   // ponytail: throughput sparkline charts the first host's series; multi-host
   // summed series lands when a real fleet shows it matters (net figures in the
@@ -324,39 +268,23 @@ export function HostsPage() {
           below lg, where half a row is too narrow for either. */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
         <div>
+          {/* One icon per app with its status, and nothing else. The view
+              switch and Update all moved to the Apps page: this section is a
+              glance at what is installed, not the place to operate on it. */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-[16px] font-semibold">Apps</h2>
-            <div className="flex items-center gap-3">
-              <AppsViewSwitch value={appsView} onChange={setAppsView} />
-              <UpdateAllButton />
-              {/* as never: route typing workaround, see router.tsx */}
-              <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
-            </div>
+            {/* as never: route typing workaround, see router.tsx */}
+            <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
           </div>
           <QueryState query={appsQuery}
-                      loading={appsView === 'detailed'
-                        ? <SkeletonGroup label="Loading apps" className={appGrid}>
-                            {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
-                          </SkeletonGroup>
-                        : appsView === 'list'
-                          ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={4} /></SkeletonGroup>
-                          : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={8} /></SkeletonGroup>}
+                      loading={<SkeletonGroup label="Loading apps">
+                        <AppIconGridSkeleton count={8} />
+                      </SkeletonGroup>}
                       emptyTitle="No apps yet"
                       emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
                       errorTitle="Apps not readable"
                       errorNote="Proxploy could not reach the backend to list your apps.">
-            {(rows) => {
-              // The same eight apps in every view: the switch changes how the
-              // set is drawn, never which apps are in it.
-              const shown = rows.slice(0, 8)
-              if (appsView === 'list') return <AppTable apps={shown} />
-              if (appsView === 'icon') return <AppIconGrid apps={shown} />
-              return (
-                <div className={appGrid}>
-                  {shown.map((a) => <AppCard key={a.id} app={a} />)}
-                </div>
-              )
-            }}
+            {(rows) => <AppIconGrid apps={rows.slice(0, 8)} />}
           </QueryState>
         </div>
 

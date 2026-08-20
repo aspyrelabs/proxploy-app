@@ -339,32 +339,22 @@ describe('HostsPage', () => {
     expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
   })
 
-  it('switches the Apps section between the three views and remembers the choice', async () => {
-    // fireEvent, not user-event: @testing-library/user-event is not a
-    // dependency of this repo and every existing suite drives clicks this way.
+  it('shows one icon per app with its status, and no controls of its own', async () => {
+    // The Apps section is a glance at what is installed. The view switch and
+    // Update all moved to the Apps page, so neither may appear here, and the
+    // section renders the icon grid regardless of any stored preference.
     appsResult = 'ok'
-    const view = withQuery(<HostsPage />)
-
-    // Detailed by default: the card's meters are present.
-    expect(await screen.findByText(/CPU/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
-    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument())
-    expect(localStorage.getItem('pp_apps_view')).toBe('list')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
-    // AppIconGrid's own icon tile, `app-icon-<id>`: only the icon view
-    // renders it, where the detailed view (no table either) instead renders
-    // AppCard's own markup. queryByRole('table') being null would equally be
-    // true of a detailed-view fallback, so it cannot tell the two apart.
-    await waitFor(() => expect(screen.getByTestId('app-icon-7')).toBeInTheDocument())
-    expect(screen.queryByRole('table')).toBeNull()
-    expect(localStorage.getItem('pp_apps_view')).toBe('icon')
-
-    // A remount reads the stored choice rather than resetting to detailed.
-    view.unmount()
+    localStorage.setItem('pp_apps_view', 'list')
     withQuery(<HostsPage />)
-    await waitFor(() => expect(screen.getByTestId('app-icon-7')).toBeInTheDocument())
+
+    // app-icon-<id> is AppIconGrid's own tile; nothing else renders it.
+    expect(await screen.findByTestId('app-icon-7')).toBeInTheDocument()
+    expect(screen.getByText('Running')).toBeInTheDocument()
+    // A stored 'list' must not drag a table onto this page any more.
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'List view' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Icon view' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /update all/i })).toBeNull()
   })
 })
 
