@@ -73,8 +73,17 @@ function Item({ row }: { row: ActivityRow }) {
   )
 }
 
-/** Doc 06 `ActivityFeed`: dashboard row pattern, also used on the Hosts page
- *  as the app's activity history now that the drawer is gone. */
+/** Doc 06 `ActivityFeed`: dashboard row pattern.
+ *
+ *  CURRENTLY UNRENDERED. The Hosts page dropped its Recent activity section
+ *  when Apps and Virtual machines were stacked in its place, and nothing
+ *  else mounts this component either, so it has no page today.
+ *
+ *  Kept rather than deleted, following the same rule LivePulse in
+ *  LiveProvider.tsx uses for the same situation: hide the surface, keep the
+ *  code, say why. Deleting it along with its endpoint and the query
+ *  invalidation call sites that feed it is a separate decision nobody has
+ *  made yet. */
 export function ActivityFeed({ limit = 8 }: { limit?: number }) {
   const activity = useActivity(limit)
   return (
