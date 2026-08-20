@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { notify } from '../lib/notify'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
+import { useOpenWebUi } from '../api/open-web-ui'
 import { AppCard, AppCardSkeleton } from '../components/AppCard'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
@@ -181,6 +182,24 @@ const TABS = [
   { path: 'config', label: 'Config' },
 ] as const
 
+// A hook cannot be called conditionally, so app.catalog_port != null (the
+// only apps with a web UI at all) gates whether this component renders at
+// all, rather than living as an early return inside it.
+function OpenWebUiButton({ app, denied }: { app: AppRow; denied: boolean }) {
+  const openWebUi = useOpenWebUi(app)
+  return (
+    <Button variant="go" disabled={denied || openWebUi.isPending}
+      title={denied ? 'Not included in your plan' : undefined}
+      onClick={() => {
+        const tab = window.open('', '_blank')
+        if (tab) tab.opener = null
+        openWebUi.mutate(tab)
+      }}>
+      Open web UI
+    </Button>
+  )
+}
+
 export function AppDetail() {
   const { appId } = useParams({ strict: false }) as { appId: string }
   const ent = useEntitlements()
@@ -191,33 +210,6 @@ export function AppDetail() {
     queryKey: ['apps', Number(appId)],
     queryFn: () => api<AppRow>(`/apps/${appId}`),
     refetchInterval: 15_000,
-  })
-  // Address is read live off the guest's own NIC config on click, never off
-  // a column set at install: a DHCP lease or a manual re-IP moves the guest
-  // and a value cached at install would silently point at the old one. Same
-  // endpoint the Network tab's edit path already reads through
-  // (api/apps.py::app_network / services guest_nics, "no cache").
-  const openWebUi = useMutation({
-    mutationFn: async (tab: Window | null) => {
-      const app = appQuery.data!
-      // `addresses`, not `ip`. `ip` is the CONFIG, and a container on DHCP has
-      // the literal word `dhcp` there, so this used to reject every DHCP guest
-      // and report that it could not determine the address. `addresses` is
-      // what the container actually holds: the configured address when there
-      // is one, else what PVE reports on /lxc/{vmid}/interfaces.
-      const nics = await api<{ addresses: string[] | null }[]>(`/apps/${app.id}/network`)
-      const addr = nics.flatMap((n) => n.addresses ?? [])[0]?.split('/')[0]
-      if (!addr) { tab?.close(); throw new Error('no address') }
-      const url = `${app.web_protocol || 'http'}://${addr}:${app.catalog_port}${app.web_path || '/'}`
-      // The tab is opened by the click handler, not here. Looking the address
-      // up first would put this window.open after an await, outside the user
-      // gesture, and a popup blocker would drop it: the one thing the button
-      // exists to do. So the tab is opened empty up front and pointed at the
-      // app once the address comes back.
-      if (tab) tab.location.href = url
-      else window.open(url, '_blank', 'noopener,noreferrer')
-    },
-    onError: () => notify.error(`Could not determine ${appQuery.data?.name ?? 'this app'}'s address.`),
   })
   return (
     <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
@@ -283,17 +275,7 @@ export function AppDetail() {
                     from a tab kills the session behind it. */}
                 <ConsoleButton hostId={app.host_id}
                   onClick={() => openConsoleWindow('app', app.id)} />
-                {app.catalog_port != null && (
-                  <Button variant="go" disabled={openUiDenied || openWebUi.isPending}
-                    title={openUiDenied ? 'Not included in your plan' : undefined}
-                    onClick={() => {
-                      const tab = window.open('', '_blank')
-                      if (tab) tab.opener = null
-                      openWebUi.mutate(tab)
-                    }}>
-                    Open web UI
-                  </Button>
-                )}
+                {app.catalog_port != null && <OpenWebUiButton app={app} denied={openUiDenied} />}
                 <Button variant="ghost" disabled={migrateDenied}
                   title={migrateDenied ? 'Not included in your plan' : undefined}
                   onClick={() => setMigrating(true)}>
