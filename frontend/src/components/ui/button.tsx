@@ -5,6 +5,10 @@ const variants = {
   primary: 'bg-[linear-gradient(150deg,#F5B544,#E79126)] text-[#20160a] font-semibold shadow-[0_6px_18px_rgba(245,181,68,.25)] hover:brightness-105',
   ghost: 'bg-panel-2 text-text border border-line hover:bg-elev',
   danger: 'bg-red-dim text-red border border-red/30 hover:bg-red/20',
+  // Start is the one action that MAKES something run, so it is the one
+  // green control in the app. Built like `danger` above so the pair reads
+  // as opposites of the same shape rather than two unrelated styles.
+  success: 'bg-green-dim text-green border border-green/30 hover:bg-green/20',
   go: 'bg-amber-dim text-amber border border-amber/30 hover:bg-amber/20',
 } as const
 

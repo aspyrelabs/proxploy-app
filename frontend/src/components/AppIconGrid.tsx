@@ -41,8 +41,8 @@ const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-x-6 gap-y
 const STATE: Record<string, { icon: string; cls: string }> = {
   running: { icon: 'play_arrow', cls: 'text-green' },
   paused: { icon: 'pause', cls: 'text-amber' },
-  stopped: { icon: 'stop', cls: 'text-text-3' },
-  pending: { icon: 'hourglass_empty', cls: 'text-text-3' },
+  stopped: { icon: 'stop', cls: 'text-red' },
+  pending: { icon: 'hourglass_empty', cls: 'text-amber' },
   error: { icon: 'error', cls: 'text-red' },
   unknown: { icon: 'help', cls: 'text-text-3' },
 }

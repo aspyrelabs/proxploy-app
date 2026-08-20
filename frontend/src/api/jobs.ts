@@ -151,7 +151,13 @@ export function useLifecycle() {
         method: 'POST',
         body: JSON.stringify(v.confirm ? { confirm: v.confirm } : {}),
       }),
-    onMutate: (v) => {
+    onMutate: async (v) => {
+      // A refetch already in flight when the button was clicked would resolve
+      // AFTER this patch and overwrite it with the pre-action status, which is
+      // half of why the pill used to flash back to "running" on its way to
+      // "stopped". The other half was the server not writing the new status
+      // until the next poll, fixed in services/lifecycle.py.
+      await qc.cancelQueries({ queryKey: [key(v.target)] })
       qc.setQueriesData({ queryKey: [key(v.target)] }, (data: unknown) => {
         if (Array.isArray(data)) {
           return data.map((r: any) => (r.id === v.id ? { ...r, status: 'pending' } : r))

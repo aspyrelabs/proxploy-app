@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useAppActionGates } from '../api/app-gates'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
@@ -7,6 +7,7 @@ import { useLifecycle } from '../api/jobs'
 import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { Button } from './ui/button'
+import { ButtonGroupSeparator } from './ui/button-group'
 
 type Target = 'app' | 'vm'
 
@@ -25,8 +26,12 @@ type Guard = { phrase: string; detail: string; action: string }
  * real 202-Accepted job endpoints. Optimistic status patch happens in
  * useLifecycle; a 409 self_target escalates to the typed-confirmation dialog.
  */
-export function LifecycleActions({ target, id, name, status, hostId, size = 'md' }: {
+export function LifecycleActions({ target, id, name, status, hostId, size = 'md',
+                                  grouped = false }: {
   target: Target; id: number; name: string; status: string; hostId: number; size?: 'sm' | 'md'
+  /** Render as bare buttons with separators between them, for a parent
+   *  ButtonGroup, instead of this component's own spaced flex row. */
+  grouped?: boolean
 }) {
   const gates = useAppActionGates(hostId)
   const ent = useEntitlements()
@@ -71,26 +76,32 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
       onSuccess: () => setGuard(null),
     })
 
+  // Start is green and Stop is red, the two opposite outcomes; Restart is
+  // neutral because it lands back where it started. `grouped` swaps the flex
+  // row for a fragment with separators, which is what lets a ButtonGroup weld
+  // these to the actions beside them without a double border down the seam.
+  const buttons = actions === null ? (
+    <Button variant="ghost" className={cls} disabled>
+      Working…
+    </Button>
+  ) : actions.map((a, i) => (
+    <Fragment key={a}>
+      {grouped && i > 0 && <ButtonGroupSeparator />}
+      <Button
+        variant={a === 'stop' ? 'danger' : a === 'start' ? 'success' : 'ghost'}
+        className={cls}
+        disabled={pending || denied || noLifecycle}
+        title={reason}
+        onClick={(e) => { e.stopPropagation(); fire(a) }}
+      >
+        {LABEL[a]}
+      </Button>
+    </Fragment>
+  ))
+
   return (
     <>
-      <div className="flex items-center gap-2">
-        {actions === null ? (
-          <Button variant="ghost" className={cls} disabled>
-            Working…
-          </Button>
-        ) : actions.map((a) => (
-          <Button
-            key={a}
-            variant={a === 'stop' ? 'danger' : a === 'start' ? 'primary' : 'ghost'}
-            className={cls}
-            disabled={pending || denied || noLifecycle}
-            title={reason}
-            onClick={(e) => { e.stopPropagation(); fire(a) }}
-          >
-            {LABEL[a]}
-          </Button>
-        ))}
-      </div>
+      {grouped ? buttons : <div className="flex items-center gap-2">{buttons}</div>}
       {guard && (
         <ConfirmSelfDialog
           phrase={guard.phrase}

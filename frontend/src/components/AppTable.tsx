@@ -2,8 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
 import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
 import { IconTile } from './IconTile'
-import { openConsoleWindow } from '../lib/console-window'
-import { ConsoleButton, LifecycleActions } from './LifecycleActions'
+import { AppActionBar } from './AppActionBar'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
@@ -88,11 +87,8 @@ function AppTableRow({ app }: { app: AppRow }) {
         ↓ {fmtBps(app.net_in_bps)} ↑ {fmtBps(app.net_out_bps)}
       </td>
       <td className={td}>
-        <div className="flex items-center justify-end gap-2">
-          <LifecycleActions target="app" id={app.id} name={app.name}
-                            status={app.status} hostId={app.host_id} size="sm" />
-          <ConsoleButton hostId={app.host_id}
-            onClick={() => openConsoleWindow('app', app.id)} />
+        <div className="flex items-center justify-end">
+          <AppActionBar app={app} />
         </div>
       </td>
     </tr>
