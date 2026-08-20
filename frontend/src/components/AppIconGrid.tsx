@@ -24,6 +24,20 @@ import { Skeleton, SkeletonLine } from './ui/skeleton'
  * the same reason. `connected`/`online` are node-only statuses StatusPill
  * also carries, never a value AppRow.status takes, so they are left out.
  */
+/** auto-fill with a FLOOR, not a fixed column count.
+ *
+ *  A count (sm:grid-cols-2 xl:grid-cols-4) decided how many columns there were
+ *  and let each one be whatever width was left over, so at four across on a
+ *  narrow page an app name was cut to a few characters. A 13rem floor is the
+ *  32px tile plus its gap plus room for roughly 20 characters at 13px: the
+ *  browser fits as many columns as that allows and no column is ever narrower
+ *  than a readable name.
+ *
+ *  Shared with the skeleton so the placeholder cannot lay out differently from
+ *  the thing it stands in for. */
+const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-x-6 gap-y-4 '
+           + 'rounded-card border border-line-soft bg-panel p-4'
+
 const STATE: Record<string, { icon: string; cls: string }> = {
   running: { icon: 'play_arrow', cls: 'text-green' },
   paused: { icon: 'pause', cls: 'text-amber' },
@@ -35,8 +49,7 @@ const STATE: Record<string, { icon: string; cls: string }> = {
 
 export function AppIconGrid({ apps }: { apps: AppRow[] }) {
   return (
-    <div className="grid grid-cols-1 gap-x-6 gap-y-4 rounded-card border border-line-soft
-                    bg-panel p-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className={GRID}>
       {apps.map((a) => <AppIconCell key={a.id} app={a} />)}
     </div>
   )
@@ -53,8 +66,8 @@ function AppIconCell({ app }: { app: AppRow }) {
       <AppIconMenu app={app}>
         <button type="button" data-testid={`app-icon-${app.id}`}
           aria-label={`Actions for ${app.name}`}
-          className="shrink-0 rounded-card transition hover:brightness-110">
-          <IconTile name={app.name} iconUrl={app.icon_url} size={64}
+          className="shrink-0 rounded-tile transition hover:brightness-110">
+          <IconTile name={app.name} iconUrl={app.icon_url} size={32}
                     initials={app.icon_initials} colors={app.icon_colors} />
         </button>
       </AppIconMenu>
@@ -63,6 +76,7 @@ function AppIconCell({ app }: { app: AppRow }) {
             modelled on has no detail page and so has only one target; this
             one does, and keeps a way in. */}
         <button type="button"
+          title={app.name}
           className="block max-w-full truncate text-left text-[13px] text-text
                      transition hover:text-amber"
           onClick={() => navigate({ to: '/apps/$appId' as never,
@@ -82,11 +96,10 @@ function AppIconCell({ app }: { app: AppRow }) {
  *  so the page below does not shift when the apps land. */
 export function AppIconGridSkeleton({ count = 8 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 gap-x-6 gap-y-4 rounded-card border border-line-soft
-                    bg-panel p-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className={GRID}>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="flex items-center gap-3">
-          <Skeleton className="h-16 w-16 shrink-0 rounded-card" />
+          <Skeleton className="h-8 w-8 shrink-0 rounded-tile" />
           <div className="min-w-0 flex-1">
             <SkeletonLine className="w-24 text-[13px]" />
             <SkeletonLine className="w-16 text-[11px]" />

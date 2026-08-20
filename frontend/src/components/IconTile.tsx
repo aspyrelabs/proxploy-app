@@ -25,19 +25,21 @@ import { STORE_GRADIENT } from './UsageBar'
 export function IconTile({ name, iconUrl, size, initials, colors }: {
   name: string
   iconUrl: string | null
-  /** 40 on a card, 56 on a detail header, 64 in the icon grid. A closed
-   *  triple rather than a free number, so the tile can carry the matching
-   *  radius and glyph size with it instead of every caller restating them. */
-  size: 40 | 56 | 64
+  /** 32 in the icon grid, 40 on a card, 56 on a detail header. A closed set
+   *  rather than a free number, so the tile can carry the matching radius and
+   *  glyph size with it instead of every caller restating them. 32 takes the
+   *  smaller rounded-tile radius: rounded-card on a 32px box eats most of the
+   *  artwork's corners. */
+  size: 32 | 40 | 56
   initials?: string | null
   colors?: { c1: string; c2: string } | null
 }) {
   const [broken, setBroken] = useState(false)
-  const box = size === 40
-    ? 'h-10 w-10 rounded-tile text-[14px]'
-    : size === 56
-      ? 'h-14 w-14 rounded-card text-[18px]'
-      : 'h-16 w-16 rounded-card text-[20px]'
+  const box = size === 32
+    ? 'h-8 w-8 rounded-tile text-[11px]'
+    : size === 40
+      ? 'h-10 w-10 rounded-tile text-[14px]'
+      : 'h-14 w-14 rounded-card text-[18px]'
   if (iconUrl && !broken) {
     return (
       <img

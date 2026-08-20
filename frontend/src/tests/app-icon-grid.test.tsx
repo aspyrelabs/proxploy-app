@@ -91,6 +91,23 @@ describe('AppIconGrid', () => {
     expect(stopped).toHaveClass('uppercase')
   })
 
+  it('leaves room for a long app name rather than cutting it to a few characters', () => {
+    // jsdom does no layout, so this pins the RULE that guarantees the room:
+    // a column floor, not a fixed column count. A count let each column be
+    // whatever was left over, which is how names got cut. The floor is sized
+    // for the 32px tile, its gap, and roughly 20 characters at 13px.
+    const { container } = wrap([{ ...APP, name: 'a-twenty-char-name!!' }])
+    const grid = container.querySelector('div[class*="grid-cols"]') as HTMLElement
+    expect(grid.className).toContain('auto-fill')
+    expect(grid.className).toMatch(/minmax\(13rem,\s*1fr\)/)
+    expect(grid.className).not.toMatch(/grid-cols-\d/)
+    // Past the floor it still ellipses rather than blowing the column open,
+    // and the full name stays reachable on hover.
+    const name = screen.getByRole('button', { name: 'a-twenty-char-name!!' })
+    expect(name.className).toContain('truncate')
+    expect(name).toHaveAttribute('title', 'a-twenty-char-name!!')
+  })
+
   it('opens the app detail page from the name', () => {
     wrap([APP])
     fireEvent.click(screen.getByRole('button', { name: 'Immich' }))
