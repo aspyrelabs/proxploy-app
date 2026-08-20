@@ -219,6 +219,10 @@ describe('HostsPage', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}; appsResult = 'empty'
     navigate.mockClear()
+    // The view-switch test below writes pp_apps_view; clearing it here, not
+    // only in that test's own body, keeps every test in this file (including
+    // ones added later) starting from the same unset choice.
+    localStorage.clear()
   })
 
   it('renders rings, counts and node cards from the API', async () => {
@@ -338,7 +342,6 @@ describe('HostsPage', () => {
   it('switches the Apps section between the three views and remembers the choice', async () => {
     // fireEvent, not user-event: @testing-library/user-event is not a
     // dependency of this repo and every existing suite drives clicks this way.
-    localStorage.clear()
     appsResult = 'ok'
     const view = withQuery(<HostsPage />)
 
@@ -350,13 +353,18 @@ describe('HostsPage', () => {
     expect(localStorage.getItem('pp_apps_view')).toBe('list')
 
     fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
-    await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
+    // AppIconGrid's own icon tile, `app-icon-<id>`: only the icon view
+    // renders it, where the detailed view (no table either) instead renders
+    // AppCard's own markup. queryByRole('table') being null would equally be
+    // true of a detailed-view fallback, so it cannot tell the two apart.
+    await waitFor(() => expect(screen.getByTestId('app-icon-7')).toBeInTheDocument())
+    expect(screen.queryByRole('table')).toBeNull()
     expect(localStorage.getItem('pp_apps_view')).toBe('icon')
 
     // A remount reads the stored choice rather than resetting to detailed.
     view.unmount()
     withQuery(<HostsPage />)
-    await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
+    await waitFor(() => expect(screen.getByTestId('app-icon-7')).toBeInTheDocument())
   })
 })
 
