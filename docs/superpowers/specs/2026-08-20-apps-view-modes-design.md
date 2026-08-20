@@ -69,7 +69,7 @@ excluded, for the reason it gives.
 
 ### Model and migration
 
-Six nullable columns on `App`, following the existing `_cached` convention:
+Seven nullable columns on `App`, following the existing `_cached` convention:
 
 | Column | Holds |
 |---|---|
@@ -79,9 +79,17 @@ Six nullable columns on `App`, following the existing `_cached` convention:
 | `net_out_cached` | Raw outbound counter, for the next diff |
 | `net_in_bps_cached` | Derived inbound rate, bytes/s |
 | `net_out_bps_cached` | Derived outbound rate, bytes/s |
+| `net_sampled_at` | When the counters above were read |
 
 The raw counters are stored, not just the rates, because the next cycle's diff
 needs them.
+
+`net_sampled_at` exists rather than the rate being divided by
+`poll_interval_s`, because the real gap between two cycles is not the configured
+interval: the poll loop backs off exponentially on a failing host. It is also
+not `TimestampMixin.updated_at`, which moves on any write to the row, so a
+rename or a migration between two cycles would silently shorten the window and
+inflate the rate.
 
 ### API
 
