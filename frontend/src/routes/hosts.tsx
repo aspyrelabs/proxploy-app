@@ -32,7 +32,10 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted because the loading placeholder has to lay out in the SAME grid as
 // the content it replaces; two copies of the string is one copy too many.
 const nodeGrid = 'grid grid-cols-1 gap-4 md:grid-cols-3'
-const appGrid = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'
+// Apps shares its row with Virtual machines, so the card grid tops out at
+// two across rather than four: at half a row, four columns leave each card
+// too narrow for its own meter labels.
+const appGrid = 'grid grid-cols-1 gap-4 xl:grid-cols-2'
 
 function useSummary() {
   return useQuery({
@@ -315,77 +318,80 @@ export function HostsPage() {
         </QueryState>
       </div>
 
-      <div className="mt-6">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-[16px] font-semibold">Apps</h2>
-          <div className="flex items-center gap-3">
-            <AppsViewSwitch value={appsView} onChange={setAppsView} />
-            <UpdateAllButton />
-            {/* as never: route typing workaround, see router.tsx */}
-            <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+      {/* Apps and Virtual machines side by side: they are the two inventories
+          this page exists to show, and an operator comparing them wants both
+          in view at once rather than one scrolled past the other. They stack
+          below lg, where half a row is too narrow for either. */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+        <div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-display text-[16px] font-semibold">Apps</h2>
+            <div className="flex items-center gap-3">
+              <AppsViewSwitch value={appsView} onChange={setAppsView} />
+              <UpdateAllButton />
+              {/* as never: route typing workaround, see router.tsx */}
+              <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+            </div>
           </div>
+          <QueryState query={appsQuery}
+                      loading={appsView === 'detailed'
+                        ? <SkeletonGroup label="Loading apps" className={appGrid}>
+                            {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
+                          </SkeletonGroup>
+                        : appsView === 'list'
+                          ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={4} /></SkeletonGroup>
+                          : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={8} /></SkeletonGroup>}
+                      emptyTitle="No apps yet"
+                      emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
+                      errorTitle="Apps not readable"
+                      errorNote="Proxploy could not reach the backend to list your apps.">
+            {(rows) => {
+              // The same eight apps in every view: the switch changes how the
+              // set is drawn, never which apps are in it.
+              const shown = rows.slice(0, 8)
+              if (appsView === 'list') return <AppTable apps={shown} />
+              if (appsView === 'icon') return <AppIconGrid apps={shown} />
+              return (
+                <div className={appGrid}>
+                  {shown.map((a) => <AppCard key={a.id} app={a} />)}
+                </div>
+              )
+            }}
+          </QueryState>
         </div>
-        <QueryState query={appsQuery}
-                    loading={appsView === 'detailed'
-                      ? <SkeletonGroup label="Loading apps" className={appGrid}>
-                          {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
-                        </SkeletonGroup>
-                      : appsView === 'list'
-                        ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={4} /></SkeletonGroup>
-                        : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={8} /></SkeletonGroup>}
-                    emptyTitle="No apps yet"
-                    emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
-                    errorTitle="Apps not readable"
-                    errorNote="Proxploy could not reach the backend to list your apps.">
-          {(rows) => {
-            // The same eight apps in every view: the switch changes how the
-            // set is drawn, never which apps are in it.
-            const shown = rows.slice(0, 8)
-            if (appsView === 'list') return <AppTable apps={shown} />
-            if (appsView === 'icon') return <AppIconGrid apps={shown} />
-            return (
-              <div className={appGrid}>
-                {shown.map((a) => <AppCard key={a.id} app={a} />)}
-              </div>
-            )
-          }}
-        </QueryState>
-      </div>
 
-      {/* Full width and stacked, not a two-up grid. Apps and Virtual machines
-          are the two inventories this page exists to show, and half a row each
-          made both scroll internally while the page had space to spare. */}
-      <div className={`mt-6 ${card}`}>
-        <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
-        <QueryState query={vmsQuery}
-                    loading={<SkeletonGroup label="Loading virtual machines">
-                      <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
-                    </SkeletonGroup>}
-                    emptyTitle="No VMs discovered"
-                    emptyNote="QEMU guests on connected hosts appear here."
-                    errorTitle="VMs not readable"
-                    errorNote="Proxploy could not reach the backend to list your VMs.">
-          {(rows) => (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="text-[11px] uppercase text-text-3">
-                  <th className="pb-2 font-medium">Name</th>
-                  <th className="pb-2 font-medium">Node</th>
-                  <th className="pb-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 4).map((v) => (
-                  <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
-                    <td className="py-2 font-mono">{v.name}</td>
-                    <td className="py-2 text-text-2">{v.host_name}</td>
-                    <td className="py-2"><StatusPill status={v.status} /></td>
+        <div className={card}>
+          <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
+          <QueryState query={vmsQuery}
+                      loading={<SkeletonGroup label="Loading virtual machines">
+                        <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
+                      </SkeletonGroup>}
+                      emptyTitle="No VMs discovered"
+                      emptyNote="QEMU guests on connected hosts appear here."
+                      errorTitle="VMs not readable"
+                      errorNote="Proxploy could not reach the backend to list your VMs.">
+            {(rows) => (
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="text-[11px] uppercase text-text-3">
+                    <th className="pb-2 font-medium">Name</th>
+                    <th className="pb-2 font-medium">Node</th>
+                    <th className="pb-2 font-medium">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </QueryState>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 4).map((v) => (
+                    <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
+                      <td className="py-2 font-mono">{v.name}</td>
+                      <td className="py-2 text-text-2">{v.host_name}</td>
+                      <td className="py-2"><StatusPill status={v.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </QueryState>
+        </div>
       </div>
 
       <div className={`mt-6 ${card}`}>
