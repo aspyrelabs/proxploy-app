@@ -66,14 +66,29 @@ describe('AppIconGrid', () => {
 
   it('shows the state beside the name, never drawn on the logo', () => {
     wrap([APP])
-    expect(screen.getByText(/running/i)).toBeInTheDocument()
+    // Exact case: statusLabel('running') is 'Running', not any other casing.
+    const status = screen.getByText('Running')
+    expect(status).toBeInTheDocument()
+    // The class that makes every status word read in the same case on the
+    // grid: statusLabel returns 'Running' but 'stopped' verbatim, so without
+    // this class the grid would mix cases. jsdom does not apply Tailwind's
+    // compiled CSS, so this checks the class is present rather than the
+    // rendered glyphs, which is the part that would actually regress.
+    expect(status).toHaveClass('uppercase')
     expect(screen.getByTestId('app-icon-1').querySelector('[data-icon]')).toBeNull()
   })
 
-  it('keeps paused distinguishable from stopped', () => {
+  it('keeps paused distinguishable from stopped, in the same case', () => {
     wrap([{ ...APP, status: 'paused' }, { ...APP, id: 2, name: 'Plex', status: 'stopped' }])
-    expect(screen.getByText(/paused/i)).toBeInTheDocument()
-    expect(screen.getByText(/stopped/i)).toBeInTheDocument()
+    // statusLabel has no entries for paused or stopped, so these come back
+    // lowercase verbatim: the exact text pins that, and the uppercase class
+    // is what makes them read the same case as 'Running' on screen.
+    const paused = screen.getByText('paused')
+    const stopped = screen.getByText('stopped')
+    expect(paused).toBeInTheDocument()
+    expect(stopped).toBeInTheDocument()
+    expect(paused).toHaveClass('uppercase')
+    expect(stopped).toHaveClass('uppercase')
   })
 
   it('opens the app detail page from the name', () => {

@@ -69,7 +69,7 @@ function AppIconCell({ app }: { app: AppRow }) {
                                     params: { appId: String(app.id) } as never })}>
           {app.name}
         </button>
-        <div className={`flex items-center gap-1 font-mono text-[11px] ${state.cls}`}>
+        <div className={`flex items-center gap-1 font-mono text-[11px] uppercase ${state.cls}`}>
           <Icon name={state.icon} size={14} />
           {statusLabel(app.status)}
         </div>
