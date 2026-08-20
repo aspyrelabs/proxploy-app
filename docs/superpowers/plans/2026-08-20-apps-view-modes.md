@@ -374,43 +374,58 @@ The raw counters and `net_sampled_at` are deliberately NOT serialized. They exis
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `backend/tests/test_apps_vms_api.py`. Match the file's existing fixture and client conventions by reading the test directly above the insertion point first, then follow it.
+Append to `backend/tests/test_apps_vms_api.py`. That file has no `client`/`db`/`host`
+fixtures: every test builds its own via the module-local `_seeded(tmp_path)` helper and
+takes `(tmp_path, csrf_header, bootstrap_admin)`. Follow that exactly.
+
+`_seeded` already seeds two apps: CT 150 "Immich" with cached metrics, and CT 151
+"Paperless" with none. The second is the unpolled case, so it needs no new seeding.
 
 ```python
-def test_app_out_carries_storage_and_network(client, db, host):
+def test_app_out_carries_storage_and_network(tmp_path, csrf_header, bootstrap_admin):
     """The four fields the Apps views read. The raw netin/netout counters are
     NOT among them: they exist so the poller can compute the next rate, and a
     client has nothing to do with a number that only means something next to
     the previous one."""
     from proxploy.models import App
 
-    db.add(App(host_id=host.id, ctid=150, name="Immich", slug="immich",
-               disk_bytes_cached=5_368_709_120,
-               disk_total_bytes_cached=17_179_869_184,
-               net_in_bps_cached=10_000.0, net_out_bps_cached=20.0))
-    db.commit()
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+        with app.state.sessionmaker() as db:
+            row = db.query(App).filter_by(ctid=150).one()
+            row.disk_bytes_cached = 5_368_709_120
+            row.disk_total_bytes_cached = 17_179_869_184
+            row.net_in_bps_cached = 10_000.0
+            row.net_out_bps_cached = 20.0
+            db.commit()
 
-    row = client.get("/api/v1/apps").json()[0]
+        immich = next(r for r in c.get("/api/v1/apps").json() if r["slug"] == "immich")
 
-    assert row["disk_bytes"] == 5_368_709_120
-    assert row["disk_total_bytes"] == 17_179_869_184
-    assert row["net_in_bps"] == 10_000.0
-    assert row["net_out_bps"] == 20.0
-    assert "net_in_cached" not in row and "net_sampled_at" not in row
+        assert immich["disk_bytes"] == 5_368_709_120
+        assert immich["disk_total_bytes"] == 17_179_869_184
+        assert immich["net_in_bps"] == 10_000.0
+        assert immich["net_out_bps"] == 20.0
+        assert "net_in_cached" not in immich and "net_sampled_at" not in immich
 
 
-def test_an_unpolled_app_serializes_null_metrics_not_zero(client, db, host):
+def test_an_unpolled_app_serializes_null_metrics_not_zero(tmp_path, csrf_header,
+                                                          bootstrap_admin):
     """Null is the honest answer for an app the poller has not reached. Zero
-    would claim a container is idle when nothing has looked at it yet."""
-    from proxploy.models import App
+    would claim a container is idle when nothing has looked at it yet.
 
-    db.add(App(host_id=host.id, ctid=151, name="Plex", slug="plex"))
-    db.commit()
+    CT 151 (Paperless) is seeded with no cached metrics at all, which is
+    exactly that case."""
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
 
-    row = next(r for r in client.get("/api/v1/apps").json() if r["ctid"] == 151)
+        row = next(r for r in c.get("/api/v1/apps").json() if r["slug"] == "paperless")
 
-    assert row["disk_bytes"] is None and row["disk_total_bytes"] is None
-    assert row["net_in_bps"] is None and row["net_out_bps"] is None
+        assert row["disk_bytes"] is None and row["disk_total_bytes"] is None
+        assert row["net_in_bps"] is None and row["net_out_bps"] is None
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -729,15 +744,19 @@ export function useAppActionGates(hostId: number) {
 
   return {
     lifecycle: gate(capability('lifecycle') ? 'lifecycle' : null, 'apps.lifecycle'),
-    console: gate(capability('console') ? 'console' : null, 'apps.lifecycle'),
+    // NO entitlement flag. ConsoleButton gates on the host capability and
+    // nothing else today, so adding one here would newly withhold Console
+    // from a plan that has it. This hook must change what no existing control
+    // does; it only moves where the rules live.
+    console: capability('console')
+      ? { denied: true, reason: noToken('console') }
+      : NO_GATE,
     // Open reads an address and opens a tab. It needs no PVE token at all, so
     // no capability gates it, only the plan.
     openUi: gate(null, 'apps.open_ui'),
   }
 }
 ```
-
-Note: `console`'s plan flag is `apps.lifecycle` only if that is what `ConsoleButton` gates on today. Read `ConsoleButton` first: if it gates on no entitlement at all (only the capability), pass a flag that is always granted by using a capability-only gate instead. Match the existing behaviour exactly; this task must not change what any current control does.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1726,6 +1745,7 @@ Expected: FAIL, cannot resolve `../components/AppsViewSwitch`.
 Create `frontend/src/components/AppsViewSwitch.tsx`:
 
 ```tsx
+import { Fragment } from 'react'
 import { APPS_VIEWS, type AppsView } from '../lib/apps-view'
 import { Button } from './ui/button'
 import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
@@ -1747,9 +1767,11 @@ export function AppsViewSwitch({ value, onChange }: {
   return (
     <ButtonGroup>
       {ORDER.map((v, i) => (
-        <>
-          {i > 0 && <ButtonGroupSeparator key={`sep-${v}`} />}
-          <Button key={v} size="icon-xs"
+        // An explicit keyed Fragment, not `<>`: the shorthand takes no key,
+        // and a keyless child in a map is a React warning that oxlint fails on.
+        <Fragment key={v}>
+          {i > 0 && <ButtonGroupSeparator />}
+          <Button size="icon-xs"
             variant={v === value ? 'go' : 'ghost'}
             aria-pressed={v === value}
             aria-label={APPS_VIEWS[v].label}
@@ -1757,14 +1779,12 @@ export function AppsViewSwitch({ value, onChange }: {
             onClick={() => onChange(v)}>
             <Icon name={APPS_VIEWS[v].icon} size={16} />
           </Button>
-        </>
+        </Fragment>
       ))}
     </ButtonGroup>
   )
 }
 ```
-
-A fragment inside `.map` needs a key on the fragment itself, not only its children. Rewrite the body as an explicit `<Fragment key={v}>` import if oxlint objects, rather than dropping the separator.
 
 `APPS_VIEWS[v].icon` is a variable reference, which the icon-name extractor deliberately does not follow. It does not need to: the names are literals in `apps-view.ts`'s `icon:` fields, which is the third shape the extractor reads. Step 10 verifies this.
 
