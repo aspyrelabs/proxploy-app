@@ -32,6 +32,43 @@ PVE_VERB = {
     "resume": "resume",
 }
 
+# The status a successful action settles the row to, matching the strings the
+# poller itself writes from PVE's /cluster/resources "status" field. This is
+# not a guess at the poller's next reading, it is what PVE just told us the
+# task did; see the comment at the call site below.
+RESULT_STATUS = {
+    "start": "running",
+    "stop": "stopped",
+    "shutdown": "stopped",
+    "restart": "running",
+    "pause": "paused",
+    "resume": "running",
+}
+
+
+def _settle_status(app, target_type: str, target_id: int, status: str) -> None:
+    """Write the known outcome of a finished action to the cached status
+    column, before the resource event that tells open tabs to refetch it.
+
+    This does not contradict doc 04's "Proxmox is the truth": the poller
+    stays the sole authority on ongoing state and this write does not
+    pre-empt it, it is not a reading we invented between polls. It is
+    Proxmox itself, via the task result, telling us the action finished, and
+    is corrected by the poller's next cycle the same as any other value in
+    this column. Only the status field is touched; cpu/mem/disk/net stay
+    whatever the poller last measured.
+    """
+    with app.state.sessionmaker() as db:
+        model = App if target_type == "app" else Vm
+        row = db.get(model, target_id)
+        if row is None:
+            return
+        if target_type == "app":
+            row.status_cached = status
+        else:
+            row.status = status
+        db.commit()
+
 
 def job_kind(target_type: str, action: str) -> str:
     return f"{target_type}.{action}"
@@ -96,6 +133,13 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
         # silently doing the wrong thing.
         if action in ("stop", "shutdown") and "not running" in str(e):
             ctx.log(f"{name} ({kind} {vmid}) is already stopped; nothing to do")
+            # Stopped is the outcome the caller wanted, even though PVE never
+            # ran a task for it, so settle the row the same way a real
+            # stop/shutdown does below rather than leaving whatever the
+            # poller last saw (which is what triggered the stop in the
+            # first place).
+            await asyncio.to_thread(_settle_status, app, target_type,
+                                    target_id, "stopped")
             app.state.bus.publish("resource", {"type": target_type,
                                                "id": target_id,
                                                "change": "lifecycle"})
@@ -105,8 +149,16 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
     status = await await_task(ctx, client, node, upid,
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
-    # Nudge every open tab to refetch rather than assert a status we have not
-    # polled yet: the poller owns cached state (doc 04: Proxmox is the truth).
+    # await_task raises JobFailed on anything but a successful exitstatus, so
+    # reaching this line means PVE has confirmed the action completed. Write
+    # the resulting status now, before publishing the resource event: the
+    # event tells every open tab to refetch, and without this write that
+    # refetch would read the poller's stale pre-action value, since the
+    # poller's own cycle can be up to 30 seconds away (this was the "stop
+    # flashes back to running" bug). This is not a guess at unpolled state,
+    # it is what the task result just told us; see _settle_status.
+    await asyncio.to_thread(_settle_status, app, target_type, target_id,
+                            RESULT_STATUS[action])
     app.state.bus.publish("resource", {"type": target_type, "id": target_id,
                                        "change": "lifecycle"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),

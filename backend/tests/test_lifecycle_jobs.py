@@ -576,3 +576,154 @@ def test_a_stop_that_fails_for_any_other_reason_still_fails(tmp_path):
     status, error, _result, _msgs = _run_stop(tmp_path, "CT 150 is locked (backup)")
     assert status == "failed"
     assert "locked" in error
+
+
+# --- Status settles before the resource event fires (flicker fix) --------
+#
+# The "stop flashes back to running" bug: run_lifecycle used to publish the
+# resource event with nothing written to status_cached/status yet, so a
+# refetch triggered by that event read whatever the poller last saw (the
+# pre-action value), not the outcome PVE just confirmed. These tests pin
+# that the cached column is settled to the true outcome once the job
+# succeeds, and left untouched when it does not.
+
+
+def test_successful_stop_settles_the_app_row_to_stopped(tmp_path):
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            row = db.get(App, app_id)
+            row.status_cached = "running"
+            db.commit()
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+            assert db.get(App, app_id).status_cached == "stopped"
+
+    asyncio.run(run())
+
+
+def test_successful_start_settles_the_app_row_to_running(tmp_path):
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            row = db.get(App, app_id)
+            row.status_cached = "stopped"
+            db.commit()
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.start", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+            assert db.get(App, app_id).status_cached == "running"
+
+    asyncio.run(run())
+
+
+def test_a_failed_task_does_not_write_any_status(tmp_path):
+    """A nonzero exitstatus is not a known outcome; the row must keep
+    whatever the poller last wrote, not be guessed at either way."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(task_exit="CT 150 is locked (snapshot)")
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            row = db.get(App, app_id)
+            row.status_cached = "running"
+            db.commit()
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "failed"
+            assert db.get(App, app_id).status_cached == "running"
+
+    asyncio.run(run())
+
+
+def test_already_stopped_noop_settles_the_row_to_stopped(tmp_path):
+    """The ProxmoxError "not running" branch never runs a task, but stopped
+    is still the outcome the caller wanted, so it settles the row too.
+
+    _run_stop only returns the job's status/error/result, not the app
+    instance it built (gone once its own asyncio.run returns), so this test
+    drives the same scenario itself to read the row back afterward."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        fake.action_error = "CT 150 not running"
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            row = db.get(App, app_id)
+            row.status_cached = "running"
+            db.commit()
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(App, app_id).status_cached == "stopped"
+
+    asyncio.run(run())
+
+
+def test_successful_stop_settles_the_vm_row_too(tmp_path):
+    """Same fix, the VM side: Vm's own field is `status`, not
+    `status_cached`, so this pins the two do not drift apart."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        vm_id = _seed_vm(app, host_id)  # seeded with status="running"
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="vm.stop", target_type="vm",
+                                     target_id=vm_id, params={"target_id": vm_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+            assert db.get(Vm, vm_id).status == "stopped"
+
+    asyncio.run(run())
