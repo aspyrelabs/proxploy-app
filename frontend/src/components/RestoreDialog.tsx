@@ -19,7 +19,8 @@ import { Loading } from './ui/loading'
  *  - `self_target`: an in-place restore over the CT Proxploy itself runs in.
  *    Refused unconditionally by api/backups.py; `confirm` does not bypass it and
  *    re-POSTing returns the identical 409. Show the reason, offer nothing.
- *  - `guest_running` / `guest_missing`, same treatment: state the reason.
+ *  - `guest_running` / `guest_missing` / `guest_status_unknown`, same
+ *    treatment: state the reason.
  */
 export function RestoreDialog({ backup, onClose }: {
   backup: BackupRow; onClose: () => void

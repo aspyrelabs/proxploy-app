@@ -408,6 +408,22 @@ def test_in_place_restore_refuses_a_running_guest(tmp_path, csrf_header,
         assert r.json()["error"] == "guest_running"
 
 
+def test_in_place_restore_refuses_a_guest_of_unknown_status(tmp_path, csrf_header,
+                                                            bootstrap_admin):
+    """A guest reads "unknown" once its host stops answering (see
+    pollers._mark_unreachable), not "stopped". "We do not know" must not be
+    treated as "it is safe", and the guest must not be told it is running when
+    Proxploy genuinely cannot tell."""
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin, ct_status="unknown")
+    with c:
+        r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
+                   json={"mode": "in_place", "confirm": "Immich"},
+                   headers=csrf_header(c))
+        assert r.status_code == 409
+        assert r.json()["error"] == "guest_status_unknown"
+        assert "cannot" in r.json()["detail"].lower()
+
+
 def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
         tmp_path, csrf_header, bootstrap_admin):
     from proxploy.models import AuditEvent

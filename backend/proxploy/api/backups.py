@@ -280,6 +280,21 @@ def restore_backup_route(request: Request, backup_id: int,
             raise HTTPException(409, {
                 "error": "guest_running",
                 "detail": f"stop {name} before restoring over it"})
+        # A destructive overwrite must be refused unless the guest is
+        # POSITIVELY known to be stopped: "we do not know" is not "it is
+        # safe". This also catches "unknown", which is what a guest reads
+        # once its host stops answering (see pollers._mark_unreachable), so
+        # without this check the guard above would fall through and let an
+        # in-place restore run during the exact window a guest might genuinely
+        # still be running. That case gets its own message: telling someone
+        # their guest is running when Proxploy actually cannot tell would be
+        # false and would waste their time chasing the wrong guest.
+        if status != "stopped":
+            raise HTTPException(409, {
+                "error": "guest_status_unknown",
+                "detail": (f"Proxploy cannot currently tell whether {name} is "
+                           f"running. This is usually because its host cannot be "
+                           f"reached right now. Try again once the host is back.")})
     # Resolve the tokens the handler will spend, BEFORE queueing. A restore
     # reads the archive on `backup` and writes the guest on `lifecycle` (it
     # creates one, so PVE checks VM.Allocate and SDN.Use), and a host missing
