@@ -424,6 +424,22 @@ def test_in_place_restore_refuses_a_guest_of_unknown_status(tmp_path, csrf_heade
         assert "cannot" in r.json()["detail"].lower()
 
 
+def test_in_place_restore_refuses_a_paused_guest(tmp_path, csrf_header,
+                                                 bootstrap_admin):
+    """Unlike "unknown", a paused guest has a known state and a reachable
+    host (that is how the state was recorded), so the message must name the
+    actual state, not send someone off to check host connectivity."""
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin, ct_status="paused")
+    with c:
+        r = c.post(f"/api/v1/backups/{ids['ct_backup']}/restore",
+                   json={"mode": "in_place", "confirm": "Immich"},
+                   headers=csrf_header(c))
+        assert r.status_code == 409
+        assert r.json()["error"] == "guest_status_unknown"
+        assert "paused" in r.json()["detail"].lower()
+        assert "host" not in r.json()["detail"].lower()
+
+
 def test_in_place_restore_over_proxploy_itself_is_refused_even_with_confirm(
         tmp_path, csrf_header, bootstrap_admin):
     from proxploy.models import AuditEvent

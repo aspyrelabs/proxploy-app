@@ -290,11 +290,18 @@ def restore_backup_route(request: Request, backup_id: int,
         # their guest is running when Proxploy actually cannot tell would be
         # false and would waste their time chasing the wrong guest.
         if status != "stopped":
-            raise HTTPException(409, {
-                "error": "guest_status_unknown",
-                "detail": (f"Proxploy cannot currently tell whether {name} is "
-                           f"running. This is usually because its host cannot be "
-                           f"reached right now. Try again once the host is back.")})
+            # Only None/"unknown" is a real "we can't tell" case caused by an
+            # unreachable host. A guest in a known state like "paused" has a
+            # reachable host (that is how the state was recorded) and a known
+            # status, so pointing someone at host connectivity would be wrong;
+            # name the actual state instead.
+            if status in (None, "unknown"):
+                detail = (f"Proxploy cannot currently tell whether {name} is "
+                          f"running. This is usually because its host cannot be "
+                          f"reached right now. Try again once the host is back.")
+            else:
+                detail = f"{name} is {status}, not stopped. Stop it before restoring over it."
+            raise HTTPException(409, {"error": "guest_status_unknown", "detail": detail})
     # Resolve the tokens the handler will spend, BEFORE queueing. A restore
     # reads the archive on `backup` and writes the guest on `lifecycle` (it
     # creates one, so PVE checks VM.Allocate and SDN.Use), and a host missing
