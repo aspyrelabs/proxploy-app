@@ -1,43 +1,51 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-
-// Icon is stubbed so this file tests the TILE, not the font subset;
-// icon.test.tsx pins Icon's own contract (host-actions-menu.test.tsx
-// precedent).
-vi.mock('../components/ui/icon', () => ({
-  Icon: ({ name, className }: { name: string; className?: string }) => (
-    <span data-icon={name} className={className} />
-  ),
-}))
+import { describe, expect, it } from 'vitest'
 
 import { NetworkStat } from '../components/StatRings'
 
-const arrow = (name: string) =>
-  document.querySelector(`[data-icon="${name}"]`) as HTMLElement
+/** The arrow subpath inside one of the two icons. The bar subpath beside it
+ *  is deliberately unlabelled: it never changes, which is the point. */
+const arrow = (dir: 'upload' | 'download') =>
+  document.querySelector(`[data-part="${dir}-arrow"]`) as SVGPathElement
+
+/** Every path in the tile that is NOT an arrow, ie. the two baseline bars. */
+const bars = () =>
+  Array.from(document.querySelectorAll('svg path:not([data-part])'))
 
 describe('NetworkStat', () => {
-  it('blinks each arrow only in the direction that is actually moving', () => {
+  it('colours and blinks only the arrow that is actually moving', () => {
     render(<NetworkStat inBps={1_200_000} outBps={0} />)
-    // Download is moving, so its arrow is live and green.
-    expect(arrow('download_2').className).toContain('text-green')
-    expect(arrow('download_2').className).toContain('animate-pulse')
-    // Upload is idle, so it stays quiet rather than blinking a colour that
-    // would then mean nothing.
-    expect(arrow('upload_2').className).toContain('text-text-3')
-    expect(arrow('upload_2').className).not.toContain('animate-pulse')
+    // Download is moving: its arrow goes green and blinks.
+    expect(arrow('download').getAttribute('class')).toContain('fill-green')
+    expect(arrow('download').getAttribute('class')).toContain('animate-pulse')
+    // Upload is idle, so it stays the ordinary label colour. A colour here
+    // would mean nothing if it were always on.
+    expect(arrow('upload').getAttribute('class')).toContain('fill-text-2')
+    expect(arrow('upload').getAttribute('class')).not.toContain('animate-pulse')
   })
 
-  it('blinks upload red when traffic is going the other way', () => {
+  it('blinks upload red when the traffic is going the other way', () => {
     render(<NetworkStat inBps={0} outBps={88_000} />)
-    expect(arrow('upload_2').className).toContain('text-red')
-    expect(arrow('upload_2').className).toContain('animate-pulse')
-    expect(arrow('download_2').className).not.toContain('animate-pulse')
+    expect(arrow('upload').getAttribute('class')).toContain('fill-red')
+    expect(arrow('upload').getAttribute('class')).toContain('animate-pulse')
+    expect(arrow('download').getAttribute('class')).not.toContain('animate-pulse')
+  })
+
+  it('keeps the icon itself in the theme colour whatever the arrows do', () => {
+    // The blink lives INSIDE the icon. The baseline bar is the icon's own
+    // outline and must never take a status colour, or the tile reads as a
+    // status light rather than as one of this row's labels.
+    render(<NetworkStat inBps={1_200_000} outBps={88_000} />)
+    expect(bars()).toHaveLength(2)
+    for (const bar of bars()) {
+      expect(bar.getAttribute('class')).toBe('fill-text-2')
+    }
   })
 
   it('turns the blink off for anyone who asked for less motion', () => {
     render(<NetworkStat inBps={1_200_000} outBps={88_000} />)
-    for (const n of ['upload_2', 'download_2']) {
-      expect(arrow(n).className).toContain('motion-reduce:animate-none')
+    for (const dir of ['upload', 'download'] as const) {
+      expect(arrow(dir).getAttribute('class')).toContain('motion-reduce:animate-none')
     }
   })
 
@@ -54,7 +62,7 @@ describe('NetworkStat', () => {
     render(<NetworkStat inBps={null} outBps={null} unknown />)
     expect(screen.getByText('unknown')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Network unknown' })).toBeInTheDocument()
-    expect(arrow('upload_2').className).not.toContain('animate-pulse')
-    expect(arrow('download_2').className).not.toContain('animate-pulse')
+    expect(arrow('upload').getAttribute('class')).not.toContain('animate-pulse')
+    expect(arrow('download').getAttribute('class')).not.toContain('animate-pulse')
   })
 })

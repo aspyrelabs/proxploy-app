@@ -1,5 +1,4 @@
 import { fmtBps } from '../lib/format'
-import { Icon } from './ui/icon'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 
 const CIRC = 326.7
@@ -72,6 +71,47 @@ export function Ring({ label, pct, sub, stops, unknown }: {
 }
 
 /**
+ * The two throughput arrows, as inline SVG rather than the Material Symbols
+ * font.
+ *
+ * WHY NOT <Icon>. A ligature font renders one glyph in one colour, and this
+ * needs two: the icon sits in the ordinary label colour like everything else
+ * in this row, while the ARROW INSIDE IT carries the activity blink. Material
+ * Symbols draws both `upload_2` and `download_2` as a single path whose first
+ * subpath is the baseline bar and whose remainder is the arrow, so splitting
+ * that path in two is what buys the second colour. The `d` strings below are
+ * that glyph, verbatim from the Material Symbols 24px source, cut at the bar's
+ * closing Z.
+ *
+ * The cost of owning them here is that they no longer follow the font when it
+ * updates. That is the right trade for two glyphs: they are geometry, not
+ * content, and the alternative was a single-colour icon that cannot show
+ * whether anything is actually moving.
+ */
+const BAR = 'M160-80v-80h640v80H160Z'
+const ARROW = {
+  upload: 'M360-240v-280H200l280-360 280 360H600v280H360Zm80-80h80v-280h76L480-750'
+        + ' 364-600h76v280Zm40-280Z',
+  download: 'M480-240L200-600h160v-280h240v280h160L480-240Zm0-130 116-150h-76v-280h-80'
+          + 'v280h-76l116 150Zm0-150Z',
+} as const
+
+function NetworkArrow({ dir, live }: { dir: 'upload' | 'download'; live: boolean }) {
+  // Colour rides on the ARROW alone. The bar stays text-2 in every state, so
+  // the tile reads as one of this row's labels rather than as a status light.
+  const arrowCls = !live ? 'fill-text-2'
+    : dir === 'upload'
+      ? 'fill-red animate-pulse motion-reduce:animate-none'
+      : 'fill-green animate-pulse motion-reduce:animate-none'
+  return (
+    <svg aria-hidden width="26" height="26" viewBox="0 -960 960 960" className="shrink-0">
+      <path d={BAR} className="fill-text-2" />
+      <path data-part={`${dir}-arrow`} d={ARROW[dir]} className={arrowCls} />
+    </svg>
+  )
+}
+
+/**
  * Throughput, as the fourth tile in the cluster-usage row beside the three
  * rings.
  *
@@ -80,12 +120,13 @@ export function Ring({ label, pct, sub, stops, unknown }: {
  * and drawing an arc against an invented ceiling would be making up a number.
  * The same call AppCard makes about its own network row.
  *
- * The two arrows blink only while traffic is actually moving, so the row reads
- * at a glance as "something is happening" without anyone parsing a figure.
- * Idle sits at text-3 rather than the live colour, so the colours mean
- * activity rather than merely labelling which arrow is which.
- * motion-reduce turns the blink off: this is decoration, and the figures below
- * carry the same information for anyone who does not want movement.
+ * The icons sit in the ordinary label colour. Only the ARROW INSIDE each one
+ * takes a colour and blinks, and only while traffic is moving in that
+ * direction, so the row reads at a glance as "something is happening" without
+ * anyone parsing a figure. Idle arrows stay text-2 with the rest of the icon,
+ * so a colour here always means movement rather than merely labelling which
+ * arrow is which. motion-reduce turns the blink off: it is decoration, and the
+ * figures below carry the same information for anyone who does not want it.
  */
 export function NetworkStat({ inBps, outBps, unknown }: {
   inBps?: number | null
@@ -96,7 +137,6 @@ export function NetworkStat({ inBps, outBps, unknown }: {
 }) {
   const up = !unknown && (outBps ?? 0) > 0
   const down = !unknown && (inBps ?? 0) > 0
-  const blink = 'animate-pulse motion-reduce:animate-none'
   return (
     <div className="flex flex-col items-center gap-1.5">
       {/* One role="img" over the pair, matching how Ring labels its whole
@@ -106,11 +146,9 @@ export function NetworkStat({ inBps, outBps, unknown }: {
            aria-label={unknown ? 'Network unknown'
              : `Network, ${fmtBps(outBps)} up, ${fmtBps(inBps)} down`}
            className="flex h-24 w-24 items-center justify-center gap-1">
-        <Icon name="upload_2" size={26}
-              className={up ? `text-red ${blink}` : 'text-text-3'} />
+        <NetworkArrow dir="upload" live={up} />
         <span className="font-mono text-[18px] text-text-3">/</span>
-        <Icon name="download_2" size={26}
-              className={down ? `text-green ${blink}` : 'text-text-3'} />
+        <NetworkArrow dir="download" live={down} />
       </div>
       <div className="text-[12px] text-text-2">Network</div>
       <div className="font-mono text-[11px] text-text-3">
