@@ -7,7 +7,6 @@ import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { AppCard, AppCardSkeleton } from '../components/AppCard'
-import { ActivityFeed } from '../components/ActivityFeed'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
@@ -69,17 +68,17 @@ export function UpdateAllButton() {
         return
       }
       notify.success(`Updating ${r.jobs.length} app${r.jobs.length === 1 ? '' : 's'}, `
-                    + 'follow them in Recent activity below.')
+                    + 'follow them in the notifications bell.')
     },
     onError: () => notify.error('Could not start the updates, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
+      // ['cluster','activity'] used to be invalidated here too, to move the
+      // Recent activity feed that sat on this page. The feed is gone and
+      // nothing here reads that key any more, so invalidating it would be
+      // work with no reader. The toast now points at the bell, which
+      // LiveProvider fills from the SSE stream rather than from a query.
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      // The toast says to follow them in Recent activity, which is on this
-      // same page and reads ['cluster','activity']. Without this it does not
-      // move until its own 30s poll, so the toast points at a feed that shows
-      // nothing new. Every other job-firing mutation pairs these two.
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
   return (
@@ -336,69 +335,67 @@ export function HostsPage() {
         </QueryState>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className={card}>
-          <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
-          <QueryState query={vmsQuery}
-                      loading={<SkeletonGroup label="Loading virtual machines">
-                        <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
-                      </SkeletonGroup>}
-                      emptyTitle="No VMs discovered"
-                      emptyNote="QEMU guests on connected hosts appear here."
-                      errorTitle="VMs not readable"
-                      errorNote="Proxploy could not reach the backend to list your VMs.">
-            {(rows) => (
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="text-[11px] uppercase text-text-3">
-                    <th className="pb-2 font-medium">Name</th>
-                    <th className="pb-2 font-medium">Node</th>
-                    <th className="pb-2 font-medium">Status</th>
+      {/* Full width and stacked, not a two-up grid. Apps and Virtual machines
+          are the two inventories this page exists to show, and half a row each
+          made both scroll internally while the page had space to spare. */}
+      <div className={`mt-6 ${card}`}>
+        <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
+        <QueryState query={vmsQuery}
+                    loading={<SkeletonGroup label="Loading virtual machines">
+                      <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
+                    </SkeletonGroup>}
+                    emptyTitle="No VMs discovered"
+                    emptyNote="QEMU guests on connected hosts appear here."
+                    errorTitle="VMs not readable"
+                    errorNote="Proxploy could not reach the backend to list your VMs.">
+          {(rows) => (
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="text-[11px] uppercase text-text-3">
+                  <th className="pb-2 font-medium">Name</th>
+                  <th className="pb-2 font-medium">Node</th>
+                  <th className="pb-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 4).map((v) => (
+                  <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
+                    <td className="py-2 font-mono">{v.name}</td>
+                    <td className="py-2 text-text-2">{v.host_name}</td>
+                    <td className="py-2"><StatusPill status={v.status} /></td>
                   </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(0, 4).map((v) => (
-                    <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
-                      <td className="py-2 font-mono">{v.name}</td>
-                      <td className="py-2 text-text-2">{v.host_name}</td>
-                      <td className="py-2"><StatusPill status={v.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </QueryState>
-        </div>
-        <div className={card}>
-          <h2 className="mb-1 font-display text-[16px] font-semibold">Network</h2>
-          {/* Two queries, one answer. The figures come from /cluster/summary
-              and the chart from the first host's series, and either one still
-              in flight leaves this half of the card silent: fmtBps(undefined)
-              prints the unknown form, and Sparkline with no samples renders an
-              empty div of its own height. Together that reads as a host moving
-              no traffic. `nodesQuery.isPending` is in the test because `net`
-              is `enabled: !!target` and a disabled query never leaves pending,
-              so the first host has to be known before net's own state means
-              anything. */}
-          {summaryQuery.isPending || nodesQuery.isPending || (firstHost != null && net.isPending) ? (
-            <SkeletonGroup label="Loading network throughput">
-              <SkeletonLine className="mb-2 w-40 text-[12px]" />
-              {/* 52px is Sparkline's default height. */}
-              <Skeleton className="h-[52px] w-full" />
-            </SkeletonGroup>
-          ) : (
-            <>
-              <div className="mb-2 font-mono text-[12px] text-text-2">
-                ↓ {fmtBps(summary?.net.in_bps)} · ↑ {fmtBps(summary?.net.out_bps)}
-              </div>
-              <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
-            </>
+                ))}
+              </tbody>
+            </table>
           )}
-          <div className="mt-4 border-t border-line-soft pt-3">
-            <div className="mb-1 text-[13px] uppercase text-text-3">Recent activity</div>
-            <ActivityFeed />
-          </div>
-        </div>
+        </QueryState>
+      </div>
+
+      <div className={`mt-6 ${card}`}>
+        <h2 className="mb-1 font-display text-[16px] font-semibold">Network</h2>
+        {/* Two queries, one answer. The figures come from /cluster/summary
+            and the chart from the first host's series, and either one still
+            in flight leaves this half of the card silent: fmtBps(undefined)
+            prints the unknown form, and Sparkline with no samples renders an
+            empty div of its own height. Together that reads as a host moving
+            no traffic. `nodesQuery.isPending` is in the test because `net`
+            is `enabled: !!target` and a disabled query never leaves pending,
+            so the first host has to be known before net's own state means
+            anything. */}
+        {summaryQuery.isPending || nodesQuery.isPending || (firstHost != null && net.isPending) ? (
+          <SkeletonGroup label="Loading network throughput">
+            <SkeletonLine className="mb-2 w-40 text-[12px]" />
+            {/* 52px is Sparkline's default height. */}
+            <Skeleton className="h-[52px] w-full" />
+          </SkeletonGroup>
+        ) : (
+          <>
+            <div className="mb-2 font-mono text-[12px] text-text-2">
+              ↓ {fmtBps(summary?.net.in_bps)} · ↑ {fmtBps(summary?.net.out_bps)}
+            </div>
+            <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
+          </>
+        )}
       </div>
     </div>
   )

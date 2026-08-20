@@ -204,7 +204,6 @@ describe('HostsPage', () => {
     withQuery(<HostsPage />)
     expect(await screen.findByText('pve1')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /CPU 42%/ })).toBeInTheDocument()
-    expect(screen.getByText(/Nothing has happened yet/)).toBeInTheDocument()
     // The App Store shipped and is a working nav item; the empty Apps
     // section used to point at "Phase 4" instead, which was both jargon and,
     // by the time this was reproduced, false.
