@@ -95,3 +95,139 @@ def test_a_real_connection_failure_still_records_why(tmp_path):
     assert h.status == "unreachable"
     # "unreachable" with a blank reason is what made this undiagnosable.
     assert "connection refused" in h.last_error
+
+
+def _seed_guests(app, host_id):
+    """One App and one Vm on host_id, both looking like a healthy poll left
+    them a moment ago: real status, real readings, a recent net sample."""
+    from proxploy.models import App, Vm, utcnow
+
+    with app.state.sessionmaker() as db:
+        a = App(host_id=host_id, ctid=101, name="redis", slug=f"redis-101-h{host_id}",
+               status_cached="running", cpu_pct_cached=12.0,
+               mem_bytes_cached=500_000_000, uptime_s_cached=3600,
+               disk_bytes_cached=1_000_000_000, disk_total_bytes_cached=5_000_000_000,
+               net_in_cached=1000, net_out_cached=2000,
+               net_in_bps_cached=10.0, net_out_bps_cached=20.0,
+               net_sampled_at=utcnow())
+        v = Vm(host_id=host_id, vmid=201, name="win11", status="running",
+              cpu_cores=4, mem_bytes=8_589_934_592, disk_bytes=50_000_000_000,
+              uptime_s=7200)
+        db.add_all([a, v])
+        db.commit()
+        return a.id, v.id
+
+
+def test_an_unreachable_host_marks_its_apps_and_vms_unknown(tmp_path):
+    from proxploy.models import App, Vm
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    app_id, vm_id = _seed_guests(app, host_id)
+
+    app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    with app.state.sessionmaker() as db:
+        a = db.get(App, app_id)
+        v = db.get(Vm, vm_id)
+        assert a.status_cached == "unknown"
+        assert a.cpu_pct_cached is None
+        assert a.mem_bytes_cached is None
+        assert a.uptime_s_cached is None
+        assert a.disk_bytes_cached is None
+        assert a.disk_total_bytes_cached is None
+        assert a.net_in_bps_cached is None
+        assert a.net_out_bps_cached is None
+        # raw counters and their timestamp are left alone: see the comment on
+        # _mark_unreachable for why the rate diff still needs them intact.
+        assert a.net_in_cached == 1000
+        assert a.net_out_cached == 2000
+        assert a.net_sampled_at is not None
+
+        assert v.status == "unknown"
+        assert v.uptime_s is None
+
+
+def test_a_healthy_hosts_guests_are_untouched(tmp_path):
+    """The most important guard here: marking ONE host unreachable must never
+    touch a guest that belongs to a different, still-answering host."""
+    from proxploy.models import App, Vm
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_host_row
+
+    fake = FakePVE(fail=True)
+    app, c, dead_host_id = _app_with(tmp_path, fake)
+    with app.state.sessionmaker() as db:
+        healthy = seed_host_row(db, name="host-02", node="pve2")
+        healthy_id = healthy.id
+    dead_app_id, dead_vm_id = _seed_guests(app, dead_host_id)
+    healthy_app_id, healthy_vm_id = _seed_guests(app, healthy_id)
+
+    app.state.poller._mark_unreachable(dead_host_id, "boom: connection refused")
+
+    with app.state.sessionmaker() as db:
+        assert db.get(App, dead_app_id).status_cached == "unknown"
+        assert db.get(Vm, dead_vm_id).status == "unknown"
+        # unrelated to the dead host: still exactly what _seed_guests wrote
+        healthy_app = db.get(App, healthy_app_id)
+        healthy_vm = db.get(Vm, healthy_vm_id)
+        assert healthy_app.status_cached == "running"
+        assert healthy_app.cpu_pct_cached == 12.0
+        assert healthy_vm.status == "running"
+        assert healthy_vm.uptime_s == 7200
+
+
+def test_marking_unreachable_twice_does_not_republish_the_same_events(tmp_path):
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    _seed_guests(app, host_id)
+
+    first = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+    # host + one app + one vm, all transitioning for the first time
+    assert len(first) == 3
+
+    second = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+    assert second == []
+
+
+def test_recovery_after_unreachable_restores_real_values(tmp_path):
+    """ingest_cycle's fresh read is the recovery path, and it must not be
+    second-guessed by anything _mark_unreachable left behind."""
+    from proxploy.models import App, Vm, utcnow
+    from proxploy.pollers import ingest_cycle
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    app_id, vm_id = _seed_guests(app, host_id)
+    app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    resources = [
+        {"type": "node", "node": "pve1", "status": "online", "cpu": 0.1,
+         "maxcpu": 4, "mem": 1_000_000_000, "maxmem": 8_000_000_000, "uptime": 100},
+        {"type": "lxc", "vmid": 101, "node": "pve1", "name": "redis",
+         "status": "running", "cpu": 0.15, "maxcpu": 1,
+         "mem": 600_000_000, "maxmem": 1_024_000_000, "maxdisk": 2_000_000_000,
+         "disk": 1_200_000_000, "netin": 1500, "netout": 2500, "uptime": 90},
+        {"type": "qemu", "vmid": 201, "node": "pve1", "name": "win11",
+         "status": "running", "cpu": 0.2, "maxcpu": 4,
+         "mem": 3_000_000_000, "maxmem": 8_589_934_592, "maxdisk": 50_000_000_000,
+         "uptime": 120},
+    ]
+    with app.state.sessionmaker() as db:
+        from proxploy.models import Host
+
+        host = db.get(Host, host_id)
+        ingest_cycle(db, host, resources, {"pve1": []}, utcnow())
+        db.commit()
+
+        a = db.get(App, app_id)
+        v = db.get(Vm, vm_id)
+        assert a.status_cached == "running"
+        assert a.cpu_pct_cached == 15.0
+        assert a.uptime_s_cached == 90
+        assert v.status == "running"
+        assert v.uptime_s == 120

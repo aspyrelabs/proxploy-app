@@ -708,8 +708,9 @@ class Poller:
                           else f"{type(e).__name__} (no detail)")
                 log.warning("host %s poll failed (attempt %s): %s",
                             host_id, fails, reason, exc_info=fails == 1)
-                evt = await asyncio.to_thread(self._mark_unreachable, host_id, reason)
-                if evt:
+                unreachable_events = await asyncio.to_thread(
+                    self._mark_unreachable, host_id, reason)
+                for evt in unreachable_events:
                     self.app.state.bus.publish(*evt)
             delay = (min(settings.poll_interval_s * (2 ** min(fails, 4)),
                          POLL_BACKOFF_CAP_S)
@@ -809,19 +810,89 @@ class Poller:
             self.snapshots[host_id] = result.snapshot
             return events
 
-    def _mark_unreachable(self, host_id: int, reason: str = ""):
+    def _mark_unreachable(self, host_id: int, reason: str = "") -> list[tuple[str, dict]]:
+        """Every failed cycle lands here, so this is also the one place that
+        already knows a host is gone and already holds a session on it. The
+        cached status/metric columns on App and Vm are exactly what
+        cluster.py's running counts, consoles.py's launch guard and
+        backups.py's target picker all read, and none of those four call
+        sites ever finds out the host went away: ingest_cycle, the only other
+        writer of those columns, never runs for a host that raised before it
+        got there. Clearing the cache here, once, is correct for all four
+        readers; a guard added at each of them instead could drift out of
+        sync with the other three.
+        """
         with self.app.state.sessionmaker() as db:
             host = db.get(Host, host_id)
             if host is None:
-                return None
+                return []
             already = host.status == "unreachable"
             host.status = "unreachable"
             # Written even when the status is unchanged: the reason can change
             # between cycles (a timeout becoming a 403), and the operator needs
             # the current one, not the first one ever recorded.
             host.last_error = reason or None
-            db.commit()
             if already:
-                return None
-            return ("resource", {"type": "host", "id": host_id,
-                                 "change": "status", "status": "unreachable"})
+                # The host loop keeps retrying a dead host forever, just
+                # slower each time (the backoff above), so this runs on every
+                # one of those retries. The guests below were already marked
+                # unknown the first time the host went unreachable; sweeping
+                # them again on every retry would write every row and publish
+                # every event again for nothing having changed, which is the
+                # storm the idempotency requirement rules out.
+                db.commit()
+                return []
+
+            events: list[tuple[str, dict]] = [
+                ("resource", {"type": "host", "id": host_id,
+                              "change": "status", "status": "unreachable"})]
+
+            for a in db.query(App).filter_by(host_id=host_id).all():
+                if a.status_cached != "unknown":
+                    events.append(("resource", {"type": "app", "id": a.id,
+                                                "change": "status", "status": "unknown"}))
+                a.status_cached = "unknown"
+                # A stale reading here is the same lie a stale "running" is:
+                # nobody knows this app's CPU, memory, disk or uptime while
+                # its host cannot be reached.
+                a.cpu_pct_cached = None
+                a.mem_bytes_cached = None
+                a.uptime_s_cached = None
+                a.disk_bytes_cached = None
+                a.disk_total_bytes_cached = None
+                a.net_in_bps_cached = None
+                a.net_out_bps_cached = None
+                # net_in_cached, net_out_cached and net_sampled_at are left
+                # exactly as they were. They are not a reading shown to
+                # anyone, only the raw counters _update_net_rates diffs
+                # against, and that function already treats a stale
+                # net_sampled_at correctly on its own: if the guest rebooted
+                # with its host (the common case, since "host unreachable"
+                # usually means the hardware is off), PVE's counters reset to
+                # a value below what is stored here and the existing
+                # now_in < prev_in guard throws the rate away for one cycle,
+                # same as any other reboot. If the guest somehow kept running
+                # untouched through the outage, the counters kept climbing
+                # and the first post-recovery rate is a genuine average over
+                # the outage window, not a fabricated spike, so there is
+                # nothing here worth guarding against. Nulling net_sampled_at
+                # instead would only turn that second, harmless case into a
+                # silently wrong one for one extra cycle, for no benefit in
+                # the common case.
+
+            for v in db.query(Vm).filter_by(host_id=host_id).all():
+                if v.status != "unknown":
+                    events.append(("resource", {"type": "vm", "id": v.id,
+                                                "change": "status", "status": "unknown"}))
+                v.status = "unknown"
+                # cpu_cores, mem_bytes and disk_bytes are the guest's
+                # configured allocation (maxcpu/maxmem/maxdisk), not a live
+                # measurement, so they stay true whether or not the host can
+                # be reached right now. uptime_s is the one live reading Vm
+                # caches (how long the guest has been up), and that becomes
+                # exactly as wrong as App's status the moment the host stops
+                # answering.
+                v.uptime_s = None
+
+            db.commit()
+            return events
