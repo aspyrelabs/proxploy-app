@@ -50,8 +50,12 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // guest list, the VM rows) are pinned to them. 'xs' goes through Button's
   // own size table instead, so a grouped bar shares one scale with the
   // buttons welded beside it rather than drifting a pixel out.
-  const cls = size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
-  const btnSize = size === 'xs' ? 'xs' : undefined
+  // Grouped bars go through Button's own size table, so every control welded
+  // into one group shares a scale exactly. Ungrouped callers (the app card,
+  // the guest list, the VM rows) keep the hand-rolled 'sm' string their
+  // layouts are pinned to, so nothing moves for them.
+  const cls = !grouped && size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
+  const btnSize = size === 'xs' ? 'xs' : grouped && size === 'sm' ? 'sm' : undefined
   // Why an unresolved fetch withholds nothing: api/app-gates.ts.
   // App gates come from that shared hook; the VM path keeps its own
   // derivation (vms.lifecycle isn't covered there, that's out of scope here).

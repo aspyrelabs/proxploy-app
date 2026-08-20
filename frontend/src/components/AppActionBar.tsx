@@ -26,11 +26,11 @@ export function AppActionBar({ app }: { app: AppRow }) {
   return (
     <ButtonGroup>
       <LifecycleActions target="app" id={app.id} name={app.name}
-                        status={app.status} hostId={app.host_id} size="xs" grouped />
+                        status={app.status} hostId={app.host_id} size="sm" grouped />
       {app.catalog_port != null && (
         <>
           <ButtonGroupSeparator />
-          <Button variant="ghost" size="xs"
+          <Button variant="ghost" size="sm"
             disabled={gates.openUi.denied || openWebUi.isPending}
             // "Open" rather than "Web UI": it is what the icon view's menu
             // already calls this action, and next to Console the pair reads as
@@ -51,7 +51,7 @@ export function AppActionBar({ app }: { app: AppRow }) {
         </>
       )}
       <ButtonGroupSeparator />
-      <Button variant="ghost" size="xs"
+      <Button variant="ghost" size="sm"
         disabled={gates.console.denied} title={gates.console.reason}
         onClick={(e) => { e.stopPropagation(); openConsoleWindow('app', app.id) }}>
         Console
