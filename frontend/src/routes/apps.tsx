@@ -3,6 +3,7 @@ import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@t
 import { useState } from 'react'
 import { api } from '../api/client'
 import { notify } from '../lib/notify'
+import { useAppActionGates } from '../api/app-gates'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { useOpenWebUi } from '../api/open-web-ui'
@@ -211,6 +212,10 @@ export function AppDetail() {
     queryFn: () => api<AppRow>(`/apps/${appId}`),
     refetchInterval: 15_000,
   })
+  // -1 is not a real host id: before the app has loaded there is no host to
+  // gate against, and useAppActionGates' own "innocent until proven guilty"
+  // rule already withholds nothing until entitlements and capabilities land.
+  const gates = useAppActionGates(appQuery.data?.host_id ?? -1)
   return (
     <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
                 // The header and the tab strip, which is the whole page
@@ -247,7 +252,10 @@ export function AppDetail() {
         const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
         const reconfigureDenied = ent.data != null && !ent.has('apps.reconfigure')
         const uninstallDenied = ent.data != null && !ent.has('apps.uninstall')
-        const openUiDenied = ent.data != null && !ent.has('apps.open_ui')
+        // src/api/app-gates.ts's useAppActionGates already computes this,
+        // and AppIconMenu already reads it from there: keeping this page's
+        // own copy is exactly the drift that hook's docstring warns about.
+        const openUiDenied = gates.openUi.denied
         return (
           <div>
             <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
