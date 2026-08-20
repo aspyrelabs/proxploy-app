@@ -973,7 +973,7 @@ Create `frontend/src/tests/app-table.test.tsx`:
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../api/client', () => ({
@@ -1024,10 +1024,11 @@ describe('AppTable', () => {
     expect(within(row).getByText(/9\.6 Mbps/)).toBeInTheDocument()
   })
 
-  it('opens the app detail page from the name', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event')
+  it('opens the app detail page from the name', () => {
+    // fireEvent, not user-event: @testing-library/user-event is not a
+    // dependency of this repo and every existing suite drives clicks this way.
     wrap([APP])
-    await userEvent.click(screen.getByRole('button', { name: 'Immich' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Immich' }))
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
       params: expect.objectContaining({ appId: '1' }),
     }))
@@ -1700,8 +1701,7 @@ Expected: PASS, 3 tests.
 Create `frontend/src/tests/apps-view-switch.test.tsx`:
 
 ```tsx
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../components/ui/icon', () => ({
@@ -1726,10 +1726,12 @@ describe('AppsViewSwitch', () => {
       .toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('reports the chosen view', async () => {
+  it('reports the chosen view', () => {
+    // fireEvent, not user-event: @testing-library/user-event is not a
+    // dependency of this repo and every existing suite drives clicks this way.
     const onChange = vi.fn()
     render(<AppsViewSwitch value="detailed" onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Icon view' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
     expect(onChange).toHaveBeenCalledWith('icon')
   })
 })
@@ -1831,19 +1833,20 @@ Append to `frontend/src/tests/hosts.test.tsx`, following that file's existing mo
 
 ```tsx
   it('switches the Apps section between the three views and remembers the choice', async () => {
-    const user = userEvent.setup()
+    // fireEvent, not user-event: @testing-library/user-event is not a
+    // dependency of this repo and every existing suite drives clicks this way.
     localStorage.clear()
-    const view = renderHostsPage()   // whatever this file's existing helper is called
+    const view = renderHostsPage()   // use this file's own existing render helper
 
     // Detailed by default: the card's meters are present.
     expect(await screen.findByText(/CPU/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'List view' }))
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument())
     expect(localStorage.getItem('pp_apps_view')).toBe('list')
 
-    await user.click(screen.getByRole('button', { name: 'Icon view' }))
-    expect(screen.queryByRole('table')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
+    await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
     expect(localStorage.getItem('pp_apps_view')).toBe('icon')
 
     // A remount reads the stored choice rather than resetting to detailed.
