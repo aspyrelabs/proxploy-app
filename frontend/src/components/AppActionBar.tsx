@@ -23,15 +23,14 @@ import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 export function AppActionBar({ app }: { app: AppRow }) {
   const gates = useAppActionGates(app.host_id)
   const openWebUi = useOpenWebUi(app)
-  const btn = 'px-2 py-1 text-[11px]'
   return (
     <ButtonGroup>
       <LifecycleActions target="app" id={app.id} name={app.name}
-                        status={app.status} hostId={app.host_id} size="sm" grouped />
+                        status={app.status} hostId={app.host_id} size="xs" grouped />
       {app.catalog_port != null && (
         <>
           <ButtonGroupSeparator />
-          <Button variant="ghost" className={btn}
+          <Button variant="ghost" size="xs"
             disabled={gates.openUi.denied || openWebUi.isPending}
             title={gates.openUi.reason}
             onClick={(e) => {
@@ -48,7 +47,7 @@ export function AppActionBar({ app }: { app: AppRow }) {
         </>
       )}
       <ButtonGroupSeparator />
-      <Button variant="ghost" className={btn}
+      <Button variant="ghost" size="xs"
         disabled={gates.console.denied} title={gates.console.reason}
         onClick={(e) => { e.stopPropagation(); openConsoleWindow('app', app.id) }}>
         Console

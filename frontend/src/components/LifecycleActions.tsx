@@ -28,7 +28,8 @@ type Guard = { phrase: string; detail: string; action: string }
  */
 export function LifecycleActions({ target, id, name, status, hostId, size = 'md',
                                   grouped = false }: {
-  target: Target; id: number; name: string; status: string; hostId: number; size?: 'sm' | 'md'
+  target: Target; id: number; name: string; status: string; hostId: number
+  size?: 'xs' | 'sm' | 'md'
   /** Render as bare buttons with separators between them, for a parent
    *  ButtonGroup, instead of this component's own spaced flex row. */
   grouped?: boolean
@@ -45,7 +46,12 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // is actually still running. Show one honest "Working…" affordance instead
   // of guessing which action set the pre-mutation status implied.
   const actions = status === 'pending' ? null : status === 'running' ? RUNNING_ACTIONS : STOPPED_ACTIONS
+  // 'sm' keeps its hand-rolled numbers: existing call sites (AppCard, the
+  // guest list, the VM rows) are pinned to them. 'xs' goes through Button's
+  // own size table instead, so a grouped bar shares one scale with the
+  // buttons welded beside it rather than drifting a pixel out.
   const cls = size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
+  const btnSize = size === 'xs' ? 'xs' : undefined
   // Why an unresolved fetch withholds nothing: api/app-gates.ts.
   // App gates come from that shared hook; the VM path keeps its own
   // derivation (vms.lifecycle isn't covered there, that's out of scope here).
@@ -81,7 +87,7 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // row for a fragment with separators, which is what lets a ButtonGroup weld
   // these to the actions beside them without a double border down the seam.
   const buttons = actions === null ? (
-    <Button variant="ghost" className={cls} disabled>
+    <Button variant="ghost" size={btnSize} className={cls} disabled>
       Working…
     </Button>
   ) : actions.map((a, i) => (
@@ -89,6 +95,7 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
       {grouped && i > 0 && <ButtonGroupSeparator />}
       <Button
         variant={a === 'stop' ? 'danger' : a === 'start' ? 'success' : 'ghost'}
+        size={btnSize}
         className={cls}
         disabled={pending || denied || noLifecycle}
         title={reason}
