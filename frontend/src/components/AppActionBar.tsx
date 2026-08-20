@@ -8,7 +8,7 @@ import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 
 /**
  * One app's four actions, welded into a single control: Start or Stop,
- * Restart, Web UI, Console.
+ * Restart, Open, Console.
  *
  * Start and Stop are never both offered, because an app is either running or
  * it is not; LifecycleActions already picks the pair from status and this
@@ -16,7 +16,7 @@ import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
  * Stop, the two opposite outcomes, and Restart stays neutral since it lands
  * back where it started.
  *
- * Web UI is ABSENT, not disabled, when the app has no catalog port: there is
+ * Open is ABSENT, not disabled, when the app has no catalog port: there is
  * nothing to point a tab at, and a dead button invites a click that cannot go
  * anywhere. Same rule the app detail header and the icon menu both follow.
  */
@@ -32,7 +32,11 @@ export function AppActionBar({ app }: { app: AppRow }) {
           <ButtonGroupSeparator />
           <Button variant="ghost" size="xs"
             disabled={gates.openUi.denied || openWebUi.isPending}
-            title={gates.openUi.reason}
+            // "Open" rather than "Web UI": it is what the icon view's menu
+            // already calls this action, and next to Console the pair reads as
+            // two ways in rather than as a noun beside a verb. The title says
+            // what opens, since the word alone does not.
+            title={gates.openUi.reason ?? `Open ${app.name}'s web interface`}
             onClick={(e) => {
               e.stopPropagation()
               // The tab opens HERE, inside the gesture. Opening it inside the
@@ -42,7 +46,7 @@ export function AppActionBar({ app }: { app: AppRow }) {
               if (tab) tab.opener = null
               openWebUi.mutate(tab)
             }}>
-            Web UI
+            Open
           </Button>
         </>
       )}

@@ -46,16 +46,16 @@ describe('AppActionBar', () => {
     capabilities = { lifecycle: true, console: true }
   })
 
-  it('offers Stop, Restart, Web UI and Console while the app is running', () => {
+  it('offers Stop, Restart, Open and Console while the app is running', () => {
     wrap(APP)
-    expect(labels()).toEqual(['Stop', 'Restart', 'Web UI', 'Console'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'Console'])
   })
 
   it('offers Start instead of Stop while it is not running', () => {
     // Never both: an app is either running or it is not, and offering the
     // pair would invite the wrong one.
     wrap({ ...APP, status: 'stopped' })
-    expect(labels()).toEqual(['Start', 'Web UI', 'Console'])
+    expect(labels()).toEqual(['Start', 'Open', 'Console'])
   })
 
   it('colours Start green and Stop red, the two opposite outcomes', () => {
@@ -72,7 +72,7 @@ describe('AppActionBar', () => {
     expect(restart).not.toContain('text-green')
   })
 
-  it('hides Web UI when there is nothing to point a tab at', () => {
+  it('hides Open when there is nothing to point a tab at', () => {
     // Absent, not disabled: a dead button invites a click that cannot go
     // anywhere.
     wrap({ ...APP, catalog_port: null })
