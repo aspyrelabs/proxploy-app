@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
-import { useEntitlements, useMetrics } from '../api/hooks'
+import { useEntitlements } from '../api/hooks'
 import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
@@ -17,12 +17,11 @@ import { HostForm } from '../components/HostForm'
 import { NodeCard, NodeCardSkeleton } from '../components/NodeCard'
 import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
-import { Sparkline } from '../components/charts/Sparkline'
 import { MetricChart } from '../components/charts/MetricChart'
-import { Ring, RingSkeleton } from '../components/StatRings'
+import { NetworkStat, NetworkStatSkeleton, Ring, RingSkeleton } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
 import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
-import { fmtBps, fmtBytes } from '../lib/format'
+import { fmtBytes } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted because the loading placeholder has to lay out in the SAME grid as
@@ -168,11 +167,6 @@ export function HostsPage() {
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
   })
-  const firstHost = nodes?.[0]?.host_id ?? null
-  // ponytail: throughput sparkline charts the first host's series; multi-host
-  // summed series lands when a real fleet shows it matters (net figures in the
-  // header are already fleet-wide from /cluster/summary).
-  const net = useMetrics(firstHost ? `host:${firstHost}` : null, 'net_in_bps', 1)
 
   return (
     <div>
@@ -201,6 +195,7 @@ export function HostsPage() {
             <RingSkeleton label="CPU" />
             <RingSkeleton label="Memory" />
             <RingSkeleton label="Storage" />
+            <NetworkStatSkeleton />
           </SkeletonGroup>
         ) : (
         <>
@@ -225,6 +220,12 @@ export function HostsPage() {
           sub={summaryQuery.isError || summary?.storage.pct == null ? 'unknown'
             : `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}`}
           stops={['#A78BFA', '#6D5AE6']} />
+        {/* Throughput moved up here from a card of its own further down the
+            page. It sits beside the three rings because it is the same kind
+            of reading, cluster-wide right now, and it drew a whole card for
+            two figures. */}
+        <NetworkStat inBps={summary?.net.in_bps} outBps={summary?.net.out_bps}
+          unknown={summaryQuery.isError || summary?.net.in_bps == null} />
         </>
         )}
       </div>
@@ -296,6 +297,8 @@ export function HostsPage() {
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
+            {/* as never: route typing workaround, see router.tsx */}
+            <a href="/vms" className="text-[12px] text-amber hover:underline">View all</a>
           </div>
           <div className={card}>
             <QueryState query={vmsQuery}
@@ -329,33 +332,6 @@ export function HostsPage() {
             </QueryState>
           </div>
         </div>
-      </div>
-
-      <div className={`mt-6 ${card}`}>
-        <h2 className="mb-1 font-display text-[16px] font-semibold">Network</h2>
-        {/* Two queries, one answer. The figures come from /cluster/summary
-            and the chart from the first host's series, and either one still
-            in flight leaves this half of the card silent: fmtBps(undefined)
-            prints the unknown form, and Sparkline with no samples renders an
-            empty div of its own height. Together that reads as a host moving
-            no traffic. `nodesQuery.isPending` is in the test because `net`
-            is `enabled: !!target` and a disabled query never leaves pending,
-            so the first host has to be known before net's own state means
-            anything. */}
-        {summaryQuery.isPending || nodesQuery.isPending || (firstHost != null && net.isPending) ? (
-          <SkeletonGroup label="Loading network throughput">
-            <SkeletonLine className="mb-2 w-40 text-[12px]" />
-            {/* 52px is Sparkline's default height. */}
-            <Skeleton className="h-[52px] w-full" />
-          </SkeletonGroup>
-        ) : (
-          <>
-            <div className="mb-2 font-mono text-[12px] text-text-2">
-              ↓ {fmtBps(summary?.net.in_bps)} · ↑ {fmtBps(summary?.net.out_bps)}
-            </div>
-            <Sparkline ts={net.data?.ts ?? []} values={net.data?.value ?? []} color="#5B9DF9" />
-          </>
-        )}
       </div>
     </div>
   )
