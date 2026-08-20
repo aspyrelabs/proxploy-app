@@ -9,10 +9,13 @@ let features: Record<string, boolean> = {}
 // null means the node refuses /nodes/{n}/status, the narrow-token case.
 let nodeStatus: Record<string, unknown> | null = null
 // Controls for `/apps?host=` and `/vms?host=` specifically: NodeOverview's
-// own guest queries, distinct from HostsPage's unfiltered `/apps` and `/vms`
-// (which stay empty-array below; nothing in this file exercises their rows).
+// own guest queries, distinct from HostsPage's unfiltered `/apps` and `/vms`.
 let nodeAppsResult: 'empty' | 'ok' | 'error' = 'empty'
 let nodeVmsResult: 'empty' | 'ok' | 'error' = 'empty'
+// HostsPage's own unfiltered `/apps` (its Apps section, distinct from the
+// nodeAppsResult pair above). Defaults empty so every existing assertion
+// about the section's empty state keeps rendering it that way.
+let appsResult: 'empty' | 'ok' = 'empty'
 // NodeDetailPage/NodeOverview/NodeHardware read their own params; reassigned
 // per-test so a single fixture (pve1/pve2/pve3, see the cluster fixture
 // below) can stand in for whichever node a test needs to look at.
@@ -43,6 +46,20 @@ const nodeVmFixture = () => ({
   id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
   status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
   mem_bytes: 2161287168, disk_bytes: null, uptime_s: 500, synced_at: null,
+})
+
+// A full AppRow, for HostsPage's own Apps section (the appsResult control
+// above), distinct from nodeAppFixture which is deliberately minimal.
+const appFixture = () => ({
+  id: 7, name: 'jellyfin', slug: 'jellyfin', host_id: 1, host_name: 'host-01',
+  node: 'pve1', ctid: 104, category: null, catalog_slug: null,
+  icon_initials: null, icon_colors: null, icon_url: null,
+  web_port: null, web_protocol: null, web_path: null, catalog_port: null,
+  status: 'running', ip: null, cpu_pct: 12,
+  mem_bytes: 2161287168, mem_total_bytes: 4294967296,
+  disk_bytes: 5368709120, disk_total_bytes: 21474836480,
+  net_in_bps: 1200, net_out_bps: 800,
+  uptime_s: 100, update_available: null, adopted: false,
 })
 
 vi.mock('../api/client', () => ({
@@ -121,6 +138,9 @@ vi.mock('../api/client', () => ({
       if (nodeVmsResult === 'ok') return Promise.resolve([nodeVmFixture()])
       return Promise.resolve([])
     }
+    if (path === '/apps') {
+      return Promise.resolve(appsResult === 'ok' ? [appFixture()] : [])
+    }
     if (path.startsWith('/apps')) return Promise.resolve([])
     if (path.startsWith('/vms')) return Promise.resolve([])
     if (path.endsWith('/nodes/pve1/status')) {
@@ -197,7 +217,8 @@ const withQuery = (ui: React.ReactNode) => {
 
 describe('HostsPage', () => {
   beforeEach(() => {
-    nodesResult = 'ok'; summaryResult = 'ok'; features = {}; navigate.mockClear()
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}; appsResult = 'empty'
+    navigate.mockClear()
   })
 
   it('renders rings, counts and node cards from the API', async () => {
@@ -312,6 +333,30 @@ describe('HostsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add host' }))
     expect(await screen.findByText(/needs the multi-host plan/i)).toBeInTheDocument()
     expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
+  })
+
+  it('switches the Apps section between the three views and remembers the choice', async () => {
+    // fireEvent, not user-event: @testing-library/user-event is not a
+    // dependency of this repo and every existing suite drives clicks this way.
+    localStorage.clear()
+    appsResult = 'ok'
+    const view = withQuery(<HostsPage />)
+
+    // Detailed by default: the card's meters are present.
+    expect(await screen.findByText(/CPU/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument())
+    expect(localStorage.getItem('pp_apps_view')).toBe('list')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Icon view' }))
+    await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
+    expect(localStorage.getItem('pp_apps_view')).toBe('icon')
+
+    // A remount reads the stored choice rather than resetting to detailed.
+    view.unmount()
+    withQuery(<HostsPage />)
+    await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
   })
 })
 

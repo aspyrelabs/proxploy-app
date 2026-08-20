@@ -7,6 +7,10 @@ import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements, useMetrics } from '../api/hooks'
 import { AppCard, AppCardSkeleton } from '../components/AppCard'
+import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
+import { AppTable, AppTableSkeleton } from '../components/AppTable'
+import { AppsViewSwitch } from '../components/AppsViewSwitch'
+import { useAppsView } from '../lib/apps-view'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
@@ -216,6 +220,7 @@ export function HostsPage() {
     queryFn: () => api<VmRow[]>('/vms'),
     refetchInterval: 30_000,
   })
+  const [appsView, setAppsView] = useAppsView()
   const firstHost = nodes?.[0]?.host_id ?? null
   // ponytail: throughput sparkline charts the first host's series; multi-host
   // summed series lands when a real fleet shows it matters (net figures in the
@@ -314,24 +319,36 @@ export function HostsPage() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-[16px] font-semibold">Apps</h2>
           <div className="flex items-center gap-3">
+            <AppsViewSwitch value={appsView} onChange={setAppsView} />
             <UpdateAllButton />
             {/* as never: route typing workaround, see router.tsx */}
             <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
           </div>
         </div>
         <QueryState query={appsQuery}
-                    loading={<SkeletonGroup label="Loading apps" className={appGrid}>
-                      {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
-                    </SkeletonGroup>}
+                    loading={appsView === 'detailed'
+                      ? <SkeletonGroup label="Loading apps" className={appGrid}>
+                          {Array.from({ length: 4 }, (_, i) => <AppCardSkeleton key={i} />)}
+                        </SkeletonGroup>
+                      : appsView === 'list'
+                        ? <SkeletonGroup label="Loading apps"><AppTableSkeleton rows={4} /></SkeletonGroup>
+                        : <SkeletonGroup label="Loading apps"><AppIconGridSkeleton count={8} /></SkeletonGroup>}
                     emptyTitle="No apps yet"
                     emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
                     errorTitle="Apps not readable"
                     errorNote="Proxploy could not reach the backend to list your apps.">
-          {(rows) => (
-            <div className={appGrid}>
-              {rows.slice(0, 8).map((a) => <AppCard key={a.id} app={a} />)}
-            </div>
-          )}
+          {(rows) => {
+            // The same eight apps in every view: the switch changes how the
+            // set is drawn, never which apps are in it.
+            const shown = rows.slice(0, 8)
+            if (appsView === 'list') return <AppTable apps={shown} />
+            if (appsView === 'icon') return <AppIconGrid apps={shown} />
+            return (
+              <div className={appGrid}>
+                {shown.map((a) => <AppCard key={a.id} app={a} />)}
+              </div>
+            )
+          }}
         </QueryState>
       </div>
 
