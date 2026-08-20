@@ -360,37 +360,46 @@ export function HostsPage() {
           </QueryState>
         </div>
 
-        <div className={card}>
-          <h2 className="mb-3 font-display text-[16px] font-semibold">Virtual machines</h2>
-          <QueryState query={vmsQuery}
-                      loading={<SkeletonGroup label="Loading virtual machines">
-                        <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
-                      </SkeletonGroup>}
-                      emptyTitle="No VMs discovered"
-                      emptyNote="QEMU guests on connected hosts appear here."
-                      errorTitle="VMs not readable"
-                      errorNote="Proxploy could not reach the backend to list your VMs.">
-            {(rows) => (
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="text-[11px] uppercase text-text-3">
-                    <th className="pb-2 font-medium">Name</th>
-                    <th className="pb-2 font-medium">Node</th>
-                    <th className="pb-2 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(0, 4).map((v) => (
-                    <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
-                      <td className="py-2 font-mono">{v.name}</td>
-                      <td className="py-2 text-text-2">{v.host_name}</td>
-                      <td className="py-2"><StatusPill status={v.status} /></td>
+        {/* Heading outside the panel, matching Apps beside it: over there the
+            heading row also carries the view switch and Update all, so it has
+            to sit outside. Putting this one inside its box made the two
+            columns read as different kinds of thing. The same flex wrapper
+            keeps both headings on one baseline across the row. */}
+        <div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
+          </div>
+          <div className={card}>
+            <QueryState query={vmsQuery}
+                        loading={<SkeletonGroup label="Loading virtual machines">
+                          <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
+                        </SkeletonGroup>}
+                        emptyTitle="No VMs discovered"
+                        emptyNote="QEMU guests on connected hosts appear here."
+                        errorTitle="VMs not readable"
+                        errorNote="Proxploy could not reach the backend to list your VMs.">
+              {(rows) => (
+                <table className="w-full text-left text-[13px]">
+                  <thead>
+                    <tr className="text-[11px] uppercase text-text-3">
+                      <th className="pb-2 font-medium">Name</th>
+                      <th className="pb-2 font-medium">Node</th>
+                      <th className="pb-2 font-medium">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </QueryState>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 4).map((v) => (
+                      <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
+                        <td className="py-2 font-mono">{v.name}</td>
+                        <td className="py-2 text-text-2">{v.host_name}</td>
+                        <td className="py-2"><StatusPill status={v.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </QueryState>
+          </div>
         </div>
       </div>
 
