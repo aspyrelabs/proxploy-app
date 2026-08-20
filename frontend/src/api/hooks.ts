@@ -28,7 +28,7 @@ export function useEntitlements() {
     // failed, that would be a security bug. `unknown` is what lets a
     // consumer tell "not entitled" apart from "could not check" and render
     // "could not check" instead of the UI of a tenant who simply lacks the
-    // feature, see components/HealthFooter.tsx for the same distinction.
+    // feature.
     has: (key: string) => q.data?.features[key] ?? false,
     unknown: q.isError,
   }

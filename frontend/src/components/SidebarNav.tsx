@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Icon } from './ui/icon'
-import { HealthFooter } from './HealthFooter'
 import { readSidebarCollapsed, setSidebarCollapsed } from '../lib/sidebar'
 
 // `icon` is a Material Symbols name (see components/ui/icon.tsx), not a
@@ -54,12 +53,12 @@ export function SidebarNav() {
             </div>
           ))}
         </nav>
-        <HealthFooter collapsed={collapsed} />
-        {/* Last, under the health line. It is chrome for the sidebar itself
-            rather than a destination, so it sits out of the way of the nav
-            instead of above it, and it is the only thing down here that is
-            always present: the health footer renders nothing while nothing is
-            wrong, so the rail must not depend on it for its bottom edge.
+        {/* Last. It is chrome for the sidebar itself rather than a
+            destination, so it sits out of the way of the nav instead of above
+            it, and it is now the only thing down here at all: the health
+            footer that used to sit above it is gone, deliberately. The sidebar
+            reports no status of its own, the pages that own each subject
+            report it.
             py-[3px], not py-2.5: the button is a 32px hit target holding an 18px
             glyph, so it already carries 7px around it. 10px of row padding on
             top of that put 17px around the chevron. 3 + 7 gives the glyph its

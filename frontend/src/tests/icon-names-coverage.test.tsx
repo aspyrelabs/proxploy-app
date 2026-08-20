@@ -39,7 +39,6 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   Link: ({ to, children, ...rest }: { to?: string; children?: unknown }) =>
     <a href={to} {...rest}>{children as never}</a>,
 }))
-vi.mock('../components/HealthFooter', () => ({ HealthFooter: () => null }))
 vi.mock('../components/AccountMenu', () => ({ AccountMenu: () => null }))
 vi.mock('../components/TierPill', () => ({ TierPill: () => null }))
 vi.mock('../components/CommandPalette', () => ({ openCommandPalette: vi.fn() }))

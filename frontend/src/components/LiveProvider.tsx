@@ -63,9 +63,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 /** Prototype `.live` badge: "Live · updated Ns ago" bound to the last SSE event.
  *
  *  CURRENTLY UNRENDERED. It was the Hosts page header's right-hand item and is
- *  no longer mounted anywhere, for two reasons: `HealthFooter` in the sidebar
- *  already carries a live status indicator (dot + "N nodes · N alerts"), and a
- *  visible "last updated" is not wanted at all -- the page should keep itself
+ *  no longer mounted anywhere, because a visible "last updated" is not wanted
+ *  at all -- the page should keep itself
  *  current without announcing when it last did so, which the LiveProvider
  *  above does regardless (its SSE subscription invalidates the queries; that
  *  is what actually keeps the page fresh, not this badge).

@@ -11,8 +11,6 @@ vi.mock('@tanstack/react-router', () => ({
   }) => <a href={to} data-to={to} {...rest}>{children}</a>,
 }))
 
-// HealthFooter runs its own queries and is not what this file tests.
-vi.mock('../components/HealthFooter', () => ({ HealthFooter: () => null }))
 
 import { NAV, SidebarNav } from '../components/SidebarNav'
 
