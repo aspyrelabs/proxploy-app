@@ -222,7 +222,8 @@ def test_a_rule_pointing_at_a_deleted_target_is_skipped_not_crashed(tmp_path):
 
 
 def test_a_firing_alert_whose_target_was_deleted_resolves_on_the_next_pass(tmp_path):
-    """Otherwise the health footer says "1 alert firing" forever."""
+    """Otherwise the bell tray and the Alerts page say "1 alert firing"
+    forever, for a target that no longer exists to fix."""
     db = make_db(tmp_path)
     host = seed_host_row(db)
     _rule(db, target_id=host.id)

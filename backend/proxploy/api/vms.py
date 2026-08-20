@@ -62,10 +62,9 @@ def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
     query = db.query(Vm)
     if host is not None:
         query = query.filter(Vm.host_id == host)
-    # Deduped for the same reason the Hosts page and the health footer are: the
-    # mirror holds one row per (host, vmid) and a cluster reports every guest to
-    # every member, so this listed each VM once per enrolled host (doc 12 check
-    # 18).
+    # Deduped for the same reason the Hosts page is: the mirror holds one row
+    # per (host, vmid) and a cluster reports every guest to every member, so
+    # this listed each VM once per enrolled host (doc 12 check 18).
     rows = dedupe_vms(query.all(), hosts)
     rows.sort(key=lambda v: (v.name or "", v.id))
     return [_vm_out(v, hosts[v.host_id], request.app.state.poller.snapshots)

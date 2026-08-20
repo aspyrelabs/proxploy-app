@@ -203,7 +203,8 @@ ALERTS_MAX = 200
 
 def alert_out(a: Alert, rules: dict, labels: dict, emails: dict) -> dict:
     """One row, fully renderable; rule name, severity and target label are
-    joined here so the table and the health footer need exactly one fetch.
+    joined here so the Alerts table and the bell tray (BellPopover) each need
+    exactly one fetch.
 
     `rules`/`labels`/`emails` are caller-built lookup dicts, so listing N
     alerts is a constant number of queries rather than 3N.
@@ -243,8 +244,12 @@ def _lookups(db, rows: list[Alert]) -> tuple[dict, dict, dict]:
 @router.get("/alerts", dependencies=[Depends(_read)])
 def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
                 user: User = Depends(_read)):
-    """Doc 05 leaves the entitlement column blank here on purpose: the sidebar
-    health footer ("3 nodes · 0 alerts") reads this on every tier."""
+    """Doc 05 leaves the entitlement column blank here on purpose: the Alerts
+    page is reachable from every tier's nav (SidebarNav does not gate the
+    link), and the bell tray (BellPopover) fetches this before entitlements
+    have even resolved (Topbar shows it while that fetch is still pending).
+    Gating this endpoint on a plan flag would 403 both of those regardless of
+    tier."""
     limit = max(1, min(limit, ALERTS_MAX))
     q = db.query(Alert)
     if state:

@@ -43,7 +43,7 @@ def test_state_filter_narrows_to_firing(client, csrf_header, bootstrap_admin):
 
 def test_each_row_carries_its_rule_name_and_target_label(client, csrf_header,
                                                          bootstrap_admin):
-    """The health footer and the alerts table both render these; without them
+    """The Alerts table and the bell tray both render these; without them
     every row would need a second and third fetch."""
     bootstrap_admin(client)
     _seed(client)
@@ -109,8 +109,9 @@ def test_ack_404s_an_unknown_alert(client, csrf_header, bootstrap_admin):
 
 def test_alerts_are_readable_without_any_entitlement(tmp_path, csrf_header,
                                                      bootstrap_admin):
-    """Doc 05 leaves the entitlement column blank for GET /alerts, the sidebar
-    health footer must work on every tier, including the free one."""
+    """Doc 05 leaves the entitlement column blank for GET /alerts: the Alerts
+    page and the bell tray must work on every tier, including the free
+    one."""
     from fastapi.testclient import TestClient
     from tests.support import make_app
 
