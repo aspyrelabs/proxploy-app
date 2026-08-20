@@ -19,5 +19,8 @@ set -euo pipefail
 # the flag a no-op unless an operator fronts the container with their own
 # proxy and sets FORWARDED_ALLOW_IPS to that proxy's address as the container
 # sees it.
+# --ws-per-message-deflate false also matches the systemd unit; see the note
+# there for the console measurements that decided it (2.20 ms versus 0.17 ms
+# per 64 KiB round trip, on a stream that is already compressed).
 exec backend/venv/bin/uvicorn --factory proxploy.main:create_app \
-  --host 0.0.0.0 --port 8000 --proxy-headers
+  --host 0.0.0.0 --port 8000 --proxy-headers --ws-per-message-deflate false

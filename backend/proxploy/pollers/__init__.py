@@ -21,7 +21,8 @@ from proxploy.services.hostclient import (capability_gaps,
                                           cluster_member_count,
                                           cluster_quorate)
 from proxploy.services.metrics import write_samples
-from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
+from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError,
+                                       routable_addresses)
 
 POLL_BACKOFF_CAP_S = 300
 
@@ -72,31 +73,258 @@ def _mem_pct(used: int, total: int) -> float:
     return round(used / total * 100, 1) if total else 0.0
 
 
-def _update_net_rates(a: App, g: dict, now: datetime) -> None:
-    """Turn this cycle's netin/netout counters into a rate on the app row.
+def _update_net_rates(row: App | Vm, g: dict, now: datetime) -> None:
+    """Turn this cycle's netin/netout counters into a rate on a guest row.
 
-    PVE reports bytes since the container booted, so a rate is a diff against
+    Shared by the app and VM blocks below, which is why Vm carries App's
+    net_* column names: PVE reports both guest types the same way and there
+    is nothing container-specific in here.
+
+    PVE reports bytes since the guest booted, so a rate is a diff against
     the previous reading over the time between the two. Both the reading and
     its timestamp are stored for the next cycle to diff against.
 
     Two cases produce no rate rather than a wrong one. The first reading has
-    nothing to diff against: one point has no slope. And a container restart
+    nothing to diff against: one point has no slope. And a guest restart
     zeroes the counters, so the delta goes negative; taking its absolute value
     would draw a fabricated traffic spike at exactly the moment an operator is
     most likely to be watching. Either way the rate is None for one cycle and
     recovers on the next, once there are two readings from the same boot.
     """
-    prev_in, prev_out, prev_at = a.net_in_cached, a.net_out_cached, a.net_sampled_at
+    prev_in, prev_out, prev_at = (row.net_in_cached, row.net_out_cached,
+                                  row.net_sampled_at)
     now_in, now_out = g["net_in"], g["net_out"]
     elapsed = (now - prev_at).total_seconds() if prev_at else 0.0
     if prev_in is None or prev_out is None or elapsed <= 0:
-        a.net_in_bps_cached = a.net_out_bps_cached = None
+        row.net_in_bps_cached = row.net_out_bps_cached = None
     elif now_in < prev_in or now_out < prev_out:
-        a.net_in_bps_cached = a.net_out_bps_cached = None
+        row.net_in_bps_cached = row.net_out_bps_cached = None
     else:
-        a.net_in_bps_cached = (now_in - prev_in) / elapsed
-        a.net_out_bps_cached = (now_out - prev_out) / elapsed
-    a.net_in_cached, a.net_out_cached, a.net_sampled_at = now_in, now_out, now
+        row.net_in_bps_cached = (now_in - prev_in) / elapsed
+        row.net_out_bps_cached = (now_out - prev_out) / elapsed
+    row.net_in_cached, row.net_out_cached, row.net_sampled_at = now_in, now_out, now
+
+
+# How often a container's address is re-read, and why it is not every cycle.
+#
+# /cluster/resources carries NO address field for an lxc row. Confirmed against
+# PVE 9.2.10 on 2026-08-20: the row's keys are cpu, disk, diskread, diskwrite,
+# id, maxcpu, maxdisk, maxmem, mem, memhost, name, netin, netout, node, status,
+# tags, template, type, uptime, vmid, and nothing else. So an address costs one
+# per-container call, which is exactly what doc 02 section 3's budget forbids
+# doing every cycle: at the default 30 s interval a 40-container fleet would be
+# 80 extra calls a minute, forever, for a value that changes when somebody
+# renumbers a network.
+#
+# So: a container with no known address is asked on the very next cycle (a
+# freshly adopted app shows its address within one interval, and a DHCP lease
+# that has not landed yet keeps being retried), and a container that already
+# has one is asked again only every 15 minutes. That is the same 15 minutes
+# APP_REAP_AFTER_S and POOL_FORGET_AFTER_S use, and it bounds how long a
+# renumbered container can show its old address. Steady-state cost for those 40
+# containers is under 3 calls a minute.
+#
+# Kept in memory rather than in a column, exactly like the capability-gap
+# cadence above: a restart re-reads every address straight away, which is the
+# useful direction, and it saves a migration for a value nothing else reads.
+APP_IP_REFRESH_INTERVAL_S = 900
+
+
+def _refresh_ip(a: App, g: dict, client, checked: dict[int, datetime],
+                now: datetime) -> bool:
+    """Keep `a.ip_cached` current. Returns True when the address changed.
+
+    The rule everywhere here is: write through what we KNOW, hold what we
+    could not ask.
+
+      * a container that is not running has no address. That is an answer, not
+        a gap, so it is written through as None. It also drops out of `checked`
+        so that starting it again reads the new address on the next cycle
+        rather than up to 15 minutes later, which matters because a DHCP
+        container usually comes back on a different lease.
+      * lxc_interfaces() returning None means PVE would not tell us. That is a
+        gap, so the last known address stands untouched, for the same reason
+        _mark_unreachable deliberately leaves this column alone: an address we
+        cannot re-read right now is still the best answer anyone has.
+      * PVE answering with no routable address (a running container whose lease
+        has not arrived, or one with only loopback and link-local) IS an
+        answer, so it clears the column and the next cycle asks again.
+    """
+    if g["status"] != "running":
+        checked.pop(a.id, None)
+        if a.ip_cached is None:
+            return False
+        a.ip_cached = None
+        return True
+    if client is None:
+        return False
+    last = checked.get(a.id)
+    if a.ip_cached and last and (now - last).total_seconds() < APP_IP_REFRESH_INTERVAL_S:
+        return False
+    rows = client.lxc_interfaces(g["node"] or a.node_name, a.ctid)
+    if rows is None:
+        return False
+    checked[a.id] = now
+    found = [addr for r in rows for addr in routable_addresses(r)]
+    # Stored bare, without the prefix length: this column is what the app card
+    # shows and what an operator copies into a browser, and "/24" is neither.
+    # IPv4 wins when a container has both, because routable_addresses reads
+    # `inet` before `inet6` on each row.
+    ip = found[0].split("/")[0] if found else None
+    if ip == a.ip_cached:
+        return False
+    a.ip_cached = ip
+    return True
+
+
+# How often a VM's filesystem usage is re-read from its guest agent, and why
+# it is not every cycle.
+#
+# /cluster/resources has a `disk` field and for a QEMU guest it is routinely a
+# flat 0: the hypervisor sees a block device, not the filesystem written into
+# it. Measured on the lab cluster on 2026-08-20, PVE 9.2.10: VM 108 running,
+# maxdisk 34359738368, `disk: 0`. So `maxdisk` is the allocation and the ONLY
+# honest source for usage is the guest itself, via
+# /nodes/{node}/qemu/{vmid}/agent/get-fsinfo.
+#
+# That is a per-VM call, which is exactly what doc 02 section 3's budget
+# forbids doing every cycle, the same objection APP_IP_REFRESH_INTERVAL_S
+# answers for container addresses. 15 minutes, matching that constant and
+# POOL_FORGET_AFTER_S and APP_REAP_AFTER_S, because filesystem usage is a
+# level that creeps rather than a rate that spikes: a disk filling up takes
+# hours or days, and an operator watching one fill has the storage graph and
+# the alert rules, not this column. At the default 30 s interval a 20-VM fleet
+# costs under 1.5 calls a minute here, against 40 a minute if it rode every
+# cycle.
+#
+# The cadence gate is PURELY time-based, which is the one place this
+# deliberately differs from _refresh_ip. That function asks again on the very
+# next cycle whenever it has no address yet, because a missing address is
+# usually a DHCP lease about to arrive. A missing disk reading is usually the
+# opposite: the guest agent is NOT INSTALLED, which is the common case and
+# never resolves on its own, so retrying it every 30 seconds would buy nothing
+# and cost a call per VM forever. A stopped VM is not asked at all (no agent
+# runs in a guest that is not running) and drops out of the map, so starting
+# one is measured on the next cycle rather than up to 15 minutes later.
+#
+# Kept in memory rather than in a column, like every other cadence here: a
+# restart re-reads every VM straight away, which is the useful direction.
+VM_DISK_REFRESH_INTERVAL_S = 900
+
+
+def _refresh_vm_disk(v: Vm, g: dict, client, checked: dict[int, datetime],
+                     now: datetime) -> None:
+    """Keep `v.disk_bytes` (USED bytes) and `v.guest_agent_ok` current.
+
+    Both come out of ONE get-fsinfo call, because whether the agent answered is
+    something that call already knew and used to throw away. See
+    ProxmoxClient.agent_fsinfo for why it was widened instead of a second
+    endpoint being asked.
+
+    Unlike an address, filesystem usage is a live MEASUREMENT, so "we could
+    not ask" is written through as None rather than held. That covers the
+    ordinary no-agent case, and it is why the column stays NULL rather than
+    dropping to 0 for the many VMs that will never have an agent: nothing is
+    logged, nothing is marked degraded, and the UI renders unknown instead of
+    an empty disk bar under a full one. _mark_unreachable applies the same
+    rule from the other side.
+
+    guest_agent_ok follows the same honesty rule with one difference: it is
+    only ever written when the probe actually produced a verdict. A probe that
+    failed for a reason PVE did not attribute to the agent leaves the previous
+    verdict standing, because a connection error says nothing about what is
+    installed inside the guest.
+    """
+    if g["status"] != "running":
+        # No agent runs in a guest that is not running, so there is nothing to
+        # ask and nothing to hold. Dropping out of `checked` is what makes a
+        # VM that gets started measured on the next cycle.
+        checked.pop(v.id, None)
+        v.disk_bytes = None
+        # Unknown, NOT False. A stopped guest cannot answer whatever it has
+        # installed, so "no guest agent" here would be a claim nobody checked,
+        # and an operator reading it would go install something that is
+        # already there. The verdict comes back on the cycle after it starts.
+        v.guest_agent_ok = None
+        return
+    if client is None:
+        return
+    last = checked.get(v.id)
+    # The cadence gate is skipped while the verdict is unknown, which is the
+    # one way this differs from the disk reading alone and mirrors what
+    # _refresh_ip does for a container with no address yet. An unknown verdict
+    # means the last probe never reached PVE (or there has not been one), so
+    # waiting out 15 minutes to try again would leave a brand new VM, or every
+    # VM on a host that has just come back, reading "unknown" for a quarter of
+    # an hour when one cheap call settles it. Steady-state cost is unchanged:
+    # once the answer is True or False it is a fact about the guest, not a
+    # measurement, and it rides the same 15 minute cadence as the bytes.
+    # ponytail: a host that keeps failing this call for some reason PVE never
+    # attributes to the agent gets asked once per VM per cycle. Bound it with
+    # a short retry interval if that is ever seen, rather than pre-emptively.
+    if (v.guest_agent_ok is not None and last
+            and (now - last).total_seconds() < VM_DISK_REFRESH_INTERVAL_S):
+        return
+    # Recorded before the answer is looked at, on purpose: a VM with no agent
+    # must wait out the same interval as one with a working agent, or the
+    # common case becomes the expensive one. See the constant above.
+    checked[v.id] = now
+    agent_ok, used = client.agent_fsinfo(g["node"] or v.node_name, v.vmid)
+    v.disk_bytes = used
+    if agent_ok is not None:
+        v.guest_agent_ok = agent_ok
+
+
+def _refresh_os_type(v: Vm, g: dict, client) -> None:
+    """Fill in `v.os_type` once, from the guest's config.
+
+    os_type was declared in the very first migration and nothing ever wrote
+    it, so it was NULL for every VM including the ones Proxploy created
+    itself: the create path SENDS an `ostype` and then never read it back.
+    Same dead-column shape ip_cached had.
+
+    /cluster/resources carries no ostype (confirmed on the lab cluster, PVE
+    9.2.10, 2026-08-20: a qemu row's keys are cpu, disk, diskread, diskwrite,
+    id, maxcpu, maxdisk, maxmem, mem, memhost, name, netin, netout, node,
+    status, template, type, uptime, vmid), so this costs a per-VM config read.
+
+    THE CADENCE IS "ONCE", not a slow refresh, and that is the whole reason
+    this fits the budget: ostype is fixed when the guest is created and only
+    ever changes if somebody hand-edits the VM's config, so a known value is
+    never re-read. Steady state for an established fleet is therefore ZERO
+    calls, and a newly discovered VM costs exactly one. Deliberately unlike
+    _refresh_ip, which does have to re-ask on a timer: a DHCP lease genuinely
+    moves under you, and an address that is right today can be wrong tomorrow
+    with nothing having been edited. Nothing does that to an ostype. The
+    consequence, stated plainly: a guest whose ostype is edited by hand in
+    the Proxmox UI keeps the old value here until the row is recreated. That
+    is the trade for a per-VM call nobody pays twice, and re-reading every
+    VM's config on a timer to catch an edit almost nobody makes is not worth
+    it. Reuses guest_config() rather than adding a wrapper, since the read is
+    exactly the one api/network.py already makes.
+
+    A config read that fails leaves the column NULL and the cycle otherwise
+    untouched: it is one optional extra on top of the bulk read, in the same
+    way version() and cluster_status() are in _poll_once, and losing it must
+    never cost a poll. It is retried on the next cycle, which is free: the
+    only VMs asked at all are the ones still missing a value.
+
+    PVE's RAW value is stored (`l26`, `win11`, `w2k19`, `other`, ...). It is
+    deliberately not collapsed to "linux"/"windows" here: that mapping is the
+    client's job, and doing it in the backend would throw away a specific
+    value the API then has no way to recover.
+    """
+    if v.os_type or client is None:
+        return
+    try:
+        cfg = client.guest_config("qemu", g["node"] or v.node_name, v.vmid)
+    except ProxmoxError:
+        return
+    # `or None` rather than the bare get: PVE omitting the key and PVE
+    # answering with an empty string both mean "no answer", and an empty
+    # string stored here would look like a known ostype and stop this from
+    # ever asking again.
+    v.os_type = cfg.get("ostype") or None
 
 
 # How long a datastore has to stay out of the reads before it stops counting
@@ -256,11 +484,25 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  quorate: bool | None | object = UNREAD,
                  degraded: bool = False,
                  pools: PoolMemory | None = None,
-                 status_rows: list[dict] | None = None) -> CycleResult:
+                 status_rows: list[dict] | None = None,
+                 client=None,
+                 ip_checked: dict[int, datetime] | None = None,
+                 fs_checked: dict[int, datetime] | None = None) -> CycleResult:
     # A fresh PoolMemory has nothing to carry forward, so a caller that does
     # not keep one across cycles (every test that drives a single cycle) gets
     # exactly what this cycle's rows say.
     pools = pools if pools is not None else PoolMemory()
+    # `client` is the only argument that lets this function make a PVE call of
+    # its own, and it is optional so the bulk-read-in, caches-out contract still
+    # holds without one: no client means addresses are simply not refreshed
+    # this cycle, everything else behaves identically. `ip_checked` is the
+    # per-app "last asked at" behind APP_IP_REFRESH_INTERVAL_S; a caller that
+    # does not keep one across cycles asks every time, which is what a single
+    # test cycle wants. `fs_checked` is the same thing for VM_DISK_REFRESH_
+    # INTERVAL_S, keyed on vm id rather than app id, which is why it cannot
+    # share ip_checked's map.
+    ip_checked = ip_checked if ip_checked is not None else {}
+    fs_checked = fs_checked if fs_checked is not None else {}
     events: list[tuple[str, dict]] = []
     samples: list[MetricSample] = []
     targets: list[dict] = []
@@ -373,7 +615,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # until somebody happened to click Test.
     #
     # `version is None` means the probe failed, not that the node has no
-    # version — same shape as rrddata above. Writing it through would replace a
+    # version; same shape as rrddata above. Writing it through would replace a
     # true-but-stale version with "unknown", which is strictly worse.
     if version and version != host.pve_version:
         host.pve_version = version
@@ -458,6 +700,12 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # Proxploy changes node without the app row being rewritten, and every
         # call site then aimed at the host's node instead (doc 12 check 18).
         a.node_name = g["node"] or a.node_name
+        if _refresh_ip(a, g, client, ip_checked, now):
+            # No `status` on this one: it is not a status change, and the
+            # client's applyResource falls through an unrecognised `change` to
+            # a plain refetch of the apps list, which is exactly right here.
+            events.append(("resource", {"type": "app", "id": a.id,
+                                        "change": "ip"}))
         samples.append(MetricSample(target_type="app", target_id=a.id,
                                     metric="cpu_pct", value=g["cpu_pct"], ts=now))
         samples.append(MetricSample(target_type="app", target_id=a.id,
@@ -502,9 +750,20 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # Refreshed every cycle: `qm template <id>` converts a guest in place,
         # so this changes without the row being recreated.
         v.template = g["template"]
-        v.status, v.uptime_s, v.synced_at = g["status"], g["uptime_s"], now
-        v.cpu_cores, v.mem_bytes, v.disk_bytes = (
-            g["cpu_cores"], g["mem_total_bytes"], g["disk_bytes"])
+        v.status, v.uptime_s = g["status"], g["uptime_s"]
+        # ALLOCATION, which is what this row used to hold under the names
+        # mem_bytes and disk_bytes while those same names meant USAGE on an
+        # App. Migration a1f4d80c3e69 moved the allocation into these two and
+        # gave the short names App's meaning; the usage below is the reading
+        # the VMs page had no way to draw a meter from before.
+        v.cpu_cores, v.mem_total_bytes = g["cpu_cores"], g["mem_total_bytes"]
+        # Same honesty rule as the app block above: 0 from PVE means "no
+        # reading", not "zero bytes used". A stopped guest reports mem 0, and
+        # a maxdisk of 0 is a row we could not read rather than a VM with no
+        # disk.
+        v.mem_bytes = g["mem_bytes"] or None
+        v.disk_total_bytes = g["disk_bytes"] or None
+        _update_net_rates(v, g, now)
     for vmid, v in existing.items():
         if vmid not in seen and trustworthy:
             # Same evidence rule the app loop above applies, and for the same
@@ -523,6 +782,13 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         g = guests.get(("qemu", v.vmid))
         if not g:
             continue
+        # After the flush, not up in the upsert loop above: this one is keyed
+        # on the VM's DB id and a row inserted this cycle does not have one
+        # yet, so every new VM would share the key None.
+        _refresh_vm_disk(v, g, client, fs_checked, now)
+        # The only other per-VM call in the cycle, and the cheap one: it asks
+        # once per VM ever, not on a timer. See _refresh_os_type.
+        _refresh_os_type(v, g, client)
         samples.append(MetricSample(target_type="vm", target_id=v.id,
                                     metric="cpu_pct", value=g["cpu_pct"], ts=now))
         samples.append(MetricSample(target_type="vm", target_id=v.id,
@@ -617,6 +883,18 @@ class Poller:
         # cycle or a pool that drops out of one read moves the percentage; see
         # PoolMemory.
         self._pools: dict[int, PoolMemory] = {}
+        # host_id -> {app_id: when its address was last read}. Same shape and
+        # same reason as _pools: the cadence in APP_IP_REFRESH_INTERVAL_S only
+        # means anything if it outlives a cycle, and it goes away with the host.
+        self._ip_checked: dict[int, dict[int, datetime]] = {}
+        # host_id -> {vm_id: when its guest agent was last asked for disk
+        # usage}. Same shape and same reason as _ip_checked above, for
+        # VM_DISK_REFRESH_INTERVAL_S.
+        self._fs_checked: dict[int, dict[int, datetime]] = {}
+        # host_id -> "poll this host now" flag, set by wake(). One Event per
+        # host is the whole burst guard: an Event that is already set stays a
+        # single wake, so five creates in a row still cost one extra cycle.
+        self._wakes: dict[int, asyncio.Event] = {}
 
     async def run(self) -> None:
         interval = self.app.state.settings.poll_interval_s
@@ -631,6 +909,9 @@ class Poller:
                         self._tasks.pop(hid).cancel()
                         self.snapshots.pop(hid, None)
                         self._pools.pop(hid, None)
+                        self._ip_checked.pop(hid, None)
+                        self._fs_checked.pop(hid, None)
+                        self._wakes.pop(hid, None)
             except Exception:  # noqa: BLE001  (supervisor never dies)
                 pass
             # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
@@ -675,6 +956,30 @@ class Poller:
         except Exception:  # noqa: BLE001  (a notification is a courtesy)
             pass
 
+    def wake(self, host_id: int) -> None:
+        """Poll this host on the next iteration instead of waiting out
+        poll_interval_s. Called by anything that has just created or destroyed
+        a guest on it.
+
+        Why an immediate re-poll is worth making: measured against the lab
+        cluster (PVE 9.2.11, 2026-08-20), a new guest appears in
+        /cluster/resources 17 to 19 ms after its create task reports finished,
+        and a destroyed one disappears 27 to 39 ms after its destroy task does
+        (54 to 97 ms when read from a different cluster member). PVE's status
+        cache is not what made a new VM take 10 to 20 seconds to show up in the
+        list; our own 30 s interval was the entire delay, so polling again
+        right away actually returns the guest.
+
+        The mirror stays the poller's alone, doc 04 (Proxmox is the truth): a
+        wake asks for a normal cycle sooner, it does not write a row.
+
+        Safe to call before the host has a loop (the flag is picked up when one
+        starts), while it is mid-cycle (the wait at the end of _host_loop is
+        what consumes it), and repeatedly. Must be called from the event loop
+        thread, which every job handler already runs on.
+        """
+        self._wakes.setdefault(host_id, asyncio.Event()).set()
+
     def stop(self) -> None:
         for t in self._tasks.values():
             t.cancel()
@@ -715,7 +1020,20 @@ class Poller:
             delay = (min(settings.poll_interval_s * (2 ** min(fails, 4)),
                          POLL_BACKOFF_CAP_S)
                      if fails else settings.poll_interval_s)
-            await asyncio.sleep(delay)
+            wake = self._wakes.setdefault(host_id, asyncio.Event())
+            if fails:
+                # The backoff owns the delay while this host is failing. A wake
+                # must never shorten it, or a create attempted against a dead
+                # host turns its loop into a hot retry against the thing that
+                # is already not answering. The wake is cleared below all the
+                # same: the cycle that runs when the backoff expires covers it.
+                await asyncio.sleep(delay)
+            else:
+                try:
+                    await asyncio.wait_for(wake.wait(), delay)
+                except TimeoutError:
+                    pass
+            wake.clear()
 
     def _poll_once(self, host_id: int) -> list[tuple[str, dict]]:
         """Blocking: one full cycle for one host. Runs in a worker thread."""
@@ -792,7 +1110,10 @@ class Poller:
                                   cluster_name=cluster_name, quorate=quorate,
                                   degraded=bool(degraded),
                                   pools=self._pools.setdefault(host_id, PoolMemory()),
-                                  status_rows=status_rows)
+                                  status_rows=status_rows,
+                                  client=client,
+                                  ip_checked=self._ip_checked.setdefault(host_id, {}),
+                                  fs_checked=self._fs_checked.setdefault(host_id, {}))
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.
@@ -882,6 +1203,18 @@ class Poller:
                 a.disk_total_bytes_cached = None
                 a.net_in_bps_cached = None
                 a.net_out_bps_cached = None
+                # ip_cached is deliberately NOT cleared, and is deliberately
+                # not part of already_cleared above either. The readings above
+                # are live measurements that go stale the instant nobody can
+                # take them; an address is not a measurement, it is a fact
+                # about the container that stays true while its host is
+                # unreachable and almost always survives the outage. Nulling it
+                # would replace the one piece of information still worth having
+                # (where this app was) with "unknown", and it would come back
+                # the moment the host answered anyway. _refresh_ip applies the
+                # same rule from the other side: it holds the last known
+                # address whenever PVE will not answer.
+                #
                 # net_in_cached, net_out_cached and net_sampled_at are left
                 # exactly as they were. They are not a reading shown to
                 # anyone, only the raw counters _update_net_rates diffs
@@ -901,20 +1234,67 @@ class Poller:
                 # the common case.
 
             for v in db.query(Vm).filter_by(host_id=host_id).all():
-                if v.status == "unknown" and v.uptime_s is None:
+                already_cleared = (
+                    v.status == "unknown"
+                    and v.uptime_s is None
+                    and v.mem_bytes is None
+                    and v.disk_bytes is None
+                    and v.net_in_bps_cached is None
+                    and v.net_out_bps_cached is None
+                )
+                if already_cleared:
                     continue
                 if v.status != "unknown":
                     events.append(("resource", {"type": "vm", "id": v.id,
                                                 "change": "status", "status": "unknown"}))
                 v.status = "unknown"
-                # cpu_cores, mem_bytes and disk_bytes are the guest's
-                # configured allocation (maxcpu/maxmem/maxdisk), not a live
-                # measurement, so they stay true whether or not the host can
-                # be reached right now. uptime_s is the one live reading Vm
-                # caches (how long the guest has been up), and that becomes
-                # exactly as wrong as App's status the moment the host stops
-                # answering.
+                # Split exactly the way the app sweep above splits it: a live
+                # MEASUREMENT nobody can take right now is unknown, and a fact
+                # about how the guest is configured stays true while its host
+                # is off the air.
+                #
+                # Cleared, because all five are readings: uptime_s (how long
+                # the guest has been up), mem_bytes (memory in use),
+                # disk_bytes (what the guest agent last said its filesystems
+                # hold) and the two derived network rates. A stale rate is the
+                # same lie a stale "running" is.
                 v.uptime_s = None
+                v.mem_bytes = None
+                v.disk_bytes = None
+                v.net_in_bps_cached = None
+                v.net_out_bps_cached = None
+                # Held: cpu_cores, mem_total_bytes and disk_total_bytes are
+                # the guest's configured allocation (maxcpu/maxmem/maxdisk),
+                # which is a fact rather than a reading and does not stop
+                # being true because a host went away. guest_agent_ok is held
+                # for exactly that reason too, and it is worth saying out loud
+                # because the column sits next to disk_bytes and comes from
+                # the same call: whether the QEMU guest agent is installed in
+                # a guest is a fact about how that guest is built, not a live
+                # measurement, and it does not change because we lost the
+                # route to its host. Nulling it would replace a real finding
+                # ("this VM has no agent, that is why its storage is unknown")
+                # with "unknown" for the whole outage, and it would come back
+                # identical on the first cycle after recovery. os_type is held
+                # for the same reason and more strongly still: what a guest runs is
+                # part of its identity, it is read exactly once per VM (see
+                # _refresh_os_type), and clearing it here would both lose the
+                # OS icon on every VM of an unreachable host and force the
+                # config read again on recovery. This is the same
+                # judgement that keeps App.ip_cached, and it is a DELIBERATE
+                # difference from the app sweep above, which does null
+                # disk_total_bytes_cached: an app's allocation is only ever
+                # read back out of the same poll that measures its usage, so
+                # nothing there distinguishes the two. On a VM the allocation
+                # is what the VMs page draws the meter's denominator from, and
+                # blanking it turns "usage unknown" into "this VM has no
+                # memory and no disk".
+                #
+                # net_in_cached, net_out_cached and net_sampled_at are left
+                # exactly as they were, for the reason spelled out at length
+                # in the app sweep above: they are not readings shown to
+                # anyone, only the counters _update_net_rates diffs against,
+                # and that function already handles a stale sample correctly.
 
             db.commit()
             return events

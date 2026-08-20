@@ -1,18 +1,31 @@
 import { useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import type { AppRow } from '../api/hooks'
+import { useEntitlements, type AppRow } from '../api/hooks'
 import { useAppActionGates } from '../api/app-gates'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useLifecycle } from '../api/jobs'
 import { useOpenWebUi } from '../api/open-web-ui'
 import { notify } from '../lib/notify'
-import { openConsoleWindow } from '../lib/console-window'
+import { openConsoleWindow, openLogsWindow } from '../lib/console-window'
+import { BackupGuestDialog } from './BackupGuestDialog'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
+import { MigrateDialog } from './MigrateDialog'
+import { ReconfigureDialog } from './ReconfigureDialog'
+import { UninstallDialog } from './UninstallDialog'
 import { Icon } from './ui/icon'
 
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
              + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text '
              + 'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50'
+// The destructive vocabulary HostActionsMenu's Power off item already uses:
+// text-red/bg-red-dim tokens, never a literal hex
+// (src/tests/no-hardcoded-colors.test.ts). The border-t IS the separator that
+// keeps Delete off the end of the ordinary list.
+const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t border-line-soft '
+                         + 'px-3 py-2 text-[13px] text-red outline-none data-[highlighted]:bg-red-dim '
+                         + 'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50'
+
+const NOT_IN_PLAN = 'Not included in your plan'
 
 // Icon names are STRING LITERALS in an `icon:` field, not a computed lookup:
 // scripts/icon-names.mjs statically scans src/ to build the Google Fonts
@@ -27,15 +40,28 @@ const STOPPED_ACTIONS = [
 ] as const
 
 type Guard = { phrase: string; detail: string; action: string }
+type Panel = 'reconfigure' | 'migrate' | 'backup' | 'uninstall' | null
 
 /**
- * The icon grid's context menu: Start, Stop, Restart, Console, Open, and
- * nothing else.
+ * One app's actions as a menu: the icon grid's tile menu and the Apps table
+ * row's three-dots menu are the same list, off one component.
  *
- * DELIBERATELY NARROWER than the app detail page's actions. Migrate,
- * Reconfigure and Uninstall are not here: this menu sits on a dense grid an
- * operator scans, and a destructive action one slip away from Restart is not
- * a trade worth making. The app page has all of them.
+ * ONE menu with a `lifecycle` switch rather than two components, because the
+ * two surfaces differ in exactly one way: the table row already carries Start
+ * or Stop, Restart and Open as buttons beside the menu, so repeating them
+ * inside it would offer the same action twice a centimetre apart. The grid
+ * tile has no buttons at all, so its menu is the only way to act and keeps
+ * them.
+ *
+ * Migrate, Reconfigure and Uninstall USED to be deliberately excluded here,
+ * on the reasoning that a destructive action one slip from Restart is a bad
+ * trade on a dense grid, and that the app detail page had them anyway. That
+ * page is gone. An action nothing reaches is worse than a slip risk, and the
+ * slip is already covered: Uninstall opens UninstallDialog, which makes you
+ * type the app's name before anything is destroyed, so a mis-click lands on a
+ * dialog rather than on a deleted container. Delete also sits below a
+ * separator, away from Restart, and is styled red so it does not read as
+ * another ordinary row.
  *
  * Lifecycle actions route through the same `useLifecycle` mutation
  * LifecycleActions.fire uses, error handling included: a 409 self_target
@@ -43,14 +69,32 @@ type Guard = { phrase: string; detail: string; action: string }
  * notify.error toast rather than letting the optimistic "pending" patch
  * revert in silence.
  */
-export function AppIconMenu({ app, children }: { app: AppRow; children: React.ReactNode }) {
+export function AppIconMenu({ app, lifecycle = true, children }: {
+  app: AppRow
+  /** Include Start/Stop, Restart and Open. On by default, which is the icon
+   *  grid's tile menu: it is the only way to act on that app. The table row
+   *  passes false, since those three are buttons beside the menu there. */
+  lifecycle?: boolean
+  children: React.ReactNode
+}) {
   const gates = useAppActionGates(app.host_id)
+  const ent = useEntitlements()
   const run = useLifecycle()
   const openWebUi = useOpenWebUi(app)
   const [guard, setGuard] = useState<Guard | null>(null)
+  const [panel, setPanel] = useState<Panel>(null)
   const pending = app.status === 'pending' || run.isPending
-  const actions = app.status === 'pending' ? []
+  const actions = !lifecycle || app.status === 'pending' ? []
     : app.status === 'running' ? RUNNING_ACTIONS : STOPPED_ACTIONS
+
+  // Same wait-for-first-fetch rule as api/app-gates.ts's "innocent until
+  // proven guilty": has() reads false until /entitlements lands, so gating on
+  // it directly would grey these out on every plan for the whole first fetch.
+  const planDenied = (flag: string) => ent.data != null && !ent.has(flag)
+  const reconfigureDenied = planDenied('apps.reconfigure')
+  const migrateDenied = planDenied('migrate.cross_host')
+  const backupDenied = planDenied('backups.run')
+  const uninstallDenied = planDenied('apps.uninstall')
 
   const fire = (action: string, confirm?: string) =>
     run.mutate({ target: 'app', id: app.id, action, confirm }, {
@@ -91,7 +135,7 @@ export function AppIconMenu({ app, children }: { app: AppRow; children: React.Re
             {/* No catalog port means nothing to point a tab at, so the action is
                 absent rather than offered and broken. Same rule as the detail
                 header. */}
-            {app.catalog_port != null && (
+            {lifecycle && app.catalog_port != null && (
               <DropdownMenu.Item className={itemCls}
                 disabled={gates.openUi.denied} title={gates.openUi.reason}
                 onSelect={() => {
@@ -105,6 +149,30 @@ export function AppIconMenu({ app, children }: { app: AppRow; children: React.Re
                 <Icon name="open_in_new" size={16} /> Open
               </DropdownMenu.Item>
             )}
+            <DropdownMenu.Item className={itemCls}
+              onSelect={() => openLogsWindow(app.id)}>
+              <Icon name="description" size={16} /> Logs
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={itemCls}
+              disabled={reconfigureDenied} title={reconfigureDenied ? NOT_IN_PLAN : undefined}
+              onSelect={() => setPanel('reconfigure')}>
+              <Icon name="tune" size={16} /> Reconfigure
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={itemCls}
+              disabled={migrateDenied} title={migrateDenied ? NOT_IN_PLAN : undefined}
+              onSelect={() => setPanel('migrate')}>
+              <Icon name="swap_horiz" size={16} /> Migrate
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={itemCls}
+              disabled={backupDenied} title={backupDenied ? NOT_IN_PLAN : undefined}
+              onSelect={() => setPanel('backup')}>
+              <Icon name="backup" size={16} /> Backup
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={destructiveItemCls}
+              disabled={uninstallDenied} title={uninstallDenied ? NOT_IN_PLAN : undefined}
+              onSelect={() => setPanel('uninstall')}>
+              <Icon name="delete" size={16} /> Delete
+            </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -116,6 +184,19 @@ export function AppIconMenu({ app, children }: { app: AppRow; children: React.Re
           onConfirm={(typed) => fire(guard.action, typed)}
         />
       )}
+      {panel === 'reconfigure' && <ReconfigureDialog app={app} onClose={() => setPanel(null)} />}
+      {panel === 'migrate' && <MigrateDialog app={app} onClose={() => setPanel(null)} />}
+      {panel === 'backup' && (
+        <BackupGuestDialog
+          guest={{ type: 'app', id: app.id, name: app.name, hostId: app.host_id,
+                   hostName: app.host_name, label: `CT ${app.ctid}` }}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {/* UninstallDialog carries its own type-the-name confirmation, which is
+          the whole gate: a second confirm in front of it would only train the
+          operator to click through both. */}
+      {panel === 'uninstall' && <UninstallDialog app={app} onClose={() => setPanel(null)} />}
     </>
   )
 }

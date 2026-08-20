@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -27,10 +28,25 @@ const APP: AppRow = {
   net_in_bps: 1200000, net_out_bps: 88000,
 }
 
-const wrap = (apps: AppRow[]) => {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><AppTable apps={apps} /></QueryClientProvider>)
+const OTHER: AppRow = { ...APP, id: 2, name: 'Paperless', slug: 'paperless',
+                        ctid: 151, ip: '10.0.0.6' }
+
+/** The table is controlled: AppsPage keeps the open row in the URL. This
+ *  stands in for that owner so a click actually changes what is rendered. */
+function Harness({ apps, initial }: { apps: AppRow[]; initial?: number }) {
+  const [open, setOpen] = useState<number | undefined>(initial)
+  return <AppTable apps={apps} open={open} onOpen={setOpen} />
 }
+
+const wrap = (apps: AppRow[], initial?: number) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={qc}><Harness apps={apps} initial={initial} /></QueryClientProvider>)
+}
+
+const rowFor = (name: string) => screen.getByRole('row', { name: new RegExp(name) })
+const panelIsOpen = (name: string) =>
+  within(rowFor(name)).getByRole('button', { name }).getAttribute('aria-expanded') === 'true'
 
 describe('AppTable', () => {
   it('is a real table, so a screen reader gets the column each cell belongs to', () => {
@@ -42,7 +58,7 @@ describe('AppTable', () => {
 
   it('carries the same detail as the card', () => {
     wrap([APP])
-    const row = screen.getByRole('row', { name: /Immich/ })
+    const row = rowFor('Immich')
     expect(within(row).getByText('Immich')).toBeInTheDocument()
     expect(within(row).getByText(/CT 150/)).toBeInTheDocument()
     expect(within(row).getByText(/running/i)).toBeInTheDocument()
@@ -53,12 +69,71 @@ describe('AppTable', () => {
     expect(within(row).getByText(/9\.6 Mbps/)).toBeInTheDocument()
   })
 
-  it('opens the app detail page from the name', () => {
+  it('opens the app detail in place, with no navigation away from the table', () => {
     wrap([APP])
-    fireEvent.click(screen.getByRole('button', { name: 'Immich' }))
-    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
-      params: expect.objectContaining({ appId: '1' }),
-    }))
+    expect(panelIsOpen('Immich')).toBe(false)
+    fireEvent.click(rowFor('Immich'))
+    expect(panelIsOpen('Immich')).toBe(true)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('shows that app\'s own details in the panel', () => {
+    wrap([APP, OTHER], 2)
+    // 10.0.0.6 is Paperless's address and 10.0.0.5 is Immich's; only the open
+    // row's KV grid should be rendering one at all.
+    expect(screen.getByText('10.0.0.6')).toBeInTheDocument()
+    expect(screen.queryByText('10.0.0.5')).toBeNull()
+    // The CPU chart's range group: one per open panel, never two.
+    expect(screen.getByRole('group', { name: 'CPU time range' })).toBeInTheDocument()
+    expect(screen.getByText('CTID')).toBeInTheDocument()
+  })
+
+  it('marks an app with an update with a named dot, not a bare decoration', () => {
+    // The dot carries no text, so its accessible name is the only wording a
+    // screen reader gets. It has to say what the dot means, not "update".
+    wrap([{ ...APP, update_available: '1.120.0' }])
+    const dot = within(rowFor('Immich')).getByRole('img', { name: 'Update available' })
+    expect(dot).toHaveAttribute('title', 'An update is available for this app')
+    expect(dot).not.toHaveTextContent(/\S/)
+  })
+
+  it('leaves an up-to-date app undotted', () => {
+    wrap([APP])
+    expect(screen.queryByRole('img', { name: 'Update available' })).toBeNull()
+  })
+
+  it('closes the first row when a second is clicked, so only one is ever open', () => {
+    wrap([APP, OTHER])
+    fireEvent.click(rowFor('Immich'))
+    expect(panelIsOpen('Immich')).toBe(true)
+
+    fireEvent.click(rowFor('Paperless'))
+    expect(panelIsOpen('Paperless')).toBe(true)
+    expect(panelIsOpen('Immich')).toBe(false)
+  })
+
+  it('closes on a click anywhere outside the table', () => {
+    wrap([APP])
+    fireEvent.click(rowFor('Immich'))
+    expect(panelIsOpen('Immich')).toBe(true)
+
+    // pointerdown, not click: the listener runs on the press so it cannot
+    // race the row's own onClick. See AppTable's click-away comment.
+    fireEvent.pointerDown(document.body)
+    expect(panelIsOpen('Immich')).toBe(false)
+  })
+
+  it('stays open when the click lands inside the panel', () => {
+    wrap([APP], 1)
+    fireEvent.pointerDown(screen.getByRole('group', { name: 'CPU time range' }))
+    expect(panelIsOpen('Immich')).toBe(true)
+  })
+
+  it('leaves the row alone when the click lands on the action bar', () => {
+    wrap([APP])
+    const cells = within(rowFor('Immich')).getAllByRole('cell')
+    fireEvent.click(cells[cells.length - 1])
+    expect(panelIsOpen('Immich')).toBe(false)
   })
 
   it('renders a missing reading as unknown, never as zero', () => {

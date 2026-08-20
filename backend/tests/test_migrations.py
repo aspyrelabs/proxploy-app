@@ -402,3 +402,58 @@ def test_a_fresh_postgres_database_matches_the_models_exactly(pg_engine):
 
     run_migrations(Settings(db_url=PG_DSN))
     _assert_no_drift(PG_DSN)
+
+
+def test_backfill_of_app_category_and_web_port(tmp_path):
+    """e4b1a7c05d92. Adopt never copied either column, so every app adopted
+    before it landed read back with no category and no web port. The rows that
+    already exist need one pass over them, and that pass must never argue with
+    a value somebody chose by hand.
+    """
+    from proxploy.migrations.versions.e4b1a7c05d92_backfill_app_category_and_web_port import (  # noqa: E501
+        _backfill)
+    from proxploy.models import App, CatalogEntry
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    db.add_all([
+        CatalogEntry(slug="adguard", name="AdGuard",
+                     category="Adblock & DNS", port=3000),
+        CatalogEntry(slug="nocat", name="No Category"),
+    ])
+
+    def app(ctid, catalog_slug, category=None, web_port=None):
+        return App(host_id=host.id, ctid=ctid, name=f"a{ctid}",
+                   slug=f"a-{host.id}-{ctid}", catalog_slug=catalog_slug,
+                   category=category, web_port=web_port, adopted=True)
+
+    db.add_all([
+        app(102, "adguard"),                        # both NULL, entry resolves
+        app(103, "adguard", "Mine", 9999),          # curated by hand
+        app(104, None),                             # no slug at all
+        app(105, "no-such-entry"),                  # slug upstream has dropped
+        app(106, "nocat"),                          # entry carries neither value
+    ])
+    db.commit()
+
+    def rows():
+        db.expire_all()
+        return {a.ctid: (a.category, a.web_port) for a in db.query(App).all()}
+
+    def backfill():
+        db.execute(text(_backfill("category", "category")))
+        db.execute(text(_backfill("web_port", "port")))
+        db.commit()
+
+    backfill()
+    first = rows()
+    assert first[102] == ("Adblock & DNS", 3000)
+    assert first[103] == ("Mine", 9999)
+    assert first[104] == (None, None)
+    assert first[105] == (None, None)
+    assert first[106] == (None, None)
+
+    # Re-running changes nothing, which is the whole idempotency claim.
+    backfill()
+    assert rows() == first

@@ -2,7 +2,7 @@ import { ApiError } from '../api/client'
 import { notify } from '../lib/notify'
 import { TERMINAL, useActivity, useCancelJob } from '../api/jobs'
 import type { ActivityRow, JobStatus } from '../api/jobs'
-import { actionLabel, ago, statusLabel, TINT } from '../lib/activityDisplay'
+import { actionLabel, ago, statusLabel, targetLabel, TINT } from '../lib/activityDisplay'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { Loading } from './ui/loading'
@@ -53,7 +53,7 @@ function Item({ row }: { row: ActivityRow }) {
         </span>
         <span className="block font-mono text-[11px] text-text-3">
           {statusLabel(row.status)}
-          {row.target_type ? ` · ${row.target_type}${row.target_id != null ? ` ${row.target_id}` : ''}` : ''}
+          {targetLabel(row) ? ` · ${targetLabel(row)}` : ''}
           {row.actor ? ` · ${row.actor}` : ''} · {ago(row.at)}
         </span>
       </span>

@@ -76,14 +76,25 @@ const jobSettled = (qc: ReturnType<typeof useQueryClient>) => () => {
  * The dialog chooses from the stores that actually carry `backup` content and
  * says which one, so "where did it go" is answered before the run.
  */
+export type BackupGuest = { type: 'app' | 'vm'; id: number }
+
+/**
+ * `guests` defaults to `'all'` (the host-wide run routes/backups.tsx has
+ * always fired), so that page's call site needed no change at all. Passing
+ * an explicit list is the one-app dialog's job: backend `_resolve_guests`
+ * requires every guest in the list to share one host, which a single app
+ * always does, so there is nothing this hook needs to check on the caller's
+ * behalf.
+ */
 export function useRunBackup() {
   const qc = useQueryClient()
-  return useMutation<{ job: JobRow }, ApiError, { hostId: number | null; storage?: string | null }>({
+  return useMutation<{ job: JobRow }, ApiError,
+    { hostId: number | null; storage?: string | null; guests?: BackupGuest[] }>({
     mutationFn: (v) =>
       api<{ job: JobRow }>('/backups/run', {
         method: 'POST',
         body: JSON.stringify({
-          guests: 'all',
+          guests: v.guests ?? 'all',
           ...(v.hostId ? { host_id: v.hostId } : {}),
           ...(v.storage ? { storage: v.storage } : {}),
         }),

@@ -71,10 +71,10 @@ def _token(priv_pem, *, kid="leaf1", features=None, exp_delta_h=72, grace_delta_
     return jwt.encode(claims, priv_pem, algorithm="EdDSA", headers={"kid": kid})
 
 
-def test_registry_is_exactly_81_all_on():
+def test_registry_is_exactly_82_all_on():
     from proxploy.entitlements.registry import DEFAULT_FEATURES, FLAG_KEYS
 
-    assert len(FLAG_KEYS) == 81 and len(set(FLAG_KEYS)) == 81
+    assert len(FLAG_KEYS) == 82 and len(set(FLAG_KEYS)) == 82
     for probe in ("hosts.multi", "store.install", "jobs.engine", "ent.client",
                   "platform.error_report", "terminal.node"):
         assert probe in FLAG_KEYS
@@ -284,5 +284,5 @@ def test_entitlements_endpoint(client, csrf_header, bootstrap_admin):
     body = r.json()
     assert body["tier"] == "builtin" and body["grace"] is None
     assert body["clock_skew"] is False
-    assert len(body["features"]) == 81
+    assert len(body["features"]) == 82
     assert all(body["features"].values())

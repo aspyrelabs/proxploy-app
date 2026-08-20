@@ -2,7 +2,12 @@ import { useMutation } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, apiErrorDetail } from './client'
 
-export type ConsoleTicket = { ticket: string; expires_at: string }
+/** `password` is the VM console's only: PVE generates a one-connection VNC
+ *  password (api/consoles.py) because QEMU's RFB server offers VNC
+ *  Authentication and the bridge relays bytes without answering challenges,
+ *  so the browser is the only party that can. Absent for host and app
+ *  consoles, whose bridge does authenticate upstream itself. */
+export type ConsoleTicket = { ticket: string; expires_at: string; password?: string }
 export type ConsoleKind = 'app' | 'host' | 'vm'
 
 const PATH: Record<ConsoleKind, (id: number) => string> = {
@@ -23,9 +28,19 @@ export function useConsoleTicket(kind: ConsoleKind, id: number) {
   })
 }
 
+/** The websocket path, ticket included, rooted at the site rather than at
+ *  whatever page is asking. Split out of consoleWsUrl so the vendored noVNC
+ *  app and our own xterm bridge cannot end up describing two different
+ *  sockets: noVNC builds its own URL from a path (it does `new URL(path,
+ *  location.href)` in app/ui.js), and it is served from /novnc/, so a path
+ *  relative to the caller would resolve under /novnc/ and hit nothing. */
+export function consoleWsPath(kind: ConsoleKind, id: number, ticket: string): string {
+  return `/api/v1${WS_PATH[kind](id, ticket)}`
+}
+
 export function consoleWsUrl(kind: ConsoleKind, id: number, ticket: string): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/v1${WS_PATH[kind](id, ticket)}`
+  return `${proto}//${location.host}${consoleWsPath(kind, id, ticket)}`
 }
 
 // A console drop with no visible cause (upstream flaked, PVE's own

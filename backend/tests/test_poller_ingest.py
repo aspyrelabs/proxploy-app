@@ -92,7 +92,10 @@ def test_vms_upserted_and_apps_cached_refreshed(tmp_path):
 
     vm = db.query(Vm).filter_by(host_id=host.id, vmid=100).one()
     assert vm.status == "running" and vm.name == "win11"
-    assert vm.mem_bytes == 8589934592 and vm.cpu_cores == 4
+    # mem_bytes is USED and mem_total_bytes is ALLOCATED, the same way round
+    # as on an App row. Before migration a1f4d80c3e69 mem_bytes held maxmem.
+    assert vm.mem_bytes == 6442450944 and vm.mem_total_bytes == 8589934592
+    assert vm.cpu_cores == 4
     app_row = db.query(App).filter_by(ctid=150).one()
     assert app_row.status_cached == "running"
     assert app_row.cpu_pct_cached == 12.0

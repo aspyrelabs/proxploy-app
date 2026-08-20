@@ -5,6 +5,7 @@ import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { IconTile } from './IconTile'
 import { StatusPill } from './StatusPill'
+import { UpdateDot } from './UpdateDot'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
@@ -15,6 +16,9 @@ export function AppCard({ app }: { app: AppRow }) {
   const diskPct = app.disk_bytes != null && app.disk_total_bytes
     ? (app.disk_bytes / app.disk_total_bytes) * 100 : null
   const stopped = app.status !== 'running'
+  // App detail is a row that expands on the Apps table now, not a page, so
+  // both the click and the keyboard path land on the same search param.
+  const open = () => navigate({ to: '/apps' as never, search: { open: app.id } as never })
   return (
     <div
       // The only way into app detail, so it has to work without a mouse:
@@ -23,11 +27,11 @@ export function AppCard({ app }: { app: AppRow }) {
       role="link" tabIndex={0}
       aria-label={app.name}
       className={`cursor-pointer rounded-card border border-line-soft bg-panel p-4 transition-transform hover:-translate-y-[3px] motion-reduce:transform-none ${stopped ? 'opacity-70' : ''}`}
-      onClick={() => navigate({ to: '/apps/$appId' as never, params: { appId: String(app.id) } as never })}
+      onClick={() => open()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          navigate({ to: '/apps/$appId' as never, params: { appId: String(app.id) } as never })
+          open()
         }
       }}
     >
@@ -37,11 +41,7 @@ export function AppCard({ app }: { app: AppRow }) {
             that entry is gone or has none, and the initials tile takes over. */}
         <IconTile name={app.name} iconUrl={app.icon_url} size={40}
                   initials={app.icon_initials} colors={app.icon_colors} />
-        {app.update_available && (
-          <span className="rounded bg-amber-dim px-1.5 py-0.5 font-mono text-[9.5px] uppercase text-amber">
-            update
-          </span>
-        )}
+        {app.update_available && <UpdateDot />}
       </div>
       <div className="mt-2 text-[14px] font-semibold text-text">{app.name}</div>
       <div className="font-mono text-[11px] text-text-3">

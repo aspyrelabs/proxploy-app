@@ -222,11 +222,45 @@ class _GuestConfigLeaf:
         return dict(self._owner.guest_configs.get((self._kind, self._vmid), {}))
 
     def put(self, **cfg):
+        """Returns None, because the real one does.
+
+        PVE routes this PUT to its SYNCHRONOUS config handler, whose schema
+        declares `returns => { type => 'null' }`; only the POST on the same
+        path is the asynchronous half that hands back a UPID. This fake used
+        to be able to return a task id, which let a caller derive "did the
+        change land in pending" from it and pass its tests while always
+        answering "no" against real hardware. Ask `pending` instead.
+
+        `delete=a,b` is PVE's own removal parameter, so it is applied as one
+        here rather than stored as a config key called "delete".
+        """
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
         self._owner.config_updates.append((self._kind, self._vmid, dict(cfg)))
-        self._owner.guest_configs.setdefault((self._kind, self._vmid), {}).update(cfg)
-        return self._owner.config_update_upid
+        cfg = dict(cfg)
+        removed = str(cfg.pop("delete", "") or "")
+        conf = self._owner.guest_configs.setdefault((self._kind, self._vmid), {})
+        conf.update(cfg)
+        for key in filter(None, removed.split(",")):
+            conf.pop(key.strip(), None)
+
+
+class _PendingLeaf:
+    """nodes(n).{lxc|qemu}(vmid).pending.get().
+
+    Real PVE lists EVERY config key here and marks only the ones with a change
+    waiting for the guest's next boot (`pending`, or `delete` for a removal).
+    A caller only ever reads the marked ones, so the default is an empty list,
+    which is what a guest with nothing waiting reduces to.
+    """
+
+    def __init__(self, owner, kind, vmid):
+        self._owner, self._kind, self._vmid = owner, kind, vmid
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        return list(self._owner.pending_by_guest.get((self._kind, self._vmid), []))
 
 
 class _RollbackLeaf:
@@ -369,6 +403,11 @@ class _VncproxyLeaf:
         if self._owner.proxy_error is not None:
             raise self._owner.proxy_error
         self._owner.last_vncproxy_call = (self._node, self._vmid)
+        # Recorded separately from last_vncproxy_call so the existing
+        # (node, vmid) assertions keep working. generate-password is the
+        # difference between a VM console that completes the RFB handshake
+        # and one that stalls forever, so it needs to be assertable.
+        self._owner.last_vncproxy_kwargs = kwargs
         return self._owner.vncproxy_response
 
 
@@ -448,6 +487,7 @@ class _GuestNS:
         self.status = _GuestStatusNS(owner, kind, vmid)
         self.termproxy = _TermproxyLeaf(owner, kind, node, vmid)
         self.config = _GuestConfigLeaf(owner, kind, vmid)
+        self.pending = _PendingLeaf(owner, kind, vmid)
         self.snapshot = _SnapshotNS(owner, kind, node, vmid)
         if kind == "lxc":
             self.interfaces = _InterfacesLeaf(owner, vmid)
@@ -761,7 +801,10 @@ class FakePVE:
         self.lxc_interface_calls: list[int] = []
         # guest config writes (Phase 6 Task 6)
         self.config_updates: list[tuple[str, int, dict]] = []
-        self.config_update_upid: str | None = None
+        # (kind, vmid) -> the rows GET .../pending returns. Only the rows that
+        # carry `pending` or `delete` matter to any caller, so a test seeds
+        # just those; empty means nothing is waiting for a restart.
+        self.pending_by_guest: dict[tuple[str, int], list[dict]] = {}
         self.snapshots_by_guest: dict[tuple[str, int], list[dict]] = {}
         self.nextid = "100"
         self.nextid_calls = 0
@@ -804,6 +847,7 @@ class FakePVE:
         self.last_termproxy_call = None
         self.last_node_termproxy_call = None
         self.last_vncproxy_call = None
+        self.last_vncproxy_kwargs: dict = {}
         # storage content mutations (Phase 6)
         self.uploads: list[dict] = []
         self.deleted_volumes: list[tuple] = []

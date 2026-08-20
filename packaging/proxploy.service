@@ -17,7 +17,16 @@ EnvironmentFile=/etc/proxploy/proxploy.env
 # FORWARDED_ALLOW_IPS in /etc/proxploy/proxploy.env. The matching CLI flag
 # for that allow list is deliberately NOT set here: a CLI value would beat
 # the env var and kill the override.
-ExecStart=/opt/proxploy/current/backend/venv/bin/uvicorn --factory proxploy.main:create_app --host 127.0.0.1 --port 8000 --proxy-headers
+#
+# --ws-per-message-deflate false is for the consoles. uvicorn defaults it to
+# True, so every browser (they all offer permessage-deflate) gets a VNC
+# stream re-compressed frame by frame in the event loop thread that also
+# relays it. Measured on a 64 KiB payload against a throwaway uvicorn echo:
+# 2.20 ms per round trip with deflate on versus 0.17 ms with it off, and on
+# the real console path a full 1280x800 repaint took 257 ms of transfer with
+# it on versus 93 to 126 ms with it off. The bytes it saves are near zero:
+# noVNC asks for Tight, so the payload is already JPEG/zlib compressed.
+ExecStart=/opt/proxploy/current/backend/venv/bin/uvicorn --factory proxploy.main:create_app --host 127.0.0.1 --port 8000 --proxy-headers --ws-per-message-deflate false
 Restart=on-failure
 RestartSec=3
 User=proxploy

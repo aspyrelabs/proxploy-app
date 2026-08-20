@@ -45,7 +45,9 @@ const app = (over: Partial<AppRow> = {}): AppRow => ({
 const vm = (over: Partial<VmRow> = {}): VmRow => ({
   id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
   status: 'stopped', os_type: 'win11', cpu_cores: 4, cpu_pct: 0,
-  mem_bytes: 2161287168, disk_bytes: null, uptime_s: null, synced_at: null,
+  mem_bytes: 1073741824, mem_total_bytes: 2147483648,
+  disk_bytes: null, disk_total_bytes: null, net_in_bps: null, net_out_bps: null,
+  uptime_s: null, guest_agent_ok: null,
   ...over,
 })
 
@@ -76,13 +78,19 @@ describe('GuestList', () => {
     expect(screen.getByText('VM 201')).toBeInTheDocument()
   })
 
-  // VmRow has mem_bytes but no mem_total_bytes. Rendering a VM's memory as a
-  // percentage would mean inventing the denominator, so the app gets "x / y"
-  // and the VM gets the figure it actually has.
-  it('shows a total only for the side that knows one', () => {
+  // Both kinds now report used and allocated memory under the same two field
+  // names, so both read "used / allocated" and the column means one thing.
+  it('writes memory as used over allocated for both kinds', () => {
     wrap()
     expect(screen.getByText('2.0 GiB / 4.0 GiB')).toBeInTheDocument()
-    expect(screen.getByText('2.0 GiB')).toBeInTheDocument()
+    expect(screen.getByText('1.0 GiB / 2.0 GiB')).toBeInTheDocument()
+  })
+
+  // A total is still nullable on either side, and a guest missing one shows
+  // the figure it has rather than a denominator nobody measured.
+  it('drops the denominator when the guest reports no allocation', () => {
+    wrap(toGuests([], [vm({ mem_total_bytes: null })]))
+    expect(screen.getByText('1.0 GiB')).toBeInTheDocument()
   })
 
   it('gives both kinds their lifecycle controls', async () => {
@@ -120,10 +128,12 @@ describe('GuestList', () => {
     expect(screen.queryByText('app')).not.toBeInTheDocument()
   })
 
-  it('badges an app with an update available, and leaves the VM alone', () => {
+  it('marks an app with an update available, and leaves the VM alone', () => {
     wrap(toGuests([app({ update_available: 'v2.4.0' })], [vm()]))
-    expect(screen.getByText('update')).toBeInTheDocument()
-    expect(screen.getAllByText('update')).toHaveLength(1)
+    // The mark is a bare dot now (UpdateDot), so its accessible name is the
+    // only thing there is to assert on: no text is rendered at all.
+    expect(screen.getAllByRole('img', { name: 'Update available' })).toHaveLength(1)
+    expect(screen.queryByText('update')).not.toBeInTheDocument()
   })
 
   it('has real list semantics, not an undifferentiated run of buttons', () => {

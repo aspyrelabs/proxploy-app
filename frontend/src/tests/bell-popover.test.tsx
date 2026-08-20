@@ -29,6 +29,7 @@ const JOBS: JobRow[] = [
   },
   {
     id: 11, kind: 'app.stop', status: 'succeeded', target_type: 'app', target_id: 2,
+    target_name: 'debian-test',
     params: null, result: null, error: null, progress_pct: 100,
     requested_by: null, schedule_id: null, started_at: '2026-08-12T08:00:00Z',
     finished_at: '2026-08-12T08:01:00Z', created_at: '2026-08-12T08:00:00Z',
@@ -188,8 +189,8 @@ describe('BellPopover', () => {
   it('opens from the bell and lists recent jobs', async () => {
     wrap()
     await openBell()
-    expect(await screen.findByText(/App Start #/)).toBeInTheDocument()
-    expect(screen.getByText(/App Stop #/)).toBeInTheDocument()
+    expect(await screen.findByText(/App Start/)).toBeInTheDocument()
+    expect(screen.getByText(/App Stop/)).toBeInTheDocument()
     expect(screen.getByText(/VM Backup/)).toBeInTheDocument()
   })
 
@@ -234,7 +235,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const running = cards.find((c) => c.textContent?.includes('App Start #'))!
+    const running = cards.find((c) => c.textContent?.includes('App Start'))!
     expect(within(running).getByRole('status')).toHaveAttribute(
       'aria-label', expect.stringContaining('40 percent'))
     expect(within(running).queryByText('40%')).toBeNull()
@@ -246,7 +247,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const finished = cards.find((c) => c.textContent?.includes('App Stop #'))!
+    const finished = cards.find((c) => c.textContent?.includes('App Stop'))!
     expect(within(finished).queryByRole('status')).toBeNull()
   })
 
@@ -282,14 +283,14 @@ describe('BellPopover', () => {
     jobsResult = 'many'
     wrap()
     await openBell()
-    await screen.findByText('Bulk Job0 #100')
+    await screen.findByText('Bulk Job0')
     expect(screen.getAllByRole('alert')).toHaveLength(15)
     // #115 is the 16th, so it is queued behind the visible fifteen.
-    expect(screen.queryByText('Bulk Job15 #115')).not.toBeInTheDocument()
+    expect(screen.queryByText('Bulk Job15')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0])
 
-    await waitFor(() => expect(screen.getByText('Bulk Job15 #115')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Bulk Job15')).toBeInTheDocument())
     expect(screen.getAllByRole('alert')).toHaveLength(15)
   })
 
@@ -321,8 +322,21 @@ describe('BellPopover', () => {
     await openBell()
     expect(await screen.findByText('disk full: retry failed')).toBeInTheDocument()
     // One muted context line per card, not a label/value table: what it
-    // touched and how long ago.
+    // touched and how long ago. Job 12 has no stored name (it predates the
+    // column), so it falls back to the type and id pair.
     expect(screen.getByText(/vm 3 ·/)).toBeInTheDocument()
+  })
+
+  // "Finished on vm 3" told the reader nothing they could act on, and a month
+  // after a delete there is no row left to look the name up in. The name the
+  // backend captured at enqueue time leads instead.
+  it('names what a job acted on, and falls back for a row with no name', async () => {
+    wrap()
+    await openBell()
+    expect(await screen.findByText('Finished on debian-test.')).toBeInTheDocument()
+    expect(screen.getByText(/^debian-test ·/)).toBeInTheDocument()
+    // The unnamed row still reads the old way rather than guessing.
+    expect(screen.getByText(/^vm 3 ·/)).toBeInTheDocument()
   })
 
   // Deleting the activity drawer took the only UI path to GET /jobs/{id}/events
@@ -339,14 +353,14 @@ describe('BellPopover', () => {
     const dialog = await screen.findByRole('dialog')
     // "Failed", because JOBS[2] failed: the title states the outcome rather
     // than only naming the kind (see actionLabel).
-    expect(within(dialog).getByText('VM Backup Failed #12')).toBeInTheDocument()
+    expect(within(dialog).getByText('VM Backup Failed')).toBeInTheDocument()
     // The archived transcript is fetched for THAT job, not whichever was first.
     await waitFor(() => expect(screen.getByText(/reading superblock/)).toBeInTheDocument())
 
     // It shipped with Escape and the scrim and nothing to click, unlike every
     // other dialog that mounts a JobLog. A visible way out is not optional.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
-    await waitFor(() => expect(screen.queryByText('VM Backup Failed #12')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('VM Backup Failed')).not.toBeInTheDocument())
   })
 
   // Icon-only controls: the aria-label is the accessible name whether or not
@@ -418,7 +432,7 @@ describe('BellPopover', () => {
     wrap()
     const trigger = await screen.findByRole('button', { name: 'Activity' })
     fireEvent.click(trigger)
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
@@ -426,21 +440,21 @@ describe('BellPopover', () => {
   it('closes on Escape', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Start/)).not.toBeInTheDocument())
   })
 
   it('closes on an outside click', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     // Radix's DismissableLayer defers a left-button pointerdown outside until
     // the matching click fires (so a drag-selection that starts outside and
     // ends inside doesn't dismiss the layer); both events are needed here.
     fireEvent.pointerDown(document.body, { button: 0 })
     fireEvent.click(document.body)
-    await waitFor(() => expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Start/)).not.toBeInTheDocument())
   })
 
   // Radix's Popover.Content legitimately carries role="dialog" (a non-modal
@@ -451,7 +465,7 @@ describe('BellPopover', () => {
   it('renders no scrim and no aria-modal', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     expect(document.querySelector('[aria-modal]')).toBeNull()
   })
 
@@ -463,7 +477,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const forJob11 = cards.filter((c) => c.textContent?.includes('App Stop #'))
+    const forJob11 = cards.filter((c) => c.textContent?.includes('App Stop'))
     expect(forJob11).toHaveLength(1)
   })
 
@@ -506,8 +520,8 @@ describe('BellPopover', () => {
     expect(await screen.findByText('1')).toBeInTheDocument()
     await openBell()
     expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
-    expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Start/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stop/)).not.toBeInTheDocument()
   })
 
   // The watermark only covers ids at or below it; an id dismissed on its
@@ -516,15 +530,15 @@ describe('BellPopover', () => {
     dismissedState = { cleared_through_job_id: null, dismissed_job_ids: [11] }
     wrap()
     await openBell()
-    expect(await screen.findByText(/App Start #/)).toBeInTheDocument()
-    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/App Start/)).toBeInTheDocument()
+    expect(screen.queryByText(/App Stop/)).not.toBeInTheDocument()
     expect(await screen.findByText(/VM Backup/)).toBeInTheDocument()
   })
 
   it('clear all writes through to the server', async () => {
     wrap()
     await openBell()
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
@@ -535,7 +549,7 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const jobCard = cards.find((c) => c.textContent?.includes('App Start #'))!
+    const jobCard = cards.find((c) => c.textContent?.includes('App Start'))!
     fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
@@ -564,14 +578,14 @@ describe('BellPopover', () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
-    const jobCard = cards.find((c) => c.textContent?.includes('App Start #'))!
+    const jobCard = cards.find((c) => c.textContent?.includes('App Start'))!
     fireEvent.click(within(jobCard).getByRole('button', { name: 'Dismiss' }))
-    await waitFor(() => expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Start/)).not.toBeInTheDocument())
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/10'),
     ).toBe(true))
     // Gave the rejected mutation a full turn to settle; it did not come back.
-    expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Start/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })
 
@@ -583,14 +597,14 @@ describe('BellPopover', () => {
     dismissWriteFails = true
     wrap()
     await openBell()
-    await screen.findByText(/App Start #/)
+    await screen.findByText(/App Start/)
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }))
-    await waitFor(() => expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/App Start/)).not.toBeInTheDocument())
     await waitFor(() => expect(
       dismissCalls.some((c) => c.path === '/notifications/dismissed/clear-all'),
     ).toBe(true))
-    expect(screen.queryByText(/App Start #/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/App Stop #/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Start/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/App Stop/)).not.toBeInTheDocument()
     expect(screen.queryByText(/VM Backup/)).not.toBeInTheDocument()
     expect(await screen.findByText(/could not save/i)).toBeInTheDocument()
   })

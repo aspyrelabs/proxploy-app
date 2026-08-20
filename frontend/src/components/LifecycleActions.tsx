@@ -1,8 +1,6 @@
 import { Fragment, useState } from 'react'
-import { useAppActionGates } from '../api/app-gates'
+import { useAppActionGates, useVmLifecycleGate } from '../api/app-gates'
 import { ApiError, apiErrorDetail } from '../api/client'
-import { useEntitlements } from '../api/hooks'
-import { useHostCapabilities } from '../api/hosts'
 import { useLifecycle } from '../api/jobs'
 import { notify } from '../lib/notify'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
@@ -35,8 +33,7 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   grouped?: boolean
 }) {
   const gates = useAppActionGates(hostId)
-  const ent = useEntitlements()
-  const hostCaps = useHostCapabilities(hostId)
+  const vmGate = useVmLifecycleGate(hostId)
   const run = useLifecycle()
   const [guard, setGuard] = useState<Guard | null>(null)
   const pending = status === 'pending' || run.isPending
@@ -56,16 +53,12 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // layouts are pinned to, so nothing moves for them.
   const cls = !grouped && size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
   const btnSize = size === 'xs' ? 'xs' : grouped && size === 'sm' ? 'sm' : undefined
-  // Why an unresolved fetch withholds nothing: api/app-gates.ts.
-  // App gates come from that shared hook; the VM path keeps its own
-  // derivation (vms.lifecycle isn't covered there, that's out of scope here).
-  const denied = target === 'app' ? gates.lifecycle.denied : ent.data != null && !ent.has('vms.lifecycle')
-  const noLifecycle = target === 'vm' && hostCaps.loaded && hostCaps.capabilities?.lifecycle === false
-  const reason = target === 'app'
-    ? gates.lifecycle.reason
-    : noLifecycle
-      ? 'This host has no lifecycle API token configured. Add one in Settings → Hosts.'
-      : denied ? 'Not included in your plan' : undefined
+  // Why an unresolved fetch withholds nothing: api/app-gates.ts. Both gates
+  // come from that file now, the VM one because VmActionsMenu offers these
+  // same actions as menu items and needs the identical answer.
+  const gate = target === 'app' ? gates.lifecycle : vmGate
+  const denied = gate.denied
+  const reason = gate.reason
 
   const fire = (action: string, confirm?: string) =>
     run.mutate({ target, id, action, confirm }, {
@@ -101,7 +94,7 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
         variant={a === 'stop' ? 'danger' : a === 'start' ? 'success' : 'ghost'}
         size={btnSize}
         className={cls}
-        disabled={pending || denied || noLifecycle}
+        disabled={pending || denied}
         title={reason}
         onClick={(e) => { e.stopPropagation(); fire(a) }}
       >
@@ -127,17 +120,30 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
 
 /**
  * The "Console" ghost button that sits beside LifecycleActions everywhere it
- * renders (AppCard, GuestList, vms.tsx's list row): same host, same
+ * renders (AppCard, GuestList, the VM row's action bar): same host, same
  * capability shape, so the capabilities.console gate lives here once instead
  * of being copied into each call site.
  */
-export function ConsoleButton({ hostId, onClick }: { hostId: number; onClick: () => void }) {
+export function ConsoleButton({ hostId, onClick, grouped = false }: {
+  hostId: number
+  onClick: () => void
+  /** Render at Button's own `sm` scale, for a parent ButtonGroup, instead of
+   *  the hand-rolled string the spaced call sites are pinned to. Same switch
+   *  and same reason as LifecycleActions' `grouped`: welded controls have to
+   *  share one size table or the seam between them is a pixel off. */
+  grouped?: boolean
+}) {
   // Why an unresolved fetch withholds nothing: api/app-gates.ts.
   const gates = useAppActionGates(hostId)
   return (
-    <Button variant="ghost" className="px-2 py-1 text-[11px]" disabled={gates.console.denied}
+    <Button variant="ghost" size={grouped ? 'sm' : undefined}
+      className={grouped ? '' : 'px-2 py-1 text-[11px]'} disabled={gates.console.denied}
       title={gates.console.reason}
-      onClick={onClick}>
+      // Stopped here, not left to the caller: this now renders inside a table
+      // row that expands when clicked, and opening a console must not also
+      // fold or unfold the row it was opened from. Nothing that renders this
+      // button wants the click to carry on past it.
+      onClick={(e) => { e.stopPropagation(); onClick() }}>
       Console
     </Button>
   )

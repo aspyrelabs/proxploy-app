@@ -111,8 +111,8 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 }))
 
 // uPlot needs a real canvas 2D context; jsdom hands it null and uPlot's _commit
-// throws on the first paint with non-empty data. Same treatment vncconsole.test
-// gives @novnc/novnc, the chart is a leaf with nothing this page asserts on.
+// throws on the first paint with non-empty data. The chart is a leaf with
+// nothing this page asserts on.
 vi.mock('../components/charts/Sparkline', () => ({
   Sparkline: ({ values }: { values: (number | null)[] }) =>
     <div data-testid="sparkline">{values.length}</div>,

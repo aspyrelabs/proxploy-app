@@ -331,6 +331,13 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
             f"under management.") from e
 
     ctx.progress(100)
+    # The App row above is ours to write (identity is Proxploy's, doc 04), but
+    # everything live about it, its status, cpu, memory, address, comes from the
+    # poller's snapshot of /cluster/resources, and the CT this install just made
+    # is not in that snapshot yet. Without the wake a brand new app sits at
+    # "unknown" for up to a poll interval; the CT is readable within tens of
+    # milliseconds of the install finishing (see Poller.wake).
+    app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "app", "id": app_id, "change": "installed"})
     return {"app_id": app_id, "slug": out_slug}
 

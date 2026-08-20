@@ -21,7 +21,7 @@ import os
 from collections.abc import Callable
 
 from proxploy.models import Job, JobEvent, to_iso, utcnow
-from proxploy.services.audit import redact
+from proxploy.services.audit import redact, resolve_target_name
 
 TERMINAL = ("succeeded", "failed", "canceled", "interrupted")
 
@@ -175,12 +175,23 @@ class JobBackend:
     def enqueue(self, db, *, kind: str, target_type: str | None = None,
                 target_id: int | None = None, params: dict | None = None,
                 requested_by: int | None = None,
-                schedule_id: int | None = None) -> Job:
-        """Called from sync (threadpool) route handlers; hops to the loop to spawn."""
+                schedule_id: int | None = None,
+                target_name: str | None = None) -> Job:
+        """Called from sync (threadpool) route handlers; hops to the loop to spawn.
+
+        Every job in the app is created here, so this is where the target's
+        name gets captured: a route that forgets to pass one still records it.
+        It has to happen now rather than when the history is read, because a
+        destroy job outlives the row it names. Callers pass `target_name`
+        explicitly only when the target has no name to look up.
+        """
         if kind not in HANDLERS:
             raise KeyError(f"no handler registered for job kind {kind!r}")
         job = Job(kind=kind, status="queued", target_type=target_type,
-                  target_id=target_id, params=redact(params) if params else None,
+                  target_id=target_id,
+                  target_name=target_name or resolve_target_name(
+                      db, target_type, target_id),
+                  params=redact(params) if params else None,
                   requested_by=requested_by, schedule_id=schedule_id)
         db.add(job)
         db.commit()

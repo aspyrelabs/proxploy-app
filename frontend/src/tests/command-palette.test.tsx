@@ -87,7 +87,7 @@ describe('CommandPalette', () => {
     searchResults = {
       query: 'plex',
       results: [
-        { kind: 'app', id: 1, label: 'Plex', sublabel: 'host-01 · CT 150', href: '/apps/1', status: 'running' },
+        { kind: 'app', id: 1, label: 'Plex', sublabel: 'host-01 · CT 150', href: '/apps?open=1', status: 'running' },
         { kind: 'vm', id: 2, label: 'plex-vm', sublabel: 'host-02', href: '/vms/2', status: null },
       ],
     }
@@ -103,7 +103,11 @@ describe('CommandPalette', () => {
     expect(screen.getByText('plex-vm')).toBeInTheDocument()
 
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/apps/1' })
+    // An app is a row that expands on the Apps table now, so its href carries
+    // a query. Router navigate takes the path and the search separately: a
+    // `to` of "/apps?open=1" would be looked up as a route by that literal
+    // name and match nothing.
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/apps', search: { open: '1' } })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 

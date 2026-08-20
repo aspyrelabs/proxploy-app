@@ -213,16 +213,25 @@ async def run_app_uninstall(ctx: JobContext, params: dict) -> dict:
     status = await await_task(ctx, client, node, upid,
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
-    def _forget() -> None:
+    def _forget() -> int | None:
         with app.state.sessionmaker() as db:
             row = db.get(App, target_id)
-            if row is not None:
-                # app_scripts cascades on the FK; nothing else references apps.
-                db.delete(row)
-                db.commit()
+            if row is None:
+                return None
+            host_id = row.host_id
+            # app_scripts cascades on the FK; nothing else references apps.
+            db.delete(row)
+            db.commit()
+            return host_id
 
-    await asyncio.to_thread(_forget)
+    host_id = await asyncio.to_thread(_forget)
     ctx.log(f"{name} removed")
+    if host_id is not None:
+        # The app row is gone from the DB already, so the list is right without
+        # any help. The wake is for the poller's snapshot, which still holds
+        # this CT and therefore keeps offering the container an operator just
+        # destroyed as an adoptable one on the Apps page until the next cycle.
+        app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "app", "id": target_id,
                                        "change": "removed"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),

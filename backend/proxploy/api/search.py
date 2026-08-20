@@ -99,8 +99,11 @@ def search(request: Request, q: str = "", db=Depends(get_db),
     if palette and _visible(request, db, user, "app", "read"):
         for a in (db.query(App).filter(App.name.ilike(like))
                   .order_by(App.name).limit(PER_KIND)):
+            # An app has no page of its own any more: it is a row on the Apps
+            # table that expands in place, and `open` is which one
+            # (frontend/src/components/AppTable.tsx).
             out.append({"kind": "app", "id": a.id, "label": a.name,
-                        "sublabel": f"CT {a.ctid}", "href": f"/apps/{a.id}",
+                        "sublabel": f"CT {a.ctid}", "href": f"/apps?open={a.id}",
                         "status": a.status_cached})
 
     if palette and _visible(request, db, user, "vm", "read"):
@@ -111,8 +114,11 @@ def search(request: Request, q: str = "", db=Depends(get_db),
                              {h.id: h for h in db.query(Host).all()})
         matches.sort(key=lambda v: (v.name or "", v.id))
         for v in matches[:PER_KIND]:
+            # A VM has no page of its own any more either: it is a row on the
+            # VMs table that expands in place, and `open` is which one
+            # (frontend/src/components/VmTable.tsx).
             out.append({"kind": "vm", "id": v.id, "label": v.name,
-                        "sublabel": f"VM {v.vmid}", "href": f"/vms/{v.id}",
+                        "sublabel": f"VM {v.vmid}", "href": f"/vms?open={v.id}",
                         "status": v.status})
 
     if palette and _visible(request, db, user, "host", "read"):

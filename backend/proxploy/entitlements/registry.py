@@ -1,4 +1,4 @@
-"""Canonical entitlement flag registry (doc 01 §17). 81 keys, all ON while dormant.
+"""Canonical entitlement flag registry (doc 01 §17). 82 keys, all ON while dormant.
 A feature without a key does not merge (doc 07 §3); keys never change once shipped."""
 
 FLAG_KEYS: tuple[str, ...] = (
@@ -11,6 +11,11 @@ FLAG_KEYS: tuple[str, ...] = (
     "store.updates", "store.update", "store.update_all", "store.auto_update",
     "vms.list", "vms.lifecycle", "vms.console", "vms.snapshots", "vms.create",
     "vms.clone", "vms.graphs",
+    # The Options tab (boot order, guest agent, SMBIOS, and so on). Its own
+    # key rather than a second job for vms.create, which is already doing
+    # double duty gating Destroy: editing a machine's settings is not the same
+    # decision as being allowed to make or unmake one.
+    "vms.options",
     "storage.view", "storage.content", "storage.manage",
     "network.view", "network.guest_config", "network.host_config",
     "backups.pbs", "backups.run", "backups.schedule", "backups.restore",

@@ -465,3 +465,71 @@ def test_vm_console_ticket_reports_a_denied_privilege_instead_of_500(
                         headers=csrf_header(client))
         assert r.status_code == 409, r.text
         assert "Sys.Console" in r.text
+
+
+def test_vm_console_ticket_returns_the_generated_vnc_password_and_stores_nothing(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The browser is the only party that can answer QEMU's RFB challenge, so
+    the ticket response has to carry the VNC password. It must be the password
+    PVE generated, not the vncticket (which also authenticates the upgrade to
+    Proxmox), and it must not be written to the console_tickets row or the
+    audit trail on its way past."""
+    from proxploy.models import AuditEvent, ConsoleTicket, Vm
+
+    fake = FakePVE()
+    fake.vncproxy_response = {"user": "proxploy@pve!console",
+                              "ticket": "PVEVNC:s3cr3t8xREST-OF-THE-TICKET",
+                              "port": "5902", "password": "s3cr3t8x",
+                              "cert": "-----BEGIN CERTIFICATE-----...",
+                              "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            v = Vm(host_id=host.id, vmid=200, name="win11", status="running")
+            db.add(v)
+            db.commit()
+            vm_id = v.id
+        _seed_credential(app, host)
+
+        r = client.post(f"/api/v1/vms/{vm_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 200, r.text
+        assert r.json()["password"] == "s3cr3t8x"
+        # Not the full ticket: that one talks to Proxmox, the password only
+        # answers one VNC challenge.
+        assert "REST-OF-THE-TICKET" not in r.json()["password"]
+
+        with app.state.sessionmaker() as db:
+            row = db.query(ConsoleTicket).filter_by(kind="vm_vnc").one()
+            assert "s3cr3t8x" not in (row.upstream_port or "")
+            assert not hasattr(row, "vnc_password")
+            audit = db.query(AuditEvent).filter_by(action="console.open").all()
+            assert audit and all("s3cr3t8x" not in str(a.__dict__) for a in audit)
+
+
+def test_vm_console_ticket_falls_back_to_the_vncticket_when_pve_sends_no_password(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A PVE that accepts generate-password and returns nothing still has to
+    yield a working console; the vncticket doubles as the VNC password (RFB
+    truncates to 8 bytes and PVE builds the ticket around it)."""
+    from proxploy.models import Vm
+
+    fake = FakePVE()
+    fake.vncproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:def",
+                              "port": "5902", "cert": "...", "upid": "UPID:..."}
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as client:
+        bootstrap_admin(client)
+        with app.state.sessionmaker() as db:
+            host = seed_host_row(db)
+            v = Vm(host_id=host.id, vmid=201, name="win11", status="running")
+            db.add(v)
+            db.commit()
+            vm_id = v.id
+        _seed_credential(app, host)
+        r = client.post(f"/api/v1/vms/{vm_id}/console/tickets",
+                        headers=csrf_header(client))
+        assert r.status_code == 200, r.text
+        assert r.json()["password"] == "PVEVNC:def"

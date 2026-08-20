@@ -54,3 +54,35 @@ export function useAppActionGates(hostId: number) {
     openUi: gate(null, 'apps.open_ui'),
   }
 }
+
+/**
+ * Whether a VM's lifecycle actions are available on one host, and why not.
+ *
+ * A separate hook rather than another key on the object above, because the
+ * plan flag differs: a VM answers to `vms.lifecycle`, an app to
+ * `apps.lifecycle`, and a single `lifecycle` gate that quietly meant one of
+ * them would be wrong wherever it was reused. The host capability is the same
+ * one either way, since it is the token the host was given, not the kind of
+ * guest it acts on.
+ *
+ * The missing token comes first: a plan that includes the action still cannot
+ * perform it without a lifecycle token, and "Not included in your plan" would
+ * send the operator to the wrong page to fix it.
+ *
+ * Both LifecycleActions (the row's Start/Stop buttons) and VmActionsMenu (the
+ * same actions as menu items) read this. Two copies of the rule is how a menu
+ * ends up offering Shutdown on a host that cannot perform it.
+ */
+export function useVmLifecycleGate(hostId: number): AppGate {
+  const ent = useEntitlements()
+  const hostCaps = useHostCapabilities(hostId)
+  if (hostCaps.loaded && hostCaps.capabilities?.lifecycle === false) {
+    return { denied: true, reason: noToken('lifecycle') }
+  }
+  // Innocent until proven guilty, exactly as above: has() reads false until
+  // /entitlements lands.
+  if (ent.data != null && !ent.has('vms.lifecycle')) {
+    return { denied: true, reason: NOT_IN_PLAN }
+  }
+  return NO_GATE
+}

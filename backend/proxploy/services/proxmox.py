@@ -255,6 +255,27 @@ def _permission_detail(text: str) -> str | None:
     return f"{m.group(2).strip()} on {m.group(1).strip()}"
 
 
+def routable_addresses(raw) -> list[str]:
+    """The addresses off one ProxmoxClient.lxc_interfaces() row that can
+    actually be reached, in CIDR form ("192.168.50.179/24").
+
+    Loopback and IPv6 link-local are dropped: every container has both on
+    every interface and neither one opens a web UI. Same rule
+    ProxmoxClient.agent_addresses applies to a VM's agent answer.
+
+    Lives here beside lxc_interfaces rather than in api/network.py, where it
+    started, because the poller wants the same rule and the poller must not
+    import the API layer to get it.
+    """
+    out: list[str] = []
+    for key in ("inet", "inet6"):
+        value = str(raw.get(key) or "")
+        if not value or value.startswith(("127.", "::1", "fe80:")):
+            continue
+        out.append(value)
+    return out
+
+
 class ProxmoxClient:
     def __init__(self, address: str, token_id: str, token_secret: str,
                  verify_tls: bool = True, tls_fingerprint: str | None = None,
@@ -528,22 +549,62 @@ class ProxmoxClient:
             raise self._wrap(f"{kind}/{vmid} {action} failed on {node}", e) from e
 
     def guest_config_update(self, kind: str, node: str, vmid: int,
-                            config: dict) -> str | None:
-        """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> UPID or None.
+                            config: dict) -> None:
+        """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> nothing.
 
-        NOT long-running: PVE writes the config file synchronously. A RUNNING
-        qemu guest is the one case that returns a UPID, the change lands in
-        the guest's pending-config section and PVE spawns a tiny task to record
-        it; the guest itself only picks it up at next boot. A stopped guest or
-        an lxc guest returns None and the write is already effective. Callers
-        surface that difference rather than pretending it is a job.
+        NOT long-running, and it never hands back a task id. PVE routes the
+        PUT to `update_vm_api($param, 1)`, the synchronous half, whose schema
+        declares `returns => { type => 'null' }`; only the POST on the same
+        path is the asynchronous half that returns a UPID. Read off the
+        node's own PVE/API2/Qemu.pm, pve-manager 9.2.11, 2026-08-20.
+
+        This used to be documented as "UPID for a running qemu guest, None
+        otherwise", and callers derived "did this land in the pending section"
+        from it. That value is ALWAYS None, so every such caller reported
+        "applied immediately" no matter what actually happened. Whether a
+        change is waiting for a restart is a question only the guest's
+        pending config can answer: call `guest_pending` after the write.
+
+        `delete` is a real PVE parameter here, not a pseudo-key: pass
+        `{"delete": "acpi,kvm"}` to REMOVE those settings, which is how a
+        setting goes back to the Proxmox default. Writing the default value
+        instead pins it, which is a different thing.
         """
         try:
-            return getattr(self._connect().nodes(node), kind)(vmid).config.put(**config)
+            getattr(self._connect().nodes(node), kind)(vmid).config.put(**config)
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"config update failed for {kind}/{vmid} on {node}", e) from e
+
+    def guest_pending(self, kind: str, node: str, vmid: int) -> dict:
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/pending, reduced to the changes.
+
+        PVE answers with one row per config key, `{key, value}`, where `value`
+        is what the guest is running on right now. A row grows a `pending` key
+        when a new value is waiting for the guest's next boot, and a `delete`
+        key when the waiting change is a removal. Rows with neither are just
+        the current config restated, so they are dropped here.
+
+        -> {key: pending value}, with None where the pending change is a
+        removal (the setting goes back to its Proxmox default at next boot).
+        An empty dict therefore means "nothing is waiting", which is the
+        answer for every stopped guest: PVE applies a write to a stopped guest
+        straight away and has no pending section to file it under.
+
+        Confirmed against both guest types on pve-manager 9.2.11, 2026-08-20;
+        lxc has this endpoint too, so the NIC editor's qemu/lxc split does not
+        need two code paths.
+        """
+        try:
+            rows = getattr(self._connect().nodes(node), kind)(vmid).pending.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"pending config read failed for {kind}/{vmid} "
+                             f"on {node}", e) from e
+        return {r["key"]: (None if r.get("delete") else r.get("pending"))
+                for r in rows or [] if r.get("delete") or "pending" in r}
 
     # --- host network staging (Phase 6 Task 7) -------------------------------
     # PVE writes every one of the three staging calls below into
@@ -717,9 +778,40 @@ class ProxmoxClient:
             raise self._wrap(f"node termproxy failed on {node}", e) from e
 
     def vncproxy(self, node: str, vmid: int) -> dict:
-        """POST /nodes/{node}/qemu/{vmid}/vncproxy (websocket=1) -> {user, ticket, port, cert, upid}."""
+        """POST /nodes/{node}/qemu/{vmid}/vncproxy (websocket=1, generate-password=1)
+        -> {user, ticket, port, cert, upid, password}.
+
+        `generate-password=1` is not optional decoration. QEMU's VNC server
+        offers exactly one RFB security type on this cluster, type 2 (VNC
+        Authentication), so an RFB client that presents no password cannot
+        finish the handshake at all. Decoded off a live PVE 9.2.10 node:
+
+            greeting            b"RFB 003.008\\n"
+            security types      b"\\x01\\x02"   (count 1, type 2)
+
+        Unlike the termproxy path, nothing in the bridge can supply that
+        password on the browser's behalf: services/consoleproxy.py is a byte
+        relay by design and the RFB challenge/response is end to end between
+        QEMU and the browser. So the password has to reach the browser, and
+        this parameter is what decides HOW MUCH reaches it.
+
+        Without it, PVE's answer carries the vncticket only, and the VNC
+        password is that ticket (RFB truncates a password to 8 bytes, and
+        PVE builds the ticket so its first 8 bytes are the password). Handing
+        the browser the whole ticket would hand it the credential that
+        authenticates the /vncwebsocket upgrade to PVE directly, which is a
+        real widening: the browser could then talk to Proxmox without going
+        through Proxploy at all.
+
+        With it, PVE returns a separate 8 character `password` field, and the
+        rest of the ticket stays server side. The browser gets a secret that
+        is only good for answering one VNC challenge on one already-bridged
+        socket. Same thing Proxmox's own UI ends up holding, minus the part
+        that talks to the API.
+        """
         try:
-            return self._connect().nodes(node).qemu(vmid).vncproxy.post(websocket=1)
+            return self._connect().nodes(node).qemu(vmid).vncproxy.post(
+                websocket=1, **{"generate-password": 1})
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -803,6 +895,91 @@ class ProxmoxClient:
                 if value and not value.startswith(("127.", "::1")):
                     out.append(value)
         return out
+
+    # Filesystem types qemu-ga reports that are not the guest's storage.
+    # get-fsinfo enumerates whatever is mounted with a block device behind it,
+    # and on a modern Linux guest that includes every snap package as its own
+    # read-only squashfs loop mount. Those report used == total, so counting
+    # them adds a gigabyte or two of nothing to a figure an operator reads as
+    # "how full is this VM".
+    AGENT_FS_SKIP = {"squashfs", "iso9660", "tmpfs", "devtmpfs", "ramfs",
+                     "overlay", "efivarfs", "autofs"}
+
+    def agent_fsinfo(self, node: str, vmid: int) -> tuple[bool | None, int | None]:
+        """One get-fsinfo call, two facts: (agent answered?, bytes used).
+
+        Was agent_disk_used() and returned the bytes alone. It is widened
+        rather than paired with a sibling call because the two facts come out
+        of the SAME request and always agreed anyway: whether a guest agent is
+        installed and answering is exactly what "we could not read the
+        filesystems" already knew and threw away. A second endpoint (ping, or
+        the config's `agent:` line) would be a second per-VM call every cycle
+        for an answer we are holding in our hand. Per-cycle cost is therefore
+        unchanged: still one call, still on the caller's cadence.
+
+        Why the bytes are needed at all: the hypervisor can only see a block
+        device, not the filesystem inside it. /cluster/resources' `disk` field
+        is meaningful for a container and is routinely a flat 0 for a QEMU
+        guest (measured on the lab cluster, PVE 9.2.10, 2026-08-20: VM 108
+        running, 32 GiB allocated, `disk: 0`). Only the guest can answer.
+
+        The first element is deliberately THREE-valued, and keeping the three
+        apart is the whole point of returning it:
+
+          * True: the agent answered. Whatever came back is a real answer,
+            even if nothing in it was usable.
+          * False: Proxmox told us this guest has no working agent. The lab VM
+            answers `500 Internal Server Error: No QEMU guest agent
+            configured`, and a guest whose config declares an agent that is
+            not running inside it answers `QEMU guest agent is not running`.
+            Both are Proxmox reporting on the agent, which is a real finding
+            an operator can act on, not a fault of ours.
+          * None: we could not ask. Any other failure (the node refused the
+            connection, the token lost its permission, a timeout) says nothing
+            about the guest, and reporting "no agent" off the back of a
+            network error would be a lie that sticks.
+
+        The split is made on the error text because that is the only thing PVE
+        gives us: every one of these arrives as a 500 with a message, so the
+        status code cannot separate them. Matching on "guest agent" is loose
+        on purpose, since it catches both of PVE's wordings above and anything
+        else it says specifically about the agent, and a message that never
+        mentions the agent is by definition not PVE answering about it.
+
+        Summing: one entry per mounted filesystem, deduped on the guest's own
+        device name (`name`, e.g. "sda1"), because a bind mount and every
+        subvolume of one btrfs pool report the SAME filesystem more than once
+        and adding those up counts the same bytes twice. Falls back to the
+        mountpoint when an agent omits the name, which at worst double-counts
+        the case the dedupe was meant to catch and never invents storage that
+        is not there. An entry with no `used-bytes` is skipped rather than
+        counted as zero (some filesystems make qemu-ga omit it).
+
+        An agent that answers with nothing usable returns (True, None), not
+        (True, 0): a VM whose every filesystem was skipped has not been
+        measured, and 0 would draw an empty disk bar under a full one. That
+        pair is also the case the old single return could not express, since
+        it collapsed "no agent" and "no usable answer" into the same None.
+        """
+        try:
+            raw = (self._connect().nodes(node).qemu(vmid)
+                   .agent("get-fsinfo").get())
+        except Exception as e:  # noqa: BLE001  (no agent is the common case, not an error)
+            return (False if "guest agent" in str(e).lower() else None), None
+        by_device: dict[str, int] = {}
+        for fs in (raw or {}).get("result", raw) or []:
+            if not isinstance(fs, dict):
+                continue
+            if str(fs.get("type") or "").lower() in self.AGENT_FS_SKIP:
+                continue
+            used = fs.get("used-bytes")
+            if used is None:
+                continue
+            key = str(fs.get("name") or fs.get("mountpoint") or "")
+            if not key:
+                continue
+            by_device[key] = int(used)
+        return True, (sum(by_device.values()) if by_device else None)
 
     def lxc_interfaces(self, node: str, vmid: int) -> list[dict] | None:
         """What a RUNNING container's interfaces actually are, or None.

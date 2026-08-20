@@ -336,12 +336,58 @@ class Vm(TimestampMixin, Base):
     template: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
+    # PVE's RAW ostype off the guest config ("l26", "win11", "w2k19",
+    # "other"), never a collapsed "linux"/"windows": the client maps it for
+    # display and the specific value is not recoverable once discarded. Read
+    # once per VM by pollers._refresh_os_type and then left alone, since an
+    # ostype is set at creation and does not drift the way an address does.
+    # NULL means not read yet, or a config read PVE refused.
     os_type: Mapped[str | None] = mapped_column(Text)
     cpu_cores: Mapped[int | None] = mapped_column(Integer)
+    # USED and ALLOCATED, in that order, and read the pair carefully: until
+    # migration a1f4d80c3e69 this table had `mem_bytes` and `disk_bytes` and
+    # both held the ALLOCATION (PVE's maxmem/maxdisk), while the identically
+    # named columns on App held USAGE. Two guest types disagreeing about what
+    # one name means is how the VMs page ended up able to draw a CPU meter and
+    # nothing else: there was no usage on the row to draw. The names now mean
+    # what they mean on App, everywhere, and the allocation moved to the
+    # explicit `*_total_bytes` columns beside them.
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    mem_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # disk_bytes comes from the QEMU guest agent, not from /cluster/resources:
+    # that row's `disk` is routinely 0 for a VM because the hypervisor sees a
+    # block device and cannot see the filesystem on it. NULL is therefore the
+    # normal, permanent state for a VM with no agent installed, and it is not
+    # an error. disk_total_bytes is maxdisk and needs no agent.
     disk_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # Exactly App's column names, because pollers._update_net_rates writes
+    # these by attribute and is shared between the two. Same meaning too:
+    # netin/netout are counters since the guest booted, the *_bps pair is the
+    # rate derived from two readings, and net_sampled_at is when the previous
+    # reading was taken (the gap between cycles is not poll_interval_s, since
+    # the poll loop backs off on a failing host).
+    net_in_cached: Mapped[int | None] = mapped_column(BigInteger)
+    net_out_cached: Mapped[int | None] = mapped_column(BigInteger)
+    net_in_bps_cached: Mapped[float | None] = mapped_column(Float)
+    net_out_bps_cached: Mapped[float | None] = mapped_column(Float)
+    net_sampled_at: Mapped[datetime | None] = mapped_column(DateTime)
     uptime_s: Mapped[int | None] = mapped_column(Integer)
-    synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Whether this VM's QEMU guest agent is installed and answering, which is
+    # the same probe disk_bytes above comes from (see
+    # ProxmoxClient.agent_fsinfo). THREE-valued, and the three have to stay
+    # apart because the distinction is the entire value of the column:
+    #   True  the agent answered.
+    #   False Proxmox says this guest has no working agent. That is a real
+    #         finding an operator can act on, and it is the reason disk_bytes
+    #         is NULL for this VM: install the agent and both fill in.
+    #   NULL  nobody knows. Never probed, or stopped (a guest that is not
+    #         running cannot answer, and recording "not installed" for it
+    #         would be a claim we did not make), or the host was unreachable.
+    # Replaced the old `synced_at`, which recorded when the poller last stamped
+    # the row and which nothing computed with: it told an operator the poller
+    # was running, which the rest of the page already showed.
+    guest_agent_ok: Mapped[bool | None] = mapped_column(Boolean)
     __table_args__ = (UniqueConstraint("host_id", "vmid", name="ux_vms"),)
 
 
@@ -495,6 +541,13 @@ class Job(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(Text, default="queued", nullable=False)
     target_type: Mapped[str | None] = mapped_column(Text)
     target_id: Mapped[int | None] = mapped_column(Integer)
+    # The name of the thing this job is about, read when the job is created.
+    # Stored rather than looked up at render time because the destructive jobs
+    # are exactly the ones whose row is gone by the time anyone reads the
+    # history: "vm 3" a month after the delete names nothing anybody remembers.
+    # NULL on jobs created before this column existed, and on targets that have
+    # no name a person would recognise; both render the old "vm 3" way.
+    target_name: Mapped[str | None] = mapped_column(Text)
     params: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[dict | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
@@ -704,6 +757,10 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(Text, nullable=False)
     target_type: Mapped[str | None] = mapped_column(Text)
     target_id: Mapped[int | None] = mapped_column(Integer)
+    # Same capture-at-write-time rule as Job.target_name, and it matters more
+    # here: the audit trail is the permanent record, and api/audit.py could
+    # only ever label a row whose target still exists.
+    target_name: Mapped[str | None] = mapped_column(Text)
     params: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[str] = mapped_column(Text, default="ok", nullable=False)
     ip: Mapped[str | None] = mapped_column(Text)

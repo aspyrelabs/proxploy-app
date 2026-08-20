@@ -10,32 +10,11 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
-from proxploy.models import (AlertRule, ApiKey, App, AuditEvent, Backup, Host,
-                             NotificationChannel, Schedule, Team, User, Vm, to_iso)
-from proxploy.services.audit import write_audit
+from proxploy.models import ApiKey, AuditEvent, User, to_iso
+from proxploy.services.audit import TARGET_LABELS, write_audit
 
 EXPORT_COLUMNS = ("id", "ts", "actor_type", "actor_id", "action", "target_type",
                   "target_id", "params", "result", "ip", "job_id")
-
-# target_type -> (model, the column that holds its human name). One map, used
-# both to label a row's Item column and to turn the "item or action" search box
-# back into ids, so the box can never match an item the column does not name.
-#
-# Deliberately no "storage": those rows carry the HOST's id in target_id
-# (api/storage.py), so labelling them from either table would print a name that
-# is wrong or right by accident. Same reason "job", "session", "alert" and
-# "system" are absent: nothing there is a name a person would recognise.
-TARGET_LABELS = {
-    "host": (Host, Host.name),
-    "app": (App, App.name),
-    "vm": (Vm, Vm.name),
-    "user": (User, User.email),
-    "team": (Team, Team.name),
-    "schedule": (Schedule, Schedule.name),
-    "notification_channel": (NotificationChannel, NotificationChannel.name),
-    "alert_rule": (AlertRule, AlertRule.name),
-    "backup": (Backup, Backup.volid),
-}
 
 
 def _search_clause(db, search: str):
@@ -52,7 +31,10 @@ def _search_clause(db, search: str):
     """
     like = f"%{search.lower()}%"
     clauses = [func.lower(AuditEvent.action).like(like),
-               func.lower(AuditEvent.target_type).like(like)]
+               func.lower(AuditEvent.target_type).like(like),
+               # The stored name, so searching for something that has
+               # since been deleted still finds the rows about it.
+               func.lower(AuditEvent.target_name).like(like)]
     for kind, (model, name_col) in TARGET_LABELS.items():
         ids = [i for (i,) in db.query(model.id)
                .filter(func.lower(name_col).like(like)).all()]
@@ -134,7 +116,12 @@ def row_dict(r: AuditEvent, actors: dict | None = None,
         # when nothing answers to that id, which is the deleted-host case: the
         # row still lists, reading "host #2".
         d["actor_label"] = actors.get((r.actor_type, r.actor_id))
-        d["target_label"] = (items or {}).get((r.target_type, r.target_id))
+        # The name captured when the row was written wins over anything we
+        # can look up now: it is the only one that survives the target being
+        # deleted, which is the case the trail exists for. Rows written
+        # before that column existed still resolve the old way.
+        d["target_label"] = (r.target_name
+                             or (items or {}).get((r.target_type, r.target_id)))
     return d
 
 router = APIRouter(prefix="/audit", tags=["audit"])

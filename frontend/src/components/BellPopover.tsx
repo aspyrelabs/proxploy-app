@@ -5,7 +5,7 @@ import { useJobs } from '../api/jobs'
 import { useFiringAlerts } from '../api/alerts'
 import { alertToastSeverity } from '../api/live'
 import type { JobRow } from '../api/jobs'
-import { actionLabel, ago } from '../lib/activityDisplay'
+import { actionLabel, ago, targetLabel } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
@@ -159,9 +159,7 @@ function severityOf(status: string): NotificationSeverity {
  *  string. */
 function messageOf(job: JobRow): string {
   if (job.error) return job.error
-  const where = job.target_type
-    ? `${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`
-    : 'this cluster'
+  const where = targetLabel(job) ?? 'this cluster'
   if (job.status === 'succeeded') return `Finished on ${where}.`
   if (job.status === 'canceled') return `Canceled before it finished on ${where}.`
   if (job.status === 'interrupted') return `Interrupted on ${where}; it may not have completed.`
@@ -183,9 +181,8 @@ function duration(job: JobRow): string | null {
  *  scan for: what it touched, how far along, and how long ago. */
 function footerOf(job: JobRow): string {
   const bits: string[] = []
-  if (job.target_type) {
-    bits.push(`${job.target_type}${job.target_id != null ? ` ${job.target_id}` : ''}`)
-  }
+  const where = targetLabel(job)
+  if (where) bits.push(where)
   // A running job's percent used to be folded in here as plain text; it now
   // renders as NotificationCard's own ring (see `progress` below) instead.
   const took = duration(job)
@@ -299,11 +296,18 @@ export function BellPopover() {
   const toJobItem = (j: JobRow): TrayItem => ({
     id: `job:${j.id}`,
     severity: severityOf(j.status),
-    // Status in the title too, not only in severityOf's colour: a card headed
-    // "App Uninstall #12" over a red icon leaves the reader working out from
-    // the colour alone whether the container is gone. actionLabel spells it
-    // out, "App Uninstall Failed".
-    title: `${actionLabel(j.kind, j.status)} #${j.id}`,
+    // Status in the title, not only in severityOf's colour: a card headed
+    // "App Uninstall" over a red icon leaves the reader working out from the
+    // colour alone whether the container is gone. actionLabel spells it out,
+    // "App Uninstall Failed".
+    //
+    // No "#12" after it. That was the jobs table's primary key, which means
+    // nothing to the person reading the tray and made every routine
+    // housekeeping card read as "Usage Cleanup #215", as though the number
+    // were a version or a count worth noticing. The row still needs a stable
+    // identity, and it has one: TrayItem.id above is `job:<id>`, which is not
+    // rendered.
+    title: actionLabel(j.kind, j.status),
     description: messageOf(j),
     footer: footerOf(j),
     progress: progressOf(j),
@@ -513,7 +517,7 @@ export function BellPopover() {
           keeps it out of the flexbox shrinking that the transcript above it
           absorbs. */}
       {logJob && (
-        <Dialog title={`${actionLabel(logJob.kind, logJob.status)} #${logJob.id}`}
+        <Dialog title={actionLabel(logJob.kind, logJob.status)}
                 description={logJob.error ?? undefined}
                 fit
                 onClose={() => setLogJob(null)}>

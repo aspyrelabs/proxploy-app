@@ -34,7 +34,7 @@ from proxploy.services.hostclient import (client_for_host, dedupe_vms,
                                           guest_node)
 from proxploy.services.metrics import pick_resolution, query_series
 from proxploy.services.netconfig import build_net, nic_identity, parse_net
-from proxploy.services.proxmox import ProxmoxError
+from proxploy.services.proxmox import ProxmoxError, routable_addresses
 
 router = APIRouter(prefix="/network", tags=["network"])
 
@@ -179,20 +179,6 @@ def _nic_out(iface: str, raw: str) -> dict:
     }
 
 
-def _routable(raw) -> list[str]:
-    """The addresses off one /lxc/{vmid}/interfaces row that can actually be
-    reached. Loopback and IPv6 link-local are dropped: every container has both
-    on every interface and neither one opens a web UI. Same rule
-    ProxmoxClient.agent_addresses applies to a VM's agent answer."""
-    out: list[str] = []
-    for key in ("inet", "inet6"):
-        value = str(raw.get(key) or "")
-        if not value or value.startswith(("127.", "::1", "fe80:")):
-            continue
-        out.append(value)
-    return out
-
-
 def _container_addresses(client, node: str, vmid: int,
                          nics: list[dict]) -> None:
     """Fill each NIC's `addresses` with what the container actually holds.
@@ -220,7 +206,7 @@ def _container_addresses(client, node: str, vmid: int,
               for r in rows}
     for n in needs_lookup:
         found = by_mac.get(str(n.get("macaddr") or "").lower())
-        addresses = _routable(found) if found else []
+        addresses = routable_addresses(found) if found else []
         n["addresses"] = addresses or None
 
 
@@ -269,8 +255,8 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
     ip = request.client.host if request.client else None
     try:
         client = client_for_host(request.app, db, host, capability="lifecycle")
-        cfg = client_for_host(request.app, db, host,
-                              capability="monitoring").guest_config(kind, node, vmid)
+        reader = client_for_host(request.app, db, host, capability="monitoring")
+        cfg = reader.guest_config(kind, node, vmid)
     except ProxmoxError as e:
         # A DIFFERENT action from the two below, and the reason is the whole
         # point of an audit log: nothing has been sent to the guest at this
@@ -327,7 +313,7 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
             parts[key] = str(val)
     value = build_net(parts)
     try:
-        upid = client.guest_config_update(kind, node, vmid, {iface: value})
+        client.guest_config_update(kind, node, vmid, {iface: value})
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
                     target_type=target_type, target_id=target_id,
@@ -336,15 +322,34 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
     write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
                 target_type=target_type, target_id=target_id,
                 params={"iface": iface, **changes}, ip=ip)
+
+    # Whether the running guest already has this NIC is a question ONLY the
+    # guest's pending config can answer, so it is asked, after the write.
+    #
+    # This used to be `upid is not None`, on the belief that PVE returns a task
+    # id when it files a config change under the pending section. It does not:
+    # the PUT handler is the synchronous one and its schema returns null, so
+    # that expression was always False and this route told every operator
+    # "applied immediately, no reboot needed" even when the new bridge was
+    # sitting in pending and the guest was still on the old one. See
+    # ProxmoxClient.guest_config_update.
+    try:
+        pending_reboot = iface in reader.guest_pending(kind, node, vmid)
+        unknown = False
+    except ProxmoxError:
+        # The write landed; only the follow-up question failed. Answering
+        # "no reboot needed" here would be the same false reassurance again,
+        # so this reports the cautious side and says why in `detail`.
+        pending_reboot, unknown = True, True
     return {
-        "iface": iface, "value": value, "upid": upid,
-        "pending_reboot": upid is not None,
-        # Honest, not reassuring: PVE handed back a UPID, which for a config
-        # write means it filed the change under the guest's PENDING section.
-        # The running guest still has the old NIC.
-        "detail": ("Proxmox recorded this as a pending change; the guest keeps its "
+        "iface": iface, "value": value,
+        "pending_reboot": pending_reboot,
+        "detail": ("The new settings were saved, but Proxmox could not be asked "
+                   "whether the running guest already has them. Restart the guest "
+                   "if the change does not show up." if unknown else
+                   "Proxmox recorded this as a pending change; the guest keeps its "
                    "current NIC until it is rebooted (a shutdown/start, not a reset)."
-                   if upid is not None else
+                   if pending_reboot else
                    "Applied immediately; no reboot needed."),
     }
 

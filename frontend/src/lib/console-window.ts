@@ -38,3 +38,20 @@ export function openConsoleWindow(kind: ConsoleKind, id: number): void {
   window.open(consoleWindowPath(kind, id), consoleWindowName(kind, id),
               `${SIZE[kind]},noopener,noreferrer`)
 }
+
+/** An app's logs, same treatment: a window of their own instead of a tab on
+ *  the app detail page. The window NAME is stable per app for the same
+ *  reason as consoleWindowName: a second click on Logs should focus the
+ *  window already open, not stack another one behind it. */
+export function logsWindowName(appId: number): string {
+  return `proxploy-logs-app-${appId}`
+}
+
+export function logsWindowPath(appId: number): string {
+  return `/logs/app/${appId}`
+}
+
+export function openLogsWindow(appId: number): void {
+  window.open(logsWindowPath(appId), logsWindowName(appId),
+              'width=1040,height=660,noopener,noreferrer')
+}

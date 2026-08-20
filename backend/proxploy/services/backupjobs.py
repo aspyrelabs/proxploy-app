@@ -400,6 +400,11 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
     status = await await_task(ctx, lifecycle_client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, info["host_id"])
+    # _resync above refreshes the BACKUP cache. A restore also creates (or
+    # overwrites) a guest, and that half of the picture belongs to the poller's
+    # mirror, so it needs the same wake create_vm gets or the restored guest
+    # takes a poll interval to appear in the list.
+    app.state.poller.wake(int(info["host_id"]))
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,
             "mode": "in_place" if in_place else "new"}
 

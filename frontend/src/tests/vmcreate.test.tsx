@@ -19,7 +19,7 @@ let releaseClone: ((v: unknown) => void) | null = null
 const VM = {
   id: 9, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11',
   status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
-  mem_bytes: 8589934592, disk_bytes: 68719476736, uptime_s: 3600, synced_at: null,
+  mem_bytes: 8589934592, disk_bytes: 68719476736, uptime_s: 3600, guest_agent_ok: null,
 }
 
 vi.mock('../api/client', () => {
@@ -342,12 +342,22 @@ describe('VmsPage create/clone affordances', () => {
     expect(btn).toHaveAttribute('title', 'Not included in your plan')
   })
 
-  it('disables the Clone row action with a Pro tooltip when vms.clone is off', async () => {
+  it('disables the Clone action with a Pro tooltip when vms.clone is off', async () => {
     features = { 'vms.create': true, 'vms.clone': false }
     wrap(<VmsPage />)
-    const btn = await screen.findByRole('button', { name: 'Clone' })
-    await waitFor(() => expect(btn).toBeDisabled())
-    expect(btn).toHaveAttribute('title', 'Cloning is a Pro feature')
+    // Clone is a menu item now, not a row button: the row carries Start/Stop,
+    // Restart and Console, and everything else moved behind the dots. Radix
+    // opens on pointerdown, not click.
+    const trigger = await screen.findByRole('button', { name: /More actions for/i })
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+    const item = await screen.findByRole('menuitem', { name: 'Clone' })
+    await waitFor(() => expect(item).toHaveAttribute('data-disabled'))
+    // "Not included in your plan", not the old row button's bespoke "Cloning
+    // is a Pro feature". Clone now sits in a menu beside Backup and Delete,
+    // which gate on the same shared wording (19 call sites use it against 4
+    // one-off strings), and one menu explaining three denials three different
+    // ways reads as three different problems.
+    expect(item).toHaveAttribute('title', 'Not included in your plan')
   })
 })
 

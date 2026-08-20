@@ -20,6 +20,26 @@ export const TINT: Record<string, string> = {
   interrupted: 'bg-amber-dim text-amber',
 }
 
+/** What a row acted on, named for a person.
+ *
+ *  `target_name` is captured by the backend when the job or audit row is
+ *  written, not looked up when it is read, so it survives the thing being
+ *  deleted. That is the case that matters: "vm 3" a month after the delete
+ *  names nothing anybody remembers, and there is no row left to ask.
+ *
+ *  Rows written before that column existed carry no name and fall back to the
+ *  type and id pair they always showed, rather than guessing at one.
+ */
+export function targetLabel(row: {
+  target_type: string | null
+  target_id: number | null
+  target_name?: string | null
+}): string | null {
+  if (row.target_name) return row.target_name
+  if (!row.target_type) return null
+  return `${row.target_type}${row.target_id != null ? ` ${row.target_id}` : ''}`
+}
+
 export function ago(iso: string): string {
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (s < 60) return `${s}s ago`

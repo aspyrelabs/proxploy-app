@@ -105,8 +105,39 @@ export type DiscoveredRow = {
 export type VmRow = {
   id: number; host_id: number; host_name: string; vmid: number; name: string
   status: string; os_type: string | null; cpu_cores: number | null
-  cpu_pct: number | null; mem_bytes: number | null; disk_bytes: number | null
-  uptime_s: number | null; synced_at: string | null
+  cpu_pct: number | null
+  // Used and allocated bytes, the SAME meaning these names carry on AppRow.
+  //
+  // They used to mean the opposite here: a VM's mem_bytes was the memory
+  // ASSIGNED to it and disk_bytes was the disk it was given, because the
+  // poller wrote PVE's maxmem/maxdisk into them. Two rows in one product
+  // cannot have one name meaning used on one and allocated on the other, so
+  // the backend now fills these the way the app rows are filled and the
+  // allocation figures moved to the _total_ fields below. Anything asking how
+  // big a VM is reads mem_total_bytes/disk_total_bytes; anything asking how
+  // much it is using reads these.
+  mem_bytes: number | null; mem_total_bytes: number | null
+  // disk_bytes is null, not zero, on a VM with no QEMU guest agent: PVE cannot
+  // see inside the disk image without one, so there is no reading to report.
+  // The allocated size is known either way.
+  disk_bytes: number | null; disk_total_bytes: number | null
+  // Bytes per second, diffed by the poller from PVE's netin/netout counters.
+  // Null on the first cycle for a VM and on the cycle after a reboot zeroes
+  // the counters, both of which are "no reading", never zero traffic.
+  net_in_bps: number | null; net_out_bps: number | null
+  uptime_s: number | null
+  // Whether the QEMU guest agent is installed and answering inside this VM.
+  // THREE states, and they must not be collapsed to a boolean:
+  //   true   the agent answered.
+  //   false  Proxmox says this VM has no working guest agent. This is the
+  //          reason disk_bytes above is null, and it is something an operator
+  //          can fix by installing the agent in the guest.
+  //   null   nobody knows: the poller has not probed it yet, the VM is
+  //          stopped so nothing inside it can answer, or its host was
+  //          unreachable. Rendered as "unknown", never as "not installed".
+  // Replaced synced_at, which was when the poller last stamped the row and
+  // which nothing computed with.
+  guest_agent_ok: boolean | null
   // PVE accepts a linked clone only FROM a template, so the clone dialog gates
   // that option on this rather than letting PVE refuse every time.
   template?: boolean

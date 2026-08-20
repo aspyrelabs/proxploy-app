@@ -92,8 +92,15 @@ def test_results_carry_a_href_the_ui_can_navigate_to(tmp_path, csrf_header,
     with c:
         bootstrap_admin(c)
         seed()
-        for r in c.get("/api/v1/search", params={"q": "immich"}).json()["results"]:
+        results = c.get("/api/v1/search", params={"q": "immich"}).json()["results"]
+        for r in results:
             assert r["href"].startswith("/") and r["label"] and r["kind"]
+        # Neither an app nor a VM has a page of its own any more: both are a
+        # row that expands on its list, so the href has to carry which row.
+        for kind, prefix in (("app", "/apps?open="), ("vm", "/vms?open=")):
+            for r in results:
+                if r["kind"] == kind:
+                    assert r["href"] == f"{prefix}{r['id']}"
 
 
 def test_search_never_reveals_a_resource_the_caller_cannot_read(

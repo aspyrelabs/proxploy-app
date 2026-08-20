@@ -294,12 +294,22 @@ def test_guest_nic_edit_can_clear_a_key_with_an_explicit_null(tmp_path, csrf_hea
 
 def test_guest_nic_edit_is_not_a_job_and_reports_pending(tmp_path, csrf_header,
                                                          bootstrap_admin):
-    """A config PUT is not long-running. It returns directly, with the UPID PVE
-    handed back for a running qemu guest and an honest pending-until-reboot flag."""
+    """A config PUT is not long-running. It returns directly, and whether the
+    guest already has the new NIC comes from the guest's own pending config.
+
+    This used to read `pending_reboot` off the PUT's return value, on the
+    belief that PVE hands back a task id when it files a change under pending.
+    It does not: that endpoint is the synchronous one and returns null, so the
+    flag was always False and the route told every operator the change was
+    live. The fake can no longer return a task id either.
+    """
     from tests.support import make_app
 
     fake = _fake()
-    fake.config_update_upid = "UPID:pve1:00001234:...:qmconfig:201:proxploy@pve:"
+    fake.pending_by_guest[("qemu", 201)] = [
+        {"key": "net0", "value": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0",
+         "pending": "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr3"},
+    ]
     app = make_app(tmp_path, fake=fake)
     with TestClient(app) as c:
         bootstrap_admin(c)
@@ -308,11 +318,27 @@ def test_guest_nic_edit_is_not_a_job_and_reports_pending(tmp_path, csrf_header,
                   headers=csrf_header(c))
         assert r.status_code == 200
         body = r.json()
-        assert body["upid"] == fake.config_update_upid
         assert body["pending_reboot"] is True
         assert "reboot" in body["detail"].lower()
         with app.state.sessionmaker() as db:
             assert db.query(Job).count() == 0  # NOT a job
+
+
+def test_guest_nic_edit_says_applied_when_nothing_is_pending(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    """The other half of the same fix: with an empty pending config the change
+    really is live, and only then does the route say so."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_fake())          # no pending rows seeded
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _, _, vm_id = _seed(app)
+        r = c.put(f"/api/v1/vms/{vm_id}/network/net0", json={"bridge": "vmbr3"},
+                  headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["pending_reboot"] is False
+        assert r.json()["detail"] == "Applied immediately; no reboot needed."
 
 
 def test_guest_nic_edit_audits_without_a_job_id(tmp_path, csrf_header, bootstrap_admin):

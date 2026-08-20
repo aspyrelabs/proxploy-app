@@ -18,9 +18,14 @@ def _seeded(tmp_path):
                        mem_bytes_cached=2147483648, uptime_s_cached=86400))
             db.add(App(host_id=h.id, ctid=151, name="Paperless", slug="paperless",
                        status_cached="stopped"))
+            # mem_bytes/disk_bytes are USED and *_total_bytes are ALLOCATED,
+            # the same way round as on an App row (migration a1f4d80c3e69).
             db.add(Vm(host_id=h.id, vmid=100, name="win11", status="running",
-                      cpu_cores=4, mem_bytes=8589934592,
-                      disk_bytes=68719476736, uptime_s=172800))
+                      cpu_cores=4, mem_bytes=6442450944,
+                      mem_total_bytes=8589934592,
+                      disk_bytes=21474836480, disk_total_bytes=68719476736,
+                      net_in_bps_cached=1500.0, net_out_bps_cached=250.0,
+                      uptime_s=172800))
             db.commit()
             hid = h.id
         seed_snapshot(app, hid, guests={
@@ -316,6 +321,58 @@ def test_vms_list_and_detail(tmp_path, csrf_header, bootstrap_admin):
         assert c.get(f"/api/v1/vms/{vm['id']}").json()["vmid"] == 100
         assert c.get("/api/v1/vms?host=999").json() == []
         assert c.get("/api/v1/vms/99999").status_code == 404
+
+
+def test_vm_out_carries_usage_the_same_way_app_out_does(tmp_path, csrf_header,
+                                                        bootstrap_admin):
+    """The VMs page could draw a CPU meter and nothing else, because a VM row
+    stored only the guest's ALLOCATION and served it under names that meant
+    USAGE on an app. Memory and storage are now a used/allocated pair each and
+    network is two rates, exactly as apps.py::_app_out serves them.
+    """
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+
+        vm = c.get("/api/v1/vms").json()[0]
+
+        assert vm["mem_bytes"] == 6442450944         # used
+        assert vm["mem_total_bytes"] == 8589934592   # allocated
+        assert vm["disk_bytes"] == 21474836480       # used, via the guest agent
+        assert vm["disk_total_bytes"] == 68719476736  # allocated, maxdisk
+        assert vm["net_in_bps"] == 1500.0 and vm["net_out_bps"] == 250.0
+        # Every field the endpoint served before is still served.
+        assert {"id", "host_id", "host_name", "vmid", "name", "status",
+                "os_type", "cpu_cores", "cpu_pct", "uptime_s", "template",
+                "node", "guest_agent_ok"} <= set(vm)
+        # Raw counters stay on the row: they only mean something next to the
+        # previous reading, which is the poller's business, not a client's.
+        assert "net_in_cached" not in vm and "net_sampled_at" not in vm
+
+
+def test_an_unpolled_vm_serializes_null_usage_not_zero(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    """Null is the honest answer for a VM nothing has measured, and for
+    disk_bytes it is the PERMANENT answer for a guest with no QEMU agent
+    installed. Zero would draw an empty bar under a full disk."""
+    from proxploy.models import Vm
+    from tests.support import seed_host_row
+
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, name="host-02", node="pve2")
+            db.add(Vm(host_id=h.id, vmid=300, name="fresh", status="running"))
+            db.commit()
+
+        row = next(r for r in c.get("/api/v1/vms").json() if r["vmid"] == 300)
+
+        assert row["mem_bytes"] is None and row["mem_total_bytes"] is None
+        assert row["disk_bytes"] is None and row["disk_total_bytes"] is None
+        assert row["net_in_bps"] is None and row["net_out_bps"] is None
 
 
 def test_a_vm_is_listed_once_per_cluster_not_once_per_host(tmp_path, csrf_header,

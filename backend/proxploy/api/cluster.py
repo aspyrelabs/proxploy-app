@@ -267,7 +267,8 @@ def activity(limit: int = 20, db=Depends(get_db),
     job_rows = [(j.created_at, {
         "kind": "job", "id": j.id, "at": to_iso(j.created_at),
         "title": j.kind, "status": j.status, "target_type": j.target_type,
-        "target_id": j.target_id, "actor": emails.get(j.requested_by),
+        "target_id": j.target_id, "target_name": j.target_name,
+        "actor": emails.get(j.requested_by),
         "job_id": j.id, "progress_pct": j.progress_pct,
         "severity": None, "message": None}) for j in jobs]
 
@@ -277,7 +278,8 @@ def activity(limit: int = 20, db=Depends(get_db),
     audit_rows = [(a.ts, {
         "kind": "audit", "id": a.id, "at": to_iso(a.ts),
         "title": a.action, "status": a.result, "target_type": a.target_type,
-        "target_id": a.target_id, "actor": emails.get(a.actor_id),
+        "target_id": a.target_id, "target_name": a.target_name,
+        "actor": emails.get(a.actor_id),
         "job_id": None, "progress_pct": None,
         "severity": None, "message": None}) for a in audits]
 
@@ -295,6 +297,9 @@ def activity(limit: int = 20, db=Depends(get_db),
         "status": a.state,
         "severity": rule_names.get(a.rule_id, (None, "warning"))[1],
         "target_type": a.target_type, "target_id": a.target_id,
+        # Alerts already carry their own label on api/alerts.py; this
+        # feed only needs the key present so every row has one shape.
+        "target_name": None,
         "actor": None,          # nobody triggers an alert; the evaluator does
         "job_id": None, "progress_pct": None,
         "message": a.message}) for a in alerts]

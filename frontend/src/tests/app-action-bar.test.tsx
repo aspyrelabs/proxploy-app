@@ -1,8 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-let features: Record<string, boolean> = { 'apps.lifecycle': true, 'apps.open_ui': true }
+// Icon is stubbed so this file tests the BAR, not the font subset: an
+// unstubbed Icon renders the ligature name as text, which would land in every
+// button's textContent (app-icon-grid.test.tsx precedent). icon.test.tsx pins
+// Icon's own contract.
+vi.mock('../components/ui/icon', () => ({
+  Icon: ({ name, size }: { name: string; size?: number }) => (
+    <span data-icon={name} data-size={size ?? 18} />
+  ),
+}))
+
+let features: Record<string, boolean> = {}
 let capabilities: Record<string, boolean> = { lifecycle: true, console: true }
 
 vi.mock('../api/client', () => ({
@@ -16,6 +26,12 @@ vi.mock('../api/client', () => ({
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},
+}))
+
+const navigate = vi.fn()
+vi.mock('@tanstack/react-router', async (orig) => ({
+  ...(await orig() as object),
+  useNavigate: () => navigate,
 }))
 
 import { AppActionBar } from '../components/AppActionBar'
@@ -32,30 +48,43 @@ const APP: AppRow = {
   disk_bytes: 1, disk_total_bytes: 2, net_in_bps: 1, net_out_bps: 1,
 }
 
+const ALL_FEATURES = {
+  'apps.lifecycle': true, 'apps.open_ui': true, 'apps.reconfigure': true,
+  'migrate.cross_host': true, 'backups.run': true, 'apps.uninstall': true,
+}
+
 const wrap = (app: AppRow) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}><AppActionBar app={app} /></QueryClientProvider>)
 }
 
 const labels = () =>
-  within(screen.getByRole('group')).getAllByRole('button').map((b) => b.textContent?.trim())
+  within(screen.getByRole('group')).getAllByRole('button')
+    .map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())
+
+// Radix opens a menu on pointerdown, not click (AccountMenu/HostActionsMenu
+// precedent).
+const openMenu = () =>
+  fireEvent.pointerDown(screen.getByRole('button', { name: /More actions for Immich/i }),
+                        { button: 0, ctrlKey: false })
 
 describe('AppActionBar', () => {
   beforeEach(() => {
-    features = { 'apps.lifecycle': true, 'apps.open_ui': true }
+    navigate.mockClear()
+    features = { ...ALL_FEATURES }
     capabilities = { lifecycle: true, console: true }
   })
 
-  it('offers Stop, Restart, Open and Console while the app is running', () => {
+  it('offers Stop, Restart and Open beside a menu while the app is running', () => {
     wrap(APP)
-    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'Console'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'More actions for Immich'])
   })
 
   it('offers Start instead of Stop while it is not running', () => {
     // Never both: an app is either running or it is not, and offering the
     // pair would invite the wrong one.
     wrap({ ...APP, status: 'stopped' })
-    expect(labels()).toEqual(['Start', 'Open', 'Console'])
+    expect(labels()).toEqual(['Start', 'Open', 'More actions for Immich'])
   })
 
   it('colours Start green and Stop red, the two opposite outcomes', () => {
@@ -76,7 +105,7 @@ describe('AppActionBar', () => {
     // Absent, not disabled: a dead button invites a click that cannot go
     // anywhere.
     wrap({ ...APP, catalog_port: null })
-    expect(labels()).toEqual(['Stop', 'Restart', 'Console'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'More actions for Immich'])
   })
 
   it('welds the actions into one group rather than loose buttons', () => {
@@ -84,5 +113,63 @@ describe('AppActionBar', () => {
     // ButtonGroup carries role="group"; the separators are decorative and add
     // nothing to the accessible tree.
     expect(screen.getByRole('group')).toBeInTheDocument()
+  })
+
+  it('names the app on the dots trigger, which has no text of its own', () => {
+    wrap(APP)
+    const trigger = screen.getByRole('button', { name: 'More actions for Immich' })
+    expect(trigger.querySelector('[data-icon="more_vert"]')).not.toBeNull()
+  })
+
+  it('keeps Console out of the row and in the menu', async () => {
+    wrap(APP)
+    expect(within(screen.getByRole('group')).queryByRole('button', { name: 'Console' }))
+      .toBeNull()
+    openMenu()
+    expect(await screen.findByRole('menuitem', { name: /console/i })).toBeInTheDocument()
+  })
+
+  it('lists the six other actions in the menu, Delete last and destructive', async () => {
+    wrap(APP)
+    openMenu()
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((i) => i.textContent?.trim()))
+      .toEqual(['Console', 'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
+    const del = items[items.length - 1]
+    // The destructive vocabulary is the text-red token, and the border above
+    // it is the separator keeping it off the end of the ordinary list.
+    expect(del.className).toContain('text-red')
+    expect(del.className).toContain('border-t')
+  })
+
+  it('does not repeat Start, Stop, Restart or Open inside the menu', async () => {
+    wrap(APP)
+    openMenu()
+    const items = (await screen.findAllByRole('menuitem')).map((i) => i.textContent?.trim())
+    for (const repeated of ['Start', 'Stop', 'Restart', 'Open']) {
+      expect(items).not.toContain(repeated)
+    }
+  })
+
+  it('opens the uninstall confirmation from Delete, rather than deleting on the spot', async () => {
+    wrap(APP)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /delete/i }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(/uninstall/i)
+    // UninstallDialog's own type-the-name gate is the confirmation; nothing
+    // is destroyed by the menu item itself.
+    expect(screen.getByRole('button', { name: /destroy container/i })).toBeInTheDocument()
+  })
+
+  it('withholds the plan-gated items once entitlements say the plan lacks them', async () => {
+    features = { 'apps.lifecycle': true, 'apps.open_ui': true }
+    wrap(APP)
+    openMenu()
+    const del = await screen.findByRole('menuitem', { name: /delete/i })
+    // waitFor because nothing is withheld until /entitlements has actually
+    // answered: api/app-gates.ts's "innocent until proven guilty" rule.
+    await waitFor(() => expect(del).toHaveAttribute('data-disabled'))
+    expect(screen.getByRole('menuitem', { name: /migrate/i })).toHaveAttribute('data-disabled')
   })
 })

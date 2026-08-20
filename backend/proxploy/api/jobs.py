@@ -29,6 +29,7 @@ def job_out(j: Job) -> dict:
     return {
         "id": j.id, "kind": j.kind, "status": j.status,
         "target_type": j.target_type, "target_id": j.target_id,
+        "target_name": j.target_name,
         "params": j.params, "result": j.result, "error": j.error,
         "progress_pct": j.progress_pct, "requested_by": j.requested_by,
         "schedule_id": j.schedule_id,
@@ -48,7 +49,8 @@ def backlog(db, job_id: int, after: int = 0, limit: int = 5000) -> list[dict]:
 
 def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
                       target_type: str | None, target_id: int | None,
-                      params: dict, action: str | None = None) -> dict:
+                      params: dict, action: str | None = None,
+                      target_name: str | None = None) -> dict:
     """Enqueue a job, write the audit row that points at it, return the 202 body.
 
     api/apps.py::enqueue_lifecycle is this same shape plus the self-guard and
@@ -59,12 +61,18 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
 
     Both `params` copies are redacted at their own sink: JobBackend.enqueue
     redacts before writing `jobs.params`, write_audit before `audit_events.params`.
+
+    `target_name` is normally left alone: JobBackend.enqueue reads the target's
+    name off its row, and the job and the audit row then carry the same one.
+    Pass it only for a target whose row cannot be looked up from
+    `(target_type, target_id)`, e.g. storage, whose target_id is a host id.
     """
     job = request.app.state.jobs.enqueue(
         db, kind=kind, target_type=target_type, target_id=target_id,
-        params=params, requested_by=user.id)
+        params=params, requested_by=user.id, target_name=target_name)
     write_audit(db, actor_type="user", actor_id=user.id, action=action or kind,
                 target_type=target_type, target_id=target_id, params=params,
+                target_name=job.target_name,
                 job_id=job.id, ip=request.client.host if request.client else None)
     return {"job": job_out(job)}
 

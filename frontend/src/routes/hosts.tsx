@@ -6,7 +6,7 @@ import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements } from '../api/hooks'
-import { AppIconGrid, AppIconGridSkeleton } from '../components/AppIconGrid'
+import { AppIconGrid, IconGridSkeleton, VmIconGrid } from '../components/IconGrid'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
@@ -20,7 +20,7 @@ import { QueryState } from '../components/QueryState'
 import { MetricChart } from '../components/charts/MetricChart'
 import { NetworkStat, NetworkStatSkeleton, Ring, RingSkeleton } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
-import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { fmtBytes } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -271,7 +271,11 @@ export function HostsPage() {
         <div>
           {/* One icon per app with its status, and nothing else. The view
               switch and Update all moved to the Apps page: this section is a
-              glance at what is installed, not the place to operate on it. */}
+              glance at what is installed, not the place to operate on it.
+
+              Every app, with no cap. It used to show the first eight in
+              whatever order /apps answered, which on a cluster meant a missing
+              app could equally be stopped, gone, or simply the ninth. */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-[16px] font-semibold">Apps</h2>
             {/* as never: route typing workaround, see router.tsx */}
@@ -279,13 +283,13 @@ export function HostsPage() {
           </div>
           <QueryState query={appsQuery}
                       loading={<SkeletonGroup label="Loading apps">
-                        <AppIconGridSkeleton count={8} />
+                        <IconGridSkeleton count={8} />
                       </SkeletonGroup>}
                       emptyTitle="No apps yet"
                       emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
                       errorTitle="Apps not readable"
                       errorNote="Proxploy could not reach the backend to list your apps.">
-            {(rows) => <AppIconGrid apps={rows.slice(0, 8)} />}
+            {(rows) => <AppIconGrid apps={rows} />}
           </QueryState>
         </div>
 
@@ -295,42 +299,26 @@ export function HostsPage() {
             columns read as different kinds of thing. The same flex wrapper
             keeps both headings on one baseline across the row. */}
         <div>
+          {/* The same icon grid the Apps column draws, grouped the same way.
+              It was a Name/Node/Status table showing the first four VMs, which
+              made the two inventories read as two different kinds of thing and
+              hid the fifth VM entirely. The grid carries its own panel, so
+              there is no card wrapper here any more. */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
             {/* as never: route typing workaround, see router.tsx */}
             <a href="/vms" className="text-[12px] text-amber hover:underline">View all</a>
           </div>
-          <div className={card}>
-            <QueryState query={vmsQuery}
-                        loading={<SkeletonGroup label="Loading virtual machines">
-                          <SkeletonTable rows={4} cols={['w-24', 'w-20', 'w-16']} />
-                        </SkeletonGroup>}
-                        emptyTitle="No VMs discovered"
-                        emptyNote="QEMU guests on connected hosts appear here."
-                        errorTitle="VMs not readable"
-                        errorNote="Proxploy could not reach the backend to list your VMs.">
-              {(rows) => (
-                <table className="w-full text-left text-[13px]">
-                  <thead>
-                    <tr className="text-[11px] uppercase text-text-3">
-                      <th className="pb-2 font-medium">Name</th>
-                      <th className="pb-2 font-medium">Node</th>
-                      <th className="pb-2 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 4).map((v) => (
-                      <tr key={v.id} className="border-t border-line-soft hover:bg-panel-2">
-                        <td className="py-2 font-mono">{v.name}</td>
-                        <td className="py-2 text-text-2">{v.host_name}</td>
-                        <td className="py-2"><StatusPill status={v.status} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </QueryState>
-          </div>
+          <QueryState query={vmsQuery}
+                      loading={<SkeletonGroup label="Loading virtual machines">
+                        <IconGridSkeleton count={4} />
+                      </SkeletonGroup>}
+                      emptyTitle="No VMs discovered"
+                      emptyNote="QEMU guests on connected hosts appear here."
+                      errorTitle="VMs not readable"
+                      errorNote="Proxploy could not reach the backend to list your VMs.">
+            {(rows) => <VmIconGrid vms={rows} />}
+          </QueryState>
         </div>
       </div>
     </div>

@@ -1,6 +1,69 @@
 """Append-only audit writer (docs 04/08 §7). There is deliberately no update or
 delete function in this module, archival is a Phase-8+ export job, never mutation."""
-from proxploy.models import AuditEvent
+from proxploy.models import (AlertRule, App, AuditEvent, Backup, Host, Job,
+                             NotificationChannel, Schedule, Team, User, Vm)
+
+# target_type -> (model, the column that holds its human name). One map, used
+# to capture a row's name when it is written (resolve_target_name below), to
+# label a row's Item column in api/audit.py, and to turn that screen's "item or
+# action" search box back into ids, so the box can never match an item the
+# column does not name.
+#
+# Deliberately no "storage": those rows carry the HOST's id in target_id
+# (api/storage.py), so labelling them from either table would print a name that
+# is wrong or right by accident. Those two routes pass their own name instead.
+# Same reason "session", "alert" and "system" are absent: nothing there is a
+# name a person would recognise.
+TARGET_LABELS = {
+    "host": (Host, Host.name),
+    "app": (App, App.name),
+    "vm": (Vm, Vm.name),
+    "user": (User, User.email),
+    "team": (Team, Team.name),
+    "schedule": (Schedule, Schedule.name),
+    "notification_channel": (NotificationChannel, NotificationChannel.name),
+    "alert_rule": (AlertRule, AlertRule.name),
+    "backup": (Backup, Backup.volid),
+}
+
+
+def resolve_target_name(db, target_type: str | None,
+                        target_id: int | None) -> str | None:
+    """The name of the thing a job or audit row is about, read RIGHT NOW.
+
+    Called from the two write paths (JobBackend.enqueue and write_audit), both
+    of which run before the work does. That ordering is the whole point: a
+    destroy job is enqueued while the guest row still exists, so the name is
+    captured before the thing that owns it is deleted. Resolving at render time
+    instead is what left the history reading "vm 3" for the one case where the
+    name can never be recovered.
+
+    Returns None for a target with no human name, and for one that is already
+    gone; callers store the None and the UI falls back to "type id".
+    """
+    if not target_type or target_id is None:
+        return None
+    # A job's own name is its kind ("vm.delete"), which is not in TARGET_LABELS
+    # because it is not the sort of name the audit screen's Item column wants.
+    if target_type == "job":
+        job = db.get(Job, target_id)
+        return job.kind if job is not None else None
+    entry = TARGET_LABELS.get(target_type)
+    if entry is None:
+        return None
+    model, name_col = entry
+    row = db.get(model, target_id)
+    if row is None:
+        return None
+    name = (getattr(row, name_col.key, None) or "").strip()
+    if name:
+        return name
+    # An unnamed guest is still worth naming by the id Proxmox shows it under.
+    if target_type == "vm":
+        return f"VM {row.vmid}"
+    if target_type == "app":
+        return f"CT {row.ctid}"
+    return None
 
 REDACT_KEYS = {"password", "secret", "token_secret", "token", "key",
                "license_key", "refresh_credential", "totp"}
@@ -34,9 +97,16 @@ def write_audit(db, *, actor_type: str, action: str, actor_id: int | None = None
                 target_type: str | None = None, target_id: int | None = None,
                 params: dict | None = None, result: str = "ok",
                 ip: str | None = None, request_id: str | None = None,
-                job_id: int | None = None) -> None:
+                job_id: int | None = None,
+                target_name: str | None = None) -> None:
+    """`target_name` is resolved from the target here unless the caller passes
+    one, so a route cannot forget to record what it acted on. Pass it only
+    where the target has no name of its own to look up, e.g. a storage row
+    whose target_id is a host id."""
     db.add(AuditEvent(actor_type=actor_type, actor_id=actor_id, action=action,
                       target_type=target_type, target_id=target_id,
+                      target_name=target_name or resolve_target_name(
+                          db, target_type, target_id),
                       params=redact(params) if params else None, result=result,
                       ip=ip, request_id=request_id, job_id=job_id))
     db.commit()

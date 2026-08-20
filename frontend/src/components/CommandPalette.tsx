@@ -109,9 +109,19 @@ export function CommandPalette() {
 
   if (!open) return null
 
+  // The server hands back one string per result, and some of those strings
+  // carry a query: an app now lives at /apps?open=<id> rather than at a page
+  // of its own. TanStack Router does NOT parse a query out of `to`, it would
+  // look for a route literally named "/apps?open=3" and find nothing, so the
+  // two halves are split here and the search handed over as the object it
+  // expects. Written for any href with a query rather than for that one shape,
+  // because the next result kind to gain a param should not have to come back
+  // and edit this.
   const go = (r: SearchResult): void => {
     close()
-    navigate({ to: r.href as never })
+    const [path, qs] = r.href.split('?')
+    navigate({ to: path as never,
+               search: qs ? Object.fromEntries(new URLSearchParams(qs)) as never : undefined })
   }
 
   return (

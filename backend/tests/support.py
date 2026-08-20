@@ -84,4 +84,11 @@ def make_job_app(tmp_path, fake=None, ssh_factory=None):
         secretstore=SecretStore(s.master_key_file),
         jobs=None,
     )
-    return SimpleNamespace(state=state)
+    ns = SimpleNamespace(state=state)
+    # The real app always has one (main.py's lifespan builds it whether or not
+    # polling is enabled), and every handler that creates or destroys a guest
+    # calls poller.wake() when its task finishes. Nothing starts its loops here,
+    # so a wake just sets a flag no one reads.
+    from proxploy.pollers import Poller
+    state.poller = Poller(ns)
+    return ns

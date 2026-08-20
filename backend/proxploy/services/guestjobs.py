@@ -290,6 +290,14 @@ async def create_vm(ctx: JobContext, params: dict) -> dict:
     next poll cycle either confirms or deletes, a second, worse source of
     truth. The resource publish below is the same nudge run_lifecycle emits, so
     an open tab refetches instead of waiting out the 30 s interval.
+
+    That nudge on its own bought nothing, though: the refetch it triggers reads
+    the mirror, which the poller has not refreshed yet, so the tab got the same
+    stale list back and the VM still took a poll interval to appear. The
+    poller.wake() below is the missing half. It is measured as sufficient: the
+    guest is in /cluster/resources ~18 ms after the task finishes (see
+    Poller.wake), so the cycle it asks for actually finds it, and that cycle
+    publishes its own vm/list event once the mirror is fresh.
     """
     app = ctx.backend.app
     host_id = int(params["host_id"])
@@ -306,6 +314,7 @@ async def create_vm(ctx: JobContext, params: dict) -> dict:
     upid = await asyncio.to_thread(client.vm_create, node, call)
     status = await await_task(ctx, client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
+    app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "created"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -326,7 +335,7 @@ async def clone_vm(ctx: JobContext, params: dict) -> dict:
     """
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
-    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+    client, node, vmid, vm_name, host_id = await asyncio.to_thread(
         _vm_target, app, vm_id)
     call: dict = {"newid": int(params["newid"]), "full": 1 if params.get("full") else 0}
     for key in ("name", "target", "storage"):
@@ -337,6 +346,10 @@ async def clone_vm(ctx: JobContext, params: dict) -> dict:
     upid = await asyncio.to_thread(client.vm_clone, node, vmid, call)
     status = await await_task(ctx, client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
+    # Same reason as create_vm's wake: a clone is a create as far as the mirror
+    # is concerned, and speeding up only one of them means the next report is
+    # about the other.
+    app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "created"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"),
@@ -350,15 +363,23 @@ async def delete_vm(ctx: JobContext, params: dict) -> dict:
     a selfguard pass. As with create, the `vms` row is left to the poller to
     drop: deleting it here would beat the poller to a state Proxmox has not
     confirmed yet.
+
+    A destroy needs no more than the wake either, and specifically no targeted
+    row deletion from this side. Unlike apps, `vms` has no missing_since grace
+    period (see the sweep in pollers/__init__.py: "a trustworthy cycle still
+    deletes at once"), so the very next cycle drops the row, and the guest is
+    measured out of /cluster/resources 27 to 39 ms after the destroy task
+    finishes. `_absence_is_trustworthy` is untouched and still decides.
     """
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
-    client, node, vmid, vm_name, _host_id = await asyncio.to_thread(
+    client, node, vmid, vm_name, host_id = await asyncio.to_thread(
         _vm_target, app, vm_id)
     ctx.log(f"destroying {vm_name} (qemu {vmid}) on {node}")
     upid = await asyncio.to_thread(client.guest_delete, "qemu", node, vmid)
     status = await await_task(ctx, client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
+    app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "vm", "id": None,
                                        "change": "deleted"})
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,

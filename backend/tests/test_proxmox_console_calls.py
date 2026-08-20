@@ -38,6 +38,24 @@ def test_vncproxy_returns_ticket_port_cert():
     assert fake.last_vncproxy_call == ("pve1", 200)
 
 
+def test_vncproxy_asks_pve_to_generate_a_console_password():
+    """QEMU offers RFB security type 2 (VNC Authentication) and nothing else,
+    verified against a live PVE 9.2.10 node: the security-types frame is
+    b"\\x01\\x02". A client with no password cannot finish that handshake, and
+    the bridge cannot answer it on the client's behalf. `generate-password=1`
+    is what makes PVE hand back a password that is separate from the
+    vncticket, so the browser can answer the challenge without also being
+    handed the credential that authenticates the PVE websocket upgrade."""
+    fake = FakePVE()
+    fake.vncproxy_response = {"user": "proxploy@pve!console", "ticket": "PVEVNC:def456",
+                              "port": "5902", "password": "s3cr3t8x",
+                              "cert": "-----BEGIN CERTIFICATE-----...",
+                              "upid": "UPID:pve1:...:vncproxy::proxploy@pve:"}
+    _client(fake).vncproxy("pve1", 200)
+    assert fake.last_vncproxy_kwargs.get("generate-password") == 1
+    assert fake.last_vncproxy_kwargs.get("websocket") == 1
+
+
 def test_termproxy_wraps_and_redacts_secret_on_failure():
     fake = FakePVE(fail=True)
     with pytest.raises(ProxmoxError) as exc:

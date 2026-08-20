@@ -881,6 +881,13 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     downtime_s = (utcnow() - t0).total_seconds()
 
     await asyncio.to_thread(_repoint, app, app_id, target_host_id, target_ctid)
+    # Both ends changed: the target host has a CT the poller has never seen and
+    # the source host has one it will not see again. The app row now points at
+    # the target, and everything live on it is read from that host's snapshot,
+    # so without these the migrated app reads "unknown" for up to a poll
+    # interval and the source CT keeps being offered for adoption.
+    app.state.poller.wake(target_host_id)
+    app.state.poller.wake(int(source["host_id"]))
     app.state.bus.publish("resource", {"type": "app", "id": app_id,
                                        "change": "migrated"})
 

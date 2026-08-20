@@ -297,6 +297,9 @@ def upload_content(request: Request, host_id: int, name: str,
     return enqueue_and_audit(
         request, db, user, kind="storage.upload", target_type="storage",
         target_id=host.id,
+        # target_id is the HOST here, so nothing can look this name up
+        # later; the storage a person recognises is the pool on that host.
+        target_name=f"{name} on {host.name}",
         params={"host_id": host.id, "node": node, "storage": name,
                 "content": content, "filename": file.filename or "upload",
                 # `spool_path`, not `path`: the job runner deletes whatever
@@ -318,7 +321,7 @@ def delete_content(request: Request, host_id: int, name: str, volid: str,
     node = _resolve_node(request, host, name, node)
     return enqueue_and_audit(
         request, db, user, kind="storage.delete_volume", target_type="storage",
-        target_id=host.id,
+        target_id=host.id, target_name=f"{name} on {host.name}",
         params={"host_id": host.id, "node": node, "storage": name, "volid": volid})
 
 

@@ -11,7 +11,11 @@ vi.mock('../components/ui/icon', () => ({
   ),
 }))
 
-let features: Record<string, boolean> = { 'apps.lifecycle': true, 'apps.open_ui': true }
+const ALL_FEATURES = {
+  'apps.lifecycle': true, 'apps.open_ui': true, 'apps.reconfigure': true,
+  'migrate.cross_host': true, 'backups.run': true, 'apps.uninstall': true,
+}
+let features: Record<string, boolean> = { ...ALL_FEATURES }
 let capabilities: Record<string, boolean> = { lifecycle: true, console: true }
 
 vi.mock('../api/client', () => ({
@@ -33,8 +37,8 @@ vi.mock('@tanstack/react-router', async (orig) => ({
   useNavigate: () => navigate,
 }))
 
-import { AppIconGrid } from '../components/AppIconGrid'
-import type { AppRow } from '../api/hooks'
+import { AppIconGrid, VmIconGrid } from '../components/IconGrid'
+import type { AppRow, VmRow } from '../api/hooks'
 
 const APP: AppRow = {
   id: 1, name: 'Immich', slug: 'immich', host_id: 1, host_name: 'pve-a',
@@ -47,10 +51,21 @@ const APP: AppRow = {
   disk_bytes: 1, disk_total_bytes: 2, net_in_bps: 1, net_out_bps: 1,
 }
 
-const wrap = (apps: AppRow[]) => {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><AppIconGrid apps={apps} /></QueryClientProvider>)
+const VM: VmRow = {
+  id: 1, host_id: 1, host_name: 'pve-a', vmid: 201, name: 'win11-lab',
+  status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
+  mem_bytes: 1, mem_total_bytes: 2, disk_bytes: null, disk_total_bytes: 2,
+  net_in_bps: 1, net_out_bps: 1, uptime_s: 500, guest_agent_ok: null,
+  node: 'pve-a',
 }
+
+const mount = (ui: React.ReactNode) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
+
+const wrap = (apps: AppRow[]) => mount(<AppIconGrid apps={apps} />)
+const wrapVms = (vms: VmRow[]) => mount(<VmIconGrid vms={vms} />)
 
 // Radix opens a menu on pointerdown, not click (AccountMenu/HostActionsMenu
 // precedent).
@@ -60,7 +75,7 @@ const openMenu = (trigger: HTMLElement) =>
 describe('AppIconGrid', () => {
   beforeEach(() => {
     navigate.mockClear()
-    features = { 'apps.lifecycle': true, 'apps.open_ui': true }
+    features = { ...ALL_FEATURES }
     capabilities = { lifecycle: true, console: true }
   })
 
@@ -99,7 +114,10 @@ describe('AppIconGrid', () => {
     const { container } = wrap([{ ...APP, name: 'a-twenty-char-name!!' }])
     const grid = container.querySelector('div[class*="grid-cols"]') as HTMLElement
     expect(grid.className).toContain('auto-fill')
-    expect(grid.className).toMatch(/minmax\(13rem,\s*1fr\)/)
+    // 10rem, measured: at the 570px a half page column really gets, this fits
+    // 3 columns of 171px where 13rem fitted 2 of 256px, and no name on the
+    // reference fleet truncates at that width.
+    expect(grid.className).toMatch(/minmax\(10rem,\s*1fr\)/)
     expect(grid.className).not.toMatch(/grid-cols-\d/)
     // Past the floor it still ellipses rather than blowing the column open,
     // and the full name stays reachable on hover.
@@ -108,31 +126,56 @@ describe('AppIconGrid', () => {
     expect(name).toHaveAttribute('title', 'a-twenty-char-name!!')
   })
 
-  it('opens the app detail page from the name', () => {
+  it('opens the app detail from the name, which is a row on the Apps table now', () => {
     wrap([APP])
     fireEvent.click(screen.getByRole('button', { name: 'Immich' }))
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
-      params: expect.objectContaining({ appId: '1' }),
+      to: '/apps', search: expect.objectContaining({ open: 1 }),
     }))
   })
 
-  it('offers exactly the five actions on the logo, and no more', async () => {
+  it('keeps the lifecycle actions here, since the tile menu is the only way to act', async () => {
     wrap([APP])
     openMenu(screen.getByRole('button', { name: /actions for Immich/i }))
     const items = await screen.findAllByRole('menuitem')
     // trim(): each item renders `<Icon /> {label}`, so its textContent
     // carries a leading space the stubbed Icon leaves behind.
     // Running, so Stop and Restart show and Start does not: the same action
-    // set LifecycleActions already picks from status.
+    // set LifecycleActions already picks from status. The Apps table row
+    // passes lifecycle={false} instead, because it carries those as buttons.
     expect(items.map((i) => i.textContent?.trim()))
-      .toEqual(['Stop', 'Restart', 'Console', 'Open'])
+      .toEqual(['Stop', 'Restart', 'Console', 'Open',
+                'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
   })
 
   it('offers Start instead of Stop when the app is stopped', async () => {
     wrap([{ ...APP, status: 'stopped' }])
     openMenu(screen.getByRole('button', { name: /actions for Immich/i }))
     const items = await screen.findAllByRole('menuitem')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Start', 'Console', 'Open'])
+    expect(items.map((i) => i.textContent?.trim()))
+      .toEqual(['Start', 'Console', 'Open',
+                'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
+  })
+
+  it('puts Delete last, below a separator and styled as destructive', async () => {
+    wrap([APP])
+    openMenu(screen.getByRole('button', { name: /actions for Immich/i }))
+    const items = await screen.findAllByRole('menuitem')
+    const del = items[items.length - 1]
+    expect(del.textContent?.trim()).toBe('Delete')
+    // The destructive vocabulary is the text-red token (HostActionsMenu's
+    // Power off item), and the border above it is the separator that keeps a
+    // slip from Restart landing here.
+    expect(del.className).toContain('text-red')
+    expect(del.className).toContain('border-t')
+  })
+
+  it('opens the uninstall confirmation from Delete, rather than deleting on the spot', async () => {
+    wrap([APP])
+    openMenu(screen.getByRole('button', { name: /actions for Immich/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /delete/i }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent(/uninstall/i)
+    expect(screen.getByRole('button', { name: /destroy container/i })).toBeInTheDocument()
   })
 
   it('hides Open when the app has no catalog port to point at', async () => {
@@ -148,5 +191,113 @@ describe('AppIconGrid', () => {
     openMenu(screen.getByRole('button', { name: /actions for Immich/i }))
     const stop = await screen.findByRole('menuitem', { name: 'Stop' })
     await waitFor(() => expect(stop).toHaveAttribute('data-disabled'))
+  })
+
+  it('groups by the node the app runs on, not the host it was read through', () => {
+    // Both of these came in through host pve-a, which is one API endpoint into
+    // a cluster; they are running on two different machines. Grouping on
+    // host_name would file both under one heading and answer the wrong
+    // question.
+    wrap([APP, { ...APP, id: 2, name: 'Plex', node: 'pve-c' }])
+    expect(screen.getByRole('heading', { name: 'pve-a' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'pve-c' })).toBeInTheDocument()
+    expect(screen.getAllByText(/1 app$/)).toHaveLength(2)
+  })
+
+  it('names the host under a node heading that is not already the host', () => {
+    // pve-c is read through host pve-a, so the section says which endpoint
+    // answers for it. The pve-a section does not repeat its own name.
+    wrap([APP, { ...APP, id: 2, name: 'Plex', node: 'pve-c' }])
+    expect(screen.getByText('on pve-a · 1 app')).toBeInTheDocument()
+  })
+
+  it('does not repeat the machine when the host is the node\'s fully qualified name', () => {
+    // The real shape on the reference cluster: PVE reports the node as `node1`
+    // while the host is registered as `node1.lab.local`. An exact string
+    // compare called those two different machines and every heading read
+    // "node1 · on node1.lab.local · 4 apps", naming one box twice.
+    wrap([{ ...APP, node: 'node1', host_name: 'node1.lab.local' }])
+    expect(screen.getByText('node1')).toBeInTheDocument()
+    expect(screen.getByText('1 app')).toBeInTheDocument()
+    expect(screen.queryByText(/aspyrelabs\.local/)).toBeNull()
+  })
+
+  it('falls back to the host name for an app whose node is not reported', () => {
+    // '' is what a row carries before the poller has filled the node in. The
+    // host name is all it can say about where it lives, and on a standalone
+    // machine that is the same name, so it joins that section rather than
+    // drawing a second one with the same heading.
+    wrap([{ ...APP, id: 2, name: 'Plex', node: '' }, APP])
+    expect(screen.getAllByRole('heading', { name: 'pve-a' })).toHaveLength(1)
+    expect(screen.getByText('2 apps')).toBeInTheDocument()
+  })
+
+  it('keeps an app with neither a node nor a host, in a section of its own', () => {
+    const { container } = wrap([{ ...APP, id: 2, name: 'Plex', node: '', host_name: '' }, APP])
+    expect(screen.getByTestId('app-icon-2')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /node not reported/i })).toBeInTheDocument()
+    // Last, after every section that knows where it is.
+    const text = container.textContent!
+    expect(text.indexOf('Immich')).toBeLessThan(text.indexOf('Plex'))
+  })
+
+  it('shows every app, with no cap', () => {
+    // The Hosts page used to slice(0, 8), so a missing app could equally be
+    // stopped, gone, or simply the ninth.
+    const apps = Array.from({ length: 12 }, (_, i) => (
+      { ...APP, id: i + 1, name: `app-${String(i + 1).padStart(2, '0')}` }
+    ))
+    wrap(apps)
+    expect(screen.getAllByRole('button', { name: /^Actions for app-/ })).toHaveLength(12)
+    expect(screen.getByText('12 apps')).toBeInTheDocument()
+  })
+})
+
+describe('VmIconGrid', () => {
+  beforeEach(() => {
+    navigate.mockClear()
+    features = { ...ALL_FEATURES }
+    capabilities = { lifecycle: true, console: true }
+  })
+
+  it('draws a VM as the same cell an app gets, wearing its OS', () => {
+    wrapVms([VM])
+    const tile = screen.getByTestId('vm-icon-1').querySelector('img')!
+    expect(tile).toHaveAttribute('src', '/windows.svg')
+    expect(screen.getByText('Running')).toHaveClass('uppercase')
+  })
+
+  it('falls back to initials for an OS Proxmox has not named', () => {
+    // osIconUrl returns null both for an ostype we do not recognise and for
+    // one PVE has not reported, and IconTile draws the initials tile for it,
+    // so an unknown OS looks like an app with no logo, not a broken image.
+    wrapVms([{ ...VM, os_type: null, name: 'solaris-box' }])
+    const tile = screen.getByTestId('vm-icon-1')
+    expect(tile.querySelector('img')).toBeNull()
+    expect(tile).toHaveTextContent('SO')
+  })
+
+  it('groups VMs by node, the same as the apps beside them', () => {
+    wrapVms([VM, { ...VM, id: 2, name: 'debian-lab', node: 'pve-c' }])
+    expect(screen.getByRole('heading', { name: 'pve-a' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'pve-c' })).toBeInTheDocument()
+    expect(screen.getAllByText(/1 VM$/)).toHaveLength(2)
+  })
+
+  it('opens the VM actions off the tile, not the app ones', async () => {
+    wrapVms([VM])
+    openMenu(screen.getByRole('button', { name: /actions for win11-lab/i }))
+    const items = await screen.findAllByRole('menuitem')
+    const labels = items.map((i) => i.textContent?.trim())
+    expect(labels).toContain('Clone')
+    expect(labels).not.toContain('Reconfigure')
+  })
+
+  it('opens the VM detail from the name, which is a row on the VMs table', () => {
+    wrapVms([VM])
+    fireEvent.click(screen.getByRole('button', { name: 'win11-lab' }))
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
+      to: '/vms', search: expect.objectContaining({ open: 1 }),
+    }))
   })
 })

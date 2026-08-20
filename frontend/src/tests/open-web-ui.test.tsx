@@ -12,8 +12,10 @@ const APP = {
   node: 'pve-a', ctid: 150, category: null, catalog_slug: 'immich',
   icon_initials: 'IM', icon_colors: null, web_port: null, web_protocol: 'http',
   web_path: '/', catalog_port: 8096 as number | null,
-  status: 'running', ip: '10.0.0.5', cpu_pct: null,
+  status: 'running', ip: '10.0.0.5', cpu_pct: null, icon_url: null,
   mem_bytes: null, mem_total_bytes: null, uptime_s: null,
+  disk_bytes: null, disk_total_bytes: null,
+  net_in_bps: null, net_out_bps: null,
   update_available: null, adopted: true,
 }
 
@@ -48,31 +50,29 @@ let dhcpGuest = false
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
-  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
   useNavigate: () => () => {},
   useSearch: () => ({}),
-  useParams: () => ({ appId: '1' }),
-  // Tab body is a routed child; AppDetail's own header/button row is what
-  // this file is about (hosts.test.tsx precedent).
-  Outlet: () => null,
 }))
 
-import { AppDetail } from '../routes/apps'
+// The app detail PAGE is gone; the Open button lives on the action bar every
+// app row carries, using the same useOpenWebUi call the page used to make.
+import { AppActionBar } from '../components/AppActionBar'
+import type { AppRow } from '../api/hooks'
 
 const withQuery = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
-describe('AppDetail Open web UI', () => {
+describe('AppActionBar Open', () => {
   beforeEach(() => { calls.length = 0 })
 
   it('shows the action when the catalog names a port, and opens the address it fetches live, not app.ip', async () => {
     APP.catalog_port = 8096
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-    withQuery(<AppDetail />)
+    withQuery(<AppActionBar app={APP as AppRow} />)
 
-    const btn = await screen.findByRole('button', { name: 'Open web UI' })
+    const btn = await screen.findByRole('button', { name: 'Open' })
     fireEvent.click(btn)
 
     await waitFor(() => expect(calls).toContain('/apps/1/network'))
@@ -89,9 +89,9 @@ describe('AppDetail Open web UI', () => {
     dhcpGuest = true
     APP.catalog_port = 8000
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-    withQuery(<AppDetail />)
+    withQuery(<AppActionBar app={APP as AppRow} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open web UI' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
     await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
       'http://10.9.9.9:8000/', '_blank', 'noopener,noreferrer'))
     openSpy.mockRestore()
@@ -100,9 +100,12 @@ describe('AppDetail Open web UI', () => {
 
   it('hides the action entirely when the catalog names no port', async () => {
     APP.catalog_port = null
-    withQuery(<AppDetail />)
+    withQuery(<AppActionBar app={APP as AppRow} />)
 
-    await screen.findByText('Immich')
-    expect(screen.queryByRole('button', { name: 'Open web UI' })).not.toBeInTheDocument()
+    // The overflow menu is always there, so its arrival is what proves the
+    // bar has rendered rather than the assertion below passing on an empty
+    // tree.
+    await screen.findByRole('button', { name: /More actions/ })
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument()
   })
 })

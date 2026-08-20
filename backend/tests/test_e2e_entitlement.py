@@ -192,7 +192,7 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
                             headers=csrf_header(client))
             assert r.status_code == 200 and r.json()["tier"] == "pro"
             ent = client.get("/api/v1/entitlements").json()
-            assert ent["tier"] == "pro" and len(ent["features"]) == 81
+            assert ent["tier"] == "pro" and len(ent["features"]) == 82
             assert all(ent["features"].values())  # dormant api: all entitled
     finally:
         proc.terminate()

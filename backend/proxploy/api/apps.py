@@ -187,12 +187,28 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
     rolls back everything flushed so far in this request (nothing partially
     lands), and a single audit row covers the whole batch rather than one per
     item.
+
+    An adopted app takes its category and its web port from the catalog entry
+    its slug names, the same way services/appstore.py::install copies category
+    onto an app it creates. Without this every adopted app read back with no
+    category at all, so the Apps grid grouped all eight of them under
+    "unknown", and with no web_port, so nothing on the row knew which port its
+    web UI answers on. AdoptIn carries neither field, so there is no caller
+    value to overwrite here; both are copied only when the slug actually
+    resolves, and an unrecognised or absent slug adopts exactly as before.
     """
+    slugs = {i.catalog_slug for i in body.items if i.catalog_slug}
+    # One query for the batch rather than one per item, matching list_apps.
+    entries = {e.slug: e for e in db.query(CatalogEntry)
+               .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
     adopted = []
     for item in body.items:
         slug = f"{item.catalog_slug or 'adopted'}-{item.host_id}-{item.ctid}"
+        entry = entries.get(item.catalog_slug)
         row = App(host_id=item.host_id, ctid=item.ctid, name=item.name, slug=slug,
                   catalog_slug=item.catalog_slug, web_protocol="http", web_path="/",
+                  category=entry.category if entry else None,
+                  web_port=entry.port if entry else None,
                   adopted=True)
         db.add(row)
         try:

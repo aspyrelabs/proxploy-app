@@ -12,10 +12,11 @@ from proxploy.api.deps import (authorize, dedupe_vms, get_db,
                                require_entitlement, scope_vm)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
-from proxploy.models import Host, User, Vm, to_iso
+from proxploy.models import Host, User, Vm
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host, guest_node
 from proxploy.services.lifecycle import VM_ACTIONS
+from proxploy.services.netconfig import build_net, parse_net
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import is_self
 
@@ -42,16 +43,41 @@ def _vm_out(v: Vm, host: Host, snapshots) -> dict:
     return {
         "id": v.id, "host_id": v.host_id, "host_name": host.name,
         "vmid": v.vmid, "name": v.name, "status": v.status,
-        "os_type": v.os_type,  # NULL in Phase 2 (plan decision 5)
+        # PVE's RAW ostype: "l26", "win11", "w2k19", "other", and so on. It is
+        # deliberately not collapsed to "linux"/"windows" here, because that
+        # mapping is presentation and the specific value is information the
+        # API could never get back once thrown away. The client maps it for
+        # the OS icon. NULL is still possible and is not an error: a VM the
+        # poller has not reached yet, or one whose config read was refused.
+        "os_type": v.os_type,
         "cpu_cores": v.cpu_cores,
         "cpu_pct": g["cpu_pct"] if g else None,
-        "mem_bytes": v.mem_bytes, "disk_bytes": v.disk_bytes,
+        # Identical shape and identical meaning to apps.py::_app_out, which is
+        # the whole point: memory and storage are each a used/allocated PAIR so
+        # a card can draw a bar, and network is two rates with no denominator
+        # because there is no link speed to divide by. These used to be one
+        # number each here, holding the ALLOCATION under names that meant
+        # USAGE on an app, so the VMs page could draw a CPU meter and nothing
+        # else. See the Vm model and migration a1f4d80c3e69.
+        #
+        # Null is normal on every one of them and is not an error: a VM the
+        # poller has not reached yet, a stopped guest, and (permanently, for
+        # disk_bytes) a VM with no QEMU guest agent installed all land here.
+        "mem_bytes": v.mem_bytes, "mem_total_bytes": v.mem_total_bytes,
+        "disk_bytes": v.disk_bytes, "disk_total_bytes": v.disk_total_bytes,
+        "net_in_bps": v.net_in_bps_cached, "net_out_bps": v.net_out_bps_cached,
         "uptime_s": v.uptime_s,
         # A linked clone is only possible FROM a template, so the clone dialog
         # needs this to stop offering an option PVE always refuses.
         "template": bool(v.template),
         "node": v.node_name,
-        "synced_at": to_iso(v.synced_at),
+        # Tri-state on purpose, served raw as true / false / null: the agent
+        # answered, Proxmox says this guest has no working agent, or nobody
+        # knows (never probed, stopped, or the host was unreachable). Folding
+        # null into false would tell an operator to install something that may
+        # well already be there, and it is the false case that explains why
+        # disk_bytes above is null for so many VMs.
+        "guest_agent_ok": v.guest_agent_ok,
     }
 
 
@@ -112,6 +138,247 @@ def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
                          host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body,
                          row=v)
+
+
+# --- VM Options ----------------------------------------------------------
+#
+# The settings on PVE's own Options tab that Proxploy can actually write, read
+# off pve-manager 9.2.11's apidoc.js, PVE/API2/Qemu.pm and PVE/QemuServer.pm on
+# 2026-08-20. Anything not named here is refused rather than forwarded: the
+# config dict below is unpacked into a proxmoxer kwargs call, so the key space
+# is a trust boundary, and a typo reaching PVE comes back as an unhelpful 500.
+#
+# There is deliberately NO table here of which key applies to a running guest
+# and which waits for a restart. That is presentation, it changes with the
+# guest's own `hotplug` setting, and the honest answer for any single write is
+# whatever PVE's pending config says AFTER the write, which is what the PUT
+# reports. A table here would be a second, staler source for the same fact.
+OPTION_KEYS = (
+    "name", "onboot", "startup", "ostype", "boot", "tablet", "hotplug", "acpi",
+    "kvm", "freeze", "localtime", "startdate", "smbios1", "agent", "protection",
+    "vmstatestorage",
+)
+
+# Settings PVE hands to root@pam and nobody else. They appear in NO privilege
+# bucket in QemuServer's $check_vm_modify_config_perm, so its fall-through
+# `else { die "only root can set '$opt' config" }` refuses them for every API
+# token, however widely privileged. Proxploy authenticates as an API token
+# (proxploy@pve!lifecycle), so there is no role change that would unlock these.
+# Reported to the caller so the dialog can show them switched off with a
+# reason, and refused here so a write never becomes a Proxmox 500.
+RESTRICTED_OPTION_KEYS = ("spice_enhancements", "amd-sev", "intel-tdx")
+
+# The options whose value is one comma-joined `k=v` string rather than a scalar.
+# The caller sends an OBJECT of sub-keys for these and it is merged into the
+# string PVE already holds, never used to rebuild it: see _merge_option.
+PROPERTY_OPTION_KEYS = frozenset({"startup", "boot", "agent", "smbios1"})
+
+# Property strings where PVE lets the FIRST sub-key's value be written bare,
+# with no `name=` in front of it. `agent: 1` means `enabled=1`, `boot: cdn`
+# means `legacy=cdn`, `startup: 2` means `order=2`. This mapping is what stops
+# a merge producing two values for one sub-key; see _merge_option.
+OPTION_DEFAULT_SUBKEY = {"startup": "order", "boot": "legacy", "agent": "enabled"}
+
+
+def _pve_scalar(value):
+    """A JSON scalar as PVE wants it on the wire: booleans are 1 and 0."""
+    return (1 if value else 0) if isinstance(value, bool) else value
+
+
+def _merge_option(key: str, existing: str, changes: dict) -> str:
+    """Fold `changes` into the property string PVE already holds for `key`.
+
+    Merged, never rebuilt, for the reason services/netconfig.py exists: a
+    property string carries sub-keys this code does not model, and rebuilding
+    drops them silently. `smbios1` is the case that matters most. It usually
+    holds nothing but `uuid=`, the identifier a guest's operating system reads
+    as its machine id, and rewriting it from a form's fields would hand the
+    guest a new identity: Windows deactivates, licences bound to it stop
+    matching, and anything keyed on the machine id treats it as a new host.
+    So parse, change the named sub-keys only, join back in the same order.
+
+    A sub-key set to null is removed. If that empties the string there is
+    nothing left to write, and the caller turns "" into a delete of the whole
+    key, because PVE has no representation for an empty property string.
+    """
+    parts = parse_net(existing)
+    default_sub = OPTION_DEFAULT_SUBKEY.get(key)
+    if default_sub and parts:
+        head, head_value = next(iter(parts.items()))
+        if head_value is None:
+            # A bare head token is the default sub-key's VALUE, but parse_net
+            # can only see a token with no "=" and reports it as a key with no
+            # value. Naming it before the merge is what stops `agent: 1` plus
+            # {"enabled": false} turning into `1,enabled=0`, which is two
+            # values for one sub-key with the stale one first. PVE accepts the
+            # named form (`agent=enabled=0`) and normalises it on write.
+            parts = {default_sub: head,
+                     **{k: v for k, v in parts.items() if k != head}}
+    for sub, value in changes.items():
+        if value is None:
+            parts.pop(sub, None)
+        else:
+            parts[sub] = str(_pve_scalar(value))
+    return build_net(parts)
+
+
+# Both routes below split their PVE calls across TWO clients, the same split
+# api/network.py::set_guest_nic uses and for the same reason. Reads (`/config`,
+# `/pending`, the node's storage list) need only VM.Audit and go on the
+# monitoring token, which is the one capability every enrolled host is
+# guaranteed to have. The write needs VM.Config.Options and its neighbours and
+# goes on lifecycle. Neither role carries the other's privileges, so running
+# both halves through one client 403s on whichever half it is not entitled to.
+
+
+@router.get("/{vm_id}/options",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("vms.options"))])
+def vm_options(request: Request, vm_id: int, db=Depends(get_db),
+               user: User = Depends(_read)):
+    """Every Options-tab setting Proxploy can write, plus what is waiting.
+
+    `values` carries ONLY the keys PVE actually holds, and that absence is
+    information, not a gap to fill in. A setting missing from a VM's config is
+    the setting at Proxmox's own default, which is not the same as the setting
+    written to that default value: `qm set --acpi 1` pins acpi to 1 forever,
+    while no acpi line at all means "whatever this Proxmox version defaults
+    to". Reporting a missing key as its default would erase that distinction
+    and the next save would pin every default the operator never touched.
+    """
+    v, host = _vm_and_host(db, vm_id)
+    node = guest_node(host, v)
+    try:
+        client = client_for_host(request.app, db, host, capability="monitoring")
+        cfg = client.guest_config("qemu", node, v.vmid)
+        pending = client.guest_pending("qemu", node, v.vmid)
+        storages = client.storages(node)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    return {
+        "values": {k: cfg[k] for k in OPTION_KEYS if k in cfg},
+        "pending": {k: pending[k] for k in OPTION_KEYS if k in pending},
+        "restricted": list(RESTRICTED_OPTION_KEYS),
+        # From the mirror, not a fifth call to PVE: the poller keeps this
+        # fresh and every other VM route already answers from it.
+        "running": v.status == "running",
+        # For vmstatestorage, which is where PVE dumps a suspended machine's
+        # memory, so only a store that accepts disk images can hold it.
+        "storages": [s["storage"] for s in storages
+                     if "images" in str(s.get("content") or "").split(",")],
+    }
+
+
+@router.put("/{vm_id}/options",
+            dependencies=[Depends(_configure),
+                          Depends(require_entitlement("vms.options"))])
+def vm_options_update(request: Request, vm_id: int,
+                      body: dict = Body(default={}), db=Depends(get_db),
+                      user: User = Depends(_configure)):
+    """Sparse edit of the Options tab. Absent leaves alone, null resets.
+
+    Three-way on purpose, and the third way is the one that is easy to get
+    wrong. A key ABSENT from the body is untouched. A key with a value is
+    written. A key sent as null is DELETED from the VM's config, which is the
+    only way to give a setting back to Proxmox's default: writing the default
+    value instead records a decision the operator did not make, and it sticks
+    even if a later Proxmox changes what the default is. PVE spells that
+    removal `delete=<key>` on the same PUT, so both halves go in one call and
+    the operator gets one atomic change rather than two.
+
+    Not a job: PVE writes a guest config synchronously, so there is no task to
+    follow and reporting one would be theatre. Whether the change is live or
+    waiting for a restart comes from the guest's own pending config, read
+    after the write; see ProxmoxClient.guest_config_update for why it cannot
+    be read off the write's return value.
+    """
+    v, host = _vm_and_host(db, vm_id)
+    ip = request.client.host if request.client else None
+
+    blocked = [k for k in body if k in RESTRICTED_OPTION_KEYS]
+    if blocked:
+        raise HTTPException(403, {
+            "error": "root_only_option",
+            "detail": (f"Proxmox lets only the root account change "
+                       f"{', '.join(sorted(blocked))}. Proxploy signs in with an "
+                       f"API token, so this has to be done in the Proxmox web "
+                       f"interface as root."),
+        })
+    unknown = [k for k in body if k not in OPTION_KEYS]
+    if unknown:
+        raise HTTPException(422, f"Proxploy cannot change: {', '.join(sorted(unknown))}")
+    for key, value in body.items():
+        wants_object = key in PROPERTY_OPTION_KEYS
+        if value is None:
+            continue
+        if wants_object != isinstance(value, dict):
+            raise HTTPException(422, (
+                f"{key} takes a group of settings, not a single value."
+                if wants_object else
+                f"{key} takes a single value, not a group of settings."))
+    if not body:
+        raise HTTPException(422, "nothing to change")
+
+    node = guest_node(host, v)
+    try:
+        writer = client_for_host(request.app, db, host, capability="lifecycle")
+        reader = client_for_host(request.app, db, host, capability="monitoring")
+        cfg = reader.guest_config("qemu", node, v.vmid)
+    except ProxmoxError as e:
+        # Its own audit action, for the reason api/network.py:261 spells out:
+        # nothing has been sent to the machine yet, so an operator reading the
+        # log must not see a row saying its settings were changed.
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="vm.options_read", target_type="vm", target_id=v.id,
+                    params={"changed": sorted(body)}, result="error", ip=ip)
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+
+    config: dict = {}
+    removals: list[str] = []
+    for key, value in body.items():
+        if value is None:
+            removals.append(key)
+        elif key in PROPERTY_OPTION_KEYS:
+            merged = _merge_option(key, str(cfg.get(key) or ""), value)
+            # Every sub-key cleared leaves no string to write, and PVE has no
+            # empty property string; the setting is simply gone.
+            if merged:
+                config[key] = merged
+            else:
+                removals.append(key)
+        else:
+            config[key] = _pve_scalar(value)
+    if removals:
+        config["delete"] = ",".join(removals)
+
+    try:
+        writer.guest_config_update("qemu", node, v.vmid, config)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="vm.options",
+                    target_type="vm", target_id=v.id,
+                    params={"changed": sorted(body)}, result="error", ip=ip)
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    write_audit(db, actor_type="user", actor_id=user.id, action="vm.options",
+                target_type="vm", target_id=v.id,
+                params={"changed": sorted(body)}, ip=ip)
+    request.app.state.bus.publish("resource", {"type": "vm", "id": v.id,
+                                               "change": "reconfigured"})
+
+    detail = None
+    try:
+        pending = {k: p for k, p in reader.guest_pending("qemu", node, v.vmid).items()
+                   if k in OPTION_KEYS}
+        pending_reboot = any(k in pending for k in body)
+    except ProxmoxError:
+        # The settings are saved; only the follow-up question failed. Saying
+        # "no restart needed" here would be a guess in the reassuring
+        # direction, which is the bug this whole path exists to avoid.
+        pending, pending_reboot = {}, True
+        detail = ("The settings were saved, but Proxmox could not be asked whether "
+                  "the running machine has them yet. Restart it if a change does "
+                  "not show up.")
+    return {"changed": sorted(body), "pending_reboot": pending_reboot,
+            "pending": pending, "detail": detail}
 
 
 # PVE's own name rule for a guest: a DNS-ish label, since it becomes the

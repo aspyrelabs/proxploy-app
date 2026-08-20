@@ -15,7 +15,9 @@ let nodeVmsResult: 'empty' | 'ok' | 'error' = 'empty'
 // HostsPage's own unfiltered `/apps` (its Apps section, distinct from the
 // nodeAppsResult pair above). Defaults empty so every existing assertion
 // about the section's empty state keeps rendering it that way.
-let appsResult: 'empty' | 'ok' = 'empty'
+let appsResult: 'empty' | 'ok' | 'twoNodes' | 'many' = 'empty'
+// HostsPage's own unfiltered `/vms`, its Virtual machines section.
+let vmsResult: 'empty' | 'ok' | 'unknownOs' = 'empty'
 // NodeDetailPage/NodeOverview/NodeHardware read their own params; reassigned
 // per-test so a single fixture (pve1/pve2/pve3, see the cluster fixture
 // below) can stand in for whichever node a test needs to look at.
@@ -45,7 +47,7 @@ const nodeAppFixture = () => ({
 const nodeVmFixture = () => ({
   id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
   status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
-  mem_bytes: 2161287168, disk_bytes: null, uptime_s: 500, synced_at: null,
+  mem_bytes: 2161287168, disk_bytes: null, uptime_s: 500, guest_agent_ok: null,
 })
 
 // A full AppRow, for HostsPage's own Apps section (the appsResult control
@@ -60,6 +62,17 @@ const appFixture = () => ({
   disk_bytes: 5368709120, disk_total_bytes: 21474836480,
   net_in_bps: 1200, net_out_bps: 800,
   uptime_s: 100, update_available: null, adopted: false,
+})
+
+// A full VmRow, for HostsPage's own Virtual machines section.
+const vmFixture = (over: Record<string, unknown> = {}) => ({
+  id: 3, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11-lab',
+  status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
+  mem_bytes: 2161287168, mem_total_bytes: 4294967296,
+  disk_bytes: null, disk_total_bytes: 34359738368,
+  net_in_bps: 1200, net_out_bps: 800,
+  uptime_s: 500, guest_agent_ok: null, node: 'pve1',
+  ...over,
 })
 
 vi.mock('../api/client', () => ({
@@ -139,7 +152,29 @@ vi.mock('../api/client', () => ({
       return Promise.resolve([])
     }
     if (path === '/apps') {
-      return Promise.resolve(appsResult === 'ok' ? [appFixture()] : [])
+      if (appsResult === 'ok') return Promise.resolve([appFixture()])
+      // A guest running on pve3 that was READ THROUGH host-01, which is one
+      // API endpoint into the cluster. This is the shape the grouping is
+      // about: host_name is the same for both rows, the node is not.
+      if (appsResult === 'twoNodes') {
+        return Promise.resolve([
+          appFixture(),
+          { ...appFixture(), id: 8, name: 'nextcloud', node: 'pve3' },
+        ])
+      }
+      if (appsResult === 'many') {
+        return Promise.resolve(Array.from({ length: 12 }, (_, i) => ({
+          ...appFixture(), id: i + 1, name: `app-${String(i + 1).padStart(2, '0')}`,
+        })))
+      }
+      return Promise.resolve([])
+    }
+    if (path === '/vms') {
+      if (vmsResult === 'ok') return Promise.resolve([vmFixture()])
+      if (vmsResult === 'unknownOs') {
+        return Promise.resolve([vmFixture({ id: 4, name: 'solaris-box', os_type: 'solaris' })])
+      }
+      return Promise.resolve([])
     }
     if (path.startsWith('/apps')) return Promise.resolve([])
     if (path.startsWith('/vms')) return Promise.resolve([])
@@ -217,7 +252,8 @@ const withQuery = (ui: React.ReactNode) => {
 
 describe('HostsPage', () => {
   beforeEach(() => {
-    nodesResult = 'ok'; summaryResult = 'ok'; features = {}; appsResult = 'empty'
+    nodesResult = 'ok'; summaryResult = 'ok'; features = {}
+    appsResult = 'empty'; vmsResult = 'empty'
     navigate.mockClear()
     // No test in this file should inherit another's stored state.
     localStorage.clear()
@@ -352,11 +388,60 @@ describe('HostsPage', () => {
     expect(screen.queryByRole('button', { name: 'Icon view' })).toBeNull()
     expect(screen.queryByRole('button', { name: /update all/i })).toBeNull()
   })
+
+  it('groups the apps under the node each one runs on, not the host they came through', async () => {
+    // With more than one machine a flat list does not say which one anything
+    // is on. Both of these rows carry host_name host-01, because that host is
+    // one API endpoint into the cluster; they run on two different nodes.
+    appsResult = 'twoNodes'
+    withQuery(<HostsPage />)
+    expect(await screen.findByTestId('app-icon-8')).toBeInTheDocument()
+    // pve1 also names a node card further up the page, so these pin the
+    // section headings specifically.
+    expect(screen.getByRole('heading', { name: 'pve1' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'pve3' })).toBeInTheDocument()
+    // One app under each heading, and each says which host answers for it.
+    expect(screen.getAllByText('on host-01 · 1 app')).toHaveLength(2)
+  })
+
+  it('shows every app, with no cap', async () => {
+    // It used to slice(0, 8) in poll order, so a missing app could equally be
+    // stopped, gone, or simply the ninth.
+    appsResult = 'many'
+    withQuery(<HostsPage />)
+    expect(await screen.findByTestId('app-icon-12')).toBeInTheDocument()
+    expect(screen.getByText('on host-01 · 12 apps')).toBeInTheDocument()
+  })
+
+  it('draws the VMs as the same icon grid, wearing their OS', async () => {
+    // It was a Name/Node/Status table of the first four VMs, which read as a
+    // different kind of thing from the apps beside it.
+    vmsResult = 'ok'
+    withQuery(<HostsPage />)
+    const tile = await screen.findByTestId('vm-icon-3')
+    expect(tile.querySelector('img')).toHaveAttribute('src', '/windows.svg')
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'pve1' })).toBeInTheDocument()
+  })
+
+  it('falls back to initials for a VM whose OS Proxmox does not name', async () => {
+    // `solaris` is a real PVE ostype with no icon of ours behind it, so the
+    // tile must look like an app with no logo, not like a broken image.
+    vmsResult = 'unknownOs'
+    withQuery(<HostsPage />)
+    const tile = await screen.findByTestId('vm-icon-4')
+    expect(tile.querySelector('img')).toBeNull()
+    expect(tile).toHaveTextContent('SO')
+  })
 })
 
 describe('NodeCard', () => {
   beforeEach(() => {
     nodesResult = 'ok'; summaryResult = 'ok'; features = {}; navigate.mockClear()
+    // These tests find a card by its node name, and the Apps and VMs sections
+    // now head their groups with that same name, so a leaked fixture from the
+    // block above would make that lookup ambiguous.
+    appsResult = 'empty'; vmsResult = 'empty'
   })
 
   it('links to the node, not just the host: a host can have many nodes', async () => {

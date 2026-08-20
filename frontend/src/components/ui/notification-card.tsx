@@ -112,7 +112,13 @@ export function NotificationCard({
     <div role="alert"
       className={`relative w-[400px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-ctl border bg-panel text-[13px] shadow-[0_8px_24px_rgba(0,0,0,.28)] ${BORDER[severity]}`}
     >
-      <div className={`grid grid-cols-[16px_1fr] items-start gap-x-2.5 gap-y-1 px-3 py-2.5 pr-8 ${FILL[severity]}`}>
+      {/* minmax(0,1fr), not a bare 1fr: a bare fr track cannot shrink below
+          its content's min-content, and this card's own comment below notes
+          that an error can arrive as one long unbroken token. The description
+          escapes that with break-words; the title has no such escape, so
+          without this a single long word in a title widens the text column
+          past the card. */}
+      <div className={`grid grid-cols-[16px_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 px-3 py-2.5 pr-8 ${FILL[severity]}`}>
         <Icon name={iconName} size={16} className="translate-y-0.5" />
         <div className="col-start-2 font-medium tracking-tight text-text">
           {title}

@@ -44,6 +44,28 @@ def test_docker_entrypoint_pins_proxy_headers():
     assert "--forwarded-allow-ips" not in exec_start
 
 
+def test_uvicorn_invocations_disable_ws_per_message_deflate():
+    """The VM console is a websocket relay, and uvicorn defaults
+    ws_per_message_deflate to True, so without this flag every browser (they
+    all offer permessage-deflate) gets the VNC stream re-compressed frame by
+    frame on the event loop thread that also relays it.
+
+    Measured against a throwaway uvicorn echo server, 64 KiB payloads: 2.20 ms
+    per round trip with deflate on, 0.17 ms with it off. On the real console
+    path a full 1280x800 repaint spent 257 ms in transfer with it on versus 93
+    to 126 ms with it off. The bytes saved are near zero because noVNC asks for
+    Tight, i.e. the payload is already JPEG/zlib compressed.
+
+    Same "packaging drift" guard as the two --proxy-headers tests above: the
+    flag only exists on these command lines, so a dropped flag is a silent 2x
+    on every console and nothing else would notice.
+    """
+    for path in (REPO_ROOT / "packaging" / "proxploy.service",
+                 REPO_ROOT / "packaging" / "docker" / "entrypoint.sh"):
+        exec_start = _non_comment_lines(path.read_text())
+        assert "--ws-per-message-deflate false" in exec_start, path
+
+
 def _wrapped_app(tmp_path, trusted_hosts):
     """Same app the `client` fixture in conftest.py builds, wrapped in
     uvicorn's own ProxyHeadersMiddleware so scope["client"] gets rewritten

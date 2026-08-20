@@ -2,8 +2,7 @@ import { useEffect } from 'react'
 import { createRoute, useParams } from '@tanstack/react-router'
 import { ApiError } from '../api/client'
 import type { ConsoleKind } from '../api/consoles'
-import { consoleWsUrl, useReconnectingTicket } from '../api/consoles'
-import { VncConsole } from '../components/console/VncConsole'
+import { consoleWsPath, consoleWsUrl, useReconnectingTicket } from '../api/consoles'
 import { Terminal } from '../components/terminal/Terminal'
 import { rootRoute } from './shell'
 
@@ -80,6 +79,56 @@ export function shellFailure(e: unknown, kind: ConsoleKind = 'host'):
   return { title: `Could not open a ${NOUN[kind]}`, note: raw || 'No reason was given.' }
 }
 
+/** The address of the vendored noVNC application, configured for one VM
+ *  console session.
+ *
+ *  We render noVNC's own UI rather than a wrapper of our own, because the
+ *  sidebar it ships with (quality, compression, scaling, view only, clipboard,
+ *  the on-screen keyboard, Ctrl+Alt+Del, fullscreen) is the console people
+ *  already know from Proxmox, and rebuilding a worse version of it was not
+ *  worth the code. It lives in public/novnc, see its VENDORED.md.
+ *
+ *  Only `path` and `password` change per session. Everything else here is
+ *  fixed, and each one is fixed for a reason:
+ *
+ *  - `host` and `port` are empty on purpose. That is the switch that puts
+ *    noVNC on the branch of app/ui.js's connect() which builds the socket URL
+ *    with `new URL(path, location.href)` instead of dialling a VNC host
+ *    itself. Our websocket is on our own origin behind our own auth, so there
+ *    is no host for it to dial.
+ *  - `path` is rooted at the site, not relative, because that `new URL` call
+ *    resolves against /novnc/vnc.html; a relative path would land on
+ *    /novnc/api/v1/... and hit the SPA fallback instead of the socket.
+ *  - `encrypt` is inert on this branch (the protocol is taken from
+ *    location.protocol) but is sent anyway so the control shows the truth and
+ *    is greyed out rather than inviting a toggle that does nothing.
+ *  - `reconnect` is off, and this is the one that would cost somebody an
+ *    evening. Console tickets are single use: services/consoletickets.py's
+ *    redeem_ticket stamps redeemed_at under an UPDATE ... WHERE redeemed_at
+ *    IS NULL, so the second redemption of a ticket gets nothing back and the
+ *    socket is closed 4401. An automatic reconnect would therefore never
+ *    reconnect; it would spend five seconds on a countdown and then report a
+ *    refused ticket, which reads as the console being broken rather than as
+ *    the session having ended. Reopening the window mints a fresh ticket and
+ *    is the only thing that can work.
+ *
+ *  The password goes in the fragment rather than the query string, which is
+ *  what noVNC's own webutil.js recommends and getConfigVar supports: a
+ *  fragment is not sent to the server, so a one-shot VNC password does not
+ *  land in our access log on the way to a page we serve ourselves.
+ */
+function vncAppUrl(id: number, ticket: string, password?: string): string {
+  const q = new URLSearchParams({
+    host: '', port: '',
+    encrypt: String(location.protocol === 'https:'),
+    path: consoleWsPath('vm', id, ticket),
+    autoconnect: 'true',
+    reconnect: 'false',
+  })
+  const hash = password ? `#password=${encodeURIComponent(password)}` : ''
+  return `/novnc/vnc.html?${q}${hash}`
+}
+
 function Failure({ title, note }: { title: string; note: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink p-8">
@@ -127,13 +176,22 @@ export function ConsoleWindow() {
   // edge. This window has no sidebar or topbar for the same reason, and a
   // bordered box floating inside it reads as an app panel rather than as a
   // console on the machine.
-  const wsUrl = consoleWsUrl(target, id, ticket.data.ticket)
   return (
     <div className="h-screen">
       {target === 'vm'
-        ? <VncConsole key={ticket.data.ticket} bare wsUrl={wsUrl}
-            onDisconnect={reconnect} />
-        : <Terminal key={ticket.data.ticket} bare wsUrl={wsUrl}
+        // noVNC reports its own failures inside its own UI, so unlike the
+        // terminal there is no onDrop to route back into <Failure>: the
+        // status bar and the disconnect screen in the iframe are the ones
+        // that know what happened.
+        ? <iframe key={ticket.data.ticket} title="VM console"
+            src={vncAppUrl(id, ticket.data.ticket, ticket.data.password)}
+            // noVNC's own fullscreen button and its clipboard panel are the
+            // point of using its UI, and both are permission-gated inside an
+            // iframe. Without this allow list they are present and dead.
+            allow="fullscreen; clipboard-read; clipboard-write"
+            className="block h-full w-full border-0" />
+        : <Terminal key={ticket.data.ticket} bare
+            wsUrl={consoleWsUrl(target, id, ticket.data.ticket)}
             onDrop={({ fatal }) => (fatal ? giveUp() : reconnect())} />}
     </div>
   )

@@ -38,9 +38,13 @@ Two background processes. Start the backend first.
 
 ```bash
 cd backend && .venv/bin/uvicorn --factory proxploy.main:create_app --reload \
-  --timeout-graceful-shutdown 3 --port 8000
+  --timeout-graceful-shutdown 3 --port 8000 --ws-per-message-deflate false
 cd frontend && npm run dev
 ```
+
+`--ws-per-message-deflate false` matches packaging/proxploy.service: it keeps
+uvicorn from re-compressing the VNC console stream (2.20 ms versus 0.17 ms per
+64 KiB round trip, measured), so a dev console feels like a deployed one.
 
 Wait for both, then drive. `/meta/onboarding` is the health probe to use —
 it is public, whereas `/meta/version` 401s when unauthenticated:

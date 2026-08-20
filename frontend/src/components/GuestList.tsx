@@ -4,6 +4,7 @@ import { fmtBytes, fmtPct } from '../lib/format'
 import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
+import { UpdateDot } from './UpdateDot'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, UsageBar } from './UsageBar'
 
@@ -16,7 +17,9 @@ export type Guest = {
   label: string
   status: string
   cpu_pct: number | null
-  /** Pre-formatted, because only the app side has a total to divide by. */
+  /** Pre-formatted: both sides now report used and allocated memory, but the
+   *  total is still nullable on either, so the "x / y" or bare "x" choice is
+   *  made once per guest here rather than in the row. */
   mem: string
   /** AppRow.update_available carried through; null on the VM side, which has
    *  no update concept. */
@@ -38,9 +41,13 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
     ...vms.map((v): Guest => ({
       kind: 'vm', id: v.id, host_id: v.host_id, name: v.name, label: `VM ${v.vmid}`,
       status: v.status, cpu_pct: v.cpu_pct,
-      // No mem_total_bytes on VmRow. Inventing one to make the two rows match
-      // would be making up a number.
-      mem: fmtBytes(v.mem_bytes),
+      // The same "used / allocated" the app rows above get, and for the first
+      // time the same meaning behind it: a VM's mem_bytes used to be the
+      // memory ASSIGNED, so this line printed an allocation where the app
+      // lines printed a usage and the column read as two different numbers.
+      mem: v.mem_total_bytes
+        ? `${fmtBytes(v.mem_bytes)} / ${fmtBytes(v.mem_total_bytes)}`
+        : fmtBytes(v.mem_bytes),
       // VmRow has no update concept at all: not "no update available", but
       // nothing to report either way.
       update: null,
@@ -97,10 +104,12 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
 
 function GuestRow({ guest: g }: { guest: Guest }) {
   const navigate = useNavigate()
-  const detail = g.kind === 'app' ? '/apps/$appId' : '/vms/$vmId'
-  const params = g.kind === 'app'
-    ? { appId: String(g.id) }
-    : { vmId: String(g.id) }
+  // Neither kind has a detail page any more: both are a row that expands on
+  // its own table, and `open` is which one. Same search param on both sides,
+  // different table.
+  const open = () => navigate(g.kind === 'app'
+    ? { to: '/apps' as never, search: { open: g.id } as never }
+    : { to: '/vms' as never, search: { open: g.id } as never })
   return (
     <div role="listitem"
       className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line-soft
@@ -110,7 +119,7 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       <button type="button"
         className="min-w-0 basis-full text-left font-mono text-[13px] text-text
                    transition hover:text-amber sm:basis-auto"
-        onClick={() => navigate({ to: detail as never, params: params as never })}>
+        onClick={open}>
         {g.name}
       </button>
       <span className="rounded-full border border-line-soft bg-panel-2 px-2 py-0.5
@@ -118,12 +127,7 @@ function GuestRow({ guest: g }: { guest: Guest }) {
         {g.kind}
       </span>
       <span className="font-mono text-[11px] text-text-3">{g.label}</span>
-      {g.update && (
-        <span className="rounded bg-amber-dim px-1.5 py-0.5 font-mono text-[9.5px]
-                         uppercase text-amber">
-          update
-        </span>
-      )}
+      {g.update && <UpdateDot />}
       <StatusPill status={g.status} />
       <div className="flex w-28 items-center gap-2">
         <div className="flex-1"><UsageBar pct={g.cpu_pct} gradient={CPU_GRADIENT} /></div>

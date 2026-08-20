@@ -1,34 +1,21 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createRoute, Link, Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router'
+import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { notify } from '../lib/notify'
-import { useAppActionGates } from '../api/app-gates'
 import type { AppRow, DiscoveredRow, UpdateInfo } from '../api/hooks'
-import { useEntitlements, useMetrics } from '../api/hooks'
-import { useOpenWebUi } from '../api/open-web-ui'
+import { useEntitlements } from '../api/hooks'
 import { AppTable, AppTableSkeleton } from '../components/AppTable'
 import { UpdateAllButton } from '../components/UpdateAllButton'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
-import { IconTile } from '../components/IconTile'
 import { JobLog } from '../components/JobLog'
-import { KVGrid } from '../components/KVGrid'
-import { openConsoleWindow } from '../lib/console-window'
-import { ConsoleButton, LifecycleActions } from '../components/LifecycleActions'
-import { MigrateDialog } from '../components/MigrateDialog'
 import { QueryState } from '../components/QueryState'
-import { Skeleton, SkeletonAvatar, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
-import { ReconfigureDialog } from '../components/ReconfigureDialog'
-import { UninstallDialog } from '../components/UninstallDialog'
+import { SkeletonGroup } from '../components/ui/skeleton'
 import { Loading } from '../components/ui/loading'
 import { TerminalPanel } from '../components/TerminalPanel'
-import { Sparkline } from '../components/charts/Sparkline'
 import { StatusPill } from '../components/StatusPill'
-import { RAM_GRADIENT, UsageBar } from '../components/UsageBar'
-import { ScriptPanel } from '../components/ScriptPanel'
-import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted so the loading placeholder lays out in the SAME grid as the cards it
@@ -38,7 +25,7 @@ const inputCls ='rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]
 type HostRow = { id: number; name: string }
 
 export function AppsPage() {
-  const search = useSearch({ strict: false }) as { host?: number; q?: string }
+  const search = useSearch({ strict: false }) as { host?: number; q?: string; open?: number }
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(false)
   const [adopting, setAdopting] = useState(false)
@@ -71,7 +58,7 @@ export function AppsPage() {
   })
   const discovered = discoveredQuery.data
 
-  const setSearch = (patch: Partial<{ host?: number; q?: string }>) =>
+  const setSearch = (patch: Partial<{ host?: number; q?: string; open?: number }>) =>
     navigate({ to: '/apps' as never, search: { ...search, ...patch } as never, replace: true })
 
   return (
@@ -168,210 +155,16 @@ export function AppsPage() {
         {/* One view, deliberately. This page is for scanning every app at
             once, which is what a table is for; the Hosts page carries the
             icon glance. A switcher here would offer two ways to read the
-            same thing on a page that only needs one. */}
-        {(rows) => <AppTable apps={rows} />}
+            same thing on a page that only needs one.
+
+            Which row is expanded lives in the URL, next to the filters, so
+            /apps?open=3 opens straight onto that app the way its own page
+            used to. */}
+        {(rows) => <AppTable apps={rows} open={search.open}
+                             onOpen={(open) => setSearch({ open })} />}
       </QueryState>
 
       {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}
-    </div>
-  )
-}
-
-// No Console tab: it opens in a window of its own (lib/console-window.ts).
-const TABS = [
-  { path: '.', label: 'Overview' },
-  { path: 'logs', label: 'Logs' },
-  { path: 'config', label: 'Config' },
-] as const
-
-// A hook cannot be called conditionally, so app.catalog_port != null (the
-// only apps with a web UI at all) gates whether this component renders at
-// all, rather than living as an early return inside it.
-function OpenWebUiButton({ app, denied }: { app: AppRow; denied: boolean }) {
-  const openWebUi = useOpenWebUi(app)
-  return (
-    <Button variant="go" disabled={denied || openWebUi.isPending}
-      title={denied ? 'Not included in your plan' : undefined}
-      onClick={() => {
-        const tab = window.open('', '_blank')
-        if (tab) tab.opener = null
-        openWebUi.mutate(tab)
-      }}>
-      Open web UI
-    </Button>
-  )
-}
-
-export function AppDetail() {
-  const { appId } = useParams({ strict: false }) as { appId: string }
-  const ent = useEntitlements()
-  const [migrating, setMigrating] = useState(false)
-  const [uninstalling, setUninstalling] = useState(false)
-  const [reconfiguring, setReconfiguring] = useState(false)
-  const appQuery = useQuery({
-    queryKey: ['apps', Number(appId)],
-    queryFn: () => api<AppRow>(`/apps/${appId}`),
-    refetchInterval: 15_000,
-  })
-  // -1 is not a real host id: before the app has loaded there is no host to
-  // gate against, and useAppActionGates' own "innocent until proven guilty"
-  // rule already withholds nothing until entitlements and capabilities land.
-  const gates = useAppActionGates(appQuery.data?.host_id ?? -1)
-  return (
-    <QueryState query={appQuery} emptyTitle="" emptyNote="" empty={() => false}
-                // The header and the tab strip, which is the whole page
-                // frame; the tab body below draws its own placeholder off its
-                // own query. Getting here means a cold navigation straight to
-                // an app URL, since arriving from the grid finds this row
-                // already cached and never shows a wait at all.
-                loading={<SkeletonGroup label="Loading app">
-                  <SkeletonLine className="w-14 text-[12px]" />
-                  <SkeletonAvatar className="mt-2 mb-4 items-center gap-4"
-                                  tile="h-14 w-14 rounded-tile"
-                                  lines={['w-44 text-[22px]', 'w-64 text-[12px]']}>
-                    {/* Lifecycle, Migrate, Reconfigure, Uninstall, then the
-                        StatusPill: four md buttons at 35px and a 19px pill,
-                        the same figures AppCardSkeleton derives. */}
-                    <div className="flex shrink-0 items-center gap-3">
-                      {['w-28', 'w-24', 'w-28', 'w-24'].map((w) => (
-                        <Skeleton key={w} className={`h-[35px] rounded-ctl ${w}`} />
-                      ))}
-                      <Skeleton className="h-[19px] w-20 rounded-full" />
-                    </div>
-                  </SkeletonAvatar>
-                  <div className="mb-5 flex gap-1 border-b border-line-soft">
-                    {TABS.map((t) => (
-                      <SkeletonLine key={t.path} className="mx-3 my-2 w-16 text-[13px]" />
-                    ))}
-                  </div>
-                </SkeletonGroup>}
-                errorTitle="This app could not be loaded"
-                errorNote="Proxploy could not reach the backend, or the app no longer exists.">
-      {(app) => {
-        // Same wait-for-first-fetch gate as vms.tsx's cloneDenied, otherwise every
-        // plan sees a dead Migrate button for the whole first entitlements fetch.
-        const migrateDenied = ent.data != null && !ent.has('migrate.cross_host')
-        const reconfigureDenied = ent.data != null && !ent.has('apps.reconfigure')
-        const uninstallDenied = ent.data != null && !ent.has('apps.uninstall')
-        // src/api/app-gates.ts's useAppActionGates already computes this,
-        // and AppIconMenu already reads it from there: keeping this page's
-        // own copy is exactly the drift that hook's docstring warns about.
-        const openUiDenied = gates.openUi.denied
-        return (
-          <div>
-            <Link to={'/apps' as never} className="text-[12px] text-text-3 hover:text-text">← Apps</Link>
-            <div className="mt-2 mb-4 flex items-center gap-4">
-              <IconTile name={app.name} iconUrl={app.icon_url} size={56}
-                        initials={app.icon_initials} colors={app.icon_colors} />
-              <div>
-                <h1 className="font-display text-[22px] font-semibold">
-                  {app.name}
-                  {app.update_available && (
-                    <span className="ml-2 rounded-tile bg-amber-dim px-2 py-0.5
-                                     font-mono text-[10.5px] uppercase text-amber">
-                      update available
-                    </span>
-                  )}
-                </h1>
-                <div className="font-mono text-[12px] text-text-3">
-                  CT {app.ctid} · {app.host_name}{app.ip ? ` · ${app.ip}${app.web_port ? `:${app.web_port}` : ''}` : ''}
-                </div>
-              </div>
-              <div className="ml-auto flex items-center gap-3">
-                <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} />
-                {/* A window of its own, not a tab: same as the node shell and
-                    the VM console (lib/console-window.ts). Navigating away
-                    from a tab kills the session behind it. */}
-                <ConsoleButton hostId={app.host_id}
-                  onClick={() => openConsoleWindow('app', app.id)} />
-                {app.catalog_port != null && <OpenWebUiButton app={app} denied={openUiDenied} />}
-                <Button variant="ghost" disabled={migrateDenied}
-                  title={migrateDenied ? 'Not included in your plan' : undefined}
-                  onClick={() => setMigrating(true)}>
-                  Migrate
-                </Button>
-                <Button variant="ghost" disabled={reconfigureDenied}
-                  title={reconfigureDenied ? 'Not included in your plan' : undefined}
-                  onClick={() => setReconfiguring(true)}>
-                  Reconfigure
-                </Button>
-                <Button variant="danger" disabled={uninstallDenied}
-                  title={uninstallDenied ? 'Not included in your plan' : undefined}
-                  onClick={() => setUninstalling(true)}>
-                  Uninstall
-                </Button>
-                <StatusPill status={app.status} />
-              </div>
-            </div>
-            <div className="mb-5 flex gap-1 border-b border-line-soft">
-              {TABS.map((t) => (
-                <Link
-                  key={t.path}
-                  to={t.path as never}
-                  from={'/apps/$appId' as never}
-                  activeOptions={{ exact: t.path === '.' }}
-                  className="px-3 py-2 text-[13px] text-text-2 hover:text-text [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text"
-                >
-                  {t.label}
-                </Link>
-              ))}
-            </div>
-            <Outlet />
-            {migrating && <MigrateDialog app={app} onClose={() => setMigrating(false)} />}
-            {reconfiguring && <ReconfigureDialog app={app} onClose={() => setReconfiguring(false)} />}
-            {uninstalling && <UninstallDialog app={app} onClose={() => setUninstalling(false)} />}
-          </div>
-        )
-      }}
-    </QueryState>
-  )
-}
-
-export function AppOverview() {
-  const { appId } = useParams({ strict: false }) as { appId: string }
-  const id = Number(appId)
-  const { data: app } = useQuery({
-    queryKey: ['apps', id],
-    queryFn: () => api<AppRow>(`/apps/${id}`),
-  })
-  const cpu = useMetrics(`app:${id}`, 'cpu_pct', 24)
-  if (!app) return null
-  const memPct = app.mem_bytes != null && app.mem_total_bytes
-    ? (app.mem_bytes / app.mem_total_bytes) * 100 : null
-  return (
-    <div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className={card}>
-          <h2 className="mb-2 text-[13px] uppercase text-text-3">CPU · 24h</h2>
-          <Sparkline ts={cpu.data?.ts ?? []} values={cpu.data?.value ?? []} color="#F5B544" />
-        </div>
-        <div className={card}>
-          <h2 className="mb-2 text-[13px] uppercase text-text-3">Memory</h2>
-          <div className="mb-2 font-mono text-[13px] text-text">
-            {fmtBytes(app.mem_bytes)} / {fmtBytes(app.mem_total_bytes)} ({fmtPct(memPct)})
-          </div>
-          <UsageBar pct={memPct} gradient={RAM_GRADIENT} />
-        </div>
-        <div className={card}>
-          <h2 className="mb-2 text-[13px] uppercase text-text-3">Status</h2>
-          <StatusPill status={app.status} />
-          <div className="mt-2 font-mono text-[12px] text-text-2">up {fmtUptime(app.uptime_s)}</div>
-        </div>
-      </div>
-      <div className={`${card} mt-4`}>
-        <KVGrid items={[
-          ['CTID', app.ctid],
-          ['Node', app.node],
-          ['IP', app.ip ?? 'unknown'],
-          ['Category', app.category ?? 'unknown'],
-          ['Web port', app.web_port ?? 'unknown'],
-          ['Update', app.update_available ?? 'Up to date'],
-        ]} />
-      </div>
-      <div className={`${card} mt-4`}>
-        <h2 className="mb-3 text-[13px] uppercase text-text-3">Update</h2>
-        <UpdatePanel appId={id} app={app} />
-      </div>
     </div>
   )
 }
@@ -464,7 +257,7 @@ export function UpdatePanel({ appId, app }:
 // Route objects, imported by router.tsx (cluster.tsx precedent). shellRoute
 // comes from ./shell, not ../router: importing router.tsx here would force
 // its eager createRouter() to run mid-cycle when this file is the import
-// entry point (e.g. in tests), before appsRoute/appDetailRoute exist.
+// entry point (e.g. in tests), before appsRoute exists.
 import { shellRoute } from './shell'
 
 export const appsRoute = createRoute({
@@ -473,21 +266,13 @@ export const appsRoute = createRoute({
   validateSearch: (s: Record<string, unknown>) => ({
     host: s.host != null ? Number(s.host) : undefined,
     q: typeof s.q === 'string' && s.q ? s.q : undefined,
+    // The expanded row, same Number coercion as `host`: search params arrive
+    // as strings and the table compares this against AppRow.id.
+    open: s.open != null ? Number(s.open) : undefined,
   }),
   component: AppsPage,
 })
 
-export const appDetailRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/apps/$appId',
-  component: AppDetail,
-})
-
-export const appOverviewRoute = createRoute({
-  getParentRoute: () => appDetailRoute,
-  path: '/',
-  component: AppOverview,
-})
 export function AppLogs({ appId }: { appId: number }) {
   const { data, isError } = useQuery({
     queryKey: ['apps', appId, 'logs'],
@@ -504,23 +289,3 @@ export function AppLogs({ appId }: { appId: number }) {
   }
   return <TerminalPanel lines={data ?? []} />
 }
-
-function AppLogsTab() {
-  const { appId } = useParams({ strict: false }) as { appId: string }
-  return <AppLogs appId={Number(appId)} />
-}
-
-export const appLogsRoute = createRoute({
-  getParentRoute: () => appDetailRoute, path: 'logs', component: AppLogsTab,
-})
-
-const AppConfigTab = () => {
-  const { appId } = useParams({ strict: false }) as { appId: string }
-  return <ScriptPanel appId={Number(appId)} />
-}
-
-export const appConfigRoute = createRoute({
-  getParentRoute: () => appDetailRoute,
-  path: 'config',
-  component: AppConfigTab,
-})

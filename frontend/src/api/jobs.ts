@@ -11,6 +11,9 @@ export const TERMINAL: JobStatus[] = ['succeeded', 'failed', 'canceled', 'interr
 export type JobRow = {
   id: number; kind: string; status: JobStatus
   target_type: string | null; target_id: number | null
+  /** Captured when the job was created, so a destroyed guest is still named.
+   *  Optional because a job created before that column existed has none. */
+  target_name?: string | null
   params: Record<string, unknown> | null
   result: Record<string, unknown> | null
   error: string | null; progress_pct: number | null
@@ -23,6 +26,8 @@ export type JobEventRow = { seq: number; ts: string; stream: string; message: st
 export type ActivityRow = {
   kind: 'job' | 'audit' | 'alert'; id: number; at: string; title: string
   status: string | null; target_type: string | null; target_id: number | null
+  /** As JobRow.target_name; null on an alert row, which labels itself. */
+  target_name?: string | null
   actor: string | null; job_id: number | null; progress_pct: number | null
   severity: string | null; message: string | null
 }

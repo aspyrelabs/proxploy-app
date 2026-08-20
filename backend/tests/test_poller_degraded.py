@@ -111,8 +111,12 @@ def _seed_guests(app, host_id):
                net_in_bps_cached=10.0, net_out_bps_cached=20.0,
                net_sampled_at=utcnow())
         v = Vm(host_id=host_id, vmid=201, name="win11", status="running",
-              cpu_cores=4, mem_bytes=8_589_934_592, disk_bytes=50_000_000_000,
-              uptime_s=7200)
+              os_type="win11", cpu_cores=4, mem_bytes=6_000_000_000,
+              mem_total_bytes=8_589_934_592, disk_bytes=20_000_000_000,
+              disk_total_bytes=50_000_000_000,
+              net_in_cached=1000, net_out_cached=2000,
+              net_in_bps_cached=10.0, net_out_bps_cached=20.0,
+              net_sampled_at=utcnow(), uptime_s=7200, guest_agent_ok=False)
         db.add_all([a, v])
         db.commit()
         return a.id, v.id
@@ -146,7 +150,79 @@ def test_an_unreachable_host_marks_its_apps_and_vms_unknown(tmp_path):
         assert a.net_sampled_at is not None
 
         assert v.status == "unknown"
+        # Live measurements go, exactly as they do for an app above.
         assert v.uptime_s is None
+        assert v.mem_bytes is None
+        assert v.disk_bytes is None
+        assert v.net_in_bps_cached is None
+        assert v.net_out_bps_cached is None
+        # The ALLOCATION stays. It is a fact about how the guest is
+        # configured, not a reading, and it is the denominator the VMs page
+        # draws its meters against: blanking it would turn "usage unknown"
+        # into "this VM has no memory and no disk".
+        assert v.cpu_cores == 4
+        assert v.mem_total_bytes == 8_589_934_592
+        assert v.disk_total_bytes == 50_000_000_000
+        # os_type is held for the same reason, and more strongly: what a guest
+        # runs is part of its identity, not a reading. Clearing it would lose
+        # the OS icon on every VM of an unreachable host and force the config
+        # read again on recovery, for a value that cannot have changed.
+        assert v.os_type == "win11"
+        # guest_agent_ok is held for the same reason, and it is the one that
+        # would hurt most to lose: "this VM has no guest agent" is why its
+        # storage reads unknown, and blanking it during an outage swaps a real
+        # finding for "we have no idea" on every VM of that host. What is
+        # installed inside a guest does not change because we lost the route
+        # to its hypervisor, and the next cycle would answer identically.
+        assert v.guest_agent_ok is False
+        # Raw counters and their timestamp survive for the same reason the
+        # app's do: _update_net_rates needs them to diff against.
+        assert v.net_in_cached == 1000 and v.net_sampled_at is not None
+
+
+def test_a_dead_host_retrying_does_not_restate_a_cleared_vm(tmp_path):
+    """The sweep runs on every one of a dead host's retries, forever. A VM
+    already fully cleared must produce no write and no event, which is what
+    stops the same rows and the same events being republished every cycle."""
+    from proxploy.models import Vm
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    _app_id, vm_id = _seed_guests(app, host_id)
+
+    app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+    events = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    assert not any(d.get("type") == "vm" for _, d in events)
+    with app.state.sessionmaker() as db:
+        assert db.get(Vm, vm_id).mem_bytes is None
+
+
+def test_a_vm_already_unknown_with_a_stale_reading_gets_it_cleared(tmp_path):
+    """Status alone is not proof a VM was swept: ingest_cycle's own absence
+    path, or a restart, can leave a stale reading behind an unknown status."""
+    from proxploy.models import Vm
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE(fail=True)
+    app, c, host_id = _app_with(tmp_path, fake)
+    with app.state.sessionmaker() as db:
+        v = Vm(host_id=host_id, vmid=202, name="ghost", status="unknown",
+               uptime_s=None, mem_bytes=6_000_000_000,
+               mem_total_bytes=8_589_934_592, net_in_bps_cached=10.0)
+        db.add(v)
+        db.commit()
+        vm_id = v.id
+
+    events = app.state.poller._mark_unreachable(host_id, "boom: connection refused")
+
+    with app.state.sessionmaker() as db:
+        v = db.get(Vm, vm_id)
+        assert v.mem_bytes is None and v.net_in_bps_cached is None
+        assert v.mem_total_bytes == 8_589_934_592
+    # Its status did not change, so no event for it, but the write happened.
+    assert not any(d.get("type") == "vm" for _, d in events)
 
 
 def test_a_healthy_hosts_guests_are_untouched(tmp_path):

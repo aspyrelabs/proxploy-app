@@ -254,7 +254,25 @@ def vm_console_ticket(request: Request, vm_id: int, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="console.open",
                target_type="vm", target_id=v.id,
                ip=request.client.host if request.client else None)
-    return {"ticket": raw, "expires_at": to_iso(expires_at)}
+    # The VNC password goes to the browser and NOWHERE else. It is not passed
+    # to mint_ticket (so it never lands in console_tickets), not logged, and
+    # not in the audit row above; the browser is the only party that needs it,
+    # because the RFB challenge/response it answers runs end to end between
+    # QEMU and noVNC through a bridge that does no protocol translation. See
+    # ProxmoxClient.vncproxy for why it is a generated password rather than
+    # the vncticket, and what that keeps out of the browser's hands.
+    #
+    # Lifetime is PVE's, not ours: the password is set on the VM's VNC server
+    # for one connection and this ticket expires in console_ticket_ttl_s
+    # anyway, so it is short lived and single use on both sides.
+    #
+    # `or upstream["ticket"]` is the pre-generate-password behaviour, for a
+    # PVE old enough to accept the parameter and ignore it rather than return
+    # a password. A console that works with a wider secret beats a console
+    # that cannot connect; the comment is here so it is a known trade, not an
+    # accident.
+    return {"ticket": raw, "expires_at": to_iso(expires_at),
+            "password": upstream.get("password") or upstream["ticket"]}
 
 
 @router.websocket("/vms/{vm_id}/vnc/ws")

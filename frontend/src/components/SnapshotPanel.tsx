@@ -5,13 +5,11 @@ import { useSnapshotAction, useSnapshots } from '../api/snapshots'
 import type { SnapshotRow } from '../api/snapshots'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { EmptyState } from './EmptyState'
-import { inputCls } from './LoginForm'
+import { TakeSnapshotDialog } from './TakeSnapshotDialog'
 import { Button } from './ui/button'
 import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 import { fmtBytes } from '../lib/format'
 import { notify } from '../lib/notify'
-
-const card = 'rounded-card border border-line-soft bg-panel p-5'
 
 type Guard = { phrase: string; detail: string; name: string }
 
@@ -29,7 +27,8 @@ function fmtWhen(t: number | null | undefined): string {
  * Delete row actions and 'Take snapshot'". The with-RAM (vmstate) checkbox is
  * doc 01 §4's "with-RAM option surfaced".
  *
- * This panel only ever mounts under /vms/$vmId, i.e. qemu guests, which is why
+ * This panel only ever mounts inside a VM's row on /vms, i.e. qemu guests,
+ * which is why
  * the vmstate checkbox is unconditional, PVE rejects vmstate for LXC, so an
  * LXC consumer would have to hide it before reusing this component.
  */
@@ -38,9 +37,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   const { data, isError, isPending } = useSnapshots(vmId)
   const run = useSnapshotAction()
   const [guard, setGuard] = useState<Guard | null>(null)
-  const [name, setName] = useState('')
-  const [desc, setDesc] = useState('')
-  const [withRam, setWithRam] = useState(false)
+  const [taking, setTaking] = useState(false)
 
   // useEntitlements().has() is false until /entitlements resolves, gate on
   // ent.data != null too or every plan sees a dead panel during the first fetch.
@@ -51,9 +48,19 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   // is not a snapshot and cannot be rolled back to or deleted.
   const rows: SnapshotRow[] = (data ?? []).filter((s) => s.name !== 'current')
 
-  const fire = (op: 'create' | 'rollback' | 'delete', target: string, confirm?: string) =>
+  // `create` carries the dialog's fields; rollback and delete carry none. They
+  // used to read the open form's state whichever op was running, so typing a
+  // description and then pressing Rollback sent that description with the
+  // rollback. Nothing downstream read it, but it was never true.
+  const fire = (
+    op: 'create' | 'rollback' | 'delete',
+    target: string,
+    confirm?: string,
+    create?: { description: string; vmstate: boolean },
+  ) =>
     run.mutate(
-      { vmId, op, name: target, description: desc, vmstate: withRam, confirm },
+      { vmId, op, name: target, confirm,
+        description: create?.description, vmstate: create?.vmstate },
       {
         onError: (e) => {
           const body = e instanceof ApiError ? (e.body as Record<string, unknown>) : null
@@ -69,7 +76,9 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
         },
         onSuccess: () => {
           setGuard(null)
-          if (op === 'create') { setName(''); setDesc(''); setWithRam(false) }
+          // The dialog owns the form fields and unmounts with them, so there
+          // is nothing to clear here.
+          if (op === 'create') setTaking(false)
           notify.success(`Snapshot ${op} queued`)
         },
       },
@@ -90,43 +99,23 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
 
   return (
     <>
-      <div className={card}>
-        <h2 className="mb-3 text-[13px] uppercase text-text-3">Take snapshot</h2>
-        <form
-          className="flex flex-wrap items-end gap-3"
-          onSubmit={(e) => { e.preventDefault(); fire('create', name.trim()) }}
-        >
-          <div className="w-[200px]">
-            <label htmlFor="snap-name" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-              Snapshot name
-            </label>
-            <input id="snap-name" className={inputCls} value={name} placeholder="pre-upgrade"
-              onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="w-[260px]">
-            <label htmlFor="snap-desc" className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-              Description (optional)
-            </label>
-            <input id="snap-desc" className={inputCls} value={desc}
-              onChange={(e) => setDesc(e.target.value)} />
-          </div>
-          <label htmlFor="snap-ram" className="flex items-center gap-2 pb-2 text-[13px] text-text-2">
-            <input id="snap-ram" type="checkbox" checked={withRam}
-              onChange={(e) => setWithRam(e.target.checked)} />
-            Include RAM (vmstate)
-          </label>
-          <Button type="submit" className="mb-0.5" disabled={denied || run.isPending || name.trim() === ''}
-            title={planTitle}>
-            Take snapshot
-          </Button>
-        </form>
-        <p className="mt-2 text-[12px] text-text-3">
-          Including RAM captures the running state so a rollback resumes mid-boot,
-          but writes the whole memory allocation to disk and briefly pauses the guest.
-        </p>
+      {/* The panel is a LIST now. Taking a snapshot moved into a dialog behind
+          this button: it is an occasional, deliberate act, and the form used to
+          sit permanently open above the table, putting three inputs and a
+          paragraph of vmstate caveats between the reader and the rollback
+          points they came to look at.
+
+          No card of its own here. VmDetailPanel already wraps this in one, and
+          two nested cards drew two borders around the same content. */}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-[11px] uppercase tracking-wide text-text-3">Snapshots</h3>
+        <Button size="sm" disabled={denied || run.isPending} title={planTitle}
+          onClick={() => setTaking(true)}>
+          Take snapshot
+        </Button>
       </div>
 
-      <div className={`${card} mt-4`}>
+      <div>
         {/* Checked BEFORE `rows.length === 0`, the same ordering BridgesCard
             uses and for the same reason: `data` is undefined until the list
             comes back from PVE, so `rows` is empty during the fetch and this
@@ -187,6 +176,16 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
           </table>
         )}
       </div>
+
+      {taking && (
+        <TakeSnapshotDialog
+          vmName={vmName}
+          pending={run.isPending}
+          onClose={() => setTaking(false)}
+          onSubmit={(v) => fire('create', v.name, undefined,
+                                { description: v.description, vmstate: v.vmstate })}
+        />
+      )}
 
       {guard && (
         <ConfirmSelfDialog

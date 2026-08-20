@@ -44,13 +44,12 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 const DEFAULT_PARAMS = { hostId: '7', node: 'pve1', kind: 'host', id: '7' }
 let params: Record<string, string> = { ...DEFAULT_PARAMS }
 
-// xterm needs a real canvas and noVNC needs a socket; the window under test
-// only has to prove WHICH renderer it mounts, never that either one drew.
+// xterm needs a real canvas; the window under test only has to prove WHICH
+// renderer it mounts, never that it drew. The VM console needs no stub at
+// all now: it is an iframe of the vendored noVNC app, and jsdom will not
+// fetch it.
 vi.mock('../components/terminal/Terminal', () => ({
   Terminal: () => <div data-testid="terminal" />,
-}))
-vi.mock('../components/console/VncConsole', () => ({
-  VncConsole: () => <div data-testid="vnc" />,
 }))
 
 const withQuery = (ui: React.ReactNode) => {
@@ -209,12 +208,48 @@ describe('one window route, three kinds', () => {
     }
   })
 
-  it('mounts VNC for a VM, because a VM console is a screen and not a shell', async () => {
+  it('mounts the vendored noVNC app for a VM, wired to this ticket', async () => {
+    // Every assertion here is a way the console has actually broken or could
+    // break silently, so they are spelled out one at a time rather than
+    // compared against one frozen URL string that nobody would read.
     params = { ...DEFAULT_PARAMS, kind: 'vm', id: '9' }
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/entitlements')) {
+        return Promise.resolve({ tier: 'pro', features, grace: null, clock_skew: false })
+      }
+      if (path.includes('/console/tickets')) {
+        return Promise.resolve({ ticket: 'tix', expires_at: '2026-01-01T00:00:00Z',
+                                 password: 's3cr3t8x' })
+      }
+      return Promise.resolve([])
+    })
     const { ConsoleWindow } = await import('../routes/console-window')
     withQuery(<ConsoleWindow />)
-    expect(await screen.findByTestId('vnc')).toBeInTheDocument()
+    const frame = await screen.findByTitle('VM console') as HTMLIFrameElement
     expect(screen.queryByTestId('terminal')).toBeNull()
+
+    const url = new URL(frame.src, 'http://localhost/')
+    expect(url.pathname).toBe('/novnc/vnc.html')
+    const q = url.searchParams
+    // Empty host is what selects noVNC's relative-URL branch, where it builds
+    // the socket from `path` instead of dialling a VNC server itself.
+    expect(q.get('host')).toBe('')
+    // Rooted at the site: noVNC resolves this against /novnc/vnc.html, so a
+    // path relative to the caller would resolve under /novnc/ and hit the SPA
+    // fallback rather than the websocket.
+    expect(q.get('path')).toBe('/api/v1/vms/9/vnc/ws?ticket=tix')
+    expect(q.get('autoconnect')).toBe('true')
+    // Console tickets are single use (services/consoletickets.py), so an
+    // automatic reconnect can only ever redeem a spent ticket and report a
+    // refusal that reads as a broken console.
+    expect(q.get('reconnect')).toBe('false')
+    // In the fragment, not the query: a fragment is not sent to the server,
+    // so the one-shot VNC password stays out of our own access log.
+    expect(url.hash).toBe('#password=s3cr3t8x')
+    // noVNC's fullscreen and clipboard controls are permission-gated inside
+    // an iframe; without these they render and do nothing.
+    expect(frame.getAttribute('allow')).toContain('fullscreen')
+    expect(frame.getAttribute('allow')).toContain('clipboard-write')
   })
 
   it('refuses a kind it does not serve rather than guessing one', async () => {
@@ -225,6 +260,6 @@ describe('one window route, three kinds', () => {
     withQuery(<ConsoleWindow />)
     expect(await screen.findByText(/no such console/i)).toBeInTheDocument()
     expect(screen.queryByTestId('terminal')).toBeNull()
-    expect(screen.queryByTestId('vnc')).toBeNull()
+    expect(screen.queryByTitle('VM console')).toBeNull()
   })
 })

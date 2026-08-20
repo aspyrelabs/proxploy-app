@@ -95,7 +95,7 @@ def test_license_set_refresh_remove(tmp_path, csrf_header, bootstrap_admin):
         assert client.delete("/api/v1/entitlements/license",
                              headers=csrf_header(client)).status_code == 200
         ent = client.get("/api/v1/entitlements").json()
-        assert ent["tier"] == "builtin" and len(ent["features"]) == 81
+        assert ent["tier"] == "builtin" and len(ent["features"]) == 82
 
 
 def test_a_token_the_install_cannot_verify_does_not_destroy_the_cached_one(
