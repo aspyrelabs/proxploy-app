@@ -845,7 +845,7 @@ const wrap = (app: AppRow) => {
 describe('AppCard storage and network', () => {
   it('shows storage as used against allocated', () => {
     wrap(APP)
-    expect(screen.getByText(/5\.0 GB \/ 16\.0 GB/)).toBeInTheDocument()
+    expect(screen.getByText(/5\.0 GiB \/ 16\.0 GiB/)).toBeInTheDocument()
   })
 
   it('shows both network directions as rates', () => {
@@ -883,7 +883,7 @@ Expected: FAIL, the storage and network text is not in the document.
 
 - [ ] **Step 3: Add the rows to the card**
 
-In `frontend/src/components/AppCard.tsx`, import `fmtBps` and `fmtBytes` from `../lib/format`. `UsageBar` exports `CPU_GRADIENT` and `RAM_GRADIENT` and no disk gradient, so storage reuses `RAM_GRADIENT`: a fourth colour would be inventing one, and `src/tests/no-hardcoded-colors.test.ts` forbids a literal anyway. Compute alongside `memPct`:
+In `frontend/src/components/AppCard.tsx`, import `fmtBps` and `fmtBytes` from `../lib/format`, and `STORAGE_GRADIENT` from `./UsageBar` alongside the two gradients already imported. `STORAGE_GRADIENT` is what `NodeCard.tsx` already draws its own DSK row with, so the app card's disk bar matches every other disk bar in the app rather than duplicating its RAM colour. Compute alongside `memPct`:
 
 ```tsx
   const diskPct = app.disk_bytes != null && app.disk_total_bytes
@@ -895,7 +895,7 @@ Then inside the `space-y-2` block, after the RAM row:
 ```tsx
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">DSK</span>
-          <div className="flex-1"><UsageBar pct={diskPct} gradient={RAM_GRADIENT} /></div>
+          <div className="flex-1"><UsageBar pct={diskPct} gradient={STORAGE_GRADIENT} /></div>
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(diskPct)}</span>
         </div>
         <div className="font-mono text-[11px] text-text-2">
@@ -1020,7 +1020,7 @@ describe('AppTable', () => {
     expect(within(row).getByText('Immich')).toBeInTheDocument()
     expect(within(row).getByText(/CT 150/)).toBeInTheDocument()
     expect(within(row).getByText(/running/i)).toBeInTheDocument()
-    expect(within(row).getByText(/5\.0 GB \/ 16\.0 GB/)).toBeInTheDocument()
+    expect(within(row).getByText(/5\.0 GiB \/ 16\.0 GiB/)).toBeInTheDocument()
     expect(within(row).getByText(/9\.6 Mbps/)).toBeInTheDocument()
   })
 
@@ -1060,7 +1060,7 @@ import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
-import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
+import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 const HEADS = ['App', 'Host', 'Status', 'CPU', 'RAM', 'Storage', 'Network', '']
 
@@ -1123,7 +1123,7 @@ function AppTableRow({ app }: { app: AppRow }) {
       <td className={td}><Meter pct={app.cpu_pct} gradient={CPU_GRADIENT} /></td>
       <td className={td}><Meter pct={memPct} gradient={RAM_GRADIENT} /></td>
       <td className={td}>
-        <Meter pct={diskPct} gradient={RAM_GRADIENT} />
+        <Meter pct={diskPct} gradient={STORAGE_GRADIENT} />
         <div className="font-mono text-[11px] text-text-3">
           {app.disk_total_bytes
             ? `${fmtBytes(app.disk_bytes)} / ${fmtBytes(app.disk_total_bytes)}`
