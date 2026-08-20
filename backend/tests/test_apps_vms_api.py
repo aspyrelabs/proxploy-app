@@ -64,6 +64,52 @@ def test_app_detail_and_404(tmp_path, csrf_header, bootstrap_admin):
         assert c.get("/api/v1/apps/99999").status_code == 404
 
 
+def test_app_out_carries_storage_and_network(tmp_path, csrf_header, bootstrap_admin):
+    """The four fields the Apps views read. The raw netin/netout counters are
+    NOT among them: they exist so the poller can compute the next rate, and a
+    client has nothing to do with a number that only means something next to
+    the previous one."""
+    from proxploy.models import App
+
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+        with app.state.sessionmaker() as db:
+            row = db.query(App).filter_by(ctid=150).one()
+            row.disk_bytes_cached = 5_368_709_120
+            row.disk_total_bytes_cached = 17_179_869_184
+            row.net_in_bps_cached = 10_000.0
+            row.net_out_bps_cached = 20.0
+            db.commit()
+
+        immich = next(r for r in c.get("/api/v1/apps").json() if r["slug"] == "immich")
+
+        assert immich["disk_bytes"] == 5_368_709_120
+        assert immich["disk_total_bytes"] == 17_179_869_184
+        assert immich["net_in_bps"] == 10_000.0
+        assert immich["net_out_bps"] == 20.0
+        assert "net_in_cached" not in immich and "net_sampled_at" not in immich
+
+
+def test_an_unpolled_app_serializes_null_metrics_not_zero(tmp_path, csrf_header,
+                                                          bootstrap_admin):
+    """Null is the honest answer for an app the poller has not reached. Zero
+    would claim a container is idle when nothing has looked at it yet.
+
+    CT 151 (Paperless) is seeded with no cached metrics at all, which is
+    exactly that case."""
+    app, c, seed = _seeded(tmp_path)
+    with c:
+        bootstrap_admin(c)
+        seed()
+
+        row = next(r for r in c.get("/api/v1/apps").json() if r["slug"] == "paperless")
+
+        assert row["disk_bytes"] is None and row["disk_total_bytes"] is None
+        assert row["net_in_bps"] is None and row["net_out_bps"] is None
+
+
 def test_apps_carry_their_catalog_entrys_icon(tmp_path, csrf_header, bootstrap_admin):
     """An installed app shows the icon of the Store entry it came from, and the
     two absences that are normal rather than errors both serve null so the card

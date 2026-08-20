@@ -87,6 +87,13 @@ export type AppRow = {
   catalog_port: number | null
   status: string; ip: string | null; cpu_pct: number | null
   mem_bytes: number | null; mem_total_bytes: number | null
+  // Used and allocated bytes, from /cluster/resources' `disk`/`maxdisk`.
+  disk_bytes: number | null; disk_total_bytes: number | null
+  // Bytes per second, diffed by the poller from PVE's netin/netout counters.
+  // Null on the first cycle for an app and on the cycle after a container
+  // restart zeroes the counters, both of which are "no reading", never zero
+  // traffic.
+  net_in_bps: number | null; net_out_bps: number | null
   uptime_s: number | null; update_available: string | null; adopted: boolean
 }
 

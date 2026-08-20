@@ -36,7 +36,9 @@ const app = (over: Partial<AppRow> = {}): AppRow => ({
   icon_initials: null, icon_colors: null, icon_url: null,
   web_port: null, web_protocol: null, catalog_port: null,
   web_path: null, status: 'running', ip: null, cpu_pct: 12,
-  mem_bytes: 2161287168, mem_total_bytes: 4294967296, uptime_s: 100,
+  mem_bytes: 2161287168, mem_total_bytes: 4294967296,
+  disk_bytes: null, disk_total_bytes: null, net_in_bps: null, net_out_bps: null,
+  uptime_s: 100,
   update_available: null, adopted: false, ...over,
 })
 

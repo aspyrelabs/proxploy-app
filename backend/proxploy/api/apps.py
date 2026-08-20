@@ -79,6 +79,15 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
         "status": a.status_cached or "unknown", "ip": a.ip_cached,
         "cpu_pct": a.cpu_pct_cached, "mem_bytes": a.mem_bytes_cached,
         "mem_total_bytes": g["mem_total_bytes"] if g else None,
+        # Storage is a pair so the card can draw a bar; network is two rates
+        # with no denominator, because there is no link speed to divide by.
+        # The raw netin/netout counters stay on the row: they only mean
+        # something next to the previous reading, which is the poller's
+        # business, not a client's.
+        "disk_bytes": a.disk_bytes_cached,
+        "disk_total_bytes": a.disk_total_bytes_cached,
+        "net_in_bps": a.net_in_bps_cached,
+        "net_out_bps": a.net_out_bps_cached,
         "uptime_s": a.uptime_s_cached,
         "update_available": a.update_available, "adopted": a.adopted,
     }
