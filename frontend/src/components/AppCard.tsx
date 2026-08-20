@@ -1,17 +1,19 @@
 import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
-import { fmtPct } from '../lib/format'
+import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
 import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { IconTile } from './IconTile'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
-import { CPU_GRADIENT, RAM_GRADIENT, UsageBar } from './UsageBar'
+import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 
 export function AppCard({ app }: { app: AppRow }) {
   const navigate = useNavigate()
   const memPct = app.mem_bytes != null && app.mem_total_bytes
     ? (app.mem_bytes / app.mem_total_bytes) * 100 : null
+  const diskPct = app.disk_bytes != null && app.disk_total_bytes
+    ? (app.disk_bytes / app.disk_total_bytes) * 100 : null
   const stopped = app.status !== 'running'
   return (
     <div
@@ -57,6 +59,24 @@ export function AppCard({ app }: { app: AppRow }) {
           <div className="flex-1"><UsageBar pct={memPct} gradient={RAM_GRADIENT} /></div>
           <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(memPct)}</span>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="w-8 text-[10.5px] uppercase text-text-3">DSK</span>
+          <div className="flex-1"><UsageBar pct={diskPct} gradient={STORAGE_GRADIENT} /></div>
+          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(diskPct)}</span>
+        </div>
+        <div className="font-mono text-[11px] text-text-2">
+          {app.disk_total_bytes
+            ? `${fmtBytes(app.disk_bytes)} / ${fmtBytes(app.disk_total_bytes)}`
+            : fmtBytes(app.disk_bytes)}
+        </div>
+        {/* No bar for network: there is no denominator. Inventing a link
+            speed to draw against would be making up a number, which is the
+            same call GuestList makes about VM memory. */}
+        <div className="flex items-center gap-2">
+          <span className="w-8 text-[10.5px] uppercase text-text-3">NET</span>
+          <span className="font-mono text-[11px] text-text-2">↓ {fmtBps(app.net_in_bps)}</span>
+          <span className="font-mono text-[11px] text-text-2">↑ {fmtBps(app.net_out_bps)}</span>
+        </div>
       </div>
       <div className="mt-3 border-t border-line-soft pt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
         <LifecycleActions target="app" id={app.id} name={app.name} status={app.status} hostId={app.host_id} size="sm" />
@@ -92,6 +112,9 @@ export function AppCardSkeleton() {
       <div className="mt-3 space-y-2">
         <SkeletonMeterRow />
         <SkeletonMeterRow />
+        <SkeletonMeterRow />
+        <SkeletonLine className="w-28 text-[11px]" />
+        <SkeletonLine className="w-40 text-[11px]" />
       </div>
       {/* LifecycleActions + Console, both `px-2 py-1 text-[11px]` ghosts, so
           ~24px tall. */}

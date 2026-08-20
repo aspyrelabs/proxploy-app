@@ -166,12 +166,12 @@ describe('the shaped card placeholders', () => {
   })
 
   it('draws one meter row per real meter row', () => {
-    // AppCard shows CPU and RAM; NodeCard adds Disk. A placeholder with the
-    // wrong count is a card of the wrong height.
+    // AppCard shows CPU, RAM and Disk; NodeCard shows the same three. A
+    // placeholder with the wrong count is a card of the wrong height.
     const meters = (ui: React.ReactNode) =>
       render(ui).container.querySelectorAll('.rounded-full.h-1\\.5, .h-1\\.5.rounded-full').length
     expect(meters(<SkeletonMeterRow />)).toBe(1)
-    expect(meters(<AppCardSkeleton />)).toBe(2)
+    expect(meters(<AppCardSkeleton />)).toBe(3)
     expect(meters(<NodeCardSkeleton />)).toBe(3)
   })
 })
