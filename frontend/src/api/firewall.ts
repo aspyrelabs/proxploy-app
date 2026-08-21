@@ -11,6 +11,14 @@ export type Scope =
   | { kind: 'group'; hostId: number; group: string }
   | { kind: 'guest'; guestType: 'app' | 'vm'; guestId: number }
 
+/** Aliases, IP sets and references live at cluster and guest scope only. A node
+ *  has none of its own, and a security group holds nothing but rules. */
+export type ObjectScope = Extract<Scope, { kind: 'cluster' } | { kind: 'guest' }>
+
+/** Proxmox writes a firewall log per node and per guest. There is no
+ *  cluster-wide log. */
+export type LogScope = Extract<Scope, { kind: 'node' } | { kind: 'guest' }>
+
 /** A guest's firewall hangs off the router that owns the guest, not off
  *  /firewall: scope_app and scope_vm resolve a row's team from the URL path,
  *  so a guest id in a query string would carry no team scope at all. */
@@ -122,10 +130,12 @@ export function useUpdateOptions(scope: Scope) {
     api(`${basePath(scope)}/options`, { method: 'PUT', body: JSON.stringify(patch) }))
 }
 
-/** A security group's rules live under the cluster, so refs and macros for a
- *  group rule come from the cluster, not from the group. */
+/** Aliases and IP sets live at cluster scope only, PVE keeps none on a node
+ *  or a security group, so refs for a node or group rule (`+ipsetname`, an
+ *  alias name) resolve against the cluster's, not against anything of the
+ *  node's or group's own. */
 function refScope(s: Scope): Scope {
-  return s.kind === 'group' ? { kind: 'cluster', hostId: s.hostId } : s
+  return s.kind === 'node' || s.kind === 'group' ? { kind: 'cluster', hostId: s.hostId } : s
 }
 
 export function useRefs(scope: Scope) {
@@ -173,37 +183,37 @@ export function useDeleteGroup(hostId: number) {
   })
 }
 
-export function useAliases(scope: Scope) {
+export function useAliases(scope: ObjectScope) {
   return useQuery({
     queryKey: key(scope, 'aliases'),
     queryFn: () => api<{ aliases: Alias[] }>(`${basePath(scope)}/aliases`),
   })
 }
 
-export function useCreateAlias(scope: Scope) {
+export function useCreateAlias(scope: ObjectScope) {
   return useScopeMutation<Alias>(scope, (a) =>
     api(`${basePath(scope)}/aliases`, { method: 'POST', body: JSON.stringify(a) }))
 }
 
-export function useUpdateAlias(scope: Scope) {
+export function useUpdateAlias(scope: ObjectScope) {
   return useScopeMutation<{ name: string; patch: Partial<Alias> & { rename?: string } }>(
     scope, (v) => api(`${basePath(scope)}/aliases/${encodeURIComponent(v.name)}`,
       { method: 'PUT', body: JSON.stringify(v.patch) }))
 }
 
-export function useDeleteAlias(scope: Scope) {
+export function useDeleteAlias(scope: ObjectScope) {
   return useScopeMutation<{ name: string }>(scope, (v) =>
     api(`${basePath(scope)}/aliases/${encodeURIComponent(v.name)}`, { method: 'DELETE' }))
 }
 
-export function useIpSets(scope: Scope) {
+export function useIpSets(scope: ObjectScope) {
   return useQuery({
     queryKey: key(scope, 'ipsets'),
     queryFn: () => api<{ ipsets: IpSet[] }>(`${basePath(scope)}/ipsets`),
   })
 }
 
-export function useCreateIpSet(scope: Scope) {
+export function useCreateIpSet(scope: ObjectScope) {
   return useScopeMutation<IpSet>(scope, (s) =>
     api(`${basePath(scope)}/ipsets`, { method: 'POST', body: JSON.stringify(s) }))
 }
@@ -211,13 +221,13 @@ export function useCreateIpSet(scope: Scope) {
 /** `force` is always the caller's decision. PVE refuses to delete a populated
  *  set without it, and sending it by default would discard members the
  *  operator may never have opened. */
-export function useDeleteIpSet(scope: Scope) {
+export function useDeleteIpSet(scope: ObjectScope) {
   return useScopeMutation<{ name: string; force: boolean }>(scope, (v) =>
     api(`${basePath(scope)}/ipsets/${encodeURIComponent(v.name)}?force=${v.force}`,
       { method: 'DELETE' }))
 }
 
-export function useIpSetMembers(scope: Scope, name: string | null) {
+export function useIpSetMembers(scope: ObjectScope, name: string | null) {
   return useQuery({
     queryKey: key(scope, 'ipsets', name ?? ''),
     enabled: name != null,
@@ -226,7 +236,7 @@ export function useIpSetMembers(scope: Scope, name: string | null) {
   })
 }
 
-export function useAddIpSetMember(scope: Scope) {
+export function useAddIpSetMember(scope: ObjectScope) {
   return useScopeMutation<{ name: string; member: IpSetMember }>(scope, (v) =>
     api(`${basePath(scope)}/ipsets/${encodeURIComponent(v.name)}/members`,
       { method: 'POST', body: JSON.stringify(v.member) }))
@@ -235,13 +245,13 @@ export function useAddIpSetMember(scope: Scope) {
 /** encodeURIComponent on the CIDR, not template interpolation: the slash is a
  *  path separator on the way in as well as on the way out, and an unescaped
  *  one routes the call to a path that does not exist. */
-export function useDeleteIpSetMember(scope: Scope) {
+export function useDeleteIpSetMember(scope: ObjectScope) {
   return useScopeMutation<{ name: string; cidr: string }>(scope, (v) =>
     api(`${basePath(scope)}/ipsets/${encodeURIComponent(v.name)}/members/`
         + encodeURIComponent(v.cidr), { method: 'DELETE' }))
 }
 
-export function useFirewallLog(scope: Scope, start = 0, limit = 500) {
+export function useFirewallLog(scope: LogScope, start = 0, limit = 500) {
   return useQuery({
     queryKey: key(scope, 'log', String(start), String(limit)),
     refetchInterval: 10_000,
