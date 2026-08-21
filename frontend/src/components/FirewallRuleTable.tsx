@@ -108,6 +108,15 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                   {canEdit && (
                     <div className="flex items-center justify-end gap-1">
                       {i > 0 && (
+                        /* pos arithmetic rather than the neighbour's pos, and they are the same
+                           thing: PVE's pos is a dense array index, not a stable id, and it is
+                           renumbered on every delete. Measured on pve-manager 9.2.11, 2026-08-21:
+                           creating three rules then deleting the middle one renumbered
+                           0,1,2 to 0,1. The guard above is index-based because the ARRAY is what
+                           tells us there is a neighbour to swap with.
+
+                           New rules are PREPENDED by PVE, so a rule added from this table lands at
+                           pos 0 and takes precedence over everything below it. */
                         <button type="button" aria-label={`Move rule ${r.pos} up`}
                           onClick={() => move.mutate({
                             pos: r.pos, moveto: r.pos - 1, digest,
