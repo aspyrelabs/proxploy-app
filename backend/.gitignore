@@ -12,3 +12,4 @@ mutants/
 .mutmut-cache*
 dod_verify_phase*.py
 
+.coverage
