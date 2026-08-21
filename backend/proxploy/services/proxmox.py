@@ -704,6 +704,73 @@ class ProxmoxClient:
         root = self._firewall_root(loc)
         return root if loc.get("kind") == "group" else root.rules
 
+    @staticmethod
+    def _fw_params(params: dict) -> dict:
+        """Drop keys whose value is None so they are never sent at all.
+
+        proxmoxer serialises whatever it is given, so `digest=None` reaches PVE
+        as the literal string "None" and fails the digest comparison on every
+        write. Absent means "no opinion"; None is not a value PVE has.
+        """
+        return {k: v for k, v in params.items() if v is not None}
+
+    def firewall_rules(self, loc: dict) -> list[dict]:
+        try:
+            return self._rules_node(loc).get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall rule list failed", e) from e
+
+    def firewall_rule(self, loc: dict, pos: int) -> dict:
+        try:
+            return self._rules_node(loc)(int(pos)).get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall rule {pos} read failed", e) from e
+
+    def firewall_rule_create(self, loc: dict, params: dict) -> None:
+        """`params` is unpacked, never named as keywords: `icmp-type` carries a
+        hyphen and cannot be a Python keyword argument at all."""
+        try:
+            self._rules_node(loc).post(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall rule create failed", e) from e
+
+    def firewall_rule_update(self, loc: dict, pos: int, params: dict) -> None:
+        try:
+            self._rules_node(loc)(int(pos)).put(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall rule {pos} update failed", e) from e
+
+    def firewall_rule_move(self, loc: dict, pos: int, moveto: int,
+                           digest: str | None = None) -> None:
+        """Sends `moveto` alone, plus the digest. PVE's own schema says "Other
+        arguments are ignored" for this call, so sending an edit alongside a
+        move would look applied and not be."""
+        try:
+            self._rules_node(loc)(int(pos)).put(
+                **self._fw_params({"moveto": int(moveto), "digest": digest}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall rule {pos} move failed", e) from e
+
+    def firewall_rule_delete(self, loc: dict, pos: int,
+                             digest: str | None = None) -> None:
+        try:
+            self._rules_node(loc)(int(pos)).delete(
+                **self._fw_params({"digest": digest}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall rule {pos} delete failed", e) from e
+
     def task_status(self, node: str, upid: str) -> dict:
         """GET /nodes/{node}/tasks/{upid}/status, `stopped` + exitstatus == done."""
         try:
