@@ -349,6 +349,7 @@ class _ClusterNS:
         # assign fake.cluster_status_rows after construction.
         self.status = _AttrLeaf(owner, "cluster_status_rows")
         self.config = _ClusterConfigNS(owner)
+        self.firewall = _FwNode(owner, "cluster/firewall")
 
 
 class _ActionLeaf:
@@ -489,6 +490,7 @@ class _GuestNS:
         self.config = _GuestConfigLeaf(owner, kind, vmid)
         self.pending = _PendingLeaf(owner, kind, vmid)
         self.snapshot = _SnapshotNS(owner, kind, node, vmid)
+        self.firewall = _FwNode(owner, f"nodes/{node}/{kind}/{vmid}/firewall")
         if kind == "lxc":
             self.interfaces = _InterfacesLeaf(owner, vmid)
         self.migrate = _MigrateLeaf(owner, kind, node, vmid)
@@ -706,6 +708,47 @@ class _NodeStatusLeaf:
         return self._owner._record_action("node", 0, kwargs.get("command") or "power")
 
 
+class _FwNode:
+    """A firewall path in the fake, recording what was asked of it.
+
+    Mirrors proxmoxer's attribute-and-call chaining rather than the HTTP it
+    would produce, because that chaining is exactly what services/proxmox.py
+    builds and therefore exactly what can be got wrong.
+    """
+
+    def __init__(self, owner, path):
+        self._owner, self.path = owner, path
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return _FwNode(self._owner, f"{self.path}/{name}")
+
+    def __call__(self, segment):
+        return _FwNode(self._owner, f"{self.path}/{segment}")
+
+    def _check(self):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+
+    def get(self, **kwargs):
+        self._check()
+        self._owner.firewall_reads.append((self.path, dict(kwargs)))
+        return self._owner.firewall_data.get(self.path, [])
+
+    def post(self, **kwargs):
+        self._check()
+        self._owner.firewall_writes.append(("post", self.path, dict(kwargs)))
+
+    def put(self, **kwargs):
+        self._check()
+        self._owner.firewall_writes.append(("put", self.path, dict(kwargs)))
+
+    def delete(self, **kwargs):
+        self._check()
+        self._owner.firewall_writes.append(("delete", self.path, dict(kwargs)))
+
+
 class _NodeNS:
     def __init__(self, owner, name):
         self.rrddata = _KwLeaf(owner.rrd_by_node.get(name, []),
@@ -727,6 +770,7 @@ class _NodeNS:
             owner, "subscription", "subscription_by_node", name, {})
         self.dns = _SectionLeaf(owner, "dns", "dns_by_node", name, {})
         self.time = _SectionLeaf(owner, "time", "time_by_node", name, {})
+        self.firewall = _FwNode(owner, f"nodes/{name}/firewall")
 
 
 class _NodesNS:
@@ -822,6 +866,13 @@ class FakePVE:
         # cluster.resources.get() see the same list by reference from then on.
         self.resources: list[dict] = list(resources) if resources else []
         self.cluster = _ClusterNS(self, self.resources, fail)
+        # Firewall (spec 2026-08-21). `firewall_data` is keyed by the same
+        # path string _FwNode builds, so a test seeds exactly the endpoint it
+        # means: "cluster/firewall/rules", "nodes/pve1/firewall/options",
+        # "nodes/pve1/lxc/150/firewall/rules".
+        self.firewall_data: dict[str, object] = {}
+        self.firewall_reads: list[tuple[str, dict]] = []
+        self.firewall_writes: list[tuple[str, str, dict]] = []
         self.nodes = _NodesNS(self)
         self.kwargs = {}
         # lifecycle recording (Phase 3)

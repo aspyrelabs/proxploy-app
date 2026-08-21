@@ -663,6 +663,47 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"reverting staged network config failed on {node}", e) from e
 
+    # ---- Firewall (spec: docs/superpowers/specs/2026-08-21-firewall-design.md)
+    #
+    # Four scopes share one rule schema, so they share one set of methods and
+    # differ only in which proxmoxer node they hang off. `loc` is built by
+    # services/firewall.py, which is also the only place that decides a caller
+    # is allowed to name a given scope.
+    #
+    # Measured on pve-manager 9.2.11, 2026-08-21: aliases and ipset exist at
+    # cluster and guest scope only, groups at cluster only, log at node and
+    # guest only. This class does not enforce that; a caller asking a scope for
+    # an object it does not have gets PVE's own 501, which says so.
+
+    def _firewall_root(self, loc: dict):
+        """The proxmoxer node under which this scope's firewall objects live."""
+        api = self._connect()
+        kind = loc.get("kind")
+        if kind == "cluster":
+            return api.cluster.firewall
+        if kind == "group":
+            return api.cluster.firewall.groups(loc["group"])
+        if kind == "node":
+            return api.nodes(loc["node"]).firewall
+        if kind == "guest":
+            return getattr(api.nodes(loc["node"]),
+                           loc["guest_kind"])(loc["vmid"]).firewall
+        raise ProxmoxError(f"unknown firewall scope {kind!r}")
+
+    def _rules_node(self, loc: dict):
+        """Where this scope's RULES live, which is not always `.rules`.
+
+        A security group is itself a rule list: PVE documents
+        GET /cluster/firewall/groups/{group} as "List rules" and POST to the
+        same path as "Create new rule", with the identical rule schema. So the
+        group node IS the rule collection, while every other scope hangs its
+        rules off a `.rules` child. Getting this wrong is a 501 on every group
+        rule call, not a wrong answer, so it is isolated here rather than
+        repeated in each method below.
+        """
+        root = self._firewall_root(loc)
+        return root if loc.get("kind") == "group" else root.rules
+
     def task_status(self, node: str, upid: str) -> dict:
         """GET /nodes/{node}/tasks/{upid}/status, `stopped` + exitstatus == done."""
         try:
