@@ -15,7 +15,9 @@ Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 from proxploy.api.deps import (authorize, get_db, require_entitlement,
@@ -32,6 +34,13 @@ router = APIRouter(prefix="/firewall", tags=["firewall"])
 # (deps.py idiom; test_route_auth_invariant.py enforces it).
 _read = authorize("firewall", "read", scope_of=scope_host())
 _manage = authorize("firewall", "manage", scope_of=scope_host())
+
+
+# A rule position is an index into an ordered list, never a number in its own
+# right: it cannot be negative, and a rules file that reached five figures
+# would be a bug at the other end. The upper bound is deliberately generous;
+# it is here so 10**30 is refused rather than serialised into a URL.
+RulePos = Annotated[int, Path(ge=0, le=65535)]
 
 
 def _host_or_404(db, host_id: int) -> Host:
@@ -59,7 +68,24 @@ def pve_error(e: ProxmoxError) -> HTTPException:
     return HTTPException(502, str(e))
 
 
-class RuleIn(BaseModel):
+class _Body(BaseModel):
+    """What every firewall body model is configured the same way for.
+
+    extra="forbid" because a misspelled key is not a harmless key. A rule
+    posted with `dportt` used to be accepted with a 201 and the key dropped on
+    the floor, so the operator was told a rule limiting port 22 had been
+    created when what had actually been created was wide open. PVE's own API
+    refuses a parameter it does not know, and so does this.
+
+    populate_by_name so `icmp-type` is accepted under BOTH its alias and its
+    field name. Forbidding extras does not narrow that: pydantic counts a
+    field's alias AND its name as known keys while this is on, which
+    test_the_icmp_type_field_is_accepted_under_either_spelling pins.
+    """
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+
+class RuleIn(_Body):
     """One firewall rule, in PVE's own vocabulary.
 
     `icmp-type` is aliased rather than renamed. It is not a valid Python
@@ -70,7 +96,6 @@ class RuleIn(BaseModel):
     `enable` is an integer, not a boolean: PVE's schema says
     "<integer> (0 - N)". Sending true would be serialised as "True".
     """
-    model_config = {"populate_by_name": True}
 
     type: str                       # in, out, forward, group
     action: str                     # ACCEPT, DROP, REJECT, or a group name
@@ -88,10 +113,9 @@ class RuleIn(BaseModel):
     digest: str | None = None
 
 
-class RulePatch(BaseModel):
+class RulePatch(_Body):
     """Every field optional. Only fields PRESENT in the body are applied, so
     the handler dumps with exclude_unset=True: absent means "leave alone"."""
-    model_config = {"populate_by_name": True}
 
     type: str | None = None
     action: str | None = None
@@ -110,8 +134,10 @@ class RulePatch(BaseModel):
     delete: str | None = None       # PVE's own "unset these keys" parameter
 
 
-class MoveIn(BaseModel):
-    moveto: int
+class MoveIn(_Body):
+    # ge/le for the same reason RulePos carries them: a destination index cannot
+    # be negative, and an absurd one is refused here rather than forwarded.
+    moveto: int = Field(ge=0, le=65535)
     digest: str | None = None
 
 
@@ -176,7 +202,7 @@ def cluster_rule_create(request: Request, host_id: int, body: RuleIn,
 @router.put("/cluster/{host_id}/rules/{pos}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def cluster_rule_update(request: Request, host_id: int, pos: int,
+def cluster_rule_update(request: Request, host_id: int, pos: RulePos,
                         body: RulePatch, db=Depends(get_db),
                         user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -192,7 +218,7 @@ def cluster_rule_update(request: Request, host_id: int, pos: int,
 @router.put("/cluster/{host_id}/rules/{pos}/move",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def cluster_rule_move(request: Request, host_id: int, pos: int, body: MoveIn,
+def cluster_rule_move(request: Request, host_id: int, pos: RulePos, body: MoveIn,
                       db=Depends(get_db), user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
     params = {"moveto": body.moveto, "digest": body.digest}
@@ -208,7 +234,7 @@ def cluster_rule_move(request: Request, host_id: int, pos: int, body: MoveIn,
 @router.delete("/cluster/{host_id}/rules/{pos}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.rules"))])
-def cluster_rule_delete(request: Request, host_id: int, pos: int,
+def cluster_rule_delete(request: Request, host_id: int, pos: RulePos,
                         digest: str | None = None, db=Depends(get_db),
                         user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -252,7 +278,7 @@ def group_rule_create(request: Request, host_id: int, group: str, body: RuleIn,
 @router.put("/cluster/{host_id}/groups/{group}/rules/{pos}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def group_rule_update(request: Request, host_id: int, group: str, pos: int,
+def group_rule_update(request: Request, host_id: int, group: str, pos: RulePos,
                       body: RulePatch, db=Depends(get_db),
                       user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -269,7 +295,7 @@ def group_rule_update(request: Request, host_id: int, group: str, pos: int,
 @router.put("/cluster/{host_id}/groups/{group}/rules/{pos}/move",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def group_rule_move(request: Request, host_id: int, group: str, pos: int,
+def group_rule_move(request: Request, host_id: int, group: str, pos: RulePos,
                     body: MoveIn, db=Depends(get_db),
                     user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -285,7 +311,7 @@ def group_rule_move(request: Request, host_id: int, group: str, pos: int,
 @router.delete("/cluster/{host_id}/groups/{group}/rules/{pos}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.rules"))])
-def group_rule_delete(request: Request, host_id: int, group: str, pos: int,
+def group_rule_delete(request: Request, host_id: int, group: str, pos: RulePos,
                       digest: str | None = None, db=Depends(get_db),
                       user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -326,7 +352,7 @@ def node_rule_create(request: Request, host_id: int, node: str, body: RuleIn,
 @router.put("/node/{host_id}/{node}/rules/{pos}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def node_rule_update(request: Request, host_id: int, node: str, pos: int,
+def node_rule_update(request: Request, host_id: int, node: str, pos: RulePos,
                      body: RulePatch, db=Depends(get_db),
                      user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -342,7 +368,7 @@ def node_rule_update(request: Request, host_id: int, node: str, pos: int,
 @router.put("/node/{host_id}/{node}/rules/{pos}/move",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def node_rule_move(request: Request, host_id: int, node: str, pos: int,
+def node_rule_move(request: Request, host_id: int, node: str, pos: RulePos,
                    body: MoveIn, db=Depends(get_db),
                    user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -358,7 +384,7 @@ def node_rule_move(request: Request, host_id: int, node: str, pos: int,
 @router.delete("/node/{host_id}/{node}/rules/{pos}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.rules"))])
-def node_rule_delete(request: Request, host_id: int, node: str, pos: int,
+def node_rule_delete(request: Request, host_id: int, node: str, pos: RulePos,
                      digest: str | None = None, db=Depends(get_db),
                      user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -393,12 +419,11 @@ OPTION_DEFAULTS: dict[str, dict] = {
 }
 
 
-class OptionsIn(BaseModel):
+class OptionsIn(_Body):
     """Every field optional and dumped with exclude_unset, so a form that
     touched one switch sends one key. The union of all three scopes' options
     lives here; PVE rejects a key that does not belong to the scope it was
     sent to, which is the correct authority for that."""
-    model_config = {"populate_by_name": True}
 
     enable: int | None = None
     policy_in: str | None = None
@@ -494,13 +519,13 @@ def node_options_update(request: Request, host_id: int, node: str,
 # Cluster and guest scope only: a node has neither (measured, 9.2.11). The
 # helpers take a location so Task 9's guest routes reuse them unchanged.
 
-class AliasIn(BaseModel):
+class AliasIn(_Body):
     name: str
     cidr: str
     comment: str | None = None
 
 
-class AliasPatch(BaseModel):
+class AliasPatch(_Body):
     """`cidr` is required even on a pure rename: PVE's PUT schema marks it
     mandatory, so a rename that omits it is refused."""
     cidr: str
@@ -509,18 +534,18 @@ class AliasPatch(BaseModel):
     digest: str | None = None
 
 
-class IpSetIn(BaseModel):
+class IpSetIn(_Body):
     name: str
     comment: str | None = None
 
 
-class MemberIn(BaseModel):
+class MemberIn(_Body):
     cidr: str
     comment: str | None = None
     nomatch: int | None = None
 
 
-class MemberPatch(BaseModel):
+class MemberPatch(_Body):
     comment: str | None = None
     nomatch: int | None = None
     digest: str | None = None
@@ -704,7 +729,7 @@ def cluster_ipset_member_delete(request: Request, host_id: int, name: str,
 
 # --------------------------------------- security groups, references, macros
 
-class GroupIn(BaseModel):
+class GroupIn(_Body):
     group: str
     comment: str | None = None
 

@@ -14,7 +14,7 @@ from proxploy.api.deps import (authorize, cluster_scope, get_db,
                                require_entitlement, scope_app)
 from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
                                    MemberPatch, MoveIn, OptionsIn, RuleIn,
-                                   RulePatch)
+                                   RulePatch, RulePos)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso
@@ -610,7 +610,7 @@ def app_fw_rule_create(request: Request, app_id: int, body: RuleIn,
 @router.put("/{app_id}/firewall/rules/{pos}",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.rules"))])
-def app_fw_rule_update(request: Request, app_id: int, pos: int, body: RulePatch,
+def app_fw_rule_update(request: Request, app_id: int, pos: RulePos, body: RulePatch,
                        db=Depends(get_db), user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
     return fwapi.guest_rule_update(request, db, user, host, "lxc", a.ctid, a,
@@ -620,7 +620,7 @@ def app_fw_rule_update(request: Request, app_id: int, pos: int, body: RulePatch,
 @router.put("/{app_id}/firewall/rules/{pos}/move",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.rules"))])
-def app_fw_rule_move(request: Request, app_id: int, pos: int, body: MoveIn,
+def app_fw_rule_move(request: Request, app_id: int, pos: RulePos, body: MoveIn,
                      db=Depends(get_db), user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
     return fwapi.guest_rule_move(request, db, user, host, "lxc", a.ctid, a, pos,
@@ -630,7 +630,7 @@ def app_fw_rule_move(request: Request, app_id: int, pos: int, body: MoveIn,
 @router.delete("/{app_id}/firewall/rules/{pos}",
                dependencies=[Depends(_fw_guest),
                              Depends(require_entitlement("firewall.rules"))])
-def app_fw_rule_delete(request: Request, app_id: int, pos: int,
+def app_fw_rule_delete(request: Request, app_id: int, pos: RulePos,
                        digest: str | None = None, db=Depends(get_db),
                        user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)

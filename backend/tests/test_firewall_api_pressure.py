@@ -711,15 +711,15 @@ def test_an_oversized_body_does_not_crash_the_route(solo):
     assert "Traceback" not in got.text
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: every firewall body model takes pydantic's default extra="
-    "'ignore'. A rule posted with a misspelled key is accepted with a 201 "
-    "and the key is silently dropped, so the operator is told a rule was "
-    "created with a restriction it does not have. model_config should carry "
-    "extra='forbid' on RuleIn, RulePatch, MoveIn, OptionsIn, AliasIn, "
-    "AliasPatch, IpSetIn, MemberIn, MemberPatch and GroupIn "
-    "(api/firewall.py:50-105, 384-411, 485-515, 695-698)."))
 def test_an_unknown_field_in_a_rule_body_is_refused(solo):
+    """A misspelled key is refused rather than dropped.
+
+    Every firewall body model used to take pydantic's default extra="ignore",
+    so this POST was answered 201 and `dportt` went in the bin: the operator
+    was told a rule limiting port 22 had been created when what had been
+    created was wide open. api/firewall.py::_Body carries extra="forbid" for
+    all ten body models now.
+    """
     c, ids = solo["client"], solo["ids"]
     got = c.post(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules",
                  headers=_csrf(c),
@@ -729,26 +729,47 @@ def test_an_unknown_field_in_a_rule_body_is_refused(solo):
         f"operator believes limits port 22 was created wide open")
 
 
-def test_an_unknown_field_at_least_never_reaches_proxmox(solo):
-    """The half of the above that IS correct today, pinned so a later change
-    to extra handling cannot start forwarding junk keys to PVE."""
+def test_an_unknown_field_never_reaches_proxmox(solo):
+    """The other half of the refusal: a junk key is not forwarded either.
+
+    Pinned separately from the status code so a later change to extra
+    handling cannot start passing unknown keys through to PVE, whatever it
+    answers the caller.
+    """
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     fake.firewall_writes.clear()
     c.post(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules",
            headers=_csrf(c),
            json={"type": "in", "action": "ACCEPT", "dportt": "22"})
-    _, _, params = fake.firewall_writes[0]
-    assert "dportt" not in params
+    assert fake.firewall_writes == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: pos and moveto are unbounded signed integers. "
-    "api/firewall.py:101-103 declares moveto as a bare int and every rule "
-    "route declares pos as a bare int, so -5 and 10**30 are both accepted "
-    "and forwarded to Proxmox. A rule position is an index into a list and "
-    "cannot be negative; Field(ge=0) on moveto and Path(ge=0) on pos is the "
-    "whole fix."))
+def test_the_icmp_type_field_is_accepted_under_either_spelling(solo):
+    """Forbidding extras must not start refusing the one aliased field.
+
+    `icmp-type` is not a valid Python identifier, so RuleIn carries it as
+    `icmp_type` with an alias and populate_by_name. Both spellings are known
+    keys, and PVE only ever sees the hyphenated one.
+    """
+    c, ids, fake = solo["client"], solo["ids"], solo["fake"]
+    for spelling in ("icmp-type", "icmp_type"):
+        fake.firewall_writes.clear()
+        got = c.post(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules",
+                     headers=_csrf(c),
+                     json={"type": "in", "action": "ACCEPT", "proto": "icmp",
+                           spelling: "echo-request"})
+        assert got.status_code == 201, f"{spelling} -> {got.text[:150]}"
+        _, _, params = fake.firewall_writes[0]
+        assert params["icmp-type"] == "echo-request"
+        assert "icmp_type" not in params
+
+
 def test_a_rule_position_cannot_be_negative_or_absurd(solo):
+    """Both used to be unbounded signed integers: moveto was a bare int and
+    every rule route declared pos as a bare int, so -5 and 10**30 were
+    accepted and forwarded to Proxmox. A rule position is an index into an
+    ordered list, so api/firewall.py::RulePos and MoveIn.moveto both carry
+    ge=0 and an upper bound now, on all four scopes."""
     c, ids = solo["client"], solo["ids"]
     host = ids["a"]["host"]
     bad = []
@@ -1108,17 +1129,18 @@ DIGEST_CARRIERS = [
     ("group delete", "DELETE", "/groups/web", None),
 ]
 
-# Writes with nowhere to put a digest at all. The first two are gaps: PVE's
-# own POST schema for an IP set and for a security group both take a digest,
-# so a concurrent edit to either is silently overwritten. The last two are
-# not: PVE's POST schema for an alias and for an IP set member has no digest
-# parameter, so there is nothing to forward.
-DIGEST_DROPPED = [
-    ("ipset create", "POST", "/ipsets", {"name": "trusted"}, True),
-    ("group create", "POST", "/groups", {"group": "web"}, True),
+# The four writes with nowhere to put a digest. PVE's POST schema for an alias
+# and for an IP set member has no digest parameter, so there is nothing to
+# forward and a body carrying one is refused rather than quietly dropped. The
+# first two are a gap and reported as one: PVE's POST schema for an IP set and
+# for a security group each DO take a digest, and neither model has a field
+# for it.
+DIGEST_REFUSED = [
+    ("ipset create", "POST", "/ipsets", {"name": "trusted"}),
+    ("group create", "POST", "/groups", {"group": "web"}),
     ("alias create", "POST", "/aliases", {"name": "office",
-                                          "cidr": "10.0.0.0/24"}, False),
-    ("member add", "POST", "/ipsets/trusted/members", {"cidr": "10.0.0.5"}, False),
+                                          "cidr": "10.0.0.0/24"}),
+    ("member add", "POST", "/ipsets/trusted/members", {"cidr": "10.0.0.5"}),
 ]
 
 
@@ -1140,21 +1162,25 @@ def test_a_write_route_forwards_the_digest_it_was_given(solo, label, method,
         f"{label} dropped the digest: sent {params}")
 
 
-@pytest.mark.parametrize("label,method,suffix,body,is_gap", DIGEST_DROPPED,
-                         ids=[d[0] for d in DIGEST_DROPPED])
-def test_the_create_routes_have_nowhere_to_put_a_digest(solo, label, method,
-                                                        suffix, body, is_gap):
-    """Pinned as current behaviour. The two flagged is_gap=True are reported
-    as defects; the other two match PVE's own schema and are correct."""
+@pytest.mark.parametrize("label,method,suffix,body", DIGEST_REFUSED,
+                         ids=[d[0] for d in DIGEST_REFUSED])
+def test_a_create_that_cannot_send_a_digest_refuses_one(solo, label, method,
+                                                        suffix, body):
+    """PVE has nowhere to put it, so the caller is told rather than left
+    believing their create was guarded against a concurrent edit."""
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     fake.firewall_writes.clear()
-    url = f"/api/v1/firewall/cluster/{ids['a']['host']}{suffix}?digest=d-query"
+    url = f"/api/v1/firewall/cluster/{ids['a']['host']}{suffix}"
     got = c.request(method, url, headers=_csrf(c),
                     json={**body, "digest": "d-body"})
+    assert got.status_code == 422, f"{label} -> {got.status_code} {got.text[:150]}"
+    assert fake.firewall_writes == [], f"{label} still reached Proxmox"
+    # And without one it goes through, so the refusal is about the digest and
+    # not about the body.
+    got = c.request(method, url, headers=_csrf(c), json=body)
     assert got.status_code < 400, f"{label} -> {got.status_code} {got.text[:150]}"
     _, _, params = fake.firewall_writes[0]
-    assert "digest" not in params, (
-        f"{label} now forwards a digest; move it to DIGEST_CARRIERS")
+    assert "digest" not in params
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -1284,17 +1310,21 @@ def test_moving_a_rule_past_the_end_is_proxmoxs_answer_not_a_local_guess(solo):
 
 def test_a_move_never_carries_an_edit_alongside_it(solo):
     """PVE's schema says other arguments are ignored on a move, so sending an
-    edit with one would look applied and not be. MoveIn has no room for one,
-    and this pins that."""
+    edit with one would look applied and not be.
+
+    MoveIn has no room for one and now says so: it used to drop the edit
+    quietly (extra="ignore"), which told the operator their comment had been
+    saved. It is a 422 naming the field instead, and nothing is sent.
+    """
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     fake.firewall_writes.clear()
-    c.put(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules/0/move",
-          headers=_csrf(c),
-          json={"moveto": 1, "digest": "d1", "comment": "should not travel",
-                "action": "DROP"})
-    _, _, params = fake.firewall_writes[0]
-    assert set(params) <= {"moveto", "digest"}, (
-        f"a move carried an edit that PVE would silently ignore: {params}")
+    got = c.put(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules/0/move",
+                headers=_csrf(c),
+                json={"moveto": 1, "digest": "d1", "comment": "should not travel",
+                      "action": "DROP"})
+    assert got.status_code == 422, got.text[:200]
+    assert fake.firewall_writes == [], (
+        "a move carried an edit that PVE would silently ignore")
 
 
 def test_deleting_an_ipset_never_forces_on_the_callers_behalf(solo):

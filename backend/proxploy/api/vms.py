@@ -13,7 +13,7 @@ from proxploy.api.deps import (authorize, dedupe_vms, get_db,
                                require_entitlement, scope_vm)
 from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
                                    MemberPatch, MoveIn, OptionsIn, RuleIn,
-                                   RulePatch)
+                                   RulePatch, RulePos)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm
@@ -169,7 +169,7 @@ def vm_fw_rule_create(request: Request, vm_id: int, body: RuleIn,
 @router.put("/{vm_id}/firewall/rules/{pos}",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.rules"))])
-def vm_fw_rule_update(request: Request, vm_id: int, pos: int, body: RulePatch,
+def vm_fw_rule_update(request: Request, vm_id: int, pos: RulePos, body: RulePatch,
                       db=Depends(get_db), user: User = Depends(_fw_guest)):
     v, host = _vm_and_host(db, vm_id)
     return fwapi.guest_rule_update(request, db, user, host, "qemu", v.vmid, v,
@@ -179,7 +179,7 @@ def vm_fw_rule_update(request: Request, vm_id: int, pos: int, body: RulePatch,
 @router.put("/{vm_id}/firewall/rules/{pos}/move",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.rules"))])
-def vm_fw_rule_move(request: Request, vm_id: int, pos: int, body: MoveIn,
+def vm_fw_rule_move(request: Request, vm_id: int, pos: RulePos, body: MoveIn,
                     db=Depends(get_db), user: User = Depends(_fw_guest)):
     v, host = _vm_and_host(db, vm_id)
     return fwapi.guest_rule_move(request, db, user, host, "qemu", v.vmid, v, pos,
@@ -189,7 +189,7 @@ def vm_fw_rule_move(request: Request, vm_id: int, pos: int, body: MoveIn,
 @router.delete("/{vm_id}/firewall/rules/{pos}",
                dependencies=[Depends(_fw_guest),
                              Depends(require_entitlement("firewall.rules"))])
-def vm_fw_rule_delete(request: Request, vm_id: int, pos: int,
+def vm_fw_rule_delete(request: Request, vm_id: int, pos: RulePos,
                       digest: str | None = None, db=Depends(get_db),
                       user: User = Depends(_fw_guest)):
     v, host = _vm_and_host(db, vm_id)
