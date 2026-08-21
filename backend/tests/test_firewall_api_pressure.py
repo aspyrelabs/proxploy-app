@@ -496,6 +496,28 @@ def test_the_node_segment_is_checked_against_the_host_it_was_asked_of(solo):
                  ).status_code == 200
 
 
+def test_a_peer_is_reachable_before_the_first_poll_has_landed(solo):
+    """The snapshot is empty for a poll interval after every backend start, so
+    reading it alone refused a peer node for that whole window: measured on the
+    lab cluster, node2's firewall page went blank after a restart. fw.nodes_seen
+    asks the cluster once on that miss, and only on a miss."""
+    from proxploy.models import Host
+    c, ids, fake = solo["client"], solo["ids"], solo["fake"]
+    with solo["app"].state.sessionmaker() as db:
+        db.get(Host, ids["a"]["host"]).cluster_name = "lab"
+        db.commit()
+    assert solo["app"].state.poller.snapshots == {}, "this test needs a cold app"
+    fake.resources.append({"type": "node", "node": "pve9", "status": "online"})
+    assert c.get(f"/api/v1/firewall/node/{ids['a']['host']}/pve9/rules"
+                 ).status_code == 200
+    # And a node the cluster does not report is still refused, so the fallback
+    # is reading an answer rather than giving up and allowing everything.
+    fake.firewall_reads.clear()
+    denied = c.get(f"/api/v1/firewall/node/{ids['a']['host']}/pve404/rules")
+    assert denied.status_code == 404
+    assert fake.firewall_reads == []
+
+
 def test_a_peer_another_team_enrolled_is_not_reachable_through_this_host(solo):
     """The case the check exists for: both hosts are peers of one cluster and
     each belongs to a different team. Team A's host sees pve2 in its poll, but
