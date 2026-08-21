@@ -475,3 +475,216 @@ def node_options_update(request: Request, host_id: int, node: str,
     host = _host_or_404(db, host_id)
     return _options_write(request, db, user, host, fw.node_loc(node),
                           label=f"firewall on {node}", body=body)
+
+
+# ------------------------------------------------------- aliases and IP sets
+#
+# Cluster and guest scope only: a node has neither (measured, 9.2.11). The
+# helpers take a location so Task 9's guest routes reuse them unchanged.
+
+class AliasIn(BaseModel):
+    name: str
+    cidr: str
+    comment: str | None = None
+
+
+class AliasPatch(BaseModel):
+    """`cidr` is required even on a pure rename: PVE's PUT schema marks it
+    mandatory, so a rename that omits it is refused."""
+    cidr: str
+    comment: str | None = None
+    rename: str | None = None
+    digest: str | None = None
+
+
+class IpSetIn(BaseModel):
+    name: str
+    comment: str | None = None
+
+
+class MemberIn(BaseModel):
+    cidr: str
+    comment: str | None = None
+    nomatch: int | None = None
+
+
+class MemberPatch(BaseModel):
+    comment: str | None = None
+    nomatch: int | None = None
+    digest: str | None = None
+
+
+def _object_write(request: Request, db, user: User, host: Host, *,
+                  action: str, label: str, params: dict, call) -> dict:
+    ip = request.client.host if request.client else None
+    try:
+        call(fw.writers(request.app, db, host))
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                    target_type="host", target_id=host.id, target_name=label,
+                    params=params, result="error", ip=ip)
+        raise pve_error(e)
+    write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                target_type="host", target_id=host.id, target_name=label,
+                params=params, ip=ip)
+    return {"ok": True}
+
+
+@router.get("/cluster/{host_id}/aliases",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_aliases(request: Request, host_id: int, db=Depends(get_db),
+                    user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        return {"aliases": fw.readers(request.app, db, host)
+                .firewall_aliases(fw.cluster_loc())}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.post("/cluster/{host_id}/aliases", status_code=201,
+             dependencies=[Depends(_manage),
+                           Depends(require_entitlement("firewall.objects"))])
+def cluster_alias_create(request: Request, host_id: int, body: AliasIn,
+                         db=Depends(get_db), user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_none=True)
+    return _object_write(request, db, user, host, action="firewall.alias_create",
+                         label=f"alias {body.name} on {host.name}", params=params,
+                         call=lambda c: c.firewall_alias_create(fw.cluster_loc(),
+                                                                params))
+
+
+@router.put("/cluster/{host_id}/aliases/{name}",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("firewall.objects"))])
+def cluster_alias_update(request: Request, host_id: int, name: str,
+                         body: AliasPatch, db=Depends(get_db),
+                         user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_unset=True, exclude_none=True)
+    return _object_write(request, db, user, host, action="firewall.alias_update",
+                         label=f"alias {name} on {host.name}", params=params,
+                         call=lambda c: c.firewall_alias_update(fw.cluster_loc(),
+                                                                name, params))
+
+
+@router.delete("/cluster/{host_id}/aliases/{name}",
+               dependencies=[Depends(_manage),
+                             Depends(require_entitlement("firewall.objects"))])
+def cluster_alias_delete(request: Request, host_id: int, name: str,
+                         digest: str | None = None, db=Depends(get_db),
+                         user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    return _object_write(request, db, user, host, action="firewall.alias_delete",
+                         label=f"alias {name} on {host.name}", params={},
+                         call=lambda c: c.firewall_alias_delete(fw.cluster_loc(),
+                                                                name, digest))
+
+
+@router.get("/cluster/{host_id}/ipsets",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_ipsets(request: Request, host_id: int, db=Depends(get_db),
+                   user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        return {"ipsets": fw.readers(request.app, db, host)
+                .firewall_ipsets(fw.cluster_loc())}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.post("/cluster/{host_id}/ipsets", status_code=201,
+             dependencies=[Depends(_manage),
+                           Depends(require_entitlement("firewall.objects"))])
+def cluster_ipset_create(request: Request, host_id: int, body: IpSetIn,
+                         db=Depends(get_db), user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_none=True)
+    return _object_write(request, db, user, host, action="firewall.ipset_create",
+                         label=f"IP set {body.name} on {host.name}", params=params,
+                         call=lambda c: c.firewall_ipset_create(fw.cluster_loc(),
+                                                                params))
+
+
+@router.delete("/cluster/{host_id}/ipsets/{name}",
+               dependencies=[Depends(_manage),
+                             Depends(require_entitlement("firewall.objects"))])
+def cluster_ipset_delete(request: Request, host_id: int, name: str,
+                         force: bool = False, digest: str | None = None,
+                         db=Depends(get_db), user: User = Depends(_manage)):
+    """`force` is the caller's word, never this route's default: PVE refuses to
+    delete a populated set without it, and silently supplying it would throw
+    away members the operator may not have looked at."""
+    host = _host_or_404(db, host_id)
+    return _object_write(request, db, user, host, action="firewall.ipset_delete",
+                         label=f"IP set {name} on {host.name}",
+                         params={"force": force},
+                         call=lambda c: c.firewall_ipset_delete(fw.cluster_loc(),
+                                                                name, force, digest))
+
+
+@router.get("/cluster/{host_id}/ipsets/{name}/members",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_ipset_members(request: Request, host_id: int, name: str,
+                          db=Depends(get_db), user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        return {"members": fw.readers(request.app, db, host)
+                .firewall_ipset_members(fw.cluster_loc(), name)}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.post("/cluster/{host_id}/ipsets/{name}/members", status_code=201,
+             dependencies=[Depends(_manage),
+                           Depends(require_entitlement("firewall.objects"))])
+def cluster_ipset_member_add(request: Request, host_id: int, name: str,
+                             body: MemberIn, db=Depends(get_db),
+                             user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_none=True)
+    return _object_write(request, db, user, host, action="firewall.ipset_member_add",
+                         label=f"{body.cidr} in IP set {name} on {host.name}",
+                         params=params,
+                         call=lambda c: c.firewall_ipset_member_add(
+                             fw.cluster_loc(), name, params))
+
+
+# `{cidr:path}`, not `{cidr}`: a CIDR contains a slash, and a plain path
+# parameter stops at the first one, so `10.0.0.0/8` would never match this
+# route at all. The client percent-encodes it again on the way out to PVE.
+@router.put("/cluster/{host_id}/ipsets/{name}/members/{cidr:path}",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("firewall.objects"))])
+def cluster_ipset_member_update(request: Request, host_id: int, name: str,
+                                cidr: str, body: MemberPatch,
+                                db=Depends(get_db),
+                                user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_unset=True, exclude_none=True)
+    return _object_write(request, db, user, host,
+                         action="firewall.ipset_member_update",
+                         label=f"{cidr} in IP set {name} on {host.name}",
+                         params=params,
+                         call=lambda c: c.firewall_ipset_member_update(
+                             fw.cluster_loc(), name, cidr, params))
+
+
+@router.delete("/cluster/{host_id}/ipsets/{name}/members/{cidr:path}",
+               dependencies=[Depends(_manage),
+                             Depends(require_entitlement("firewall.objects"))])
+def cluster_ipset_member_delete(request: Request, host_id: int, name: str,
+                                cidr: str, digest: str | None = None,
+                                db=Depends(get_db),
+                                user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    return _object_write(request, db, user, host,
+                         action="firewall.ipset_member_delete",
+                         label=f"{cidr} in IP set {name} on {host.name}",
+                         params={},
+                         call=lambda c: c.firewall_ipset_member_delete(
+                             fw.cluster_loc(), name, cidr, digest))

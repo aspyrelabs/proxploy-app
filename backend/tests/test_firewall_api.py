@@ -216,3 +216,88 @@ def test_options_write_is_audited(tmp_path, csrf_header, bootstrap_admin):
         with app.state.sessionmaker() as db:
             row = db.query(AuditEvent).filter_by(action="firewall.options").one()
             assert row.result == "ok"
+
+
+def test_alias_create_and_delete(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.post(f"/api/v1/firewall/cluster/{host_id}/aliases",
+                    headers=csrf_header(c),
+                    json={"name": "office", "cidr": "10.0.0.0/24",
+                          "comment": "the office range"})
+        assert r.status_code == 201
+        c.delete(f"/api/v1/firewall/cluster/{host_id}/aliases/office",
+                  headers=csrf_header(c))
+        assert [(v, p) for v, p, _ in fake.firewall_writes] == [
+            ("post", "cluster/firewall/aliases"),
+            ("delete", "cluster/firewall/aliases/office"),
+        ]
+
+
+def test_alias_rename_is_a_put_carrying_rename(tmp_path, csrf_header, bootstrap_admin):
+    """PVE renames an alias by PUTting `rename` alongside the (still required)
+    cidr, not by a separate call."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        c.put(f"/api/v1/firewall/cluster/{host_id}/aliases/office",
+              headers=csrf_header(c),
+              json={"cidr": "10.0.0.0/24", "rename": "hq"})
+        _, path, params = fake.firewall_writes[0]
+        assert path == "cluster/firewall/aliases/office"
+        assert params["rename"] == "hq"
+
+
+def test_ipset_member_path_escapes_the_cidr(tmp_path, csrf_header, bootstrap_admin):
+    """The member CIDR is a path segment on both sides: ours and PVE's. Ours
+    must accept the slash, and the client must escape it going out."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.delete(
+            f"/api/v1/firewall/cluster/{host_id}/ipsets/trusted/members/10.0.0.0%2F8",
+            headers=csrf_header(c))
+        assert r.status_code == 200
+        _, path, _ = fake.firewall_writes[0]
+        assert path == "cluster/firewall/ipset/trusted/10.0.0.0%2F8"
+
+
+def test_ipset_member_add_carries_nomatch(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        c.post(f"/api/v1/firewall/cluster/{host_id}/ipsets/trusted/members",
+                headers=csrf_header(c),
+                json={"cidr": "10.0.0.5", "nomatch": 1, "comment": "except this"})
+        _, path, params = fake.firewall_writes[0]
+        assert path == "cluster/firewall/ipset/trusted"
+        assert params["nomatch"] == 1
+
+
+def test_ipset_delete_force_is_explicit(tmp_path, csrf_header, bootstrap_admin):
+    """Deleting a populated IP set without force fails in PVE. The caller has
+    to say it means to drop the members too, so it is a query parameter here
+    rather than something this route decides on their behalf."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        c.delete(f"/api/v1/firewall/cluster/{host_id}/ipsets/trusted?force=true",
+                  headers=csrf_header(c))
+        _, _, params = fake.firewall_writes[0]
+        assert params["force"] == 1
