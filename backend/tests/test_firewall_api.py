@@ -150,3 +150,69 @@ def test_unknown_host_is_404(tmp_path, csrf_header, bootstrap_admin):
     with TestClient(app) as c:
         bootstrap_admin(c)
         assert c.get("/api/v1/firewall/cluster/999/rules").status_code == 404
+
+
+def test_options_read_returns_pve_defaults_alongside_the_values(
+        tmp_path, csrf_header, bootstrap_admin):
+    """An absent option is not "off", it is PVE's default, and the enable
+    warning is wrong without that. policy_in defaults to DROP, so enabling a
+    firewall with no rules blocks everything inbound."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        fake.firewall_data["cluster/firewall/options"] = {"enable": 1, "digest": "d1"}
+        r = c.get(f"/api/v1/firewall/cluster/{host_id}/options")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["options"]["enable"] == 1
+        assert body["defaults"]["policy_in"] == "DROP"
+        assert body["digest"] == "d1"
+
+
+def test_node_options_defaults_differ_from_cluster(tmp_path, csrf_header, bootstrap_admin):
+    """A node has no policy_in at all: its option set is conntrack tuning and
+    log levels. Claiming a cluster default on a node would invent a control."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        fake.firewall_data["nodes/pve1/firewall/options"] = {"digest": "d1"}
+        body = c.get(f"/api/v1/firewall/node/{host_id}/pve1/options").json()
+        assert "policy_in" not in body["defaults"]
+        assert body["defaults"]["nftables"] == 0
+
+
+def test_options_write_sends_only_what_was_set(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.put(f"/api/v1/firewall/cluster/{host_id}/options",
+                   headers=csrf_header(c),
+                   json={"enable": 1, "policy_in": "DROP", "digest": "d1"})
+        assert r.status_code == 200
+        verb, path, params = fake.firewall_writes[0]
+        assert (verb, path) == ("put", "cluster/firewall/options")
+        assert params == {"enable": 1, "policy_in": "DROP", "digest": "d1"}
+        assert "ebtables" not in params
+
+
+def test_options_write_is_audited(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        c.put(f"/api/v1/firewall/cluster/{host_id}/options",
+              headers=csrf_header(c), json={"enable": 1})
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="firewall.options").one()
+            assert row.result == "ok"

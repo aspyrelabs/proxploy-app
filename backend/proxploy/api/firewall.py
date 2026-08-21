@@ -357,3 +357,121 @@ def node_rule_delete(request: Request, host_id: int, node: str, pos: int,
                  call=lambda c: c.firewall_rule_delete(fw.node_loc(node), pos,
                                                        digest))
     return {"deleted": True}
+
+
+# ------------------------------------------------------------------- options
+#
+# What PVE does when an option is ABSENT, transcribed from `pvesh usage` on
+# pve-manager 9.2.11 on 2026-08-21. This exists for one reason: the warning
+# shown when an operator enables a firewall has to say what will actually
+# happen, and an absent policy_in is not "no policy", it is DROP. Reading an
+# empty options object as "nothing is configured, so nothing will be blocked"
+# is the exact misreading that got the NIC toggle removed in the first place.
+#
+# Only the options that change behaviour are listed. Conntrack sizing and
+# timeouts are omitted deliberately: they tune a firewall, they do not decide
+# whether traffic passes.
+OPTION_DEFAULTS: dict[str, dict] = {
+    "cluster": {"enable": 0, "ebtables": 1, "policy_in": "DROP",
+                "policy_out": "ACCEPT", "policy_forward": "ACCEPT"},
+    "node": {"enable": 0, "nftables": 0, "nosmurfs": 0, "log_nf_conntrack": 0,
+             "ndp": 1},
+    "guest": {"enable": 0, "dhcp": 0, "ndp": 1, "radv": 0, "macfilter": 1,
+              "ipfilter": 0, "policy_in": "DROP", "policy_out": "ACCEPT"},
+}
+
+
+class OptionsIn(BaseModel):
+    """Every field optional and dumped with exclude_unset, so a form that
+    touched one switch sends one key. The union of all three scopes' options
+    lives here; PVE rejects a key that does not belong to the scope it was
+    sent to, which is the correct authority for that."""
+    model_config = {"populate_by_name": True}
+
+    enable: int | None = None
+    policy_in: str | None = None
+    policy_out: str | None = None
+    policy_forward: str | None = None
+    ebtables: int | None = None
+    log_ratelimit: str | None = None
+    log_level_in: str | None = None
+    log_level_out: str | None = None
+    log_nf_conntrack: int | None = None
+    nftables: int | None = None
+    nosmurfs: int | None = None
+    smurf_log_level: str | None = None
+    tcpflags: int | None = None
+    ndp: int | None = None
+    radv: int | None = None
+    dhcp: int | None = None
+    macfilter: int | None = None
+    ipfilter: int | None = None
+    digest: str | None = None
+    delete: str | None = None
+
+
+def _options_read(request: Request, db, host: Host, loc: dict, scope: str) -> dict:
+    try:
+        options = fw.readers(request.app, db, host).firewall_options(loc)
+    except ProxmoxError as e:
+        raise pve_error(e)
+    return {"scope": scope, "options": options,
+            "defaults": OPTION_DEFAULTS[scope],
+            "digest": options.get("digest")}
+
+
+def _options_write(request: Request, db, user: User, host: Host, loc: dict, *,
+                   label: str, body: OptionsIn) -> dict:
+    params = body.model_dump(by_alias=True, exclude_unset=True, exclude_none=True)
+    ip = request.client.host if request.client else None
+    try:
+        fw.writers(request.app, db, host).firewall_options_update(loc, params)
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="firewall.options", target_type="host",
+                    target_id=host.id, target_name=label, params=params,
+                    result="error", ip=ip)
+        raise pve_error(e)
+    write_audit(db, actor_type="user", actor_id=user.id, action="firewall.options",
+                target_type="host", target_id=host.id, target_name=label,
+                params=params, ip=ip)
+    return {"updated": True}
+
+
+@router.get("/cluster/{host_id}/options",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_options(request: Request, host_id: int, db=Depends(get_db),
+                    user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    return _options_read(request, db, host, fw.cluster_loc(), "cluster")
+
+
+@router.put("/cluster/{host_id}/options",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("firewall.options"))])
+def cluster_options_update(request: Request, host_id: int, body: OptionsIn,
+                           db=Depends(get_db), user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    return _options_write(request, db, user, host, fw.cluster_loc(),
+                          label=f"cluster firewall on {host.name}", body=body)
+
+
+@router.get("/node/{host_id}/{node}/options",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def node_options(request: Request, host_id: int, node: str, db=Depends(get_db),
+                 user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    return _options_read(request, db, host, fw.node_loc(node), "node")
+
+
+@router.put("/node/{host_id}/{node}/options",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("firewall.options"))])
+def node_options_update(request: Request, host_id: int, node: str,
+                        body: OptionsIn, db=Depends(get_db),
+                        user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    return _options_write(request, db, user, host, fw.node_loc(node),
+                          label=f"firewall on {node}", body=body)
