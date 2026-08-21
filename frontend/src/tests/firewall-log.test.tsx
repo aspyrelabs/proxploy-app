@@ -7,10 +7,17 @@ let LOG: any = { lines: [
   { n: 2, t: '100 6 tap100i0-IN 21/Aug/2026:11:20:01 +0530 DROP: IN=fwbr100i0' },
 ], start: 0, limit: 500 }
 
-vi.mock('../api/client', () => ({
-  ApiError: class extends Error {},
-  api: vi.fn(() => Promise.resolve(LOG)),
-}))
+let readFails = false
+
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>()
+  return {
+    ...actual,
+    api: vi.fn(() => (readFails
+      ? Promise.reject(new actual.ApiError(502, { detail: 'Proxmox refused the request' }))
+      : Promise.resolve(LOG))),
+  }
+})
 
 import { FirewallLog } from '../components/FirewallLog'
 
@@ -37,5 +44,18 @@ describe('FirewallLog', () => {
     renderLog()
     await waitFor(() => expect(screen.getByText(/nothing logged/i)).toBeTruthy())
     expect(screen.queryByText('no content')).toBeNull()
+  })
+
+  it('says the log could not be read rather than that nothing was logged', async () => {
+    // "Quiet" and "unreadable" are different answers, and only one of them
+    // says anything about the firewall.
+    readFails = true
+    try {
+      renderLog()
+      await screen.findByText(/could not read the firewall log/i)
+      expect(screen.queryByText(/nothing logged/i)).toBeNull()
+    } finally {
+      readFails = false
+    }
   })
 })

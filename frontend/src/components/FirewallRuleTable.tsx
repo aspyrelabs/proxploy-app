@@ -1,5 +1,6 @@
 import { Icon } from './ui/icon'
 import { Button } from './ui/button'
+import { QueryState } from './QueryState'
 import { useDeleteRule, useMoveRule, useRules, useUpdateRule } from '../api/firewall'
 import type { Rule, Scope } from '../api/firewall'
 
@@ -33,131 +34,134 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
   const move = useMoveRule(scope)
   const update = useUpdateRule(scope)
   const remove = useDeleteRule(scope)
-  const rules = q.data?.rules ?? []
-  const digest = q.data?.digest ?? null
 
-  if (!q.isLoading && rules.length === 0) {
-    return (
-      <div className="rounded-ctl border border-line-soft bg-elev p-4">
-        <p className="text-[13px] text-text-3">
-          No rules here yet. Proxmox applies this firewall&apos;s default policy
-          to everything until you add one.
-        </p>
-        {canEdit && (
-          <Button className="mt-3" onClick={onAdd}>Add rule</Button>
-        )}
-      </div>
-    )
-  }
-
+  // "No rules here" and "Proxploy could not find out" are opposite answers to
+  // the only question this table exists to answer, so they are never the same
+  // screen. QueryState is what keeps them apart.
   return (
-    <div>
-      <table aria-label="Firewall rules" className="w-full text-left text-[13px]">
-        <thead>
-          <tr className="border-b border-line-soft">
-            <th scope="col" className={th}>#</th>
-            <th scope="col" className={th}>On</th>
-            <th scope="col" className={th}>Direction</th>
-            <th scope="col" className={th}>Action</th>
-            <th scope="col" className={th}>Source</th>
-            <th scope="col" className={th}>Destination</th>
-            <th scope="col" className={th}>Protocol and port</th>
-            <th scope="col" className={th}>Comment</th>
-            <th scope="col" className={th} />
-          </tr>
-        </thead>
-        <tbody>
-          {rules.map((r, i) => {
-            const on = (r.enable ?? 0) !== 0
-            return (
-              <tr key={r.pos} className="border-b border-line-soft/60">
-                <td className={`${td} font-mono text-text-3`}>{r.pos}</td>
-                <td className={td}>
-                  <div className="flex items-center gap-1.5">
-                    {/* The state is its own element with its own accessible
-                        name, always rendered: it says what is currently true,
-                        which is not the same thing the toggle button (when
-                        present) says clicking it will do. */}
-                    <span role="img" aria-label={`Rule ${r.pos} is ${on ? 'on' : 'off'}`}
-                      className={on ? 'text-green' : 'text-text-3'}>
-                      <Icon name={on ? 'toggle_on' : 'toggle_off'} />
-                    </span>
-                    {canEdit && (
-                      <button type="button"
-                        aria-label={`Turn rule ${r.pos} ${on ? 'off' : 'on'}`}
-                        onClick={() => update.mutate({
-                          pos: r.pos,
-                          // RulePatch's digest is `string | undefined`, unlike
-                          // move/delete's `string | null`: null becomes
-                          // undefined here rather than widening that type.
-                          patch: { enable: on ? 0 : 1, digest: digest ?? undefined },
-                        })}
-                        className={on ? 'text-green' : 'text-text-3'}>
-                        <Icon name={on ? 'toggle_on' : 'toggle_off'} size={16} />
-                      </button>
-                    )}
-                  </div>
-                </td>
-                <td className={`${td} font-mono text-[12px]`}>{r.type}</td>
-                <td className={`${td} font-medium`}>{r.action}</td>
-                <td className={`${td} font-mono text-[12px]`}>{any(r.source)}</td>
-                <td className={`${td} font-mono text-[12px]`}>{any(r.dest)}</td>
-                <td className={`${td} font-mono text-[12px]`}>{portLabel(r)}</td>
-                <td className={`${td} text-text-3`}>{r.comment ?? ''}</td>
-                <td className={td}>
-                  {canEdit && (
-                    <div className="flex items-center justify-end gap-1">
-                      {i > 0 && (
-                        /* pos arithmetic rather than the neighbour's pos, and they are the same
-                           thing: PVE's pos is a dense array index, not a stable id, and it is
-                           renumbered on every delete. Measured on pve-manager 9.2.11, 2026-08-21:
-                           creating three rules then deleting the middle one renumbered
-                           0,1,2 to 0,1. The guard above is index-based because the ARRAY is what
-                           tells us there is a neighbour to swap with.
+    <QueryState query={q}
+      empty={(d) => (d.rules ?? []).length === 0}
+      emptyTitle="No rules here yet"
+      emptyNote={"Proxmox applies this firewall's default policy to everything "
+        + 'until you add one.'}
+      emptyAction={canEdit ? <Button onClick={onAdd}>Add rule</Button> : undefined}
+      errorTitle="Could not read these rules"
+      errorNote={"Proxploy could not read this firewall's rules, so it cannot say "
+        + 'what is allowed here or whether any rules exist at all.'}>
+      {(data) => {
+        const rules = data.rules ?? []
+        const digest = data.digest ?? null
+        return (
+          <div>
+            <table aria-label="Firewall rules" className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-line-soft">
+                  <th scope="col" className={th}>#</th>
+                  <th scope="col" className={th}>On</th>
+                  <th scope="col" className={th}>Direction</th>
+                  <th scope="col" className={th}>Action</th>
+                  <th scope="col" className={th}>Source</th>
+                  <th scope="col" className={th}>Destination</th>
+                  <th scope="col" className={th}>Protocol and port</th>
+                  <th scope="col" className={th}>Comment</th>
+                  <th scope="col" className={th} />
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r, i) => {
+                  const on = (r.enable ?? 0) !== 0
+                  return (
+                    <tr key={r.pos} className="border-b border-line-soft/60">
+                      <td className={`${td} font-mono text-text-3`}>{r.pos}</td>
+                      <td className={td}>
+                        <div className="flex items-center gap-1.5">
+                          {/* The state is its own element with its own accessible
+                              name, always rendered: it says what is currently true,
+                              which is not the same thing the toggle button (when
+                              present) says clicking it will do. */}
+                          <span role="img" aria-label={`Rule ${r.pos} is ${on ? 'on' : 'off'}`}
+                            className={on ? 'text-green' : 'text-text-3'}>
+                            <Icon name={on ? 'toggle_on' : 'toggle_off'} />
+                          </span>
+                          {canEdit && (
+                            <button type="button"
+                              aria-label={`Turn rule ${r.pos} ${on ? 'off' : 'on'}`}
+                              onClick={() => update.mutate({
+                                pos: r.pos,
+                                // RulePatch's digest is `string | undefined`, unlike
+                                // move/delete's `string | null`: null becomes
+                                // undefined here rather than widening that type.
+                                patch: { enable: on ? 0 : 1, digest: digest ?? undefined },
+                              })}
+                              className={on ? 'text-green' : 'text-text-3'}>
+                              <Icon name={on ? 'toggle_on' : 'toggle_off'} size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className={`${td} font-mono text-[12px]`}>{r.type}</td>
+                      <td className={`${td} font-medium`}>{r.action}</td>
+                      <td className={`${td} font-mono text-[12px]`}>{any(r.source)}</td>
+                      <td className={`${td} font-mono text-[12px]`}>{any(r.dest)}</td>
+                      <td className={`${td} font-mono text-[12px]`}>{portLabel(r)}</td>
+                      <td className={`${td} text-text-3`}>{r.comment ?? ''}</td>
+                      <td className={td}>
+                        {canEdit && (
+                          <div className="flex items-center justify-end gap-1">
+                            {i > 0 && (
+                              /* pos arithmetic rather than the neighbour's pos, and they are the same
+                                 thing: PVE's pos is a dense array index, not a stable id, and it is
+                                 renumbered on every delete. Measured on pve-manager 9.2.11, 2026-08-21:
+                                 creating three rules then deleting the middle one renumbered
+                                 0,1,2 to 0,1. The guard above is index-based because the ARRAY is what
+                                 tells us there is a neighbour to swap with.
 
-                           New rules are PREPENDED by PVE, so a rule added from this table lands at
-                           pos 0 and takes precedence over everything below it. */
-                        <button type="button" aria-label={`Move rule ${r.pos} up`}
-                          onClick={() => move.mutate({
-                            pos: r.pos, moveto: r.pos - 1, digest,
-                          })}
-                          className="text-text-3 hover:text-text">
-                          <Icon name="arrow_upward" size={16} />
-                        </button>
-                      )}
-                      {i < rules.length - 1 && (
-                        <button type="button" aria-label={`Move rule ${r.pos} down`}
-                          /* +2, not +1. PVE inserts at moveto and THEN removes the old row, so
-                             moving down lands the rule at moveto-1 and moveto === pos+1 is a
-                             silent no-op. Measured on pve-manager 9.2.11, 2026-08-21. Moving up
-                             needs no such correction: the removal is below the insert, so the
-                             rule lands at moveto exactly. */
-                          onClick={() => move.mutate({
-                            pos: r.pos, moveto: r.pos + 2, digest,
-                          })}
-                          className="text-text-3 hover:text-text">
-                          <Icon name="arrow_downward" size={16} />
-                        </button>
-                      )}
-                      <button type="button" aria-label={`Edit rule ${r.pos}`}
-                        onClick={() => onEdit(r)}
-                        className="text-text-3 hover:text-text">
-                        <Icon name="edit" size={16} />
-                      </button>
-                      <button type="button" aria-label={`Delete rule ${r.pos}`}
-                        onClick={() => remove.mutate({ pos: r.pos, digest })}
-                        className="text-text-3 hover:text-red">
-                        <Icon name="delete" size={16} />
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {canEdit && <Button className="mt-3" onClick={onAdd}>Add rule</Button>}
-    </div>
+                                 New rules are PREPENDED by PVE, so a rule added from this table lands at
+                                 pos 0 and takes precedence over everything below it. */
+                              <button type="button" aria-label={`Move rule ${r.pos} up`}
+                                onClick={() => move.mutate({
+                                  pos: r.pos, moveto: r.pos - 1, digest,
+                                })}
+                                className="text-text-3 hover:text-text">
+                                <Icon name="arrow_upward" size={16} />
+                              </button>
+                            )}
+                            {i < rules.length - 1 && (
+                              <button type="button" aria-label={`Move rule ${r.pos} down`}
+                                /* +2, not +1. PVE inserts at moveto and THEN removes the old row, so
+                                   moving down lands the rule at moveto-1 and moveto === pos+1 is a
+                                   silent no-op. Measured on pve-manager 9.2.11, 2026-08-21. Moving up
+                                   needs no such correction: the removal is below the insert, so the
+                                   rule lands at moveto exactly. */
+                                onClick={() => move.mutate({
+                                  pos: r.pos, moveto: r.pos + 2, digest,
+                                })}
+                                className="text-text-3 hover:text-text">
+                                <Icon name="arrow_downward" size={16} />
+                              </button>
+                            )}
+                            <button type="button" aria-label={`Edit rule ${r.pos}`}
+                              onClick={() => onEdit(r)}
+                              className="text-text-3 hover:text-text">
+                              <Icon name="edit" size={16} />
+                            </button>
+                            <button type="button" aria-label={`Delete rule ${r.pos}`}
+                              onClick={() => remove.mutate({ pos: r.pos, digest })}
+                              className="text-text-3 hover:text-red">
+                              <Icon name="delete" size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {canEdit && <Button className="mt-3" onClick={onAdd}>Add rule</Button>}
+          </div>
+        )
+      }}
+    </QueryState>
   )
 }

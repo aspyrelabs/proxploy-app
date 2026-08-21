@@ -18,22 +18,23 @@ let RULES: any = { scope: 'cluster', digest: 'd1', rules: [] }
 
 const calls: { path: string; method: string; body: any }[] = []
 
-vi.mock('../api/client', () => {
-  class ApiError extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) {
-      super(`API ${status}`); this.status = status; this.body = body
-    }
-  }
+let optionsFail = false
+
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>()
   return {
-    ApiError,
+    ...actual,
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method !== 'GET') {
         calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : {} })
         return Promise.resolve({ ok: true })
       }
-      if (path.endsWith('/options')) return Promise.resolve(OPTIONS)
+      if (path.endsWith('/options')) {
+        return optionsFail
+          ? Promise.reject(new actual.ApiError(502, { detail: 'Proxmox refused the request' }))
+          : Promise.resolve(OPTIONS)
+      }
       if (path.endsWith('/rules')) return Promise.resolve(RULES)
       return Promise.resolve({})
     }),
@@ -132,5 +133,29 @@ describe('FirewallOptionsPanel', () => {
     expect((screen.getByLabelText('Incoming policy') as HTMLSelectElement).disabled)
       .toBe(true)
     expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
+  })
+
+  it('says the settings could not be read rather than drawing the defaults', async () => {
+    // A form full of Proxmox's defaults looks exactly like a firewall that is
+    // off and unconfigured, which is the one thing a failed read cannot claim.
+    optionsFail = true
+    try {
+      renderPanel()
+      await screen.findByText(/could not read these settings/i)
+      expect(screen.queryByLabelText('Incoming policy')).toBeNull()
+    } finally {
+      optionsFail = false
+    }
+  })
+
+  it('still draws the form when Proxmox stored no options at all', async () => {
+    // The empty case is NOT the error case: an options object with no keys is
+    // a firewall running on Proxmox's own defaults, and policy_in DROP among
+    // them is the opposite of an inert firewall.
+    OPTIONS = { ...OPTIONS, options: {} }
+    renderPanel()
+    const policy = await screen.findByLabelText('Incoming policy') as HTMLSelectElement
+    expect(policy.value).toBe('DROP')
+    OPTIONS = { ...OPTIONS, options: { digest: 'd1' } }
   })
 })

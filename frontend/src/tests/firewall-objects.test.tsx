@@ -14,20 +14,22 @@ const GROUPS = { groups: [{ group: 'web', comment: 'public services' }] }
 
 const calls: { path: string; method: string; body: any }[] = []
 
-vi.mock('../api/client', () => {
-  class ApiError extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) {
-      super(`API ${status}`); this.status = status; this.body = body
-    }
-  }
+/** Path suffixes the fake api should reject instead of answering, set by the
+ *  failed-read cases at the bottom of each block. */
+let failing: string | null = null
+
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>()
   return {
-    ApiError,
+    ...actual,
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method !== 'GET') {
         calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : {} })
         return Promise.resolve({ ok: true })
+      }
+      if (failing && path.endsWith(failing)) {
+        return Promise.reject(new actual.ApiError(502, { detail: 'Proxmox refused the request' }))
       }
       if (path.endsWith('/members')) return Promise.resolve(MEMBERS)
       if (path.endsWith('/aliases')) return Promise.resolve(ALIASES)
@@ -73,6 +75,17 @@ describe('AliasTable', () => {
     wrap(<AliasTable scope={SCOPE} canEdit={false} />)
     await screen.findByText('office')
     expect(screen.queryByRole('button', { name: /add alias/i })).toBeNull()
+  })
+
+  it('says the read failed rather than that there are no aliases', async () => {
+    failing = '/aliases'
+    try {
+      wrap(<AliasTable scope={SCOPE} canEdit />)
+      await screen.findByText(/could not read these aliases/i)
+      expect(screen.queryByText(/no aliases here yet/i)).toBeNull()
+    } finally {
+      failing = null
+    }
   })
 })
 
@@ -122,6 +135,32 @@ describe('IpSetPanel', () => {
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0].path).toContain('force=true')
   })
+
+  it('says the read failed rather than that there are no IP sets', async () => {
+    failing = '/ipsets'
+    try {
+      wrap(<IpSetPanel scope={SCOPE} canEdit />)
+      await screen.findByText(/could not read these IP sets/i)
+      expect(screen.queryByText(/no IP sets here yet/i)).toBeNull()
+    } finally {
+      failing = null
+    }
+  })
+
+  it('will not say a set holds 0 addresses when it could not read the set', async () => {
+    // "Holds 0 addresses. Deleting it removes them too." reads as a safe
+    // delete. On a failed read nobody knows what is about to go.
+    wrap(<IpSetPanel scope={SCOPE} canEdit />)
+    await screen.findByText('trusted')
+    failing = '/members'
+    try {
+      fireEvent.click(screen.getByLabelText('Delete IP set trusted'))
+      await screen.findByText(/could not read what is in this set/i)
+      expect(screen.queryByText(/0 addresses/i)).toBeNull()
+    } finally {
+      failing = null
+    }
+  })
 })
 
 describe('SecurityGroupList', () => {
@@ -143,5 +182,16 @@ describe('SecurityGroupList', () => {
     fireEvent.click(screen.getByRole('button', { name: /^save group$/i }))
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0].body).toEqual({ group: 'db' })
+  })
+
+  it('says the read failed rather than that there are no security groups', async () => {
+    failing = '/groups'
+    try {
+      wrap(<SecurityGroupList hostId={1} canEdit selected={null} onSelect={() => {}} />)
+      await screen.findByText(/could not read these security groups/i)
+      expect(screen.queryByText(/no security groups here yet/i)).toBeNull()
+    } finally {
+      failing = null
+    }
   })
 })
