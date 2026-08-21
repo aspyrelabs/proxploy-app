@@ -160,14 +160,15 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
                 <option key={m.macro} value={m.macro}>{m.macro}</option>
               ))}
             </select>
-            {/* Proxmox gives a macro's description and not the ports it opens,
-                so this shows exactly what Proxmox said and claims nothing more.
-                Shown even with none picked yet, so the list reads as
-                explainable rather than as ninety opaque names. */}
-            {(macros.data?.macros ?? []).length > 0 && (
+            {/* Only when a macro is actually chosen. Proxmox gives a macro's name
+                and description and does not say which ports it opens, so this
+                shows exactly what Proxmox said about the macro in the box above
+                and nothing more. A description shown under a select reading
+                "None" describes a macro the operator did not pick, whatever its
+                text says. */}
+            {form.macro && (
               <p className="mt-1 text-[12px] text-text-3">
-                {(macros.data!.macros.find(m => m.macro === form.macro)
-                  ?? macros.data!.macros[0]).descr}
+                {(macros.data?.macros ?? []).find(m => m.macro === form.macro)?.descr}
               </p>
             )}
           </div>

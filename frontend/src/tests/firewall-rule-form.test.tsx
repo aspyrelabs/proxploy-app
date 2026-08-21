@@ -123,11 +123,27 @@ describe('FirewallRuleForm', () => {
     expect(calls[0].body.digest).toBe('d1')
   })
 
-  it('shows a macro description, because the name alone does not say what it does',
+  it('shows the chosen macro description, because the name alone does not say what it does',
      async () => {
     renderForm()
     fireEvent.click(screen.getByRole('button', { name: /advanced/i }))
-    await screen.findByText(/WWW traffic/)
+    await screen.findByRole('option', { name: 'Web' })
+    fireEvent.change(screen.getByLabelText('Macro'), { target: { value: 'Web' } })
+    expect(await screen.findByText(/WWW traffic/)).toBeTruthy()
+  })
+
+  it('shows no macro description while none is chosen', () => {
+    renderForm()
+    fireEvent.click(screen.getByRole('button', { name: /advanced/i }))
+    expect(screen.queryByText(/WWW traffic/)).toBeNull()
+  })
+
+  it('opens Advanced when editing a rule that already uses an advanced field', () => {
+    renderForm({ pos: 1, type: 'in', action: 'ACCEPT', enable: 1,
+                 iface: 'net0', digest: 'd1' })
+    // Not clicked open: the rule sets iface, so hiding it would hide the field
+    // being edited.
+    expect(screen.getByLabelText('Interface')).toBeTruthy()
   })
 
   it('says a new rule will be checked before the existing ones', () => {
