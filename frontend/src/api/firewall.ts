@@ -272,18 +272,34 @@ export function useFirewallLog(scope: LogScope, start = 0, limit = 500) {
  * happen rather than what was typed.
  *
  * Proxploy warns and never blocks here, matching what Proxmox itself allows.
+ *
+ * `savedEnabled` is the firewall's state as PVE actually has it stored, not
+ * whatever the operator is mid-typing: it decides the tense (present, "is
+ * being dropped", for a firewall already on, versus conditional, "will be
+ * dropped", for one that is not) so the sentence never claims a live outage
+ * is hypothetical, or a hypothetical one as already happening.
  */
 export function effectiveWarning(options: Options, defaults: Options,
-                                 rules: Rule[]): string | null {
+                                 rules: Rule[], savedEnabled: boolean): string | null {
   const policyIn = String(options.policy_in ?? defaults.policy_in ?? '')
   if (policyIn !== 'DROP' && policyIn !== 'REJECT') return null
   const allows = rules.filter(
     r => r.type === 'in' && r.action === 'ACCEPT' && (r.enable ?? 0) !== 0).length
   const verb = policyIn === 'DROP' ? 'dropped' : 'rejected'
-  if (allows === 0) {
-    return `Incoming traffic will be ${verb} by default, and no rule here `
-         + `allows any through. Nothing will be able to reach it until you add one.`
+  // Tense follows what is SAVED, not what is pending. A firewall already on is
+  // describing a guest's traffic right now, and calling that "will be" reads as
+  // a hypothesis about something that has already happened.
+  if (savedEnabled) {
+    return allows === 0
+      ? `Incoming traffic is being ${verb} by default, and no rule here allows `
+        + `any through. Nothing can reach it until you add one.`
+      : `Incoming traffic is being ${verb} by default. `
+        + `${allows} rule${allows === 1 ? '' : 's'} here ${allows === 1 ? 'is' : 'are'} `
+        + `letting traffic through.`
   }
-  return `Incoming traffic will be ${verb} by default. `
-       + `${allows} rule${allows === 1 ? '' : 's'} here will still let traffic through.`
+  return allows === 0
+    ? `If you turn this on, incoming traffic will be ${verb} by default, and no `
+      + `rule here allows any through. Nothing will be able to reach it until you add one.`
+    : `If you turn this on, incoming traffic will be ${verb} by default. `
+      + `${allows} rule${allows === 1 ? '' : 's'} here will still let traffic through.`
 }

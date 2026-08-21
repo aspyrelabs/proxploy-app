@@ -64,6 +64,8 @@ describe('FirewallOptionsPanel', () => {
   it('warns that nothing will get through when there are no allow rules', async () => {
     RULES = { scope: 'cluster', digest: 'd1', rules: [] }
     renderPanel()
+    await screen.findByLabelText('Firewall enabled')
+    fireEvent.click(screen.getByLabelText('Firewall enabled'))
     await screen.findByText(/no rule here allows any through/i)
   })
 
@@ -74,7 +76,25 @@ describe('FirewallOptionsPanel', () => {
       { pos: 2, type: 'out', action: 'ACCEPT', enable: 1 },  // outgoing, does not count
     ] }
     renderPanel()
+    await screen.findByLabelText('Firewall enabled')
+    fireEvent.click(screen.getByLabelText('Firewall enabled'))
     await screen.findByText(/1 rule here will still let traffic through/i)
+  })
+
+  it('stays quiet on a firewall that is off and nobody has touched', async () => {
+    // Proxmox defaults policy_in to DROP, so an untouched scope resolves to deny.
+    // Warning on every visit is how a warning stops being read.
+    renderPanel()
+    await screen.findByLabelText('Firewall enabled')
+    expect(screen.queryByText(/dropped by default/i)).toBeNull()
+  })
+
+  it('speaks in the present tense about a firewall that is already on', async () => {
+    OPTIONS = { ...OPTIONS, options: { enable: 1, digest: 'd1' } }
+    RULES = { scope: 'cluster', digest: 'd1', rules: [] }
+    renderPanel()
+    await screen.findByText(/is being dropped by default/i)
+    OPTIONS = { ...OPTIONS, options: { digest: 'd1' } }   // restore for later cases
   })
 
   it('does not warn when the default policy already accepts', async () => {

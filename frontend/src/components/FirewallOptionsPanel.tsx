@@ -60,7 +60,10 @@ export function FirewallOptionsPanel({ scope, canEdit }: {
   const current = (k: string) => patch[k] ?? options[k] ?? defaults[k] ?? ''
 
   const merged: Options = { ...options, ...patch }
-  const warning = effectiveWarning(merged, defaults, rulesQ.data?.rules ?? [])
+  // Saved state decides the tense, pending state decides whether to speak at all.
+  const savedOn = Number(options.enable ?? defaults.enable ?? 0) !== 0
+  const willBeOn = Number(current('enable')) !== 0
+  const warning = effectiveWarning(merged, defaults, rulesQ.data?.rules ?? [], savedOn)
 
   const set = (k: string, v: string | number) => setPatch(p => ({ ...p, [k]: v }))
 
@@ -115,11 +118,14 @@ export function FirewallOptionsPanel({ scope, canEdit }: {
           is an accurate sentence about what happens next, which is why the
           backend sends PVE's defaults alongside the stored values.
 
-          Shown regardless of the current enable state, not just once it is
-          checked: the operator needs this sentence before they decide to
-          flip the switch, not only after. Gating it on the checkbox would
-          hide the warning exactly when it is most useful. */}
-      {warning && (
+          Gated on the PENDING state (willBeOn), not shown unconditionally:
+          an untouched, already-off scope resolves to DROP by Proxmox's own
+          default, so an always-on warning here would fire on every visit to
+          every scope nobody has asked to change, and a warning nobody can
+          turn off is a warning nobody reads. It shows once the operator
+          ticks the box, or whenever the firewall is already on and this is
+          describing something actually happening. */}
+      {willBeOn && warning && (
         <p className="rounded-ctl border border-amber/40 bg-amber/10 p-2.5 text-[12.5px] text-text-2">
           {warning}
         </p>
