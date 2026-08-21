@@ -776,3 +776,230 @@ def node_log(request: Request, host_id: int, node: str, start: int = 0,
     except ProxmoxError as e:
         raise pve_error(e)
     return {"lines": lines, "start": start, "limit": limit}
+
+
+# ------------------------------------------------------------- guest handlers
+#
+# These are NOT routes on this router. They are mounted by api/apps.py and
+# api/vms.py, because scope_app() and scope_vm() resolve a row's team from
+# request.path_params and nothing else (api/deps.py). A guest id carried as a
+# query parameter would reach these handlers with no team scope at all, so the
+# guest lives in the path of the router that already owns it. Same reason
+# guest_nics and set_guest_nic live in api/network.py and are called from
+# there.
+
+def _guest_label(kind: str, vmid: int, row) -> str:
+    name = getattr(row, "name", None)
+    return name or f"{'VM' if kind == 'qemu' else 'CT'} {vmid}"
+
+
+def guest_rules(request: Request, db, host: Host, kind: str, vmid: int, row):
+    return _rules_read(request, db, host, fw.guest_loc(host, kind, vmid, row),
+                       "guest")
+
+
+def guest_rule_create(request: Request, db, user: User, host: Host, kind: str,
+                      vmid: int, row, body: RuleIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = rule_params(body)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.rule_create", params=params,
+                 call=lambda c: c.firewall_rule_create(loc, params))
+    return {"created": True}
+
+
+def guest_rule_update(request: Request, db, user: User, host: Host, kind: str,
+                      vmid: int, row, pos: int, body: RulePatch):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = rule_params(body, partial=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.rule_update", params={"pos": pos, **params},
+                 call=lambda c: c.firewall_rule_update(loc, pos, params))
+    return {"updated": True}
+
+
+def guest_rule_move(request: Request, db, user: User, host: Host, kind: str,
+                    vmid: int, row, pos: int, body: MoveIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.rule_move",
+                 params={"pos": pos, "moveto": body.moveto},
+                 call=lambda c: c.firewall_rule_move(loc, pos, body.moveto,
+                                                     body.digest))
+    return {"moved": True, "pos": body.moveto}
+
+
+def guest_rule_delete(request: Request, db, user: User, host: Host, kind: str,
+                      vmid: int, row, pos: int, digest: str | None):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.rule_delete", params={"pos": pos},
+                 call=lambda c: c.firewall_rule_delete(loc, pos, digest))
+    return {"deleted": True}
+
+
+def _guest_write(request: Request, db, user: User, host: Host, kind: str,
+                 vmid: int, row, *, action: str, params: dict, call) -> None:
+    """Audits against the GUEST, not the host: the operator reading the log
+    needs to know which container's traffic changed, and the host is one row
+    up from the answer."""
+    ip = request.client.host if request.client else None
+    target_type = "app" if kind == "lxc" else "vm"
+    target_id = getattr(row, "id", None)
+    label = _guest_label(kind, vmid, row)
+    try:
+        call(fw.writers(request.app, db, host))
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                    target_type=target_type, target_id=target_id,
+                    target_name=label, params=params, result="error", ip=ip)
+        raise pve_error(e)
+    write_audit(db, actor_type="user", actor_id=user.id, action=action,
+                target_type=target_type, target_id=target_id,
+                target_name=label, params=params, ip=ip)
+
+
+def guest_options(request: Request, db, host: Host, kind: str, vmid: int, row):
+    return _options_read(request, db, host, fw.guest_loc(host, kind, vmid, row),
+                         "guest")
+
+
+def guest_options_update(request: Request, db, user: User, host: Host,
+                         kind: str, vmid: int, row, body: OptionsIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(by_alias=True, exclude_unset=True, exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.options", params=params,
+                 call=lambda c: c.firewall_options_update(loc, params))
+    return {"updated": True}
+
+
+def guest_aliases(request: Request, db, host: Host, kind: str, vmid: int, row):
+    try:
+        return {"aliases": fw.readers(request.app, db, host).firewall_aliases(
+            fw.guest_loc(host, kind, vmid, row))}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+def guest_alias_create(request: Request, db, user: User, host: Host, kind: str,
+                       vmid: int, row, body: AliasIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.alias_create", params=params,
+                 call=lambda c: c.firewall_alias_create(loc, params))
+    return {"ok": True}
+
+
+def guest_alias_update(request: Request, db, user: User, host: Host, kind: str,
+                       vmid: int, row, name: str, body: AliasPatch):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(exclude_unset=True, exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.alias_update", params={"name": name, **params},
+                 call=lambda c: c.firewall_alias_update(loc, name, params))
+    return {"ok": True}
+
+
+def guest_alias_delete(request: Request, db, user: User, host: Host, kind: str,
+                       vmid: int, row, name: str, digest: str | None):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.alias_delete", params={"name": name},
+                 call=lambda c: c.firewall_alias_delete(loc, name, digest))
+    return {"ok": True}
+
+
+def guest_ipsets(request: Request, db, host: Host, kind: str, vmid: int, row):
+    try:
+        return {"ipsets": fw.readers(request.app, db, host).firewall_ipsets(
+            fw.guest_loc(host, kind, vmid, row))}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+def guest_ipset_create(request: Request, db, user: User, host: Host, kind: str,
+                       vmid: int, row, body: IpSetIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.ipset_create", params=params,
+                 call=lambda c: c.firewall_ipset_create(loc, params))
+    return {"ok": True}
+
+
+def guest_ipset_delete(request: Request, db, user: User, host: Host, kind: str,
+                       vmid: int, row, name: str, force: bool,
+                       digest: str | None):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.ipset_delete",
+                 params={"name": name, "force": force},
+                 call=lambda c: c.firewall_ipset_delete(loc, name, force, digest))
+    return {"ok": True}
+
+
+def guest_ipset_members(request: Request, db, host: Host, kind: str, vmid: int,
+                        row, name: str):
+    try:
+        return {"members": fw.readers(request.app, db, host)
+                .firewall_ipset_members(fw.guest_loc(host, kind, vmid, row), name)}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+def guest_ipset_member_add(request: Request, db, user: User, host: Host,
+                           kind: str, vmid: int, row, name: str, body: MemberIn):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.ipset_member_add",
+                 params={"ipset": name, **params},
+                 call=lambda c: c.firewall_ipset_member_add(loc, name, params))
+    return {"ok": True}
+
+
+def guest_ipset_member_update(request: Request, db, user: User, host: Host,
+                              kind: str, vmid: int, row, name: str, cidr: str,
+                              body: MemberPatch):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    params = body.model_dump(exclude_unset=True, exclude_none=True)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.ipset_member_update",
+                 params={"ipset": name, "cidr": cidr, **params},
+                 call=lambda c: c.firewall_ipset_member_update(loc, name, cidr,
+                                                               params))
+    return {"ok": True}
+
+
+def guest_ipset_member_delete(request: Request, db, user: User, host: Host,
+                              kind: str, vmid: int, row, name: str, cidr: str,
+                              digest: str | None):
+    loc = fw.guest_loc(host, kind, vmid, row)
+    _guest_write(request, db, user, host, kind, vmid, row,
+                 action="firewall.ipset_member_delete",
+                 params={"ipset": name, "cidr": cidr},
+                 call=lambda c: c.firewall_ipset_member_delete(loc, name, cidr,
+                                                               digest))
+    return {"ok": True}
+
+
+def guest_refs(request: Request, db, host: Host, kind: str, vmid: int, row,
+               ref_type: str | None = None):
+    try:
+        return {"refs": fw.readers(request.app, db, host).firewall_refs(
+            fw.guest_loc(host, kind, vmid, row), ref_type=ref_type)}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+def guest_log(request: Request, db, host: Host, kind: str, vmid: int, row, *,
+              start: int, limit: int, since: int | None, until: int | None):
+    try:
+        lines = fw.readers(request.app, db, host).firewall_log(
+            fw.guest_loc(host, kind, vmid, row), start=start, limit=limit,
+            since=since, until=until)
+    except ProxmoxError as e:
+        raise pve_error(e)
+    return {"lines": lines, "start": start, "limit": limit}

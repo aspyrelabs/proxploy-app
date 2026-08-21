@@ -7,9 +7,13 @@ import re
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from proxploy.api import firewall as fwapi
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
 from proxploy.api.deps import (authorize, dedupe_vms, get_db,
                                require_entitlement, scope_vm)
+from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
+                                   MemberPatch, MoveIn, OptionsIn, RuleIn,
+                                   RulePatch)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import Host, User, Vm
@@ -35,6 +39,8 @@ _create = authorize("vm", "create")               # host_id is body-carried, no 
 _clone = authorize("vm", "clone", scope_of=scope_vm())
 _remove = authorize("vm", "remove", scope_of=scope_vm())
 _configure = authorize("vm", "configure", scope_of=scope_vm())
+_fw_read = authorize("firewall", "read", scope_of=scope_vm())
+_fw_guest = authorize("firewall", "guest", scope_of=scope_vm())
 
 
 def _vm_out(v: Vm, host: Host, snapshots) -> dict:
@@ -138,6 +144,211 @@ def vm_network_update(request: Request, vm_id: int, iface: str, body: NicIn,
     return set_guest_nic(request, db, user, target_type="vm", target_id=v.id,
                          host=host, kind="qemu", vmid=v.vmid, iface=iface, body=body,
                          row=v)
+
+
+# Above the lifecycle wildcard, same as /{vm_id}/network directly above:
+# registered after it, "firewall" matches as an ACTION and never gets here.
+@router.get("/{vm_id}/firewall/rules",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_rules(request: Request, vm_id: int, db=Depends(get_db),
+                user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_rules(request, db, host, "qemu", v.vmid, v)
+
+
+@router.post("/{vm_id}/firewall/rules", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.rules"))])
+def vm_fw_rule_create(request: Request, vm_id: int, body: RuleIn,
+                      db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_rule_create(request, db, user, host, "qemu", v.vmid, v, body)
+
+
+@router.put("/{vm_id}/firewall/rules/{pos}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.rules"))])
+def vm_fw_rule_update(request: Request, vm_id: int, pos: int, body: RulePatch,
+                      db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_rule_update(request, db, user, host, "qemu", v.vmid, v,
+                                   pos, body)
+
+
+@router.put("/{vm_id}/firewall/rules/{pos}/move",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.rules"))])
+def vm_fw_rule_move(request: Request, vm_id: int, pos: int, body: MoveIn,
+                    db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_rule_move(request, db, user, host, "qemu", v.vmid, v, pos,
+                                 body)
+
+
+@router.delete("/{vm_id}/firewall/rules/{pos}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.rules"))])
+def vm_fw_rule_delete(request: Request, vm_id: int, pos: int,
+                      digest: str | None = None, db=Depends(get_db),
+                      user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_rule_delete(request, db, user, host, "qemu", v.vmid, v,
+                                   pos, digest)
+
+
+@router.get("/{vm_id}/firewall/options",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_options(request: Request, vm_id: int, db=Depends(get_db),
+                  user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_options(request, db, host, "qemu", v.vmid, v)
+
+
+@router.put("/{vm_id}/firewall/options",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.options"))])
+def vm_fw_options_update(request: Request, vm_id: int, body: OptionsIn,
+                         db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_options_update(request, db, user, host, "qemu", v.vmid, v,
+                                      body)
+
+
+@router.get("/{vm_id}/firewall/aliases",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_aliases(request: Request, vm_id: int, db=Depends(get_db),
+                  user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_aliases(request, db, host, "qemu", v.vmid, v)
+
+
+@router.post("/{vm_id}/firewall/aliases", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def vm_fw_alias_create(request: Request, vm_id: int, body: AliasIn,
+                       db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_alias_create(request, db, user, host, "qemu", v.vmid, v, body)
+
+
+@router.put("/{vm_id}/firewall/aliases/{name}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.objects"))])
+def vm_fw_alias_update(request: Request, vm_id: int, name: str,
+                       body: AliasPatch, db=Depends(get_db),
+                       user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_alias_update(request, db, user, host, "qemu", v.vmid, v,
+                                    name, body)
+
+
+@router.delete("/{vm_id}/firewall/aliases/{name}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def vm_fw_alias_delete(request: Request, vm_id: int, name: str,
+                       digest: str | None = None, db=Depends(get_db),
+                       user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_alias_delete(request, db, user, host, "qemu", v.vmid, v,
+                                    name, digest)
+
+
+@router.get("/{vm_id}/firewall/ipsets",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_ipsets(request: Request, vm_id: int, db=Depends(get_db),
+                 user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipsets(request, db, host, "qemu", v.vmid, v)
+
+
+@router.post("/{vm_id}/firewall/ipsets", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def vm_fw_ipset_create(request: Request, vm_id: int, body: IpSetIn,
+                       db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_create(request, db, user, host, "qemu", v.vmid, v, body)
+
+
+@router.delete("/{vm_id}/firewall/ipsets/{name}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def vm_fw_ipset_delete(request: Request, vm_id: int, name: str,
+                       force: bool = False, digest: str | None = None,
+                       db=Depends(get_db), user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_delete(request, db, user, host, "qemu", v.vmid, v,
+                                    name, force, digest)
+
+
+@router.get("/{vm_id}/firewall/ipsets/{name}/members",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_ipset_members(request: Request, vm_id: int, name: str,
+                        db=Depends(get_db), user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_members(request, db, host, "qemu", v.vmid, v, name)
+
+
+@router.post("/{vm_id}/firewall/ipsets/{name}/members", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def vm_fw_ipset_member_add(request: Request, vm_id: int, name: str,
+                           body: MemberIn, db=Depends(get_db),
+                           user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_member_add(request, db, user, host, "qemu", v.vmid,
+                                        v, name, body)
+
+
+# {cidr:path}: a CIDR contains a slash and a plain path parameter stops at the
+# first one, so 10.0.0.0/8 would never match this route.
+@router.put("/{vm_id}/firewall/ipsets/{name}/members/{cidr:path}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.objects"))])
+def vm_fw_ipset_member_update(request: Request, vm_id: int, name: str,
+                              cidr: str, body: MemberPatch,
+                              db=Depends(get_db),
+                              user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_member_update(request, db, user, host, "qemu",
+                                           v.vmid, v, name, cidr, body)
+
+
+@router.delete("/{vm_id}/firewall/ipsets/{name}/members/{cidr:path}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def vm_fw_ipset_member_delete(request: Request, vm_id: int, name: str,
+                              cidr: str, digest: str | None = None,
+                              db=Depends(get_db),
+                              user: User = Depends(_fw_guest)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_ipset_member_delete(request, db, user, host, "qemu",
+                                           v.vmid, v, name, cidr, digest)
+
+
+@router.get("/{vm_id}/firewall/refs",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def vm_fw_refs(request: Request, vm_id: int, type: str | None = None,
+               db=Depends(get_db), user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_refs(request, db, host, "qemu", v.vmid, v, ref_type=type)
+
+
+@router.get("/{vm_id}/firewall/log",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.log"))])
+def vm_fw_log(request: Request, vm_id: int, start: int = 0, limit: int = 500,
+              since: int | None = None, until: int | None = None,
+              db=Depends(get_db), user: User = Depends(_fw_read)):
+    v, host = _vm_and_host(db, vm_id)
+    return fwapi.guest_log(request, db, host, "qemu", v.vmid, v, start=start,
+                           limit=limit, since=since, until=until)
 
 
 # --- VM Options ----------------------------------------------------------

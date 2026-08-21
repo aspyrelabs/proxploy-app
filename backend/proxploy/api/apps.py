@@ -9,8 +9,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from proxploy.api import firewall as fwapi
 from proxploy.api.deps import (authorize, cluster_scope, get_db,
                                require_entitlement, scope_app)
+from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
+                                   MemberPatch, MoveIn, OptionsIn, RuleIn,
+                                   RulePatch)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso
@@ -44,6 +48,8 @@ _script = authorize("app", "script", scope_of=scope_app())
 _adopt = authorize("app", "adopt")
 _migrate = authorize("app", "migrate", scope_of=scope_app())
 _remove = authorize("app", "remove", scope_of=scope_app())
+_fw_read = authorize("firewall", "read", scope_of=scope_app())
+_fw_guest = authorize("firewall", "guest", scope_of=scope_app())
 
 
 def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
@@ -579,6 +585,211 @@ def app_network(request: Request, app_id: int, db=Depends(get_db),
                 user: User = Depends(_read_scoped)):
     a, host = _app_and_host(db, app_id)
     return guest_nics(request, db, host, "lxc", a.ctid, a)
+
+
+# Above the lifecycle wildcard, same as /{app_id}/network directly above:
+# registered after it, "firewall" matches as an ACTION and never gets here.
+@router.get("/{app_id}/firewall/rules",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_rules(request: Request, app_id: int, db=Depends(get_db),
+                 user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_rules(request, db, host, "lxc", a.ctid, a)
+
+
+@router.post("/{app_id}/firewall/rules", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.rules"))])
+def app_fw_rule_create(request: Request, app_id: int, body: RuleIn,
+                       db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_rule_create(request, db, user, host, "lxc", a.ctid, a, body)
+
+
+@router.put("/{app_id}/firewall/rules/{pos}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.rules"))])
+def app_fw_rule_update(request: Request, app_id: int, pos: int, body: RulePatch,
+                       db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_rule_update(request, db, user, host, "lxc", a.ctid, a,
+                                   pos, body)
+
+
+@router.put("/{app_id}/firewall/rules/{pos}/move",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.rules"))])
+def app_fw_rule_move(request: Request, app_id: int, pos: int, body: MoveIn,
+                     db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_rule_move(request, db, user, host, "lxc", a.ctid, a, pos,
+                                 body)
+
+
+@router.delete("/{app_id}/firewall/rules/{pos}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.rules"))])
+def app_fw_rule_delete(request: Request, app_id: int, pos: int,
+                       digest: str | None = None, db=Depends(get_db),
+                       user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_rule_delete(request, db, user, host, "lxc", a.ctid, a,
+                                   pos, digest)
+
+
+@router.get("/{app_id}/firewall/options",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_options(request: Request, app_id: int, db=Depends(get_db),
+                   user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_options(request, db, host, "lxc", a.ctid, a)
+
+
+@router.put("/{app_id}/firewall/options",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.options"))])
+def app_fw_options_update(request: Request, app_id: int, body: OptionsIn,
+                          db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_options_update(request, db, user, host, "lxc", a.ctid, a,
+                                      body)
+
+
+@router.get("/{app_id}/firewall/aliases",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_aliases(request: Request, app_id: int, db=Depends(get_db),
+                   user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_aliases(request, db, host, "lxc", a.ctid, a)
+
+
+@router.post("/{app_id}/firewall/aliases", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def app_fw_alias_create(request: Request, app_id: int, body: AliasIn,
+                        db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_alias_create(request, db, user, host, "lxc", a.ctid, a, body)
+
+
+@router.put("/{app_id}/firewall/aliases/{name}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.objects"))])
+def app_fw_alias_update(request: Request, app_id: int, name: str,
+                        body: AliasPatch, db=Depends(get_db),
+                        user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_alias_update(request, db, user, host, "lxc", a.ctid, a,
+                                    name, body)
+
+
+@router.delete("/{app_id}/firewall/aliases/{name}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def app_fw_alias_delete(request: Request, app_id: int, name: str,
+                        digest: str | None = None, db=Depends(get_db),
+                        user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_alias_delete(request, db, user, host, "lxc", a.ctid, a,
+                                    name, digest)
+
+
+@router.get("/{app_id}/firewall/ipsets",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_ipsets(request: Request, app_id: int, db=Depends(get_db),
+                  user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipsets(request, db, host, "lxc", a.ctid, a)
+
+
+@router.post("/{app_id}/firewall/ipsets", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def app_fw_ipset_create(request: Request, app_id: int, body: IpSetIn,
+                        db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_create(request, db, user, host, "lxc", a.ctid, a, body)
+
+
+@router.delete("/{app_id}/firewall/ipsets/{name}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def app_fw_ipset_delete(request: Request, app_id: int, name: str,
+                        force: bool = False, digest: str | None = None,
+                        db=Depends(get_db), user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_delete(request, db, user, host, "lxc", a.ctid, a,
+                                    name, force, digest)
+
+
+@router.get("/{app_id}/firewall/ipsets/{name}/members",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_ipset_members(request: Request, app_id: int, name: str,
+                         db=Depends(get_db), user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_members(request, db, host, "lxc", a.ctid, a, name)
+
+
+@router.post("/{app_id}/firewall/ipsets/{name}/members", status_code=201,
+             dependencies=[Depends(_fw_guest),
+                           Depends(require_entitlement("firewall.objects"))])
+def app_fw_ipset_member_add(request: Request, app_id: int, name: str,
+                            body: MemberIn, db=Depends(get_db),
+                            user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_member_add(request, db, user, host, "lxc", a.ctid,
+                                        a, name, body)
+
+
+# {cidr:path}: a CIDR contains a slash and a plain path parameter stops at the
+# first one, so 10.0.0.0/8 would never match this route.
+@router.put("/{app_id}/firewall/ipsets/{name}/members/{cidr:path}",
+            dependencies=[Depends(_fw_guest),
+                          Depends(require_entitlement("firewall.objects"))])
+def app_fw_ipset_member_update(request: Request, app_id: int, name: str,
+                               cidr: str, body: MemberPatch,
+                               db=Depends(get_db),
+                               user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_member_update(request, db, user, host, "lxc",
+                                           a.ctid, a, name, cidr, body)
+
+
+@router.delete("/{app_id}/firewall/ipsets/{name}/members/{cidr:path}",
+               dependencies=[Depends(_fw_guest),
+                             Depends(require_entitlement("firewall.objects"))])
+def app_fw_ipset_member_delete(request: Request, app_id: int, name: str,
+                               cidr: str, digest: str | None = None,
+                               db=Depends(get_db),
+                               user: User = Depends(_fw_guest)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_ipset_member_delete(request, db, user, host, "lxc",
+                                           a.ctid, a, name, cidr, digest)
+
+
+@router.get("/{app_id}/firewall/refs",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.view"))])
+def app_fw_refs(request: Request, app_id: int, type: str | None = None,
+                db=Depends(get_db), user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_refs(request, db, host, "lxc", a.ctid, a, ref_type=type)
+
+
+@router.get("/{app_id}/firewall/log",
+            dependencies=[Depends(_fw_read),
+                          Depends(require_entitlement("firewall.log"))])
+def app_fw_log(request: Request, app_id: int, start: int = 0, limit: int = 500,
+               since: int | None = None, until: int | None = None,
+               db=Depends(get_db), user: User = Depends(_fw_read)):
+    a, host = _app_and_host(db, app_id)
+    return fwapi.guest_log(request, db, host, "lxc", a.ctid, a, start=start,
+                           limit=limit, since=since, until=until)
 
 
 # Above the lifecycle wildcard, same as /network directly above.
