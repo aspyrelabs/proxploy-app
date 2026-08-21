@@ -252,11 +252,18 @@ class Made:
 
     # -- creating, each returning the handle we will find it by again
 
+    def track(self, kind: str, loc: dict | None, handle: str) -> str:
+        """Record an object created somewhere ELSE, so teardown removes it the
+        same way. tests/test_firewall_hardware_routes.py creates through the
+        API routes rather than through the client, and its objects are this
+        run's just the same."""
+        self._made.append([kind, loc, handle])
+        return handle
+
     def rule(self, loc: dict, params: dict) -> str:
         comment = params["comment"]
         self.l.firewall_rule_create(loc, params)
-        self._made.append(["rule", loc, comment])
-        return comment
+        return self.track("rule", loc, comment)
 
     def alias(self, loc: dict, params: dict) -> str:
         name = params["name"]
