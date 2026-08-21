@@ -63,7 +63,18 @@ PX = "pxppress"
 # Guests this run may touch. vmid 105 is off limits and is deliberately absent.
 LXC_VMID, LXC_NODE = 104, "node1"           # wastebin
 QEMU_VMID, QEMU_NODE = 108, "node1"         # debian-test
-FOREIGN_VMID, FOREIGN_NODE = 109, "node2"   # actualbudget, NOT on host 1's node
+FOREIGN_VMID, FOREIGN_NODE = 109, "node2"   # actualbudget, an LXC, NOT on
+                                            # host 1's node
+
+# 109 is a CONTAINER: cluster_resources() on this cluster reports it as an lxc,
+# and this file used to describe it as a VM. Every foreign_* location below asks
+# for it down the QEMU path ON PURPOSE, and that is not an oversight to tidy
+# up: PVE keys a guest firewall on the vmid alone, at
+# /etc/pve/firewall/<vmid>.fw, and never checks the kind in the URL, so the
+# wrong kind reads and writes the same file the right one does. That is the
+# behaviour test_an_unknown_vmid_reads_as_empty_rather_than_404 proves against
+# 104, and asking 109 the same way keeps it covered on the cross-node path too.
+# Measured on pve-manager 9.2.11 on 2026-08-21.
 
 # A vmid that does not exist and plausibly never will on this lab.
 GHOST_VMID = 999999
@@ -134,7 +145,7 @@ def qemu_loc(host) -> dict:
 @pytest.fixture(scope="module")
 def foreign_loc(host) -> dict:
     """Guest 109, routed to its OWN node (node2), reached through host 1
-    (node1)."""
+    (node1). Asked for as a VM although it is a container: see FOREIGN_VMID."""
     return guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))
 
 
@@ -396,7 +407,7 @@ def run_snapshot(monitor, host, lxc_loc, qemu_loc, foreign_loc):
     scopes = {"cluster": cluster_loc(),
               "node1": node_loc("node1"), "node2": node_loc("node2"),
               f"lxc {LXC_VMID}": lxc_loc, f"qemu {QEMU_VMID}": qemu_loc,
-              f"qemu {FOREIGN_VMID}": foreign_loc}
+              f"lxc {FOREIGN_VMID}": foreign_loc}
     snap = {}
     for label, loc in scopes.items():
         snap[label] = (loc, _keys(monitor.firewall_rules(loc)),
@@ -1061,6 +1072,10 @@ def test_guest_loc_routes_to_the_guests_own_node(host):
     """guest_loc must take the node from the guest's row, never from the host's
     entry node. Host 1 is node1; guest 109 lives on node2.
 
+    guest_loc is a pure function here, so the kind in these calls is only
+    carried through to the dict and never checked by anything. 109 is a
+    container asked for as a VM, deliberately: see FOREIGN_VMID.
+
     This test fails outright if guest_loc ever goes back to host.node_name.
     """
     assert host.node_name == "node1", f"rig host is {host.node_name}, expected node1"
@@ -1087,6 +1102,10 @@ def test_firewall_endpoints_do_not_validate_the_node_in_the_path(monitor,
     Nothing observable distinguishes a correctly routed firewall call from a
     misrouted one, which is exactly why the assertion above is on the location
     dict and not on a response.
+
+    109 is a container and every call below asks for it as a VM, which the same
+    node-blind lookup makes work: this covers the wrong kind and the wrong node
+    at once. See FOREIGN_VMID.
     """
     wrong = guest_loc(host, "qemu", FOREIGN_VMID)                    # node1
     right = guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))  # node2
