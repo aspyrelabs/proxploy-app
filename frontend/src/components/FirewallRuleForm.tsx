@@ -74,7 +74,6 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
   }
 
   const pending = create.isPending || update.isPending
-  const err = create.error ?? update.error
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
@@ -202,9 +201,10 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
         </div>
       )}
 
-      {err && <p className="text-[12.5px] text-red">
-        Could not save that rule. {String((err.body as { detail?: string })?.detail ?? '')}
-      </p>}
+      {/* The failure is not repeated here. useScopeMutation's onError notifies
+          through apiErrorDetail, and NotificationSurface sits at z-40 against
+          this dialog's z-30 scrim, so the message is readable with the dialog
+          still open and still holding what was typed. */}
 
       {/* Measured on pve-manager 9.2.11: PVE prepends a new rule, so it lands
           at position 0 and outranks every rule below it. Rule order IS

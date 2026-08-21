@@ -19,6 +19,7 @@ let RULES: any = { scope: 'cluster', digest: 'd1', rules: [] }
 const calls: { path: string; method: string; body: any }[] = []
 
 let optionsFail = false
+let writeFails: { status: number; body: unknown } | null = null
 
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
@@ -28,7 +29,9 @@ vi.mock('../api/client', async (importOriginal) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method !== 'GET') {
         calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : {} })
-        return Promise.resolve({ ok: true })
+        return writeFails
+          ? Promise.reject(new actual.ApiError(writeFails.status, writeFails.body))
+          : Promise.resolve({ ok: true })
       }
       if (path.endsWith('/options')) {
         return optionsFail
@@ -42,6 +45,7 @@ vi.mock('../api/client', async (importOriginal) => {
 })
 
 import { FirewallOptionsPanel } from '../components/FirewallOptionsPanel'
+import { getNotifications, resetNotificationStore } from '../lib/notificationStore'
 
 function renderPanel(canEdit = true) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -157,5 +161,30 @@ describe('FirewallOptionsPanel', () => {
     const policy = await screen.findByLabelText('Incoming policy') as HTMLSelectElement
     expect(policy.value).toBe('DROP')
     OPTIONS = { ...OPTIONS, options: { digest: 'd1' } }
+  })
+
+  it('reports a failed save through apiErrorDetail, and only once', async () => {
+    // The panel used to dig `body.detail` out by hand and render it inline as
+    // well. That dig knew one body shape and no status: it could not produce
+    // the 502 prefix below, so the inline paragraph and the tray described the
+    // same failure differently. There is one rendering now, and it is the one
+    // that reads every shape the backend sends.
+    writeFails = { status: 502, body: { detail: 'pvesh: cluster not quorate' } }
+    resetNotificationStore()
+    try {
+      renderPanel()
+      await screen.findByLabelText('Firewall enabled')
+      fireEvent.click(screen.getByLabelText('Firewall enabled'))
+      fireEvent.click(screen.getByRole('button', { name: /save/i }))
+      await waitFor(() => expect(getNotifications()).toHaveLength(1))
+      expect(getNotifications()[0]).toMatchObject({
+        severity: 'destructive',
+        title: 'Proxmox could not do this: pvesh: cluster not quorate',
+      })
+      expect(screen.queryByText(/could not save those settings/i)).toBeNull()
+    } finally {
+      writeFails = null
+      resetNotificationStore()
+    }
   })
 })

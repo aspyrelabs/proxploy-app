@@ -148,13 +148,13 @@ export function FirewallOptionsPanel({ scope, canEdit }: {
               </p>
             )}
 
-            {save.error && (
-              <p className="text-[12.5px] text-red">
-                Could not save those settings.{' '}
-                {String((save.error.body as { detail?: string })?.detail ?? '')}
-              </p>
-            )}
-
+            {/* No inline copy of the failure. useScopeMutation's onError already
+                notifies, through apiErrorDetail, which reads every body shape the
+                backend uses (nested 502, FastAPI's validation array, problem+json)
+                and says whose side failed on a 502. The hand-rolled dig that used
+                to sit here read one of those shapes, so the two renderings could
+                describe the same failure differently and the operator read the
+                worse one first. */}
             {canEdit && (
               <div className="flex justify-end">
                 <Button disabled={save.isPending || Object.keys(patch).length === 0}
