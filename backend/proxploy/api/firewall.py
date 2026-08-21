@@ -222,26 +222,46 @@ def rule_params(model: BaseModel, *, partial: bool = False) -> dict:
 
 # ---------------------------------------------------------------- rules
 
-def _digest_of(payload) -> str | None:
-    """The digest carried by whatever Proxmox answered, or None.
+def _unreadable(what: str) -> HTTPException:
+    """A 502, because a Proxmox answer nobody can parse is a gateway failure.
 
-    PVE returns the digest on each rule ROW rather than on the collection, so
-    the first row is where a rules digest lives; an options response carries
-    its own. Surfacing it gives the client something to send back on a write
-    without it having to know either of those things.
+    It is emphatically NOT an empty firewall. Handing back the rows with no
+    digest would show the operator a rule list Proxploy could not actually
+    read as though it were the truth, which is the same mistake as rendering a
+    failed read as an empty list; and the null digest is not inert either,
+    because the next write would go out without one and PVE accepts an
+    undigested write unconditionally, silently overwriting whoever else was
+    editing. That is exactly what the 409 in pve_error exists to prevent.
 
-    Shape-checked rather than assumed. `rules[0].get(...)` and
-    `options.get(...)` used to be the only crash in the whole firewall
-    surface: a row that was not an object, or an options payload that was a
-    list or a string, raised inside the handler and Starlette answered a bare
-    500 with no sentence in it. A payload nothing can be read out of simply
-    has no digest, and the rest of the answer still reaches the operator.
+    Not a 4xx: nothing about the caller's request is wrong.
     """
-    if isinstance(payload, dict):
-        return payload.get("digest")
-    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        return payload[0].get("digest")
-    return None
+    return HTTPException(502, f"Proxmox sent back firewall {what} in a shape "
+                              f"Proxploy does not recognise, so nothing is "
+                              f"shown here rather than something that might "
+                              f"be wrong.")
+
+
+def _rules_digest(rules) -> str | None:
+    """PVE returns the digest on each rule ROW rather than on the collection,
+    so the first row is where a rules digest lives. Surfacing it gives the
+    client something to send back on a write without it having to know that.
+
+    Shape-checked rather than assumed: `rules[0].get(...)` used to be one of
+    the two crashes in this file, answering a bare 500 with no sentence in it
+    when a row was not an object. An empty list is not malformed, it is a
+    scope with no rules yet.
+    """
+    if not isinstance(rules, list) or any(not isinstance(r, dict) for r in rules):
+        raise _unreadable("rules")
+    return rules[0].get("digest") if rules else None
+
+
+def _options_digest(options) -> str | None:
+    """The options half of the same check. An options response is an object;
+    a list or a string is Proxmox answering something else entirely."""
+    if not isinstance(options, dict):
+        raise _unreadable("settings")
+    return options.get("digest")
 
 
 def _rules_read(request: Request, db, host: Host, loc: dict, scope: str) -> dict:
@@ -250,7 +270,7 @@ def _rules_read(request: Request, db, host: Host, loc: dict, scope: str) -> dict
         rules = fw.readers(request.app, db, host).firewall_rules(loc)
     except ProxmoxError as e:
         raise pve_error(e)
-    return {"scope": scope, "rules": rules, "digest": _digest_of(rules)}
+    return {"scope": scope, "rules": rules, "digest": _rules_digest(rules)}
 
 
 def _rules_write(request: Request, db, user: User, host: Host, loc: dict, *,
@@ -557,7 +577,7 @@ def _options_read(request: Request, db, host: Host, loc: dict, scope: str) -> di
         raise pve_error(e)
     return {"scope": scope, "options": options,
             "defaults": OPTION_DEFAULTS[scope],
-            "digest": _digest_of(options)}
+            "digest": _options_digest(options)}
 
 
 def _options_write(request: Request, db, user: User, host: Host, loc: dict, *,

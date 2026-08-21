@@ -81,10 +81,9 @@ def seed_world(app):
 
 def seed_options(fake):
     """PVE answers options with an object. The fake answers an unset path with
-    [], and _options_read calls .get("digest") on whatever came back, so every
-    options route 500s unless the shape is seeded. That crash is a finding in
-    its own right (test_a_non_object_options_response_is_not_a_crash); seeding
-    here keeps the authorization walk measuring authorization."""
+    [], which is not an options object, so every options route answers 502
+    unless the shape is seeded (test_a_malformed_proxmox_response_is_a_502).
+    Seeding here keeps the authorization walk measuring authorization."""
     for path in ("cluster/firewall/options",
                  "nodes/pve1/firewall/options",
                  "nodes/pve2/lxc/150/firewall/options",
@@ -983,17 +982,26 @@ def test_a_not_found_from_proxmox_is_not_reported_as_a_gateway_failure(
         f"a PVE {label} was relayed as {got.status_code}")
 
 
-def test_a_non_object_options_response_is_not_a_crash(tmp_path, csrf_header,
-                                                      bootstrap_admin):
-    """A malformed Proxmox response is answered, not crashed on.
+def test_a_malformed_proxmox_response_is_a_502(tmp_path, csrf_header,
+                                               bootstrap_admin):
+    """A Proxmox answer Proxploy cannot parse is a gateway failure. Exactly
+    502, never a 500 and never a 200.
 
     _rules_read used to do rules[0].get("digest") and _options_read
     options.get("digest"), so a rule list whose rows were not objects, or an
     options payload that was a list or a string, raised AttributeError or
     KeyError inside the handler and Starlette answered a bare 500: the only
-    500 in the whole firewall surface. api/firewall.py::_digest_of checks the
-    shape instead, so such a payload simply carries no digest and the rest of
-    the answer still reaches the operator.
+    500 in the whole firewall surface.
+
+    502 rather than a tolerant 200, and the reason is worth stating because a
+    tolerant 200 is the tempting answer. Handing the rows back with a null
+    digest would show the operator a rule list Proxploy could not read as
+    though it were authoritative, which is the same defect as rendering a
+    failed read as an empty firewall. And the null digest would not sit still:
+    it reaches the client, the next write goes out with no digest, PVE accepts
+    an undigested write unconditionally, and a concurrent edit is silently
+    overwritten, which is the very thing the 409 branch of pve_error exists to
+    prevent. Not a 4xx either: nothing about the caller's request is wrong.
     """
     from tests.support import make_app
     fake = _fake()
@@ -1003,29 +1011,35 @@ def test_a_non_object_options_response_is_not_a_crash(tmp_path, csrf_header,
         ids = seed_world(app)
         host = ids["a"]["host"]
         bad = []
-        for label, value in (("rules as strings", ["nope"]),
-                             ("rules as an object", {"a": 1})):
-            fake.firewall_data["cluster/firewall/rules"] = value
-            got = c.get(f"/api/v1/firewall/cluster/{host}/rules")
-            if got.status_code >= 500:
-                bad.append(f"{label} -> {got.status_code}")
-        fake.firewall_data.pop("cluster/firewall/rules", None)
-        for label, value in (("options as a list", []),
-                             ("options as a string", "boom")):
-            fake.firewall_data["cluster/firewall/options"] = value
-            got = c.get(f"/api/v1/firewall/cluster/{host}/options")
-            if got.status_code >= 500:
-                bad.append(f"{label} -> {got.status_code}")
-        assert not bad, ("a malformed Proxmox response crashed the handler:\n"
-                         + "\n".join(bad))
+        probes = [("rules as strings", "rules", ["nope"]),
+                  ("rules as an object", "rules", {"a": 1}),
+                  ("options as a list", "options", []),
+                  ("options as a string", "options", "boom")]
+        for label, what, value in probes:
+            fake.firewall_data[f"cluster/firewall/{what}"] = value
+            got = c.get(f"/api/v1/firewall/cluster/{host}/{what}")
+            if got.status_code != 502:
+                bad.append(f"{label} -> {got.status_code} {got.text[:120]}")
+                continue
+            bad += [f"{label}: {p}"
+                    for p in writing_problems(got.json().get("detail"))]
+            fake.firewall_data.pop(f"cluster/firewall/{what}", None)
+        assert not bad, ("a malformed Proxmox response was not answered as a "
+                         "gateway failure:\n" + "\n".join(bad))
+        # An empty rule list is NOT malformed: a scope with no rules yet reads
+        # as a scope with no rules yet.
+        fake.firewall_data["cluster/firewall/rules"] = []
+        empty = c.get(f"/api/v1/firewall/cluster/{host}/rules")
+        assert empty.status_code == 200
+        assert empty.json() == {"scope": "cluster", "rules": [], "digest": None}
 
 
 def test_a_malformed_response_never_puts_a_stack_trace_in_the_answer(
         tmp_path, bootstrap_admin):
-    """The other half: whatever the answer is, it carries no internals.
+    """The other half: the answer carries no internals.
 
-    This used to be a 500 and the assertion was that the 500 body was at
-    least clean. It is a 200 with no digest now, and the words below must
+    This used to be a bare 500 and the assertion was that its body was at
+    least clean. It is a 502 with a sentence now, and the words below must
     stay out of it either way.
     """
     from tests.support import make_app
@@ -1036,8 +1050,8 @@ def test_a_malformed_response_never_puts_a_stack_trace_in_the_answer(
         ids = seed_world(app)
         fake.firewall_data["cluster/firewall/rules"] = ["nope"]
         got = c.get(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules")
-        assert got.status_code < 500
-        assert got.json()["digest"] is None
+        assert got.status_code == 502
+        assert "rules" not in got.json()
         for word in ("Traceback", "firewall.py", "AttributeError",
                      "site-packages"):
             assert word not in got.text
