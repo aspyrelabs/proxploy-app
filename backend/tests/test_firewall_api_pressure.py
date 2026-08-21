@@ -1138,52 +1138,61 @@ def test_a_guest_firewall_write_is_audited_against_the_guest_not_the_host(solo):
     assert kinds["vm"] == "win11"
 
 
-def test_the_move_handler_has_a_dead_local_params(solo):
-    """Confirms the known deferred item at api/firewall.py:186. The local is
-    built with the digest in it and then thrown away, because the call below
-    passes its own params= keyword. Reading the handler, it looks as though
-    the digest is audited. It is not."""
-    import inspect
+def test_every_move_handler_records_the_digest_it_sent(solo):
+    """All four scopes, because the gap was in all four.
 
-    from proxploy.api.firewall import cluster_rule_move
-    source = inspect.getsource(cluster_rule_move)
-    assert 'params = {"moveto": body.moveto, "digest": body.digest}' in source
-    assert 'params={"moveto": body.moveto}' in source, (
-        "the dead local may have been wired up; recheck what is audited")
-
-
-def test_a_rule_move_records_the_move_but_not_the_digest(solo):
-    """The known deferred item, asserted as behaviour rather than as source.
-
-    Every other write route records the digest it sent, so a reviewer reading
-    the trail after a lost update can see which version of the rule list the
-    move was against. For a move they cannot.
+    The cluster handler built a params dict with the digest in it and then
+    threw it away (the call below passed its own params= keyword), and the
+    group, node and guest handlers never built one at all. Every other
+    firewall write records the digest it sent, which is what lets a reviewer
+    reading the trail after a lost update see which version of the rule list
+    each move was against.
     """
     c, ids, app = solo["client"], solo["ids"], solo["app"]
+    host = ids["a"]["host"]
+    moves = {
+        "cluster": f"/api/v1/firewall/cluster/{host}/rules/3/move",
+        "group": f"/api/v1/firewall/cluster/{host}/groups/web/rules/3/move",
+        "node": f"/api/v1/firewall/node/{host}/pve1/rules/3/move",
+        "app": f"/api/v1/apps/{ids['a']['app']}/firewall/rules/3/move",
+        "vm": f"/api/v1/vms/{ids['a']['vm']}/firewall/rules/3/move",
+    }
+    missing = []
+    for scope, url in moves.items():
+        got = c.put(url, headers=_csrf(c),
+                    json={"moveto": 1, "digest": f"d-{scope}"})
+        assert got.status_code == 200, f"{scope} -> {got.text[:150]}"
+        with app.state.sessionmaker() as db:
+            row = (db.query(AuditEvent).filter_by(action="firewall.rule_move")
+                   .order_by(AuditEvent.id).all()[-1])
+        if row.params.get("digest") != f"d-{scope}":
+            missing.append(f"{scope} move recorded {row.params}")
+    assert not missing, ("a move did not record the digest it was made "
+                         "against:\n" + "\n".join(missing))
+
+
+def test_a_move_that_carried_no_digest_records_no_digest(solo):
+    """Recording the digest must not mean inventing one: a caller that sent
+    none has none in the trail, rather than a null that reads like one."""
+    c, ids, app = solo["client"], solo["ids"], solo["app"]
     c.put(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules/3/move",
-          headers=_csrf(c), json={"moveto": 1, "digest": "d-move"})
+          headers=_csrf(c), json={"moveto": 1})
     with app.state.sessionmaker() as db:
         row = db.query(AuditEvent).filter_by(action="firewall.rule_move").one()
     assert row.params == {"moveto": 1}
-    assert "digest" not in row.params
-    # And the digest DID go to Proxmox, so the gap is the record, not the call.
-    _, _, params = solo["fake"].firewall_writes[0]
-    assert params["digest"] == "d-move"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "KNOWN DEFERRED: the move handlers drop the digest from the audit entry. "
-    "api/firewall.py:186 builds a params dict containing it and then never "
-    "uses it (dead local), passing params={'moveto': ...} to _rules_write "
-    "instead. The group, node and guest move handlers never build it at all "
-    "(:267, :340, :826). Every other firewall write records its digest."))
-def test_a_rule_move_should_record_the_digest_it_sent(solo):
+def test_a_rule_move_records_the_digest_it_sent(solo):
+    """The cluster move, on its own, and the digest it sent still goes to
+    Proxmox: recording it is in addition to sending it, not instead."""
     c, ids, app = solo["client"], solo["ids"], solo["app"]
     c.put(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules/3/move",
           headers=_csrf(c), json={"moveto": 1, "digest": "d-move"})
     with app.state.sessionmaker() as db:
         row = db.query(AuditEvent).filter_by(action="firewall.rule_move").one()
     assert row.params.get("digest") == "d-move"
+    _, _, params = solo["fake"].firewall_writes[0]
+    assert params["digest"] == "d-move"
 
 
 # =====================================================================
@@ -1209,17 +1218,19 @@ DIGEST_CARRIERS = [
     ("member update", "PUT", "/ipsets/trusted/members/10.0.0.5", {"comment": "x"}),
     ("member delete", "DELETE", "/ipsets/trusted/members/10.0.0.5", None),
     ("group delete", "DELETE", "/groups/web", None),
-]
-
-# The four writes with nowhere to put a digest. PVE's POST schema for an alias
-# and for an IP set member has no digest parameter, so there is nothing to
-# forward and a body carrying one is refused rather than quietly dropped. The
-# first two are a gap and reported as one: PVE's POST schema for an IP set and
-# for a security group each DO take a digest, and neither model has a field
-# for it.
-DIGEST_REFUSED = [
+    # These two were the gap: PVE's own POST schema for an IP set and for a
+    # security group each take a digest, and neither model had a field for one,
+    # so creating either was the one firewall write that could not be made safe
+    # against a concurrent edit.
     ("ipset create", "POST", "/ipsets", {"name": "trusted"}),
     ("group create", "POST", "/groups", {"group": "web"}),
+]
+
+# The two writes with nowhere to put a digest, and correctly so: PVE's POST
+# schema for an alias and for an IP set member has no digest parameter, so
+# there is nothing to forward and a body carrying one is refused rather than
+# quietly dropped.
+DIGEST_REFUSED = [
     ("alias create", "POST", "/aliases", {"name": "office",
                                           "cidr": "10.0.0.0/24"}),
     ("member add", "POST", "/ipsets/trusted/members", {"cidr": "10.0.0.5"}),
@@ -1265,16 +1276,12 @@ def test_a_create_that_cannot_send_a_digest_refuses_one(solo, label, method,
     assert "digest" not in params
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: IpSetIn (api/firewall.py:500) and GroupIn (api/firewall.py:695) "
-    "carry no digest field, and neither route reads a digest query "
-    "parameter, so there is no way for a caller to send one. PVE's POST "
-    "schema for /cluster/firewall/ipset and /cluster/firewall/groups both "
-    "accept a digest, so creating an IP set or a security group is the one "
-    "kind of firewall write that cannot be made safe against a concurrent "
-    "edit. AliasIn and MemberIn have the same shape but are correct: PVE's "
-    "POST schema for those two has no digest to send."))
 def test_creating_an_ipset_or_a_group_can_carry_a_digest(solo):
+    """IpSetIn and GroupIn used to carry no digest field, and neither route
+    read a digest query parameter, so there was no way for a caller to send
+    one: creating an IP set or a security group was the one kind of firewall
+    write that could not be made safe against a concurrent edit. PVE's POST
+    schema for both accepts a digest, and both models carry one now."""
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     missing = []
     for label, suffix, body in (("ipset", "/ipsets", {"name": "trusted"}),

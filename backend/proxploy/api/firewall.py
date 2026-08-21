@@ -314,11 +314,15 @@ def cluster_rule_update(request: Request, host_id: int, pos: RulePos,
 def cluster_rule_move(request: Request, host_id: int, pos: RulePos, body: MoveIn,
                       db=Depends(get_db), user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
-    params = {"moveto": body.moveto, "digest": body.digest}
+    # rule_params, so the digest the move was made against is RECORDED and not
+    # only sent: after a lost update the trail has to show which version of the
+    # rule list each move was against. Every other firewall write records its
+    # own digest, and for a while these four did not.
+    params = rule_params(body)
     _rules_write(request, db, user, host, fw.cluster_loc(),
                  action="firewall.rule_move",
                  label=f"rule {pos} in the cluster firewall on {host.name}",
-                 params={"moveto": body.moveto},
+                 params=params,
                  call=lambda c: c.firewall_rule_move(fw.cluster_loc(), pos,
                                                      body.moveto, body.digest))
     return {"moved": True, "pos": body.moveto}
@@ -395,7 +399,7 @@ def group_rule_move(request: Request, host_id: int, group: ObjectName, pos: Rule
     _rules_write(request, db, user, host, fw.group_loc(group),
                  action="firewall.rule_move",
                  label=f"rule {pos} in security group {group} on {host.name}",
-                 params={"moveto": body.moveto},
+                 params=rule_params(body),
                  call=lambda c: c.firewall_rule_move(fw.group_loc(group), pos,
                                                      body.moveto, body.digest))
     return {"moved": True, "pos": body.moveto}
@@ -472,7 +476,7 @@ def node_rule_move(request: Request, host_id: int, node: str, pos: RulePos,
     _rules_write(request, db, user, host, fw.node_loc(node),
                  action="firewall.rule_move",
                  label=f"rule {pos} in the firewall on {node}",
-                 params={"moveto": body.moveto},
+                 params=rule_params(body),
                  call=lambda c: c.firewall_rule_move(fw.node_loc(node), pos,
                                                      body.moveto, body.digest))
     return {"moved": True, "pos": body.moveto}
@@ -639,6 +643,11 @@ class AliasPatch(_Body):
 class IpSetIn(_Body):
     name: str
     comment: str | None = None
+    # PVE's POST schema for an IP set takes a digest, so a create can be made
+    # safe against a concurrent edit like every other firewall write. AliasIn
+    # and MemberIn below have the same shape and deliberately have no digest:
+    # PVE's POST schema for those two has nowhere to put one.
+    digest: str | None = None
 
 
 class MemberIn(_Body):
@@ -834,6 +843,7 @@ def cluster_ipset_member_delete(request: Request, host_id: int, name: ObjectName
 class GroupIn(_Body):
     group: str
     comment: str | None = None
+    digest: str | None = None      # PVE's POST schema takes one; see IpSetIn
 
 
 @router.get("/cluster/{host_id}/groups",
@@ -964,7 +974,7 @@ def guest_rule_move(request: Request, db, user: User, host: Host, kind: str,
     loc = fw.guest_loc(host, kind, vmid, row)
     _guest_write(request, db, user, host, kind, vmid, row,
                  action="firewall.rule_move",
-                 params={"pos": pos, "moveto": body.moveto},
+                 params={"pos": pos, **rule_params(body)},
                  call=lambda c: c.firewall_rule_move(loc, pos, body.moveto,
                                                      body.digest))
     return {"moved": True, "pos": body.moveto}
