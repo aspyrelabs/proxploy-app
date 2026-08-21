@@ -77,6 +77,12 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("network", "read"): "viewer",
     ("network", "guest"): "operator",
     ("network", "host"): "admin",
+    # Firewall mirrors network exactly: reading is a viewer's, a guest edit is
+    # an operator's, and anything at node or cluster level is an admin's. A
+    # security group is cluster-wide config, so it sits with manage.
+    ("firewall", "read"): "viewer",
+    ("firewall", "guest"): "operator",
+    ("firewall", "manage"): "admin",
     ("backup", "read"): "viewer",
     ("backup", "run"): "operator",
     ("backup", "restore"): "admin",

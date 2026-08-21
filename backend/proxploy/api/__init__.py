@@ -1,10 +1,10 @@
 from fastapi import APIRouter
 
 from proxploy.api import (alerts, apikeys, apps, audit, auth, backups, catalog,
-                          cluster, consoles, entitlements, events, hosts, jobs,
-                          meta, metrics, network, notification_dismissals,
-                          notifications, schedules, search, settings, storage,
-                          teams, vms)
+                          cluster, consoles, entitlements, events, firewall,
+                          hosts, jobs, meta, metrics, network,
+                          notification_dismissals, notifications, schedules,
+                          search, settings, storage, teams, vms)
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(meta.router)
@@ -29,6 +29,7 @@ api_router.include_router(notification_dismissals.router)
 api_router.include_router(alerts.router)
 api_router.include_router(metrics.router)
 api_router.include_router(network.router)
+api_router.include_router(firewall.router)
 api_router.include_router(backups.router)
 api_router.include_router(teams.router)
 api_router.include_router(search.router)

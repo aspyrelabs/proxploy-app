@@ -1,4 +1,4 @@
-"""Canonical entitlement flag registry (doc 01 §17). 82 keys, all ON while dormant.
+"""Canonical entitlement flag registry (doc 01 §17). 87 keys, all ON while dormant.
 A feature without a key does not merge (doc 07 §3); keys never change once shipped."""
 
 FLAG_KEYS: tuple[str, ...] = (
@@ -18,6 +18,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "vms.options",
     "storage.view", "storage.content", "storage.manage",
     "network.view", "network.guest_config", "network.host_config",
+    "firewall.view", "firewall.rules", "firewall.options", "firewall.objects",
+    "firewall.log",
     "backups.pbs", "backups.run", "backups.schedule", "backups.restore",
     "backups.notify", "backups.retention",
     "migrate.cross_host", "migrate.preflight",
