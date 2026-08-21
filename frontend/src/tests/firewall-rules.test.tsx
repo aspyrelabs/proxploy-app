@@ -97,6 +97,18 @@ describe('FirewallRuleTable', () => {
     expect(calls[0].body).toEqual({ moveto: 0, digest: 'd1' })
   })
 
+  it('moves a rule down by sending pos + 2, which is where PVE lands it', async () => {
+    // pos + 1 is a no-op on real hardware: PVE inserts at moveto then removes the
+    // old row, so a rule moving down lands at moveto - 1. Measured on 9.2.11.
+    calls.length = 0
+    renderTable()
+    await screen.findByText('ssh from the office')
+    fireEvent.click(screen.getByLabelText('Move rule 0 down'))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0].path).toBe('/firewall/cluster/1/rules/0/move')
+    expect(calls[0].body).toEqual({ moveto: 2, digest: 'd1' })
+  })
+
   it('does not offer to move the first rule up or the last one down', async () => {
     renderTable()
     await screen.findByText('ssh from the office')

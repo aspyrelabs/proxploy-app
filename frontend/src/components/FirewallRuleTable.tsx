@@ -127,8 +127,13 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                       )}
                       {i < rules.length - 1 && (
                         <button type="button" aria-label={`Move rule ${r.pos} down`}
+                          /* +2, not +1. PVE inserts at moveto and THEN removes the old row, so
+                             moving down lands the rule at moveto-1 and moveto === pos+1 is a
+                             silent no-op. Measured on pve-manager 9.2.11, 2026-08-21. Moving up
+                             needs no such correction: the removal is below the insert, so the
+                             rule lands at moveto exactly. */
                           onClick={() => move.mutate({
-                            pos: r.pos, moveto: r.pos + 1, digest,
+                            pos: r.pos, moveto: r.pos + 2, digest,
                           })}
                           className="text-text-3 hover:text-text">
                           <Icon name="arrow_downward" size={16} />
