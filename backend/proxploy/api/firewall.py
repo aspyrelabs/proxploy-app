@@ -688,3 +688,91 @@ def cluster_ipset_member_delete(request: Request, host_id: int, name: str,
                          params={},
                          call=lambda c: c.firewall_ipset_member_delete(
                              fw.cluster_loc(), name, cidr, digest))
+
+
+# --------------------------------------- security groups, references, macros
+
+class GroupIn(BaseModel):
+    group: str
+    comment: str | None = None
+
+
+@router.get("/cluster/{host_id}/groups",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_groups(request: Request, host_id: int, db=Depends(get_db),
+                   user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        return {"groups": fw.readers(request.app, db, host).firewall_groups()}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.post("/cluster/{host_id}/groups", status_code=201,
+             dependencies=[Depends(_manage),
+                           Depends(require_entitlement("firewall.objects"))])
+def cluster_group_create(request: Request, host_id: int, body: GroupIn,
+                         db=Depends(get_db), user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    params = body.model_dump(exclude_none=True)
+    return _object_write(request, db, user, host, action="firewall.group_create",
+                         label=f"security group {body.group} on {host.name}",
+                         params=params,
+                         call=lambda c: c.firewall_group_create(params))
+
+
+@router.delete("/cluster/{host_id}/groups/{group}",
+               dependencies=[Depends(_manage),
+                             Depends(require_entitlement("firewall.objects"))])
+def cluster_group_delete(request: Request, host_id: int, group: str,
+                         digest: str | None = None, db=Depends(get_db),
+                         user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    return _object_write(request, db, user, host, action="firewall.group_delete",
+                         label=f"security group {group} on {host.name}",
+                         params={},
+                         call=lambda c: c.firewall_group_delete(group, digest))
+
+
+@router.get("/cluster/{host_id}/refs",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_refs(request: Request, host_id: int, type: str | None = None,
+                 db=Depends(get_db), user: User = Depends(_read)):
+    """Alias and IP set names a rule's source or dest may reference. The
+    parameter is named `type` because that is PVE's own name for it."""
+    host = _host_or_404(db, host_id)
+    try:
+        return {"refs": fw.readers(request.app, db, host)
+                .firewall_refs(fw.cluster_loc(), ref_type=type)}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.get("/cluster/{host_id}/macros",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.view"))])
+def cluster_macros(request: Request, host_id: int, db=Depends(get_db),
+                   user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        return {"macros": fw.readers(request.app, db, host).firewall_macros()}
+    except ProxmoxError as e:
+        raise pve_error(e)
+
+
+@router.get("/node/{host_id}/{node}/log",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("firewall.log"))])
+def node_log(request: Request, host_id: int, node: str, start: int = 0,
+             limit: int = 500, since: int | None = None,
+             until: int | None = None, db=Depends(get_db),
+             user: User = Depends(_read)):
+    host = _host_or_404(db, host_id)
+    try:
+        lines = fw.readers(request.app, db, host).firewall_log(
+            fw.node_loc(node), start=start, limit=limit, since=since, until=until)
+    except ProxmoxError as e:
+        raise pve_error(e)
+    return {"lines": lines, "start": start, "limit": limit}

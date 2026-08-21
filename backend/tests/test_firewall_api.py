@@ -301,3 +301,68 @@ def test_ipset_delete_force_is_explicit(tmp_path, csrf_header, bootstrap_admin):
                   headers=csrf_header(c))
         _, _, params = fake.firewall_writes[0]
         assert params["force"] == 1
+
+
+def test_group_create_and_delete(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        r = c.post(f"/api/v1/firewall/cluster/{host_id}/groups",
+                    headers=csrf_header(c),
+                    json={"group": "web", "comment": "public services"})
+        assert r.status_code == 201
+        c.delete(f"/api/v1/firewall/cluster/{host_id}/groups/web",
+                  headers=csrf_header(c))
+        assert [(v, p) for v, p, _ in fake.firewall_writes] == [
+            ("post", "cluster/firewall/groups"),
+            ("delete", "cluster/firewall/groups/web"),
+        ]
+
+
+def test_refs_returns_aliases_and_ipsets_together(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        fake.firewall_data["cluster/firewall/refs"] = [
+            {"type": "alias", "name": "office", "ref": "office"},
+            {"type": "ipset", "name": "trusted", "ref": "+trusted"},
+        ]
+        body = c.get(f"/api/v1/firewall/cluster/{host_id}/refs").json()
+        assert [r["type"] for r in body["refs"]] == ["alias", "ipset"]
+
+
+def test_macros_are_read_only_and_carry_descriptions(tmp_path, csrf_header, bootstrap_admin):
+    """PVE gives a name and a description and does NOT say which ports a macro
+    opens, so nothing downstream may claim to."""
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        fake.firewall_data["cluster/firewall/macros"] = [
+            {"macro": "Web", "descr": "WWW traffic (HTTP and HTTPS)"},
+        ]
+        body = c.get(f"/api/v1/firewall/cluster/{host_id}/macros").json()
+        assert body["macros"][0]["descr"].startswith("WWW traffic")
+
+
+def test_node_log_passes_the_cursor(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+    fake = _fake()
+    app = make_app(tmp_path, fake=fake)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        host_id = _seed(app)
+        fake.firewall_data["nodes/pve1/firewall/log"] = [{"n": 1, "t": "line one"}]
+        body = c.get(
+            f"/api/v1/firewall/node/{host_id}/pve1/log?start=10&limit=50").json()
+        assert body["lines"][0]["t"] == "line one"
+        _, params = fake.firewall_reads[0]
+        assert params["start"] == 10 and params["limit"] == 50
