@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { NAV } from '../components/SidebarNav'
 
 describe('fixed nav (doc 01 §0, never reshaped by tier/config/entitlement)', () => {
-  it('is exactly the 10 pages in order', () => {
+  it('is exactly the 11 pages in order', () => {
     const labels = NAV.flatMap(g => g.items.map(i => i.label))
     expect(labels).toEqual(['Hosts', 'Apps', 'App Store', 'Virtual Machines',
-                            'Storage', 'Network', 'Backups', 'Alerts', 'Audit', 'Settings'])
+                            'Storage', 'Network', 'Firewall', 'Backups', 'Alerts',
+                            'Audit', 'Settings'])
   })
   it('groups: Overview then Infrastructure', () => {
     expect(NAV.map(g => g.label)).toEqual(['Overview', 'Infrastructure'])

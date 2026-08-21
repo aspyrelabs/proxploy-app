@@ -15,12 +15,12 @@ vi.mock('@tanstack/react-router', () => ({
 import { NAV, SidebarNav } from '../components/SidebarNav'
 
 describe('SidebarNav icons', () => {
-  it('gives every one of the ten nav items an icon name', () => {
+  it('gives every one of the eleven nav items an icon name', () => {
     // .map().flat() rather than .flatMap(): with NAV's heterogeneous
     // per-group `as const` tuples, flatMap's overload resolution collapses
     // the item union into the first group's shape and tsc rejects it.
     const items = NAV.map((g) => g.items).flat()
-    expect(items).toHaveLength(10)
+    expect(items).toHaveLength(11)
     for (const item of items) {
       // A Material Symbols name (see components/ui/icon.tsx), not a
       // component reference -- a plain lowercase snake_case string.
@@ -67,7 +67,7 @@ describe('SidebarNav collapse', () => {
     toggle(/collapse sidebar/i)
     // The labels go; the links, and their icons, stay.
     expect(screen.queryByText('Hosts')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link')).toHaveLength(10)
+    expect(screen.getAllByRole('link')).toHaveLength(11)
     // and the group headings become a rule rather than text
     expect(screen.queryByText('Infrastructure')).not.toBeInTheDocument()
   })

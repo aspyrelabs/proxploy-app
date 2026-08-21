@@ -5,7 +5,7 @@ import { Icon } from './ui/icon'
 import { readSidebarCollapsed, setSidebarCollapsed } from '../lib/sidebar'
 
 // `icon` is a Material Symbols name (see components/ui/icon.tsx), not a
-// component reference -- these ten are a deliberate, fixed set of concepts
+// component reference -- these eleven are a deliberate, fixed set of concepts
 // (see nav.test.tsx) and each name below is verified against the real font
 // in the material-symbols report, not guessed.
 export const NAV = [
@@ -18,6 +18,7 @@ export const NAV = [
   { label: 'Infrastructure', items: [
     { label: 'Storage', to: '/storage', icon: 'database' },
     { label: 'Network', to: '/network', icon: 'public' },
+    { label: 'Firewall', to: '/firewall', icon: 'shield' },
     { label: 'Backups', to: '/backups', icon: 'archive' },
     { label: 'Alerts', to: '/alerts', icon: 'notifications_active' },
     { label: 'Audit', to: '/audit', icon: 'fact_check' },
