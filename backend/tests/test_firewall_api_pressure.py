@@ -880,25 +880,32 @@ def writing_problems(detail, *, reason: str | None = None) -> list[str]:
     return bad
 
 
+# (label, what PVE raised, the kind _classify gives it, the status we owe the
+# caller). The status is spelled out per row rather than asserted as a range:
+# 502 is "Proxploy could not complete the call", and the two rows that are not
+# that (a 404 about the caller's own request, a 501 about the scope) have to be
+# told apart from it, which a range cannot do.
 PVE_FAILURES = [
-    ("401", Exception("401 Unauthorized: authentication failure"), "auth"),
+    ("401", Exception("401 Unauthorized: authentication failure"), "auth", 502),
     ("403", Exception("403 Forbidden: Permission check failed "
-                      "(/cluster/firewall, Sys.Modify)"), "permission"),
-    ("404", Exception("404 Not Found: no such rule"), "unknown"),
-    ("500", Exception("500 Internal Server Error: rule update failed"), "unknown"),
+                      "(/cluster/firewall, Sys.Modify)"), "permission", 502),
+    ("404", Exception("404 Not Found: no such rule"), "unknown", 404),
+    ("500", Exception("500 Internal Server Error: rule update failed"),
+     "unknown", 502),
     ("501", Exception("501 Method 'PUT /cluster/firewall/aliases' not "
-                      "implemented"), "unknown"),
-    ("connection", ConnectionError("Connection refused"), "unreachable"),
-    ("timeout", TimeoutError("Read timed out. (read timeout=10)"), "unreachable"),
+                      "implemented"), "unknown", 501),
+    ("connection", ConnectionError("Connection refused"), "unreachable", 502),
+    ("timeout", TimeoutError("Read timed out. (read timeout=10)"),
+     "unreachable", 502),
 ]
 
 
-@pytest.mark.parametrize("label,raw,kind", PVE_FAILURES,
+@pytest.mark.parametrize("label,raw,kind,want", PVE_FAILURES,
                          ids=[f[0] for f in PVE_FAILURES])
 def test_a_proxmox_failure_becomes_a_readable_answer(solo, monkeypatch, label,
-                                                     raw, kind):
-    """pve_error (api/firewall.py:44) is the only mapping there is. What it
-    must never do is 500, lose the reason, or hand the caller vocabulary from
+                                                     raw, kind, want):
+    """pve_error (api/firewall.py) is the only mapping there is. What it must
+    never do is 500, lose the reason, or hand the caller vocabulary from
     inside the process."""
     err = _wrapped(raw)
     assert err.kind == kind
@@ -906,7 +913,7 @@ def test_a_proxmox_failure_becomes_a_readable_answer(solo, monkeypatch, label,
     c, ids = solo["client"], solo["ids"]
     got = c.post(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules",
                  headers=_csrf(c), json={"type": "in", "action": "ACCEPT"})
-    assert got.status_code < 500 or got.status_code == 502
+    assert got.status_code == want, f"{label} -> {got.status_code}"
     assert got.status_code != 500
     assert not writing_problems(got.json()["detail"], reason=str(raw))
 
@@ -958,16 +965,16 @@ def test_a_digest_conflict_is_a_409_not_a_gateway_failure(solo, monkeypatch,
     ("501", Exception("501 Method 'PUT /cluster/firewall/aliases' not "
                       "implemented"), 501),
 ], ids=["404", "501"])
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: api/firewall.py:44 pve_error() collapses every Proxmox "
-    "failure to 502, including the two that are not gateway failures. A rule "
-    "or alias that does not exist is a 404 about the caller's own request; a "
-    "501 means the scope has no such object at all, which services/"
-    "firewall.py:19 SCOPE_OBJECTS was written to answer as a 404 and never "
-    "wired up (that table is imported by nothing outside its own test). "
-    "Today both read to the operator as 'Proxmox is broken'."))
 def test_a_not_found_from_proxmox_is_not_reported_as_a_gateway_failure(
         solo, monkeypatch, label, raw, want):
+    """pve_error used to collapse every Proxmox failure to 502, including the
+    two that are not gateway failures at all: a rule or alias that is not
+    there is a 404 about the caller's own request, and a 501 says the scope
+    has no such object. Both used to read to the operator as "Proxmox is
+    broken". They are relayed as themselves now, and the 501 should be rare,
+    because SCOPE_OBJECTS answers that same fact as a 404 of our own before
+    the call goes out (test_a_scope_that_has_no_such_object_is_a_404_from_us).
+    """
     _raise_from_pve(monkeypatch, _wrapped(raw))
     c, ids = solo["client"], solo["ids"]
     got = c.delete(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules/9",
@@ -976,15 +983,18 @@ def test_a_not_found_from_proxmox_is_not_reported_as_a_gateway_failure(
         f"a PVE {label} was relayed as {got.status_code}")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: api/firewall.py:122 and :420 trust the SHAPE of what Proxmox "
-    "returned. _rules_read does rules[0].get('digest') and _options_read "
-    "does options.get('digest'), so a rule list whose rows are not objects, "
-    "or an options response that is not an object, raises AttributeError or "
-    "KeyError inside the handler and Starlette answers a bare 500. This is "
-    "the only 500 in the whole firewall surface."))
 def test_a_non_object_options_response_is_not_a_crash(tmp_path, csrf_header,
                                                       bootstrap_admin):
+    """A malformed Proxmox response is answered, not crashed on.
+
+    _rules_read used to do rules[0].get("digest") and _options_read
+    options.get("digest"), so a rule list whose rows were not objects, or an
+    options payload that was a list or a string, raised AttributeError or
+    KeyError inside the handler and Starlette answered a bare 500: the only
+    500 in the whole firewall surface. api/firewall.py::_digest_of checks the
+    shape instead, so such a payload simply carries no digest and the rest of
+    the answer still reaches the operator.
+    """
     from tests.support import make_app
     fake = _fake()
     app = make_app(tmp_path, fake=fake)
@@ -1010,9 +1020,14 @@ def test_a_non_object_options_response_is_not_a_crash(tmp_path, csrf_header,
                          + "\n".join(bad))
 
 
-def test_a_crash_never_puts_a_stack_trace_in_the_response(tmp_path,
-                                                          bootstrap_admin):
-    """The half of the above that is safe: the 500 body carries no internals."""
+def test_a_malformed_response_never_puts_a_stack_trace_in_the_answer(
+        tmp_path, bootstrap_admin):
+    """The other half: whatever the answer is, it carries no internals.
+
+    This used to be a 500 and the assertion was that the 500 body was at
+    least clean. It is a 200 with no digest now, and the words below must
+    stay out of it either way.
+    """
     from tests.support import make_app
     fake = _fake()
     app = make_app(tmp_path, fake=fake)
@@ -1021,10 +1036,38 @@ def test_a_crash_never_puts_a_stack_trace_in_the_response(tmp_path,
         ids = seed_world(app)
         fake.firewall_data["cluster/firewall/rules"] = ["nope"]
         got = c.get(f"/api/v1/firewall/cluster/{ids['a']['host']}/rules")
-        assert got.status_code == 500
+        assert got.status_code < 500
+        assert got.json()["digest"] is None
         for word in ("Traceback", "firewall.py", "AttributeError",
                      "site-packages"):
             assert word not in got.text
+
+
+def test_a_scope_that_has_no_such_object_is_a_404_from_us(solo, monkeypatch):
+    """A node has no aliases and a security group holds nothing but rules.
+
+    services/firewall.py::SCOPE_OBJECTS says so, and it is consulted before
+    the call goes out, so the answer is a 404 of ours rather than PVE's 501
+    relayed afterwards. Asserted through the helper every rules route shares,
+    because there is deliberately no route mounted at a pair that does not
+    exist; this is what stops one being added by accident.
+    """
+    from fastapi import HTTPException
+
+    from proxploy.api.firewall import scope_object_or_404
+    from proxploy.services.firewall import SCOPE_OBJECTS
+    assert scope_object_or_404({"kind": "node"}, "rules") == {"kind": "node"}
+    for loc, obj in (({"kind": "node"}, "aliases"),
+                     ({"kind": "node"}, "ipsets"),
+                     ({"kind": "group"}, "options"),
+                     ({"kind": "guest"}, "macros")):
+        with pytest.raises(HTTPException) as caught:
+            scope_object_or_404(loc, obj)
+        assert caught.value.status_code == 404
+        assert not writing_problems(caught.value.detail)
+    # Every object every mounted route asks for IS in the table, so no live
+    # route can be answering 404 from this.
+    assert SCOPE_OBJECTS["group"] == frozenset({"rules"})
 
 
 def test_a_failed_write_still_leaves_an_audit_row(solo, monkeypatch):

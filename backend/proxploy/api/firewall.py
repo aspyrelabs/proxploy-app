@@ -15,6 +15,7 @@ Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 """
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
@@ -83,22 +84,61 @@ def _node_or_404(request: Request, db, host: Host, node: str) -> str:
                              f"{node}, so it has no firewall there.")
 
 
+# The status PVE itself answered with, as it appears at the front of the
+# sentence _wrap built: "firewall rule 9 delete failed: 404 Not Found: ...".
+# Anchored on the ": " so a 404 inside a rule comment or a digest cannot be
+# read as PVE's own answer.
+_RELAYED_STATUS = re.compile(r"(?:^|: )(404|501) ")
+
+
 def pve_error(e: ProxmoxError) -> HTTPException:
     """A 502 means Proxploy could not complete a call to Proxmox, never that
     the rule was rejected: PVE's own refusals arrive as text inside this.
 
-    The one exception is a digest conflict, which PVE reports as a 500 with
-    "detected modified configuration - file changed by other user? Try again."
-    That is not a bad gateway; it is somebody else editing the same scope, and
-    the operator's next move is to reload rather than retry. Matched on the
-    message because ProxmoxError.kind cannot tell it apart from any other 500.
-    Measured on pve-manager 9.2.11, 2026-08-21.
+    Three exceptions, all measured on pve-manager 9.2.11, 2026-08-21.
+
+    A digest conflict, which PVE reports as a 500 with "detected modified
+    configuration - file changed by other user? Try again." That is not a bad
+    gateway; it is somebody else editing the same scope, and the operator's
+    next move is to reload rather than retry. Matched on the message because
+    ProxmoxError.kind cannot tell it apart from any other 500.
+
+    A 404 and a 501, which are both about the request rather than about the
+    link to Proxmox: a 404 says the rule or object named is not there, and a
+    501 says the scope has no such object at all. Relaying either as a 502
+    tells the operator that Proxmox is broken when the truth is that what they
+    asked for does not exist. A 501 should be rare from here, because
+    scope_object_or_404 below answers the same fact from SCOPE_OBJECTS before
+    the call goes out; it is mapped anyway for the pair that table has not
+    heard of yet.
+
+    The sentence PVE gave is passed through in every case: it names the rule,
+    the privilege or the path, and inventing a friendlier one loses that.
     """
     if "detected modified configuration" in str(e):
         return HTTPException(409, "Somebody else changed this firewall scope "
                                   "while you were editing it. Reload to see "
                                   "their changes, then make yours again.")
+    relayed = _RELAYED_STATUS.search(str(e))
+    if relayed:
+        return HTTPException(int(relayed.group(1)), str(e))
     return HTTPException(502, str(e))
+
+
+def scope_object_or_404(loc: dict, obj: str) -> dict:
+    """`loc`, unless the scope it names has no `obj` at all.
+
+    A node has no aliases and no IP sets; a security group holds nothing but
+    rules. Asking PVE anyway gets a 501, which reads as an outage rather than
+    as the design fact it is, so fw.SCOPE_OBJECTS answers it here and the call
+    never goes out. Returns the location so a caller can wrap the one
+    expression it already had.
+    """
+    if obj not in fw.SCOPE_OBJECTS.get(loc["kind"], ()):
+        raise HTTPException(404, f"A firewall at {loc['kind']} scope has no "
+                                 f"{obj}, so there is nothing there to read "
+                                 f"or change.")
+    return loc
 
 
 class _Body(BaseModel):
@@ -182,20 +222,40 @@ def rule_params(model: BaseModel, *, partial: bool = False) -> dict:
 
 # ---------------------------------------------------------------- rules
 
+def _digest_of(payload) -> str | None:
+    """The digest carried by whatever Proxmox answered, or None.
+
+    PVE returns the digest on each rule ROW rather than on the collection, so
+    the first row is where a rules digest lives; an options response carries
+    its own. Surfacing it gives the client something to send back on a write
+    without it having to know either of those things.
+
+    Shape-checked rather than assumed. `rules[0].get(...)` and
+    `options.get(...)` used to be the only crash in the whole firewall
+    surface: a row that was not an object, or an options payload that was a
+    list or a string, raised inside the handler and Starlette answered a bare
+    500 with no sentence in it. A payload nothing can be read out of simply
+    has no digest, and the rest of the answer still reaches the operator.
+    """
+    if isinstance(payload, dict):
+        return payload.get("digest")
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[0].get("digest")
+    return None
+
+
 def _rules_read(request: Request, db, host: Host, loc: dict, scope: str) -> dict:
+    scope_object_or_404(loc, "rules")
     try:
         rules = fw.readers(request.app, db, host).firewall_rules(loc)
     except ProxmoxError as e:
         raise pve_error(e)
-    # PVE returns the digest on each rule row rather than on the collection.
-    # Surfacing the first one gives the client something to send back on a
-    # write without it having to know that.
-    digest = rules[0].get("digest") if rules else None
-    return {"scope": scope, "rules": rules, "digest": digest}
+    return {"scope": scope, "rules": rules, "digest": _digest_of(rules)}
 
 
 def _rules_write(request: Request, db, user: User, host: Host, loc: dict, *,
                  action: str, label: str, params: dict, call) -> None:
+    scope_object_or_404(loc, "rules")
     ip = request.client.host if request.client else None
     try:
         call(fw.writers(request.app, db, host))
@@ -486,17 +546,19 @@ class OptionsIn(_Body):
 
 
 def _options_read(request: Request, db, host: Host, loc: dict, scope: str) -> dict:
+    scope_object_or_404(loc, "options")
     try:
         options = fw.readers(request.app, db, host).firewall_options(loc)
     except ProxmoxError as e:
         raise pve_error(e)
     return {"scope": scope, "options": options,
             "defaults": OPTION_DEFAULTS[scope],
-            "digest": options.get("digest")}
+            "digest": _digest_of(options)}
 
 
 def _options_write(request: Request, db, user: User, host: Host, loc: dict, *,
                    label: str, body: OptionsIn) -> dict:
+    scope_object_or_404(loc, "options")
     params = body.model_dump(by_alias=True, exclude_unset=True, exclude_none=True)
     ip = request.client.host if request.client else None
     try:
@@ -850,7 +912,8 @@ def node_log(request: Request, host_id: int, node: str, start: int = 0,
     node = _node_or_404(request, db, host, node)
     try:
         lines = fw.readers(request.app, db, host).firewall_log(
-            fw.node_loc(node), start=start, limit=limit, since=since, until=until)
+            scope_object_or_404(fw.node_loc(node), "log"),
+            start=start, limit=limit, since=since, until=until)
     except ProxmoxError as e:
         raise pve_error(e)
     return {"lines": lines, "start": start, "limit": limit}
@@ -944,7 +1007,7 @@ def guest_options(request: Request, db, host: Host, kind: str, vmid: int, row):
 
 def guest_options_update(request: Request, db, user: User, host: Host,
                          kind: str, vmid: int, row, body: OptionsIn):
-    loc = fw.guest_loc(host, kind, vmid, row)
+    loc = scope_object_or_404(fw.guest_loc(host, kind, vmid, row), "options")
     params = body.model_dump(by_alias=True, exclude_unset=True, exclude_none=True)
     _guest_write(request, db, user, host, kind, vmid, row,
                  action="firewall.options", params=params,
@@ -1076,8 +1139,8 @@ def guest_log(request: Request, db, host: Host, kind: str, vmid: int, row, *,
               start: int, limit: int, since: int | None, until: int | None):
     try:
         lines = fw.readers(request.app, db, host).firewall_log(
-            fw.guest_loc(host, kind, vmid, row), start=start, limit=limit,
-            since=since, until=until)
+            scope_object_or_404(fw.guest_loc(host, kind, vmid, row), "log"),
+            start=start, limit=limit, since=since, until=until)
     except ProxmoxError as e:
         raise pve_error(e)
     return {"lines": lines, "start": start, "limit": limit}
