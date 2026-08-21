@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import type { Attachment, NicPatch } from '../api/network'
 import { errBody, useSetNic } from '../api/network'
 import { notify } from '../lib/notify'
@@ -7,10 +8,7 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 
 /**
- * Edit one guest NIC: bridge and VLAN tag. Nothing else.
- *
- * Deliberately NOT the firewall flag, even though the API accepts it: see the
- * comment beside the state line below.
+ * Edit one guest NIC: bridge, VLAN tag, and whether Proxmox filters it.
  *
  * The NIC's model and MAC are shown but never submitted. Proxmox stores them in
  * the netN head token (`virtio=AA:BB:CC:DD:EE:FF`), and the backend edits the
@@ -36,6 +34,7 @@ export function NicForm({ nic, bridges, onClose }: {
   const [ipCidr, setIpCidr] = useState(
     nic.ip && nic.ip !== 'dhcp' && nic.ip !== 'manual' ? nic.ip : '')
   const [gw, setGw] = useState(nic.gw ?? '')
+  const [firewall, setFirewall] = useState(nic.firewall)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,6 +51,7 @@ export function NicForm({ nic, bridges, onClose }: {
       const nextGw = gw.trim() || null
       if (nextGw !== nic.gw) patch.gw = nextGw
     }
+    if (firewall !== nic.firewall) patch.firewall = firewall
     if (Object.keys(patch).length === 0) { onClose(); return }
     set.mutate({ guestType: nic.guest_type, guestId: nic.guest_id, iface: nic.iface, patch }, {
       onSuccess: (r) => {
@@ -145,23 +145,29 @@ export function NicForm({ nic, bridges, onClose }: {
           </div>
         ) : null
       )}
-      {/* No firewall TOGGLE. Proxploy has no firewall feature: there is no rule,
-          security group, alias or IP set management anywhere in it, at guest,
-          node or cluster level. A switch here would read as though there were
-          one, and turning it on can leave a guest unreachable with nothing in
-          this product able to permit traffic again. Removed 2026-08-18, doc 11
-          carries the decision. Proxmox's own UI is where the firewall lives.
+      {/* The toggle is back, and it had to be: a guest's firewall rules do
+          nothing unless BOTH this flag and the guest's own `enable` option are
+          set, so leaving the flag unmanageable would ship a rule table that
+          silently has no effect.
 
-          The STATE is still shown, and only when it is on, because a guest whose
-          traffic is being filtered by a flag nobody can see here is worse than
-          one line of explanation. Same principle as the sidebar health line:
-          speak when it matters, stay quiet otherwise. */}
-      {nic.firewall && (
-        <p className="rounded-ctl border border-line-soft bg-elev p-2 text-[12px] text-text-3">
-          Proxmox&apos;s firewall is enabled on this NIC. Its rules are managed in
-          the Proxmox web UI, not here.
-        </p>
-      )}
+          It was removed on 2026-08-18 because turning it on could leave a
+          guest unreachable with nothing in this product able to permit traffic
+          again. That is no longer true: rules, policies and the whole firewall
+          for this guest are on its Firewall page, linked below. */}
+      <div className="flex items-center gap-2">
+        <input id="nic-firewall" type="checkbox"
+          checked={firewall}
+          onChange={(e) => setFirewall(e.target.checked)} />
+        <label htmlFor="nic-firewall" className="text-[13px] text-text-2">
+          Filter this NIC through the Proxmox firewall
+        </label>
+      </div>
+      <p className="text-[12px] text-text-3">
+        Rules for this guest are on its{' '}
+        <Link to={`/firewall/guest/${nic.guest_type}/${nic.guest_id}` as never}
+          className="text-amber hover:underline">Firewall page</Link>.
+        With this off, none of them apply to this NIC.
+      </p>
       {error && <p className="text-[12.5px] text-red">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

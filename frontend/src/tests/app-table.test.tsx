@@ -4,13 +4,27 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../api/client', () => ({
-  api: vi.fn(() => Promise.resolve([])),
+  // GuestFirewallLine (rendered in the detail panel) reads these two; every
+  // other query in this file is happy with the plain empty array.
+  api: vi.fn((path: string) => {
+    if (path.endsWith('/firewall/options')) {
+      return Promise.resolve({ scope: 'guest', digest: null, options: { enable: 0 }, defaults: {} })
+    }
+    if (path.endsWith('/firewall/rules')) {
+      return Promise.resolve({ scope: 'guest', digest: null, rules: [] })
+    }
+    return Promise.resolve([])
+  }),
   ApiError: class extends Error {},
 }))
 const navigate = vi.fn()
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
   useNavigate: () => navigate,
+  // The detail panel's GuestFirewallLine renders a real Link, which needs a
+  // <RouterProvider> this file never stands up; every other test mocks it
+  // thin for the same reason.
+  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
 }))
 
 import { AppTable } from '../components/AppTable'

@@ -76,16 +76,16 @@ describe('AppActionBar', () => {
     capabilities = { lifecycle: true, console: true }
   })
 
-  it('offers Stop, Restart and Open beside a menu while the app is running', () => {
+  it('offers Stop, Restart, Open and Firewall beside a menu while the app is running', () => {
     wrap(APP)
-    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'More actions for Immich'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'Firewall', 'More actions for Immich'])
   })
 
-  it('offers Start instead of Stop while it is not running', () => {
+  it('offers Start instead of Stop while it is not running, Firewall either way', () => {
     // Never both: an app is either running or it is not, and offering the
     // pair would invite the wrong one.
     wrap({ ...APP, status: 'stopped' })
-    expect(labels()).toEqual(['Start', 'Open', 'More actions for Immich'])
+    expect(labels()).toEqual(['Start', 'Open', 'Firewall', 'More actions for Immich'])
   })
 
   it('colours Start green and Stop red, the two opposite outcomes', () => {
@@ -106,7 +106,13 @@ describe('AppActionBar', () => {
     // Absent, not disabled: a dead button invites a click that cannot go
     // anywhere.
     wrap({ ...APP, catalog_port: null })
-    expect(labels()).toEqual(['Stop', 'Restart', 'More actions for Immich'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Firewall', 'More actions for Immich'])
+  })
+
+  it('opens the guest firewall route from the Firewall button', () => {
+    wrap(APP)
+    fireEvent.click(screen.getByRole('button', { name: 'Firewall' }))
+    expect(navigate).toHaveBeenCalledWith({ to: '/firewall/guest/app/1' })
   })
 
   it('welds the actions into one group rather than loose buttons', () => {

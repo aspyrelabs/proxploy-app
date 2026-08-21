@@ -1,6 +1,7 @@
 import type { VmRow } from '../api/hooks'
 import { MetricChart } from './charts/MetricChart'
 import { InfoHint } from './ui/info-hint'
+import { GuestFirewallLine } from './GuestFirewallLine'
 import { KVGrid } from './KVGrid'
 import { SnapshotPanel } from './SnapshotPanel'
 import { StatusPill } from './StatusPill'
@@ -90,6 +91,7 @@ export function VmDetailPanel({ vm }: { vm: VmRow }) {
               <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-text-3">Status</h3>
               <StatusPill status={vm.status} />
               <div className="mt-2 font-mono text-[12px] text-text-2">up {fmtUptime(vm.uptime_s)}</div>
+              <div className="mt-2"><GuestFirewallLine guestType="vm" guestId={vm.id} /></div>
             </div>
             <div className={`${card} flex-1`}>
               <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-text-3">Resources</h3>

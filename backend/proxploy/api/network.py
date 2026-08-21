@@ -151,12 +151,12 @@ class NicIn(BaseModel):
     gw: str | None = None
     ip6: str | None = None
     gw6: str | None = None
-    # Accepted, and deliberately NOT offered by the UI (components/NicForm.tsx).
-    # Proxploy has no firewall feature: no rules, security groups, aliases or IP
-    # sets at guest, node or cluster level. A toggle implies one exists, and
-    # enabling the flag can leave a guest unreachable with nothing in this
-    # product able to permit traffic again. The field stays so an API caller can
-    # still clear a flag PVE set, and so the read path can report it (doc 11).
+    # The UI offers this again (components/NicForm.tsx). Proxploy manages the
+    # firewall itself now: rules, policies, aliases, IP sets and security
+    # groups at cluster, node, guest and security group scope (api/firewall.py).
+    # A guest's rules do nothing unless BOTH this flag and the guest's own
+    # `enable` option are set, so this flag has to be settable for rule
+    # management to mean anything.
     firewall: bool | None = None
     rate: float | None = None
     mtu: int | None = None

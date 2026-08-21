@@ -116,19 +116,25 @@ describe('VmActionBar', () => {
     vi.mocked(notify.error).mockClear()
   })
 
-  it('offers Stop, Restart and Console beside a menu while the VM is running', () => {
+  it('offers Stop, Restart, Console and Firewall beside a menu while the VM is running', () => {
     wrap({ ...VM, status: 'running' })
-    expect(labels()).toEqual(['Stop', 'Restart', 'Console', 'More actions for win11'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Console', 'Firewall', 'More actions for win11'])
   })
 
-  it('offers Start instead of Stop while it is not running, Console either way', () => {
+  it('offers Start instead of Stop while it is not running, Console and Firewall either way', () => {
     wrap(VM)
-    expect(labels()).toEqual(['Start', 'Console', 'More actions for win11'])
+    expect(labels()).toEqual(['Start', 'Console', 'Firewall', 'More actions for win11'])
   })
 
   it('has no Open button: there is no web interface to point a tab at', () => {
     wrap({ ...VM, status: 'running' })
     expect(within(screen.getByRole('group')).queryByRole('button', { name: 'Open' })).toBeNull()
+  })
+
+  it('opens the guest firewall route from the Firewall button', () => {
+    wrap(VM)
+    fireEvent.click(screen.getByRole('button', { name: 'Firewall' }))
+    expect(navigate).toHaveBeenCalledWith({ to: '/firewall/guest/vm/9' })
   })
 
   it('withholds the console when the host cannot serve one', async () => {

@@ -285,26 +285,45 @@ const wrapNic = (ui: React.ReactNode) => render(
     {ui}
   </QueryClientProvider>)
 
-describe('NicForm has no firewall toggle', () => {
-  it('offers bridge and VLAN only, and never sends a firewall key', async () => {
-    // Proxploy has no firewall feature: no rules, groups, aliases or IP sets at
-    // any level. A toggle here would imply one, and enabling it can leave a
-    // guest unreachable with nothing in this product able to permit traffic
-    // again. doc 11 carries the decision.
+// The toggle removed on 2026-08-18 is back, and these tests now check that it
+// is here rather than that it is absent. That removal assumed there would
+// never be a way to permit traffic again once the flag turned filtering on
+// for a guest; the firewall feature this repository has shipped since then is
+// exactly that way, so a guest's rules do nothing unless BOTH this flag and
+// its own `enable` option are set. Leaving the flag unmanageable would have
+// shipped a rule table with no way to make it take effect.
+describe('NicForm has its firewall toggle back', () => {
+  it('offers a checkbox that starts from the NIC state and can be turned on', () => {
     wrapNic(<NicForm nic={NIC_PLAIN as never} bridges={['vmbr0', 'vmbr1']}
                      onClose={() => {}} />)
-    expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.queryByText(/firewall enabled on this nic/i)).toBeNull()
-    expect(screen.getByLabelText(/vlan tag/i)).toBeInTheDocument()
+    const checkbox = screen.getByRole('checkbox', { name: /filter this nic/i }) as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    fireEvent.click(checkbox)
+    expect(checkbox.checked).toBe(true)
   })
 
-  it('states the flag when Proxmox has it on, so a filtered guest is not a mystery', async () => {
+  it('starts checked when Proxmox already has the flag on', () => {
     wrapNic(<NicForm nic={NIC_FIREWALLED as never} bridges={['vmbr0']}
                      onClose={() => {}} />)
-    expect(screen.getByText(/firewall is enabled on this NIC/i)).toBeInTheDocument()
-    expect(screen.getByText(/managed in the Proxmox web UI/i)).toBeInTheDocument()
-    // Still no control: it is information, not a switch.
-    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect((screen.getByRole('checkbox', { name: /filter this nic/i }) as HTMLInputElement).checked)
+      .toBe(true)
+  })
+
+  it('sends the firewall key when the flag changed, same as any other field', async () => {
+    // A VM NIC, so the container-only ip/gw branch stays out of this patch:
+    // the point here is the firewall key alone.
+    calls.length = 0
+    wrapNic(<NicForm nic={NIC_VM as never} bridges={['vmbr0']} onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /filter this nic/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save NIC' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].body).toEqual({ firewall: true })
+  })
+
+  it('offers the link to the guest Firewall page and says the flag gates its rules', () => {
+    wrapNic(<NicForm nic={NIC_PLAIN as never} bridges={['vmbr0']} onClose={() => {}} />)
+    expect(screen.getByText(/firewall page/i)).toBeInTheDocument()
+    expect(screen.getByText(/none of them apply to this nic/i)).toBeInTheDocument()
   })
 })
 

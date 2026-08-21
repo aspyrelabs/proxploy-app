@@ -11,6 +11,15 @@ vi.mock('../api/client', () => ({
       return Promise.resolve({ target: 'app:7', metric: 'cpu_pct',
                                resolution: '5m', ts: [1, 2], value: [0.1, 0.14] })
     }
+    // GuestFirewallLine reads these; the panel does not exercise them beyond
+    // rendering, so a firewall that is off with no rules keeps this file's
+    // assertions about the rest of the panel unaffected.
+    if (path.endsWith('/firewall/options')) {
+      return Promise.resolve({ scope: 'guest', digest: null, options: { enable: 0 }, defaults: {} })
+    }
+    if (path.endsWith('/firewall/rules')) {
+      return Promise.resolve({ scope: 'guest', digest: null, rules: [] })
+    }
     return Promise.resolve([])
   }),
   ApiError: class extends Error {},
@@ -18,6 +27,10 @@ vi.mock('../api/client', () => ({
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
   useNavigate: () => vi.fn(),
+  // GuestFirewallLine renders a real Link, which needs a <RouterProvider>
+  // this file never stands up; every other test mocks it thin for the same
+  // reason.
+  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
 }))
 
 import { AppDetailPanel } from '../components/AppDetailPanel'

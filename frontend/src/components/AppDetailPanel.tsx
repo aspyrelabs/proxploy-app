@@ -1,6 +1,7 @@
 import type { AppRow } from '../api/hooks'
 import { UpdatePanel } from '../routes/apps'
 import { MetricChart } from './charts/MetricChart'
+import { GuestFirewallLine } from './GuestFirewallLine'
 import { KVGrid } from './KVGrid'
 import { StatusPill } from './StatusPill'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
@@ -85,6 +86,7 @@ export function AppDetailPanel({ app }: { app: AppRow }) {
               <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-text-3">Status</h3>
               <StatusPill status={app.status} />
               <div className="mt-2 font-mono text-[12px] text-text-2">up {fmtUptime(app.uptime_s)}</div>
+              <div className="mt-2"><GuestFirewallLine guestType="app" guestId={app.id} /></div>
             </div>
             {/* min-h-0 on both the box and its body: a flex child's automatic
                 minimum is its content, so without it the box refuses to shrink
