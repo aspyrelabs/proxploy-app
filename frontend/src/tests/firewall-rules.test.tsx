@@ -17,31 +17,42 @@ const RULES = {
 
 const calls: { path: string; method: string; body: any }[] = []
 
-vi.mock('../api/client', () => {
-  class ApiError extends Error {
-    status: number; body: unknown
-    constructor(status: number, body: unknown) {
-      super(`API ${status}`); this.status = status; this.body = body
-    }
-  }
+/** Set by the two failure cases at the bottom. Everything else leaves them
+ *  alone, so the happy path above stays a plain resolve. */
+let readFails = false
+let writeFails: { status: number; body: unknown } | null = null
+
+// The real ApiError and apiErrorDetail, only `api` faked: the error text the
+// operator sees is produced by client.ts's own unwrapping, so a test that
+// re-implemented it here could pass while the real funnel was broken.
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>()
   return {
-    ApiError,
+    ...actual,
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       if (method !== 'GET') {
         calls.push({ path, method, body: opts?.body ? JSON.parse(String(opts.body)) : {} })
+        if (writeFails) {
+          return Promise.reject(new actual.ApiError(writeFails.status, writeFails.body))
+        }
         return Promise.resolve({ ok: true })
       }
       // Only the cluster scope used by most tests below gets RULES: matching
       // any path ending in '/rules' also catches the node scope path the
       // last test uses, which is meant to resolve to {} (an unmocked scope).
-      if (path === '/firewall/cluster/1/rules') return Promise.resolve(RULES)
+      if (path === '/firewall/cluster/1/rules') {
+        return readFails
+          ? Promise.reject(new actual.ApiError(502, { detail: 'Proxmox refused the request' }))
+          : Promise.resolve(RULES)
+      }
       return Promise.resolve({})
     }),
   }
 })
 
 import { FirewallRuleTable } from '../components/FirewallRuleTable'
+import { getNotifications, resetNotificationStore } from '../lib/notificationStore'
 
 const SCOPE = { kind: 'cluster', hostId: 1 } as const
 
@@ -146,5 +157,41 @@ describe('FirewallRuleTable', () => {
     // The node path is not mocked above, so it resolves to {} and rules is
     // undefined: the same render path as a genuinely empty list.
     await waitFor(() => expect(screen.getByText(/no rules/i)).toBeTruthy())
+  })
+
+  it('says the read failed rather than claiming the firewall has no rules', async () => {
+    // The whole point of the fix. "No rules here" and "Proxploy could not find
+    // out" are opposite answers for somebody deciding whether a host is
+    // protected, and a failed read used to render as the first one.
+    readFails = true
+    try {
+      renderTable()
+      await screen.findByText(/could not read these rules/i)
+      expect(screen.queryByText(/no rules here yet/i)).toBeNull()
+    } finally {
+      readFails = false
+    }
+  })
+
+  it('surfaces a failed write instead of letting the refetch undo the edit', async () => {
+    // A digest conflict is the case that matters: the backend answers 409 with
+    // the reason, the refetch puts the old value back, and without this the
+    // edit just vanishes with nothing said.
+    const conflict = 'somebody else changed this firewall scope while you were '
+      + 'editing it, reload'
+    writeFails = { status: 409, body: { detail: conflict } }
+    resetNotificationStore()
+    try {
+      renderTable()
+      await screen.findByText('ssh from the office')
+      fireEvent.click(screen.getByLabelText('Turn rule 1 on'))
+      await waitFor(() => expect(getNotifications()).toHaveLength(1))
+      expect(getNotifications()[0]).toMatchObject({
+        severity: 'destructive', title: conflict,
+      })
+    } finally {
+      writeFails = null
+      resetNotificationStore()
+    }
   })
 })

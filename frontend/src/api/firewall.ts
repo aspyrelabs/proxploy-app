@@ -1,7 +1,8 @@
 // api/firewall.ts, firewall server state for every scope.
 // Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from './client'
+import { api, ApiError, apiErrorDetail } from './client'
+import { notify } from '../lib/notify'
 
 /** Where a firewall lives. The four kinds map to four PVE path shapes, and
  *  basePath below is the only place that mapping exists. */
@@ -82,14 +83,25 @@ export function useRules(scope: Scope, enabled = true) {
   })
 }
 
-/** Every mutation invalidates the whole scope rather than one list: a rule
+/** Every firewall write goes through here. Two things it owes the operator:
+ *
+ *  Invalidation is of the whole scope rather than one list, because a rule
  *  write shifts every later rule's `pos` AND mints a new digest, so the
- *  options read is stale too. */
+ *  options read is stale too.
+ *
+ *  And it says so when the write failed. Without an onError the refetch
+ *  above simply puts the old value back and the edit appears to undo itself
+ *  for no reason. The message that matters most here is the backend's 409 on
+ *  a digest conflict ("somebody else changed this firewall scope while you
+ *  were editing it"), which is the one case where the operator has to be
+ *  told to reload rather than retype. */
 function useScopeMutation<TVars>(scope: Scope,
                                  run: (v: TVars) => Promise<unknown>) {
   const qc = useQueryClient()
   return useMutation<unknown, ApiError, TVars>({
     mutationFn: run,
+    onError: (e) => notify.error(
+      apiErrorDetail(e, 'Could not save that firewall change, try again.')),
     onSettled: () => { qc.invalidateQueries({ queryKey: key(scope) }) },
   })
 }
@@ -157,30 +169,31 @@ export function useMacros(hostId: number) {
   })
 }
 
+/** Security groups are cluster scope, so they are keyed under the cluster's
+ *  own key rather than a namespace of their own: that is what lets the two
+ *  mutations below go through useScopeMutation like every other firewall
+ *  write, instead of hand-rolling a useMutation that then has no onError. */
+function clusterScope(hostId: number): Scope {
+  return { kind: 'cluster', hostId }
+}
+
 export function useGroups(hostId: number) {
   return useQuery({
-    queryKey: ['firewall', 'groups', hostId],
+    queryKey: key(clusterScope(hostId), 'groups'),
     queryFn: () => api<{ groups: Group[] }>(`/firewall/cluster/${hostId}/groups`),
   })
 }
 
 export function useCreateGroup(hostId: number) {
-  const qc = useQueryClient()
-  return useMutation<unknown, ApiError, { group: string; comment?: string }>({
-    mutationFn: (v) => api(`/firewall/cluster/${hostId}/groups`,
-      { method: 'POST', body: JSON.stringify(v) }),
-    onSettled: () => { qc.invalidateQueries({ queryKey: ['firewall', 'groups', hostId] }) },
-  })
+  return useScopeMutation<{ group: string; comment?: string }>(clusterScope(hostId), (v) =>
+    api(`/firewall/cluster/${hostId}/groups`,
+      { method: 'POST', body: JSON.stringify(v) }))
 }
 
 export function useDeleteGroup(hostId: number) {
-  const qc = useQueryClient()
-  return useMutation<unknown, ApiError, { group: string }>({
-    mutationFn: (v) => api(
-      `/firewall/cluster/${hostId}/groups/${encodeURIComponent(v.group)}`,
-      { method: 'DELETE' }),
-    onSettled: () => { qc.invalidateQueries({ queryKey: ['firewall', 'groups', hostId] }) },
-  })
+  return useScopeMutation<{ group: string }>(clusterScope(hostId), (v) =>
+    api(`/firewall/cluster/${hostId}/groups/${encodeURIComponent(v.group)}`,
+      { method: 'DELETE' }))
 }
 
 export function useAliases(scope: ObjectScope) {
