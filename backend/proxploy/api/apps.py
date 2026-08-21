@@ -13,8 +13,8 @@ from proxploy.api import firewall as fwapi
 from proxploy.api.deps import (authorize, cluster_scope, get_db,
                                require_entitlement, scope_app)
 from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
-                                   MemberPatch, MoveIn, OptionsIn, RuleIn,
-                                   RulePatch, RulePos)
+                                   MemberPatch, MoveIn, ObjectName,
+                                   OptionsIn, RuleIn, RulePatch, RulePos)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso
@@ -678,7 +678,7 @@ def app_fw_alias_create(request: Request, app_id: int, body: AliasIn,
 @router.put("/{app_id}/firewall/aliases/{name}",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.objects"))])
-def app_fw_alias_update(request: Request, app_id: int, name: str,
+def app_fw_alias_update(request: Request, app_id: int, name: ObjectName,
                         body: AliasPatch, db=Depends(get_db),
                         user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
@@ -689,7 +689,7 @@ def app_fw_alias_update(request: Request, app_id: int, name: str,
 @router.delete("/{app_id}/firewall/aliases/{name}",
                dependencies=[Depends(_fw_guest),
                              Depends(require_entitlement("firewall.objects"))])
-def app_fw_alias_delete(request: Request, app_id: int, name: str,
+def app_fw_alias_delete(request: Request, app_id: int, name: ObjectName,
                         digest: str | None = None, db=Depends(get_db),
                         user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
@@ -718,7 +718,7 @@ def app_fw_ipset_create(request: Request, app_id: int, body: IpSetIn,
 @router.delete("/{app_id}/firewall/ipsets/{name}",
                dependencies=[Depends(_fw_guest),
                              Depends(require_entitlement("firewall.objects"))])
-def app_fw_ipset_delete(request: Request, app_id: int, name: str,
+def app_fw_ipset_delete(request: Request, app_id: int, name: ObjectName,
                         force: bool = False, digest: str | None = None,
                         db=Depends(get_db), user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
@@ -729,7 +729,7 @@ def app_fw_ipset_delete(request: Request, app_id: int, name: str,
 @router.get("/{app_id}/firewall/ipsets/{name}/members",
             dependencies=[Depends(_fw_read),
                           Depends(require_entitlement("firewall.view"))])
-def app_fw_ipset_members(request: Request, app_id: int, name: str,
+def app_fw_ipset_members(request: Request, app_id: int, name: ObjectName,
                          db=Depends(get_db), user: User = Depends(_fw_read)):
     a, host = _app_and_host(db, app_id)
     return fwapi.guest_ipset_members(request, db, host, "lxc", a.ctid, a, name)
@@ -738,7 +738,7 @@ def app_fw_ipset_members(request: Request, app_id: int, name: str,
 @router.post("/{app_id}/firewall/ipsets/{name}/members", status_code=201,
              dependencies=[Depends(_fw_guest),
                            Depends(require_entitlement("firewall.objects"))])
-def app_fw_ipset_member_add(request: Request, app_id: int, name: str,
+def app_fw_ipset_member_add(request: Request, app_id: int, name: ObjectName,
                             body: MemberIn, db=Depends(get_db),
                             user: User = Depends(_fw_guest)):
     a, host = _app_and_host(db, app_id)
@@ -751,7 +751,7 @@ def app_fw_ipset_member_add(request: Request, app_id: int, name: str,
 @router.put("/{app_id}/firewall/ipsets/{name}/members/{cidr:path}",
             dependencies=[Depends(_fw_guest),
                           Depends(require_entitlement("firewall.objects"))])
-def app_fw_ipset_member_update(request: Request, app_id: int, name: str,
+def app_fw_ipset_member_update(request: Request, app_id: int, name: ObjectName,
                                cidr: str, body: MemberPatch,
                                db=Depends(get_db),
                                user: User = Depends(_fw_guest)):
@@ -763,7 +763,7 @@ def app_fw_ipset_member_update(request: Request, app_id: int, name: str,
 @router.delete("/{app_id}/firewall/ipsets/{name}/members/{cidr:path}",
                dependencies=[Depends(_fw_guest),
                              Depends(require_entitlement("firewall.objects"))])
-def app_fw_ipset_member_delete(request: Request, app_id: int, name: str,
+def app_fw_ipset_member_delete(request: Request, app_id: int, name: ObjectName,
                                cidr: str, digest: str | None = None,
                                db=Depends(get_db),
                                user: User = Depends(_fw_guest)):

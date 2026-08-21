@@ -682,7 +682,7 @@ class ProxmoxClient:
         if kind == "cluster":
             return api.cluster.firewall
         if kind == "group":
-            return api.cluster.firewall.groups(loc["group"])
+            return api.cluster.firewall.groups(self._segment(loc["group"]))
         if kind == "node":
             return api.nodes(loc["node"]).firewall
         if kind == "guest":
@@ -805,7 +805,8 @@ class ProxmoxClient:
 
     def firewall_alias_update(self, loc: dict, name: str, params: dict) -> None:
         try:
-            self._firewall_root(loc).aliases(name).put(**self._fw_params(params))
+            self._firewall_root(loc).aliases(self._segment(name)).put(
+                **self._fw_params(params))
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -814,7 +815,7 @@ class ProxmoxClient:
     def firewall_alias_delete(self, loc: dict, name: str,
                               digest: str | None = None) -> None:
         try:
-            self._firewall_root(loc).aliases(name).delete(
+            self._firewall_root(loc).aliases(self._segment(name)).delete(
                 **self._fw_params({"digest": digest}))
         except ProxmoxError:
             raise
@@ -843,7 +844,8 @@ class ProxmoxClient:
         if force:
             params["force"] = 1          # PVE takes 1/0, not true/false
         try:
-            self._firewall_root(loc).ipset(name).delete(**self._fw_params(params))
+            self._firewall_root(loc).ipset(self._segment(name)).delete(
+                **self._fw_params(params))
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -851,7 +853,7 @@ class ProxmoxClient:
 
     def firewall_ipset_members(self, loc: dict, name: str) -> list[dict]:
         try:
-            return self._firewall_root(loc).ipset(name).get()
+            return self._firewall_root(loc).ipset(self._segment(name)).get()
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -859,24 +861,35 @@ class ProxmoxClient:
 
     def firewall_ipset_member_add(self, loc: dict, name: str, params: dict) -> None:
         try:
-            self._firewall_root(loc).ipset(name).post(**self._fw_params(params))
+            self._firewall_root(loc).ipset(self._segment(name)).post(
+                **self._fw_params(params))
         except ProxmoxError:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"firewall IP set {name!r} add failed", e) from e
 
     @staticmethod
-    def _cidr_segment(cidr: str) -> str:
-        """A member's CIDR is a URL PATH segment, so its slash has to be
-        escaped. Unescaped, `10.0.0.0/8` splits the path and PVE answers 404 on
-        every member read, update and delete. `safe=""` because the default
-        leaves `/` alone, which is the whole bug."""
-        return quote(str(cidr), safe="")
+    def _segment(value: str) -> str:
+        """One URL PATH segment, escaped, because proxmoxer joins segments with
+        posixpath.join and quotes none of them.
+
+        Written for a member's CIDR: unescaped, `10.0.0.0/8` splits the path
+        and PVE answers 404 on every member read, update and delete. `safe=""`
+        because the default leaves `/` alone, which is the whole bug.
+
+        Now also used for every alias, IP set and security group NAME, which
+        had exactly the same shape of hole and no escaping at all. Note that
+        quoting alone cannot save a name of `..` (a dot is unreserved, so it
+        survives quoting and still means "the parent endpoint"), which is why
+        api/firewall.py::ObjectName refuses one at the route as well. This is
+        the second half of that: one mechanism, both places it is needed.
+        """
+        return quote(str(value), safe="")
 
     def firewall_ipset_member_update(self, loc: dict, name: str, cidr: str,
                                      params: dict) -> None:
         try:
-            (self._firewall_root(loc).ipset(name)(self._cidr_segment(cidr))
+            (self._firewall_root(loc).ipset(self._segment(name))(self._segment(cidr))
              .put(**self._fw_params(params)))
         except ProxmoxError:
             raise
@@ -886,7 +899,7 @@ class ProxmoxClient:
     def firewall_ipset_member_delete(self, loc: dict, name: str, cidr: str,
                                      digest: str | None = None) -> None:
         try:
-            (self._firewall_root(loc).ipset(name)(self._cidr_segment(cidr))
+            (self._firewall_root(loc).ipset(self._segment(name))(self._segment(cidr))
              .delete(**self._fw_params({"digest": digest})))
         except ProxmoxError:
             raise
@@ -912,7 +925,7 @@ class ProxmoxClient:
 
     def firewall_group_delete(self, group: str, digest: str | None = None) -> None:
         try:
-            self._connect().cluster.firewall.groups(group).delete(
+            self._connect().cluster.firewall.groups(self._segment(group)).delete(
                 **self._fw_params({"digest": digest}))
         except ProxmoxError:
             raise

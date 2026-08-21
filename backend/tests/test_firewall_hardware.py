@@ -161,7 +161,7 @@ def test_ipset_member_cidr_with_slash(monitor, lifecycle):
     """The member CIDR is a URL path segment. `firewall_ipset_members` calls
     GET .../ipset/{name} (no member in the path, so nothing to encode there),
     but adding, updating and deleting one member/{cidr} all go through
-    ProxmoxClient._cidr_segment, which quotes the slash. A CIDR without a
+    ProxmoxClient._segment, which quotes the slash. A CIDR without a
     slash (a bare /32 host) would pass even with that quoting missing, so this
     uses a real subnet to prove it."""
     loc = cluster_loc()

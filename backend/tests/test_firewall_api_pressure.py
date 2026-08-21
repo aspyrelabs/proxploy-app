@@ -470,25 +470,58 @@ def test_a_host_id_from_another_team_in_the_path_does_not_widen_scope(solo):
                  ).status_code == 403
 
 
-def test_the_node_segment_is_not_checked_against_the_host_it_was_asked_of(solo):
-    """Pinned as behaviour, and reported as a finding.
+def test_the_node_segment_is_checked_against_the_host_it_was_asked_of(solo):
+    """{node} used to be a free string.
 
-    {node} is a free string. api/firewall.py's node routes hand it to
-    fw.node_loc() without asking whether that node belongs to the host in the
-    path, so a caller with firewall.manage on one host can write node scope
-    rules on any node name that host's credentials can reach. That is fine on
-    a single host install and is not fine when two teams each enrol a
-    different peer of the SAME Proxmox cluster: the team check is done on the
-    Host row, and the node named in the path walks straight past it.
+    The node routes handed it to fw.node_loc() without asking whether that
+    node belonged to the host in the path, so a caller with firewall.manage on
+    one host could write node scope rules on any node name that host's
+    credentials could reach. Harmless on a single host install and not
+    harmless when two teams each enrol a different peer of the SAME Proxmox
+    cluster: the team check is done on the Host row, and the node named in the
+    path walked straight past it.
+
+    fw.host_speaks_for_node answers it now, from the poll snapshot and the
+    hosts table, so the refusal costs no call to Proxmox.
     """
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     fake.firewall_writes.clear()
     got = c.post(f"/api/v1/firewall/node/{ids['a']['host']}/somebody-elses-node"
                  f"/rules", headers=_csrf(c),
                  json={"type": "in", "action": "DROP"})
-    assert got.status_code == 201
-    _, path, _ = fake.firewall_writes[0]
-    assert path == "nodes/somebody-elses-node/firewall/rules"
+    assert got.status_code == 404, got.text[:200]
+    assert fake.firewall_writes == [], "a refused node write still reached Proxmox"
+    assert not writing_problems(got.json()["detail"])
+    # The host's own node still works, on every node route it has.
+    assert c.get(f"/api/v1/firewall/node/{ids['a']['host']}/pve1/rules"
+                 ).status_code == 200
+
+
+def test_a_peer_another_team_enrolled_is_not_reachable_through_this_host(solo):
+    """The case the check exists for: both hosts are peers of one cluster and
+    each belongs to a different team. Team A's host sees pve2 in its poll, but
+    pve2 is enrolled as team B's host, so it is team B's to change."""
+    from proxploy.models import Host
+    c, ids, fake = solo["client"], solo["ids"], solo["fake"]
+    app = solo["app"]
+    with app.state.sessionmaker() as db:
+        for host_id, node in ((ids["a"]["host"], "pve1"), (ids["b"]["host"], "pve2")):
+            h = db.get(Host, host_id)
+            h.cluster_name, h.node_name = "lab", node
+        db.commit()
+
+    class _Snap:
+        nodes = [{"node": "pve1"}, {"node": "pve2"}, {"node": "pve3"}]
+    app.state.poller.snapshots[ids["a"]["host"]] = _Snap()
+    fake.firewall_writes.clear()
+    taken = c.get(f"/api/v1/firewall/node/{ids['a']['host']}/pve2/rules")
+    assert taken.status_code == 404, "a peer another team enrolled was reachable"
+    assert fake.firewall_writes == []
+    # pve3 is in the same cluster and nobody's host, so it stays reachable
+    # through the host that can see it: refusing it would remove working
+    # functionality without protecting anyone.
+    assert c.get(f"/api/v1/firewall/node/{ids['a']['host']}/pve3/rules"
+                 ).status_code == 200
 
 
 def test_an_unknown_host_is_a_404_and_never_an_existence_oracle(solo):
@@ -555,8 +588,10 @@ def test_a_hostile_cidr_never_500s(solo, label, segment):
 
 
 def test_the_member_cidr_is_always_escaped_before_it_becomes_a_pve_segment(solo):
-    """The one segment that IS escaped. services/proxmox.py::_cidr_segment
-    quotes with safe="", so a slash inside a CIDR cannot split the path."""
+    """services/proxmox.py::_segment quotes with safe="", so a slash inside a
+    CIDR cannot split the path. Every alias, IP set and security group name
+    goes through the same helper now; a name is charset-checked at the route
+    on top of that, since quoting alone cannot save a name of ".."."""
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     host = ids["a"]["host"]
     for raw in ("10.0.0.0/8", "%2E%2E%2F%2E%2E", "..%2F.."):
@@ -572,18 +607,23 @@ def test_the_member_cidr_is_always_escaped_before_it_becomes_a_pve_segment(solo)
             f"the URL path")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "SECURITY FINDING: an object name is never validated and is never "
-    "escaped. api/firewall.py hands {name}/{group} straight to the client, "
-    "services/proxmox.py hands it to proxmoxer, and proxmoxer joins it with "
-    "posixpath.join without quoting (proxmoxer/core.py:101). A name of "
-    "%2E%2E arrives at Proxmox as a literal .. segment, so the call lands on "
-    "the parent endpoint instead of the named object. Same shape as the "
-    "member CIDR bug that _cidr_segment already fixes: the fix is the same "
-    "escaping, applied to names too, or a name charset check at the route."))
 def test_an_object_name_cannot_escape_its_endpoint(solo):
     """A name is a NAME. It must never be able to change which Proxmox
-    endpoint the call lands on."""
+    endpoint the call lands on.
+
+    It used to be able to. Nothing validated a name and nothing escaped one:
+    api/firewall.py handed {name}/{group} straight to the client,
+    services/proxmox.py handed it to proxmoxer, and proxmoxer joins with
+    posixpath.join without quoting (proxmoxer/core.py:101), so a name of
+    %2E%2E arrived at Proxmox as a literal .. segment and the call landed on
+    the PARENT endpoint instead of the named object.
+
+    Guaranteed now by api/firewall.py::ObjectName, which is PVE's own charset
+    for these three objects declared as a path constraint, so a name that
+    could be a path never reaches a handler. ProxmoxClient._segment quoting
+    every name segment is the second half of it, for a caller that reaches the
+    client without passing a route.
+    """
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     host = ids["a"]["host"]
     escapes = []
@@ -609,13 +649,12 @@ def test_an_object_name_cannot_escape_its_endpoint(solo):
                          + "\n".join(escapes))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FINDING: an object name is length-unchecked and byte-unchecked. A 4096 "
-    "character name and a name containing a null byte both reach the "
-    "Proxmox client. PVE's own schema caps these names, and a null byte in "
-    "a URL is rejected by urllib3 as a ValueError, which api/firewall.py "
-    "does not catch, so on a real cluster that is a 500 rather than a 422."))
 def test_an_object_name_is_length_and_byte_checked_before_it_leaves(solo):
+    """Both of these used to reach the Proxmox client unexamined. PVE's own
+    schema caps these names, and a null byte in a URL makes urllib3 raise
+    ValueError, which no handler catches: on a real cluster that was a 500
+    where a 422 was owed. ObjectName's length cap and charset answer both
+    before the handler runs."""
     c, ids, fake = solo["client"], solo["ids"], solo["fake"]
     host = ids["a"]["host"]
     bad = []

@@ -872,7 +872,7 @@ def test_ipset_full_lifecycle(monitor, lifecycle, made):
     """Members with a slash, a bare IP and an IPv6 prefix, plus nomatch, plus
     the forced delete of a populated set.
 
-    The slashed CIDR is what proves _cidr_segment quotes the path: a bare host
+    The slashed CIDR is what proves _segment quotes the path: a bare host
     address would pass even with that quoting missing.
     """
     loc = cluster_loc()

@@ -10,7 +10,8 @@ Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 from __future__ import annotations
 
 from proxploy.models import Host
-from proxploy.services.hostclient import client_for_host, guest_node
+from proxploy.services.hostclient import (client_for_host, cluster_scope,
+                                          guest_node)
 
 # Which objects each scope actually carries, measured on pve-manager 9.2.11 on
 # 2026-08-21 rather than assumed. Used to answer 404 for a scope/object pair
@@ -37,6 +38,36 @@ def node_loc(node: str) -> dict:
 
 def group_loc(group: str) -> dict:
     return {"kind": "group", "group": group}
+
+
+def host_speaks_for_node(app, db, host: Host, node: str) -> bool:
+    """May this host act on `node`'s own firewall?
+
+    Its own node, always. Any OTHER node only if the host's last poll actually
+    saw it and no other enrolled host is registered at it: a node somebody else
+    enrolled as their host is that host's (and that host's team's), and reaching
+    it through this one would walk straight past the team check, which is done
+    on the Host row and never on the node named in the path.
+
+    Answered from the poll snapshot and the hosts table, so a node request
+    costs no extra call to Proxmox. A host with no snapshot yet (freshly
+    enrolled, or unreachable) speaks for its own node only, which is the same
+    answer api/cluster.py::cluster_nodes gives that host.
+
+    Keyed on cluster_scope for the reason that helper exists: a node name is
+    unique only WITHIN a cluster, so a same-named node on another cluster is a
+    different machine and must not decide this.
+    """
+    if node == host.node_name:
+        return True
+    poller = getattr(app.state, "poller", None)
+    snap = poller.snapshots.get(host.id) if poller else None
+    seen = {n["node"] for n in (snap.nodes or [])} if snap else set()
+    if node not in seen:
+        return False
+    scope = cluster_scope(host)
+    owners = db.query(Host).filter(Host.node_name == node).all()
+    return not any(h.id != host.id and cluster_scope(h) == scope for h in owners)
 
 
 def guest_loc(host: Host, kind: str, vmid: int, row=None) -> dict:

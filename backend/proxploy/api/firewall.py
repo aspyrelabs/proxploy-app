@@ -36,6 +36,19 @@ _read = authorize("firewall", "read", scope_of=scope_host())
 _manage = authorize("firewall", "manage", scope_of=scope_host())
 
 
+# An alias, IP set or security group name is a PATH SEGMENT in the URL sent to
+# Proxmox, and proxmoxer joins segments without quoting any of them, so a name
+# is checked HERE or nowhere. The charset is PVE's own for these three objects
+# ([A-Za-z] then letters, digits, dash or underscore), so nothing this refuses
+# would have been accepted at the other end anyway; the length cap is PVE's own
+# too. Measured on pve-manager 9.2.11 on 2026-08-21.
+#
+# Declared as a path constraint rather than checked in each handler so a
+# hostile name is a 422 from FastAPI before any handler runs: `..` never
+# becomes a segment, a null byte never reaches urllib3 (which raises
+# ValueError on one, i.e. a 500), and a 4096 character name never leaves.
+ObjectName = Annotated[str, Path(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")]
+
 # A rule position is an index into an ordered list, never a number in its own
 # right: it cannot be negative, and a rules file that reached five figures
 # would be a bug at the other end. The upper bound is deliberately generous;
@@ -48,6 +61,26 @@ def _host_or_404(db, host_id: int) -> Host:
     if host is None:
         raise HTTPException(404, "That host is not enrolled.")
     return host
+
+
+def _node_or_404(request: Request, db, host: Host, node: str) -> str:
+    """The node in the path, unless this host has no business speaking for it.
+
+    Team scope is decided on the HOST row (api/deps.py::scope_host), and {node}
+    is a free string that walks straight past that: without this check a caller
+    holding firewall.manage on one peer of a cluster could write node scope
+    rules on any other peer that host's credentials can reach, including a peer
+    another team enrolled as their own host.
+
+    Costs no round trip. The nodes a host legitimately speaks for are its own
+    node, plus any node its last poll saw that no OTHER host row is registered
+    at, which is exactly how api/cluster.py::cluster_nodes attributes a node to
+    a host.
+    """
+    if fw.host_speaks_for_node(request.app, db, host, node):
+        return node
+    raise HTTPException(404, f"{host.name} does not answer for a node called "
+                             f"{node}, so it has no firewall there.")
 
 
 def pve_error(e: ProxmoxError) -> HTTPException:
@@ -255,7 +288,7 @@ def cluster_rule_delete(request: Request, host_id: int, pos: RulePos,
 @router.get("/cluster/{host_id}/groups/{group}/rules",
             dependencies=[Depends(_read),
                           Depends(require_entitlement("firewall.view"))])
-def group_rules(request: Request, host_id: int, group: str, db=Depends(get_db),
+def group_rules(request: Request, host_id: int, group: ObjectName, db=Depends(get_db),
                 user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
     return _rules_read(request, db, host, fw.group_loc(group), "group")
@@ -264,7 +297,7 @@ def group_rules(request: Request, host_id: int, group: str, db=Depends(get_db),
 @router.post("/cluster/{host_id}/groups/{group}/rules", status_code=201,
              dependencies=[Depends(_manage),
                            Depends(require_entitlement("firewall.rules"))])
-def group_rule_create(request: Request, host_id: int, group: str, body: RuleIn,
+def group_rule_create(request: Request, host_id: int, group: ObjectName, body: RuleIn,
                       db=Depends(get_db), user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
     params = rule_params(body)
@@ -278,7 +311,7 @@ def group_rule_create(request: Request, host_id: int, group: str, body: RuleIn,
 @router.put("/cluster/{host_id}/groups/{group}/rules/{pos}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def group_rule_update(request: Request, host_id: int, group: str, pos: RulePos,
+def group_rule_update(request: Request, host_id: int, group: ObjectName, pos: RulePos,
                       body: RulePatch, db=Depends(get_db),
                       user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -295,7 +328,7 @@ def group_rule_update(request: Request, host_id: int, group: str, pos: RulePos,
 @router.put("/cluster/{host_id}/groups/{group}/rules/{pos}/move",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.rules"))])
-def group_rule_move(request: Request, host_id: int, group: str, pos: RulePos,
+def group_rule_move(request: Request, host_id: int, group: ObjectName, pos: RulePos,
                     body: MoveIn, db=Depends(get_db),
                     user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -311,7 +344,7 @@ def group_rule_move(request: Request, host_id: int, group: str, pos: RulePos,
 @router.delete("/cluster/{host_id}/groups/{group}/rules/{pos}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.rules"))])
-def group_rule_delete(request: Request, host_id: int, group: str, pos: RulePos,
+def group_rule_delete(request: Request, host_id: int, group: ObjectName, pos: RulePos,
                       digest: str | None = None, db=Depends(get_db),
                       user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -332,6 +365,7 @@ def group_rule_delete(request: Request, host_id: int, group: str, pos: RulePos,
 def node_rules(request: Request, host_id: int, node: str, db=Depends(get_db),
                user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     return _rules_read(request, db, host, fw.node_loc(node), "node")
 
 
@@ -341,6 +375,7 @@ def node_rules(request: Request, host_id: int, node: str, db=Depends(get_db),
 def node_rule_create(request: Request, host_id: int, node: str, body: RuleIn,
                      db=Depends(get_db), user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     params = rule_params(body)
     _rules_write(request, db, user, host, fw.node_loc(node),
                  action="firewall.rule_create",
@@ -356,6 +391,7 @@ def node_rule_update(request: Request, host_id: int, node: str, pos: RulePos,
                      body: RulePatch, db=Depends(get_db),
                      user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     params = rule_params(body, partial=True)
     _rules_write(request, db, user, host, fw.node_loc(node),
                  action="firewall.rule_update",
@@ -372,6 +408,7 @@ def node_rule_move(request: Request, host_id: int, node: str, pos: RulePos,
                    body: MoveIn, db=Depends(get_db),
                    user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     _rules_write(request, db, user, host, fw.node_loc(node),
                  action="firewall.rule_move",
                  label=f"rule {pos} in the firewall on {node}",
@@ -388,6 +425,7 @@ def node_rule_delete(request: Request, host_id: int, node: str, pos: RulePos,
                      digest: str | None = None, db=Depends(get_db),
                      user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     _rules_write(request, db, user, host, fw.node_loc(node),
                  action="firewall.rule_delete",
                  label=f"rule {pos} in the firewall on {node}",
@@ -500,6 +538,7 @@ def cluster_options_update(request: Request, host_id: int, body: OptionsIn,
 def node_options(request: Request, host_id: int, node: str, db=Depends(get_db),
                  user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     return _options_read(request, db, host, fw.node_loc(node), "node")
 
 
@@ -510,6 +549,7 @@ def node_options_update(request: Request, host_id: int, node: str,
                         body: OptionsIn, db=Depends(get_db),
                         user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     return _options_write(request, db, user, host, fw.node_loc(node),
                           label=f"firewall on {node}", body=body)
 
@@ -596,7 +636,7 @@ def cluster_alias_create(request: Request, host_id: int, body: AliasIn,
 @router.put("/cluster/{host_id}/aliases/{name}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.objects"))])
-def cluster_alias_update(request: Request, host_id: int, name: str,
+def cluster_alias_update(request: Request, host_id: int, name: ObjectName,
                          body: AliasPatch, db=Depends(get_db),
                          user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -610,7 +650,7 @@ def cluster_alias_update(request: Request, host_id: int, name: str,
 @router.delete("/cluster/{host_id}/aliases/{name}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.objects"))])
-def cluster_alias_delete(request: Request, host_id: int, name: str,
+def cluster_alias_delete(request: Request, host_id: int, name: ObjectName,
                          digest: str | None = None, db=Depends(get_db),
                          user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -649,7 +689,7 @@ def cluster_ipset_create(request: Request, host_id: int, body: IpSetIn,
 @router.delete("/cluster/{host_id}/ipsets/{name}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.objects"))])
-def cluster_ipset_delete(request: Request, host_id: int, name: str,
+def cluster_ipset_delete(request: Request, host_id: int, name: ObjectName,
                          force: bool = False, digest: str | None = None,
                          db=Depends(get_db), user: User = Depends(_manage)):
     """`force` is the caller's word, never this route's default: PVE refuses to
@@ -666,7 +706,7 @@ def cluster_ipset_delete(request: Request, host_id: int, name: str,
 @router.get("/cluster/{host_id}/ipsets/{name}/members",
             dependencies=[Depends(_read),
                           Depends(require_entitlement("firewall.view"))])
-def cluster_ipset_members(request: Request, host_id: int, name: str,
+def cluster_ipset_members(request: Request, host_id: int, name: ObjectName,
                           db=Depends(get_db), user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
     try:
@@ -679,7 +719,7 @@ def cluster_ipset_members(request: Request, host_id: int, name: str,
 @router.post("/cluster/{host_id}/ipsets/{name}/members", status_code=201,
              dependencies=[Depends(_manage),
                            Depends(require_entitlement("firewall.objects"))])
-def cluster_ipset_member_add(request: Request, host_id: int, name: str,
+def cluster_ipset_member_add(request: Request, host_id: int, name: ObjectName,
                              body: MemberIn, db=Depends(get_db),
                              user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -697,7 +737,7 @@ def cluster_ipset_member_add(request: Request, host_id: int, name: str,
 @router.put("/cluster/{host_id}/ipsets/{name}/members/{cidr:path}",
             dependencies=[Depends(_manage),
                           Depends(require_entitlement("firewall.objects"))])
-def cluster_ipset_member_update(request: Request, host_id: int, name: str,
+def cluster_ipset_member_update(request: Request, host_id: int, name: ObjectName,
                                 cidr: str, body: MemberPatch,
                                 db=Depends(get_db),
                                 user: User = Depends(_manage)):
@@ -714,7 +754,7 @@ def cluster_ipset_member_update(request: Request, host_id: int, name: str,
 @router.delete("/cluster/{host_id}/ipsets/{name}/members/{cidr:path}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.objects"))])
-def cluster_ipset_member_delete(request: Request, host_id: int, name: str,
+def cluster_ipset_member_delete(request: Request, host_id: int, name: ObjectName,
                                 cidr: str, digest: str | None = None,
                                 db=Depends(get_db),
                                 user: User = Depends(_manage)):
@@ -762,7 +802,7 @@ def cluster_group_create(request: Request, host_id: int, body: GroupIn,
 @router.delete("/cluster/{host_id}/groups/{group}",
                dependencies=[Depends(_manage),
                              Depends(require_entitlement("firewall.objects"))])
-def cluster_group_delete(request: Request, host_id: int, group: str,
+def cluster_group_delete(request: Request, host_id: int, group: ObjectName,
                          digest: str | None = None, db=Depends(get_db),
                          user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
@@ -807,6 +847,7 @@ def node_log(request: Request, host_id: int, node: str, start: int = 0,
              until: int | None = None, db=Depends(get_db),
              user: User = Depends(_read)):
     host = _host_or_404(db, host_id)
+    node = _node_or_404(request, db, host, node)
     try:
         lines = fw.readers(request.app, db, host).firewall_log(
             fw.node_loc(node), start=start, limit=limit, since=since, until=until)
