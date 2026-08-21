@@ -269,7 +269,19 @@ class App(TimestampMixin, Base):
     icon_initials: Mapped[str | None] = mapped_column(Text)
     icon_colors: Mapped[dict | None] = mapped_column(JSON)
     web_port: Mapped[int | None] = mapped_column(Integer)
-    web_protocol: Mapped[str] = mapped_column(Text, default="http", nullable=False)
+    # NULL means nobody has told Proxploy, so the app itself is asked at open
+    # time (services/webui.py). It was NOT NULL defaulting to "http", which
+    # made every app claim plain HTTP as if someone had chosen it, and sent
+    # the operator to http:// for the apps that only speak https.
+    web_protocol: Mapped[str | None] = mapped_column(Text)
+    # The URL the install script printed about itself, captured when the
+    # install job finished (services/appstore.py). Kept as the whole URL and
+    # kept SEPARATE from the three fields above, which is what makes "never
+    # overwrite what the operator set" structural rather than a check that can
+    # be got wrong: nothing derived from a log is ever written into a field a
+    # person owns. It is evidence, so it is stored as the installer stated it
+    # rather than as three values picked out of it.
+    installed_url: Mapped[str | None] = mapped_column(Text)
     web_path: Mapped[str] = mapped_column(Text, default="/", nullable=False)
     status_cached: Mapped[str | None] = mapped_column(Text)
     ip_cached: Mapped[str | None] = mapped_column(Text)

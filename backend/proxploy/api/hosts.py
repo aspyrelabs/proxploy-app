@@ -290,8 +290,11 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     try:
         v = client.version()
     except ProxmoxError as e:
+        # No Host row exists to resolve a name from: the enrolment failed
+        # before one was written. The name the operator typed is what they
+        # will be looking for when they come back to ask why it failed.
         write_audit(db, actor_type="user", actor_id=user.id, action="host.create",
-                    params=audit_params, result="error",
+                    target_name=body.name, params=audit_params, result="error",
                     ip=request.client.host if request.client else None)
         raise HTTPException(502, {"error": e.kind, "detail": str(e)})
 

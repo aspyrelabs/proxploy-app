@@ -20,7 +20,8 @@ const APP: AppRow = {
   id: 1, name: 'Immich', slug: 'immich', host_id: 1, host_name: 'pve-a',
   node: 'pve-a', ctid: 150, category: null, catalog_slug: 'immich',
   icon_initials: 'IM', icon_colors: null, icon_url: null,
-  web_port: null, web_protocol: 'http', web_path: '/', catalog_port: 8096,
+  web_port: null, web_protocol: 'http', web_path: '/', installed_url: null,
+  catalog_port: 8096,
   status: 'running', ip: '10.0.0.5', cpu_pct: 12,
   mem_bytes: 2147483648, mem_total_bytes: 4294967296, uptime_s: 86400,
   update_available: null, adopted: false,
@@ -97,9 +98,16 @@ describe('AppTable', () => {
     expect(dot).not.toHaveTextContent(/\S/)
   })
 
+  it('explains the dot on focus, so a pointerless reader gets the wording too', async () => {
+    wrap([{ ...APP, update_available: '1.120.0' }])
+    fireEvent.focus(within(rowFor('Immich')).getByRole('img', { name: 'Update available' }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Update available')
+  })
+
   it('leaves an up-to-date app undotted', () => {
     wrap([APP])
     expect(screen.queryByRole('img', { name: 'Update available' })).toBeNull()
+    expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
   it('closes the first row when a second is clicked, so only one is ever open', () => {

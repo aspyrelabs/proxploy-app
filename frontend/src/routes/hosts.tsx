@@ -17,11 +17,15 @@ import { HostForm } from '../components/HostForm'
 import { NodeCard, NodeCardSkeleton } from '../components/NodeCard'
 import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../components/ui/resizable'
 import { MetricChart } from '../components/charts/MetricChart'
 import { NetworkStat, NetworkStatSkeleton, Ring, RingSkeleton } from '../components/StatRings'
 import { StatusPill } from '../components/StatusPill'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { fmtBytes } from '../lib/format'
+import { useMediaQuery } from '../lib/use-media-query'
+import { useThroughput } from '../api/network'
+import { combineThroughput } from '../lib/throughput'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted because the loading placeholder has to lay out in the SAME grid as
@@ -168,6 +172,85 @@ export function HostsPage() {
     refetchInterval: 30_000,
   })
 
+  const wide = useMediaQuery('(min-width: 1024px)')
+
+  // History for the Network tile's spark. An hour is the SHORTEST window
+  // /network/throughput serves (api/network.py validates 1 <= hours <= 48),
+  // so the tile's footer reads the window off the timestamps it actually got
+  // rather than claiming one.
+  //
+  // combineThroughput, never a sum: two hosts enrolled into one cluster each
+  // record that whole cluster's traffic, so adding the rows reports it twice.
+  // The cluster each host belongs to comes off `nodes`, which this page has
+  // already fetched, so this costs one request and no extra state. The live
+  // figures beside the spark stay /cluster/summary's, which is deduped
+  // server-side already.
+  const throughputQuery = useThroughput(1)
+  const clusterOf = (hostId: number) =>
+    (nodes ?? []).find((n) => n.host_id === hostId)?.cluster ?? null
+  const net = combineThroughput(throughputQuery.data?.hosts ?? [], clusterOf)
+
+  /* The two inventories, built once and placed by the branch below. They are
+     consts rather than two components because they close over the two
+     queries above and take nothing else; a component here would be two props
+     of ceremony for one caller. */
+  const appsColumn = (
+    <div>
+      {/* One icon per app with its status, and nothing else. The view
+          switch and Update all moved to the Apps page: this section is a
+          glance at what is installed, not the place to operate on it.
+
+          Every app, with no cap. It used to show the first eight in
+          whatever order /apps answered, which on a cluster meant a missing
+          app could equally be stopped, gone, or simply the ninth. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-[16px] font-semibold">Apps</h2>
+        {/* as never: route typing workaround, see router.tsx */}
+        <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+      </div>
+      <QueryState query={appsQuery}
+                  loading={<SkeletonGroup label="Loading apps">
+                    <IconGridSkeleton count={8} />
+                  </SkeletonGroup>}
+                  emptyTitle="No apps yet"
+                  emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
+                  errorTitle="Apps not readable"
+                  errorNote="Proxploy could not reach the backend to list your apps.">
+        {(rows) => <AppIconGrid apps={rows} />}
+      </QueryState>
+    </div>
+  )
+
+  /* Heading outside the panel, matching Apps beside it: over there the
+     heading row also carries the view switch and Update all, so it has to sit
+     outside. Putting this one inside its box made the two columns read as
+     different kinds of thing. The same flex wrapper keeps both headings on one
+     baseline across the row. */
+  const vmsColumn = (
+    <div>
+      {/* The same icon grid the Apps column draws, grouped the same way.
+          It was a Name/Node/Status table showing the first four VMs, which
+          made the two inventories read as two different kinds of thing and
+          hid the fifth VM entirely. The grid carries its own panel, so
+          there is no card wrapper here any more. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
+        {/* as never: route typing workaround, see router.tsx */}
+        <a href="/vms" className="text-[12px] text-amber hover:underline">View all</a>
+      </div>
+      <QueryState query={vmsQuery}
+                  loading={<SkeletonGroup label="Loading virtual machines">
+                    <IconGridSkeleton count={4} />
+                  </SkeletonGroup>}
+                  emptyTitle="No VMs discovered"
+                  emptyNote="QEMU guests on connected hosts appear here."
+                  errorTitle="VMs not readable"
+                  errorNote="Proxploy could not reach the backend to list your VMs.">
+        {(rows) => <VmIconGrid vms={rows} />}
+      </QueryState>
+    </div>
+  )
+
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
@@ -224,7 +307,11 @@ export function HostsPage() {
             page. It sits beside the three rings because it is the same kind
             of reading, cluster-wide right now, and it drew a whole card for
             two figures. */}
+        {/* No `scope`: every other reading in this row is the whole fleet
+            too, so naming it here would state the obvious. The prop is for a
+            per-node caller, which IS a departure from what the row means. */}
         <NetworkStat inBps={summary?.net.in_bps} outBps={summary?.net.out_bps}
+          ts={net.ts} inValues={net.inValues} outValues={net.outValues}
           unknown={summaryQuery.isError || summary?.net.in_bps == null} />
         </>
         )}
@@ -265,62 +352,42 @@ export function HostsPage() {
 
       {/* Apps and Virtual machines side by side: they are the two inventories
           this page exists to show, and an operator comparing them wants both
-          in view at once rather than one scrolled past the other. They stack
-          below lg, where half a row is too narrow for either. */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-        <div>
-          {/* One icon per app with its status, and nothing else. The view
-              switch and Update all moved to the Apps page: this section is a
-              glance at what is installed, not the place to operate on it.
+          in view at once rather than one scrolled past the other. The split
+          between them is draggable now, because which of the two deserves the
+          width is a fact about the fleet rather than about the page: a node
+          running twenty apps and one VM wants the bar nowhere near the middle.
 
-              Every app, with no cap. It used to show the first eight in
-              whatever order /apps answered, which on a cluster meant a missing
-              app could equally be stopped, gone, or simply the ninth. */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display text-[16px] font-semibold">Apps</h2>
-            {/* as never: route typing workaround, see router.tsx */}
-            <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
-          </div>
-          <QueryState query={appsQuery}
-                      loading={<SkeletonGroup label="Loading apps">
-                        <IconGridSkeleton count={8} />
-                      </SkeletonGroup>}
-                      emptyTitle="No apps yet"
-                      emptyNote="Installed or adopted apps appear here. Install one from the App Store, or adopt a container Proxploy already found."
-                      errorTitle="Apps not readable"
-                      errorNote="Proxploy could not reach the backend to list your apps.">
-            {(rows) => <AppIconGrid apps={rows} />}
-          </QueryState>
-        </div>
+          The group draws no border, only the bar. Each inventory already
+          carries its own panel (IconGrid's PANEL), so a box around the pair
+          would be a third edge saying nothing the two inside it do not.
 
-        {/* Heading outside the panel, matching Apps beside it: over there the
-            heading row also carries the view switch and Update all, so it has
-            to sit outside. Putting this one inside its box made the two
-            columns read as different kinds of thing. The same flex wrapper
-            keeps both headings on one baseline across the row. */}
-        <div>
-          {/* The same icon grid the Apps column draws, grouped the same way.
-              It was a Name/Node/Status table showing the first four VMs, which
-              made the two inventories read as two different kinds of thing and
-              hid the fifth VM entirely. The grid carries its own panel, so
-              there is no card wrapper here any more. */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
-            {/* as never: route typing workaround, see router.tsx */}
-            <a href="/vms" className="text-[12px] text-amber hover:underline">View all</a>
-          </div>
-          <QueryState query={vmsQuery}
-                      loading={<SkeletonGroup label="Loading virtual machines">
-                        <IconGridSkeleton count={4} />
-                      </SkeletonGroup>}
-                      emptyTitle="No VMs discovered"
-                      emptyNote="QEMU guests on connected hosts appear here."
-                      errorTitle="VMs not readable"
-                      errorNote="Proxploy could not reach the backend to list your VMs.">
-            {(rows) => <VmIconGrid vms={rows} />}
-          </QueryState>
+          `height: auto` overrides the library's inline `height: 100%`, which
+          would otherwise resolve against this page's own auto height and is
+          not worth relying on. NEITHER GRID CAPS ITS ROWS: AppIconGrid and
+          VmIconGrid render every app and every VM the fleet has, grouped by
+          node, so any fixed height here is a guess that clips the twenty-first
+          app the day somebody installs it. The panels divide width; height
+          stays whatever the taller inventory needs.
+
+          minSize is 16rem rather than a percentage: the grid inside wants a
+          10rem column plus the panel's padding, and that is a number of
+          pixels, not a fraction of a window nobody has measured.
+
+          They stack below lg, where half a row is too narrow for either, and
+          where a draggable split would divide height instead of width. */}
+      {wide ? (
+        <ResizablePanelGroup orientation="horizontal" className="mt-6"
+                             style={{ height: 'auto' }}>
+          <ResizablePanel defaultSize="50%" minSize="16rem">{appsColumn}</ResizablePanel>
+          <ResizableHandle withHandle className="mx-2" />
+          <ResizablePanel defaultSize="50%" minSize="16rem">{vmsColumn}</ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="mt-6 grid grid-cols-1 gap-4">
+          {appsColumn}
+          {vmsColumn}
         </div>
-      </div>
+      )}
     </div>
   )
 }

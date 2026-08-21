@@ -349,6 +349,11 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     """
     host = _host_or_404(db, body.host_id)
     ip = request.client.host if request.client else None
+    # target_id here is the HOST's id, not a storage row's, so
+    # resolve_target_name has nothing to look up and these rows rendered as
+    # "storage #1", an id that points at a different table. Same label the
+    # upload and delete-volume routes above already pass.
+    label = f"{body.storage} on {host.name}"
     # Route-controlled keys (storage/type) go LAST in the unpack so a
     # caller-supplied config.storage or config.type overrides nothing this
     # route says it is attaching: storage.py has no _SAFE_KEY filter at all
@@ -359,11 +364,11 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
             {**body.config, "storage": body.storage, "type": body.type})
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
-                    target_type="storage", target_id=host.id,
+                    target_type="storage", target_id=host.id, target_name=label,
                     params=body.model_dump(), result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
-                target_type="storage", target_id=host.id,
+                target_type="storage", target_id=host.id, target_name=label,
                 params=body.model_dump(), ip=ip)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})
@@ -381,15 +386,16 @@ def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
     host = _host_or_404(db, host_id)
     keys = sorted(body.config)
     ip = request.client.host if request.client else None
+    label = f"{name} on {host.name}"
     try:
         client_for_host(request.app, db, host, capability="lifecycle").storage_update(name, body.config)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
-                    target_type="storage", target_id=host.id,
+                    target_type="storage", target_id=host.id, target_name=label,
                     params={"storage": name, "keys": keys}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
-                target_type="storage", target_id=host.id,
+                target_type="storage", target_id=host.id, target_name=label,
                 params={"storage": name, "keys": keys}, ip=ip)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})
@@ -406,15 +412,16 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
     running guests. Upstream data is left in place; this is not a wipe."""
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
+    label = f"{name} on {host.name}"
     try:
         client_for_host(request.app, db, host, capability="lifecycle").storage_remove(name)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
-                    target_type="storage", target_id=host.id,
+                    target_type="storage", target_id=host.id, target_name=label,
                     params={"storage": name}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
-                target_type="storage", target_id=host.id,
+                target_type="storage", target_id=host.id, target_name=label,
                 params={"storage": name}, ip=ip)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})

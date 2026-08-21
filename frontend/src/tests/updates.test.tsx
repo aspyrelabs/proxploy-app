@@ -58,7 +58,7 @@ describe('UpdatePanel', () => {
     ).toBeInTheDocument())
   })
 
-  it('requires the root-consent checkbox before it will post', async () => {
+  it('requires the backup-consent checkbox before it will post', async () => {
     posted.length = 0
     app = { id: 1, name: 'Redis', update_available: 'b'.repeat(7) }
     updateInfo = { update_available: 'b'.repeat(7), from_ref: 'a'.repeat(40),
@@ -66,7 +66,11 @@ describe('UpdatePanel', () => {
     wrap(<UpdatePanel appId={1} app={app} />)
     const btn = await screen.findByRole('button', { name: /update to/i })
     expect(btn).toBeDisabled()
-    fireEvent.click(screen.getByLabelText(/runs as root/i))
+    // The consent names the precaution the operator can act on rather than
+    // restating that Proxploy runs as root, which is true of everything it
+    // does and is not a thing to check before clicking. Matched on the
+    // backup, so a revert to the old wording fails here.
+    fireEvent.click(screen.getByLabelText(/backed up and want to update/i))
     await waitFor(() => expect(btn).not.toBeDisabled())
     fireEvent.click(btn)
     await waitFor(() => expect(posted.length).toBe(1))

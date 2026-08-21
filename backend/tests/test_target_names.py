@@ -147,3 +147,205 @@ def test_audit_row_prefers_the_captured_name_over_a_live_lookup(
         rows = c.get("/api/v1/audit").json()
         deletes = [r for r in rows if r["action"] == "vm.delete"]
         assert deletes and all(r["target_label"] == "win11" for r in deletes)
+
+
+# --- the thing that did not exist yet when the row was written -------------
+#
+# The install, the create and the clone all record a REQUEST: the App or Vm
+# row they are about is written later, by the job. There is nothing for
+# resolve_target_name to look up, so left alone these rows took the name of
+# the HOST they pointed at and the trail read "App Install / node1.lab",
+# which never says which app. Each route now records what was asked for.
+
+def _installable(app, host_id, slug="redis"):
+    """The two gates the install route clears before it enqueues anything: an
+    enrolled ssh_key on the host, and a catalog entry classified installable."""
+    from proxploy.models import CatalogEntry, HostCredential
+
+    with app.state.sessionmaker() as db:
+        db.add(CatalogEntry(slug=slug, name="Redis", installable=True))
+        db.add(HostCredential(host_id=host_id, kind="ssh_key", encrypted_blob=b"x",
+                              key_version=1, public_meta="ssh-ed25519 AAAA"))
+        db.commit()
+
+
+def test_install_names_the_app_its_ctid_and_the_host(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    """The reported bug: the audit log said "App Install" and nothing else."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        _installable(app, ids["host_id"])
+        r = c.post("/api/v1/catalog/redis/install",
+                   json={"host_id": ids["host_id"], "name": "Redis", "ctid": 150,
+                         "consent": True}, headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        assert r.json()["job"]["target_name"] == "Redis (CT 150) on node1.lab"
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="app.install").one()
+            assert row.target_name == "Redis (CT 150) on node1.lab"
+        # And it reaches the screen, which is where the bug was seen.
+        listed = c.get("/api/v1/audit").json()
+        assert [x["target_label"] for x in listed if x["action"] == "app.install"] \
+            == ["Redis (CT 150) on node1.lab"]
+
+
+def test_install_without_a_ctid_still_names_the_app_and_the_host(
+        tmp_path, csrf_header, bootstrap_admin):
+    """A blank ctid means the node picks the next free one, so there is no
+    container id to record. The app and the host are still knowable, and a
+    row that names those two beats one that names neither."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        _installable(app, ids["host_id"])
+        r = c.post("/api/v1/catalog/redis/install",
+                   json={"host_id": ids["host_id"], "name": "Redis",
+                         "consent": True}, headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="app.install").one()
+            assert row.target_name == "Redis on node1.lab"
+
+
+def test_uninstall_names_the_app(tmp_path, csrf_header, bootstrap_admin):
+    """The other half of the report. This one always worked, because the App
+    row still exists when the row is written, and it stays working."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.request("DELETE", f"/api/v1/apps/{ids['app_id']}",
+                      json={"confirm": "debian-test"}, headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="app.uninstall").one()
+            assert row.target_name == "debian-test"
+
+
+def test_vm_create_names_the_guest_not_the_host(tmp_path, csrf_header,
+                                                bootstrap_admin):
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms",
+                   json={"host_id": ids["host_id"], "name": "web-01", "node": "pve1",
+                         "vmid": 310, "cores": 2, "memory_mb": 2048,
+                         "disk_gb": 32, "storage": "local-lvm"},
+                   headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="vm.create").one()
+            assert row.target_name == "web-01 (VM 310) on node1.lab"
+
+
+def test_clone_names_both_the_source_and_the_copy(tmp_path, csrf_header,
+                                                  bootstrap_admin):
+    """target_id points at the source, which is the row that exists. Without
+    the copy in the name, two clones of one template read identically."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post(f"/api/v1/vms/{ids['vm_id']}/clone",
+                   json={"name": "web-02", "newid": 311}, headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="vm.clone").one()
+            assert row.target_name == "win11 to web-02 (VM 311)"
+
+
+# --- the thing that has no row of its own ---------------------------------
+#
+# A snapshot, a storage definition and a bridge are all named on a host or a
+# guest rather than in a table of their own, so target_id points at the owner
+# and the name has to carry the rest. Storage was the worst of the three: its
+# target_id is a HOST id, so an unnamed row rendered as "storage #1", an id
+# that belongs to a different table entirely.
+
+def test_snapshot_rows_name_the_snapshot_and_the_guest(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        h = csrf_header(c)
+        assert c.post(f"/api/v1/vms/{ids['vm_id']}/snapshots",
+                      json={"name": "nightly"}, headers=h).status_code == 202
+        assert c.request("DELETE",
+                         f"/api/v1/vms/{ids['vm_id']}/snapshots/nightly",
+                         headers=h).status_code == 202
+        with app.state.sessionmaker() as db:
+            names = {r.action: r.target_name for r in db.query(AuditEvent)
+                     .filter(AuditEvent.action.like("vm.snapshot%"))}
+            assert names == {"vm.snapshot_create": "nightly on win11",
+                             "vm.snapshot_delete": "nightly on win11"}
+
+
+def test_storage_rows_name_the_storage_not_a_host_id(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/storage",
+                   json={"host_id": ids["host_id"], "storage": "nfs-media",
+                         "type": "nfs", "config": {"server": "10.0.0.30",
+                                                   "export": "/media"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="storage.create").one()
+            assert row.target_name == "nfs-media on node1.lab"
+        listed = c.get("/api/v1/audit").json()
+        assert [x["target_label"] for x in listed
+                if x["action"] == "storage.create"] == ["nfs-media on node1.lab"]
+
+
+def test_api_key_rows_name_the_key(tmp_path, csrf_header, bootstrap_admin):
+    """No route passes this one: `api_key` joined TARGET_LABELS, so the
+    resolver answers for it the way it does for a host or a VM."""
+    app, c, _ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/api-keys", json={"name": "ci-runner", "scopes": []},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="apikey.create").one()
+            assert row.target_name == "ci-runner"
+
+
+def test_bridge_rows_name_the_interface_and_the_node(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/network/bridges", headers=csrf_header(c),
+                   json={"host_id": ids["host_id"], "node": "pve1",
+                         "iface": "vmbr9", "type": "bridge",
+                         "config": {"bridge_ports": "enp3s0"}})
+        assert r.status_code == 201, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="network.host_config").one()
+            assert row.target_name == "vmbr9 on pve1"
+
+
+def test_adopt_names_the_apps_it_took_over(tmp_path, csrf_header,
+                                           bootstrap_admin):
+    """One row covers the batch, so there is no single target to point at.
+    The names are what make it answerable without opening params, which the
+    audit screen never shows."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/apps/adopt", headers=csrf_header(c),
+                   json={"items": [{"host_id": ids["host_id"], "ctid": 120,
+                                    "name": "plex"},
+                                   {"host_id": ids["host_id"], "ctid": 121,
+                                    "name": "pihole"}]})
+        assert r.status_code == 200, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="apps.adopt").one()
+            assert row.target_name == "plex, pihole"
+
+
+def test_adopting_a_big_batch_caps_the_list(tmp_path, csrf_header,
+                                            bootstrap_admin):
+    """Forty names in one cell pushes every other column off the screen. The
+    full set is still in params."""
+    app, c, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/apps/adopt", headers=csrf_header(c),
+                   json={"items": [{"host_id": ids["host_id"], "ctid": 200 + n,
+                                    "name": f"ct{n}"} for n in range(7)]})
+        assert r.status_code == 200, r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(AuditEvent).filter_by(action="apps.adopt").one()
+            assert row.target_name == "ct0, ct1, ct2, ct3, ct4 and 2 more"

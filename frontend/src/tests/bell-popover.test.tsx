@@ -333,10 +333,31 @@ describe('BellPopover', () => {
   it('names what a job acted on, and falls back for a row with no name', async () => {
     wrap()
     await openBell()
-    expect(await screen.findByText('Finished on debian-test.')).toBeInTheDocument()
+    // "Finished on debian-test" named the target and never the ACTION, which
+    // is not a sentence, and it doubled the "on" once a target name became
+    // "<guest> on <node>". Job 11 is an app.stop, so the verb is "stopping".
+    expect(await screen.findByText('Finished stopping debian-test.')).toBeInTheDocument()
     expect(screen.getByText(/^debian-test ·/)).toBeInTheDocument()
     // The unnamed row still reads the old way rather than guessing.
     expect(screen.getByText(/^vm 3 ·/)).toBeInTheDocument()
+  })
+
+  it('drops the verb rather than inventing one for an unmapped job kind', async () => {
+    // Job kinds land backend-side all the time. An unmapped one falls back to
+    // the verbless sentence this tray always wrote, because a plainer sentence
+    // is a better failure than confident wrong English.
+    //
+    // Restored in a finally: JOBS is shared across this file, and leaving a
+    // made-up kind behind broke the dedupe test two below it.
+    const original = JOBS[1]
+    JOBS[1] = { ...original, kind: 'quantum.entangle' }
+    try {
+      wrap()
+      await openBell()
+      expect(await screen.findByText('Finished on debian-test.')).toBeInTheDocument()
+    } finally {
+      JOBS[1] = original
+    }
   })
 
   // Deleting the activity drawer took the only UI path to GET /jobs/{id}/events

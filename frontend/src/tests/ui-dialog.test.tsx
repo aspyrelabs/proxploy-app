@@ -304,4 +304,24 @@ describe('AlertDialog', () => {
 
     await waitFor(() => expect(panel.contains(document.activeElement)).toBe(true))
   })
+
+  it('takes a CSS width, so a panel can ask for a share of the window', () => {
+    // The install transcript asks for 60% of the window rather than a fixed
+    // number of pixels: a terminal that wraps mid-line hides the part worth
+    // reading, which on an install is the finished URL and the errors. A
+    // number still means px, which every other caller passes.
+    //
+    // Asserted as the RESOLVED width rather than the literal expression: the
+    // point is that the panel comes out wider than the form it replaces, and
+    // a string compare would pass just as happily on a value that resolved to
+    // nothing.
+    const px = (w: number | string) => {
+      const { unmount } = render(
+        <Dialog title="Install redis" width={w} onClose={vi.fn()}><p>body</p></Dialog>)
+      const width = getComputedStyle(screen.getByRole('dialog')).width
+      unmount()
+      return parseFloat(width)
+    }
+    expect(px('max(520px, 60vw)')).toBeGreaterThan(px(520))
+  })
 })

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import shlex
+from collections import deque
 
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
@@ -19,6 +20,7 @@ from proxploy.models import App, AppScript, CatalogEntry, Host, Job, utcnow
 from proxploy.services.catalog import pinned_payload_script, raw_url
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
+from proxploy.services.webui import TAIL_LINES, url_from_install_log
 
 
 SHORT_SHA = 7
@@ -248,12 +250,25 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # as a bare word inside the substitution.
     _url = shlex.quote(raw_url(entry.upstream_sha, entry.script_path))
     command = f"bash -c \"$(curl -fsSL {_url})\""
+
+    # The script's last words are where it prints the finished URL, so they
+    # are kept as they stream rather than read back out of job_events
+    # afterwards. Two reasons: they are already in hand here, and job_events
+    # has no retention policy today, so a parse that depended on rows still
+    # being there would quietly stop working the day someone adds pruning.
+    tail: deque[str] = deque(maxlen=TAIL_LINES)
+
+    def on_line(stream: str, line: str) -> None:
+        ctx.log(line, stream=stream)
+        if stream == "stdout":
+            tail.append(line)
+
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, host_id, host.address, command,
             pinned_fingerprint=host.ssh_host_key_fingerprint,
             on_new_fingerprint=on_new_fingerprint, env=env,
-            on_line=lambda stream, line: ctx.log(line, stream=stream),
+            on_line=on_line,
         )
     except LookupError as e:
         raise JobFailed(str(e)) from e
@@ -293,7 +308,20 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         with app.state.sessionmaker() as db:
             row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
                       catalog_slug=catalog_slug, category=entry.category,
-                      web_protocol="http", web_path="/", adopted=True,
+                      # No web_protocol: whether this app speaks http or https
+                      # is not something an install knows, and writing "http"
+                      # here is what used to send Open at the wrong scheme.
+                      # Left NULL so the app is asked (services/webui.py).
+                      #
+                      # `installed_url` is what the script printed about
+                      # itself, and it is only read after the run exited 0:
+                      # a failed install can still have printed a URL, for a
+                      # container that was then rolled back. The catalog's
+                      # port corroborates it, so a documentation link printed
+                      # near the end cannot win over the real one.
+                      installed_url=url_from_install_log(
+                          tail, expected_port=entry.port),
+                      web_path="/", adopted=True,
                       update_available=None)
             db.add(row)
             db.flush()

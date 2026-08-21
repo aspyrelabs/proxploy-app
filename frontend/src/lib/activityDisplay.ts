@@ -40,6 +40,70 @@ export function targetLabel(row: {
   return `${row.target_type}${row.target_id != null ? ` ${row.target_id}` : ''}`
 }
 
+/**
+ * The verb for a job kind, as a gerund, for the sentence the tray writes.
+ *
+ * The tray used to say "Finished on anytype-server on node1", which names what
+ * was acted on and never says WHAT WAS DONE. It reads as broken English, and
+ * once target_name started carrying "<guest> on <node>" it also doubled the
+ * "on". The verb was always the missing half of the sentence; the target name
+ * only made its absence obvious.
+ *
+ * A TABLE, not a conjugator. Deriving "installing" from "install" needs the
+ * silent-e rule (migrate, clone, create, delete), consonant doubling (stop,
+ * run) and a hand-written exception for "backing up" anyway, which is a
+ * grammar engine to save thirty lines of data and would still be wrong for the
+ * next irregular verb somebody adds.
+ *
+ * An unmapped kind is a deliberate MISS, not a guess: gerundFor returns null
+ * and messageOf falls back to the verbless sentence it always wrote. New job
+ * kinds land backend-side regularly, and today's plain sentence is a better
+ * failure than confident wrong English.
+ */
+export const GERUND: Record<string, string> = {
+  'app.install': 'installing',
+  'app.uninstall': 'uninstalling',
+  'app.update': 'updating',
+  'app.reconfigure': 'reconfiguring',
+  'app.start': 'starting',
+  'app.stop': 'stopping',
+  'app.restart': 'restarting',
+  'app.shutdown': 'shutting down',
+  'apps.adopt': 'importing',
+  'backup.run': 'backing up',
+  'backup.restore': 'restoring',
+  'backup.delete': 'deleting the backup for',
+  'backup.prune': 'pruning backups on',
+  'backup.sync': 'syncing backups on',
+  'catalog.classify_backlog': 'checking compatibility on',
+  'catalog.refresh': 'refreshing the catalog on',
+  'host.reboot': 'rebooting',
+  'host.shutdown': 'shutting down',
+  'metrics.maintain': 'tidying metrics on',
+  'migrate.app': 'migrating',
+  'network.apply': 'applying network changes on',
+  'storage.upload': 'uploading to',
+  'storage.delete_volume': 'deleting a volume on',
+  'vm.create': 'creating',
+  'vm.clone': 'cloning',
+  'vm.delete': 'destroying',
+  'vm.snapshot_create': 'snapshotting',
+  'vm.snapshot_delete': 'deleting a snapshot on',
+  'vm.snapshot_rollback': 'rolling back',
+  'vm.start': 'starting',
+  'vm.stop': 'stopping',
+  'vm.restart': 'restarting',
+  'vm.shutdown': 'shutting down',
+  'vm.pause': 'pausing',
+  'vm.resume': 'resuming',
+}
+
+/** The gerund for a job kind, or null when nobody has written one. Null is the
+ *  signal to fall back to a sentence with no verb in it, never to invent one. */
+export function gerundFor(kind: string | null | undefined): string | null {
+  return kind ? GERUND[kind] ?? null : null
+}
+
 export function ago(iso: string): string {
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
   if (s < 60) return `${s}s ago`

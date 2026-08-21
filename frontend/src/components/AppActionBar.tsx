@@ -24,7 +24,7 @@ import { Icon } from './ui/icon'
  * Stop, the two opposite outcomes, and Restart stays neutral since it lands
  * back where it started.
  *
- * Open is ABSENT, not disabled, when the app has no catalog port: there is
+ * Open is ABSENT, not disabled, when the app has no known port: there is
  * nothing to point a tab at, and a dead button invites a click that cannot go
  * anywhere. Same rule the icon menu follows.
  *
@@ -39,7 +39,11 @@ export function AppActionBar({ app }: { app: AppRow }) {
     <ButtonGroup>
       <LifecycleActions target="app" id={app.id} name={app.name}
                         status={app.status} hostId={app.host_id} size="sm" grouped />
-      {app.catalog_port != null && (
+      {/* Same port the backend's /web-url will use, app row first and catalog
+          second, so the button is offered exactly when there is one. Reading
+          only the catalog's hid the button on an app whose port the operator
+          had set by hand. */}
+      {(app.web_port ?? app.catalog_port) != null && (
         <>
           <ButtonGroupSeparator />
           <Button variant="ghost" size="sm"

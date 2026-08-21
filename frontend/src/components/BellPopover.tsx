@@ -5,7 +5,7 @@ import { useJobs } from '../api/jobs'
 import { useFiringAlerts } from '../api/alerts'
 import { alertToastSeverity } from '../api/live'
 import type { JobRow } from '../api/jobs'
-import { actionLabel, ago, targetLabel } from '../lib/activityDisplay'
+import { actionLabel, ago, gerundFor, targetLabel } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
@@ -156,15 +156,41 @@ function severityOf(status: string): NotificationSeverity {
 
 /** The message. A failure's reason is the message; anything else states what
  *  happened in a sentence rather than making the reader infer it from a kind
- *  string. */
+ *  string.
+ *
+ *  Every branch names the ACTION as well as the target. "Finished on
+ *  anytype-server on node1" said what was acted on and never what was done to
+ *  it, which is not a sentence, and it doubled the "on" once target_name began
+ *  carrying "<guest> on <node>". With the verb in place the same row reads
+ *  "Finished installing anytype-server on node1".
+ *
+ *  `verb` is null for a job kind nobody has written a gerund for, and the
+ *  fallbacks below are then the exact sentences this function always wrote.
+ *  New kinds arrive backend-side regularly, and a plainer sentence is a better
+ *  failure than invented English. */
 function messageOf(job: JobRow): string {
   if (job.error) return job.error
   const where = targetLabel(job) ?? 'this cluster'
-  if (job.status === 'succeeded') return `Finished on ${where}.`
-  if (job.status === 'canceled') return `Canceled before it finished on ${where}.`
-  if (job.status === 'interrupted') return `Interrupted on ${where}; it may not have completed.`
-  if (job.status === 'queued') return `Queued for ${where}, not started yet.`
-  return `Running on ${where}.`
+  const verb = gerundFor(job.kind)
+  if (job.status === 'succeeded') {
+    return verb ? `Finished ${verb} ${where}.` : `Finished on ${where}.`
+  }
+  if (job.status === 'canceled') {
+    return verb ? `Canceled before it finished ${verb} ${where}.`
+                : `Canceled before it finished on ${where}.`
+  }
+  if (job.status === 'interrupted') {
+    return verb ? `Interrupted while ${verb} ${where}; it may not have completed.`
+                : `Interrupted on ${where}; it may not have completed.`
+  }
+  if (job.status === 'queued') {
+    return verb ? `Queued to start ${verb} ${where}, not started yet.`
+                : `Queued for ${where}, not started yet.`
+  }
+  // Sentence-cased rather than a template, because the verb IS the first word
+  // here: "Installing anytype-server on node1."
+  return verb ? `${verb[0].toUpperCase()}${verb.slice(1)} ${where}.`
+              : `Running on ${where}.`
 }
 
 function duration(job: JobRow): string | null {

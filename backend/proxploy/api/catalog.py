@@ -416,12 +416,22 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if host.install_consent_at is None and body.consent:
         host.install_consent_at = utcnow()
     db.commit()
+    # The App row does not exist yet: the job below creates it. So there is no
+    # app id for resolve_target_name to look up, and left alone the audit row
+    # takes the name of the HOST it points at, i.e. the trail reads "App
+    # Install / pve1" and never says which app. Record what was REQUESTED
+    # instead, which is knowable right here and is what someone reading the
+    # history a month later is looking for. The ctid is optional: blank means
+    # the node picks the next free one, and it is not knowable until it does.
+    where = f"{body.name} (CT {body.ctid})" if body.ctid else body.name
+    requested = f"{where} on {host.name}"
     job = request.app.state.jobs.enqueue(
-        db, kind="app.install", requested_by=user.id,
+        db, kind="app.install", requested_by=user.id, target_name=requested,
         params={"catalog_slug": slug, "host_id": body.host_id, "name": body.name,
                "ctid": body.ctid, "overrides": body.overrides})
     write_audit(db, actor_type="user", actor_id=user.id, action="app.install",
                 target_type="host", target_id=body.host_id, job_id=job.id,
+                target_name=requested,
                 params={"catalog_slug": slug, "name": body.name, "ctid": body.ctid},
                 ip=request.client.host if request.client else None)
     return {"job": job_out(job)}

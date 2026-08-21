@@ -80,6 +80,9 @@ export type AppRow = {
   // longer has, or an entry with no logo -- which is the initials tile.
   icon_url: string | null
   web_port: number | null; web_protocol: string | null; web_path: string | null
+  // What the install script printed about itself. Read-only: the three
+  // fields above override it, it never overrides them.
+  installed_url: string | null
   // "Open web UI" target port, resolved from this app's catalog entry every
   // request (services/catalog.py). Null when there is no catalog entry or the
   // entry names no port, which is what hides the action rather than offering

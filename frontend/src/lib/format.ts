@@ -51,6 +51,44 @@ export function fmtBps(n?: number | null): string {
   return `${v.toFixed(1)} ${units[i]}`
 }
 
+/**
+ * bytes/s → byte-rate display ("1.2 MB/s"). The SAME input as `fmtBps` above,
+ * which is the point: both take bytes per second, and the only difference is
+ * that fmtBps multiplies by 8 on the way in to reach bits.
+ *
+ * WHY THERE ARE TWO, and why deleting either is a regression rather than a
+ * cleanup. They are not a mistake left half-finished; the app deliberately
+ * speaks two vocabularies:
+ *
+ *   - `fmtBps`, bits, is the default and covers every network surface but one:
+ *     the Network page's throughput card, every app row, every VM row. Bits are
+ *     what link speed is quoted in and what an operator comparing against a
+ *     1 Gbps NIC expects to read.
+ *   - `fmtByteRate`, bytes, is used by exactly ONE surface: the Network tile in
+ *     the Hosts page cluster-usage row (components/StatRings.tsx::NetworkStat).
+ *     That tile sits beside three gauges captioned in GiB and TiB, and reading
+ *     bytes there lets someone weigh throughput against the disk it is filling
+ *     without doing arithmetic in their head. That was a product call, made
+ *     with the inconsistency spelled out, and it is meant to stay a one-tile
+ *     exception.
+ *
+ * So: if you are here to make the two agree, the answer is no. Widening this
+ * one to the rest of the app, or narrowing the tile back to bits, both need
+ * asking first.
+ *
+ * Decimal steps of 1000, matching `fmtBps` and NOT `fmtBytes`'s binary 1024,
+ * because the unit is spelled KB rather than KiB. A "KB/s" that meant 1024
+ * would be quietly wrong by 2.4%.
+ */
+export function fmtByteRate(n?: number | null): string {
+  if (n == null) return UNKNOWN
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
+  let v = n
+  let i = 0
+  while (Math.abs(v) >= 1000 && i < units.length - 1) { v /= 1000; i++ }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
              'Saturday', 'Sunday']  // cron accepts both 0 and 7 for Sunday
 

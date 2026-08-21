@@ -40,8 +40,11 @@ export function Dialog({
   title: ReactNode
   /** Rendered under the title, and wired to aria-describedby when present. */
   description?: ReactNode
-  /** Panel width in px. The 92vw cap is applied for you, always. */
-  width?: number
+  /** Panel width. A number is px; a string is any CSS width, which is how a
+   *  panel asks for a share of the WINDOW rather than a fixed size. The 92vw
+   *  cap is applied for you either way, so a percentage cannot push the panel
+   *  off screen on a narrow one. */
+  width?: number | string
   /** 'palette' sits high and hides its heading (the command palette names
    *  itself through its input). */
   variant?: 'center' | 'palette'

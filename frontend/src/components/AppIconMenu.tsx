@@ -132,10 +132,10 @@ export function AppIconMenu({ app, lifecycle = true, children }: {
               onSelect={() => openConsoleWindow('app', app.id)}>
               <Icon name="terminal" size={16} /> Console
             </DropdownMenu.Item>
-            {/* No catalog port means nothing to point a tab at, so the action is
-                absent rather than offered and broken. Same rule as the detail
-                header. */}
-            {lifecycle && app.catalog_port != null && (
+            {/* No port at all, on the app row or in the catalog, means nothing
+                to point a tab at, so the action is absent rather than offered
+                and broken. Same pair the backend's /web-url picks from. */}
+            {lifecycle && (app.web_port ?? app.catalog_port) != null && (
               <DropdownMenu.Item className={itemCls}
                 disabled={gates.openUi.denied} title={gates.openUi.reason}
                 onSelect={() => {

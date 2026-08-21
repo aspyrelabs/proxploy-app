@@ -467,8 +467,13 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
               "disk_gb": body.disk_gb, "storage": body.storage, "iso": body.iso,
               "bridge": body.bridge, "vlan_tag": body.vlan_tag,
               "ostype": body.ostype, "start": body.start}
+    # Same hole app.install had: the Vm row is created by the job, so with no
+    # name passed the row is labelled with the HOST and the history reads "VM
+    # Create / pve1". The requested name and the minted vmid are both known
+    # here, and the vmid is what PVE will call the guest either way.
     out = enqueue_and_audit(request, db, user, kind="vm.create",
-                            target_type="host", target_id=host.id, params=params)
+                            target_type="host", target_id=host.id, params=params,
+                            target_name=f"{body.name} (VM {int(vmid)}) on {host.name}")
     return {**out, "vmid": int(vmid)}
 
 
@@ -538,8 +543,13 @@ def create_vm_snapshot(request: Request, vm_id: int, body: SnapshotIn,
                        user: User = Depends(_snapshot)):
     v, _host = _vm_and_host(db, vm_id)
     name = _valid_snap_name(body.name)
+    # A snapshot has no row of its own here, so target_id points at the guest
+    # and the name has to carry the snapshot. Without it three snapshot rows
+    # against the same guest read identically and none of them says which
+    # snapshot was taken, rolled back to, or thrown away.
     return enqueue_and_audit(request, db, user, kind="vm.snapshot_create",
                              target_type="vm", target_id=v.id,
+                             target_name=f"{name} on {v.name or f'VM {v.vmid}'}",
                              params={"vm_id": v.id, "name": name,
                                      "description": body.description,
                                      "vmstate": body.vmstate})
@@ -573,7 +583,8 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
     if (body.confirm or "") != vm_name:
         write_audit(db, actor_type="user", actor_id=user.id,
                     action="vm.snapshot_rollback", target_type="vm",
-                    target_id=v.id, params={"name": name}, result="denied", ip=ip)
+                    target_id=v.id, target_name=f"{name} on {vm_name}",
+                    params={"name": name}, result="denied", ip=ip)
         raise HTTPException(409, {
             "error": "confirm_required", "confirm_phrase": vm_name,
             "detail": (f"Rolling {vm_name} back to {name!r} discards everything "
@@ -582,6 +593,7 @@ def rollback_vm_snapshot(request: Request, vm_id: int, name: str,
         })
     return enqueue_and_audit(request, db, user, kind="vm.snapshot_rollback",
                              target_type="vm", target_id=v.id,
+                             target_name=f"{name} on {vm_name}",
                              params={"vm_id": v.id, "name": name})
 
 
@@ -597,6 +609,7 @@ def delete_vm_snapshot(request: Request, vm_id: int, name: str, db=Depends(get_d
     _valid_snap_name(name)
     return enqueue_and_audit(request, db, user, kind="vm.snapshot_delete",
                              target_type="vm", target_id=v.id,
+                             target_name=f"{name} on {v.name or f'VM {v.vmid}'}",
                              params={"vm_id": v.id, "name": name})
 
 
@@ -647,8 +660,14 @@ def clone_vm_route(request: Request, vm_id: int,
             newid = int(client.cluster_nextid())
         except ProxmoxError as e:
             raise HTTPException(502, str(e)) from e
+    # Names both ends. target_id still points at the SOURCE, which is the row
+    # that exists, but a clone row that names only the source cannot be told
+    # apart from the next clone of the same template, and the copy it made is
+    # the thing someone comes looking for.
+    src = v.name or f"VM {v.vmid}"
+    dest = f"{body.name} (VM {int(newid)})" if body.name else f"VM {int(newid)}"
     out = enqueue_and_audit(request, db, user, kind="vm.clone", target_type="vm",
-                            target_id=v.id,
+                            target_id=v.id, target_name=f"{src} to {dest}",
                             params={"vm_id": v.id, "newid": int(newid),
                                     "name": body.name, "full": body.full,
                                     "target": body.target,

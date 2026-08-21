@@ -2,16 +2,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// AppRow.ip is the App row's own (effectively always-stale/never-populated,
-// see api/apps.py::_app_out) cached field. It is deliberately DIFFERENT from
-// the address the /network mock below returns, so a test that used the
-// stored field by mistake would open the wrong host and fail loudly instead
+const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
+vi.mock('../lib/notify', () => ({
+  notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
+
+// Both `ip` and `web_protocol` here are deliberately WRONG for the URL the
+// backend resolves below: `ip` is the row's own (effectively always-stale,
+// see api/apps.py::_app_out) cached address, and `web_protocol` is the "http"
+// that used to be written onto every app whether or not it was true. A test
+// that read either by mistake opens the wrong place and fails loudly instead
 // of passing by coincidence.
 const APP = {
   id: 1, name: 'Immich', slug: 'immich', host_id: 1, host_name: 'pve-a',
   node: 'pve-a', ctid: 150, category: null, catalog_slug: 'immich',
   icon_initials: 'IM', icon_colors: null, web_port: null, web_protocol: 'http',
-  web_path: '/', catalog_port: 8096 as number | null,
+  web_path: '/', installed_url: null, catalog_port: 8096 as number | null,
   status: 'running', ip: '10.0.0.5', cpu_pct: null, icon_url: null,
   mem_bytes: null, mem_total_bytes: null, uptime_s: null,
   disk_bytes: null, disk_total_bytes: null,
@@ -31,22 +37,24 @@ vi.mock('../api/client', () => ({
         features: { 'apps.open_ui': true, 'apps.lifecycle': true },
       })
     }
-    // Live guest NIC read (services guest_nics, "no cache"): the address the
-    // button must actually use.
-    if (path === '/apps/1/network') {
-      // `addresses`, not `ip`: `ip` is the config, and a container on DHCP has
-      // the word `dhcp` there. `addresses` is what the guest actually holds.
-      return Promise.resolve([{ ip: dhcpGuest ? 'dhcp' : '10.9.9.9/24',
-                               addresses: ['10.9.9.9/24'] }])
+    // The whole URL comes from the backend now: it reads the guest's address
+    // live AND asks the app itself whether it speaks http or https, neither
+    // of which this page can do. The scheme is the half that was wrong, so
+    // the fixture serves https, the way Actual Budget really answers.
+    if (path === '/apps/1/web-url') {
+      if (webUrlError) return Promise.reject(webUrlError)
+      return Promise.resolve({ url: webUrl, protocol: 'https',
+                               protocol_decided_by: 'asked the app' })
     }
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},
+  apiErrorDetail: (_e: unknown, fallback: string) => errorDetail ?? fallback,
 }))
 
-// A container whose CONFIG says dhcp but which holds a real lease, which is
-// the case that used to report "could not determine this app's address".
-let dhcpGuest = false
+let webUrl = 'https://10.9.9.9:5006/'
+let webUrlError: Error | null = null
+let errorDetail: string | null = null
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
@@ -65,40 +73,58 @@ const withQuery = (ui: React.ReactNode) => {
 }
 
 describe('AppActionBar Open', () => {
-  beforeEach(() => { calls.length = 0 })
-
-  it('shows the action when the catalog names a port, and opens the address it fetches live, not app.ip', async () => {
-    APP.catalog_port = 8096
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-    withQuery(<AppActionBar app={APP as AppRow} />)
-
-    const btn = await screen.findByRole('button', { name: 'Open' })
-    fireEvent.click(btn)
-
-    await waitFor(() => expect(calls).toContain('/apps/1/network'))
-    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
-      'http://10.9.9.9:8096/', '_blank', 'noopener,noreferrer'))
-    openSpy.mockRestore()
+  beforeEach(() => {
+    calls.length = 0
+    webUrl = 'https://10.9.9.9:5006/'
+    webUrlError = null
+    errorDetail = null
+    notifyError.mockClear()
   })
 
-  it('opens a DHCP container, whose config address is the word "dhcp"', async () => {
-    // Reported from real use: the app card knew the port, and clicking Open
-    // web UI said "Could not determine <app>'s address". The container was on
-    // DHCP, so its PVE config carries `ip=dhcp`, and the button filtered that
-    // out and gave up. The port was never the problem.
-    dhcpGuest = true
-    APP.catalog_port = 8000
+  it('opens the URL the backend resolved, keeping the https it found', async () => {
+    // The bug: this used to be built in the browser as
+    // `${app.web_protocol || 'http'}` over an address fetched from /network,
+    // and every row said "http" because install and adopt wrote that string
+    // whether or not it was true. Actual Budget serves https on 5006, so
+    // Open landed on a page that could not load. Nothing on the row decides
+    // this any more, which is why the fixture's own web_protocol still says
+    // "http" and the tab must still go to https.
+    APP.catalog_port = 5006
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
     withQuery(<AppActionBar app={APP as AppRow} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+
+    await waitFor(() => expect(calls).toContain('/apps/1/web-url'))
     await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
-      'http://10.9.9.9:8000/', '_blank', 'noopener,noreferrer'))
+      'https://10.9.9.9:5006/', '_blank', 'noopener,noreferrer'))
+    // And the address is not read off the row either: APP.ip is deliberately
+    // a different address from the one the backend resolved live.
+    expect(calls).not.toContain('/apps/1/network')
     openSpy.mockRestore()
-    dhcpGuest = false
   })
 
-  it('hides the action entirely when the catalog names no port', async () => {
+  it('says what actually went wrong when no URL could be built', async () => {
+    // The backend's 409 names the real reason ("did not answer ... cannot
+    // tell whether it uses http or https"), which is the point of refusing
+    // rather than guessing, so it has to reach the operator rather than be
+    // flattened into one generic sentence.
+    webUrlError = new Error('API 409')
+    errorDetail = 'Immich did not answer at 10.9.9.9:5006, so Proxploy cannot tell'
+    APP.catalog_port = 5006
+    const close = vi.fn()
+    const openSpy = vi.spyOn(window, 'open')
+      .mockImplementation(() => ({ close } as unknown as Window))
+    withQuery(<AppActionBar app={APP as AppRow} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith(errorDetail))
+    // The blank tab the click opened is closed, not left on about:blank.
+    expect(close).toHaveBeenCalled()
+    openSpy.mockRestore()
+  })
+
+  it('hides the action entirely when nothing names a port', async () => {
     APP.catalog_port = null
     withQuery(<AppActionBar app={APP as AppRow} />)
 

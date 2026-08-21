@@ -1,7 +1,7 @@
 """Append-only audit writer (docs 04/08 §7). There is deliberately no update or
 delete function in this module, archival is a Phase-8+ export job, never mutation."""
-from proxploy.models import (AlertRule, App, AuditEvent, Backup, Host, Job,
-                             NotificationChannel, Schedule, Team, User, Vm)
+from proxploy.models import (AlertRule, ApiKey, App, AuditEvent, Backup, Host,
+                             Job, NotificationChannel, Schedule, Team, User, Vm)
 
 # target_type -> (model, the column that holds its human name). One map, used
 # to capture a row's name when it is written (resolve_target_name below), to
@@ -24,6 +24,10 @@ TARGET_LABELS = {
     "notification_channel": (NotificationChannel, NotificationChannel.name),
     "alert_rule": (AlertRule, AlertRule.name),
     "backup": (Backup, Backup.volid),
+    # A revoked key is deleted from nobody's screen but its rows outlive it,
+    # and "api_key #3" names nothing: the key someone revoked in a hurry is
+    # exactly the row an audit reader comes back for.
+    "api_key": (ApiKey, ApiKey.name),
 }
 
 

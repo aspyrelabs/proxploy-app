@@ -744,3 +744,71 @@ def test_one_catalog_app_can_be_installed_more_than_once(tmp_path):
     # Same catalog app, same host, different CTIDs: the identities differ, so
     # the unique constraint is satisfied without either install being refused.
     assert len({r.slug for r in rows}) == 2
+
+
+# The closing banner of a real community-scripts install, copied byte for byte
+# out of job_events for job 231 in the dev database (Actual Budget): ANSI
+# escapes, emoji and all. A tidied-up version would test the capture against
+# input it will never see.
+REAL_BANNER = [
+    '\r\x1b[K  ✔️  \x1b[1;92mCompleted successfully!',
+    '\x1b[m',
+    '  \U0001f680  \x1b[m\x1b[1;92mActual Budget setup has been successfully initialized!\x1b[m',
+    '  \U0001f4a1  \x1b[m\x1b[33mAccess it using the following URL:\x1b[m',
+    '  \U0001f310  \x1b[m\x1b[4;92mhttps://192.168.50.194:5006\x1b[m',
+]
+
+
+def test_install_stores_the_url_the_script_printed_about_itself(tmp_path):
+    """The script states its own scheme, port and path on the way out, and
+    Proxploy was throwing that away and then guessing "http" for an app that
+    only speaks https. Captured as it streams rather than read back out of
+    job_events, which has no retention policy today.
+    """
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        app.state.ssh_connect_factory = _ssh_that_builds(
+            pve, 150, stdout_lines=["Setup Redis", *REAL_BANNER])
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        result = await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                         "name": "Redis", "ctid": 150, "overrides": {}})
+
+        with app.state.sessionmaker() as db:
+            row = db.query(App).filter_by(slug=result["slug"]).one()
+            assert row.installed_url == "https://192.168.50.194:5006"
+            # And the fields a person owns are still untouched, which is what
+            # keeps an operator's later correction winning over this.
+            assert row.web_protocol is None
+
+    asyncio.run(scenario())
+
+
+def test_install_stores_nothing_when_the_script_printed_no_url_of_its_own(tmp_path):
+    async def scenario():
+        pve = FakePVE()
+        _seed_single_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        with app.state.sessionmaker() as db:
+            host_id = _seed_installable_host(app, db)
+
+        app.state.ssh_connect_factory = _ssh_that_builds(
+            pve, 150, stdout_lines=["Setup Redis", "See https://redis.io for docs"])
+
+        from proxploy.jobs import JobBackend
+        ctx = JobContext(JobBackend(app), job_id=1)
+        result = await run_install(ctx, {"catalog_slug": "redis", "host_id": host_id,
+                                         "name": "Redis", "ctid": 150, "overrides": {}})
+
+        with app.state.sessionmaker() as db:
+            # A project link is not the container's web interface, so nothing
+            # is recorded and the probe answers on the first click instead.
+            assert db.query(App).filter_by(slug=result["slug"]).one().installed_url is None
+
+    asyncio.run(scenario())

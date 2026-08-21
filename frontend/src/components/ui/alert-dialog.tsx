@@ -22,10 +22,19 @@ export function AlertDialog({
   description,
   onCancel,
   onOpenAutoFocus,
+  width,
   children,
 }: {
   title: ReactNode
   description: ReactNode
+  /** Any CSS width, for a panel that holds something other than a short
+   *  question. The uninstall dialog turns into a job transcript once the run
+   *  starts, and 420px wrapped community-scripts' output mid-line, which is
+   *  where the useful part is. Left unset the panel keeps its 420, which is
+   *  the right size for the yes/no this component is mostly used for. The
+   *  92vw cap applies either way, so a percentage cannot push it off a narrow
+   *  screen. */
+  width?: number | string
   /** Escape and the cancel control both route here. */
   onCancel: () => void
   /** Override which control gets the caret on open. Radix picks the cancel
@@ -44,7 +53,8 @@ export function AlertDialog({
             onCloseAutoFocus={onCloseAutoFocus}
             onOpenAutoFocus={onOpenAutoFocus}
             aria-modal="true"
-            className={`w-[420px] max-w-[92vw] ${dialogPanelClass}`}
+            className={`${width == null ? 'w-[420px] ' : ''}max-w-[92vw] ${dialogPanelClass}`}
+            style={width == null ? undefined : { width }}
           >
             <AlertDialogPrimitive.Title className="font-display text-[16px] font-semibold text-amber">
               {title}

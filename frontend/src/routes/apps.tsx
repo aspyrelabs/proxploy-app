@@ -243,8 +243,15 @@ export function UpdatePanel({ appId, app }:
       <label className="mb-3 flex items-start gap-2 text-[12.5px] text-text-2">
         <input type="checkbox" checked={consent}
                onChange={(e) => setConsent(e.target.checked)} />
+        {/* The consent names the risk the operator can actually do something
+            about. "Runs as root on the node" was true and useless: it is true
+            of every action in this product, it is not a thing to check before
+            clicking, and it left the one precaution that matters here unsaid.
+            An update rewrites a running container in place, so the question
+            worth asking is whether there is a backup to go back to. */}
         <span>
-          I understand this runs as root on the node hosting {app.name}.
+          I confirm that I have backed up and want to update{' '}
+          <span className="font-mono">{app.name}</span>.
         </span>
       </label>
       <Button disabled={!consent || run.isPending} onClick={() => run.mutate()}>

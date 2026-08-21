@@ -22,6 +22,7 @@ from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import APP_ACTIONS, job_kind
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
+from proxploy.services.webui import installed_parts, scheme_for
 
 router = APIRouter(prefix="/apps", tags=["apps"])
 
@@ -71,6 +72,9 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
         "icon_url": served_icon_url(entry),
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
+        # Read-only, and shown so the operator can see what the install script
+        # said before deciding whether the three fields above need correcting.
+        "installed_url": a.installed_url,
         # "Open web UI" target port (PXP-85): the catalog's own port, resolved
         # through `entry` the same way the icon above is, never stored on the
         # app row. No catalog entry / no port on it means no button, not a
@@ -206,7 +210,9 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
         slug = f"{item.catalog_slug or 'adopted'}-{item.host_id}-{item.ctid}"
         entry = entries.get(item.catalog_slug)
         row = App(host_id=item.host_id, ctid=item.ctid, name=item.name, slug=slug,
-                  catalog_slug=item.catalog_slug, web_protocol="http", web_path="/",
+                  # No web_protocol, same reason as install: left NULL so the
+                  # app is asked which scheme it speaks rather than told.
+                  catalog_slug=item.catalog_slug, web_path="/",
                   category=entry.category if entry else None,
                   web_port=entry.port if entry else None,
                   adopted=True)
@@ -218,7 +224,18 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
             raise HTTPException(409, f"CT {item.ctid} on host {item.host_id} is already adopted")
         adopted.append(row.id)
     db.commit()
+    # One row covers the whole batch, so there is no single target to point at
+    # and the row carried no name at all. The names are all right here, and a
+    # list of them is what makes the row answerable later without opening the
+    # params blob, which the audit screen never shows. Capped at five: a
+    # forty-name string is one table cell that pushes every other column off
+    # the screen, and `app_ids` in params still holds the full set.
+    names = [i.name or f"CT {i.ctid}" for i in body.items]
+    listed = ", ".join(names[:5])
+    if len(names) > 5:
+        listed += f" and {len(names) - 5} more"
     write_audit(db, actor_type="user", actor_id=user.id, action="apps.adopt",
+                target_name=listed,
                 params={"count": len(adopted), "app_ids": adopted},
                 ip=request.client.host if request.client else None)
     return {"adopted": adopted}
@@ -564,6 +581,67 @@ def app_network(request: Request, app_id: int, db=Depends(get_db),
     return guest_nics(request, db, host, "lxc", a.ctid, a)
 
 
+# Above the lifecycle wildcard, same as /network directly above.
+@router.get("/{app_id}/web-url",
+            dependencies=[Depends(_read_scoped),
+                          Depends(require_entitlement("network.guest_config"))])
+def app_web_url(request: Request, app_id: int, db=Depends(get_db),
+                user: User = Depends(_read_scoped)):
+    """The whole URL to point a tab at, built here rather than in the browser.
+
+    Three of the four pieces can only be answered on this side. The address is
+    read live off the guest's own NIC config, because a DHCP lease or a manual
+    re-IP moves it and a value cached at install would point at the old one.
+    The scheme is asked of the app itself (services/webui.py), which a page
+    served from Proxploy's own origin cannot do: a cross-origin probe of a
+    self-signed https app fails opaquely, so the browser cannot tell "speaks
+    https" from "is not there".
+
+    Port and path follow the same precedence the scheme does (see
+    services/webui.py::scheme_for): what the operator set, then what the
+    install script printed about itself, then the catalog. The operator's
+    value is first everywhere and is never written over, and the catalog is
+    last because it is the only one of the three that describes the app in
+    general rather than this container in particular.
+
+    Every failure here is a 409 with a sentence naming what is missing, not a
+    URL built out of a default. Sending someone to a page that cannot load and
+    calling that success is the bug this endpoint exists to end.
+    """
+    a, host = _app_and_host(db, app_id)
+    entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
+             if a.catalog_slug else None)
+    _, installed_port, installed_path = installed_parts(a.installed_url)
+    port = a.web_port or installed_port or (entry.port if entry else None)
+    if port is None:
+        raise HTTPException(409, f"Proxploy does not know which port {a.name}'s "
+                                 f"web interface answers on. Set the web port "
+                                 f"in Reconfigure and try again.")
+    # "/" is not an operator's answer, it is the column's own placeholder, so
+    # a real path the installer printed is preferred over it. Anything else in
+    # web_path was typed by a person and wins.
+    path = a.web_path if a.web_path not in (None, "", "/") else (installed_path or "/")
+    # `addresses`, not the config's `ip`: a container on DHCP has the literal
+    # word `dhcp` there, so reading the config rejected every DHCP guest.
+    address = next((str(v).split("/")[0]
+                    for nic in guest_nics(request, db, host, "lxc", a.ctid, a)
+                    for v in (nic.get("addresses") or [])), None)
+    if not address:
+        raise HTTPException(409, f"Proxploy could not find an address for "
+                                 f"{a.name}. Start the container if it is "
+                                 f"stopped, then try again.")
+    protocol, decided_by = scheme_for(a, address, port)
+    if protocol is None:
+        raise HTTPException(409, f"{a.name} did not answer at {address}:{port}, "
+                                 f"so Proxploy cannot tell whether it uses http "
+                                 f"or https. It will not guess and send you to a "
+                                 f"page that fails to load. Start {a.name} if it "
+                                 f"is not running, or set the protocol in "
+                                 f"Reconfigure.")
+    return {"url": f"{protocol}://{address}:{port}{path}",
+            "protocol": protocol, "protocol_decided_by": decided_by}
+
+
 @router.put("/{app_id}/network/{iface}",
             dependencies=[Depends(_configure),
                           Depends(require_entitlement("network.guest_config"))])
@@ -811,10 +889,24 @@ def reconfigure_app(request: Request, app_id: int,
         except ProxmoxError as e:
             raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
 
+    if body.web_protocol is not None:
+        # Only two values open in a browser, and a third would be stored as
+        # fact and then built into a URL that cannot load. Blank is allowed
+        # and means "clear it": that puts the app back to being asked which
+        # scheme it speaks rather than told (services/webui.py).
+        body.web_protocol = body.web_protocol.strip().lower() or None
+        if body.web_protocol not in (None, "http", "https"):
+            raise HTTPException(422, "Protocol must be http or https, or left "
+                                     "blank to let Proxploy ask the app.")
+
     changed = dict(pve_config)
     for field in ("name", "web_port", "web_protocol", "web_path"):
         value = getattr(body, field)
-        if value is not None:
+        # web_protocol is the one field a None can mean "clear this" for, so
+        # it is applied when the caller sent the key at all rather than when
+        # the value is non-null.
+        if value is not None or (field == "web_protocol"
+                                 and "web_protocol" in body.model_fields_set):
             setattr(a, field, value)
             changed[field] = value
 

@@ -13,6 +13,9 @@ import { LockVeil } from '../components/LockVeil'
 import { actionLabel, statusLabel } from '../lib/activityDisplay'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
+} from '../components/ui/pagination'
 import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -244,14 +247,32 @@ export function AuditPage() {
                     ))}
                   </tbody>
                 </table>
-                <div className="mt-4 flex justify-end gap-2">
-                  <Button variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                    Previous
-                  </Button>
-                  <Button variant="ghost" disabled={!hasMore}
-                    onClick={() => setPage((p) => p + 1)}>
-                    Next
-                  </Button>
+                <div className="mt-4 flex justify-end">
+                  <Pagination className="mx-0 w-auto">
+                    <PaginationContent>
+                      <PaginationItem>
+                        {/* Real buttons, genuinely disabled at the ends. The
+                            shadcn example ships anchors, and an anchor is the
+                            wrong control here twice over: href="#" jumps the
+                            scroll position, and aria-disabled on a link still
+                            follows on click. */}
+                        <PaginationPrevious disabled={page <= 1}
+                                            onClick={() => setPage((p) => p - 1)} />
+                      </PaginationItem>
+                      <PaginationItem>
+                        {/* Page N, and no "of M": the endpoint answers with rows
+                            only, so the total is not something this table knows.
+                            Numbered links and the ellipsis are left out for the
+                            same reason. Offering a jump to page 9 that cannot
+                            land is worse than not offering it. */}
+                        <span className="px-2 text-[12px] text-text-2">Page {page}</span>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationNext disabled={!hasMore}
+                                        onClick={() => setPage((p) => p + 1)} />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
                 </div>
               </>
               )

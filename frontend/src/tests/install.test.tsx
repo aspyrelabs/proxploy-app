@@ -268,7 +268,13 @@ describe('InstallDialog', () => {
     renderDialog()
     await startInstall()
 
-    await screen.findByText(/installing/i)
+    // The progress line says WHERE, not the app name again: this sits under a
+    // title already reading "Install <app>", and the same words twice told the
+    // reader nothing. The node is the one thing the running dialog does not
+    // otherwise show, and on a cluster it is the part worth checking.
+    const line = await screen.findByText(/^Installing/)
+    expect(line.textContent).toMatch(/^Installing on \S/)
+    expect(line.textContent).not.toMatch(/redis/i)
     expect(screen.queryByRole('status')).toBeNull()
 
     FakeEventSource.last.emit('progress', { pct: 55 })

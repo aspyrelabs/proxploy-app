@@ -117,8 +117,18 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
           </div>
           <div>
             <label htmlFor="reconf-protocol" className={label}>Protocol</label>
-            <input id="reconf-protocol" className={inputCls} value={webProtocol}
-              onChange={(e) => setWebProtocol(e.target.value)} />
+            {/* Three choices, not free text. Only two values open in a
+                browser, and the blank one is the useful default rather than
+                an empty field: it means Proxploy asks the app which scheme it
+                speaks when Open is clicked, which is right for the apps that
+                serve https on a plain-looking port. Pick a value only to
+                override that. */}
+            <select id="reconf-protocol" className={inputCls} value={webProtocol}
+              onChange={(e) => setWebProtocol(e.target.value)}>
+              <option value="">Ask the app</option>
+              <option value="http">http</option>
+              <option value="https">https</option>
+            </select>
           </div>
           <div>
             <label htmlFor="reconf-path" className={label}>Path</label>

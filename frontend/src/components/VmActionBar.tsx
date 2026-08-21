@@ -41,7 +41,11 @@ export function VmActionBar({ vm }: { vm: VmRow }) {
       <ConsoleButton hostId={vm.host_id} grouped
                      onClick={() => openConsoleWindow('vm', vm.id)} />
       <ButtonGroupSeparator />
-      <VmActionsMenu vm={vm}>
+      {/* lifecycle={false}: Start, Stop and Restart are the buttons welded to
+          the left of this menu, so repeating them inside it would offer the
+          same action twice a centimetre apart. The Hosts grid's tile has no
+          buttons and takes the default. */}
+      <VmActionsMenu vm={vm} lifecycle={false}>
         {/* No text, so the name has to be spelled out for anyone who cannot
             see the glyph, and it names the VM: a table of these otherwise
             reads as a column of identical "More actions". */}

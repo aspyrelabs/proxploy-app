@@ -42,8 +42,20 @@ export function ConfirmSelfDialog({ phrase, detail, title, children, onConfirm, 
       onOpenAutoFocus={(event) => { event.preventDefault(); input.current?.focus() }}
     >
       {children}
+      {/* The phrase is a CODE CHIP, not just a monospace run inside the
+          sentence. This is the one string the operator has to reproduce
+          exactly, and set in the flow of "Type x to confirm" it read as part
+          of the sentence rather than as the thing to copy. A border and a
+          panel behind it make where the name starts and stops unambiguous,
+          which matters most for the names that contain spaces or end in
+          punctuation. */}
       <label className="mt-4 block text-[12px] text-text-3" htmlFor="self-confirm">
-        Type <span className="font-mono text-text">{phrase}</span> to confirm
+        Type{' '}
+        <span className="mx-0.5 inline-block rounded border border-line bg-panel-2
+                         px-1.5 py-0.5 font-mono text-[12px] text-text">
+          {phrase}
+        </span>{' '}
+        to confirm
       </label>
       <input
         id="self-confirm"

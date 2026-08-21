@@ -253,6 +253,10 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         raise HTTPException(422, "iface must look like net0")
     node = guest_node(host, row)
     ip = request.client.host if request.client else None
+    # The guest's name alone would resolve on its own, but three NIC edits on
+    # one guest then read identically. The iface is the half that says which.
+    guest = getattr(row, "name", None) or f"{'VM' if kind == 'qemu' else 'CT'} {vmid}"
+    label = f"{iface} on {guest}"
     try:
         client = client_for_host(request.app, db, host, capability="lifecycle")
         reader = client_for_host(request.app, db, host, capability="monitoring")
@@ -268,6 +272,7 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
         write_audit(db, actor_type="user", actor_id=user.id,
                     action="network.guest_config_read",
                     target_type=target_type, target_id=target_id,
+                    target_name=label,
                     params={"iface": iface}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     if iface not in cfg:
@@ -317,10 +322,11 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
                     target_type=target_type, target_id=target_id,
+                    target_name=label,
                     params={"iface": iface, **changes}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.guest_config",
-                target_type=target_type, target_id=target_id,
+                target_type=target_type, target_id=target_id, target_name=label,
                 params={"iface": iface, **changes}, ip=ip)
 
     # Whether the running guest already has this NIC is a question ONLY the
@@ -567,16 +573,20 @@ def create_bridge(request: Request, body: BridgeIn, db=Depends(get_db),
     # _SAFE_KEY: can never override what this route says it is staging.
     cfg = {**_check_config(body.config), "iface": body.iface, "type": body.type}
     ip = request.client.host if request.client else None
+    # The interface is the thing being staged, and it has no row of its own,
+    # so target_id points at the host. Left to resolve itself the row reads as
+    # the bare host name and three bridge edits on one node are indistinguishable.
+    label = f"{body.iface} on {body.node}"
     try:
         client_for_host(request.app, db, host, capability="lifecycle").network_create(body.node, cfg)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                    target_type="host", target_id=host.id,
+                    target_type="host", target_id=host.id, target_name=label,
                     params={"op": "create", "node": body.node, "iface": body.iface,
                             "config": body.config}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                target_type="host", target_id=host.id,
+                target_type="host", target_id=host.id, target_name=label,
                 params={"op": "create", "node": body.node, "iface": body.iface,
                         "config": body.config}, ip=ip)
     return {"staged": True, "node": body.node, "iface": body.iface}
@@ -590,17 +600,18 @@ def update_bridge(request: Request, host_id: int, node: str, iface: str,
                   user: User = Depends(_host)):
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
+    label = f"{iface} on {node}"
     try:
         client_for_host(request.app, db, host, capability="lifecycle").network_update(
             node, iface, _check_config(body.config))
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                    target_type="host", target_id=host.id,
+                    target_type="host", target_id=host.id, target_name=label,
                     params={"op": "update", "node": node, "iface": iface,
                             "config": body.config}, result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                target_type="host", target_id=host.id,
+                target_type="host", target_id=host.id, target_name=label,
                 params={"op": "update", "node": node, "iface": iface,
                         "config": body.config}, ip=ip)
     return {"staged": True, "node": node, "iface": iface}
@@ -613,16 +624,17 @@ def delete_bridge(request: Request, host_id: int, node: str, iface: str,
                   db=Depends(get_db), user: User = Depends(_host)):
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
+    label = f"{iface} on {node}"
     try:
         client_for_host(request.app, db, host, capability="lifecycle").network_delete(node, iface)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                    target_type="host", target_id=host.id,
+                    target_type="host", target_id=host.id, target_name=label,
                     params={"op": "delete", "node": node, "iface": iface},
                     result="error", ip=ip)
         raise HTTPException(502, str(e))
     write_audit(db, actor_type="user", actor_id=user.id, action="network.host_config",
-                target_type="host", target_id=host.id,
+                target_type="host", target_id=host.id, target_name=label,
                 params={"op": "delete", "node": node, "iface": iface}, ip=ip)
     return {"staged": True, "node": node, "iface": iface}
 

@@ -98,6 +98,57 @@ type NodeGroup<T> = {
   rows: T[]
 }
 
+/**
+ * The most guests one inventory draws, across every node in it.
+ *
+ * 50 for the apps and 50 for the VMs, not 50 each per node: the number that
+ * matters is how much of the page a section can take, and that is the total.
+ * One host showing 50 apps and two hosts showing 25 apiece cost the operator
+ * the same scroll.
+ *
+ * The cap exists because the sections are uncapped otherwise, and a fleet with
+ * three hundred containers turned the Hosts page into a list nobody reads on
+ * the way to the thing they came for. Both sections link to their full table,
+ * which is where a fleet that size belongs.
+ */
+const CAP = 50
+
+/**
+ * How many rows each node section may draw, dealt round-robin.
+ *
+ * Round-robin rather than a slice off the front, because a slice is the bug
+ * this file already carries a comment about: take the first 50 of a sorted
+ * list and node1 eats all of them while node2 renders empty, so an operator
+ * reading the page cannot tell a node with no apps from a node that lost the
+ * draw. Dealing one at a time gives 25/25 for two even nodes and spends the
+ * remainder on whoever still has rows left, so every node is represented
+ * before any node is complete.
+ *
+ * Terminates: every pass either hands out at least one row or every group is
+ * already full, and `left` never exceeds the rows that exist.
+ */
+function quotas(sizes: number[], cap: number): number[] {
+  const out = sizes.map(() => 0)
+  let left = Math.min(cap, sizes.reduce((a, b) => a + b, 0))
+  while (left > 0) {
+    for (let i = 0; i < sizes.length && left > 0; i++) {
+      if (out[i] < sizes[i]) {
+        out[i]++
+        left--
+      }
+    }
+  }
+  return out
+}
+
+/** "4 apps", or "25 of 40 apps" when the cap took the rest. The count is the
+ *  only place the page can admit it is not showing everything, so it says the
+ *  total rather than quietly drawing a shorter list. */
+function counted(shown: number, total: number, word: string): string {
+  const plural = `${word}${total === 1 ? '' : 's'}`
+  return shown === total ? `${total} ${plural}` : `${shown} of ${total} ${plural}`
+}
+
 /** Rows with neither a node nor a host name. They are still somebody's guests,
  *  so they get a section of their own at the end rather than being dropped on
  *  the floor, which is what a `if (!node) continue` would have done. */
@@ -157,15 +208,20 @@ function groupByNode<T extends Guest>(rows: T[]): NodeGroup<T>[] {
 }
 
 /** One panel, one section per node, a rule between them. */
-function NodeSections<T extends Guest>({ rows, count, children }: {
+function NodeSections<T extends Guest>({ rows, word, children }: {
   rows: T[]
-  /** "3 apps" or "3 VMs", the one phrase the two inventories do not share. */
-  count: (n: number) => string
+  /** "app" or "VM", the one noun the two inventories do not share. */
+  word: string
   children: (rows: T[]) => React.ReactNode
 }) {
+  // Grouped first, capped second. The cap is a total across the sections, so
+  // it cannot be applied to `rows` before the groups exist without deciding
+  // which node loses out by sort order alone.
+  const groups = groupByNode(rows)
+  const share = quotas(groups.map((g) => g.rows.length), CAP)
   return (
     <div className={PANEL}>
-      {groupByNode(rows).map((g, i) => {
+      {groups.map((g, i) => {
         // The host is worth saying only when it is a DIFFERENT machine from
         // the heading: "pve3 · on host-01" tells the operator which endpoint
         // answers for that node, while "node1 · on node1.lab.local" is
@@ -187,10 +243,11 @@ function NodeSections<T extends Guest>({ rows, count, children }: {
                   reads the same on screen and is a great deal harder to assert
                   on, and it is one sentence either way. */}
               <span className="text-[11px] text-text-3">
-                {(via.length > 0 ? `on ${via.join(', ')} · ` : '') + count(g.rows.length)}
+                {(via.length > 0 ? `on ${via.join(', ')} · ` : '')
+                  + counted(share[i], g.rows.length, word)}
               </span>
             </div>
-            <div className={GRID}>{children(g.rows)}</div>
+            <div className={GRID}>{children(g.rows.slice(0, share[i]))}</div>
           </section>
         )
       })}
@@ -249,14 +306,16 @@ function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen,
   )
 }
 
-/** Every installed app, grouped under the node it runs on. No cap: the page
- *  showed the first eight of them in whatever order the API answered, which on
- *  a cluster meant an operator could not tell whether a missing app was
- *  stopped, gone, or simply the ninth. */
+/** Every installed app up to CAP, grouped under the node it runs on. The page
+ *  once showed the first eight in whatever order the API answered, which on a
+ *  cluster meant an operator could not tell whether a missing app was stopped,
+ *  gone, or simply the ninth. The cap that replaced no cap at all is dealt
+ *  across the nodes and stated in each section's count, so neither of those
+ *  readings is possible: a section that is holding rows back says so. */
 export function AppIconGrid({ apps }: { apps: AppRow[] }) {
   const navigate = useNavigate()
   return (
-    <NodeSections rows={apps} count={(n) => `${n} app${n === 1 ? '' : 's'}`}>
+    <NodeSections rows={apps} word="app">
       {(rows) => rows.map((a) => (
         <IconGridCell key={a.id} name={a.name} testId={`app-icon-${a.id}`}
           iconUrl={a.icon_url} initials={a.icon_initials} colors={a.icon_colors}
@@ -269,7 +328,7 @@ export function AppIconGrid({ apps }: { apps: AppRow[] }) {
   )
 }
 
-/** Every VM, the same grid, grouped the same way.
+/** Every VM up to CAP, the same grid, grouped and capped the same way.
  *
  *  A VM has no catalog entry and so no logo. osIconUrl returns null both for
  *  an ostype we do not recognise and for a VM whose ostype PVE has not told us
@@ -279,7 +338,7 @@ export function AppIconGrid({ apps }: { apps: AppRow[] }) {
 export function VmIconGrid({ vms }: { vms: VmRow[] }) {
   const navigate = useNavigate()
   return (
-    <NodeSections rows={vms} count={(n) => `${n} VM${n === 1 ? '' : 's'}`}>
+    <NodeSections rows={vms} word="VM">
       {(rows) => rows.map((v) => (
         <IconGridCell key={v.id} name={v.name} testId={`vm-icon-${v.id}`}
           iconUrl={osIconUrl(v.os_type)} status={v.status}

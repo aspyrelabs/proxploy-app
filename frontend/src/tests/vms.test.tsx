@@ -158,22 +158,31 @@ describe('VmActionBar', () => {
     expect(del.className).toContain('border-t')
   })
 
-  it('offers Pause only while the VM is running', async () => {
+  it('offers neither Pause nor Shutdown once the VM is stopped', async () => {
+    // Shutdown used to be listed here, which is what this assertion was
+    // written around. It was wrong: the VM is already off, and the backend
+    // answers "already stopped; nothing to do" (services/lifecycle.py), so
+    // the item cost a job row and changed nothing. Every item that acts on a
+    // running guest now branches on status the way Pause always did.
     wrap({ ...VM, status: 'stopped' })
     openMenu()
-    expect(await items()).toEqual(['Shutdown', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Options', 'Clone', 'Backup', 'Delete'])
   })
 
   it('offers Resume only while the VM is paused, in place of Pause', async () => {
     // "paused" is the exact string the row carries in that state: the poller
     // writes PVE's own status, and services/lifecycle.py settles a finished
-    // pause to the same word.
+    // pause to the same word. No Shutdown either: PVE refuses to shut down a
+    // suspended guest, so the way out is Resume and then Shutdown.
     wrap({ ...VM, status: 'paused' })
     openMenu()
-    expect(await items()).toEqual(['Shutdown', 'Resume', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Resume', 'Options', 'Clone', 'Backup', 'Delete'])
   })
 
   it('does not repeat the row buttons inside the menu', async () => {
+    // This is what lifecycle={false} buys: the same menu on the Hosts icon
+    // grid DOES carry Start, Stop and Restart, because there are no buttons
+    // beside it there (app-icon-grid.test.tsx).
     wrap({ ...VM, status: 'running' })
     openMenu()
     const listed = await items()

@@ -115,13 +115,20 @@ describe('AuditPage pagination boundary', () => {
     })
   }
 
+  // The controls are shadcn's Pagination now, and PaginationPrevious/Next
+  // carry an aria-label ("Go to previous page" / "Go to next page") which
+  // wins over their visible text when the accessible name is computed. The
+  // old { name: 'Next' } lookups matched the text; these match the label.
+  const prevBtn = () => screen.findByRole('button', { name: 'Go to previous page' })
+  const nextBtn = () => screen.findByRole('button', { name: 'Go to next page' })
+
   it('asks for one row beyond the page so "more" is a fact, not a guess', async () => {
     // One row, not zero: an empty result renders the empty state instead of
     // the table, and this assertion is about the request, not the table.
     await serve(1)
     wrap()
     const { api } = await import('../api/client')
-    await screen.findByRole('button', { name: 'Next' })
+    await nextBtn()
     const call = (api as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => String(c[0])).find((p) => p.startsWith('/audit'))!
     // 51, not 50: the extra row is the whole mechanism.
@@ -135,15 +142,36 @@ describe('AuditPage pagination boundary', () => {
     // user into an empty table.
     await serve(50)
     wrap()
-    expect((await screen.findByRole('button', { name: 'Next' })) as HTMLButtonElement)
-      .toBeDisabled()
+    expect((await nextBtn()) as HTMLButtonElement).toBeDisabled()
   })
 
   it('enables Next when the extra row shows another page exists', async () => {
     await serve(51)
     wrap()
-    expect((await screen.findByRole('button', { name: 'Next' })) as HTMLButtonElement)
-      .not.toBeDisabled()
+    expect((await nextBtn()) as HTMLButtonElement).not.toBeDisabled()
+  })
+
+  it('disables Previous on page one, where there is nothing behind', async () => {
+    await serve(51)
+    wrap()
+    expect((await prevBtn()) as HTMLButtonElement).toBeDisabled()
+    // And it stays a real button, not a link: a link cannot be made inert.
+    expect((await prevBtn()).tagName).toBe('BUTTON')
+  })
+
+  it('turns the page by refetching with the new page number', async () => {
+    await serve(51)
+    wrap()
+    const { api } = await import('../api/client')
+    fireEvent.click(await nextBtn())
+    const pages = async () => (api as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0])).filter((p) => p.startsWith('/audit'))
+      .map((p) => new URL(p, 'http://x').searchParams.get('page'))
+    await waitFor(async () => expect(await pages()).toContain('2'))
+    // Back again, and Previous is live now that page 2 has something behind it.
+    expect((await prevBtn()) as HTMLButtonElement).not.toBeDisabled()
+    fireEvent.click(await prevBtn())
+    await waitFor(async () => expect((await pages()).at(-1)).toBe('1'))
   })
 
   // The friendly name is what the row is read by; the raw identifier stays
@@ -198,7 +226,7 @@ describe('AuditPage pagination boundary', () => {
   it('never renders the probe row', async () => {
     await serve(51)
     wrap()
-    await screen.findByRole('button', { name: 'Next' })
+    await nextBtn()
     // 51 fetched, 50 rendered, plus the header row.
     expect(screen.getAllByRole('row')).toHaveLength(51)
   })

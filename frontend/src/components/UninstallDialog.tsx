@@ -92,7 +92,12 @@ export function UninstallDialog({ app, onClose }: { app: AppRow; onClose: () => 
 
   return (
     <>
+      {/* Wide once the transcript replaces the question, the same 60% the
+          install dialog takes and for the same reason: a terminal that wraps
+          mid-line hides the part worth reading. max() keeps it from ever being
+          NARROWER than the 420 the question is asked at. */}
       <AlertDialog
+        width={jobId != null ? 'max(420px, 60vw)' : undefined}
         title={<>Uninstall <span className="font-mono">{app.name}</span></>}
         description={`Destroy CT ${app.ctid} and its disk, or stop tracking it and leave it `
           + 'running. Destroying asks you to type the name first.'}

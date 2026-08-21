@@ -31,6 +31,12 @@ vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
 }))
 
+const openConsole = vi.fn()
+vi.mock('../lib/console-window', () => ({
+  openConsoleWindow: (...a: unknown[]) => openConsole(...a),
+  openLogsWindow: vi.fn(),
+}))
+
 const navigate = vi.fn()
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
@@ -44,7 +50,8 @@ const APP: AppRow = {
   id: 1, name: 'Immich', slug: 'immich', host_id: 1, host_name: 'pve-a',
   node: 'pve-a', ctid: 150, category: null, catalog_slug: 'immich',
   icon_initials: 'IM', icon_colors: null, icon_url: null,
-  web_port: null, web_protocol: 'http', web_path: '/', catalog_port: 8096,
+  web_port: null, web_protocol: 'http', web_path: '/', installed_url: null,
+  catalog_port: 8096,
   status: 'running', ip: '10.0.0.5', cpu_pct: 12,
   mem_bytes: 1, mem_total_bytes: 2, uptime_s: 86400,
   update_available: null, adopted: false,
@@ -75,6 +82,7 @@ const openMenu = (trigger: HTMLElement) =>
 describe('AppIconGrid', () => {
   beforeEach(() => {
     navigate.mockClear()
+    openConsole.mockClear()
     features = { ...ALL_FEATURES }
     capabilities = { lifecycle: true, console: true }
   })
@@ -241,7 +249,7 @@ describe('AppIconGrid', () => {
     expect(text.indexOf('Immich')).toBeLessThan(text.indexOf('Plex'))
   })
 
-  it('shows every app, with no cap', () => {
+  it('shows every app under the cap, not the first eight', () => {
     // The Hosts page used to slice(0, 8), so a missing app could equally be
     // stopped, gone, or simply the ninth.
     const apps = Array.from({ length: 12 }, (_, i) => (
@@ -251,11 +259,62 @@ describe('AppIconGrid', () => {
     expect(screen.getAllByRole('button', { name: /^Actions for app-/ })).toHaveLength(12)
     expect(screen.getByText('12 apps')).toBeInTheDocument()
   })
+
+  it('caps one node at 50 apps and says so rather than trimming quietly', () => {
+    // 50 is a total for the section, not a per-node allowance. The count is
+    // the only thing on the page that can admit the list is short, so the
+    // assertion is on the words as much as on the tile count.
+    const apps = Array.from({ length: 64 }, (_, i) => (
+      { ...APP, id: i + 1, name: `app-${String(i + 1).padStart(2, '0')}` }
+    ))
+    wrap(apps)
+    expect(screen.getAllByRole('button', { name: /^Actions for app-/ })).toHaveLength(50)
+    expect(screen.getByText('50 of 64 apps')).toBeInTheDocument()
+  })
+
+  it('deals the 50 across nodes rather than letting the first node take them all', () => {
+    // A slice off the front would give pve1 all 50 and draw pve2 empty, which
+    // is indistinguishable from a node with nothing installed on it. Two nodes
+    // with 40 apiece get 25 apiece.
+    const apps = [
+      ...Array.from({ length: 40 }, (_, i) => (
+        { ...APP, id: i + 1, name: `one-${String(i + 1).padStart(2, '0')}`, node: 'pve1' }
+      )),
+      ...Array.from({ length: 40 }, (_, i) => (
+        { ...APP, id: 100 + i, name: `two-${String(i + 1).padStart(2, '0')}`, node: 'pve2' }
+      )),
+    ]
+    wrap(apps)
+    expect(screen.getAllByRole('button', { name: /^Actions for one-/ })).toHaveLength(25)
+    expect(screen.getAllByRole('button', { name: /^Actions for two-/ })).toHaveLength(25)
+    // The line is "on host-01 · 25 of 40 apps": these fixtures name the node
+    // and the host differently, so the count is matched, not the whole line.
+    expect(screen.getAllByText(/25 of 40 apps/)).toHaveLength(2)
+  })
+
+  it('spends the remainder on the node that still has rows, not on empty seats', () => {
+    // pve1 has 10 and cannot use half of 50, so pve2 takes the other 40 rather
+    // than the section stopping short at 20.
+    const apps = [
+      ...Array.from({ length: 10 }, (_, i) => (
+        { ...APP, id: i + 1, name: `one-${String(i + 1).padStart(2, '0')}`, node: 'pve1' }
+      )),
+      ...Array.from({ length: 60 }, (_, i) => (
+        { ...APP, id: 100 + i, name: `two-${String(i + 1).padStart(2, '0')}`, node: 'pve2' }
+      )),
+    ]
+    wrap(apps)
+    expect(screen.getAllByRole('button', { name: /^Actions for one-/ })).toHaveLength(10)
+    expect(screen.getAllByRole('button', { name: /^Actions for two-/ })).toHaveLength(40)
+    expect(screen.getByText(/· 10 apps$/)).toBeInTheDocument()
+    expect(screen.getByText(/40 of 60 apps/)).toBeInTheDocument()
+  })
 })
 
 describe('VmIconGrid', () => {
   beforeEach(() => {
     navigate.mockClear()
+    openConsole.mockClear()
     features = { ...ALL_FEATURES }
     capabilities = { lifecycle: true, console: true }
   })
@@ -299,5 +358,91 @@ describe('VmIconGrid', () => {
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({
       to: '/vms', search: expect.objectContaining({ open: 1 }),
     }))
+  })
+
+  it('offers Start on a stopped VM, since the tile menu is the only way to act', async () => {
+    // The bug: this menu was written as the three-dots HALF of VmActionBar,
+    // where Start, Stop and Console are controls beside it, then reused whole
+    // on the Hosts grid where that other half does not exist. A stopped VM's
+    // tile offered Shutdown, no way to start it, and no way into it at all.
+    // AppIconMenu already solved this with a `lifecycle` switch; this is the
+    // VM half of it. Asserted as the WHOLE list, so the order is pinned and a
+    // later addition cannot slip in unnoticed.
+    wrapVms([{ ...VM, status: 'stopped' }])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).toEqual(['Start', 'Console', 'Options', 'Clone', 'Backup', 'Delete'])
+  })
+
+  it('offers Console on the tile, the only way into a VM at all', async () => {
+    // Console is absent from VmActionsMenu because VmActionBar spends its
+    // third button slot on it, which is true of the VMs table and false of
+    // this grid. It is not a nice-to-have here: Proxploy opens no web UI and
+    // reads no logs for a QEMU guest, so the console is the ONLY way in.
+    wrapVms([VM])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).toContain('Console')
+    fireEvent.click(await screen.findByRole('menuitem', { name: /console/i }))
+    expect(openConsole).toHaveBeenCalledWith('vm', 1)
+  })
+
+  it('withholds Console on a host with no console token', async () => {
+    // The same host capability ConsoleButton reads, through the same hook, so
+    // the menu item and the button cannot disagree about one host.
+    capabilities = { lifecycle: true, console: false }
+    wrapVms([VM])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const item = await screen.findByRole('menuitem', { name: /console/i })
+    await waitFor(() => expect(item).toHaveAttribute('data-disabled'))
+  })
+
+  it('does not offer Start to a paused VM, which is suspended and not stopped', async () => {
+    // 'paused' is not 'stopped': the guest is still running, just suspended,
+    // so PVE refuses a start and Resume is the way back. Falling through to
+    // the stopped table drew both Start and Resume on one menu.
+    wrapVms([{ ...VM, status: 'paused' }])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).toEqual(['Resume', 'Console', 'Options', 'Clone', 'Backup', 'Delete'])
+  })
+
+  it('does not offer to shut down a VM that is already stopped', async () => {
+    // Shutdown had no status guard at all while Pause and Resume did, so it
+    // rendered on every VM in every state. The backend turns it into a no-op
+    // ("already stopped; nothing to do" in services/lifecycle.py), so the
+    // click cost a job row and changed nothing.
+    wrapVms([{ ...VM, status: 'stopped' }])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).not.toContain('Shutdown')
+    expect(labels).not.toContain('Pause')
+  })
+
+  it('offers Stop, Restart and Shutdown on a running VM, never Start', async () => {
+    wrapVms([VM])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).toEqual(['Stop', 'Restart', 'Shutdown', 'Pause', 'Console',
+                            'Options', 'Clone', 'Backup', 'Delete'])
+  })
+
+  it('says Working rather than guessing an action set while a job is in flight', async () => {
+    // 'pending' is the optimistic patch useLifecycle writes between the click
+    // and the job resolving, not a PVE state. LifecycleActions already
+    // refuses to guess from it; falling through to the stopped set here would
+    // draw Start on a VM that is still running.
+    wrapVms([{ ...VM, status: 'pending' }])
+    openMenu(screen.getByTestId('vm-icon-1'))
+    const labels = (await screen.findAllByRole('menuitem'))
+      .map((i) => i.textContent?.trim())
+    expect(labels).not.toContain('Start')
+    expect(labels).not.toContain('Stop')
+    expect(labels).not.toContain('Shutdown')
   })
 })

@@ -270,6 +270,32 @@ describe('HostsPage', () => {
     expect(screen.queryByText(/Phase/)).not.toBeInTheDocument()
   })
 
+  it('splits the two inventories with a draggable bar from lg up', async () => {
+    // setup.ts answers false to every media query, which is the phone layout,
+    // so the split is only reachable by saying yes to lg here. The two panels
+    // and the bar between them are the whole point of the wide branch: prove
+    // both inventories still render inside it, and that the group draws no
+    // border of its own around them.
+    vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q === '(min-width: 1024px)',
+      media: q, onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList)
+    appsResult = 'ok'; vmsResult = 'ok'
+    withQuery(<HostsPage />)
+    expect(await screen.findByText('jellyfin')).toBeInTheDocument()
+    expect(screen.getByText('win11-lab')).toBeInTheDocument()
+    const bar = screen.getByRole('separator')
+    expect(bar).toHaveAttribute('aria-orientation', 'vertical')
+    const group = bar.closest('[data-slot="resizable-panel-group"]')!
+    expect(group.className).not.toMatch(/\bborder\b/)
+    // Height is the content's, not a fixed box: the grids are uncapped, so a
+    // set height would clip whichever inventory outgrew it.
+    expect((group as HTMLElement).style.height).toBe('auto')
+  })
+
   it('says the nodes could not be read rather than showing "no nodes yet"', async () => {
     // The bug this task exists to fix: a failed fetch used to render as a
     // bare, message-less <div>; indistinguishable from a fresh install
@@ -404,9 +430,12 @@ describe('HostsPage', () => {
     expect(screen.getAllByText('on host-01 · 1 app')).toHaveLength(2)
   })
 
-  it('shows every app, with no cap', async () => {
+  it('shows every app under the cap, not the first eight', async () => {
     // It used to slice(0, 8) in poll order, so a missing app could equally be
-    // stopped, gone, or simply the ninth.
+    // stopped, gone, or simply the ninth. The 50 that replaced no cap at all
+    // is dealt across nodes and stated in the count; IconGrid's own tests
+    // cover the dealing, this one only proves the section is not trimmed
+    // below it.
     appsResult = 'many'
     withQuery(<HostsPage />)
     expect(await screen.findByTestId('app-icon-12')).toBeInTheDocument()

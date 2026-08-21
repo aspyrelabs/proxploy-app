@@ -73,6 +73,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [progress, setProgress] = useState<number | null>(null)
 
   const host = (hosts.data ?? []).find((h) => h.id === hostId)
+  // The node it lands on, falling back to the host record's own name: a
+  // standalone host is usually named after its only node, and on a cluster the
+  // node is the machine the container actually runs on.
+  const installTarget = host?.node_name ?? host?.name ?? null
   // Called above the early return, and with the same queryKey StorageFields
   // uses, so react-query dedupes it against Advanced mode's own fetch rather
   // than doubling the request.
@@ -232,7 +236,16 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   }
 
   return (
-    <Dialog title={<>Install {entry.name ?? slug}</>} width={520} onClose={onClose}>
+    /* Two states, two widths, one dialog. The form is a column of fields and
+       reads fine at 520. The install transcript is a terminal, and 520 wrapped
+       community-scripts' output mid-line, which is where the useful part
+       lives: the finished URL, the port, and whatever went wrong. 60% of the
+       window is what an operator can actually read, and max() means it is
+       never NARROWER than the form was, so a small window keeps today's
+       behaviour rather than getting worse. The 92vw cap in dialogPanelClass
+       still applies on top. */
+    <Dialog title={<>Install {entry.name ?? slug}</>}
+            width={jobId ? 'max(520px, 60vw)' : 520} onClose={onClose}>
 
     {jobId ? (
       <div className="mt-4">
@@ -241,7 +254,17 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               jumps rather than sweeps: honest, not smoothed. Never shown
               before the first step, a zero here would read as stalled. */}
           {progress != null && <Loading value={progress} label="Install progress" size={28} />}
-          <span className="text-[12.5px] text-text-2">Installing {entry.name ?? slug}…</span>
+          {/* The DESTINATION, not the app again. This line used to read
+              "Installing Alpine-IT-Tools…" directly under a title reading
+              "Install Alpine-IT-Tools", which is the same words twice and
+              tells the reader nothing the heading did not. Where it is going
+              is the one thing the dialog does not otherwise say once the form
+              is replaced by the transcript, and on a cluster it is the thing
+              worth checking. Falls back to the bare verb when the host is not
+              readable, rather than printing an empty "on". */}
+          <span className="text-[12.5px] text-text-2">
+            {installTarget ? `Installing on ${installTarget}…` : 'Installing…'}
+          </span>
         </div>
         <JobLog jobId={jobId} onProgress={setProgress} />
         <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>

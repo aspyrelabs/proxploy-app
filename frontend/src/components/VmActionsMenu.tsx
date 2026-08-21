@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useVmLifecycleGate } from '../api/app-gates'
+import { useAppActionGates, useVmLifecycleGate } from '../api/app-gates'
 import { api, ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements, type VmRow } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
 import { useLifecycle } from '../api/jobs'
+import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import { BackupGuestDialog } from './BackupGuestDialog'
 import { CloneDialog } from './CloneDialog'
@@ -29,6 +30,23 @@ const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t bord
 
 const NOT_IN_PLAN = 'Not included in your plan'
 
+// Icon names are STRING LITERALS in an `icon:` field, not a computed lookup:
+// scripts/icon-names.mjs statically scans src/ to build the Google Fonts
+// icon_names parameter, and a name it cannot read out of the source ships a
+// font subset without that glyph, so the browser renders the literal word.
+//
+// The same two tables AppIconMenu keeps, for the same reason and in the same
+// order: an operator who learns the app menu should not have to relearn the
+// VM one. Stop is the hard kill and Shutdown below is the graceful one PVE
+// distinguishes it from (services/lifecycle.py).
+const RUNNING_ACTIONS = [
+  { action: 'stop', label: 'Stop', icon: 'stop' },
+  { action: 'restart', label: 'Restart', icon: 'restart_alt' },
+] as const
+const STOPPED_ACTIONS = [
+  { action: 'start', label: 'Start', icon: 'play_arrow' },
+] as const
+
 type Guard = { phrase: string; detail: string; action: string }
 type Panel = 'clone' | 'backup' | 'destroy' | 'options' | null
 
@@ -40,32 +58,56 @@ type Panel = 'clone' | 'backup' | 'destroy' | 'options' | null
  *
  *  - No Open and no Logs. A VM has no catalog port to point a tab at, and
  *    Proxploy reads no journal from inside a QEMU guest.
- *  - No Console either, and that one is not a gap. It is the only way into a
- *    VM at all, so it took the row's third button slot, the one an app spends
- *    on Open (VmActionBar). Repeating it here would offer the same action
- *    twice, one click apart.
+ *  - Console is here only when this menu stands alone. It is the ONLY way
+ *    into a VM at all, since Proxploy opens no web UI and reads no journal
+ *    for a QEMU guest, which is exactly why VmActionBar spends its third
+ *    button slot on it. Repeating it in the table row's menu would offer the
+ *    same action twice a centimetre apart; omitting it from the grid's tile
+ *    left a VM with no way in.
  *  - Shutdown, Pause and Resume are here. services/lifecycle.py's VM_ACTIONS
  *    already accepts all three (`pause` is Proxmox's `suspend`, mapped there
- *    and nowhere else), and the row's buttons only carry Start, Stop and
+ *    and nowhere else), and the row's buttons carry only Start, Stop and
  *    Restart, so without these there was no way to reach them at all.
  *  - Clone replaces Reconfigure and Migrate, which are app-shaped operations.
  *
- * Pause is offered only while the VM is running and Resume only while it is
- * paused, rather than both being present and one of them failing: "paused" is
- * the exact string the row carries in that state, written by the poller from
- * PVE's own status field and by services/lifecycle.py's RESULT_STATUS when a
- * pause finishes.
+ * `lifecycle` is AppIconMenu's switch, and it is here for the bug it fixes:
+ * this menu was written as the three-dots HALF of VmActionBar and then reused
+ * whole as the icon grid's tile menu, where the other half does not exist. On
+ * the Hosts page a stopped VM was offered Shutdown, which the backend turns
+ * into a no-op, no way to start it, and no console. The grid takes the
+ * default and gets the bar's controls back; the table row passes false, since
+ * those sit a centimetre away there. The name is AppIconMenu's, and like
+ * AppIconMenu (which gates Open on it too) it means "this menu is the only
+ * affordance", not strictly "power actions".
+ *
+ * EVERY item that acts on a running guest is offered only while the guest is
+ * running, and that now includes Shutdown. Pause and Resume already branched
+ * on status; Shutdown branched on nothing, so it rendered on a stopped VM in
+ * both surfaces. The backend tolerates it ("already stopped; nothing to do")
+ * rather than failing, which is worse than a refusal: the click costs a job
+ * row and changes nothing. "paused" and "running" are the exact strings the
+ * row carries, written by the poller from PVE's own status field and by
+ * services/lifecycle.py's RESULT_STATUS when an action finishes.
  *
  * Lifecycle actions route through the same `useLifecycle` mutation
  * LifecycleActions.fire uses, error handling included: a 409 self_target
  * escalates to ConfirmSelfDialog, and everything else surfaces a notify.error
  * toast rather than letting the optimistic "pending" patch revert in silence.
  */
-export function VmActionsMenu({ vm, children }: {
+export function VmActionsMenu({ vm, lifecycle = true, children }: {
   vm: VmRow
+  /** Include Start, or Stop and Restart. On by default, which is the icon
+   *  grid's tile menu: it is the only way to act on that VM. VmActionBar
+   *  passes false, since those are buttons beside the menu there. */
+  lifecycle?: boolean
   children: React.ReactNode
 }) {
   const lifecycleGate = useVmLifecycleGate(vm.host_id)
+  // The console gate is host-shaped, not guest-shaped: it reads the host's
+  // console token and no entitlement flag, which is why ConsoleButton reads
+  // this same hook for VMs already. Sharing it is what keeps the menu item
+  // and the button from disagreeing about one host.
+  const consoleGate = useAppActionGates(vm.host_id).console
   const ent = useEntitlements()
   const run = useLifecycle()
   const [guard, setGuard] = useState<Guard | null>(null)
@@ -83,6 +125,17 @@ export function VmActionsMenu({ vm, children }: {
   // page's Destroy button read before it was folded in here.
   const destroyDenied = planDenied('vms.create')
   const running = vm.status === 'running'
+  // 'pending' is the optimistic patch useLifecycle writes between the click
+  // and the job resolving, not a state PVE reports, so neither table covers
+  // it. Falling through to STOPPED_ACTIONS would draw Start on a VM that is
+  // still running; LifecycleActions refuses the same guess for the same
+  // reason. Nothing at all is the honest answer while a job is in flight.
+  //
+  // 'paused' is not 'stopped' either. The guest is suspended, not off, so PVE
+  // refuses a start and Resume below is the way back; falling through to the
+  // stopped table drew Start and Resume on the same menu.
+  const actions = !lifecycle || vm.status === 'pending' || vm.status === 'paused' ? []
+    : running ? RUNNING_ACTIONS : STOPPED_ACTIONS
 
   const fire = (action: string, confirm?: string) =>
     run.mutate({ target: 'vm', id: vm.id, action, confirm }, {
@@ -107,18 +160,23 @@ export function VmActionsMenu({ vm, children }: {
           <DropdownMenu.Content align="start" sideOffset={6}
             className="z-50 w-44 overflow-hidden rounded-card border border-line bg-panel
                        shadow-[0_12px_32px_rgba(0,0,0,.35)]">
-            {/* Shutdown, not another Stop: the row's Stop button is the hard
-                kill, this is the graceful one PVE distinguishes it from
-                (services/lifecycle.py). Icon names are STRING LITERALS here:
-                scripts/icon-names.mjs statically scans src/ to build the
-                Google Fonts icon_names parameter, and a name it cannot read
-                out of the source ships a font subset without that glyph, so
-                the browser renders the literal word. */}
-            <DropdownMenu.Item className={itemCls}
-              disabled={pending || lifecycleGate.denied} title={lifecycleGate.reason}
-              onSelect={() => fire('shutdown')}>
-              <Icon name="power_settings_new" size={16} /> Shutdown
-            </DropdownMenu.Item>
+            {actions.map((a) => (
+              <DropdownMenu.Item key={a.action} className={itemCls}
+                disabled={pending || lifecycleGate.denied} title={lifecycleGate.reason}
+                onSelect={() => fire(a.action)}>
+                <Icon name={a.icon} size={16} /> {a.label}
+              </DropdownMenu.Item>
+            ))}
+            {/* Shutdown, not another Stop: Stop is the hard kill, this is the
+                graceful one PVE distinguishes it from (services/lifecycle.py).
+                Only while the VM is running, for the reason in the doc above. */}
+            {running && (
+              <DropdownMenu.Item className={itemCls}
+                disabled={pending || lifecycleGate.denied} title={lifecycleGate.reason}
+                onSelect={() => fire('shutdown')}>
+                <Icon name="power_settings_new" size={16} /> Shutdown
+              </DropdownMenu.Item>
+            )}
             {running && (
               <DropdownMenu.Item className={itemCls}
                 disabled={pending || lifecycleGate.denied} title={lifecycleGate.reason}
@@ -131,6 +189,16 @@ export function VmActionsMenu({ vm, children }: {
                 disabled={pending || lifecycleGate.denied} title={lifecycleGate.reason}
                 onSelect={() => fire('resume')}>
                 <Icon name="play_arrow" size={16} /> Resume
+              </DropdownMenu.Item>
+            )}
+            {/* After every power item and before the rest, the order
+                AppIconMenu already uses. Only when this menu stands alone:
+                VmActionBar has a Console button welded beside it. */}
+            {lifecycle && (
+              <DropdownMenu.Item className={itemCls}
+                disabled={consoleGate.denied} title={consoleGate.reason}
+                onSelect={() => openConsoleWindow('vm', vm.id)}>
+                <Icon name="terminal" size={16} /> Console
               </DropdownMenu.Item>
             )}
             {/* No plan gate: reading and editing a VM's own settings is not a

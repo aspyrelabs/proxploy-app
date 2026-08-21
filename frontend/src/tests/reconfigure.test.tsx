@@ -62,6 +62,24 @@ describe('ReconfigureDialog', () => {
     expect(screen.getByLabelText('Swap (MB)')).toHaveValue(null)
   })
 
+  it('offers only http, https and letting Proxploy ask the app', async () => {
+    // Free text here used to mean any string became the scheme a URL was
+    // built from. The blank option is the one that matters: it clears the
+    // stored value so the app is asked which scheme it speaks on open,
+    // which is how an https app on a plain-looking port gets opened right.
+    calls.length = 0
+    patchOutcome = 'ok'
+    wrap()
+    const select = screen.getByLabelText('Protocol')
+    expect([...select.querySelectorAll('option')].map((o) => o.value))
+      .toEqual(['', 'http', 'https'])
+
+    fireEvent.change(select, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ web_protocol: '' })
+  })
+
   it('disables Save with no edits, and sends only the changed field', async () => {
     calls.length = 0
     patchOutcome = 'ok'
