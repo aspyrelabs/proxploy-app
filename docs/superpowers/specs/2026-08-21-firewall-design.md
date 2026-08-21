@@ -68,31 +68,62 @@ no new PVE role, no host re-enrolment, and no change to `services/pveum.py`.
 
 ## API surface
 
-One router, `api/firewall.py`, mounted at `/api/v1/firewall`, with the scope as a
-path segment so one set of handlers serves all four.
+One service, `services/firewall.py`, resolves a scope into a location dict and
+picks the right client. The handlers live in `api/firewall.py`, and the guest
+routes are re-exported onto the apps and VMs routers the same way `guest_nics`
+and `set_guest_nic` already are.
+
+**Every target is a path parameter, never a query parameter.** `scope_app()`,
+`scope_vm()` and `scope_host()` resolve a row's team from `request.path_params`
+(`api/deps.py:124`) and nothing else, so a target passed as a query parameter
+would carry no team scope at all. A viewer in one team could then read another
+team's firewall. This is why guest networking is mounted under `/apps/{id}` and
+`/vms/{id}` today rather than taking a guest id as a query parameter, and the
+firewall follows it exactly.
+
+Cluster, node and security group scope, on the firewall router:
 
 ```
-GET/POST/PUT/DELETE  /firewall/{scope}/rules[/{pos}]
-PUT                  /firewall/{scope}/rules/{pos}/move
-GET/PUT              /firewall/{scope}/options
-GET/POST             /firewall/{scope}/aliases                 cluster, guest
-GET/PUT/DELETE       /firewall/{scope}/aliases/{name}
-GET/POST             /firewall/{scope}/ipsets                  cluster, guest
-DELETE               /firewall/{scope}/ipsets/{name}           ?force= drops members
-GET/POST             /firewall/{scope}/ipsets/{name}/members
-PUT/DELETE           /firewall/{scope}/ipsets/{name}/members/{cidr}
-GET/POST             /firewall/groups                          cluster only
-DELETE               /firewall/groups/{group}
-GET                  /firewall/{scope}/log                     node, guest
-GET                  /firewall/refs
+GET/POST/PUT/DELETE  /firewall/cluster/{host_id}/rules[/{pos}]
+PUT                  /firewall/cluster/{host_id}/rules/{pos}/move
+GET/PUT              /firewall/cluster/{host_id}/options
+GET/POST             /firewall/cluster/{host_id}/aliases
+GET/PUT/DELETE       /firewall/cluster/{host_id}/aliases/{name}
+GET/POST             /firewall/cluster/{host_id}/ipsets
+DELETE               /firewall/cluster/{host_id}/ipsets/{name}      ?force= drops members
+GET/POST             /firewall/cluster/{host_id}/ipsets/{name}/members
+PUT/DELETE           /firewall/cluster/{host_id}/ipsets/{name}/members/{cidr}
+GET/POST             /firewall/cluster/{host_id}/groups
+DELETE               /firewall/cluster/{host_id}/groups/{group}
+GET/POST/PUT/DELETE  /firewall/cluster/{host_id}/groups/{group}/rules[/{pos}]
+PUT                  /firewall/cluster/{host_id}/groups/{group}/rules/{pos}/move
+GET                  /firewall/cluster/{host_id}/refs
+GET                  /firewall/cluster/{host_id}/macros
+
+GET/POST/PUT/DELETE  /firewall/node/{host_id}/{node}/rules[/{pos}]
+PUT                  /firewall/node/{host_id}/{node}/rules/{pos}/move
+GET/PUT              /firewall/node/{host_id}/{node}/options
+GET                  /firewall/node/{host_id}/{node}/log
 ```
 
-`scope` is one of `cluster`, `node`, `guest`, `group`. The target arrives as a
-query parameter, the way `/network/bridges` already takes `host`: `?host=` for
-cluster, `?host=&node=` for node, `?target=app:12` or `?target=vm:108` for guest,
-`?host=&group=web` for a security group. Guest scope resolves its node through
-`guest_node()`, which exists because a guest does not always run on its host's own
-node.
+Guest scope, mounted on the routers that already own the guest:
+
+```
+GET/POST/PUT/DELETE  /apps/{app_id}/firewall/rules[/{pos}]      and /vms/{vm_id}/...
+PUT                  /apps/{app_id}/firewall/rules/{pos}/move
+GET/PUT              /apps/{app_id}/firewall/options
+GET/POST             /apps/{app_id}/firewall/aliases
+GET/PUT/DELETE       /apps/{app_id}/firewall/aliases/{name}
+GET/POST             /apps/{app_id}/firewall/ipsets
+DELETE               /apps/{app_id}/firewall/ipsets/{name}
+GET/POST             /apps/{app_id}/firewall/ipsets/{name}/members
+PUT/DELETE           /apps/{app_id}/firewall/ipsets/{name}/members/{cidr}
+GET                  /apps/{app_id}/firewall/refs
+GET                  /apps/{app_id}/firewall/log
+```
+
+Guest scope resolves its node through `guest_node()`, which exists because a guest
+does not always run on its host's own node.
 
 ## Architecture decisions
 
@@ -184,10 +215,20 @@ state what the control would do without going to check the default policy first.
 Entitlement keys, added to `FLAG_KEYS`: `firewall.view`, `firewall.rules`,
 `firewall.options`, `firewall.objects`, `firewall.log`.
 
-RBAC: `authorize("firewall", "read")` and `authorize("firewall", "manage")`, with
-`scope_host()` where a host id is in the path. The read singleton goes first in
-`dependencies=[...]` and is reused as the parameter dependency, per the `deps.py`
-idiom that `test_route_auth_invariant.py` enforces.
+RBAC, mirroring the network resource exactly, where a guest edit is an operator's
+job and a host-level edit is an admin's:
+
+```
+("firewall", "read"):   "viewer"
+("firewall", "guest"):  "operator"   guest scope
+("firewall", "manage"): "admin"      cluster, node and security group scope
+```
+
+Scoping is `scope_host()` on the firewall router's routes and `scope_app()` or
+`scope_vm()` on the guest routes, in both cases reading the target out of the
+path. The read singleton goes first in `dependencies=[...]` and is reused as the
+parameter dependency, per the `deps.py` idiom that
+`test_route_auth_invariant.py` enforces.
 
 Audit: `write_audit` on every mutation, with a target named the way a person would
 say it, following `set_guest_nic`'s example of naming both the object and the
