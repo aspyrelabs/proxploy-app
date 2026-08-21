@@ -865,6 +865,34 @@ def test_a_permission_failure_names_the_privilege_proxmox_wanted(solo, monkeypat
     assert "/cluster/firewall" in detail
 
 
+@pytest.mark.parametrize("path,method,body", [
+    ("/rules/0", "put", {"type": "in", "action": "ACCEPT"}),
+    ("/rules/0/move", "put", {"moveto": 1}),
+    ("/rules/0", "delete", None),
+    ("/options", "put", {"policy_out": "ACCEPT"}),
+], ids=["update", "move", "delete", "options"])
+def test_a_digest_conflict_is_a_409_not_a_gateway_failure(solo, monkeypatch,
+                                                          path, method, body):
+    """PVE answers a stale digest with a 500 carrying "detected modified
+    configuration", on all four writes that take one. It is the one 500 that
+    is not a gateway failure: somebody else edited the scope, and the caller
+    reloads rather than retries. Measured on pve-manager 9.2.11, 2026-08-21.
+    """
+    _raise_from_pve(monkeypatch, _wrapped(Exception(
+        "500 Internal Server Error: detected modified configuration - "
+        "file changed by other user? Try again.")))
+    c, ids = solo["client"], solo["ids"]
+    url = f"/api/v1/firewall/cluster/{ids['a']['host']}{path}"
+    kw = {"headers": _csrf(c)} | ({} if body is None else {"json": body})
+    got = getattr(c, method)(url, **kw)
+    assert got.status_code == 409, (
+        f"a stale digest on {method.upper()} {path} read as {got.status_code}")
+    detail = got.json()["detail"]
+    assert not writing_problems(detail)
+    # It has to tell the operator to reload; a retry alone loses their edit.
+    assert "reload" in detail.lower()
+
+
 @pytest.mark.parametrize("label,raw,want", [
     ("404", Exception("404 Not Found: no such rule"), 404),
     ("501", Exception("501 Method 'PUT /cluster/firewall/aliases' not "

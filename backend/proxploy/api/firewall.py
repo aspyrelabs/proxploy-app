@@ -43,7 +43,19 @@ def _host_or_404(db, host_id: int) -> Host:
 
 def pve_error(e: ProxmoxError) -> HTTPException:
     """A 502 means Proxploy could not complete a call to Proxmox, never that
-    the rule was rejected: PVE's own refusals arrive as text inside this."""
+    the rule was rejected: PVE's own refusals arrive as text inside this.
+
+    The one exception is a digest conflict, which PVE reports as a 500 with
+    "detected modified configuration - file changed by other user? Try again."
+    That is not a bad gateway; it is somebody else editing the same scope, and
+    the operator's next move is to reload rather than retry. Matched on the
+    message because ProxmoxError.kind cannot tell it apart from any other 500.
+    Measured on pve-manager 9.2.11, 2026-08-21.
+    """
+    if "detected modified configuration" in str(e):
+        return HTTPException(409, "Somebody else changed this firewall scope "
+                                  "while you were editing it. Reload to see "
+                                  "their changes, then make yours again.")
     return HTTPException(502, str(e))
 
 
