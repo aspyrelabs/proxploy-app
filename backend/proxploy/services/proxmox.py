@@ -9,7 +9,7 @@ import os
 import re
 import socket
 import ssl
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from proxploy.models import utcnow  # noqa: F401  (used by later phases' sync paths)
 # The single source of truth for the privilege name (services/pveum.py's own
@@ -770,6 +770,189 @@ class ProxmoxClient:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"firewall rule {pos} delete failed", e) from e
+
+    def firewall_options(self, loc: dict) -> dict:
+        try:
+            return self._firewall_root(loc).options.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall options read failed", e) from e
+
+    def firewall_options_update(self, loc: dict, params: dict) -> None:
+        try:
+            self._firewall_root(loc).options.put(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall options update failed", e) from e
+
+    def firewall_aliases(self, loc: dict) -> list[dict]:
+        try:
+            return self._firewall_root(loc).aliases.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall alias list failed", e) from e
+
+    def firewall_alias_create(self, loc: dict, params: dict) -> None:
+        try:
+            self._firewall_root(loc).aliases.post(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall alias create failed", e) from e
+
+    def firewall_alias_update(self, loc: dict, name: str, params: dict) -> None:
+        try:
+            self._firewall_root(loc).aliases(name).put(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall alias {name!r} update failed", e) from e
+
+    def firewall_alias_delete(self, loc: dict, name: str,
+                              digest: str | None = None) -> None:
+        try:
+            self._firewall_root(loc).aliases(name).delete(
+                **self._fw_params({"digest": digest}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall alias {name!r} delete failed", e) from e
+
+    def firewall_ipsets(self, loc: dict) -> list[dict]:
+        try:
+            return self._firewall_root(loc).ipset.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall IP set list failed", e) from e
+
+    def firewall_ipset_create(self, loc: dict, params: dict) -> None:
+        try:
+            self._firewall_root(loc).ipset.post(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall IP set create failed", e) from e
+
+    def firewall_ipset_delete(self, loc: dict, name: str, force: bool = False,
+                              digest: str | None = None) -> None:
+        params = {"digest": digest}
+        if force:
+            params["force"] = 1          # PVE takes 1/0, not true/false
+        try:
+            self._firewall_root(loc).ipset(name).delete(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall IP set {name!r} delete failed", e) from e
+
+    def firewall_ipset_members(self, loc: dict, name: str) -> list[dict]:
+        try:
+            return self._firewall_root(loc).ipset(name).get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall IP set {name!r} read failed", e) from e
+
+    def firewall_ipset_member_add(self, loc: dict, name: str, params: dict) -> None:
+        try:
+            self._firewall_root(loc).ipset(name).post(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall IP set {name!r} add failed", e) from e
+
+    @staticmethod
+    def _cidr_segment(cidr: str) -> str:
+        """A member's CIDR is a URL PATH segment, so its slash has to be
+        escaped. Unescaped, `10.0.0.0/8` splits the path and PVE answers 404 on
+        every member read, update and delete. `safe=""` because the default
+        leaves `/` alone, which is the whole bug."""
+        return quote(str(cidr), safe="")
+
+    def firewall_ipset_member_update(self, loc: dict, name: str, cidr: str,
+                                     params: dict) -> None:
+        try:
+            (self._firewall_root(loc).ipset(name)(self._cidr_segment(cidr))
+             .put(**self._fw_params(params)))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall IP set member {cidr!r} update failed", e) from e
+
+    def firewall_ipset_member_delete(self, loc: dict, name: str, cidr: str,
+                                     digest: str | None = None) -> None:
+        try:
+            (self._firewall_root(loc).ipset(name)(self._cidr_segment(cidr))
+             .delete(**self._fw_params({"digest": digest})))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall IP set member {cidr!r} delete failed", e) from e
+
+    def firewall_groups(self) -> list[dict]:
+        """Security groups are cluster-wide, so this takes no scope."""
+        try:
+            return self._connect().cluster.firewall.groups.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall security group list failed", e) from e
+
+    def firewall_group_create(self, params: dict) -> None:
+        try:
+            self._connect().cluster.firewall.groups.post(**self._fw_params(params))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall security group create failed", e) from e
+
+    def firewall_group_delete(self, group: str, digest: str | None = None) -> None:
+        try:
+            self._connect().cluster.firewall.groups(group).delete(
+                **self._fw_params({"digest": digest}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"firewall security group {group!r} delete failed",
+                             e) from e
+
+    def firewall_refs(self, loc: dict, ref_type: str | None = None) -> list[dict]:
+        """Alias and IP set names this scope may reference in source and dest."""
+        try:
+            return self._firewall_root(loc).refs.get(
+                **self._fw_params({"type": ref_type}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall reference list failed", e) from e
+
+    def firewall_macros(self) -> list[dict]:
+        """Read only, cluster wide. PVE gives a name and a description; it does
+        NOT say which ports a macro expands to, so nothing downstream can."""
+        try:
+            return self._connect().cluster.firewall.macros.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall macro list failed", e) from e
+
+    def firewall_log(self, loc: dict, start: int = 0, limit: int = 500,
+                     since: int | None = None,
+                     until: int | None = None) -> list[dict]:
+        """Line cursor plus optional epoch bounds, returning {n, t} rows: the
+        same shape task_log reads, so JobLog can render it unchanged."""
+        try:
+            return self._firewall_root(loc).log.get(**self._fw_params(
+                {"start": int(start), "limit": int(limit),
+                 "since": since, "until": until}))
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap("firewall log read failed", e) from e
 
     def task_status(self, node: str, upid: str) -> dict:
         """GET /nodes/{node}/tasks/{upid}/status, `stopped` + exitstatus == done."""
