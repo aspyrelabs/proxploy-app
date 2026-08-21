@@ -1,9 +1,15 @@
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { api } from '../api/client'
 import type { NodeRow } from '../api/hooks'
 import { fmtPct, fmtUptime } from '../lib/format'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
+
+/** The slice of GET /hosts this card needs: which endpoint answers for a node,
+ *  and the address its "Open" shortcut points at. */
+type HostRow = { id: number; address: string }
 
 /** One NODE, not one host: a Host is a single Proxmox API endpoint and the
  *  cluster behind it has as many nodes as it has.
@@ -17,6 +23,19 @@ export function NodeCard({ node }: {
   node: NodeRow & { endpoints?: { host_id: number; name: string; status: string }[] }
 }) {
   const navigate = useNavigate()
+  // The ['hosts'] key half a dozen components already read (CloneDialog,
+  // VmCreateWizard, StorageForm and the rest), so a page of these cards costs
+  // ONE request however many nodes a cluster has: react-query serves them all
+  // from the one cache entry. GET /nodes does not carry the address, and a
+  // fetch per card would be a request per node.
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  // The ENDPOINT's address, so on a cluster this opens the web UI of the
+  // machine Proxploy talks to rather than of this particular node. Proxmox's
+  // own UI is cluster-wide so it shows the whole cluster either way, and it is
+  // the same link the node detail page already offers. A deep link that
+  // preselects one node is a URL shape that differs across PVE versions, so it
+  // is not worth inventing here.
+  const webUrl = (hosts.data ?? []).find((h) => h.id === node.host_id)?.address
   // A host with no snapshot yet has no node name to route on; /hosts/$hostId
   // still resolves (it redirects to the entry node once one is known).
   // `endpoints` is optional so the card still renders from a bare NodeRow;
@@ -66,7 +85,24 @@ export function NodeCard({ node }: {
               which is where "how do we reach this" belongs. */}
           {node.node ?? 'node unknown'}
         </Link>
-        <StatusPill status={node.status} />
+        <div className="flex items-center gap-2">
+          {webUrl && (
+            /* stopPropagation because the whole card is a click target that
+               opens the node: following this link must not also navigate the
+               page behind the new tab.
+
+               rel="noopener": without it the opened page can steer this one
+               through window.opener. */
+            <a href={webUrl} target="_blank" rel="noopener noreferrer"
+              aria-label={`Open the Proxmox web UI for ${node.node ?? node.name}`}
+              title="Open Proxmox web UI"
+              onClick={(e) => e.stopPropagation()}
+              className="text-[11px] text-text-3 transition hover:text-amber">
+              Open ↗
+            </a>
+          )}
+          <StatusPill status={node.status} />
+        </div>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-text-3">
         {/* The cluster's own name, not "in <name>": these cards already sit

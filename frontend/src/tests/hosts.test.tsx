@@ -209,6 +209,13 @@ vi.mock('../api/client', () => ({
           why: 'vzdump/PBS backup and restore jobs, and backup listing.' },
       ])
     }
+    // The LIST, matched exactly and before the catch-all below: NodeCard reads
+    // it for the address behind its "Open" shortcut, and the catch-all's []
+    // left every card without one.
+    if (path === '/hosts') {
+      return Promise.resolve([{ id: 1, name: 'host-01', address: 'https://10.0.0.5:8006' },
+                              { id: 2, name: 'host-02', address: 'https://10.0.0.6:8006' }])
+    }
     if (path.startsWith('/hosts')) return Promise.resolve([])
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'host:1', metric: 'net_in_bps', resolution: 'raw', ts: [], value: [] })
@@ -268,6 +275,24 @@ describe('HostsPage', () => {
     // by the time this was reproduced, false.
     expect(screen.getByText(/Install one from the App Store/)).toBeInTheDocument()
     expect(screen.queryByText(/Phase/)).not.toBeInTheDocument()
+  })
+
+  it('offers the Proxmox web UI from the node card, beside the status', async () => {
+    // The shortcut existed only on the node detail page, one click further
+    // away than the card an operator is already looking at. The address comes
+    // from GET /hosts on the shared ['hosts'] key, so a cluster of cards costs
+    // one request rather than one per node.
+    withQuery(<HostsPage />)
+    // Filtered to the anchor that actually carries an href: the router Link is
+    // stubbed in this file as a bare <a> with no href, so a name match alone
+    // can land on a card's own navigation link.
+    const links = await screen.findAllByRole('link', { name: /Proxmox web UI for pve1/i })
+    const link = links.find((a) => a.getAttribute('href'))!
+    expect(link).toHaveAttribute('href', 'https://10.0.0.5:8006')
+    expect(link).toHaveAttribute('target', '_blank')
+    // Without noopener the opened page can steer this one via window.opener.
+    expect(link.getAttribute('rel')).toContain('noopener')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
   })
 
   it('splits the two inventories with a draggable bar from lg up', async () => {
