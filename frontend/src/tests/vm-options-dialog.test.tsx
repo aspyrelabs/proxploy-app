@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 type Call = { path: string; method: string; body: any }
@@ -235,5 +235,56 @@ describe('VmOptionsDialog', () => {
     expect(await screen.findByText('only root can set this option')).toBeInTheDocument()
     expect(toasts).toContainEqual({ kind: 'error', msg: 'only root can set this option' })
     putFails = null
+  })
+})
+
+describe('the Advanced section', () => {
+  it('groups its rows under headings rather than one long list', async () => {
+    // Seven unrelated rows in a column, from hot-plug to SMBIOS identity, with
+    // nothing saying which belong together.
+    options = payload()
+    wrap()
+    await ready()
+    go('Advanced')
+    expect(screen.getByText('Hardware')).toBeInTheDocument()
+    expect(screen.getByText('Startup and identity')).toBeInTheDocument()
+  })
+
+  it('puts each row under the heading it belongs to', async () => {
+    options = payload()
+    wrap()
+    await ready()
+    go('Advanced')
+    const hardware = screen.getByText('Hardware').closest('div')!
+    const startup = screen.getByText('Startup and identity').closest('div')!
+    expect(within(hardware).getByLabelText('ACPI support')).toBeInTheDocument()
+    expect(within(hardware).getByLabelText('Hardware virtualisation')).toBeInTheDocument()
+    expect(within(startup).getByLabelText('Freeze the CPU at startup')).toBeInTheDocument()
+    expect(within(startup).getByLabelText('Clock start date')).toBeInTheDocument()
+  })
+
+  it('keeps the Proxmox-only group last and separate', async () => {
+    options = payload()
+    wrap()
+    await ready()
+    go('Advanced')
+    const headings = screen.getAllByText(
+      /^(Hardware|Startup and identity|Set by Proxmox only)$/)
+      .map((el) => el.textContent)
+    expect(headings[0]).toBe('Hardware')
+    expect(headings[1]).toBe('Startup and identity')
+  })
+
+  it('stacks the hot-plug switches one per line', async () => {
+    // Six of them wrapped three to a row, so which label went with which
+    // switch depended on how wide the dialog happened to be.
+    options = payload()
+    wrap()
+    await ready()
+    go('Advanced')
+    const first = screen.getByLabelText('Network cards')
+    const list = first.closest('div[class*="flex-col"]') as HTMLElement | null
+    expect(list).not.toBeNull()
+    expect(within(list!).getAllByRole('switch')).toHaveLength(6)
   })
 })

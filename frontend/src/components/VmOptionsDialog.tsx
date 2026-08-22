@@ -349,6 +349,19 @@ function Effect({ optionKey, running, pending }: {
  *  column an eye can run down. `hint` is the long explanation and lives behind
  *  the (i) rather than on the page; `warn` is for the two settings whose
  *  consequence has to be unmissable, and is the only prose that stays inline. */
+/** A heading inside one section's pane. Advanced carries seven unrelated
+ *  rows, from hot-plug to SMBIOS identity, and a flat column of them says
+ *  nothing about which belong together. The markup is what the "Set by
+ *  Proxmox only" group was already using inline; naming it keeps the three
+ *  groups identical by construction rather than by copy. */
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-1 ps-3 pt-3 text-[11px] uppercase tracking-wide text-text-3">
+      {children}
+    </p>
+  )
+}
+
 function OptionRow({ label, htmlFor, hint, warn, changed, effect, control, children }: {
   label: string
   htmlFor?: string
@@ -697,10 +710,12 @@ function OptionsForm({ vm, data, onClose }: {
 
           {section === 'advanced' && (
             <>
+              <div>
+              <SubHeading>Hardware</SubHeading>
               <OptionRow label="Hotplug" changed={changed('hotplug')}
                 hint="Which kinds of hardware can be added or removed while the VM is running. Changing CPU or memory hotplug only lands at the next boot."
                 effect={<Effect optionKey="hotplug" running={running} pending={pending} />}>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                <div className="flex flex-col gap-2">
                   {HOTPLUG_FLAGS.map(([f, l]) => (
                     <label key={f} htmlFor={`vmopt-hotplug-${f}`}
                       className="flex items-center gap-2 text-[12.5px] text-text-2">
@@ -732,6 +747,10 @@ function OptionsForm({ vm, data, onClose }: {
                 control={<Switch id="vmopt-kvm" checked={boolOf('kvm')}
                   onCheckedChange={(v) => setBool('kvm', v)} />} />
 
+              </div>
+
+              <div>
+              <SubHeading>Startup and identity</SubHeading>
               <OptionRow label="Freeze the CPU at startup" htmlFor="vmopt-freeze"
                 changed={changed('freeze')}
                 hint="The VM starts paused, waiting for you to resume it from the console. For debugging a boot problem."
@@ -762,14 +781,14 @@ function OptionsForm({ vm, data, onClose }: {
                 </div>
               </OptionRow>
 
+              </div>
+
               {/* Locked, not hidden. These three exist in Proxmox and an operator
                   who knows that would otherwise wonder where they went; saying
                   why costs one line and answers the question before it is asked. */}
               {restricted.length > 0 && (
-                <div className="pt-3">
-                  <p className="mb-1 ps-3 text-[11px] uppercase tracking-wide text-text-3">
-                    Set by Proxmox only
-                  </p>
+                <div>
+                  <SubHeading>Set by Proxmox only</SubHeading>
                   {restricted.map((k) => {
                     const copy = RESTRICTED_COPY[k] ?? { label: k, why: ROOT_ONLY }
                     return (
