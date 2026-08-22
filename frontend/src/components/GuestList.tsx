@@ -4,6 +4,7 @@ import { fmtBytes, fmtPct } from '../lib/format'
 import { openConsoleWindow } from '../lib/console-window'
 import { ConsoleButton, LifecycleActions } from './LifecycleActions'
 import { StatusPill } from './StatusPill'
+import { linkCls } from './ui/button'
 import { UpdateDot } from './UpdateDot'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { CPU_GRADIENT, UsageBar } from './UsageBar'
@@ -117,8 +118,7 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       {/* basis-full below sm puts the name on its own line and lets the id,
           status and usage wrap beneath it; sm:basis-auto resolves the row. */}
       <button type="button"
-        className="min-w-0 basis-full text-left font-mono text-[13px] text-text
-                   transition hover:text-amber sm:basis-auto"
+        className={`min-w-0 basis-full text-left font-mono text-[13px] sm:basis-auto ${linkCls}`}
         onClick={open}>
         {g.name}
       </button>

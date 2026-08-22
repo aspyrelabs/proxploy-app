@@ -4,6 +4,7 @@ import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
 import { osIconUrl } from '../lib/os-icon'
 import { IconTile } from './IconTile'
 import { StatusPill } from './StatusPill'
+import { linkCls } from './ui/button'
 import { VmActionBar } from './VmActionBar'
 import { VmDetailPanel } from './VmDetailPanel'
 import { Icon } from './ui/icon'
@@ -138,7 +139,7 @@ function VmTableRow({ vm, open, onToggle }: {
               the row, cancelling itself out. It stays a real button so the
               row is reachable and announced from the keyboard. */}
           <button type="button" aria-expanded={open}
-            className="text-left font-mono text-[13px] text-text transition hover:text-amber">
+            className={`text-left font-mono text-[13px] ${linkCls}`}>
             {vm.name}
           </button>
         </div>

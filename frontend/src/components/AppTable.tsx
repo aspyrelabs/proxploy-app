@@ -4,6 +4,7 @@ import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
 import { IconTile } from './IconTile'
 import { AppActionBar } from './AppActionBar'
 import { AppDetailPanel } from './AppDetailPanel'
+import { linkCls } from './ui/button'
 import { StatusPill } from './StatusPill'
 import { UpdateDot } from './UpdateDot'
 import { Icon } from './ui/icon'
@@ -123,7 +124,7 @@ function AppTableRow({ app, open, onToggle }: {
               the row, cancelling itself out. It stays a real button so the
               row is reachable and announced from the keyboard. */}
           <button type="button" aria-expanded={open}
-            className="text-left font-mono text-[13px] text-text transition hover:text-amber">
+            className={`text-left font-mono text-[13px] ${linkCls}`}>
             {app.name}
           </button>
           {app.update_available && <UpdateDot />}

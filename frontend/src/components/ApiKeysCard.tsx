@@ -6,7 +6,7 @@ import { useEntitlements } from '../api/hooks'
 import { useApiKeys } from '../api/apikeys'
 import type { ApiKeyCreated, ApiKeyRow } from '../api/apikeys'
 import { QueryState } from './QueryState'
-import { Button } from './ui/button'
+import { Button, amberLinkCls } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
 
 // Mirrors backend/proxploy/services/authz.py::PERMISSIONS: resource -> its
@@ -262,7 +262,7 @@ export function ApiKeysCard() {
 
           <p className="mt-4 text-[11.5px] text-text-3">
             Keys drive the{' '}
-            <a href="/api/docs" target="_blank" rel="noreferrer" className="text-amber hover:underline">
+            <a href="/api/docs" target="_blank" rel="noreferrer" className={amberLinkCls}>
               full REST API
             </a>
             {' '}, everything this UI does.

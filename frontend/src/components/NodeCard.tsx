@@ -6,6 +6,7 @@ import { fmtPct, fmtUptime } from '../lib/format'
 import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
+import { linkCls } from './ui/button'
 
 /** The slice of GET /hosts this card needs: which endpoint answers for a node,
  *  and the address its "Open" shortcut points at. */
@@ -75,7 +76,7 @@ export function NodeCard({ node }: {
           to={'/hosts/$hostId/$node' as never} // node detail, keyed on (host, node)
           params={{ hostId: String(node.host_id), node: node.node ?? '' } as never}
           onClick={(e) => e.stopPropagation()}
-          className="font-mono text-[13px] text-text hover:text-amber"
+          className={`font-mono text-[13px] ${linkCls}`}
         >
           {/* The NODE leads, not the host. This card depicts one node, and
               titling it with the host name meant a cluster drew several cards

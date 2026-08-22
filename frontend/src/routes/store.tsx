@@ -12,7 +12,7 @@ import { InstallAction, StoreDetailContent } from '../components/StoreDetailCont
 import { StoreCard, StoreCardSkeleton } from '../components/StoreCard'
 import { QueryState } from '../components/QueryState'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
-import { Button } from '../components/ui/button'
+import { Button, segment } from '../components/ui/button'
 import { Dialog } from '../components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import {
@@ -390,8 +390,7 @@ export function StorePage() {
           {categories.map((c) => (
             <button
               key={c}
-              className={`rounded-full px-3 py-1 text-[12px] ${
-                (search.category ?? 'All') === c ? 'bg-elev text-text' : 'text-text-2 hover:bg-panel-2'}`}
+              className={`rounded-full px-3 py-1 text-[12px] ${segment((search.category ?? 'All') === c)}`}
               onClick={() => setFilter({ category: c === 'All' ? undefined : c })}
             >
               {c}

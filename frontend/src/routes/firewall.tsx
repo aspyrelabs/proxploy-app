@@ -18,10 +18,8 @@ import { QueryState } from '../components/QueryState'
 // import entry point (e.g. a test importing this route file directly), as
 // routes/shell.tsx explains.
 import { shellRoute } from './shell'
+import { tabList, tabTrigger } from '../components/ui/tabs'
 
-const tabTrigger = 'cursor-pointer px-3 py-2 text-[13px] text-text-2 hover:text-text ' +
-  'data-[state=active]:border-b-2 data-[state=active]:border-amber data-[state=active]:text-text'
-const tabList = 'mb-4 mt-5 flex gap-1 border-b border-line-soft'
 const selectClass = 'rounded-ctl border border-line-soft bg-elev px-2 py-1.5 text-[13px]'
 
 // Same order the backend uses (proxploy/api/deps.py: ROLE_ORDER). Kept in

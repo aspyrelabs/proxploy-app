@@ -84,7 +84,7 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                             <Icon name={on ? 'toggle_on' : 'toggle_off'} />
                           </span>
                           {canEdit && (
-                            <button type="button"
+                            <Button type="button" variant="icon" size="icon-xs"
                               aria-label={`Turn rule ${r.pos} ${on ? 'off' : 'on'}`}
                               onClick={() => update.mutate({
                                 pos: r.pos,
@@ -93,9 +93,16 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                                 // undefined here rather than widening that type.
                                 patch: { enable: on ? 0 : 1, digest: digest ?? undefined },
                               })}
-                              className={on ? 'text-green' : 'text-text-3'}>
+                              // The only one of these that carries state rather
+                              // than just an action, so it overrides the
+                              // variant's resting tint when the rule is on.
+                              // `!` for the same reason HostCapabilityList
+                              // needs it: this and the variant's text-text-3
+                              // are equal-specificity utilities, so stylesheet
+                              // order decides, not the order they are written.
+                              className={on ? 'text-green!' : ''}>
                               <Icon name={on ? 'toggle_on' : 'toggle_off'} size={16} />
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -118,16 +125,17 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
 
                                  New rules are PREPENDED by PVE, so a rule added from this table lands at
                                  pos 0 and takes precedence over everything below it. */
-                              <button type="button" aria-label={`Move rule ${r.pos} up`}
+                              <Button type="button" variant="icon" size="icon-xs"
+                                aria-label={`Move rule ${r.pos} up`}
                                 onClick={() => move.mutate({
                                   pos: r.pos, moveto: r.pos - 1, digest,
-                                })}
-                                className="text-text-3 hover:text-text">
+                                })}>
                                 <Icon name="arrow_upward" size={16} />
-                              </button>
+                              </Button>
                             )}
                             {i < rules.length - 1 && (
-                              <button type="button" aria-label={`Move rule ${r.pos} down`}
+                              <Button type="button" variant="icon" size="icon-xs"
+                                aria-label={`Move rule ${r.pos} down`}
                                 /* +2, not +1. PVE inserts at moveto and THEN removes the old row, so
                                    moving down lands the rule at moveto-1 and moveto === pos+1 is a
                                    silent no-op. Measured on pve-manager 9.2.11, 2026-08-21. Moving up
@@ -135,21 +143,20 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                                    rule lands at moveto exactly. */
                                 onClick={() => move.mutate({
                                   pos: r.pos, moveto: r.pos + 2, digest,
-                                })}
-                                className="text-text-3 hover:text-text">
+                                })}>
                                 <Icon name="arrow_downward" size={16} />
-                              </button>
+                              </Button>
                             )}
-                            <button type="button" aria-label={`Edit rule ${r.pos}`}
-                              onClick={() => onEdit(r)}
-                              className="text-text-3 hover:text-text">
+                            <Button type="button" variant="icon" size="icon-xs"
+                              aria-label={`Edit rule ${r.pos}`}
+                              onClick={() => onEdit(r)}>
                               <Icon name="edit" size={16} />
-                            </button>
-                            <button type="button" aria-label={`Delete rule ${r.pos}`}
-                              onClick={() => remove.mutate({ pos: r.pos, digest })}
-                              className="text-text-3 hover:text-red">
+                            </Button>
+                            <Button type="button" variant="icon-danger" size="icon-xs"
+                              aria-label={`Delete rule ${r.pos}`}
+                              onClick={() => remove.mutate({ pos: r.pos, digest })}>
                               <Icon name="delete" size={16} />
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </td>

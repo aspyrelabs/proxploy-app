@@ -5,7 +5,7 @@ import type { VmRow } from '../api/hooks'
 import { errBody } from '../api/network'
 import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
-import { Button } from './ui/button'
+import { Button, segment } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Icon } from './ui/icon'
 import { InfoHint } from './ui/info-hint'
@@ -542,8 +542,7 @@ function OptionsForm({ vm, data, onClose }: {
               <button key={s.id} type="button" onClick={() => setSection(s.id)}
                 aria-current={on ? 'true' : undefined}
                 className={`flex shrink-0 items-center justify-between gap-2 rounded-ctl
-                            px-3 py-1.5 text-left text-[13px] transition
-                            ${on ? 'bg-panel-2 text-text' : 'text-text-2 hover:text-text'}`}>
+                            px-3 py-1.5 text-left text-[13px] ${segment(on)}`}>
                 {s.label}
                 {n > 0 && (
                   <span className="rounded-full bg-amber-dim px-1.5 font-mono

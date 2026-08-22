@@ -4,6 +4,7 @@ import { statusLabel } from '../lib/activityDisplay'
 import { osIconUrl } from '../lib/os-icon'
 import { AppIconMenu } from './AppIconMenu'
 import { IconTile } from './IconTile'
+import { linkCls } from './ui/button'
 import { VmActionsMenu } from './VmActionsMenu'
 import { Icon } from './ui/icon'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
@@ -292,8 +293,7 @@ function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen,
             the Apps or VMs table rather than a page of its own. */}
         <button type="button"
           title={name}
-          className="block max-w-full truncate text-left text-[13px] text-text
-                     transition hover:text-amber"
+          className={`block max-w-full truncate text-left text-[13px] ${linkCls}`}
           onClick={onOpen}>
           {name}
         </button>

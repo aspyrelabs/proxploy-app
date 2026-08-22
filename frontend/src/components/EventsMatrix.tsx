@@ -132,7 +132,10 @@ export function EventsMatrix() {
                   {chans.map((c) => (
                     <td key={c.id} className="px-3 py-1.5">
                       <input type="checkbox"
-                             className="size-[15px] accent-amber disabled:opacity-40"
+                             // No per-cell accent utility here any more:
+                             // tokens.css sets accent-color on :root, so every
+                             // native control in the app inherits the amber.
+                             className="size-[15px] disabled:opacity-40"
                              aria-label={`Send ${r.label} to ${c.name}`}
                              // A row that is off reaches nobody, so showing
                              // its cells ticked would claim a delivery that

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { InstallDialog } from '../components/InstallDialog'
 import { StoreDetailContent } from '../components/StoreDetailContent'
 import { shellRoute } from './shell'
+import { quietCls } from '../components/ui/button'
 
 /**
  * The ROUTE shell for an app's detail view. Everything inside it lives in
@@ -26,7 +27,7 @@ export function StoreDetailPage() {
   const [installing, setInstalling] = useState<string | null>(null)
   return (
     <div>
-      <Link to={'/store' as never} className="text-[12px] text-text-3 hover:text-text">
+      <Link to={'/store' as never} className={`text-[12px] ${quietCls}`}>
         ← App Store
       </Link>
       <StoreDetailContent slug={slug} onInstall={setInstalling} />

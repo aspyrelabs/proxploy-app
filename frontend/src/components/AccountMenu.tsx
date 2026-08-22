@@ -33,7 +33,7 @@ export function AccountMenu() {
       <DropdownMenu.Trigger
         aria-label="Account"
         className="grid h-8 w-8 cursor-pointer place-items-center rounded-tile
-                   bg-[linear-gradient(150deg,#5B9DF9,#7C5CFB)] font-display text-[12px]
+                   bg-[image:var(--grad-avatar)] font-display text-[12px]
                    font-semibold text-white transition hover:brightness-110"
       >
         {letter}

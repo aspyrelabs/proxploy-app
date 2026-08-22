@@ -9,6 +9,26 @@
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 :root, [data-theme="dark"] {
+  /* Checkboxes, radios, range sliders and progress bars are painted by the
+     browser, not by this stylesheet, and they were the only controls in the
+     app that ignored the palette: 22 of 23 checkboxes and all 6 radios
+     rendered in system blue on an amber app.
+
+     Two declarations rather than one, because they fix different halves and
+     one without the other still looks wrong:
+
+       - `accent-color` paints the CHECKED fill. It inherits, so setting it
+         once here reaches every native control without a single selector or
+         a class at any call site.
+       - `color-scheme` paints everything else the browser owns: the
+         UNCHECKED box, its border, the focus ring, scrollbars, and the
+         native select popup. Without it a dark theme still draws a white
+         box on a dark panel, and `accent-color` cannot touch that.
+
+     Both flip with the theme because they sit in the theme blocks. */
+  color-scheme: dark;
+  accent-color: var(--amber);
+
   --ink:#0B0F16; --panel:#121924; --panel-2:#161F2A; --elev:#1B2531;
   --line:#243040; --line-soft:#1A2330;
   --text:#E8EDF4; --text-2:#93A0B1; --text-3:#5C6979;
@@ -17,6 +37,12 @@
   --red:#F26D6D;   --red-dim:rgba(242,109,109,.13);
   --blue:#5B9DF9;  --blue-dim:rgba(91,157,249,.12);
   --violet:#A78BFA; --cyan:#34D3C6;
+  /* The account avatar's fill. A gradient, not a flat colour, so the one
+     control in the topbar that stands for a person reads as an object rather
+     than another button. It lived as a literal in AccountMenu.tsx, which made
+     it the only gradient in the app outside ui/button.tsx and the only one
+     that could not follow the theme. */
+  --grad-avatar: linear-gradient(150deg, #5B9DF9, #7C5CFB);
   /* The sticky topbar sits over scrolling content, so it needs `--ink` WITH
      alpha for the backdrop-blur to read. This was a hardcoded
      rgba(11,15,22,.82) in Topbar.tsx, which is the only reason the bar stayed
@@ -30,6 +56,11 @@
 }
 
 [data-theme="light"] {
+  /* See the dark block. `accent-color` re-resolves on its own here because
+     --amber is redefined below, but `color-scheme` is a keyword, not a var,
+     so it has to be said again or the light theme keeps dark form controls. */
+  color-scheme: light;
+
   --ink:#F5F7FA; --panel:#FFFFFF; --panel-2:#F0F3F7; --elev:#E7ECF2;
   --line:#D9E0E8; --line-soft:#E4E9EF;
   --text:#16202C; --text-2:#4E5D6E; --text-3:#8896A6;
@@ -38,6 +69,9 @@
   --red:#D9463F;   --red-dim:rgba(217,70,63,.13);
   --blue:#2F6FE0;  --blue-dim:rgba(47,111,224,.12);
   --violet:#7C5CFB; --cyan:#0FA8A0;
+  /* Built from the light theme's own blue and violet, so the avatar does not
+     stay a dark-theme swatch on a white topbar. */
+  --grad-avatar: linear-gradient(150deg, #2F6FE0, #7C5CFB);
   /* Light mode's topbar: `--ink` with the same alpha, so the whole page goes
      light together (PXP-16). */
   --topbar:rgba(245,247,250,.82);

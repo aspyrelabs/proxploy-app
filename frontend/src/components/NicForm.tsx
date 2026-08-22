@@ -4,7 +4,7 @@ import type { Attachment, NicPatch } from '../api/network'
 import { errBody, useSetNic } from '../api/network'
 import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
-import { Button } from './ui/button'
+import { Button, amberLinkCls } from './ui/button'
 import { Dialog } from './ui/dialog'
 
 /**
@@ -165,7 +165,7 @@ export function NicForm({ nic, bridges, onClose }: {
       <p className="text-[12px] text-text-3">
         Rules for this guest are on its{' '}
         <Link to={`/firewall/guest/${nic.guest_type}/${nic.guest_id}` as never}
-          className="text-amber hover:underline">Firewall page</Link>.
+          className={amberLinkCls}>Firewall page</Link>.
         With this off, none of them apply to this NIC.
       </p>
       {error && <p className="text-[12.5px] text-red">{error}</p>}

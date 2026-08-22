@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
 import { useApplyUpdate, useUpdateStatus } from '../api/account'
 import { notify } from '../lib/notify'
-import { Button } from './ui/button'
+import { Button, amberLinkCls } from './ui/button'
 import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 // Matches backend/proxploy/config.py's update_timeout_s default. The updater
@@ -106,7 +106,7 @@ export function UpdateCard() {
             </Button>
             {s.notes_url && (
               <a href={s.notes_url} target="_blank" rel="noopener noreferrer"
-                className="ml-3 text-[12px] text-amber hover:underline">
+                className={`ml-3 text-[12px] ${amberLinkCls}`}>
                 Release notes
               </a>
             )}

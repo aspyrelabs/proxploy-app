@@ -8,7 +8,7 @@ import { useEntitlements } from '../api/hooks'
 import { AppTable, AppTableSkeleton } from '../components/AppTable'
 import { UpdateAllButton } from '../components/UpdateAllButton'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
-import { Button } from '../components/ui/button'
+import { Button, amberLinkCls, quietCls, segment } from '../components/ui/button'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { QueryState } from '../components/QueryState'
@@ -85,7 +85,7 @@ export function AppsPage() {
             <h2 className="text-[14px] font-semibold text-text">
               {discovered.length} existing container{discovered.length > 1 ? 's' : ''} discovered
             </h2>
-            <button className="text-[12px] text-text-3 hover:text-text" onClick={() => setDismissed(true)}>
+            <button className={`text-[12px] ${quietCls}`} onClick={() => setDismissed(true)}>
               Dismiss
             </button>
           </div>
@@ -104,7 +104,7 @@ export function AppsPage() {
               </div>
             ))}
           </div>
-          <button className="mt-2 text-[12px] text-amber hover:underline" onClick={() => setAdopting(true)}>
+          <button className={`mt-2 text-[12px] ${amberLinkCls}`} onClick={() => setAdopting(true)}>
             Adopt {discovered.length} container{discovered.length > 1 ? 's' : ''}
           </button>
         </div>
@@ -113,7 +113,7 @@ export function AppsPage() {
       <div className="mb-4 flex items-center gap-3">
         <div className="flex overflow-hidden rounded-ctl border border-line">
           <button
-            className={`px-3 py-1.5 text-[12px] ${search.host == null ? 'bg-elev text-text' : 'text-text-2 hover:bg-panel-2'}`}
+            className={`px-3 py-1.5 text-[12px] ${segment(search.host == null)}`}
             onClick={() => setSearch({ host: undefined })}
           >
             All hosts
@@ -121,7 +121,7 @@ export function AppsPage() {
           {(hosts ?? []).map((h) => (
             <button
               key={h.id}
-              className={`border-l border-line px-3 py-1.5 text-[12px] ${search.host === h.id ? 'bg-elev text-text' : 'text-text-2 hover:bg-panel-2'}`}
+              className={`border-l border-line px-3 py-1.5 text-[12px] ${segment(search.host === h.id)}`}
               onClick={() => setSearch({ host: h.id })}
             >
               {h.name}

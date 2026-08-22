@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown'
+import { amberLinkCls } from './button'
 
 /**
  * Renders a small, fixed subset of markdown from UNTRUSTED third-party text.
@@ -99,7 +100,7 @@ export default function Markdown({ children }: { children: string }) {
         a: ({ href, children }) =>
           href
             ? <a href={href} target="_blank" rel="noreferrer noopener"
-                className="text-amber hover:underline">{children}</a>
+                className={amberLinkCls}>{children}</a>
             : <>{children}</>,
       }}
     >

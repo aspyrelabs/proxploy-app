@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import { fmtBytes } from '../lib/format'
 import { KVGrid } from './KVGrid'
+import { Button } from './ui/button'
 
 /** GET /hosts/{id}/nodes/{node}/hardware.
  *
@@ -309,10 +310,9 @@ function ServicesSection({ services, refusal }: {
         {!all && stopped.length > 0 && (
           <span>{list.length - stopped.length} running services hidden.</span>
         )}
-        <button type="button" onClick={() => setAll((v) => !v)}
-          className="rounded-md border border-line-soft px-2 py-1 text-[12px] text-text-2 hover:bg-panel-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setAll((v) => !v)}>
           {all ? 'Show only what is not running' : `Show all ${list.length}`}
-        </button>
+        </Button>
       </div>
     </Section>
   )

@@ -19,6 +19,7 @@ import { fmtBytes } from '../lib/format'
 // would force its eager createRouter() to run mid-cycle (cluster.tsx carries
 // the same note).
 import { shellRoute } from './shell'
+import { tabList, tabTrigger } from '../components/ui/tabs'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted so the loading placeholder lays out in the SAME grid as the cards it
@@ -143,14 +144,12 @@ export function ContentBrowser({ row, onClose, onManage }:
           and VM pages ARE child routes and stay that way, because converting
           them would break links like ?tab=logs. */}
       <Tabs.Root value={active} onValueChange={(v) => setActive(v as typeof active)}>
-        <Tabs.List className="mb-4 mt-5 flex gap-1 border-b border-line-soft">
+        <Tabs.List className={tabList}>
           {tabs.map((t) => (
             <Tabs.Trigger
               key={t.key}
               value={t.key}
-              className="cursor-pointer px-3 py-2 text-[13px] text-text-2 hover:text-text
-                         data-[state=active]:border-b-2 data-[state=active]:border-amber
-                         data-[state=active]:text-text"
+              className={tabTrigger}
             >
               {t.label}
             </Tabs.Trigger>

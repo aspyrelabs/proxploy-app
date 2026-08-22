@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import type { MouseEvent } from 'react'
 import type { CatalogRow } from '../api/catalog'
 import { IconTile } from './IconTile'
-import { Button } from './ui/button'
+import { Button, amberLinkCls, linkCls } from './ui/button'
 import { Icon } from './ui/icon'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 
@@ -252,7 +252,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
           the fixed height. */}
       <button type="button" title={name}
         onClick={(e) => { e.stopPropagation(); onOpenDetail(entry.slug) }}
-        className="mt-2 block shrink-0 cursor-pointer truncate text-left text-[14px] font-semibold text-text hover:text-amber hover:underline">
+        className={`mt-2 block shrink-0 cursor-pointer truncate text-left text-[14px] font-semibold hover:underline ${linkCls}`}>
         {name}
       </button>
       <div className="shrink-0 font-mono text-[11px] text-text-3">{entry.category ?? 'Uncategorized'}</div>
@@ -306,7 +306,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
       <div className="mt-1 flex shrink-0 items-center gap-2">
         <button type="button"
           onClick={(e) => { e.stopPropagation(); onOpenDetail(entry.slug) }}
-          className="shrink-0 cursor-pointer text-[11.5px] text-amber hover:underline">
+          className={`shrink-0 cursor-pointer text-[11.5px] ${amberLinkCls}`}>
           Read more
         </button>
         {entry.installable === false ? (
@@ -318,7 +318,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
             {entry.website && (
               <a href={entry.website} target="_blank" rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="ml-auto shrink-0 text-[11.5px] text-amber hover:underline">upstream</a>
+                className={`ml-auto shrink-0 text-[11.5px] ${amberLinkCls}`}>upstream</a>
             )}
           </>
         ) : (

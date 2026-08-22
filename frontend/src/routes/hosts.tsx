@@ -7,7 +7,17 @@ import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
 import { useEntitlements } from '../api/hooks'
 import { AppIconGrid, IconGridSkeleton, VmIconGrid } from '../components/IconGrid'
-import { Button } from '../components/ui/button'
+import { Button, amberLinkCls } from '../components/ui/button'
+import { tabTrigger } from '../components/ui/tabs'
+
+// The two controls in a node's header: one opens a shell, one opens Proxmox.
+// They sit side by side and have to read as a pair, and one of them is an <a>,
+// which Button cannot render, so the shared thing is a class string. Not ghost
+// either: these are transparent until pointed at, so they sit quietly in a
+// header rather than stacking two filled boxes next to the node name.
+const headerCtl = 'rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2 ' +
+  'transition hover:border-amber hover:text-amber'
+
 import { EmptyState } from '../components/EmptyState'
 import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
@@ -206,7 +216,7 @@ export function HostsPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[16px] font-semibold">Apps</h2>
         {/* as never: route typing workaround, see router.tsx */}
-        <a href="/apps" className="text-[12px] text-amber hover:underline">View all</a>
+        <a href="/apps" className={`text-[12px] ${amberLinkCls}`}>View all</a>
       </div>
       <QueryState query={appsQuery}
                   loading={<SkeletonGroup label="Loading apps">
@@ -236,7 +246,7 @@ export function HostsPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
         {/* as never: route typing workaround, see router.tsx */}
-        <a href="/vms" className="text-[12px] text-amber hover:underline">View all</a>
+        <a href="/vms" className={`text-[12px] ${amberLinkCls}`}>View all</a>
       </div>
       <QueryState query={vmsQuery}
                   loading={<SkeletonGroup label="Loading virtual machines">
@@ -430,10 +440,7 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
   { hostId: number; nodeShellEnabled: boolean | undefined }) {
   const ent = useEntitlements()
   return (
-    <button type="button"
-      className="rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2
-                 transition hover:border-amber hover:text-amber"
-      onClick={() => {
+    <button type="button" className={headerCtl} onClick={() => {
         if (ent.data != null && !ent.has('terminal.node')) {
           notify.error('Not included in your plan.', {
             description: 'Everything else on this page works without it.',
@@ -558,8 +565,7 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
             // rel="noopener": without it the opened page can steer this one
             // through window.opener.
             <a href={host.address} target="_blank" rel="noopener noreferrer"
-              className="rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2
-                         transition hover:border-amber hover:text-amber">
+              className={headerCtl}>
               Open Proxmox web UI ↗
             </a>
           )}
@@ -610,8 +616,7 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
           <Link key={t.path} to={t.path as never}
             from={'/hosts/$hostId/$node' as never}
             activeOptions={{ exact: t.path === '.' }}
-            className="px-3 py-2 text-[13px] text-text-2 hover:text-text
-                       [&.active]:border-b-2 [&.active]:border-amber [&.active]:text-text">
+            className={tabTrigger}>
             {t.label}
           </Link>
         ))}
@@ -641,7 +646,7 @@ function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
       {entryNode && (
         <Link to={'/hosts/$hostId/$node' as never}
           params={{ hostId: String(hostId), node: entryNode } as never}
-          className="text-amber hover:underline">
+          className={amberLinkCls}>
           Open {entryNode} →
         </Link>
       )}

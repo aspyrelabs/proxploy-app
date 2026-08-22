@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { Button } from './ui/button'
+import { Button, segment } from './ui/button'
 import { Icon } from './ui/icon'
 import { QueryState } from './QueryState'
 import {
@@ -114,16 +114,16 @@ export function AliasTable({ scope, canEdit }: { scope: ObjectScope; canEdit: bo
                   <td className={td}>
                     {canEdit && (
                       <div className="flex items-center justify-end gap-1">
-                        <button type="button" aria-label={`Edit alias ${a.name}`}
-                          onClick={() => setEditing(a)}
-                          className="text-text-3 hover:text-text">
+                        <Button type="button" variant="icon" size="icon-xs"
+                          aria-label={`Edit alias ${a.name}`}
+                          onClick={() => setEditing(a)}>
                           <Icon name="edit" size={16} />
-                        </button>
-                        <button type="button" aria-label={`Delete alias ${a.name}`}
-                          onClick={() => remove.mutate({ name: a.name })}
-                          className="text-text-3 hover:text-red">
+                        </Button>
+                        <Button type="button" variant="icon-danger" size="icon-xs"
+                          aria-label={`Delete alias ${a.name}`}
+                          onClick={() => remove.mutate({ name: a.name })}>
                           <Icon name="delete" size={16} />
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </td>
@@ -202,11 +202,11 @@ function IpSetMembers({ scope, name, canEdit }: {
                     </span>
                   )}
                   {canEdit && (
-                    <button type="button" aria-label={`Remove ${m.cidr} from ${name}`}
-                      onClick={() => remove.mutate({ name, cidr: m.cidr })}
-                      className="text-text-3 hover:text-red">
+                    <Button type="button" variant="icon-danger" size="icon-xs"
+                      aria-label={`Remove ${m.cidr} from ${name}`}
+                      onClick={() => remove.mutate({ name, cidr: m.cidr })}>
                       <Icon name="delete" size={16} />
-                    </button>
+                    </Button>
                   )}
                 </li>
               )
@@ -290,11 +290,11 @@ export function IpSetPanel({ scope, canEdit }: { scope: ObjectScope; canEdit: bo
                   {s.comment && <span className="font-normal text-text-3">{s.comment}</span>}
                 </button>
                 {canEdit && (
-                  <button type="button" aria-label={`Delete IP set ${s.name}`}
-                    onClick={() => setConfirming(s.name)}
-                    className="text-text-3 hover:text-red">
+                  <Button type="button" variant="icon-danger" size="icon-xs"
+                    aria-label={`Delete IP set ${s.name}`}
+                    onClick={() => setConfirming(s.name)}>
                     <Icon name="delete" size={16} />
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -402,21 +402,22 @@ export function SecurityGroupList({ hostId, canEdit, selected, onSelect }: {
               <button type="button" aria-label={`Open security group ${g.group}`}
                 aria-pressed={selected === g.group}
                 onClick={() => onSelect(g.group)}
-                className={`flex-1 rounded-ctl px-2 py-1.5 text-left text-[13px] ${
-                  selected === g.group ? 'bg-panel-2 font-medium text-text' : 'text-text-2 hover:bg-panel-2'
-                }`}>
+                className={`flex-1 rounded-ctl px-2 py-1.5 text-left text-[13px]
+                             ${selected === g.group ? 'font-medium' : ''}
+                             ${segment(selected === g.group)}`}>
                 {g.group}
                 {g.comment && <span className="ml-2 font-normal text-text-3">{g.comment}</span>}
               </button>
               {canEdit && (
-                <button type="button" aria-label={`Delete security group ${g.group}`}
+                <Button type="button" variant="icon-danger" size="icon-xs"
+                  aria-label={`Delete security group ${g.group}`}
                   onClick={() => {
                     remove.mutate({ group: g.group })
                     if (selected === g.group) onSelect(null)
                   }}
-                  className="ml-1 text-text-3 hover:text-red">
+                  className="ml-1">
                   <Icon name="delete" size={16} />
-                </button>
+                </Button>
               )}
             </li>
           ))}

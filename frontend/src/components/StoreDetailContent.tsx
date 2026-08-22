@@ -27,6 +27,7 @@ import {
   Skeleton, SkeletonAvatar, SkeletonGroup, SkeletonLine,
 } from '../components/ui/skeleton'
 import { fmtBytes } from '../lib/format'
+import { amberLinkCls } from './ui/button'
 
 /**
  * The App Store detail page: everything about one catalog entry that does not
@@ -196,7 +197,7 @@ function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
         {sha
           ? (
             <a href={`${BLOB_BASE}/${sha}/${path}`} target="_blank" rel="noreferrer noopener"
-              className="font-mono text-amber hover:underline">{path}</a>
+              className={`font-mono ${amberLinkCls}`}>{path}</a>
           )
           // Path but no commit to pin it to. The path is still a true,
           // discovery-owned fact and is shown, but as TEXT: an unpinned link
@@ -624,7 +625,7 @@ export function LinkRow({ label, href }: { label: string; href: string }) {
     <li>
       <span className="text-[12.5px] text-text-3">{label}</span>
       <a href={href} target="_blank" rel="noopener noreferrer"
-        className="ml-2 break-all font-mono text-[11px] text-amber hover:underline">
+        className={`ml-2 break-all font-mono text-[11px] ${amberLinkCls}`}>
         {href}
       </a>
     </li>

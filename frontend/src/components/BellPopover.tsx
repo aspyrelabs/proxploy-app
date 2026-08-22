@@ -497,11 +497,10 @@ export function BellPopover() {
                   x, so a clear-all beside it would be two controls for one
                   action. */}
               {undismissed.length >= 2 && (
-                <button type="button" onClick={clearAll}
-                  className="self-end rounded-ctl border border-line bg-panel-2 px-2.5 py-1
-                             text-[11px] text-text-2 shadow-lg transition hover:bg-elev hover:text-text">
+                <Button type="button" variant="ghost" size="sm"
+                  onClick={clearAll} className="self-end shadow-lg">
                   Clear all ({undismissed.length})
-                </button>
+                </Button>
               )}
               {/* As many as fit, and no scrollbar: dismissing one is what
                   reveals the next, so the backlog drains through the x rather

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMetrics } from '../../api/hooks'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../ui/skeleton'
 import { TimeChart, type ChartAccent, type ChartUnit } from './TimeChart'
+import { segment } from '../ui/button'
 
 /** TimeChart's own `height` default. Repeated here rather than exported from
  *  there, because the placeholder has to reserve the plot's height before
@@ -56,9 +57,7 @@ export function MetricChart({
               aria-pressed={r.label === range}
               onClick={() => setRange(r.label)}
               className={`cursor-pointer rounded-ctl px-1.5 py-0.5 font-mono text-[10.5px]
-                transition ${r.label === range
-                  ? 'bg-amber-dim text-amber'
-                  : 'text-text-3 hover:text-text-2'}`}
+                ${segment(r.label === range)}`}
             >
               {r.label}
             </button>

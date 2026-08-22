@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Icon } from './ui/icon'
 import { useOptions, useRules } from '../api/firewall'
+import { quietCls } from './ui/button'
 
 /** One line in a guest's detail panel: is Proxmox filtering this guest, and
  *  how much is configured. It exists because a guest whose traffic is being
@@ -21,7 +22,7 @@ export function GuestFirewallLine({ guestType, guestId }: {
   return (
     <Link to={`/firewall/guest/${guestType}/${guestId}` as never}
       aria-label="Firewall"
-      className="flex items-center gap-1.5 text-[12.5px] text-text-3 hover:text-text">
+      className={`flex items-center gap-1.5 text-[12.5px] ${quietCls}`}>
       <Icon name="shield" size={16} />
       <span>Firewall {state}</span>
     </Link>

@@ -10,7 +10,7 @@ import { Brand } from '../components/LoginForm'
 import { AdminAccountStep } from '../components/AdminAccountStep'
 import { HostForm, type HostCreated } from '../components/HostForm'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
-import { Button } from '../components/ui/button'
+import { Button, quietCls } from '../components/ui/button'
 import { Loading } from '../components/ui/loading'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { StepRail, type RailStep } from '../components/StepRail'
@@ -229,7 +229,7 @@ export function Wizard() {
           <div key={step} className={dir === 1 ? 'pp-in-fwd' : 'pp-in-back'}>
             {step > 0 && (
               <button type="button" onClick={() => go(step - 1)}
-                className="mb-3 cursor-pointer text-[12px] text-text-3 transition hover:text-text-2">
+                className={`mb-3 cursor-pointer text-[12px] ${quietCls}`}>
                 ← Back
               </button>
             )}

@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { Button } from './ui/button'
+import { Button, quietCls } from './ui/button'
 import { useCreateRule, useGroups, useMacros, useRefs, useUpdateRule } from '../api/firewall'
 import type { Rule, RulePatch, Scope } from '../api/firewall'
 
@@ -144,7 +144,7 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
       </div>
 
       <button type="button" onClick={() => setAdvanced(a => !a)}
-        className="self-start text-[12px] text-text-3 hover:text-text">
+        className={`self-start text-[12px] ${quietCls}`}>
         {advanced ? 'Hide advanced' : 'Advanced'}
       </button>
 
