@@ -56,7 +56,7 @@ CATALOG: tuple[Service, ...] = (
         template="ntfy://{host}/{topic}",
         setup_url="https://appriseit.com/services/ntfy/",
         fields=(
-            Field("host", "Server", default="ntfy.sh",
+            Field("host", "Server", default="ntfy.sh", safe=":",
                   help="Leave as ntfy.sh unless you run your own."),
             Field("topic", "Topic", placeholder="proxploy-alerts"),
         ),
@@ -66,7 +66,7 @@ CATALOG: tuple[Service, ...] = (
         template="gotify://{host}/{token}",
         setup_url="https://appriseit.com/services/gotify/",
         fields=(
-            Field("host", "Server", placeholder="gotify.example.com"),
+            Field("host", "Server", placeholder="gotify.example.com", safe=":"),
             Field("token", "App token", secret=True,
                   help="Gotify calls this the application token."),
         ),
@@ -76,7 +76,7 @@ CATALOG: tuple[Service, ...] = (
         template="mailto://{user}:{password}@{host}/{to}",
         setup_url="https://appriseit.com/services/email/",
         fields=(
-            Field("host", "SMTP server", placeholder="smtp.example.com"),
+            Field("host", "SMTP server", placeholder="smtp.example.com", safe=":"),
             Field("user", "Username", placeholder="you@example.com"),
             Field("password", "Password", secret=True),
             Field("to", "Send to", placeholder="you@example.com", safe="/@",
@@ -122,7 +122,7 @@ CATALOG: tuple[Service, ...] = (
         template="json://{host}",
         setup_url="https://appriseit.com/services/json/",
         fields=(
-            Field("host", "Address", safe="/@", placeholder="example.com/hooks/proxploy",
+            Field("host", "Address", safe="/:@", placeholder="example.com/hooks/proxploy",
                   help="Host and path, no https:// prefix. Use Secure for TLS."),
         ),
     ),
@@ -131,7 +131,7 @@ CATALOG: tuple[Service, ...] = (
         template="matrix://{user}:{password}@{host}/{room}",
         setup_url="https://appriseit.com/services/matrix/",
         fields=(
-            Field("host", "Homeserver", placeholder="matrix.org"),
+            Field("host", "Homeserver", placeholder="matrix.org", safe=":"),
             Field("user", "Username"),
             Field("password", "Password", secret=True),
             Field("room", "Room", placeholder="#proxploy:matrix.org", safe="/@"),
@@ -142,7 +142,7 @@ CATALOG: tuple[Service, ...] = (
         template="mmost://{host}/{token}",
         setup_url="https://appriseit.com/services/mattermost/",
         fields=(
-            Field("host", "Server", placeholder="mattermost.example.com"),
+            Field("host", "Server", placeholder="mattermost.example.com", safe=":"),
             Field("token", "Webhook token", secret=True),
         ),
     ),
@@ -151,7 +151,7 @@ CATALOG: tuple[Service, ...] = (
         template="rocket://{user}:{password}@{host}/{channel}",
         setup_url="https://appriseit.com/services/rocketchat/",
         fields=(
-            Field("host", "Server", placeholder="rocketchat.example.com"),
+            Field("host", "Server", placeholder="rocketchat.example.com", safe=":"),
             Field("user", "Username"),
             Field("password", "Password", secret=True),
             Field("channel", "Channel", placeholder="#alerts", safe="/@"),
@@ -180,7 +180,8 @@ CATALOG: tuple[Service, ...] = (
         template="signal://{host}/{from_phone}/{to}",
         setup_url="https://appriseit.com/services/signal/",
         fields=(
-            Field("host", "Signal API server", placeholder="signal.example.com",
+            Field("host", "Signal API server", safe=":",
+                  placeholder="signal.example.com",
                   help="Proxploy talks to signal-cli-rest-api, not to Signal directly."),
             Field("from_phone", "From number", placeholder="+15551234567"),
             Field("to", "Send to", required=False, placeholder="+15559876543", safe="/"),
@@ -191,7 +192,8 @@ CATALOG: tuple[Service, ...] = (
         template="workflow://{host}/{workflow}/{signature}",
         setup_url="https://appriseit.com/services/workflows/",
         fields=(
-            Field("host", "Host", placeholder="prod-00.westus.logic.azure.com",
+            Field("host", "Host", safe=":",
+                  placeholder="prod-00.westus.logic.azure.com",
                   help="The three parts of the Power Automate workflow URL."),
             Field("workflow", "Workflow ID"),
             Field("signature", "Signature", secret=True),
@@ -234,7 +236,7 @@ CATALOG: tuple[Service, ...] = (
         template="apprise://{host}/{token}",
         setup_url="https://appriseit.com/services/apprise_api/",
         fields=(
-            Field("host", "Server", placeholder="apprise.example.com"),
+            Field("host", "Server", placeholder="apprise.example.com", safe=":"),
             Field("token", "Config ID", secret=True),
         ),
     ),

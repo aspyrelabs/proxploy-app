@@ -12,10 +12,12 @@ from proxploy.services.notification_catalog import BY_KIND, CATALOG, build_url
 
 # One realistic value per field. Several plugins validate shape (Twilio wants a
 # 34-character SID, the phone fields must parse as numbers), so these are not
-# placeholder gibberish.
+# placeholder gibberish. Hosts carry an explicit ":port" on purpose: encoding
+# that colon folds the port into the hostname and Apprise rejects the URL
+# outright, which is what shipped until the end-to-end test caught it.
 SAMPLES: dict[str, dict] = {
     "ntfy": {"host": "ntfy.sh", "topic": "proxploy-alerts"},
-    "gotify": {"host": "gotify.example.com", "token": "AbCdEfGhIjKlMnO"},
+    "gotify": {"host": "gotify.example.com:8080", "token": "AbCdEfGhIjKlMnO"},
     "email": {"host": "smtp.example.com", "user": "alerts@example.com",
               "password": "s3cr3t", "to": "ops@example.com"},
     "telegram": {"bot_token": "123456789:AAHrLHtM3vJqPpAaBbCcDdEeFfGgHhIiJjK",
@@ -24,16 +26,16 @@ SAMPLES: dict[str, dict] = {
               "token_c": "AbCdEfGhIjKlMnOpQrStUvWx", "channel": "#alerts"},
     "discord": {"webhook_id": "1234567890123456789",
                 "webhook_token": "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
-    "webhook": {"host": "example.com/hooks/proxploy"},
-    "matrix": {"host": "matrix.example.com", "user": "proxploy",
+    "webhook": {"host": "127.0.0.1:8123/hooks/proxploy"},
+    "matrix": {"host": "matrix.example.com:8448", "user": "proxploy",
                "password": "s3cr3t", "room": "#alerts:matrix.example.com"},
-    "mattermost": {"host": "mattermost.example.com", "token": "abcdefghijklmnopqrstuvwxyz"},
+    "mattermost": {"host": "mattermost.example.com:8065", "token": "abcdefghijklmnopqrstuvwxyz"},
     "rocketchat": {"host": "rocketchat.example.com", "user": "proxploy",
                    "password": "s3cr3t", "channel": "alerts"},
     "pushover": {"user_key": "uQiRzpo4DXghDmr9QzzfQu27cmVRsG",
                  "token": "aTokenThatIsThirtyCharsLong123"},
     "pushbullet": {"accesstoken": "o.AbCdEfGhIjKlMnOpQrStUvWxYz01234"},
-    "signal": {"host": "signal.example.com", "from_phone": "+15551234567",
+    "signal": {"host": "signal.example.com:8080", "from_phone": "+15551234567",
                "to": "+15559876543"},
     "msteams": {"host": "prod-00.westus.logic.azure.com",
                 "workflow": "abcdef1234567890", "signature": "AbCdEf1234567890"},
