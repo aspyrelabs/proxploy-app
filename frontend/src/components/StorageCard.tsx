@@ -8,6 +8,45 @@ import { DANGER_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 // decoration.
 const DANGER_PCT = 80
 
+/**
+ * The glyph on the tile: a drive for a local datastore, a networked one for a
+ * shared pool.
+ *
+ * Drawn as a CSS mask rather than an <img>, which is what lets it take the
+ * tile's own colour. The two files in public/ are flat black, so an <img>
+ * would paint black on violet whatever the theme did; masked, the shape comes
+ * from the file and the colour from `bg-current`, which resolves to the
+ * tile's existing text colour. No edit to the artwork, and nothing new to
+ * keep in sync if it is replaced.
+ *
+ * It replaces the first two letters of the Proxmox type ("DI", "LV", "NF"),
+ * which needed decoding and did not say the one thing worth knowing at a
+ * glance. The precise type is still spelled out in full on the line below.
+ */
+function StorageGlyph({ shared }: { shared: boolean }) {
+  const src = shared ? "/network-drive.svg" : "/hard-drive.svg";
+  const mask = {
+    maskImage: `url(${src})`,
+    WebkitMaskImage: `url(${src})`,
+    maskSize: "contain",
+    WebkitMaskSize: "contain",
+    maskRepeat: "no-repeat",
+    WebkitMaskRepeat: "no-repeat",
+    maskPosition: "center",
+    WebkitMaskPosition: "center",
+  } as const;
+  return (
+    <span
+      role="img"
+      // Says out loud what the shape means, and what the two letters never
+      // did: whether this datastore is one machine's or the cluster's.
+      aria-label={shared ? "Shared storage" : "Local storage"}
+      className="block h-5 w-5 bg-current"
+      style={mask}
+    />
+  );
+}
+
 export function StorageCard({ row, onOpen, showNode = true }:
   { row: StorageRow; onOpen: (row: StorageRow) => void
     /** False in the Storage page's shared group, where the node on the row is
@@ -23,10 +62,10 @@ export function StorageCard({ row, onOpen, showNode = true }:
     >
       <div className="flex items-center gap-3">
         <div
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-tile font-mono text-[11px] font-semibold text-[#1b1230]"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-tile text-[#1b1230]"
           style={{ background: STORAGE_GRADIENT }}
         >
-          {(row.type ?? '??').slice(0, 2).toUpperCase()}
+          <StorageGlyph shared={row.shared} />
         </div>
         <div className="min-w-0">
           <div className="truncate font-mono text-[14px] text-text">{row.storage}</div>

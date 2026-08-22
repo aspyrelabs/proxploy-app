@@ -180,3 +180,37 @@ describe('StoragePage', () => {
     expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument()
   })
 })
+
+describe('the datastore glyph', () => {
+  it('shows a drive for local and a networked one for shared', async () => {
+    withQuery(<StoragePage />)
+    await screen.findByText('local')
+    const local = screen.getAllByRole('img', { name: 'Local storage' })
+    const shared = screen.getAllByRole('img', { name: 'Shared storage' })
+    expect(local.length).toBeGreaterThan(0)
+    expect(shared.length).toBeGreaterThan(0)
+    expect(local[0].getAttribute('style')).toContain('hard-drive.svg')
+    expect(shared[0].getAttribute('style')).toContain('network-drive.svg')
+  })
+
+  it('no longer asks anyone to decode two letters', async () => {
+    // "DI", "LV", "NF": the first two characters of the Proxmox type, which
+    // needed decoding and did not say whether the datastore was one machine's
+    // or the cluster's. The full type is still on the line below.
+    withQuery(<StoragePage />)
+    await screen.findByText('local')
+    for (const letters of ['DI', 'LV', 'NF', 'PB']) {
+      expect(screen.queryByText(letters)).not.toBeInTheDocument()
+    }
+  })
+
+  it('takes its colour from the tile rather than the file', async () => {
+    // The artwork is flat black; an <img> would paint black on violet. The
+    // mask means the shape comes from the file and the colour from the tile.
+    withQuery(<StoragePage />)
+    await screen.findByText('local')
+    const glyph = screen.getAllByRole('img', { name: 'Local storage' })[0]
+    expect(glyph.className).toContain('bg-current')
+    expect(glyph.getAttribute('style')).toContain('mask-image')
+  })
+})
