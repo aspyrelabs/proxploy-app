@@ -350,3 +350,76 @@ def test_a_thing_with_no_page_gets_the_message_without_a_link(
     body = _Inbox.received[0]["message"]
     assert "disk full" in body
     assert "Open in Proxploy" not in body
+
+
+# --- Every type, actually delivered -----------------------------------------
+
+def test_every_registry_key_can_be_produced_by_something(inbox):
+    """No key without an emitter. `app.updated` was tickable in the old form
+    for the life of the feature and nothing could ever produce it."""
+    import importlib
+    import pkgutil
+
+    import proxploy
+    from proxploy.jobs import HANDLERS, TERMINAL
+    from proxploy.services.notification_types import BY_KEY, type_for_job
+
+    for mod in pkgutil.walk_packages(proxploy.__path__, "proxploy."):
+        try:
+            importlib.import_module(mod.name)
+        except Exception:  # noqa: BLE001
+            pass
+
+    producible = {type_for_job(k, s) for k in HANDLERS for s in TERMINAL}
+    # The three with no job behind them, emitted by services/alerts.py and
+    # services/audit.py.
+    producible |= {"alert.fired", "alert.resolved", "audit.error"}
+    assert set(BY_KEY) == producible
+
+
+def test_every_notification_type_reaches_a_channel(tmp_path, csrf_header,
+                                                   bootstrap_admin, inbox):
+    """One sweep over all nineteen, through real Apprise to a real socket.
+
+    Delivery had been proven for eight of them; the rest were covered only by
+    the mapping test, which says a key is correct and nothing about whether
+    anything comes out the other end.
+    """
+    from proxploy.services.notification_prefs import set_overrides
+    from proxploy.services.notification_types import TYPES
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+        # Housekeeping ships off, so turn everything on for the sweep.
+        with app.state.sessionmaker() as db:
+            set_overrides(db, {t.key: True for t in TYPES})
+
+        for t in TYPES:
+            assert notifier.notify(app, t.key, f"Proxploy: {t.label}",
+                                   "- **Job:** #1") == 1, t.key
+
+    assert len(_Inbox.received) == len(TYPES) == 19
+    titles = [m["title"] for m in _Inbox.received]
+    for t in TYPES:
+        assert f"Proxploy: {t.label}" in titles
+    # And not one of them carries a backend key where a person will read it.
+    assert not [x for x in titles if "." in x.replace("Proxploy: ", "")]
+
+
+def test_the_two_that_ship_off_stay_off_until_asked(tmp_path, csrf_header,
+                                                    bootstrap_admin, inbox):
+    from proxploy.services.notification_types import TYPES
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+        for t in TYPES:
+            reached = notifier.notify(app, t.key, "t", "b")
+            assert reached == (0 if t.key.startswith("housekeeping.") else 1), t.key
+
+    assert len(_Inbox.received) == 17
