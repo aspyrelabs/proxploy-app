@@ -19,6 +19,11 @@ export type KindField = {
   pattern: string
   /** What to show when the rule refuses. Never the pattern itself. */
   hint: string
+  /** A realistic value for the (i) beside the label. Falls back to the
+   *  placeholder server-side, so it is never empty. It matters most on secret
+   *  fields, where a password box shows no placeholder at all and "what am I
+   *  meant to paste here" has nowhere else to be answered. */
+  example: string
 }
 
 /** No guided field takes a whole URL: each one is a single component the
@@ -62,5 +67,26 @@ export function useNotificationKinds(enabled = true) {
     queryFn: () => api<NotificationKind[]>('/notifications/kinds'),
     staleTime: Infinity,
     enabled,
+  })
+}
+
+/** What a saved channel can tell an edit form about itself.
+ *
+ *  Secret VALUES are never in here, by design: `secrets_set` names the keys
+ *  that have one so the form can say "leave blank to keep" rather than showing
+ *  dots it could not honour. `known` is false for a channel added by pasting a
+ *  URL and for any row written before the values were kept.
+ */
+export type ChannelFields = {
+  kind: string
+  known: boolean
+  fields: Record<string, string>
+  secrets_set: string[]
+}
+
+export function useChannelFields(id: number) {
+  return useQuery({
+    queryKey: ['notifications', 'channels', id, 'fields'],
+    queryFn: () => api<ChannelFields>(`/notifications/channels/${id}/fields`),
   })
 }

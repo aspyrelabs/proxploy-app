@@ -32,6 +32,11 @@ class Field:
     placeholder: str = ""
     default: str = ""
     help: str = ""
+    # A realistic value, shown in the (i) beside the label. Defaults to the
+    # placeholder, because for a plain text field the placeholder already IS
+    # the example; spelled out separately only where there is no placeholder
+    # to borrow, which is every secret field, since a password box shows none.
+    example: str = ""
     # A rule the value must match, in a syntax both Python's re and the
     # browser's RegExp accept, so the server gate and the form's live feedback
     # are literally the same string. Empty means no rule: a password is a
@@ -106,7 +111,7 @@ CATALOG: tuple[Service, ...] = (
         template="ntfy://{host}/{topic}",
         setup_url="https://appriseit.com/services/ntfy/",
         fields=(
-            Field("host", "Server", default="ntfy.sh", safe=":",
+            Field("host", "Server", default="ntfy.sh", safe=":", example="ntfy.sh",
                   pattern=_HOST, hint=_HOST_HINT,
                   help="Leave as ntfy.sh unless you run your own."),
             Field("topic", "Topic", placeholder="proxploy-alerts",
@@ -121,7 +126,7 @@ CATALOG: tuple[Service, ...] = (
         fields=(
             Field("host", "Server", placeholder="gotify.example.com", safe=":",
                   pattern=_HOST, hint=_HOST_HINT),
-            Field("token", "App token", secret=True,
+            Field("token", "App token", example="AwQ1nT9zLPmExampleKey", secret=True,
                   pattern=r"^[A-Za-z0-9._-]{8,}$",
                   hint="At least 8 characters, no spaces.",
                   help="Gotify calls this the application token."),
@@ -136,7 +141,7 @@ CATALOG: tuple[Service, ...] = (
                   pattern=_HOST, hint=_HOST_HINT),
             Field("user", "Username", placeholder="you@example.com",
                   pattern=r"^\S+$", hint="No spaces."),
-            Field("password", "Password", secret=True),
+            Field("password", "Password", example="an app password, not your login", secret=True),
             Field("to", "Send to", placeholder="you@example.com", safe="/@",
                   pattern=_EMAILS, hint=_EMAILS_HINT,
                   help="Separate several addresses with a comma."),
@@ -147,7 +152,7 @@ CATALOG: tuple[Service, ...] = (
         template="tgram://{bot_token}/{chat_id}",
         setup_url="https://appriseit.com/services/telegram/",
         fields=(
-            Field("bot_token", "Bot token", secret=True,
+            Field("bot_token", "Bot token", example="123456789:AAHrLHtM3vJqPpAaBbCcDdEeFfGgHhIiJjK", secret=True,
                   pattern=r"^[0-9]+:[A-Za-z0-9_-]+$",
                   hint="Digits, a colon, then the key, exactly as BotFather sent it.",
                   help="What BotFather gave you when you created the bot."),
@@ -162,12 +167,12 @@ CATALOG: tuple[Service, ...] = (
         template="slack://{token_a}/{token_b}/{token_c}/{channel}",
         setup_url="https://appriseit.com/services/slack/",
         fields=(
-            Field("token_a", "Token A", secret=True, placeholder="T0000000000",
+            Field("token_a", "Token A", example="T0000000000", secret=True, placeholder="T0000000000",
                   pattern=r"^[A-Za-z0-9]+$", hint="Letters and numbers only.",
                   help="The three parts of your hooks.slack.com/services/ URL."),
-            Field("token_b", "Token B", secret=True, placeholder="B0000000000",
+            Field("token_b", "Token B", example="B0000000000", secret=True, placeholder="B0000000000",
                   pattern=r"^[A-Za-z0-9]+$", hint="Letters and numbers only."),
-            Field("token_c", "Token C", secret=True,
+            Field("token_c", "Token C", example="AbCdEfGhIjKlMnOpQrStUvWx", secret=True,
                   pattern=r"^[A-Za-z0-9]+$", hint="Letters and numbers only."),
             Field("channel", "Channel", required=False, placeholder="#alerts",
                   pattern=r"^#?[A-Za-z0-9_-]+$",
@@ -179,12 +184,12 @@ CATALOG: tuple[Service, ...] = (
         template="discord://{webhook_id}/{webhook_token}",
         setup_url="https://appriseit.com/services/discord/",
         fields=(
-            Field("webhook_id", "Webhook ID",
+            Field("webhook_id", "Webhook ID", example="1234567890123456789",
                   pattern=r"^[0-9]{15,25}$",
                   hint="The long number from the webhook URL, digits only.",
                   help="From Channel Settings, Integrations, Webhooks: the two "
                        "parts after /api/webhooks/ in the URL."),
-            Field("webhook_token", "Webhook token", secret=True,
+            Field("webhook_token", "Webhook token", example="AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", secret=True,
                   pattern=r"^[A-Za-z0-9_-]{20,}$",
                   hint="The long part after the last slash of the webhook URL."),
         ),
@@ -207,8 +212,8 @@ CATALOG: tuple[Service, ...] = (
         fields=(
             Field("host", "Homeserver", placeholder="matrix.org", safe=":",
                   pattern=_HOST, hint=_HOST_HINT),
-            Field("user", "Username"),
-            Field("password", "Password", secret=True),
+            Field("user", "Username", example="proxploy"),
+            Field("password", "Password", example="the bot account password", secret=True),
             Field("room", "Room", placeholder="#proxploy:matrix.org", safe="/@",
                   pattern=r"^[#!][^\s]+$",
                   hint="A room alias starting with # or a room id starting with !."),
@@ -221,7 +226,7 @@ CATALOG: tuple[Service, ...] = (
         fields=(
             Field("host", "Server", placeholder="mattermost.example.com", safe=":",
                   pattern=_HOST, hint=_HOST_HINT),
-            Field("token", "Webhook token", secret=True,
+            Field("token", "Webhook token", example="abcdefghijklmnopqrstuvwxyz", secret=True,
                   pattern=r"^[A-Za-z0-9]{20,}$",
                   hint="Letters and numbers, at least 20 characters."),
         ),
@@ -233,8 +238,8 @@ CATALOG: tuple[Service, ...] = (
         fields=(
             Field("host", "Server", placeholder="rocketchat.example.com", safe=":",
                   pattern=_HOST, hint=_HOST_HINT),
-            Field("user", "Username"),
-            Field("password", "Password", secret=True),
+            Field("user", "Username", example="proxploy-bot"),
+            Field("password", "Password", example="the bot account password", secret=True),
             Field("channel", "Channel", placeholder="#alerts", safe="/@",
                   pattern=r"^#?[A-Za-z0-9_-]+$",
                   hint="A channel name, with or without the leading hash."),
@@ -245,11 +250,11 @@ CATALOG: tuple[Service, ...] = (
         template="pover://{user_key}@{token}",
         setup_url="https://appriseit.com/services/pushover/",
         fields=(
-            Field("user_key", "User key", secret=True,
+            Field("user_key", "User key", example="uQiRzpo4DXghDmr9QzzfQu27cmVRsG", secret=True,
                   pattern=r"^[A-Za-z0-9]{30}$",
                   hint="Exactly 30 letters and numbers.",
                   help="Shown on your Pushover dashboard."),
-            Field("token", "Application token", secret=True,
+            Field("token", "Application token", example="aTokenThatIsThirtyCharsLong123", secret=True,
                   pattern=r"^[A-Za-z0-9]{30}$",
                   hint="Exactly 30 letters and numbers."),
         ),
@@ -259,7 +264,7 @@ CATALOG: tuple[Service, ...] = (
         template="pbul://{accesstoken}",
         setup_url="https://appriseit.com/services/pushbullet/",
         fields=(
-            Field("accesstoken", "Access token", secret=True,
+            Field("accesstoken", "Access token", example="o.AbCdEfGhIjKlMnOpQrStUvWxYz0123", secret=True,
                   pattern=r"^[A-Za-z0-9._-]{20,}$",
                   hint="At least 20 characters, no spaces."),
         ),
@@ -288,9 +293,9 @@ CATALOG: tuple[Service, ...] = (
                   placeholder="prod-00.westus.logic.azure.com",
                   pattern=_HOST, hint=_HOST_HINT,
                   help="The three parts of the Power Automate workflow URL."),
-            Field("workflow", "Workflow ID", pattern=r"^[A-Za-z0-9_-]+$",
+            Field("workflow", "Workflow ID", example="abcdef1234567890", pattern=r"^[A-Za-z0-9_-]+$",
                   hint="Letters, numbers, dashes and underscores only."),
-            Field("signature", "Signature", secret=True,
+            Field("signature", "Signature", example="AbCdEf1234567890", secret=True,
                   pattern=r"^[A-Za-z0-9_-]+$",
                   hint="Letters, numbers, dashes and underscores only."),
         ),
@@ -304,7 +309,7 @@ CATALOG: tuple[Service, ...] = (
                   placeholder="AC00000000000000000000000000000000",
                   pattern=r"^AC[a-fA-F0-9]{32}$",
                   hint="Starts with AC, then 32 hex characters."),
-            Field("auth_token", "Auth token", secret=True,
+            Field("auth_token", "Auth token", example="32 letters and numbers from the console", secret=True,
                   pattern=r"^[a-zA-Z0-9]{32}$",
                   hint="32 letters and numbers."),
             Field("from_phone", "From number", placeholder="+15551234567",
@@ -318,9 +323,9 @@ CATALOG: tuple[Service, ...] = (
         template="whatsapp://{token}@{from_phone_id}/{to}",
         setup_url="https://appriseit.com/services/whatsapp/",
         fields=(
-            Field("token", "Access token", secret=True,
+            Field("token", "Access token", example="EAABxxxxxxxxxxxxxxxxxxxxxxxxxxxx", secret=True,
                   pattern=r"^\S{20,}$", hint="At least 20 characters, no spaces."),
-            Field("from_phone_id", "From phone number ID",
+            Field("from_phone_id", "From phone number ID", example="123456789012345",
                   pattern=r"^[0-9]+$", hint="Digits only.",
                   help="The numeric ID from the Meta app dashboard, not the number."),
             Field("to", "Send to", placeholder="+15559876543", safe="/,",
@@ -338,7 +343,7 @@ CATALOG: tuple[Service, ...] = (
             Field("organization", "Organization", placeholder="your-org",
                   pattern=r"^[A-Za-z0-9_-]{1,32}$",
                   hint="Letters, numbers, dashes and underscores, up to 32 characters."),
-            Field("token", "Bot token", secret=True,
+            Field("token", "Bot token", example="AbCdEfGhIjKlMnOpQrStUvWxYz012345", secret=True,
                   pattern=r"^[A-Za-z0-9]{32}$", hint="32 letters and numbers."),
         ),
     ),
@@ -349,7 +354,7 @@ CATALOG: tuple[Service, ...] = (
         fields=(
             Field("host", "Server", placeholder="apprise.example.com", safe=":",
                   pattern=_HOST, hint=_HOST_HINT),
-            Field("token", "Config ID", secret=True,
+            Field("token", "Config ID", example="proxploy", secret=True,
                   pattern=r"^[A-Za-z0-9_-]{1,128}$",
                   hint="Letters, numbers, dashes and underscores."),
         ),
@@ -362,10 +367,10 @@ CATALOG: tuple[Service, ...] = (
             Field("from_email", "From address", safe="@",
                   placeholder="alerts@example.com",
                   pattern=_EMAIL, hint=_EMAIL_HINT),
-            Field("access_key_id", "Access key ID", secret=True,
+            Field("access_key_id", "Access key ID", example="AKIAIOSFODNN7EXAMPLE", secret=True,
                   pattern=r"^[A-Z0-9]{16,128}$",
                   hint="Upper case letters and numbers, at least 16 characters."),
-            Field("secret_access_key", "Secret access key", secret=True,
+            Field("secret_access_key", "Secret access key", example="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", secret=True,
                   pattern=r"^\S{20,}$", hint="At least 20 characters, no spaces."),
             Field("region", "Region", placeholder="us-east-1",
                   pattern=r"^[a-z]{2}-[a-z]+-[0-9]$",
@@ -379,7 +384,7 @@ CATALOG: tuple[Service, ...] = (
         template="sendgrid://{apikey}:{from_email}/{to}",
         setup_url="https://appriseit.com/services/sendgrid/",
         fields=(
-            Field("apikey", "API key", secret=True,
+            Field("apikey", "API key", example="SG.AbCdEfGhIjKlMnOpQrStUv", secret=True,
                   pattern=r"^SG\.\S+$",
                   hint="A SendGrid key, which starts with SG. and has no spaces."),
             Field("from_email", "From address", safe="@",
@@ -405,6 +410,7 @@ def public_catalog() -> list[dict]:
          "fields": [{"key": f.key, "label": f.label, "required": f.required,
                      "secret": f.secret, "placeholder": f.placeholder,
                      "default": f.default, "help": f.help,
+                     "example": f.example or f.placeholder,
                      # The client gets the same rule string the server gates
                      # on, so the two can never drift into disagreeing about
                      # what is acceptable.
@@ -412,6 +418,12 @@ def public_catalog() -> list[dict]:
                     for f in s.fields]}
         for s in CATALOG
     ]
+
+
+def secret_keys(kind: str) -> set[str]:
+    """Which of a kind's fields must never travel back to a browser."""
+    service = BY_KIND.get(kind)
+    return {f.key for f in service.fields if f.secret} if service else set()
 
 
 def build_url(kind: str, values: dict) -> str:

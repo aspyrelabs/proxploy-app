@@ -483,3 +483,136 @@ def test_an_edit_records_that_the_credential_was_rotated(
     with app.state.sessionmaker() as db:
         blob = " ".join(str(a.params) for a in db.query(AuditEvent).all())
     assert "ntfy.sh" not in blob
+
+
+# --- Prefilling an edit -----------------------------------------------------
+
+def test_a_saved_channel_gives_its_details_back_except_the_secrets(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Correcting one mistyped password should not mean re-entering the server
+    and the topic as well."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "G", "kind": "gotify",
+                           "fields": {"host": "gotify.example.com:8080",
+                                      "token": "AbCdEfGhIjKlMnO"}},
+                     headers=csrf_header(c)).json()["id"]
+
+        r = c.get(f"/api/v1/notifications/channels/{cid}/fields")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["known"] is True
+        assert body["kind"] == "gotify"
+        assert body["fields"] == {"host": "gotify.example.com:8080"}
+        assert body["secrets_set"] == ["token"]
+        # The secret is reported as set and never as a value, anywhere.
+        assert "AbCdEfGhIjKlMnO" not in r.text
+
+
+def test_a_blank_secret_on_save_keeps_the_stored_one(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The browser is never sent a secret, so it cannot send one back. Without
+    the merge, correcting a hostname would silently blank the token beside it
+    and the channel would stop delivering."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "G", "kind": "gotify",
+                           "fields": {"host": "gotify.example.com:8080",
+                                      "token": "AbCdEfGhIjKlMnO"}},
+                     headers=csrf_header(c)).json()["id"]
+
+        r = c.patch(f"/api/v1/notifications/channels/{cid}",
+                    json={"name": "G", "kind": "gotify",
+                          "fields": {"host": "gotify.example.com:9090", "token": ""}},
+                    headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        with app.state.sessionmaker() as db:
+            row = db.get(NotificationChannel, cid)
+        url = app.state.secretstore.decrypt(row.url_enc).decode()
+        assert url == "gotify://gotify.example.com:9090/AbCdEfGhIjKlMnO"
+
+
+def test_typing_a_new_secret_replaces_the_old_one(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "G", "kind": "gotify",
+                           "fields": {"host": "gotify.example.com",
+                                      "token": "AbCdEfGhIjKlMnO"}},
+                     headers=csrf_header(c)).json()["id"]
+        c.patch(f"/api/v1/notifications/channels/{cid}",
+                json={"name": "G", "kind": "gotify",
+                      "fields": {"host": "gotify.example.com",
+                                 "token": "ZzZzZzZzZzZzZzZ"}},
+                headers=csrf_header(c))
+    with app.state.sessionmaker() as db:
+        row = db.get(NotificationChannel, cid)
+    assert "ZzZzZzZzZzZzZzZ" in app.state.secretstore.decrypt(row.url_enc).decode()
+
+
+def test_changing_service_does_not_carry_the_old_secret_over(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The merge is keyed on the kind being unchanged. Moving a channel from
+    Gotify to ntfy must not smuggle the Gotify token into the new URL."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "G", "kind": "gotify",
+                           "fields": {"host": "gotify.example.com",
+                                      "token": "AbCdEfGhIjKlMnO"}},
+                     headers=csrf_header(c)).json()["id"]
+        c.patch(f"/api/v1/notifications/channels/{cid}",
+                json={"name": "G", "kind": "ntfy",
+                      "fields": {"host": "ntfy.sh", "topic": "moved"}},
+                headers=csrf_header(c))
+    with app.state.sessionmaker() as db:
+        row = db.get(NotificationChannel, cid)
+    url = app.state.secretstore.decrypt(row.url_enc).decode()
+    assert url == "ntfy://ntfy.sh/moved"
+    assert "AbCdEfGhIjKlMnO" not in url
+
+
+def test_a_pasted_url_channel_says_it_has_nothing_to_prefill(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Rather than presenting an empty form as if it were the stored truth."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "Raw", "url": "sinch://a/b/c/+15551234567"},
+                     headers=csrf_header(c)).json()["id"]
+        body = c.get(f"/api/v1/notifications/channels/{cid}/fields").json()
+    assert body["known"] is False
+    assert body["fields"] == {}
+
+
+def test_the_stored_fields_are_encrypted_at_rest(tmp_path, csrf_header, bootstrap_admin):
+    """Same discipline as url_enc: the column is a blob, not readable JSON."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        c.post("/api/v1/notifications/channels",
+               json={"name": "G", "kind": "gotify",
+                     "fields": {"host": "gotify.example.com",
+                                "token": "AbCdEfGhIjKlMnO"}},
+               headers=csrf_header(c))
+    with app.state.sessionmaker() as db:
+        blob = db.query(NotificationChannel).one().fields_enc
+    assert blob and b"AbCdEfGhIjKlMnO" not in blob and b"gotify.example.com" not in blob

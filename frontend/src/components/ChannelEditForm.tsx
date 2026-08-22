@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { useNotificationKinds } from '../api/notificationKinds'
+import { useChannelFields, useNotificationKinds } from '../api/notificationKinds'
 import type { NotificationKind } from '../api/notificationKinds'
 import type { ChannelRow } from './ChannelForm'
 import { Button } from './ui/button'
@@ -28,6 +28,7 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
   onCancel: () => void
 }) {
   const kinds = useNotificationKinds()
+  const saved = useChannelFields(channel.id)
   const [name, setName] = useState(channel.name)
   const [replacing, setReplacing] = useState(false)
   const [kind, setKind] = useState(channel.kind)
@@ -37,12 +38,17 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
   const service: NotificationKind | undefined =
     kinds.data?.find((k) => k.kind === kind)
 
-  // Defaults are folded in at render rather than seeded into state on click.
-  // The Replace button exists before the kinds query has resolved, so seeding
-  // on click races the fetch and leaves a field that ships with a default
-  // (ntfy's ntfy.sh) blank. Switching service still clears what was typed, so
-  // a Gotify token cannot ride along into an ntfy channel.
-  const values = { ...defaultsFor(service), ...fields }
+  // What the channel already had, when the service has not been switched
+  // away from. Correcting one mistyped password should not mean re-entering
+  // the server and the topic as well. Secrets are absent from `saved` by
+  // design and stay blank; the server keeps the stored one for any secret
+  // sent empty.
+  const prefill = kind === channel.kind ? (saved.data?.fields ?? {}) : {}
+  const secretsSet = kind === channel.kind ? (saved.data?.secrets_set ?? []) : []
+  // Folded in at render rather than seeded into state on click: the Replace
+  // button exists before either query has resolved, so seeding on click races
+  // the fetch and leaves a field that ships with a default blank.
+  const values = { ...defaultsFor(service), ...prefill, ...fields }
 
   const switchService = (next: string) => {
     setKind(next)
@@ -66,7 +72,7 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
 
   const errors = replacing ? fieldErrors(service, values) : {}
   const ready = name && Object.keys(errors).length === 0
-    && (!replacing || allRequiredFilled(service, values))
+    && (!replacing || allRequiredFilled(service, values, secretsSet))
 
   return (
     <div className="space-y-3">
@@ -79,7 +85,9 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
       {!replacing ? (
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-text-3">
-            Credentials are stored and cannot be shown again.
+            {saved.data?.known === false
+              ? 'This channel was added before Proxploy kept its details, so replacing them means entering them all again.'
+              : 'Its details are saved. Replacing lets you correct any of them, and anything secret stays as it is unless you type a new one.'}
           </span>
           <Button variant="ghost" onClick={() => setReplacing(true)}>
             Replace credentials
@@ -101,7 +109,7 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
           </div>
           {service && (
             <KindFields service={service} values={values} errors={errors}
-                        idPrefix="ed"
+                        idPrefix="ed" keepBlank={secretsSet}
                         onChange={(k, v) => setFields((p) => ({ ...p, [k]: v }))} />
           )}
         </>

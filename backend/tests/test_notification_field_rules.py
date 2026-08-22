@@ -187,3 +187,25 @@ def test_several_phone_numbers_do_the_same():
     ap = apprise.Apprise()
     assert ap.add(url)
     assert [t[1] for t in ap[0].targets] == ["+15559876543", "+15550001111"]
+
+
+def test_every_field_carries_an_example():
+    """A password box shows no placeholder, so a secret field has nothing to
+    borrow and needs one spelled out. Those are exactly the fields where
+    "what am I even meant to paste here" bites hardest."""
+    from proxploy.services.notification_catalog import public_catalog
+
+    for svc in public_catalog():
+        for f in svc["fields"]:
+            assert f["example"], f"{svc['kind']}.{f['key']} has no example"
+
+
+def test_no_example_is_a_real_credential_shape_we_would_regret():
+    """Examples are shown in the UI. None of them may look like something an
+    operator could mistake for a working value they should keep."""
+    from proxploy.services.notification_catalog import public_catalog
+
+    for svc in public_catalog():
+        for f in svc["fields"]:
+            assert "proxploy.io" not in f["example"]
+            assert "@aspyrelabs" not in f["example"]

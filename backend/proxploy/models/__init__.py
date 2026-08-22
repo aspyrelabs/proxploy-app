@@ -660,6 +660,12 @@ class NotificationChannel(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str | None] = mapped_column(Text)
     url_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # The individual values the guided picker collected, as encrypted JSON, so
+    # an edit can prefill instead of demanding the whole lot again to correct
+    # one mistyped password. No new exposure: url_enc already carries every one
+    # of these under the same key. NULL for a channel added by pasting a URL,
+    # and for any row written before this column existed.
+    fields_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     key_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     events: Mapped[list] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

@@ -5,13 +5,16 @@ not in a response, not in an audit row, not in an error message.
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import NotificationChannel, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.notification_catalog import build_url, public_catalog
+from proxploy.services.notification_catalog import (
+    build_url, public_catalog, secret_keys)
 from proxploy.services.notification_prefs import effective, set_overrides
 from proxploy.services.notification_types import BY_KEY, TYPES
 from proxploy.services.notifier import kind_for, parses, send_one
@@ -69,6 +72,33 @@ def _require_url(url: str) -> str:
     if "://" not in url:
         raise HTTPException(422, "url must be an Apprise URL, e.g. ntfy://host/topic")
     return url
+
+
+def _store_fields(request: Request, row: NotificationChannel,
+                  kind: str | None, fields: dict | None) -> None:
+    """Keep the values the picker collected, so an edit can prefill them.
+
+    No new exposure: url_enc already carries every one of these under the same
+    key. Cleared for a pasted URL, because there are no fields behind it and a
+    stale set would prefill an edit form with someone else's old answers.
+    """
+    if kind is None:
+        row.fields_enc = None
+        return
+    blob, _ver = request.app.state.secretstore.encrypt(
+        json.dumps(fields or {}).encode())
+    row.fields_enc = blob
+
+
+def _stored_fields(request: Request, row: NotificationChannel) -> dict:
+    """What the picker collected last time, or {} when nothing was kept (a
+    pasted URL, or a row written before the column existed)."""
+    if not row.fields_enc:
+        return {}
+    try:
+        return json.loads(request.app.state.secretstore.decrypt(row.fields_enc))
+    except Exception:  # noqa: BLE001  (an unreadable blob is an empty form)
+        return {}
 
 
 def _resolve_url(body: ChannelIn | ChannelPatch) -> str:
@@ -155,6 +185,7 @@ def create_channel(request: Request, body: ChannelIn, db=Depends(get_db),
     row = NotificationChannel(name=body.name, kind=kind_for(url),
                               url_enc=blob, key_version=ver,
                               events=body.events or [], enabled=body.enabled)
+    _store_fields(request, row, body.kind, body.fields)
     db.add(row)
     db.commit()
     # params carries the label only: the URL is a secret and never enters audit.
@@ -180,12 +211,24 @@ def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
     if body.enabled is not None:
         row.enabled = body.enabled
     if body.url is not None or body.kind is not None:
+        if body.kind is not None:
+            # A secret left blank means "keep the one you have". Without this,
+            # correcting a topic would silently blank the token beside it,
+            # because the browser is never sent a secret to send back.
+            merged = dict(body.fields or {})
+            if body.kind == row.kind:
+                stored = _stored_fields(request, row)
+                for key in secret_keys(body.kind):
+                    if not merged.get(key) and stored.get(key):
+                        merged[key] = stored[key]
+            body = body.model_copy(update={"fields": merged})
         # Same two gates as create: field rules, then Apprise's parser. An
         # edit that rotates a token must not be a way around them.
         url = _resolve_url(body)
         row.url_enc, row.key_version = request.app.state.secretstore.encrypt(
             url.encode())
         row.kind = kind_for(url)
+        _store_fields(request, row, body.kind, body.fields)
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="notify.channel.update", target_type="notification_channel",
@@ -219,6 +262,31 @@ def delete_channel(request: Request, channel_id: int, db=Depends(get_db),
                 target_id=channel_id, params={"name": name, "kind": kind},
                 ip=_ip(request))
     return Response(status_code=204)
+
+
+@router.get("/channels/{channel_id}/fields",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("notify.channels"))])
+def channel_fields(request: Request, channel_id: int, db=Depends(get_db)):
+    """What the picker collected, for prefilling an edit.
+
+    Secret values are NEVER in the response. They come back as a list of keys
+    that are set, so the form can say "leave blank to keep" instead of showing
+    dots it could not honour. `known` is false for a channel added by pasting a
+    URL and for any row written before the values were kept, and the form says
+    so rather than presenting an empty box as if it were the truth.
+    """
+    row = db.get(NotificationChannel, channel_id)
+    if row is None:
+        raise HTTPException(404, "channel not found")
+    stored = _stored_fields(request, row)
+    secrets = secret_keys(row.kind or "")
+    return {
+        "kind": row.kind,
+        "known": bool(stored),
+        "fields": {k: v for k, v in stored.items() if k not in secrets},
+        "secrets_set": sorted(k for k in secrets if stored.get(k)),
+    }
 
 
 @router.post("/channels/{channel_id}/test",

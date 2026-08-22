@@ -9,22 +9,22 @@ const KINDS = [
   { kind: 'ntfy', label: 'ntfy', setup_url: 'https://appriseit.com/services/ntfy/',
     fields: [
       { key: 'host', label: 'Server', required: true, secret: false,
-        placeholder: '', default: 'ntfy.sh', help: 'Leave as ntfy.sh unless you run your own.',
+        placeholder: '', default: 'ntfy.sh', help: 'Leave as ntfy.sh unless you run your own.', example: 'ntfy.sh',
         pattern: '^[A-Za-z0-9][A-Za-z0-9.\\-]*(:\\d{1,5})?$',
         hint: 'A hostname or address, optionally with :port. No scheme, no path.' },
       { key: 'topic', label: 'Topic', required: true, secret: false,
-        placeholder: 'proxploy-alerts', default: '', help: '',
+        placeholder: 'proxploy-alerts', default: '', help: '', example: 'proxploy-alerts',
         pattern: '^[A-Za-z0-9_-]{1,64}$',
         hint: 'Letters, numbers, dashes and underscores, up to 64 characters.' },
     ] },
   { kind: 'telegram', label: 'Telegram', setup_url: 'https://appriseit.com/services/telegram/',
     fields: [
       { key: 'bot_token', label: 'Bot token', required: true, secret: true,
-        placeholder: '', default: '', help: 'What BotFather gave you.',
+        placeholder: '', default: '', help: 'What BotFather gave you.', example: '123456789:AAHrLHtM3vJqPpAaBbCcDdEeFfGgHhIiJjK',
         pattern: '^[0-9]+:[A-Za-z0-9_-]+$',
         hint: 'Digits, a colon, then the key, exactly as BotFather sent it.' },
       { key: 'chat_id', label: 'Chat ID', required: true, secret: false,
-        placeholder: '123456789', default: '', help: '',
+        placeholder: '123456789', default: '', help: '', example: '123456789',
         pattern: '^(-?[0-9]+|@[A-Za-z0-9_]+)$', hint: 'A numeric id, or @channelname.' },
     ] },
 ]
@@ -226,5 +226,28 @@ describe('credentials for the wrong service', () => {
     fireEvent.change(await screen.findByLabelText('Server'),
       { target: { value: 'https://ntfy.sh' } })
     expect(await screen.findByText(/add that service instead/)).toBeInTheDocument()
+  })
+})
+
+describe('examples', () => {
+  beforeEach(() => { posted.length = 0; failNext = null })
+
+  it('offers an example beside every field, not only the ones with a placeholder', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Telegram' }))
+    // The bot token is a password box, so it shows no placeholder at all and
+    // the (i) is the only thing that says what shape to paste.
+    expect(await screen.findByRole('button',
+      { name: /Example: 123456789:AAHrLHtM/ })).toBeInTheDocument()
+    expect(screen.getByRole('button',
+      { name: /Example: 123456789$/ })).toBeInTheDocument()
+  })
+
+  it('puts the rule in the same tooltip as the example', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    const info = await screen.findByRole('button',
+      { name: /Letters, numbers, dashes and underscores/ })
+    expect(info).toHaveAccessibleName(/Example: proxploy-alerts/)
   })
 })
