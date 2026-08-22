@@ -199,3 +199,34 @@ describe('field rules', () => {
     expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument()
   })
 })
+
+describe('credentials for the wrong service', () => {
+  beforeEach(() => { posted.length = 0; failNext = null })
+
+  it('refuses a Slack webhook pasted into a Telegram bot token', async () => {
+    // It satisfies plenty of token rules on length alone, which is exactly
+    // why the URL check runs before the field's own pattern.
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Telegram' }))
+    fireEvent.change(await screen.findByLabelText('Bot token'),
+      { target: { value: 'https://hooks.slack.com/services/T0/B0/abcdefghijkl' } })
+    expect(await screen.findByText(/not a whole URL/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add channel/i })).toBeDisabled()
+  })
+
+  it('refuses an Apprise URL for another service just the same', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    fireEvent.change(await screen.findByLabelText('Topic'),
+      { target: { value: 'slack://TokenA/TokenB/TokenC' } })
+    expect(await screen.findByText(/not a whole URL/)).toBeInTheDocument()
+  })
+
+  it('says to add that service rather than leaving you stuck', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    fireEvent.change(await screen.findByLabelText('Server'),
+      { target: { value: 'https://ntfy.sh' } })
+    expect(await screen.findByText(/add that service instead/)).toBeInTheDocument()
+  })
+})

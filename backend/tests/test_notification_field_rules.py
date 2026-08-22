@@ -104,3 +104,46 @@ def test_the_catalog_endpoint_hands_the_rules_to_the_client():
     topic = next(f for f in ntfy["fields"] if f["key"] == "topic")
     assert topic["pattern"]
     assert topic["hint"]
+
+
+# --- Credentials for the wrong service -------------------------------------
+
+# No field in the guided form takes a whole URL, so a value carrying "://" is
+# wrong whatever the service. These all used to be someone's afternoon: the
+# channel saves, the badge looks right, and nothing is delivered.
+WRONG_SERVICE = [
+    ("whatsapp", "token", "https://hooks.slack.com/services/T0/B0/abcdefghijkl"),
+    ("whatsapp", "token", "slack://TokenA/TokenB/TokenCabcdefgh"),
+    ("email", "host", "slack://TokenA/TokenB/TokenC"),
+    ("email", "to", "mailto://user:pass@gmail.com"),
+    ("webhook", "host", "https://example.com/hook"),
+    ("gotify", "token", "mailto://user:pass@gmail.com"),
+    ("slack", "token_a", "https://hooks.slack.com/services/T0/B0/xyz"),
+    ("ntfy", "topic", "ntfy://ntfy.sh/proxploy"),
+    ("pushover", "token", "tgram://123456789:key/42"),
+]
+
+
+@pytest.mark.parametrize("kind,field,value", WRONG_SERVICE,
+                         ids=[f"{k}.{f}" for k, f, _ in WRONG_SERVICE])
+def test_a_whole_url_in_a_field_is_refused_whatever_the_service(kind, field, value):
+    label = next(f.label for f in BY_KIND[kind].fields if f.key == field)
+    with pytest.raises(ValueError) as e:
+        build_url(kind, {**SAMPLES[kind], field: value})
+    assert label in str(e.value)
+
+
+def test_the_message_says_it_is_a_url_rather_than_reciting_the_pattern():
+    """"Access token is not right. At least 20 characters, no spaces." is a
+    true statement about a pasted Slack URL and a useless one."""
+    with pytest.raises(ValueError, match="not a whole URL"):
+        build_url("whatsapp", {**SAMPLES["whatsapp"],
+                               "token": "https://hooks.slack.com/services/T0/B0/x"})
+
+
+def test_the_paste_a_url_path_is_untouched_by_this():
+    """The guard belongs to the guided fields. A whole URL is exactly what the
+    escape hatch is for, and it does not go through build_url at all."""
+    from proxploy.api.notifications import _require_url
+
+    assert _require_url("slack://a/b/c") == "slack://a/b/c"

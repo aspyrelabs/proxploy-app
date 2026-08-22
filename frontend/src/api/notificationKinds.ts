@@ -21,11 +21,23 @@ export type KindField = {
   hint: string
 }
 
+/** No guided field takes a whole URL: each one is a single component the
+ *  server assembles into one. Worth catching by name, because a Slack webhook
+ *  pasted into WhatsApp's access token satisfies that field's own rule ("at
+ *  least 20 characters, no spaces") perfectly well. Kept identical to
+ *  services/notification_catalog.py's _URLISH so the two agree. */
+const URLISH = /[A-Za-z][A-Za-z0-9+.-]*:\/\//
+
 /** Does this value satisfy its field? An empty value is not a rule failure,
  *  it is the required check's business, and a pattern the browser cannot
  *  compile must never make a field permanently unfillable. */
 export function fieldError(field: KindField, value: string): string | null {
-  if (!value || !field.pattern) return null
+  if (!value) return null
+  if (URLISH.test(value)) {
+    return `${field.label} takes a single value, not a whole URL. `
+      + 'If that is a URL for another service, add that service instead.'
+  }
+  if (!field.pattern) return null
   try {
     if (new RegExp(field.pattern).test(value)) return null
   } catch {

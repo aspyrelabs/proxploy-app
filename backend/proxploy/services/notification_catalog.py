@@ -79,6 +79,17 @@ _PHONE = r"^\+?[0-9][0-9 ()\-]{5,}$"
 _PHONE_HINT = "A phone number in international form, like +15551234567."
 _PHONES = r"^\+?[0-9][0-9 ()\-]{5,}(/\+?[0-9][0-9 ()\-]{5,})*$"
 
+# No field in the guided form takes a whole URL: every one of them is a single
+# component that build_url assembles into one. So a value carrying a scheme is
+# always the wrong thing, and it is the specific mistake worth catching by
+# name, because a Slack webhook pasted into WhatsApp's token satisfies that
+# field's own rule ("at least 20 characters, no spaces") perfectly well. The
+# channel then saves, shows a correct badge, and delivers nothing.
+#
+# Checked before the field's own pattern so the message is about what actually
+# went wrong rather than a true but useless remark about character counts.
+_URLISH = r"[A-Za-z][A-Za-z0-9+.\-]*://"
+
 
 CATALOG: tuple[Service, ...] = (
     Service(
@@ -414,6 +425,10 @@ def build_url(kind: str, values: dict) -> str:
         raw = str(values.get(f.key) or "").strip() or f.default
         if not raw and f.required:
             raise ValueError(f"{f.label} is required for {service.label}.")
+        if raw and re.search(_URLISH, raw):
+            raise ValueError(
+                f"{f.label} takes a single value, not a whole URL. If that is "
+                f"a URL for another service, add that service instead.")
         if raw and f.pattern and not re.match(f.pattern, raw):
             # Name the field and say what it wants. Printing the pattern here
             # is how a form becomes unusable by anyone who did not write it.
