@@ -60,8 +60,25 @@ def redact_url(url: str) -> str:
     return f"{kind_for(url)}://***"
 
 
+def parses(url: str) -> bool:
+    """Does Apprise recognise this URL and accept its fields?
+
+    Cheap and offline: Apprise::add() parses and instantiates the plugin
+    without sending anything. This is what lets a channel assembled from the
+    guided form (services/notification_catalog.py) be rejected at 422 while
+    the operator is still looking at the form, rather than saving cleanly and
+    then never delivering.
+    """
+    import apprise
+
+    try:
+        return bool(apprise.Apprise().add(url))
+    except Exception:  # noqa: BLE001  (a malformed URL is an answer, not a crash)
+        return False
+
+
 def send_one(url: str, title: str, body: str) -> bool:
-    """The ONE Apprise call site. Blocking."""
+    """The one Apprise *send* site. Blocking."""
     import apprise
 
     ap = apprise.Apprise()

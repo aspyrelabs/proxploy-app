@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import NotificationChannel, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
-from proxploy.services.notifier import kind_for, send_one
+from proxploy.services.notification_catalog import build_url, public_catalog
+from proxploy.services.notifier import kind_for, parses, send_one
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -29,7 +30,12 @@ _manage = authorize("channel", "manage")
 
 class ChannelIn(BaseModel):
     name: str
-    url: str
+    # Two ways in, exactly one of which must be filled (see _resolve_url).
+    # `url` is the escape hatch the form has always had, and every existing
+    # caller still uses it unchanged; `kind` + `fields` is the guided picker.
+    url: str | None = None
+    kind: str | None = None
+    fields: dict[str, str] | None = None
     events: list[str] | None = None
     enabled: bool = True
 
@@ -53,6 +59,33 @@ def _require_url(url: str) -> str:
     return url
 
 
+def _resolve_url(body: ChannelIn) -> str:
+    """Turn either input shape into one Apprise URL.
+
+    A guided channel is checked against Apprise's parser here, before it is
+    ever encrypted and stored: a kind whose fields do not actually assemble
+    into something Apprise recognises would otherwise save cleanly, show a
+    correct-looking badge, and silently never deliver. The pasted-URL path
+    keeps its older, looser check, tightening it would reject targets that
+    work today for the 122 services the catalog does not cover.
+    """
+    if body.kind is not None:
+        if body.url:
+            raise HTTPException(422, "Send either a URL or a kind, not both.")
+        try:
+            url = build_url(body.kind, body.fields or {})
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        if not parses(url):
+            raise HTTPException(
+                422, f"Those {body.kind} details are not something Apprise "
+                     "can send to. Check them and try again.")
+        return url
+    if not body.url:
+        raise HTTPException(422, "A channel needs either a URL or a kind.")
+    return _require_url(body.url)
+
+
 def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
@@ -63,14 +96,23 @@ def list_channels(db=Depends(get_db), user: User = Depends(_manage)):
     return [_out(c) for c in db.query(NotificationChannel).order_by(NotificationChannel.id)]
 
 
+@router.get("/kinds", dependencies=[Depends(_manage),
+                                    Depends(require_entitlement("notify.channels"))])
+def list_kinds():
+    """The questions the guided picker asks, per service. No templates: the
+    client sends back what it collected and the server assembles the URL, so
+    the only percent-encoding that ever runs is build_url()'s."""
+    return public_catalog()
+
+
 @router.post("/channels", status_code=201,
              dependencies=[Depends(_manage),
                           Depends(require_entitlement("notify.channels"))])
 def create_channel(request: Request, body: ChannelIn, db=Depends(get_db),
                    user: User = Depends(_manage)):
-    _require_url(body.url)
-    blob, ver = request.app.state.secretstore.encrypt(body.url.encode())
-    row = NotificationChannel(name=body.name, kind=kind_for(body.url),
+    url = _resolve_url(body)
+    blob, ver = request.app.state.secretstore.encrypt(url.encode())
+    row = NotificationChannel(name=body.name, kind=kind_for(url),
                               url_enc=blob, key_version=ver,
                               events=body.events or [], enabled=body.enabled)
     db.add(row)

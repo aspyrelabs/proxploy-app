@@ -177,3 +177,103 @@ def test_an_unparseable_url_is_rejected(tmp_path, csrf_header, bootstrap_admin):
         r = c.post("/api/v1/notifications/channels",
                    json={"name": "n", "url": "not-a-url"}, headers=csrf_header(c))
         assert r.status_code == 422
+
+
+# --- Guided picker (services/notification_catalog.py) -----------------------
+
+def test_kinds_lists_every_service_without_leaking_templates(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The client gets the questions, never the string they assemble into."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.get("/api/v1/notifications/kinds")
+        assert r.status_code == 200
+        kinds = r.json()
+        assert len(kinds) == 20
+        assert {"kind", "label", "setup_url", "fields"} == set(kinds[0])
+        telegram = next(k for k in kinds if k["kind"] == "telegram")
+        assert [f["key"] for f in telegram["fields"]] == ["bot_token", "chat_id"]
+        assert next(f for f in telegram["fields"] if f["key"] == "bot_token")["secret"]
+
+
+def test_guided_create_assembles_and_stores_the_url(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "Bot", "kind": "telegram",
+                         "fields": {"bot_token": "123456789:AAHrLHtM3vJqPpAaBbCcDdEeFfGgHhI",
+                                    "chat_id": "123456789"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 201, r.text
+        assert r.json()["kind"] == "telegram"
+        # The assembled URL is stored encrypted like any other, and the raw
+        # field values never come back out.
+        assert "bot_token" not in r.text and "123456789:" not in r.text
+        with app.state.sessionmaker() as db:
+            row = db.query(NotificationChannel).one()
+        url = app.state.secretstore.decrypt(row.url_enc).decode()
+        # The colon inside a bot token is content, not structure, so it is
+        # percent-encoded; Apprise unquotes it back on the way out.
+        assert url == ("tgram://123456789%3AAAHrLHtM3vJqPpAaBbCcDdEeFfGgHhI"
+                       "/123456789")
+
+
+def test_guided_create_reports_a_missing_field_by_name(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "n", "kind": "ntfy", "fields": {"host": "ntfy.sh"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 422
+        assert "Topic is required" in r.text
+
+
+def test_guided_create_refuses_details_apprise_cannot_send_to(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The point of validating before storing: a channel that saves cleanly and
+    then never delivers is worse than a 422 while the form is still open."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "n", "kind": "telegram",
+                         "fields": {"bot_token": "not-a-token", "chat_id": "x"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 422
+        assert "Apprise" in r.text
+
+
+def test_channel_needs_either_a_url_or_a_kind(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        h = csrf_header(c)
+        assert c.post("/api/v1/notifications/channels", json={"name": "n"},
+                      headers=h).status_code == 422
+        assert c.post("/api/v1/notifications/channels",
+                      json={"name": "n", "url": URL, "kind": "ntfy"},
+                      headers=csrf_header(c)).status_code == 422
+
+
+def test_pasted_url_still_works_unchanged(tmp_path, csrf_header, bootstrap_admin):
+    """The escape hatch keeps its looser check: tightening it would reject
+    targets that work today for services the catalog does not cover."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "Raw", "url": "sinch://a/b/c/+15551234567"},
+                   headers=csrf_header(c))
+        assert r.status_code == 201
