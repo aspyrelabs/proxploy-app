@@ -108,6 +108,11 @@ def notify(app, event: str, title: str, body: str,
            only_ids: list[int] | None = None) -> int:
     """Fan a single event out to every subscribed channel. Returns channels reached.
 
+    The master switch is consulted first, so a type the operator turned off
+    costs one settings read rather than a decrypt and an Apprise send per
+    channel. An event with no registry row is NOT suppressed: that is a
+    mapping bug, and silence would hide it.
+
     A channel that is misconfigured, unreachable or slow must never fail the
     job that triggered it, each send is isolated. Decryption happens inside
     the session (cheap); the blocking Apprise sends happen outside it, so a
@@ -115,7 +120,11 @@ def notify(app, event: str, title: str, body: str,
     ~8s-per-channel (Apprise's default connect+read timeout) while every
     other channel's `last_notified_at` stamp waits behind it.
     """
+    from proxploy.services.notification_prefs import is_enabled
+
     with app.state.sessionmaker() as db:
+        if not is_enabled(db, event):
+            return 0
         targets = []
         for channel in channels_for(db, event, only_ids):
             try:

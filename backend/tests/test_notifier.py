@@ -513,3 +513,55 @@ def test_channels_for_restricted_to_explicit_ids(tmp_path):
     assert [c.name for c in got] == ["a"]
     # unchanged without only_ids: subscription rules apply
     assert {c.name for c in channels_for(db, "alert.fired")} == {"b"}
+
+
+# --- Master switch, and the job kind we used to throw away ------------------
+
+def test_a_named_kind_notifies_under_its_own_row():
+    """jobs/backend.py used to discard the kind and emit job.failed for every
+    outcome, which is why "App install failed" could not be its own switch."""
+    from proxploy.services.notification_types import type_for_job
+
+    assert type_for_job("app.install", "failed") == "app.install.failed"
+    assert type_for_job("vm.create", "failed") == "job.failed"
+
+
+def test_notify_returns_early_for_a_disabled_type(tmp_path, monkeypatch):
+    """Off means no channel is decrypted and no Apprise send runs, not that
+    the send happens and its result is discarded."""
+    from fastapi.testclient import TestClient
+
+    from proxploy.services import notifier
+    from proxploy.services.notification_prefs import set_overrides
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    sent = []
+    monkeypatch.setattr(notifier, "send_one",
+                        lambda *a, **k: (sent.append(a), True)[1])
+    with TestClient(app):
+        with app.state.sessionmaker() as db:
+            _channel(db, app.state.secretstore, "ntfy://ntfy.sh/t", events=[])
+            set_overrides(db, {"job.succeeded": False})
+
+        assert notifier.notify(app, "job.succeeded", "t", "b") == 0
+        assert sent == []
+
+        assert notifier.notify(app, "job.failed", "t", "b") == 1
+        assert len(sent) == 1
+
+
+def test_an_unknown_event_still_sends(tmp_path, monkeypatch):
+    """A type we cannot find is a mapping bug. Swallowing the notification
+    would hide it; sending it makes it visible."""
+    from fastapi.testclient import TestClient
+
+    from proxploy.services import notifier
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    monkeypatch.setattr(notifier, "send_one", lambda *a, **k: True)
+    with TestClient(app):
+        with app.state.sessionmaker() as db:
+            _channel(db, app.state.secretstore, "ntfy://ntfy.sh/t", events=[])
+        assert notifier.notify(app, "something.new", "t", "b") == 1

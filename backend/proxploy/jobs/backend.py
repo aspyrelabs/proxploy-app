@@ -370,15 +370,27 @@ class JobBackend:
         # error only when set (mirrors the fanout payload above): the global
         # `job` delta is what LiveProvider's failure toast reads its message
         # from, and a bare "App Stop Failed" with no reason was the finding.
+        # notify_type rides along so the client can honour the same master
+        # switch without keeping its own copy of the job kind table.
+        from proxploy.services.notification_types import type_for_job
         self._publish(job_id, status=status, kind=kind, target_type=target_type,
+                      notify_type=type_for_job(kind, status),
                       **({"error": error} if error else {}))
         self._notify(job_id, kind, status, error)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:
-        """Route the terminal result to the Notifier, off the event loop."""
+        """Route the terminal result to the Notifier, off the event loop.
+
+        The job kind used to be dropped here and every outcome went out as
+        `job.{status}`, which is why "App install failed" could not be its own
+        switch. The registry maps (kind, status) onto exactly one row, so a
+        named kind never also fires the generic one.
+        """
+        from proxploy.services.notification_types import type_for_job
+
         title = f"Proxploy: {kind} {status}"
         body = error or f"job {job_id} ({kind}) {status}"
-        self._notify_async(f"job.{status}", title, body)
+        self._notify_async(type_for_job(kind, status), title, body)
 
     def _notify_async(self, event: str, title: str, body: str) -> None:
         """Fire the Notifier off the event loop, fire-and-forget.
