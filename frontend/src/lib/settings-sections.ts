@@ -38,8 +38,6 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
   { group: 'General', items: [
     { id: 'hosts', label: 'Hosts',
       keywords: ['node', 'proxmox', 'enrol', 'enroll', 'add host', 'node shell'] },
-    { id: 'notifications', label: 'Notifications',
-      keywords: ['channel', 'ntfy', 'telegram', 'email', 'notify'] },
     { id: 'schedules', label: 'Schedules',
       keywords: ['cron', 'timer', 'scheduled job', 'recurring'] },
     { id: 'teams', label: 'Teams',
@@ -48,6 +46,18 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
       keywords: ['account', 'invite', 'reset password', 'admin'] },
     { id: 'api-keys', label: 'API keys',
       keywords: ['token', 'api token', 'integration', 'revoke key'] },
+  ] },
+  // Notifications is its own group rather than one crowded card, because the
+  // two halves answer different questions: Channels is WHERE anything goes,
+  // Events is WHAT gets sent at all. Events is useful with no channel
+  // configured, which is the case the old single card could not express.
+  { group: 'Notifications', items: [
+    { id: 'channels', label: 'Channels',
+      keywords: ['ntfy', 'gotify', 'telegram', 'email', 'smtp', 'slack',
+                 'discord', 'webhook', 'notify', 'channel', 'apprise'] },
+    { id: 'events', label: 'Events',
+      keywords: ['notification', 'notify', 'toast', 'alert', 'job failed',
+                 'backup failed', 'mute', 'turn off', 'housekeeping'] },
   ] },
   { group: 'Your account', items: [
     { id: 'profile', label: 'Profile',

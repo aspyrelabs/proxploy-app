@@ -607,7 +607,7 @@ export function SettingsPage() {
         )}
       </Card>}
 
-      {active === 'notifications' && <>
+      {active === 'channels' && <>
       {/* This is the card's own entitlement-gated first load: not yet known
           whether the plan includes notify.channels, then the channels list's
           own first fetch. `isPending`, not `isFetching`, so this stays quiet

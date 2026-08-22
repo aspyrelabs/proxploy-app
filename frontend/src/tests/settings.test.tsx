@@ -83,6 +83,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 }))
 
 import { SettingsPage } from '../routes/settings'
+import { SETTINGS_SECTIONS } from '../lib/settings-sections'
 
 /** `at` is the ?section= the page opens on; omitted means the default (Hosts). */
 const wrap = (at?: string) => {
@@ -97,7 +98,7 @@ describe('SettingsPage, notification channels', () => {
 
   it('asks for confirmation before deleting a channel, and skips the call on cancel', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
-    wrap('notifications')
+    wrap('channels')
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Home ntfy'))
     await new Promise((r) => setTimeout(r, 10))
@@ -106,22 +107,22 @@ describe('SettingsPage, notification channels', () => {
 
   it('deletes the channel once the confirmation is accepted', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    wrap('notifications')
+    wrap('channels')
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true))
   })
 
   it('toggles enabled/disabled via PATCH', async () => {
-    wrap('notifications')
+    wrap('channels')
     fireEvent.click(await screen.findByRole('button', { name: 'Disable' }))
     await waitFor(() => expect(calls.some((c) =>
       c.method === 'PATCH' && c.path === '/notifications/channels/1'
       && JSON.stringify(c.body) === JSON.stringify({ enabled: false }))).toBe(true))
   })
 
-  it('gates the Notifications card behind notify.channels: no fetch, no Add channel, when the plan lacks it', async () => {
+  it('gates the Channels card behind notify.channels: no fetch, no Add channel, when the plan lacks it', async () => {
     notifyChannels = false
-    wrap('notifications')
+    wrap('channels')
     // TeamsCard also renders "Not included in your plan." (teams.rbac is off
     // in this test's entitlements mock too) -- scope to the Notifications
     // section specifically so the two identical messages don't collide.
@@ -265,7 +266,7 @@ describe('SettingsPage, hosts and channels error vs empty', () => {
 
   it('says the channels could not be read rather than showing "no channels yet"', async () => {
     channelsError = true
-    wrap('notifications')
+    wrap('channels')
     expect(await screen.findByText(/channels not readable/i)).toBeInTheDocument()
     expect(screen.queryByText('No channels yet')).not.toBeInTheDocument()
   })
@@ -325,8 +326,9 @@ describe('SettingsPage sections', () => {
     // Every entry carries a real ?section=, so a setting can be linked to and
     // bookmarked rather than only scrolled to.
     expect(railTargets).toEqual([
-      { section: 'hosts' }, { section: 'notifications' }, { section: 'schedules' },
+      { section: 'hosts' }, { section: 'schedules' },
       { section: 'teams' }, { section: 'users' }, { section: 'api-keys' },
+      { section: 'channels' }, { section: 'events' },
       { section: 'profile' }, { section: 'sessions' }, { section: 'console' },
       { section: 'plan' }, { section: 'updates' },
     ])
@@ -421,5 +423,25 @@ describe('SettingsPage, unassigning a host from its team', () => {
       expect(patch).toBeTruthy()
       expect((patch!.body as { team_id: number | null }).team_id).toBeNull()
     })
+  })
+})
+
+describe('the Notifications group', () => {
+  it('is its own group holding Channels and Events', () => {
+    const group = SETTINGS_SECTIONS.find(g => g.group === 'Notifications')
+    expect(group).toBeDefined()
+    expect(group!.items.map(i => i.id)).toEqual(['channels', 'events'])
+  })
+
+  it('no longer carries a single notifications section under General', () => {
+    const ids = SETTINGS_SECTIONS.flatMap(g => g.items.map(i => i.id))
+    expect(ids).not.toContain('notifications')
+  })
+
+  it('keeps the old search words reachable, so "ntfy" still finds Channels', () => {
+    const channels = SETTINGS_SECTIONS
+      .flatMap(g => g.items).find(i => i.id === 'channels')!
+    expect(channels.keywords).toEqual(
+      expect.arrayContaining(['ntfy', 'telegram', 'email', 'slack', 'notify']))
   })
 })
