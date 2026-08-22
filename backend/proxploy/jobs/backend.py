@@ -367,11 +367,17 @@ class JobBackend:
                 db.commit()
                 schedule = (db.get(Schedule, job.schedule_id)
                             if job.schedule_id else None)
+                from proxploy.services.links import absolute, path_for
                 facts = {"target_name": job.target_name,
                          "target_type": job.target_type or target_type,
                          "started_at": job.started_at,
                          "finished_at": job.finished_at,
-                         "schedule_name": schedule.name if schedule else None}
+                         "schedule_name": schedule.name if schedule else None,
+                         # There is no /jobs route, so the link points at the
+                         # thing the job was about, which is what someone
+                         # reading "backup of pve1 failed" wants anyway.
+                         "link": absolute(db, path_for(job.target_type,
+                                                       job.target_id))}
         payload: dict = {"status": status}
         if result:
             payload["result"] = result
@@ -417,7 +423,7 @@ class JobBackend:
                       duration=human_duration(facts.get("started_at"),
                                               facts.get("finished_at")),
                       schedule_name=facts.get("schedule_name")),
-            error)
+            error, link=facts.get("link", ""))
         self._notify_async(key, title, body)
 
     def _notify_async(self, event: str, title: str, body: str) -> None:

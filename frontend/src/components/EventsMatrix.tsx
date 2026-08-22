@@ -6,6 +6,7 @@ import type { TypeRow } from '../api/notificationTypes'
 import type { ChannelRow } from './ChannelForm'
 import { Skeleton, SkeletonGroup } from './ui/skeleton'
 import { Switch } from './ui/switch'
+import { PublicUrlField } from './PublicUrlField'
 
 /**
  * What Proxploy tells you about, and where each thing goes.
@@ -148,6 +149,11 @@ export function EventsMatrix() {
           ))}
         </table>
       </div>
+
+      {/* Sits here rather than in a general settings section because
+          notifications are its only consumer: the link at the bottom of the
+          messages this page decides to send. */}
+      <PublicUrlField />
     </div>
   )
 }

@@ -6,6 +6,7 @@ not in a response, not in an audit row, not in an error message.
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import NotificationChannel, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
+from proxploy.services.settings import set_setting
+from proxploy.services.links import PUBLIC_URL_KEY, public_url
 from proxploy.services.notification_catalog import (
     build_url, public_catalog, secret_keys)
 from proxploy.services.notification_prefs import effective, set_overrides
@@ -60,6 +63,10 @@ class ChannelPatch(BaseModel):
 
 class TypesPatch(BaseModel):
     enabled: dict[str, bool]
+
+
+class PublicUrlIn(BaseModel):
+    url: str
 
 
 def _out(c: NotificationChannel) -> dict:
@@ -151,6 +158,35 @@ def _types_out(db) -> dict:
     live = effective(db)
     return {"types": [{"key": t.key, "label": t.label, "group": t.group,
                        "enabled": live[t.key]} for t in TYPES]}
+
+
+# Its own route rather than a hole in api/settings.py's allowlist, which says
+# in as many words that a fresh key gets one. It also needs validation that
+# generic key-value writes cannot give it: this string is interpolated into a
+# Markdown link in mail we send, so "javascript:..." must never reach it.
+_URL_OK = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d{1,5})?(/[^\s]*)?$")
+
+
+@router.get("/public-url", dependencies=[Depends(_manage)])
+def get_public_url(db=Depends(get_db)):
+    return {"url": public_url(db)}
+
+
+@router.put("/public-url", dependencies=[Depends(_manage)])
+def set_public_url(request: Request, body: PublicUrlIn, db=Depends(get_db),
+                   user: User = Depends(_manage)):
+    """Empty clears it, which means notifications carry no link. That is a
+    real choice and not a failure to configure, so it is accepted."""
+    value = body.url.strip().rstrip("/")
+    if value and not _URL_OK.match(value):
+        raise HTTPException(
+            422, "That needs to be a full http:// or https:// address, "
+                 "like https://proxploy.example.com.")
+    set_setting(db, PUBLIC_URL_KEY, value)
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="notify.public_url.set", target_type="setting",
+                params={"set": bool(value)}, ip=_ip(request))
+    return {"url": value}
 
 
 @router.get("/types", dependencies=[Depends(_manage)])

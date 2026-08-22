@@ -1,4 +1,5 @@
 """Notification channel CRUD + test-send (doc 05 §Notifications)."""
+import pytest
 from fastapi.testclient import TestClient
 
 from proxploy.models import AuditEvent, NotificationChannel
@@ -616,3 +617,66 @@ def test_the_stored_fields_are_encrypted_at_rest(tmp_path, csrf_header, bootstra
     with app.state.sessionmaker() as db:
         blob = db.query(NotificationChannel).one().fields_enc
     assert blob and b"AbCdEfGhIjKlMnO" not in blob and b"gotify.example.com" not in blob
+
+
+# --- This installation's address --------------------------------------------
+
+def test_the_public_url_round_trips(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        assert c.get("/api/v1/notifications/public-url").json() == {"url": ""}
+        r = c.put("/api/v1/notifications/public-url",
+                  json={"url": "https://pve.example.com/"}, headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json() == {"url": "https://pve.example.com"}
+        assert c.get("/api/v1/notifications/public-url").json()["url"] \
+            == "https://pve.example.com"
+
+
+@pytest.mark.parametrize("bad", [
+    "javascript:alert(1)",
+    "not-a-url",
+    "ftp://pve.example.com",
+    "https://pve.example.com/ path",
+    "//pve.example.com",
+])
+def test_only_a_real_web_address_is_accepted(bad, tmp_path, csrf_header,
+                                             bootstrap_admin):
+    """This string is interpolated into a Markdown link in mail we send, so a
+    javascript: URL must never reach it."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.put("/api/v1/notifications/public-url", json={"url": bad},
+                  headers=csrf_header(c))
+        assert r.status_code == 422, bad
+
+
+def test_clearing_it_is_allowed_because_no_link_is_a_real_choice(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        c.put("/api/v1/notifications/public-url",
+              json={"url": "https://pve.example.com"}, headers=csrf_header(c))
+        r = c.put("/api/v1/notifications/public-url", json={"url": ""},
+                  headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json() == {"url": ""}
+
+
+def test_the_address_is_never_written_through_the_generic_settings_route(
+        tmp_path, csrf_header, bootstrap_admin):
+    """api/settings.py says a fresh key gets its own route rather than a hole
+    in its allowlist. This is the test that keeps that true."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.patch("/api/v1/settings", json={"public_url": "https://x.example.com"},
+                    headers=csrf_header(c))
+        assert r.status_code == 422

@@ -33,8 +33,9 @@ def human_duration(started: datetime | None, finished: datetime | None) -> str:
     return f"{hours}h {minutes}m"
 
 
-def compose(facts: list[tuple[str, str]], detail: str | None = None) -> str:
-    """One notification body: the facts as a list, then the reason.
+def compose(facts: list[tuple[str, str]], detail: str | None = None,
+            link: str = "") -> str:
+    """One notification body: the facts as a list, the reason, then the link.
 
     The title already carries what happened, so it is deliberately not repeated
     here: every service shows the two separately and an email whose subject and
@@ -47,6 +48,11 @@ def compose(facts: list[tuple[str, str]], detail: str | None = None) -> str:
     lines = [f"- **{label}:** {value}" for label, value in facts if value]
     if detail:
         lines += ["", detail.strip()]
+    if link:
+        # Last, and only when there is somewhere real to go. services/links.py
+        # returns "" rather than guessing a host, because a link to the wrong
+        # installation is worse than none.
+        lines += ["", f"[Open in Proxploy]({link})"]
     return "\n".join(lines)
 
 

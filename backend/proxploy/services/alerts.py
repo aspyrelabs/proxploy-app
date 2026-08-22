@@ -362,8 +362,12 @@ def notify_transitions(app, transitions: list[dict]) -> int:
     every send is isolated inside notifier.notify already; this only has to not
     raise on its own account.
     """
+    from proxploy.services.links import absolute
     from proxploy.services.notification_body import compose
     from proxploy.services.notifier import notify
+
+    with app.state.sessionmaker() as db:
+        link = absolute(db, "/alerts")
 
     reached = 0
     for t in transitions:
@@ -374,7 +378,7 @@ def notify_transitions(app, transitions: list[dict]) -> int:
             ("Rule", t.get("rule_name") or ""),
             ("Severity", (t.get("severity") or "").capitalize()),
             ("Alert", f"#{t['alert_id']}" if t.get("alert_id") else ""),
-        ], t.get("message"))
+        ], t.get("message"), link=link)
         try:
             reached += notify(app, event, title, body,
                               only_ids=t.get("channel_ids") or None)

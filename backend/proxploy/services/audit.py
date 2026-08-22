@@ -143,12 +143,16 @@ def _notify_error(app, action: str, target_type: str | None,
     """The row is the record and the notification is a courtesy, so a broken
     channel must never cost the record. Fired after the commit, and swallowed
     whole."""
+    from proxploy.services.links import absolute
     from proxploy.services.notification_body import compose
     from proxploy.services.notifier import notify
 
     label = (target_type or "target").replace("_", " ").capitalize()
+    with app.state.sessionmaker() as db:
+        link = absolute(db, "/audit")
     body = compose([("Action", action), (label, target_name or "")],
-                   "This did not complete. The audit log has the full record.")
+                   "This did not complete. The audit log has the full record.",
+                   link=link)
     try:
         notify(app, "audit.error", f"Proxploy: {action} failed", body)
     except Exception:  # noqa: BLE001  (a courtesy never breaks the record)

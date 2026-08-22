@@ -31,6 +31,8 @@ vi.mock('../api/client', () => ({
     if (path === '/notifications/channels' && !opts?.method) {
       return Promise.resolve(channels)
     }
+    if (path === '/notifications/public-url' && !opts?.method)
+      return Promise.resolve({ url: '' })
     patched.push({ path, body: opts?.body ? JSON.parse(String(opts.body)) : null })
     if (path === '/notifications/types') return Promise.resolve({ types: TYPES })
     return Promise.resolve({})
@@ -150,5 +152,32 @@ describe('what the matrix claims', () => {
     // A row that IS on still shows its delivery.
     expect(screen.getByRole('checkbox',
       { name: 'Send Job failed to SMTP' })).toBeChecked()
+  })
+})
+
+describe('the installation address', () => {
+  it('offers the address of the browser looking at the page', async () => {
+    wrap()
+    // Whoever is reading this reached the app at the right URL by definition,
+    // so it is a suggestion. Not saved for them: on this screen the value can
+    // be a LAN address nobody else resolves.
+    expect(await screen.findByRole('button',
+      { name: /Use http:\/\/localhost/ })).toBeInTheDocument()
+    expect(patched).toHaveLength(0)
+  })
+
+  it('says plainly what happens when it is left empty', async () => {
+    wrap()
+    expect(await screen.findByText(/notifications carry no link/i)).toBeInTheDocument()
+  })
+
+  it('sends the address to its own endpoint, which trims it', async () => {
+    wrap()
+    const box = await screen.findByLabelText(/installation.s address/i)
+    fireEvent.change(box, { target: { value: 'https://pve.example.com/' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patched).toHaveLength(1))
+    expect(patched[0].path).toBe('/notifications/public-url')
+    expect(patched[0].body).toEqual({ url: 'https://pve.example.com/' })
   })
 })

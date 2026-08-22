@@ -268,3 +268,85 @@ def test_what_a_real_failure_actually_says(tmp_path, csrf_header, bootstrap_admi
     assert f"#{job_id}" in body               # the job to go and read
     assert "no space left on device" in body  # why
     assert "backup.run" not in body           # and no backend spelling anywhere
+
+
+def test_no_public_url_means_no_link_rather_than_a_broken_one(
+        tmp_path, csrf_header, bootstrap_admin, inbox):
+    """Nothing can derive it: api_base_url is the licence server and the Host
+    header is attacker-controllable. A link to the wrong installation, in a
+    message we sent, is worse than no link."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+        notifier.notify(app, "job.failed", "Proxploy: Job failed", "it broke")
+
+    assert "Open in Proxploy" not in _Inbox.received[0]["message"]
+
+
+def test_a_configured_public_url_puts_a_real_link_in_the_message(
+        tmp_path, csrf_header, bootstrap_admin, inbox, monkeypatch):
+    from proxploy.jobs.backend import JobBackend, JobContext
+    from proxploy.models import Job
+    from proxploy.services.links import PUBLIC_URL_KEY
+    from proxploy.services.settings import set_setting
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    monkeypatch.setattr(JobBackend, "_notify_async",
+                        lambda self, event, title, body:
+                            notifier.notify(self.app, event, title, body))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+        with app.state.sessionmaker() as db:
+            set_setting(db, PUBLIC_URL_KEY, "https://pve.example.com")
+            job = Job(kind="app.install", status="running", target_type="app",
+                      target_id=12, target_name="nextcloud")
+            db.add(job)
+            db.commit()
+            job_id = job.id
+        app.state.jobs._finish(JobContext(app.state.jobs, job_id), "app.install",
+                               "failed", error="template missing",
+                               target_type="app")
+
+    body = _Inbox.received[0]["message"]
+    # The link points at the app, because there is no /jobs route and the
+    # thing that failed is what someone reading this wants to open.
+    assert "[Open in Proxploy](https://pve.example.com/apps?open=12)" in body
+    assert _Inbox.received[0]["title"] == "Proxploy: App install failed"
+
+
+def test_a_thing_with_no_page_gets_the_message_without_a_link(
+        tmp_path, csrf_header, bootstrap_admin, inbox, monkeypatch):
+    """A storage job has nowhere useful to point, so it says everything else
+    and offers nothing rather than linking to the dashboard."""
+    from proxploy.jobs.backend import JobBackend, JobContext
+    from proxploy.models import Job
+    from proxploy.services.links import PUBLIC_URL_KEY
+    from proxploy.services.settings import set_setting
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    monkeypatch.setattr(JobBackend, "_notify_async",
+                        lambda self, event, title, body:
+                            notifier.notify(self.app, event, title, body))
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+        with app.state.sessionmaker() as db:
+            set_setting(db, PUBLIC_URL_KEY, "https://pve.example.com")
+            job = Job(kind="storage.upload", status="running",
+                      target_type="storage", target_id=1, target_name="tank")
+            db.add(job)
+            db.commit()
+            job_id = job.id
+        app.state.jobs._finish(JobContext(app.state.jobs, job_id),
+                               "storage.upload", "failed", error="disk full",
+                               target_type="storage")
+
+    body = _Inbox.received[0]["message"]
+    assert "disk full" in body
+    assert "Open in Proxploy" not in body
