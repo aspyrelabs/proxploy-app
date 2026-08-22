@@ -78,13 +78,21 @@ def parses(url: str) -> bool:
 
 
 def send_one(url: str, title: str, body: str) -> bool:
-    """The one Apprise *send* site. Blocking."""
+    """The one Apprise *send* site. Blocking.
+
+    body_format is not decoration. Apprise defaults to TEXT, so every service
+    was handed the raw characters: an email arrived as one unbroken paragraph
+    with literal asterisks in it, and Slack the same. Told MARKDOWN, Apprise
+    converts per service, real HTML for email, blocks for Slack, and the
+    markup stripped for ntfy and the rest.
+    """
     import apprise
 
     ap = apprise.Apprise()
     if not ap.add(url):
         return False
-    return bool(ap.notify(title=title, body=body))
+    return bool(ap.notify(title=title, body=body,
+                          body_format=apprise.NotifyFormat.MARKDOWN))
 
 
 def channels_for(db, event: str, only_ids: list[int] | None = None

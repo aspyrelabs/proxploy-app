@@ -208,3 +208,63 @@ def test_an_audited_failure_reaches_the_channel_with_no_job_behind_it(
     titles = [m["title"] for m in _Inbox.received]
     assert any("notify.channel.test failed" in t for t in titles), titles
     assert cid  # the live channel is the one that received it
+
+
+
+
+def test_what_a_real_failure_actually_says(tmp_path, csrf_header, bootstrap_admin,
+                                           inbox, monkeypatch):
+    """The body used to be "out of disk", or with no error text at all,
+    "job 7 (vm.create) failed": a backend job kind, a number nobody can act on,
+    and nothing about which machine on which host.
+
+    _notify_async is run inline here rather than through ensure_future. The
+    fire-and-forget dispatch is not what this is testing and there is no
+    running loop in a sync test; everything below it, the composition and the
+    real Apprise send, is the real thing.
+    """
+    from datetime import timedelta
+
+    from proxploy.jobs.backend import JobBackend, JobContext
+    from proxploy.models import Job, Schedule, utcnow
+    from proxploy.services import notifier
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    monkeypatch.setattr(JobBackend, "_notify_async",
+                        lambda self, event, title, body:
+                            notifier.notify(self.app, event, title, body))
+
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        _add_webhook_channel(c, csrf_header, inbox)
+
+        with app.state.sessionmaker() as db:
+            sched = Schedule(name="Nightly backup", job_kind="backup.run",
+                             cron="0 2 * * *", enabled=True)
+            db.add(sched)
+            db.commit()
+            job = Job(kind="backup.run", status="running", target_type="host",
+                      target_id=1, target_name="pve1",
+                      started_at=utcnow() - timedelta(seconds=134),
+                      schedule_id=sched.id)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        app.state.jobs._finish(JobContext(app.state.jobs, job_id), "backup.run",
+                               "failed", error="no space left on device",
+                               target_type="host")
+
+    assert len(_Inbox.received) == 1
+    got = _Inbox.received[0]
+    # The title is the row's own label, the same words the Events matrix uses,
+    # rather than the job kind.
+    assert got["title"] == "Proxploy: Backup failed"
+    body = got["message"]
+    assert "pve1" in body                     # which host
+    assert "2m 14s" in body                   # how long it ran
+    assert "Nightly backup" in body           # nobody did this by hand
+    assert f"#{job_id}" in body               # the job to go and read
+    assert "no space left on device" in body  # why
+    assert "backup.run" not in body           # and no backend spelling anywhere

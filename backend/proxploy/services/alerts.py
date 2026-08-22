@@ -362,15 +362,21 @@ def notify_transitions(app, transitions: list[dict]) -> int:
     every send is isolated inside notifier.notify already; this only has to not
     raise on its own account.
     """
+    from proxploy.services.notification_body import compose
     from proxploy.services.notifier import notify
 
     reached = 0
     for t in transitions:
         event = f"alert.{'fired' if t['state'] == 'firing' else 'resolved'}"
-        verb = "FIRING" if t["state"] == "firing" else "RESOLVED"
-        title = f"Proxploy alert {verb}: {t['rule_name']}"
+        verb = "triggered" if t["state"] == "firing" else "resolved"
+        title = f"Proxploy: {t['rule_name']} {verb}"
+        body = compose([
+            ("Rule", t.get("rule_name") or ""),
+            ("Severity", (t.get("severity") or "").capitalize()),
+            ("Alert", f"#{t['alert_id']}" if t.get("alert_id") else ""),
+        ], t.get("message"))
         try:
-            reached += notify(app, event, title, t["message"],
+            reached += notify(app, event, title, body,
                               only_ids=t.get("channel_ids") or None)
         except Exception:  # noqa: BLE001  (a broken channel never breaks alerting)
             logger.debug("alert %s notification failed", t.get("alert_id"),

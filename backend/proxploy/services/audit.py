@@ -115,16 +115,19 @@ def write_audit(db, *, actor_type: str, action: str, actor_id: int | None = None
     `app` is optional and only enables the `audit.error` notification. Most
     call sites have no app handle, and auditing must never depend on being
     able to notify, so its absence means a silent row rather than an error."""
+    # Resolved once and used twice: the row records what was acted on, and so
+    # does the notification. Passing the caller's `target_name` to the notifier
+    # instead would leave it blank on every route that relies on the lookup.
+    resolved = target_name or resolve_target_name(db, target_type, target_id)
     db.add(AuditEvent(actor_type=actor_type, actor_id=actor_id, action=action,
                       target_type=target_type, target_id=target_id,
-                      target_name=target_name or resolve_target_name(
-                          db, target_type, target_id),
+                      target_name=resolved,
                       params=redact(params) if params else None, result=result,
                       ip=ip, request_id=request_id, job_id=job_id))
     db.commit()
     app = app or db.info.get("app")
     if app is not None and result == "error" and action not in _NOT_OPERATIONAL:
-        _notify_error(app, action, target_name)
+        _notify_error(app, action, target_type, resolved)
 
 
 # A failed sign-in is a security event, not an operational failure, and one
@@ -135,16 +138,19 @@ _NOT_OPERATIONAL = frozenset({
 })
 
 
-def _notify_error(app, action: str, target_name: str | None) -> None:
+def _notify_error(app, action: str, target_type: str | None,
+                  target_name: str | None) -> None:
     """The row is the record and the notification is a courtesy, so a broken
     channel must never cost the record. Fired after the commit, and swallowed
     whole."""
+    from proxploy.services.notification_body import compose
     from proxploy.services.notifier import notify
 
-    subject = f"{action} on {target_name}" if target_name else action
+    label = (target_type or "target").replace("_", " ").capitalize()
+    body = compose([("Action", action), (label, target_name or "")],
+                   "This did not complete. The audit log has the full record.")
     try:
-        notify(app, "audit.error", f"Proxploy: {action} failed",
-               f"{subject} did not complete.")
+        notify(app, "audit.error", f"Proxploy: {action} failed", body)
     except Exception:  # noqa: BLE001  (a courtesy never breaks the record)
         logger.debug("audit error notification failed for %s", action,
                      exc_info=True)

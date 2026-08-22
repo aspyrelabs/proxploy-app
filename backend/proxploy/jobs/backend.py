@@ -20,7 +20,7 @@ import contextlib
 import os
 from collections.abc import Callable
 
-from proxploy.models import Job, JobEvent, to_iso, utcnow
+from proxploy.models import Job, JobEvent, Schedule, to_iso, utcnow
 from proxploy.services.audit import redact, resolve_target_name
 
 TERMINAL = ("succeeded", "failed", "canceled", "interrupted")
@@ -350,6 +350,10 @@ class JobBackend:
                 target_type: str | None = None) -> None:
         """Synchronous on purpose: the cancel path cannot await (see JobContext)."""
         job_id = ctx.job_id
+        # Captured while the row is loaded, because the notification is sent
+        # after this session closes and re-reading it there would be a second
+        # query for facts already in hand.
+        facts: dict = {}
         with self.app.state.sessionmaker() as db:
             job = db.get(Job, job_id)
             if job is not None:
@@ -361,6 +365,13 @@ class JobBackend:
                                 stream="status",
                                 message=f"{status}: {error or 'ok'}"))
                 db.commit()
+                schedule = (db.get(Schedule, job.schedule_id)
+                            if job.schedule_id else None)
+                facts = {"target_name": job.target_name,
+                         "target_type": job.target_type or target_type,
+                         "started_at": job.started_at,
+                         "finished_at": job.finished_at,
+                         "schedule_name": schedule.name if schedule else None}
         payload: dict = {"status": status}
         if result:
             payload["result"] = result
@@ -376,21 +387,38 @@ class JobBackend:
         self._publish(job_id, status=status, kind=kind, target_type=target_type,
                       notify_type=type_for_job(kind, status),
                       **({"error": error} if error else {}))
-        self._notify(job_id, kind, status, error)
+        self._notify(job_id, kind, status, error, facts)
 
-    def _notify(self, job_id: int, kind: str, status: str, error: str | None) -> None:
+    def _notify(self, job_id: int, kind: str, status: str, error: str | None,
+                facts: dict) -> None:
         """Route the terminal result to the Notifier, off the event loop.
 
         The job kind used to be dropped here and every outcome went out as
         `job.{status}`, which is why "App install failed" could not be its own
         switch. The registry maps (kind, status) onto exactly one row, so a
         named kind never also fires the generic one.
-        """
-        from proxploy.services.notification_types import type_for_job
 
-        title = f"Proxploy: {kind} {status}"
-        body = error or f"job {job_id} ({kind}) {status}"
-        self._notify_async(type_for_job(kind, status), title, body)
+        The title is the row's own label, not the job kind. "Proxploy:
+        vm.create failed" put a backend identifier in an email subject line;
+        "Proxploy: Job failed" is what the operator sees in the Events matrix
+        and is the same words in both places.
+        """
+        from proxploy.services.notification_body import (
+            compose, human_duration, job_facts)
+        from proxploy.services.notification_types import BY_KEY, type_for_job
+
+        key = type_for_job(kind, status)
+        row = BY_KEY.get(key)
+        title = f"Proxploy: {row.label if row else kind + ' ' + status}"
+        body = compose(
+            job_facts(job_id=job_id,
+                      target_name=facts.get("target_name"),
+                      target_type=facts.get("target_type"),
+                      duration=human_duration(facts.get("started_at"),
+                                              facts.get("finished_at")),
+                      schedule_name=facts.get("schedule_name")),
+            error)
+        self._notify_async(key, title, body)
 
     def _notify_async(self, event: str, title: str, body: str) -> None:
         """Fire the Notifier off the event loop, fire-and-forget.
