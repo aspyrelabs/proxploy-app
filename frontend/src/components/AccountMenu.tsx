@@ -56,11 +56,14 @@ export function AccountMenu() {
             )}
           </DropdownMenu.Label>
 
+          {/* Was "Profile and security" at /profile, a whole second page
+              rendering the same cards as Settings' own Profile section. One
+              place now, and this menu points at it. */}
           <DropdownMenu.Item asChild>
-            <Link to={'/profile' as never}
+            <Link to="/settings" search={{ section: 'profile' } as never}
               className="block cursor-pointer px-3 py-2 text-[13px] text-text-2 outline-none
                          data-[highlighted]:bg-panel-2 data-[highlighted]:text-text">
-              Profile and security
+              Profile
             </Link>
           </DropdownMenu.Item>
 

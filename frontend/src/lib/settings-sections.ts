@@ -21,16 +21,18 @@ export type SettingsSection = {
  * make in the code and never made on screen: six configure the installation,
  * two configure you, two describe the Proxploy application itself.
  *
- * `profile` is deliberately one section holding three cards. Two-factor,
- * Sessions and Trusted devices are one subject -- how you get in and what is
- * still allowed to -- and splitting them across three rail entries would mean
- * revoking a session in one place and the device that skips its second factor
- * in another, with nothing on screen connecting them.
+ * The account half is split where the subject changes, not per card.
+ * `profile` is who you are and how you prove it: your email and display name,
+ * your password, your second factor. `sessions` is what is currently allowed
+ * in on that basis: live sessions, and the browsers trusted to skip the second
+ * factor. Trusted devices sits with Sessions rather than with Two-factor
+ * because revoking a session and forgetting the browser that would walk
+ * straight back in are the same job, done together.
  *
- * Which is exactly why `keywords` is not decoration on that row. Merging three
- * cards under one name takes "sessions" and "trusted devices" out of the
- * rail's own text, so without these an operator searching for either finds
- * nothing at all -- the palette would have made the merge cost findability.
+ * `keywords` is what keeps that grouping from costing findability. Cards
+ * folded under a section name lose their own name from the rail's text, so
+ * without these an operator searching "trusted devices" or "change password"
+ * would find nothing at all.
  */
 export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = [
   { group: 'General', items: [
@@ -49,8 +51,12 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
   ] },
   { group: 'Your account', items: [
     { id: 'profile', label: 'Profile',
-      keywords: ['two-factor', 'two factor', '2fa', 'mfa', 'totp', 'authenticator',
-                 'recovery codes', 'sessions', 'sign out', 'trusted devices'] },
+      keywords: ['account', 'email', 'display name', 'role', 'password',
+                 'change password', 'two-factor', 'two factor', '2fa', 'mfa',
+                 'totp', 'authenticator', 'recovery codes'] },
+    { id: 'sessions', label: 'Sessions',
+      keywords: ['session', 'sign out', 'signed in', 'log out', 'revoke',
+                 'trusted device', 'trusted devices', 'remember this browser'] },
     { id: 'console', label: 'Console',
       keywords: ['terminal', 'shell', 'font size', 'colour', 'color', 'theme'] },
   ] },

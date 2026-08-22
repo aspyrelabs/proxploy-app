@@ -308,7 +308,7 @@ describe('SettingsPage sections', () => {
     expect(await screen.findByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
     // The point of the rail: one section is on screen, not twelve cards.
     for (const other of ['Notifications', 'Schedules', 'Teams', 'Users', 'API keys',
-                         'Console', 'Updates', 'Plan']) {
+                         'Sessions', 'Console', 'Updates', 'Plan']) {
       expect(screen.queryByRole('heading', { name: other })).toBeNull()
     }
   })
@@ -318,7 +318,8 @@ describe('SettingsPage sections', () => {
     await screen.findByRole('heading', { name: 'Hosts' })
     const rail = screen.getByRole('navigation', { name: 'Settings sections' })
     for (const label of ['Hosts', 'Notifications', 'Schedules', 'Teams', 'Users',
-                         'API keys', 'Profile', 'Console', 'Plan', 'Updates']) {
+                         'API keys', 'Profile', 'Sessions', 'Console', 'Plan',
+                         'Updates']) {
       expect(within(rail).getByText(label)).toBeInTheDocument()
     }
     // Every entry carries a real ?section=, so a setting can be linked to and
@@ -326,7 +327,7 @@ describe('SettingsPage sections', () => {
     expect(railTargets).toEqual([
       { section: 'hosts' }, { section: 'notifications' }, { section: 'schedules' },
       { section: 'teams' }, { section: 'users' }, { section: 'api-keys' },
-      { section: 'profile' }, { section: 'console' },
+      { section: 'profile' }, { section: 'sessions' }, { section: 'console' },
       { section: 'plan' }, { section: 'updates' },
     ])
   })
@@ -339,15 +340,26 @@ describe('SettingsPage sections', () => {
     expect(current).toHaveLength(1)
   })
 
-  it('keeps two-factor, sessions and trusted devices together under Profile', async () => {
+  it('puts who you are and how you prove it under Profile', async () => {
     wrap('profile')
-    // One rail entry, three cards: they are one subject, and revoking a
-    // session next to the device that skips its second factor is the point.
-    expect(await screen.findByRole('heading', { name: /two-factor/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    // Trusted devices renders only once TOTP is on; /auth/me says it is not
-    // here, so its absence is correct rather than a missing card.
-    expect(screen.queryByRole('heading', { name: 'Console' })).toBeNull()
+    // routes/profile.tsx used to be a second page carrying Account and
+    // Password beside these; it is gone and this is where they live.
+    expect(await screen.findByRole('heading', { name: 'Account' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Password' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /two-factor/i })).toBeInTheDocument()
+    // What is currently allowed in is the section next door, not this one.
+    expect(screen.queryByRole('heading', { name: 'Sessions' })).toBeNull()
+  })
+
+  it('puts what is currently allowed in under Sessions', async () => {
+    wrap('sessions')
+    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
+    // Trusted devices sits with Sessions, not with Two-factor: revoking a
+    // session and forgetting the browser that would walk straight back in are
+    // the same job. It renders only once TOTP is on, and /auth/me says it is
+    // not here, so its absence is correct rather than a missing card.
+    expect(screen.queryByRole('heading', { name: 'Account' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /two-factor/i })).toBeNull()
   })
 
   it('falls back to Hosts when the URL names a section that does not exist', async () => {

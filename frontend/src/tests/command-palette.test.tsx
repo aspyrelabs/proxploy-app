@@ -207,17 +207,20 @@ describe('CommandPalette reaches Settings sections', () => {
       { to: '/settings', search: { section: 'updates' } })
   })
 
-  it('finds Profile by what is inside it, not only by its name', async () => {
-    // The whole reason the section table carries keywords: merging Two-factor,
-    // Sessions and Trusted devices under "Profile" took all three names out of
-    // the rail, so without these the merge would have cost an operator every
-    // way of finding them.
-    for (const term of ['trusted devices', '2fa', 'recovery codes', 'sign out']) {
+  it('finds a section by what is inside it, not only by its name', async () => {
+    // The whole reason the section table carries keywords: a card folded under
+    // a section name loses its own name from the rail's text, so without these
+    // the grouping would cost an operator every way of finding it.
+    const cases: [string, RegExp][] = [
+      ['2fa', /Profile/], ['recovery codes', /Profile/], ['change password', /Profile/],
+      ['trusted devices', /Sessions/], ['sign out', /Sessions/], ['revoke', /Sessions/],
+    ]
+    for (const [term, expected] of cases) {
       const { unmount } = withQuery(<CommandPalette />)
       openViaShortcut()
       fireEvent.change(screen.getByRole('combobox'), { target: { value: term } })
-      expect(await screen.findByRole('option', { name: /Profile/ }),
-             `"${term}" should reach Profile`).toBeInTheDocument()
+      expect(await screen.findByRole('option', { name: expected }),
+             `"${term}" should reach ${expected}`).toBeInTheDocument()
       unmount()
     }
   })

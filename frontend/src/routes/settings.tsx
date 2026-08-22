@@ -20,6 +20,8 @@ import { ScheduleForm } from '../components/ScheduleForm'
 import { TeamsCard } from '../components/TeamsCard'
 import { ApiKeysCard } from '../components/ApiKeysCard'
 import { UsersCard } from '../components/UsersCard'
+import { AccountCard } from '../components/AccountCard'
+import { PasswordCard } from '../components/PasswordCard'
 import { TotpCard } from '../components/TotpCard'
 import { ConsoleCard } from '../components/ConsoleCard'
 import { SessionsCard } from '../components/SessionsCard'
@@ -681,13 +683,19 @@ export function SettingsPage() {
 
       {active === 'api-keys' && <ApiKeysCard />}
 
-      {/* Three cards, one section, and the rail entry for it is "Profile":
-          they are one subject (see lib/settings-sections.ts).
-          TrustedDevicesCard renders nothing until two-factor is on, which is
-          correct here -- there is no such thing as a device trusted to skip a
-          factor you do not have. */}
+      {/* Who you are and how you prove it. These three were routes/profile.tsx,
+          a second page named "Profile and security" that rendered the same
+          cards Settings did; it is gone and the avatar menu points here. */}
       {active === 'profile' && <>
+        <AccountCard />
+        <PasswordCard />
         <TotpCard />
+      </>}
+
+      {/* What is currently allowed in on that basis. TrustedDevicesCard
+          renders nothing until two-factor is on, which is correct: there is no
+          such thing as a device trusted to skip a factor you do not have. */}
+      {active === 'sessions' && <>
         <SessionsCard />
         <TrustedDevicesCard />
       </>}
