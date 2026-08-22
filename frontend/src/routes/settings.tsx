@@ -10,6 +10,7 @@ import { useSchedules } from '../api/schedules'
 import { actionLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
+import { ChannelEditForm } from '../components/ChannelEditForm'
 import { EventsMatrix } from '../components/EventsMatrix'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostEditDialog } from '../components/HostEditDialog'
@@ -410,6 +411,7 @@ export function SettingsPage() {
   // resolves true.
   const channelsAllowed = ent.data != null && ent.has('notify.channels')
   const [addingChannel, setAddingChannel] = useState(false)
+  const [editingChannel, setEditingChannel] = useState<number | null>(null)
   const channels = useQuery({
     queryKey: ['notifications', 'channels'],
     queryFn: () => api<ChannelRow[]>('/notifications/channels'),
@@ -649,6 +651,12 @@ export function SettingsPage() {
                         </td>
                         <td className="py-2 text-right">
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                                  aria-label={`Edit ${ch.name}`}
+                                  onClick={() => setEditingChannel(
+                                    editingChannel === ch.id ? null : ch.id)}>
+                            Edit
+                          </Button>
+                          <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
                                   disabled={toggleChannel.isPending}
                                   onClick={() => toggleChannel.mutate(ch)}>
                             {ch.enabled ? 'Disable' : 'Enable'}
@@ -657,6 +665,18 @@ export function SettingsPage() {
                                   onClick={() => testChannel.mutate(ch.id)}>Test</Button>
                           <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
                                   onClick={() => removeChannel(ch)}>Remove</Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {rows.filter(ch => ch.id === editingChannel).map(ch => (
+                      <tr key={`edit-${ch.id}`} className="border-t border-line-soft">
+                        <td colSpan={5} className="py-3">
+                          <ChannelEditForm channel={ch}
+                            onSaved={() => {
+                              setEditingChannel(null)
+                              qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
+                            }}
+                            onCancel={() => setEditingChannel(null)} />
                         </td>
                       </tr>
                     ))}

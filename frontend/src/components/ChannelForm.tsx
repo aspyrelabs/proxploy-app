@@ -1,22 +1,18 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { fieldError, useNotificationKinds } from '../api/notificationKinds'
+import { useNotificationKinds } from '../api/notificationKinds'
 import type { NotificationKind } from '../api/notificationKinds'
 import { Button } from './ui/button'
 import { Skeleton, SkeletonGroup } from './ui/skeleton'
+import {
+  KindFields, allRequiredFilled, defaultsFor, fieldErrors, inputClass,
+} from './KindFields'
 
 export type ChannelRow = {
   id: number; name: string; kind: string; events: string[]
   enabled: boolean; last_notified_at: string | null
 }
-
-const input = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
-
-/** The escape hatch, kept as a 21st choice. Apprise reaches 142 services and
- *  the catalog names 20 of them, so someone who already knows the syntax for
- *  one of the other 122 must still be able to use it. */
-const PASTE = '__paste__'
 
 /**
  * Pick the service, then answer that service's own questions.
@@ -26,11 +22,11 @@ const PASTE = '__paste__'
  * services we support were only ever a lookup that ran AFTER a URL was pasted,
  * to decide which badge to draw; nothing offered them.
  *
- * The URL is still assembled server-side rather than here. A password
- * containing "@" or "/" has to be percent-encoded or it rewrites the URL into
- * a different host, and the server can hand the assembled result to Apprise's
- * parser before storing it, so a channel cannot save cleanly and then silently
- * never deliver.
+ * The URL is assembled server-side, not here. A password containing "@" or
+ * "/" has to be percent-encoded or it rewrites the URL into a different host,
+ * and the server can hand the assembled result to Apprise's parser before
+ * storing it, so a channel cannot save cleanly and then silently never
+ * deliver.
  *
  * `events` posts empty on purpose: which events reach a channel is the Events
  * matrix's job now, and empty already means "every event" server-side.
@@ -39,7 +35,6 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
   const kinds = useNotificationKinds()
   const [picked, setPicked] = useState<string | null>(null)
   const [name, setName] = useState('')
-  const [url, setUrl] = useState('')
   const [fields, setFields] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
 
@@ -49,26 +44,20 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
   const choose = (kind: string) => {
     setPicked(kind)
     setError(null)
-    const chosen = kinds.data?.find((k) => k.kind === kind)
-    // Seed the defaults so a field that ships with one (ntfy's ntfy.sh) shows
-    // it rather than an empty box the operator has to guess at.
-    setFields(Object.fromEntries(
-      (chosen?.fields ?? []).map((f) => [f.key, f.default])))
+    setFields(defaultsFor(kinds.data?.find((k) => k.kind === kind)))
   }
 
   const save = useMutation({
     mutationFn: () =>
       api<ChannelRow>('/notifications/channels', {
         method: 'POST',
-        body: JSON.stringify(picked === PASTE
-          ? { name, url, events: [] }
-          : { name, kind: picked, fields, events: [] }),
+        body: JSON.stringify({ name, kind: picked, fields, events: [] }),
       }),
     onSuccess: () => {
-      setPicked(null); setName(''); setUrl(''); setFields({}); setError(null)
+      setPicked(null); setName(''); setFields({}); setError(null)
       onSaved()
     },
-    // The server's 422 names the field that is missing or the details Apprise
+    // The server's 422 names the field that is missing, or the details Apprise
     // would not take. Replacing that with "Could not add that channel" throws
     // away the only part that tells the operator what to fix.
     onError: (e: unknown) =>
@@ -95,20 +84,14 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
               {k.label}
             </Button>
           ))}
-          <Button variant="ghost" onClick={() => choose(PASTE)}>Paste a URL</Button>
         </div>
       </div>
     )
   }
 
-  const errors: Record<string, string> = {}
-  for (const f of service?.fields ?? []) {
-    const e = fieldError(f, fields[f.key] ?? '')
-    if (e) errors[f.key] = e
-  }
-  const ready = name && Object.keys(errors).length === 0 && (picked === PASTE
-    ? url
-    : (service?.fields ?? []).every((f) => !f.required || fields[f.key]))
+  const errors = fieldErrors(service, fields)
+  const ready = name && Object.keys(errors).length === 0
+    && allRequiredFilled(service, fields)
 
   return (
     <div className="space-y-3">
@@ -116,9 +99,7 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
         <Button variant="ghost" onClick={() => { setPicked(null); setError(null) }}>
           Back
         </Button>
-        <span className="text-[13px] text-text-2">
-          {picked === PASTE ? 'Paste a URL' : service?.label}
-        </span>
+        <span className="text-[13px] text-text-2">{service?.label}</span>
         {service && (
           <a className="text-[11.5px] text-text-3 underline" href={service.setup_url}
              target="_blank" rel="noreferrer">How to set this up</a>
@@ -127,41 +108,15 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
 
       <div>
         <label className="block text-[12px] text-text-3" htmlFor="ch-name">Name</label>
-        <input id="ch-name" className={input} value={name}
+        <input id="ch-name" className={inputClass} value={name}
                onChange={(e) => setName(e.target.value)}
-               placeholder={picked === PASTE ? 'My webhook' : `My ${service?.label}`} />
+               placeholder={`My ${service?.label}`} />
       </div>
 
-      {picked === PASTE ? (
-        <div>
-          <label className="block text-[12px] text-text-3" htmlFor="ch-url">Apprise URL</label>
-          <input id="ch-url" className={`${input} font-mono`} value={url}
-                 onChange={(e) => setUrl(e.target.value)}
-                 placeholder="ntfy://ntfy.sh/your-topic" />
-          <p className="mt-1 text-[11.5px] text-text-3">
-            Stored encrypted and never shown again.
-          </p>
-        </div>
-      ) : service?.fields.map((f) => (
-        <div key={f.key}>
-          <label className="block text-[12px] text-text-3" htmlFor={`ch-${f.key}`}>
-            {f.label}
-          </label>
-          <input id={`ch-${f.key}`}
-                 className={`${input} ${errors[f.key] ? 'border-red' : ''}`}
-                 type={f.secret ? 'password' : 'text'}
-                 aria-invalid={errors[f.key] ? true : undefined}
-                 aria-describedby={errors[f.key] ? `ch-${f.key}-err` : undefined}
-                 value={fields[f.key] ?? ''} placeholder={f.placeholder}
-                 onChange={(e) =>
-                   setFields((prev) => ({ ...prev, [f.key]: e.target.value }))} />
-          {errors[f.key]
-            ? <p id={`ch-${f.key}-err`} className="mt-1 text-[11.5px] text-red">
-                {errors[f.key]}
-              </p>
-            : f.help && <p className="mt-1 text-[11.5px] text-text-3">{f.help}</p>}
-        </div>
-      ))}
+      {service && (
+        <KindFields service={service} values={fields} errors={errors}
+                    onChange={(k, v) => setFields((p) => ({ ...p, [k]: v }))} />
+      )}
 
       {error && <div className="text-[12px] text-red">{error}</div>}
       <Button disabled={!ready || save.isPending} onClick={() => save.mutate()}>

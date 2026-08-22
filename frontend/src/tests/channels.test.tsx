@@ -107,17 +107,15 @@ describe('ChannelForm', () => {
     expect(posted[0].body.url).toBeUndefined()
   })
 
-  it('keeps a paste-a-URL escape hatch for services we do not list', async () => {
+  it('offers services and nothing else, no raw URL tile among them', async () => {
+    // "Paste a URL" sat in a row of real service names and named an
+    // implementation detail rather than anything an operator wants. The
+    // POST /channels url path still exists for the API and for rows created
+    // before this, it is just not a thing the picker offers.
     wrap(<ChannelForm onSaved={() => {}} />)
-    fireEvent.click(await screen.findByRole('button', { name: /paste a url/i }))
-    const url = await screen.findByLabelText(/apprise url/i)
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Raw' } })
-    fireEvent.change(url, { target: { value: 'sinch://a/b/c/+15551234567' } })
-    fireEvent.click(screen.getByRole('button', { name: /add channel/i }))
-    await waitFor(() => expect(posted).toHaveLength(1))
-    expect(posted[0].body).toEqual({
-      name: 'Raw', url: 'sinch://a/b/c/+15551234567', events: [],
-    })
+    await screen.findByRole('button', { name: 'ntfy' })
+    expect(screen.queryByRole('button', { name: /paste a url/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/apprise url/i)).not.toBeInTheDocument()
   })
 
   it('shows what the server said when the details are not sendable', async () => {

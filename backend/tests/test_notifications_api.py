@@ -358,3 +358,128 @@ def test_types_needs_admin(tmp_path):
 
     with TestClient(make_app(tmp_path)) as c:
         assert c.get("/api/v1/notifications/types").status_code == 401
+
+
+# --- Editing a channel ------------------------------------------------------
+
+def test_renaming_a_channel_leaves_its_credential_alone(
+        tmp_path, csrf_header, bootstrap_admin):
+    """The common edit. Credentials are unrecoverable, so an edit that only
+    changes the name must not need them re-entered."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "Old", "kind": "ntfy",
+                         "fields": {"host": "ntfy.sh", "topic": "first-topic"}},
+                   headers=csrf_header(c))
+        cid = r.json()["id"]
+        with app.state.sessionmaker() as db:
+            before = db.get(NotificationChannel, cid).url_enc
+
+        r = c.patch(f"/api/v1/notifications/channels/{cid}",
+                    json={"name": "New"}, headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["name"] == "New"
+        with app.state.sessionmaker() as db:
+            row = db.get(NotificationChannel, cid)
+            assert row.url_enc == before
+            assert row.kind == "ntfy"
+
+
+def test_replacing_credentials_reassembles_and_re_encrypts(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "Bot", "kind": "ntfy",
+                           "fields": {"host": "ntfy.sh", "topic": "first-topic"}},
+                     headers=csrf_header(c)).json()["id"]
+
+        r = c.patch(f"/api/v1/notifications/channels/{cid}",
+                    json={"kind": "ntfy",
+                          "fields": {"host": "ntfy.sh", "topic": "second-topic"}},
+                    headers=csrf_header(c))
+        assert r.status_code == 200
+        with app.state.sessionmaker() as db:
+            row = db.get(NotificationChannel, cid)
+        url = app.state.secretstore.decrypt(row.url_enc).decode()
+        assert url == "ntfy://ntfy.sh/second-topic"
+        # The id is unchanged, so the channel keeps its column in the Events
+        # matrix and everything ticked in it. Delete-and-recreate does not.
+        assert row.id == cid
+
+
+def test_an_edit_cannot_walk_around_the_field_rules(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "Bot", "kind": "ntfy",
+                           "fields": {"host": "ntfy.sh", "topic": "fine"}},
+                     headers=csrf_header(c)).json()["id"]
+
+        r = c.patch(f"/api/v1/notifications/channels/{cid}",
+                    json={"kind": "ntfy",
+                          "fields": {"host": "ntfy.sh", "topic": "no spaces!!"}},
+                    headers=csrf_header(c))
+        assert r.status_code == 422
+        assert "Topic" in r.text
+
+
+def test_an_edit_can_move_a_channel_to_a_different_service(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Changing service keeps the row, so the matrix column survives."""
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "Alerts", "kind": "ntfy",
+                           "fields": {"host": "ntfy.sh", "topic": "t"}},
+                     headers=csrf_header(c)).json()["id"]
+        c.patch(f"/api/v1/notifications/channels/{cid}",
+                json={"events": ["job.failed"]}, headers=csrf_header(c))
+
+        r = c.patch(f"/api/v1/notifications/channels/{cid}",
+                    json={"kind": "gotify",
+                          "fields": {"host": "gotify.example.com:8080",
+                                     "token": "AbCdEfGhIjKlMnO"}},
+                    headers=csrf_header(c))
+        assert r.status_code == 200
+        assert r.json()["kind"] == "gotify"
+        assert r.json()["events"] == ["job.failed"]
+
+
+def test_an_edit_records_that_the_credential_was_rotated(
+        tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        cid = c.post("/api/v1/notifications/channels",
+                     json={"name": "Bot", "kind": "ntfy",
+                           "fields": {"host": "ntfy.sh", "topic": "t"}},
+                     headers=csrf_header(c)).json()["id"]
+        c.patch(f"/api/v1/notifications/channels/{cid}", json={"name": "Renamed"},
+                headers=csrf_header(c))
+        c.patch(f"/api/v1/notifications/channels/{cid}",
+                json={"kind": "ntfy", "fields": {"host": "ntfy.sh", "topic": "u"}},
+                headers=csrf_header(c))
+    with app.state.sessionmaker() as db:
+        rotated = [a.params.get("rotated") for a in db.query(AuditEvent)
+                   .filter_by(action="notify.channel.update").all()]
+    assert rotated == [False, True]
+    # And the raw values never reach an audit row.
+    with app.state.sessionmaker() as db:
+        blob = " ".join(str(a.params) for a in db.query(AuditEvent).all())
+    assert "ntfy.sh" not in blob

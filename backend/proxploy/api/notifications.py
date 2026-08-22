@@ -44,7 +44,13 @@ class ChannelIn(BaseModel):
 
 class ChannelPatch(BaseModel):
     name: str | None = None
+    # Credentials are replace-only, never amend: `_out` has never returned the
+    # URL and the secret is not recoverable, so an edit form cannot prefill
+    # them. Leaving all three of these unset keeps the stored credential and
+    # edits only the name, which is the common case.
     url: str | None = None
+    kind: str | None = None
+    fields: dict[str, str] | None = None
     events: list[str] | None = None
     enabled: bool | None = None
 
@@ -65,7 +71,7 @@ def _require_url(url: str) -> str:
     return url
 
 
-def _resolve_url(body: ChannelIn) -> str:
+def _resolve_url(body: ChannelIn | ChannelPatch) -> str:
     """Turn either input shape into one Apprise URL.
 
     A guided channel is checked against Apprise's parser here, before it is
@@ -173,17 +179,25 @@ def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
         row.events = body.events
     if body.enabled is not None:
         row.enabled = body.enabled
-    if body.url is not None:
-        _require_url(body.url)
+    if body.url is not None or body.kind is not None:
+        # Same two gates as create: field rules, then Apprise's parser. An
+        # edit that rotates a token must not be a way around them.
+        url = _resolve_url(body)
         row.url_enc, row.key_version = request.app.state.secretstore.encrypt(
-            body.url.encode())
-        row.kind = kind_for(body.url)
+            url.encode())
+        row.kind = kind_for(url)
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="notify.channel.update", target_type="notification_channel",
                 target_id=row.id,
                 params={"name": row.name, "enabled": row.enabled, "kind": row.kind,
-                        "url_rotated": body.url is not None,
+                        # Just "rotated". This was "url_rotated", and
+                        # redact() blanks any key containing "url" (or
+                        # "credential", or "token"), so the one thing an audit
+                        # reader wants from this row has always been stored as
+                        # "[redacted]". The redactor is right to be blunt
+                        # about key names; the key was wrongly named.
+                        "rotated": body.url is not None or body.kind is not None,
                         "events_changed": body.events is not None},
                 ip=_ip(request))
     return _out(row)
