@@ -147,3 +147,43 @@ def test_the_paste_a_url_path_is_untouched_by_this():
     from proxploy.api.notifications import _require_url
 
     assert _require_url("slack://a/b/c") == "slack://a/b/c"
+
+
+# --- Several recipients -----------------------------------------------------
+
+@pytest.mark.parametrize("value", [
+    "a@x.com,b@y.com",
+    "a@x.com, b@y.com",
+    "a@x.com , b@y.com",
+    "a@x.com/b@y.com",        # the older spelling, still accepted
+], ids=["comma", "comma-space", "spaced", "slash"])
+def test_several_addresses_reach_apprise_as_several_targets(value):
+    """A comma is what people expect, and Apprise unquotes the path before
+    splitting, so an encoded comma resolves exactly as a slash does. The slash
+    came from Apprise's own URL templates and was never a requirement."""
+    import apprise
+
+    url = build_url("email", {**SAMPLES["email"], "to": value})
+    ap = apprise.Apprise()
+    assert ap.add(url)
+    assert [t[1] for t in ap[0].targets] == ["a@x.com", "b@y.com"]
+
+
+@pytest.mark.parametrize("value", ["a@x.com;b@y.com", "a@x.com b@y.com",
+                                   "a@x.com,not-an-address"])
+def test_a_separator_we_do_not_take_is_refused_rather_than_silently_one_target(value):
+    """The failure worth catching: a separator Apprise does not split on makes
+    the whole string one malformed address, and mail to nobody looks identical
+    to mail nobody read."""
+    with pytest.raises(ValueError, match="Send to"):
+        build_url("email", {**SAMPLES["email"], "to": value})
+
+
+def test_several_phone_numbers_do_the_same():
+    import apprise
+
+    url = build_url("twilio", {**SAMPLES["twilio"],
+                               "to": "+15559876543, +15550001111"})
+    ap = apprise.Apprise()
+    assert ap.add(url)
+    assert [t[1] for t in ap[0].targets] == ["+15559876543", "+15550001111"]

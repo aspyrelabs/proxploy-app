@@ -71,13 +71,22 @@ class Service:
 _HOST = r"^[A-Za-z0-9][A-Za-z0-9.\-]*(:\d{1,5})?$"
 _HOST_HINT = "A hostname or address, optionally with :port. No scheme, no path."
 _HOST_PATH = r"^[A-Za-z0-9][A-Za-z0-9.\-]*(:\d{1,5})?(/[^\s]*)?$"
-_EMAIL = r"^[^@\s/]+@[^@\s/]+\.[^@\s/]+$"
+_EMAIL = r"^[^@\s,/]+@[^@\s,/]+\.[^@\s,/]+$"
 _EMAIL_HINT = "An email address, like you@example.com."
-_EMAILS = r"^[^@\s/]+@[^@\s/]+\.[^@\s/]+(/[^@\s/]+@[^@\s/]+\.[^@\s/]+)*$"
-_EMAILS_HINT = "One email address, or several separated by a slash."
-_PHONE = r"^\+?[0-9][0-9 ()\-]{5,}$"
+# A comma is what people expect between addresses, and Apprise unquotes the
+# path before splitting it, so an encoded comma reaches the plugin as a comma
+# and resolves to the same targets a slash would. The slash came from Apprise's
+# published URL templates and was never a requirement; it stays accepted so
+# anyone who read the older hint is not punished for it.
+_SEP = r"\s*[,/]\s*"
+_ONE_EMAIL = r"[^@\s,/]+@[^@\s,/]+\.[^@\s,/]+"
+_EMAILS = rf"^{_ONE_EMAIL}({_SEP}{_ONE_EMAIL})*$"
+_EMAILS_HINT = "One email address, or several separated by a comma."
+_ONE_PHONE = r"\+?[0-9][0-9 ()\-]{5,}"
+_PHONE = rf"^{_ONE_PHONE}$"
 _PHONE_HINT = "A phone number in international form, like +15551234567."
-_PHONES = r"^\+?[0-9][0-9 ()\-]{5,}(/\+?[0-9][0-9 ()\-]{5,})*$"
+_PHONES = rf"^{_ONE_PHONE}({_SEP}{_ONE_PHONE})*$"
+_PHONES_HINT = "One number in international form, or several separated by a comma."
 
 # No field in the guided form takes a whole URL: every one of them is a single
 # component that build_url assembles into one. So a value carrying a scheme is
@@ -130,7 +139,7 @@ CATALOG: tuple[Service, ...] = (
             Field("password", "Password", secret=True),
             Field("to", "Send to", placeholder="you@example.com", safe="/@",
                   pattern=_EMAILS, hint=_EMAILS_HINT,
-                  help="Separate several addresses with a slash."),
+                  help="Separate several addresses with a comma."),
         ),
     ),
     Service(
@@ -267,7 +276,7 @@ CATALOG: tuple[Service, ...] = (
             Field("from_phone", "From number", placeholder="+15551234567",
                   pattern=_PHONE, hint=_PHONE_HINT),
             Field("to", "Send to", required=False, placeholder="+15559876543",
-                  safe="/", pattern=_PHONES, hint=_PHONE_HINT),
+                  safe="/,", pattern=_PHONES, hint=_PHONES_HINT),
         ),
     ),
     Service(
@@ -300,8 +309,8 @@ CATALOG: tuple[Service, ...] = (
                   hint="32 letters and numbers."),
             Field("from_phone", "From number", placeholder="+15551234567",
                   pattern=_PHONE, hint=_PHONE_HINT),
-            Field("to", "Send to", placeholder="+15559876543", safe="/",
-                  pattern=_PHONES, hint=_PHONE_HINT),
+            Field("to", "Send to", placeholder="+15559876543", safe="/,",
+                  pattern=_PHONES, hint=_PHONES_HINT),
         ),
     ),
     Service(
@@ -314,8 +323,8 @@ CATALOG: tuple[Service, ...] = (
             Field("from_phone_id", "From phone number ID",
                   pattern=r"^[0-9]+$", hint="Digits only.",
                   help="The numeric ID from the Meta app dashboard, not the number."),
-            Field("to", "Send to", placeholder="+15559876543", safe="/",
-                  pattern=_PHONES, hint=_PHONE_HINT),
+            Field("to", "Send to", placeholder="+15559876543", safe="/,",
+                  pattern=_PHONES, hint=_PHONES_HINT),
         ),
     ),
     Service(
