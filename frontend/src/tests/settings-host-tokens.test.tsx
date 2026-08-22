@@ -74,11 +74,20 @@ const wrap = () => {
   return render(<QueryClientProvider client={qc}><SettingsPage /></QueryClientProvider>)
 }
 
+/** Edit lives behind the row's actions menu now (routes/settings.tsx::
+ *  HostRowMenu), since four named buttons no longer fit beside the section
+ *  rail. Radix opens on pointerdown, not click (AccountMenu precedent). */
+const openEdit = async () => {
+  const row = await screen.findByRole('row', { name: /pve-01/ })
+  fireEvent.pointerDown(within(row).getByRole('button', { name: 'Actions for pve-01' }),
+                        { button: 0, ctrlKey: false })
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }))
+}
+
 /** Open pve-01's Edit dialog and reveal one capability's token fields. */
 const openTokenForm = async (label: string) => {
   wrap()
-  const row = await screen.findByRole('row', { name: /pve-01/ })
-  fireEvent.click(within(row).getByRole('button', { name: 'Edit' }))
+  await openEdit()
   const dialog = screen.getByRole('dialog')
   await within(dialog).findByText(label)
   fireEvent.click(within(dialog).getByRole('button',
@@ -95,7 +104,7 @@ describe('Settings host tokens', () => {
 
   it('opens the merged Edit dialog for a host, with name, address and the capability list', async () => {
     wrap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await openEdit()
     expect(await screen.findByLabelText(/name/i)).toHaveValue('pve-01')
     expect(screen.getByLabelText(/^address$/i)).toHaveValue('https://10.0.0.5:8006')
     expect(await screen.findByText('Lifecycle')).toBeInTheDocument()

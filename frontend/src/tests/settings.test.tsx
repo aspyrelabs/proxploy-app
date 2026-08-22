@@ -10,6 +10,8 @@ let hostsError = false
 let channelsError = false
 let clockSkew = false
 let entitlementsError = false
+/** Set to a pending promise to hold GET /settings; null lets it answer at once. */
+let settingsGate: Promise<unknown> | null = null
 const teamRows = [{ id: 1, name: 'Default', slug: 'default', description: null,
                     member_count: 1, host_count: 1 },
                    { id: 2, name: 'Ops', slug: 'ops', description: null,
@@ -29,6 +31,12 @@ vi.mock('../api/client', () => ({
     if (path === '/hosts') {
       if (hostsError) return Promise.reject(new Error('boom'))
       return Promise.resolve(hostRows)
+    }
+    // SelfHostRow's own read, held on demand so its placeholder can be looked
+    // at: this fetch only starts once /hosts has answered, so it is a second,
+    // later wait inside the Hosts card rather than part of the page's first.
+    if (path === '/settings' && !opts?.method) {
+      return (settingsGate ?? Promise.resolve(null)).then(() => ({}))
     }
     if (path === '/schedules') return Promise.resolve([])
     if (path === '/auth/sessions') return Promise.resolve([])
@@ -53,16 +61,33 @@ vi.mock('../api/client', () => ({
   }),
 }))
 
+/** The section the page is opened on. Settings renders one section at a time
+ *  now (routes/settings.tsx::SECTIONS), so a test that wants the Notifications
+ *  card has to say so, the same way it would in the address bar. */
+let section: string | undefined
+/** Every `search` a rail link was rendered with, in order, so a test can check
+ *  where the rail points without a real router underneath it. */
+const railTargets: unknown[] = []
+
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
-  Link: ({ children }: { children?: unknown }) => <a>{children as never}</a>,
+  // `to` and `search` are the router's; everything else (className,
+  // aria-current) is the component's own output and has to survive the mock,
+  // or a test cannot see what the rail actually renders.
+  Link: ({ children, search, to: _to, ...rest }: Record<string, unknown>) => {
+    railTargets.push(search)
+    return <a {...rest as object}>{children as never}</a>
+  },
   useNavigate: () => () => {},
-  useSearch: () => ({}),
+  useSearch: () => (section ? { section } : {}),
 }))
 
 import { SettingsPage } from '../routes/settings'
 
-const wrap = () => {
+/** `at` is the ?section= the page opens on; omitted means the default (Hosts). */
+const wrap = (at?: string) => {
+  section = at
+  railTargets.length = 0
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(<QueryClientProvider client={qc}><SettingsPage /></QueryClientProvider>)
 }
@@ -72,7 +97,7 @@ describe('SettingsPage, notification channels', () => {
 
   it('asks for confirmation before deleting a channel, and skips the call on cancel', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
-    wrap()
+    wrap('notifications')
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Home ntfy'))
     await new Promise((r) => setTimeout(r, 10))
@@ -81,13 +106,13 @@ describe('SettingsPage, notification channels', () => {
 
   it('deletes the channel once the confirmation is accepted', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    wrap()
+    wrap('notifications')
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true))
   })
 
   it('toggles enabled/disabled via PATCH', async () => {
-    wrap()
+    wrap('notifications')
     fireEvent.click(await screen.findByRole('button', { name: 'Disable' }))
     await waitFor(() => expect(calls.some((c) =>
       c.method === 'PATCH' && c.path === '/notifications/channels/1'
@@ -96,7 +121,7 @@ describe('SettingsPage, notification channels', () => {
 
   it('gates the Notifications card behind notify.channels: no fetch, no Add channel, when the plan lacks it', async () => {
     notifyChannels = false
-    wrap()
+    wrap('notifications')
     // TeamsCard also renders "Not included in your plan." (teams.rbac is off
     // in this test's entitlements mock too) -- scope to the Notifications
     // section specifically so the two identical messages don't collide.
@@ -114,6 +139,25 @@ describe('SettingsPage, node shell toggle', () => {
     notifyChannels = true
     hostRows = [{ id: 5, name: 'pve1', address: 'https://10.0.0.9:8006', status: 'connected',
                  pve_version: '8.4.1', node_shell_enabled: false }]
+  })
+
+  it('holds the self-host question open instead of growing it in over the table', async () => {
+    let answer!: () => void
+    settingsGate = new Promise<void>((r) => { answer = r })
+    wrap()
+    // The question itself is not waiting for anything, so it is on screen with
+    // the placeholder, not after it.
+    expect(await screen.findByText(/Which of these hosts is Proxploy itself running on/))
+      .toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Loading which host Proxploy runs on' }))
+      .toBeTruthy()
+    expect(screen.queryByLabelText("Proxploy's own host")).toBeNull()
+
+    answer()
+    expect(await screen.findByLabelText("Proxploy's own host")).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading which host Proxploy runs on' }))
+      .toBeNull()
+    settingsGate = null
   })
 
   it('renders the current node_shell_enabled state and PATCHes on toggle', async () => {
@@ -143,12 +187,24 @@ describe('SettingsPage, hosts row actions', () => {
     // button any more.
     wrap()
     await screen.findByText('pve1')
+    // Sync stays in the row; Edit, Tasks and Remove moved behind the row menu
+    // when the section rail took the width four named buttons needed.
     expect(screen.getByRole('button', { name: 'Sync' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Tokens' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Actions for pve1' })).toBeInTheDocument()
+
+    // Radix opens on pointerdown, not click (AccountMenu/HostActionsMenu
+    // precedent).
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Actions for pve1' }),
+                          { button: 0, ctrlKey: false })
+    const menu = await screen.findByRole('menu')
+    for (const item of ['Edit', 'Tasks', 'Remove']) {
+      expect(within(menu).getByRole('menuitem', { name: item })).toBeInTheDocument()
+    }
+    // Tokens was merged into the Edit dialog and renamed; Rotate (SSH key
+    // regeneration) moved into that same dialog. Neither is reachable from the
+    // row at all, menu included.
+    expect(within(menu).queryByRole('menuitem', { name: 'Rotate' })).toBeNull()
+    expect(within(menu).queryByRole('menuitem', { name: 'Tokens' })).toBeNull()
   })
 })
 
@@ -209,7 +265,7 @@ describe('SettingsPage, hosts and channels error vs empty', () => {
 
   it('says the channels could not be read rather than showing "no channels yet"', async () => {
     channelsError = true
-    wrap()
+    wrap('notifications')
     expect(await screen.findByText(/channels not readable/i)).toBeInTheDocument()
     expect(screen.queryByText('No channels yet')).not.toBeInTheDocument()
   })
@@ -225,16 +281,78 @@ describe('SettingsPage, clock skew', () => {
 
   it('renders the clock message, not the grace/license-refresh message, when clock_skew is true', async () => {
     clockSkew = true
-    wrap()
+    wrap('plan')
     expect(await screen.findByText(/clock looks wrong/i)).toBeInTheDocument()
     expect(screen.queryByText(/license refresh failing/i)).toBeNull()
   })
 
   it('renders no clock message when clock_skew is false', async () => {
     clockSkew = false
-    wrap()
-    await screen.findByText('Plan')
+    wrap('plan')
+    // By role: "Plan" is now both the rail entry and the card's own heading.
+    await screen.findByRole('heading', { name: 'Plan' })
     expect(screen.queryByText(/clock looks wrong/i)).toBeNull()
+  })
+})
+
+describe('SettingsPage sections', () => {
+  beforeEach(() => {
+    calls.length = 0; notifyChannels = true; teamsRbac = false
+    hostsError = false; channelsError = false; clockSkew = false
+    hostRows = [{ id: 5, name: 'pve1', address: 'https://10.0.0.9:8006', status: 'connected',
+                 pve_version: '8.4.1', node_shell_enabled: false }]
+  })
+
+  it('opens on Hosts, and does not render the other nine sections with it', async () => {
+    wrap()
+    expect(await screen.findByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
+    // The point of the rail: one section is on screen, not twelve cards.
+    for (const other of ['Notifications', 'Schedules', 'Teams', 'Users', 'API keys',
+                         'Console', 'Updates', 'Plan']) {
+      expect(screen.queryByRole('heading', { name: other })).toBeNull()
+    }
+  })
+
+  it('lists every section in the rail, and points each at its own URL', async () => {
+    wrap()
+    await screen.findByRole('heading', { name: 'Hosts' })
+    const rail = screen.getByRole('navigation', { name: 'Settings sections' })
+    for (const label of ['Hosts', 'Notifications', 'Schedules', 'Teams', 'Users',
+                         'API keys', 'Profile', 'Console', 'Plan', 'Updates']) {
+      expect(within(rail).getByText(label)).toBeInTheDocument()
+    }
+    // Every entry carries a real ?section=, so a setting can be linked to and
+    // bookmarked rather than only scrolled to.
+    expect(railTargets).toEqual([
+      { section: 'hosts' }, { section: 'notifications' }, { section: 'schedules' },
+      { section: 'teams' }, { section: 'users' }, { section: 'api-keys' },
+      { section: 'profile' }, { section: 'console' },
+      { section: 'plan' }, { section: 'updates' },
+    ])
+  })
+
+  it('marks the open section, and only that one, as the current page', async () => {
+    wrap('console')
+    const rail = await screen.findByRole('navigation', { name: 'Settings sections' })
+    const current = within(rail).getAllByText((_t, el) =>
+      el?.getAttribute('aria-current') === 'page')
+    expect(current).toHaveLength(1)
+  })
+
+  it('keeps two-factor, sessions and trusted devices together under Profile', async () => {
+    wrap('profile')
+    // One rail entry, three cards: they are one subject, and revoking a
+    // session next to the device that skips its second factor is the point.
+    expect(await screen.findByRole('heading', { name: /two-factor/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
+    // Trusted devices renders only once TOTP is on; /auth/me says it is not
+    // here, so its absence is correct rather than a missing card.
+    expect(screen.queryByRole('heading', { name: 'Console' })).toBeNull()
+  })
+
+  it('falls back to Hosts when the URL names a section that does not exist', async () => {
+    wrap('backups-but-in-settings')
+    expect(await screen.findByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
   })
 })
 
@@ -250,14 +368,14 @@ describe('SettingsPage, the plan card', () => {
     // api/hooks.ts defaults tier to 'builtin' so gating fails closed, which is
     // right for security and wrong to print. A paid install read "FREE" for
     // the length of the fetch and then corrected itself.
-    wrap()
+    wrap('plan')
     expect(screen.queryByText('FREE')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Checking your plan')).toBeInTheDocument()
   })
 
   it('says it could not check, rather than FREE, when the plan fetch fails', async () => {
     entitlementsError = true
-    wrap()
+    wrap('plan')
     // TotpCard says the same sentence for the same reason, so more than one
     // match is expected here; the property under test is that the tier is NOT
     // stated as fact.
@@ -267,7 +385,7 @@ describe('SettingsPage, the plan card', () => {
   })
 
   it('shows the tier once it lands', async () => {
-    wrap()
+    wrap('plan')
     expect(await screen.findByText('FREE')).toBeInTheDocument()
     expect(screen.queryByLabelText('Checking your plan')).not.toBeInTheDocument()
   })

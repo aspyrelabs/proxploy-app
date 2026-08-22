@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react'
-import { createRoute } from '@tanstack/react-router'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { Link, createRoute, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { shellRoute } from './shell'
 import { api, apiErrorDetail } from '../api/client'
@@ -25,15 +26,68 @@ import { SessionsCard } from '../components/SessionsCard'
 import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
+import { Icon } from '../components/ui/icon'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
+// The rail, the ?section= contract and the command palette all read the same
+// table; it lives in lib/ so CommandPalette can import it without closing a
+// cycle back through routes/shell.tsx. See lib/settings-sections.ts.
+import {
+  DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, SETTINGS_SECTION_IDS,
+} from '../lib/settings-sections'
 
 export const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/settings',
+  // Same shape apps.tsx and vms.tsx use. An unrecognised ?section= falls back
+  // to Hosts rather than rendering an empty pane: a stale bookmark from before
+  // a section was renamed must land somewhere real.
+  validateSearch: (s: Record<string, unknown>) => ({
+    section: typeof s.section === 'string' && SETTINGS_SECTION_IDS.has(s.section)
+      ? s.section : undefined,
+  }),
   component: SettingsPage,
 })
+
+/** The section list. Same vocabulary as components/SidebarNav.tsx (10.5px
+ *  uppercase group captions, rounded-tile rows, an amber bar on the active
+ *  one) but borderless and inside the page, so it reads as part of Settings
+ *  rather than as a second app rail.
+ *
+ *  Horizontal and scrollable below `md`, where SidebarNav has already hidden
+ *  itself: a column of ten rows there would push every setting a screen down.
+ *  The group captions go with it, since they only separate anything in a
+ *  column.
+ */
+function SectionRail({ active }: { active: string }) {
+  return (
+    <nav aria-label="Settings sections"
+         className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1
+                    md:mx-0 md:w-[188px] md:flex-col md:gap-0 md:overflow-visible
+                    md:px-0 md:pb-0 md:sticky md:top-20 md:self-start">
+      {SETTINGS_SECTIONS.map(g => (
+        <Fragment key={g.group}>
+          <div className="hidden px-3 pb-1 pt-4 text-[10.5px] font-semibold uppercase
+                          tracking-[.08em] text-text-3 first:pt-0 md:block">
+            {g.group}
+          </div>
+          {g.items.map(i => (
+            <Link key={i.id} to="/settings" search={{ section: i.id }}
+                  aria-current={i.id === active ? 'page' : undefined}
+                  className={`relative whitespace-nowrap rounded-tile px-3 py-2 text-[13.5px]
+                              hover:bg-panel-2 hover:text-text ${i.id === active
+                    ? 'bg-panel-2 text-text before:absolute before:left-0 before:top-1.5 '
+                      + 'before:bottom-1.5 before:w-[3px] before:rounded before:bg-amber'
+                    : 'text-text-2'}`}>
+              {i.label}
+            </Link>
+          ))}
+        </Fragment>
+      ))}
+    </nav>
+  )
+}
 
 type HostRow = { id: number; name: string; address: string; status: string; pve_version: string | null;
                 node_shell_enabled: boolean; team_id: number | null }
@@ -170,6 +224,65 @@ export function SchedulesCard() {
  *  "None of these" is a real, storable answer: not every install manages the
  *  host it runs on, and self-detection already fails open (never blocks) when
  *  nothing is recorded. */
+// The same two class strings HostActionsMenu, VmActionsMenu and AppIconMenu
+// already share, destructive vocabulary included: text-red/bg-red-dim tokens,
+// never a literal hex (src/tests/no-hardcoded-colors.test.ts).
+const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
+             + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text'
+const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t border-line-soft '
+                         + 'px-3 py-2 text-[13px] text-red outline-none data-[highlighted]:bg-red-dim'
+
+/**
+ * Edit, Tasks and Remove for one enrolled host, behind one trigger.
+ *
+ * Four named buttons measured 277px, and with the section rail taking 216px
+ * the seven-column table wanted 1,054px in an 898px pane: Tasks and Remove
+ * were reachable only by scrolling the card sideways, which on macOS shows no
+ * scrollbar until you are already scrolling. Sync stays out here because it is
+ * the one with a pending state worth watching ("Syncing…"), and it is the
+ * action an operator repeats.
+ *
+ * Not HostActionsMenu: that one is the host PAGE's menu and carries Reboot and
+ * Power off, which are node power and have their own typed-confirmation gate.
+ * These three are enrolment management and belong to this table. Same Radix
+ * primitive and the same two class strings, so they read as one family.
+ */
+function HostRowMenu({ name, onEdit, onTasks, onRemove, tasksOpen }: {
+  name: string
+  onEdit: () => void
+  onTasks: () => void
+  onRemove: () => void
+  tasksOpen: boolean
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${name}`}>
+          <Icon name="more_vert" />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={8}
+          className="z-50 w-48 overflow-hidden rounded-card border border-line bg-panel
+                     shadow-[0_12px_32px_rgba(0,0,0,.35)]">
+          <DropdownMenu.Item onSelect={onEdit} className={itemCls}>
+            <Icon name="edit" size={16} /> Edit
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={onTasks} className={itemCls}>
+            <Icon name="fact_check" size={16} /> {tasksOpen ? 'Hide tasks' : 'Tasks'}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={onRemove} className={destructiveItemCls}>
+            <Icon name="delete" size={16} /> Remove
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+const selfRow = 'mb-4 flex flex-wrap items-center gap-2 rounded-ctl border '
+  + 'border-line-soft bg-panel-2 px-3 py-2 text-[12.5px]'
+
 function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
   const qc = useQueryClient()
   const settings = useQuery({
@@ -186,11 +299,29 @@ function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   })
 
-  if (settings.isPending) return null
+  // The QUESTION is static and waits for nothing; only the answer to it is in
+  // flight. Returning null for the whole strip meant the Hosts card drew its
+  // table and then, a moment later, grew a bordered row above it and pushed
+  // every host row down, under whatever the cursor was already reaching for.
+  // Same rule routes/network.tsx's Throughput card follows: keep what is
+  // already known on screen, stand in only for what is not.
+  if (settings.isPending) {
+    return (
+      <div className={selfRow}>
+        <span className="text-text-2">
+          Which of these hosts is Proxploy itself running on?
+        </span>
+        <SkeletonGroup label="Loading which host Proxploy runs on">
+          {/* The select below: px-2 py-1 text-[11.5px] inside a 1px border, so
+              8 + 2 + 11.5 * 1.45 = 27px, and rounded-ctl like the control. */}
+          <Skeleton className="h-[27px] w-36 rounded-ctl" />
+        </SkeletonGroup>
+      </div>
+    )
+  }
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-ctl border
-                    border-line-soft bg-panel-2 px-3 py-2 text-[12.5px]">
+    <div className={selfRow}>
       <span className="text-text-2">
         Which of these hosts is Proxploy itself running on?
       </span>
@@ -211,6 +342,12 @@ function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
 }
 
 export function SettingsPage() {
+  // `strict: false` matches apps.tsx: this component is rendered directly by
+  // tests as well as by the router, and a strict read throws when there is no
+  // matched route above it.
+  const search = useSearch({ strict: false }) as { section?: string }
+  const active = search.section && SETTINGS_SECTION_IDS.has(search.section)
+    ? search.section : DEFAULT_SETTINGS_SECTION
   const ent = useEntitlements()
   const { tier, grace, clockSkew } = ent
   const qc = useQueryClient()
@@ -306,10 +443,18 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <h1 className="font-display text-[22px] font-semibold">Settings</h1>
+    <div>
+      {/* The one h1 stays on the page, not on the section: every card below
+          already carries its own h2, so moving the title onto the section
+          would leave the page with two headings for the same thing. */}
+      <h1 className="mb-5 font-display text-[22px] font-semibold">Settings</h1>
 
-      <Card title="Plan">
+      <div className="flex flex-col gap-4 md:flex-row md:gap-7">
+        <SectionRail active={active} />
+
+        <div className="min-w-0 flex-1 space-y-5">
+
+      {active === 'plan' && <Card title="Plan">
         {/* api/hooks.ts defaults tier to 'builtin' because failing closed is
             the right security answer, but printing that default as a sentence
             told a paid installation it was on the free plan for the length of
@@ -338,9 +483,9 @@ export function SettingsPage() {
             This machine&apos;s clock looks wrong. Fix the system time; entitlement checks depend on it.
           </p>
         )}
-      </Card>
+      </Card>}
 
-      <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
+      {active === 'hosts' && <Card title="Hosts" action={<Button variant="ghost" onClick={() => setAdding(a => !a)}>{adding ? 'Close' : 'Add host'}</Button>}>
         {hosts.data && hosts.data.length > 0 && <SelfHostRow hosts={hosts.data} />}
         <QueryState query={hosts}
                     // Wrapped in the same overflow-x-auto the loaded branch
@@ -349,10 +494,12 @@ export function SettingsPage() {
                     // where the table will not is a placeholder of the wrong
                     // width.
                     loading={<SkeletonGroup label="Loading hosts" className="overflow-x-auto">
-                      <div className="min-w-[620px]">
+                      <div className="min-w-[860px]">
                         {/* Host, Address, PVE, Status, Node shell, Team, actions. */}
+                        {/* Host, Address, PVE, Status, Node shell, Team, then
+                            Sync and the row menu. */}
                         <SkeletonTable rows={2}
-                          cols={['w-24', 'w-32', 'w-16', 'w-20', 'w-24', 'w-24', 'w-40']} />
+                          cols={['w-24', 'w-32', 'w-16', 'w-20', 'w-24', 'w-24', 'w-24']} />
                       </div>
                     </SkeletonGroup>}
                     emptyTitle="No hosts yet."
@@ -362,8 +509,12 @@ export function SettingsPage() {
           {(rows) => (
             // Seven columns plus four action buttons overflow a narrow card, and a
             // table that shrinks to fit collides its own headers. Scroll instead.
+            // 860px is what the seven columns measure with Sync and the row
+            // menu; 620 was set when this card had the whole page. The wrapper
+            // still scrolls, but only below roughly a 1,300px window rather
+            // than on every laptop.
             <div className="overflow-x-auto">
-            <table className="w-full min-w-[620px] text-left text-[13px]">
+            <table className="w-full min-w-[860px] text-left text-[13px]">
               <thead><tr className="whitespace-nowrap text-[10.5px] uppercase tracking-wide text-text-3">
                 <th className="pb-2 pr-4">Host</th><th className="pr-4">Address</th><th className="pr-4">PVE</th><th className="pr-4">Status</th><th className="pr-4">Node shell</th><th className="pr-4">Team</th><th /></tr></thead>
               <tbody>
@@ -408,20 +559,23 @@ export function SettingsPage() {
                         ) : <span className="text-text-3">n/a</span>}
                       </td>
                       <td className="py-2">
-                        <div className="flex flex-wrap justify-end gap-1.5">
+                        {/* nowrap, not wrap: wrapping let the cell collapse
+                            below the width four buttons actually need, so with
+                            the section rail taking 216px the row stacked into
+                            three lines instead of scrolling. The card's own
+                            overflow-x-auto below is what handles a narrow
+                            pane, and it can only do that if the cell reports
+                            its real width. */}
+                        <div className="flex flex-nowrap justify-end gap-1.5">
                           <Button variant="ghost" className="px-2 py-1 text-[11px]"
                             disabled={syncHost.isPending && syncHost.variables?.id === h.id}
                             onClick={() => syncHost.mutate(h)}>
                             {syncHost.isPending && syncHost.variables?.id === h.id ? 'Syncing…' : 'Sync'}
                           </Button>
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                            onClick={() => setEditingHost(h)}>Edit</Button>
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
-                            onClick={() => setTasksHostId(id => id === h.id ? null : h.id)}>
-                            {tasksHostId === h.id ? 'Hide tasks' : 'Tasks'}
-                          </Button>
-                          <Button variant="danger" className="px-2 py-1 text-[11px]"
-                            onClick={() => setRemovingHost(h)}>Remove</Button>
+                          <HostRowMenu name={h.name} tasksOpen={tasksHostId === h.id}
+                            onEdit={() => setEditingHost(h)}
+                            onTasks={() => setTasksHostId(id => id === h.id ? null : h.id)}
+                            onRemove={() => setRemovingHost(h)} />
                         </div>
                       </td>
                     </tr>
@@ -449,8 +603,9 @@ export function SettingsPage() {
             onClose={() => setRemovingHost(null)}
             onRemoved={() => setRemovingHost(null)} />
         )}
-      </Card>
+      </Card>}
 
+      {active === 'notifications' && <>
       {/* This is the card's own entitlement-gated first load: not yet known
           whether the plan includes notify.channels, then the channels list's
           own first fetch. `isPending`, not `isFetching`, so this stays quiet
@@ -516,24 +671,33 @@ export function SettingsPage() {
         )}
       </Card>
       </CardLoadingOverlay>
+      </>}
 
-      <SchedulesCard />
+      {active === 'schedules' && <SchedulesCard />}
 
-      <TeamsCard />
+      {active === 'teams' && <TeamsCard />}
 
-      <UsersCard />
+      {active === 'users' && <UsersCard />}
 
-      <ApiKeysCard />
+      {active === 'api-keys' && <ApiKeysCard />}
 
-      <TotpCard />
+      {/* Three cards, one section, and the rail entry for it is "Profile":
+          they are one subject (see lib/settings-sections.ts).
+          TrustedDevicesCard renders nothing until two-factor is on, which is
+          correct here -- there is no such thing as a device trusted to skip a
+          factor you do not have. */}
+      {active === 'profile' && <>
+        <TotpCard />
+        <SessionsCard />
+        <TrustedDevicesCard />
+      </>}
 
-      <SessionsCard />
+      {active === 'console' && <ConsoleCard />}
 
-      <TrustedDevicesCard />
+      {active === 'updates' && <UpdateCard />}
 
-      <ConsoleCard />
-
-      <UpdateCard />
+        </div>
+      </div>
     </div>
   )
 }
