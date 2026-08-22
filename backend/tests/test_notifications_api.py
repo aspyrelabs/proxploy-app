@@ -277,3 +277,60 @@ def test_pasted_url_still_works_unchanged(tmp_path, csrf_header, bootstrap_admin
                    json={"name": "Raw", "url": "sinch://a/b/c/+15551234567"},
                    headers=csrf_header(c))
         assert r.status_code == 201
+
+
+# --- Master switches (services/notification_prefs.py) -----------------------
+
+def test_types_lists_every_row_with_its_live_value(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.get("/api/v1/notifications/types")
+        assert r.status_code == 200
+        rows = r.json()["types"]
+        assert len(rows) == 19
+        by_key = {t["key"]: t for t in rows}
+        assert by_key["job.failed"]["enabled"] is True
+        assert by_key["job.failed"]["label"] == "Job failed"
+        assert by_key["housekeeping.succeeded"]["enabled"] is False
+
+
+def test_patching_a_type_persists_and_is_audited(tmp_path, csrf_header, bootstrap_admin):
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        r = c.patch("/api/v1/notifications/types",
+                    json={"enabled": {"job.succeeded": False}},
+                    headers=csrf_header(c))
+        assert r.status_code == 200
+        by_key = {t["key"]: t for t in r.json()["types"]}
+        assert by_key["job.succeeded"]["enabled"] is False
+        again = {t["key"]: t for t in c.get("/api/v1/notifications/types").json()["types"]}
+        assert again["job.succeeded"]["enabled"] is False
+        with app.state.sessionmaker() as db:
+            actions = [a.action for a in db.query(AuditEvent).all()]
+        assert "notify.types.update" in actions
+
+
+def test_patching_an_unknown_type_is_refused(tmp_path, csrf_header, bootstrap_admin):
+    """`app.updated` was tickable in the old form and no emitter could produce
+    it. Refusing the key at the door is how that stops recurring."""
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.patch("/api/v1/notifications/types",
+                    json={"enabled": {"app.updated": False}},
+                    headers=csrf_header(c))
+        assert r.status_code == 422
+        assert "app.updated" in r.text
+
+
+def test_types_needs_admin(tmp_path):
+    from tests.support import make_app
+
+    with TestClient(make_app(tmp_path)) as c:
+        assert c.get("/api/v1/notifications/types").status_code == 401

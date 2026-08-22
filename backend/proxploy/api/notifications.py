@@ -12,6 +12,8 @@ from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.models import NotificationChannel, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.notification_catalog import build_url, public_catalog
+from proxploy.services.notification_prefs import effective, set_overrides
+from proxploy.services.notification_types import BY_KEY, TYPES
 from proxploy.services.notifier import kind_for, parses, send_one
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -45,6 +47,10 @@ class ChannelPatch(BaseModel):
     url: str | None = None
     events: list[str] | None = None
     enabled: bool | None = None
+
+
+class TypesPatch(BaseModel):
+    enabled: dict[str, bool]
 
 
 def _out(c: NotificationChannel) -> dict:
@@ -103,6 +109,34 @@ def list_kinds():
     client sends back what it collected and the server assembles the URL, so
     the only percent-encoding that ever runs is build_url()'s."""
     return public_catalog()
+
+
+def _types_out(db) -> dict:
+    live = effective(db)
+    return {"types": [{"key": t.key, "label": t.label, "group": t.group,
+                       "enabled": live[t.key]} for t in TYPES]}
+
+
+@router.get("/types", dependencies=[Depends(_manage)])
+def list_types(db=Depends(get_db)):
+    """Deliberately NOT behind notify.channels: the master switches are how
+    someone with no channels at all stops a toast, so gating them on the
+    channel feature would make "turn that off" unreachable on the very
+    installs most likely to want it."""
+    return _types_out(db)
+
+
+@router.patch("/types", dependencies=[Depends(_manage)])
+def patch_types(request: Request, body: TypesPatch, db=Depends(get_db),
+                user: User = Depends(_manage)):
+    unknown = sorted(set(body.enabled) - set(BY_KEY))
+    if unknown:
+        raise HTTPException(422, f"unknown notification type: {unknown[0]}")
+    set_overrides(db, body.enabled)
+    write_audit(db, actor_type="user", actor_id=user.id,
+                action="notify.types.update", target_type="setting",
+                params={"changed": sorted(body.enabled)}, ip=_ip(request))
+    return _types_out(db)
 
 
 @router.post("/channels", status_code=201,
