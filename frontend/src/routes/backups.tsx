@@ -24,7 +24,7 @@ import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
 import { Dialog } from '../components/ui/dialog'
 import { Loading } from '../components/ui/loading'
-import { SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
+import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
@@ -157,7 +157,26 @@ function RunDialog({ onClose }: { onClose: () => void }) {
           <p className="mt-3 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
             {blocked}
           </p>
-        ) : hostId != null && !checking && (
+        ) : hostId != null && checking ? (
+          /* A host is chosen and the three lists it is judged against (apps,
+             VMs, storage) are still in flight, so `blocked` is deliberately
+             null and the branch below is deliberately not drawn yet. That left
+             the dialog as a lone host select with the Start button under it,
+             and then the guest sentence and the whole "Archive lands on" field
+             appeared and shoved the buttons down, under a cursor already on
+             its way to them. */
+          <SkeletonGroup label="Checking what is on this host">
+            {/* "N guests on host will be backed up: a, b, c" wraps to two
+                lines as often as not, so two bars, the second short. */}
+            <SkeletonLine className="mt-3 w-full text-[12.5px]" />
+            <SkeletonLine className="w-2/3 text-[12.5px]" />
+            {/* The label and the select, spelled the way the real pair below
+                is: an 11px caption, then inputCls (px-3 py-2, text-[13.5px],
+                1px border) which is 16 + 2 + 13.5 * 1.45 = 38px. */}
+            <SkeletonLine className="mt-4 w-32 text-[11px]" />
+            <Skeleton className="h-[38px] w-full rounded-ctl" />
+          </SkeletonGroup>
+        ) : hostId != null && (
           <>
             {/* The scope, before the click. "One vzdump over every guest on the
                 chosen host" was only ever in this file's comments; naming the
@@ -443,7 +462,11 @@ export function BackupsPage() {
           <h1 className="font-display text-[22px] font-semibold">Backups</h1>
           <div className="text-[12px] text-text-3">
             {isPending
-              ? <SkeletonLine className="w-64 max-w-full text-[12px]" />
+              ? (
+                <SkeletonGroup label="Loading backup datastore">
+                  <SkeletonLine className="w-64 max-w-full text-[12px]" />
+                </SkeletonGroup>
+              )
               : data
                 ? (biggest
                     ? `Proxmox Backup Server · ${biggest.storage}`

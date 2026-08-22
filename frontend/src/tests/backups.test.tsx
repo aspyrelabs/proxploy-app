@@ -53,6 +53,9 @@ let stores: any[] = [
   { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
 ]
 
+/** Set to a pending promise to hold GET /apps; null lets it answer at once. */
+let appsGate: Promise<unknown> | null = null
+
 vi.mock('../api/client', () => {
   class ApiError extends Error {
     status: number; body: unknown
@@ -78,7 +81,11 @@ vi.mock('../api/client', () => {
       // The Run now dialog's two honest preconditions: guests to dump, and a
       // storage that carries `backup` content. Not PBS: `local` below is a
       // plain directory store and vzdump writes there perfectly well.
-      if (path === '/apps') return Promise.resolve(apps)
+      // appsGate holds /apps unresolved on demand, which is the only way to
+      // stand still in the window RunDialog's placeholder covers: hosts
+      // answered, so a host is chosen, while what is ON that host is not known
+      // yet.
+      if (path === '/apps') return (appsGate ?? Promise.resolve(null)).then(() => apps)
       if (path === '/vms') return Promise.resolve(vms)
       if (path === '/storage') return Promise.resolve(stores)
       if (path.startsWith('/backups/prune-preview')) return Promise.resolve(PRUNE)
@@ -153,6 +160,29 @@ describe('BackupsPage', () => {
     // unspecified, and an operator reasonably asked whether these buttons were
     // about Proxploy's own data rather than their apps and VMs.
     expect(screen.getByText(/not Proxploy's own settings/)).toBeInTheDocument()
+  })
+
+  it('stands in for the header and for what is on the host, and clears both', async () => {
+    calls.length = 0
+    let open!: () => void
+    appsGate = new Promise<void>((r) => { open = r })
+    wrap()
+    // First paint, before GET /backups has had a microtask to settle in.
+    expect(screen.getByRole('status', { name: 'Loading backup datastore' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
+    // /hosts answers, so the single host is chosen, but /apps is still held:
+    // this is the window where `blocked` is null and the guest sentence and
+    // the storage field were simply absent.
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: 'Checking what is on this host' })).toBeTruthy())
+    expect(screen.queryByLabelText(/archive lands on/i)).toBeNull()
+
+    open()
+    expect(await screen.findByText(/2 guests on host-01 will be backed up/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/archive lands on/i)).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Checking what is on this host' })).toBeNull()
+    appsGate = null
   })
 
   it('runs a backup and swaps the dialog body for the job log', async () => {
