@@ -71,4 +71,7 @@ def session(tmp_path):
 
     app = make_app(tmp_path)
     with TestClient(app), app.state.sessionmaker() as db:
+        # Services that notify need the app handle too; Session.info is
+        # SQLAlchemy's own place to hang per-session context.
+        db.info["app"] = app
         yield db

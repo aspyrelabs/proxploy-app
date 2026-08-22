@@ -1,5 +1,7 @@
 """Append-only audit writer (docs 04/08 §7). There is deliberately no update or
 delete function in this module, archival is a Phase-8+ export job, never mutation."""
+import logging
+
 from proxploy.models import (AlertRule, ApiKey, App, AuditEvent, Backup, Host,
                              Job, NotificationChannel, Schedule, Team, User, Vm)
 
@@ -14,6 +16,8 @@ from proxploy.models import (AlertRule, ApiKey, App, AuditEvent, Backup, Host,
 # is wrong or right by accident. Those two routes pass their own name instead.
 # Same reason "session", "alert" and "system" are absent: nothing there is a
 # name a person would recognise.
+logger = logging.getLogger(__name__)
+
 TARGET_LABELS = {
     "host": (Host, Host.name),
     "app": (App, App.name),
@@ -102,11 +106,15 @@ def write_audit(db, *, actor_type: str, action: str, actor_id: int | None = None
                 params: dict | None = None, result: str = "ok",
                 ip: str | None = None, request_id: str | None = None,
                 job_id: int | None = None,
-                target_name: str | None = None) -> None:
+                target_name: str | None = None, app=None) -> None:
     """`target_name` is resolved from the target here unless the caller passes
     one, so a route cannot forget to record what it acted on. Pass it only
     where the target has no name of its own to look up, e.g. a storage row
-    whose target_id is a host id."""
+    whose target_id is a host id.
+
+    `app` is optional and only enables the `audit.error` notification. Most
+    call sites have no app handle, and auditing must never depend on being
+    able to notify, so its absence means a silent row rather than an error."""
     db.add(AuditEvent(actor_type=actor_type, actor_id=actor_id, action=action,
                       target_type=target_type, target_id=target_id,
                       target_name=target_name or resolve_target_name(
@@ -114,3 +122,29 @@ def write_audit(db, *, actor_type: str, action: str, actor_id: int | None = None
                       params=redact(params) if params else None, result=result,
                       ip=ip, request_id=request_id, job_id=job_id))
     db.commit()
+    app = app or db.info.get("app")
+    if app is not None and result == "error" and action not in _NOT_OPERATIONAL:
+        _notify_error(app, action, target_name)
+
+
+# A failed sign-in is a security event, not an operational failure, and one
+# fat-fingered password would page whoever owns the channel. The audit row
+# still records every one of these; only the notification is withheld.
+_NOT_OPERATIONAL = frozenset({
+    "auth.login", "auth.login.totp_pending", "oidc.jit_provision.pending",
+})
+
+
+def _notify_error(app, action: str, target_name: str | None) -> None:
+    """The row is the record and the notification is a courtesy, so a broken
+    channel must never cost the record. Fired after the commit, and swallowed
+    whole."""
+    from proxploy.services.notifier import notify
+
+    subject = f"{action} on {target_name}" if target_name else action
+    try:
+        notify(app, "audit.error", f"Proxploy: {action} failed",
+               f"{subject} did not complete.")
+    except Exception:  # noqa: BLE001  (a courtesy never breaks the record)
+        logger.debug("audit error notification failed for %s", action,
+                     exc_info=True)

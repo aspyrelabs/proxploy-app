@@ -14,6 +14,12 @@ ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}
 
 def get_db(request: Request):
     db = request.app.state.sessionmaker()
+    # The app handle rides on the session so services/audit.py can fire the
+    # `audit.error` notification without every one of the ~25 routes that
+    # audits a failure having to thread an `app=` argument down to it. A route
+    # that forgets an argument notifies nothing and says so nowhere, which is
+    # the failure mode this avoids.
+    db.info["app"] = request.app
     try:
         yield db
     finally:
