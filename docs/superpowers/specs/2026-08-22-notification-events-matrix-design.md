@@ -154,8 +154,23 @@ This is the whole of the job-side change; no new call sites.
 `audit.error` is the one genuinely new emitter: `services/audit.py::write_audit`
 gains a notification when `result="error"`.
 
-`notifier.notify` and `channels_for` are unchanged. The master switch is applied
-before the fan-out, so a disabled type reaches neither the bus nor Apprise.
+`notifier.notify` and `channels_for` are unchanged.
+
+The master switch is applied in two places, not one, and deliberately not at the
+event bus. `applyJob` in LiveProvider does the react-query invalidation and the
+toast from the same SSE delta, so suppressing the publish would stop the Jobs
+page updating live rather than merely silencing a toast. Instead:
+
+* server side, `notifier.notify` returns early for a disabled type, before any
+  channel is decrypted or any Apprise send runs;
+* client side, LiveProvider skips `pushJobEvent`/`pushAlertEvent` for a disabled
+  type, in the same place the `notify.inapp` gate already sits, leaving the data
+  path untouched.
+
+To keep the client from re-deriving the mapping (and drifting from it), the
+`job` bus payload carries the resolved registry key as `notify_type`. The client
+tests one field against the prefs map and never needs its own copy of the job
+kind table.
 
 ## Testing
 
