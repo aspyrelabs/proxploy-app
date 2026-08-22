@@ -235,7 +235,7 @@ function AttachmentMap({ attachments, nodes, pending }: {
   )
 }
 
-function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
+function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: boolean }) {
   const ent = useEntitlements()
   const locked = ent.data != null && !ent.has('network.host_config')
   const [editing, setEditing] = useState<{ hostId: number; node: string; iface: Iface | null } | null>(null)
@@ -308,7 +308,33 @@ function HostNetworkSection({ nodes }: { nodes: NodeIfaces[] }) {
             </div>
           )}
 
-          {nodes.map((n) => (
+          {/* Same ordering rule the two cards above follow: this section reads
+              from the SAME useBridges() fetch, so during it `nodes` is [] and
+              the section drew its heading, its staging note and its red
+              warning over nothing at all -- a node with no interfaces, which
+              is not what an unfinished read means. One block, because the node
+              count is not known until the answer lands and guessing at it
+              would snap. */}
+          {pending ? (
+            <SkeletonGroup label="Loading host interfaces"
+                           className="mt-4 border-t border-line-soft pt-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <SkeletonLine className="w-20 text-[13px]" />
+                <SkeletonLine className="w-28 text-[11.5px]" />
+                {/* Add bridge, Discard staged, Apply staged config. Button is
+                    px-2 py-1 text-[11px] inside a 1px border: 11 * 1.45 line
+                    box + 8px + 2px = 26px, and rounded-ctl like the control. */}
+                <div className="ml-auto flex gap-2">
+                  <Skeleton className="h-[26px] w-20 rounded-ctl" />
+                  <Skeleton className="h-[26px] w-28 rounded-ctl" />
+                  <Skeleton className="h-[26px] w-36 rounded-ctl" />
+                </div>
+              </div>
+              {/* Interface, Type, Subnet, Ports, State, and the two buttons. */}
+              <SkeletonTable rows={5}
+                cols={['w-20', 'w-16', 'w-28', 'w-20', 'w-10', 'w-28']} />
+            </SkeletonGroup>
+          ) : nodes.map((n) => (
             <div key={`${n.host_id}:${n.node}`} className="mt-4 border-t border-line-soft pt-4">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <h3 className="font-mono text-[13px]">{n.node}</h3>
@@ -404,9 +430,18 @@ export function NetworkPage() {
     <div>
       <div className="mb-5">
         <h1 className="font-display text-[22px] font-semibold">Network</h1>
-        <div className="text-[12px] text-text-3">
-          {data ? `${bridgeCount} bridges across ${nodes.length} nodes` : '…'}
-        </div>
+        {/* An ellipsis stood here, which is a placeholder that says nothing
+            about its own width: it sat at 8px and then shoved the heading's
+            block down to a full line when the count arrived. */}
+        {isPending ? (
+          <SkeletonGroup label="Loading network summary">
+            <SkeletonLine className="w-40 text-[12px]" />
+          </SkeletonGroup>
+        ) : (
+          <div className="text-[12px] text-text-3">
+            {data ? `${bridgeCount} bridges across ${nodes.length} nodes` : '…'}
+          </div>
+        )}
       </div>
 
       {isError ? (
@@ -434,7 +469,7 @@ export function NetworkPage() {
             <ThroughputCard />
           </div>
           <AttachmentMap attachments={data?.attachments ?? []} nodes={nodes} pending={isPending} />
-          <HostNetworkSection nodes={nodes} />
+          <HostNetworkSection nodes={nodes} pending={isPending} />
         </>
       )}
     </div>

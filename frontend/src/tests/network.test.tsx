@@ -367,3 +367,21 @@ describe('NicForm addressing', () => {
     expect(screen.queryByText(/cloud-init/i)).toBeNull()
   })
 })
+
+describe('NetworkPage while the bridges read is still running', () => {
+  it('stands in for the host section and the count, and clears both', async () => {
+    const { container } = wrap()
+    // The first paint is synchronous, before any of the mocked promises have
+    // had a microtask to settle in, so this is the genuine pending state.
+    expect(screen.getByRole('status', { name: 'Loading network summary' })).toBeTruthy()
+    expect(screen.getByRole('status', { name: 'Loading host interfaces' })).toBeTruthy()
+    // A placeholder, not an empty real table: the real one names its node, and
+    // drawing it with no rows would say pve1 has no interfaces.
+    expect(screen.queryByRole('table', { name: /Interfaces on/ })).toBeNull()
+
+    await waitFor(() => expect(screen.getByText('2 bridges across 1 nodes')).toBeTruthy())
+    expect(table(/Interfaces on pve1/).getByText('vmbr0')).toBeTruthy()
+    // Nothing left pulsing under the data.
+    expect(container.querySelectorAll('.animate-pulse')).toHaveLength(0)
+  })
+})
