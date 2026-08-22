@@ -57,7 +57,9 @@ def test_a_host_matches_on_its_name(tmp_path, csrf_header, bootstrap_admin):
         seed()
         body = c.get("/api/v1/search", params={"q": "pve-node"}).json()
         assert [r["kind"] for r in body["results"]] == ["host"]
-        assert body["results"][0]["href"].startswith("/settings/hosts/")
+        # A route that exists: /settings/hosts/{id} never did, so this
+        # assertion passed while the link dead-ended in the browser.
+        assert body["results"][0]["href"] == "/settings?section=hosts"
 
 
 def test_an_exact_match_sorts_above_a_substring_match(tmp_path, csrf_header,

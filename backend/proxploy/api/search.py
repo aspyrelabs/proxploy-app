@@ -126,7 +126,14 @@ def search(request: Request, q: str = "", db=Depends(get_db),
                   .order_by(Host.name).limit(PER_KIND)):
             out.append({"kind": "host", "id": h.id, "label": h.name,
                         "sublabel": h.node_name or h.address,
-                        "href": f"/settings/hosts/{h.id}", "status": h.status})
+                        # /settings/hosts/{id} was never a route. The frontend
+                        # router has /settings and nothing under it, so this
+                        # link has always dead-ended; the palette navigates to
+                        # a path TanStack cannot match. Settings grew a section
+                        # rail on 2026-08-22, so the page this wanted now has a
+                        # real URL. Not per-host (there is still no such page),
+                        # but the section that lists every enrolled host.
+                        "href": "/settings?section=hosts", "status": h.status})
 
     if store and _visible(request, db, user, "catalog", "read"):
         # Name OR slug OR description, mirroring the rule the Store's own grid

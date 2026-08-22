@@ -3,6 +3,7 @@ import { Command } from 'cmdk'
 import { useNavigate } from '@tanstack/react-router'
 import { useEntitlements } from '../api/hooks'
 import { useGlobalSearch } from '../api/search'
+import { matchSettingsSections } from '../lib/settings-sections'
 import type { SearchResult } from '../api/search'
 import { Dialog } from './ui/dialog'
 
@@ -69,6 +70,17 @@ export function CommandPalette() {
   const search = useGlobalSearch(query, open && !denied)
   const groups = groupResults(search.data?.results ?? [])
   const flat = groups.flatMap((g) => g.items)
+  // Settings sections are static client-side routes, so they are matched here
+  // rather than by GET /search: there is nothing on the server to scan, and
+  // making an operator wait 250ms and a round trip to reach their own settings
+  // would be slower than the rail they are trying to skip. Matched off `raw`,
+  // not `query`, for the same reason -- the debounce exists for the LIKE scan.
+  //
+  // This became worth doing when Settings grew a rail: a section now has a URL
+  // (?section=), so "trusted devices" is somewhere the palette can actually
+  // send you, and the Profile merge means it is no longer reachable by
+  // scrolling for its heading.
+  const sections = matchSettingsSections(raw.trim().length >= 2 ? raw : '')
 
   const close = (): void => setPaletteOpen(false)
 
@@ -117,6 +129,11 @@ export function CommandPalette() {
   // expects. Written for any href with a query rather than for that one shape,
   // because the next result kind to gain a param should not have to come back
   // and edit this.
+  const goSection = (id: string): void => {
+    close()
+    navigate({ to: '/settings' as never, search: { section: id } as never })
+  }
+
   const go = (r: SearchResult): void => {
     close()
     const [path, qs] = r.href.split('?')
@@ -157,16 +174,48 @@ export function CommandPalette() {
           </p>
         ) : (
           <Command.List className="mt-2 max-h-[50vh] overflow-auto">
+            {/* First, and without waiting: these are local, so they are on
+                screen while the fleet search is still in flight. */}
+            {sections.length > 0 && (
+              <Command.Group heading="Settings" className="mb-1
+                [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1
+                [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:uppercase
+                [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-text-3">
+                {sections.map((sec) => (
+                  <Command.Item
+                    key={`settings-${sec.id}`}
+                    value={`settings-${sec.id}`}
+                    onSelect={() => goSection(sec.id)}
+                    className="flex cursor-pointer items-center justify-between rounded-ctl px-2 py-1.5 text-[13px] text-text-2 data-[selected=true]:bg-elev data-[selected=true]:text-text"
+                  >
+                    <span>
+                      {sec.label}
+                      {/* The group, not the URL: "Profile · Your account" says
+                          whose setting this is, which is the thing the rail's
+                          own grouping exists to say. */}
+                      <span className="ml-2 text-[11.5px] text-text-3">{sec.group}</span>
+                    </span>
+                    <span className="text-[11px] text-text-3">Settings</span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
+
+            {/* Every message below is suppressed once a section matched: a
+                "No results" under a list of results is a lie about the list
+                directly above it. */}
             {raw.trim().length > 0 && raw.trim().length < 2 ? (
               <p className="px-2 py-3 text-[12.5px] text-text-3">Keep typing, 2 characters minimum.</p>
-            ) : query.length === 0 ? (
+            ) : raw.trim().length === 0 ? (
               <p className="px-2 py-3 text-[12.5px] text-text-3">
                 {storeOnly ? 'Type to search the store.' : 'Type to search across the fleet.'}
               </p>
-            ) : search.isFetching && flat.length === 0 ? (
-              <p className="px-2 py-3 text-[12.5px] text-text-3">Searching…</p>
+            ) : (query.length === 0 || (search.isFetching && flat.length === 0)) ? (
+              sections.length === 0
+                && <p className="px-2 py-3 text-[12.5px] text-text-3">Searching…</p>
             ) : flat.length === 0 ? (
-              <p className="px-2 py-3 text-[12.5px] text-text-3">No results for &quot;{query}&quot;.</p>
+              sections.length === 0
+                && <p className="px-2 py-3 text-[12.5px] text-text-3">No results for &quot;{query}&quot;.</p>
             ) : (
               groups.map((g) => (
                 <Command.Group key={g.kind} heading={g.label} className="mb-1

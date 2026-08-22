@@ -574,7 +574,10 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
               403 partway through a job. The poll loop refreshes this every half
               hour. */}
           {gapCount > 0 && (
-            <Link to={'/settings/hosts' as never}
+            /* /settings/hosts was never a route, so this badge has always
+               dead-ended; the `as never` cast is what let it type-check.
+               Settings grew a section rail, so Hosts now has a real URL. */
+            <Link to="/settings" search={{ section: 'hosts' } as never}
               title="Re-run the setup script from Settings to grant them."
               className="rounded-ctl border border-amber/30 bg-amber-dim px-2 py-0.5
                          text-[12px] text-amber">

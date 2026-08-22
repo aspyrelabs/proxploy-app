@@ -184,3 +184,63 @@ describe('CommandPalette', () => {
     expect(screen.getByText(/type to search across the fleet/i)).toBeInTheDocument()
   })
 })
+
+
+describe('CommandPalette reaches Settings sections', () => {
+  beforeEach(() => {
+    features = { 'ui.global_search': true }
+    searchResults = { query: '', results: [] }
+    navigateMock.mockClear()
+    vi.mocked(api).mockClear()
+  })
+
+  const type = (v: string) => {
+    withQuery(<CommandPalette />)
+    openViaShortcut()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: v } })
+  }
+
+  it('jumps straight to a section, by its ?section= URL', async () => {
+    type('updates')
+    fireEvent.click(await screen.findByRole('option', { name: /Updates/ }))
+    expect(navigateMock).toHaveBeenCalledWith(
+      { to: '/settings', search: { section: 'updates' } })
+  })
+
+  it('finds Profile by what is inside it, not only by its name', async () => {
+    // The whole reason the section table carries keywords: merging Two-factor,
+    // Sessions and Trusted devices under "Profile" took all three names out of
+    // the rail, so without these the merge would have cost an operator every
+    // way of finding them.
+    for (const term of ['trusted devices', '2fa', 'recovery codes', 'sign out']) {
+      const { unmount } = withQuery(<CommandPalette />)
+      openViaShortcut()
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: term } })
+      expect(await screen.findByRole('option', { name: /Profile/ }),
+             `"${term}" should reach Profile`).toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('answers before the fleet search does, and asks the backend nothing', () => {
+    type('console')
+    // On screen with no debounce and no round trip: the 250ms wait exists for
+    // the server's LIKE scan, and a section has nothing to scan.
+    expect(screen.getByRole('option', { name: /Console/ })).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([path]) =>
+      String(path).startsWith('/search'))).toBe(false)
+  })
+
+  it('does not say "no results" above a section it just listed', async () => {
+    type('plan')
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: /Plan/ })).toBeInTheDocument())
+    expect(screen.queryByText(/no results for/i)).toBeNull()
+    expect(screen.queryByText('Searching…')).toBeNull()
+  })
+
+  it('still says "no results" when nothing matched anywhere', async () => {
+    type('zzzznothing')
+    expect(await screen.findByText(/no results for/i)).toBeInTheDocument()
+  })
+})
