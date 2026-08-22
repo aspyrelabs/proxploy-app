@@ -58,3 +58,17 @@ def bootstrap_admin(csrf_header):
                     headers=csrf_header(client))
         return client
     return _make
+
+
+@pytest.fixture
+def session(tmp_path):
+    """A bare DB session with the schema in place, for services that take a
+    session rather than an app. Enters TestClient because the schema is
+    created by the app's lifespan, not by make_app itself."""
+    from fastapi.testclient import TestClient
+
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app), app.state.sessionmaker() as db:
+        yield db
