@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { alertToastSeverity, applyAlert, applyJob, applyMetrics, applyResource, jobToastSeverity } from '../api/live'
 import { useEntitlements } from '../api/hooks'
+import { useNotificationTypes } from '../api/notificationTypes'
 import { pushAlertEvent, pushJobEvent } from '../lib/notificationStore'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
@@ -30,6 +31,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const ent = useEntitlements()
   const inApp = useRef(true)
   inApp.current = ent.data == null || ent.has('notify.inapp')
+  // The Events matrix' master switches. Read through a ref for the same
+  // reason inApp is: the SSE handlers below are wired once in an effect that
+  // must not re-subscribe every time a query settles.
+  const types = useNotificationTypes()
+  const typeEnabled = useRef<Record<string, boolean>>({})
+  typeEnabled.current = types.data?.enabled ?? {}
   useEffect(() => {
     if (typeof EventSource === 'undefined') return // jsdom / stripped proxies
     const es = new EventSource('/api/v1/events/stream')
@@ -42,6 +49,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     wire('resource', (d) => applyResource(qc, d))
     wire('job', (d) => applyJob(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
+      // An absent notify_type is a progress delta, not a silenced one: only a
+      // terminal outcome carries a type, and reading absent as off would
+      // silence every running job.
+      if (d.notify_type && typeEnabled.current[d.notify_type] === false) return
       // Keyed by jobId, not a fresh push: notificationStore.pushJobEvent and
       // notificationMerge.ts are what keep this job from ever rendering
       // twice once GET /jobs carries the same terminal delta.
@@ -53,6 +64,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }))
     wire('alert', (d) => applyAlert(qc, d, (t) => {
       if (!inApp.current) return   // notify.inapp gates the surface, not the data
+      const key = d.state === 'resolved' ? 'alert.resolved' : 'alert.fired'
+      if (typeEnabled.current[key] === false) return
       pushAlertEvent(t.alertId, alertToastSeverity(t.kind, d.severity), t.text, 'alert')
     }))
     return () => es.close()

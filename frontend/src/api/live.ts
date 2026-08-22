@@ -91,6 +91,10 @@ export function jobToastSeverity(kind: 'ok' | 'err' | 'info'): ToastSeverity {
 type JobDelta = {
   id: number; kind?: string; status?: string
   progress_pct?: number; target_type?: string | null; error?: string | null
+  /** The Events matrix row this outcome belongs to, resolved server-side in
+   *  jobs/backend.py so the client never needs its own copy of the job kind
+   *  table. Present only on a terminal delta; a progress frame has none. */
+  notify_type?: string
 }
 type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number; detail?: string }) => void
 
