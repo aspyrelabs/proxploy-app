@@ -8,6 +8,9 @@ let teamsRbac = false
 let hostRows: unknown[] = []
 let hostsError = false
 let channelsError = false
+let channelRows: unknown[] = [{ id: 1, name: 'Home ntfy', kind: 'ntfy',
+                               events: ['job.failed'], enabled: true,
+                               last_notified_at: null }]
 let clockSkew = false
 let entitlementsError = false
 /** Set to a pending promise to hold GET /settings; null lets it answer at once. */
@@ -48,10 +51,7 @@ vi.mock('../api/client', () => ({
     }
     if (path === '/notifications/channels' && !opts?.method) {
       if (channelsError) return Promise.reject(new Error('boom'))
-      return Promise.resolve([
-        { id: 1, name: 'Home ntfy', kind: 'ntfy', events: ['job.failed'],
-          enabled: true, last_notified_at: null },
-      ])
+      return Promise.resolve(channelRows)
     }
     calls.push({ path, method: opts?.method, body: opts?.body ? JSON.parse(String(opts.body)) : null })
     if (path.endsWith('/test')) return Promise.resolve({ sent: true })
@@ -248,6 +248,8 @@ describe('SettingsPage, hosts and channels error vs empty', () => {
     teamsRbac = false
     hostsError = false
     channelsError = false
+  channelRows = [{ id: 1, name: 'Home ntfy', kind: 'ntfy', events: ['job.failed'],
+                   enabled: true, last_notified_at: null }]
     hostRows = []
   })
 
@@ -446,5 +448,23 @@ describe('the Notifications group', () => {
       .flatMap(g => g.items).find(i => i.id === 'channels')!
     expect(channels.keywords).toEqual(
       expect.arrayContaining(['ntfy', 'telegram', 'email', 'slack', 'notify']))
+  })
+})
+
+describe('the channel row', () => {
+  it('counts the events rather than printing their backend keys', async () => {
+    channelRows = [{ id: 1, name: 'Ops', kind: 'webhook',
+                     events: ['job.failed', 'backup.failed'],
+                     enabled: true, last_notified_at: null }]
+    wrap('channels')
+    expect(await screen.findByText('2 events')).toBeInTheDocument()
+    expect(screen.queryByText(/job\.failed/)).not.toBeInTheDocument()
+  })
+
+  it('says Everything for a channel subscribed to all of them', async () => {
+    channelRows = [{ id: 1, name: 'Ops', kind: 'webhook', events: [],
+                     enabled: true, last_notified_at: null }]
+    wrap('channels')
+    expect(await screen.findByText('Everything')).toBeInTheDocument()
   })
 })

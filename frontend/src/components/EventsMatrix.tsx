@@ -5,6 +5,7 @@ import { useNotificationTypes, useSetNotificationTypes } from '../api/notificati
 import type { TypeRow } from '../api/notificationTypes'
 import type { ChannelRow } from './ChannelForm'
 import { Skeleton, SkeletonGroup } from './ui/skeleton'
+import { Switch } from './ui/switch'
 
 /**
  * What Proxploy tells you about, and where each thing goes.
@@ -95,13 +96,19 @@ export function EventsMatrix() {
       ) : null}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
+        {/* w-auto, not w-full: stretched to the card, the label column
+            absorbed every spare pixel and the switch ended up hundreds of
+            pixels from the row it belongs to. Hugging the content keeps a
+            name and its controls next to each other, and the wrapper above
+            scrolls once there are enough channels to need it. */}
+        <table className="w-auto text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px] text-text-3">
-              <th scope="col" className="py-1.5 pr-4">Notification</th>
-              <th scope="col" className="py-1.5 pr-4">In app</th>
+              <th scope="col" className="py-1.5 pr-10">Notification</th>
+              <th scope="col" className="whitespace-nowrap px-3 py-1.5">In app</th>
               {chans.map((c) => (
-                <th key={c.id} scope="col" className="py-1.5 pr-4">{c.name}</th>
+                <th key={c.id} scope="col"
+                    className="whitespace-nowrap px-3 py-1.5">{c.name}</th>
               ))}
             </tr>
           </thead>
@@ -115,20 +122,22 @@ export function EventsMatrix() {
               </tr>
               {rows.filter((r) => r.group === g).map((r: TypeRow) => (
                 <tr key={r.key} className="border-t border-line">
-                  <td className="py-1.5 pr-4 text-text-2">{r.label}</td>
-                  <td className="py-1.5 pr-4">
-                    <input type="checkbox" role="switch" aria-label={r.label}
-                           checked={r.enabled} disabled={setTypes.isPending}
-                           onChange={() => setTypes.mutate({ [r.key]: !r.enabled })} />
+                  <td className="whitespace-nowrap py-1.5 pr-10 text-text-2">{r.label}</td>
+                  <td className="px-3 py-1.5">
+                    <Switch aria-label={r.label} checked={r.enabled}
+                            disabled={setTypes.isPending}
+                            onCheckedChange={() => setTypes.mutate({ [r.key]: !r.enabled })} />
                   </td>
                   {chans.map((c) => (
-                    <td key={c.id} className="py-1.5 pr-4">
+                    <td key={c.id} className="px-3 py-1.5">
                       <input type="checkbox"
+                             className="size-[15px] accent-amber disabled:opacity-40"
                              aria-label={`Send ${r.label} to ${c.name}`}
-                             checked={ticked(c, r.key)}
-                             // A row that is off reaches nobody, so its
-                             // columns would be describing something that
-                             // cannot happen.
+                             // A row that is off reaches nobody, so showing
+                             // its cells ticked would claim a delivery that
+                             // cannot happen. Greyed-but-ticked said exactly
+                             // that: "never" on the left, "yes" on the right.
+                             checked={r.enabled && ticked(c, r.key)}
                              disabled={!r.enabled || !routingAllowed}
                              onChange={() => toggleCell(c, r.key)} />
                     </td>

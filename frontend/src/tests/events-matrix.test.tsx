@@ -135,3 +135,20 @@ describe('EventsMatrix while loading', () => {
       { name: 'Loading notification types' })).toBeInTheDocument()
   })
 })
+
+describe('what the matrix claims', () => {
+  it('does not show a row as delivered when its master switch is off', async () => {
+    // Greyed-but-ticked said two contradictory things at once: "never" on the
+    // left of the row and "yes, to Ops webhook" on the right.
+    channels = [{ id: 1, name: 'SMTP', kind: 'email', events: [],
+                  enabled: true, last_notified_at: null }]
+    wrap()
+    const off = await screen.findByRole('checkbox',
+      { name: 'Send Housekeeping succeeded to SMTP' })
+    expect(off).toBeDisabled()
+    expect(off).not.toBeChecked()
+    // A row that IS on still shows its delivery.
+    expect(screen.getByRole('checkbox',
+      { name: 'Send Job failed to SMTP' })).toBeChecked()
+  })
+})

@@ -643,8 +643,16 @@ export function SettingsPage() {
                       <tr key={ch.id} className="border-t border-line-soft hover:bg-panel-2">
                         <td className="py-2">{ch.name}</td>
                         <td className="font-mono text-text-2">{ch.kind}</td>
-                        <td className="font-mono text-[11.5px] text-text-3">
-                          {ch.events.length ? ch.events.join(', ') : 'all events'}
+                        {/* A count, not the keys. Joining them printed
+                            "app.install.failed, app.install.succeeded, ..."
+                            across four lines of backend spelling, which is
+                            both unreadable and the one thing a row like this
+                            must never show. Which events is the Events
+                            section's question. */}
+                        <td className="whitespace-nowrap text-text-3">
+                          {ch.events.length === 0
+                            ? 'Everything'
+                            : `${ch.events.length} ${ch.events.length === 1 ? 'event' : 'events'}`}
                         </td>
                         <td className={ch.enabled ? 'text-green' : 'text-text-3'}>
                           {ch.enabled ? 'enabled' : 'disabled'}
