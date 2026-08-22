@@ -18,11 +18,15 @@ describe('tokens', () => {
 describe('LoginForm', () => {
   it('renders brand + email/password fields', () => {
     render(<LoginForm onSuccess={() => {}} />)
-    // The wordmark is an inline SVG, not text, so it is findable by its
-    // accessible name and not by getByText. Asserting on the role also keeps
-    // this honest about the thing that actually matters: a screen reader can
-    // still tell you which product's login page this is.
-    expect(screen.getByRole('img', { name: 'Proxploy' })).toBeDefined()
+    // The wordmark is artwork, not text, so it is findable by its accessible
+    // name and not by getByText. Asserting on the role keeps this honest about
+    // the thing that matters: a screen reader can still tell you which
+    // product's login page this is.
+    //
+    // Two of them: one artwork file per theme, with CSS choosing. jsdom
+    // applies no CSS so both are here; a browser hides one with display:none,
+    // which removes it from the accessibility tree.
+    expect(screen.getAllByRole('img', { name: 'Proxploy' })).toHaveLength(2)
     expect(screen.getByLabelText(/email/i)).toBeDefined()
     expect(screen.getByLabelText(/password/i)).toBeDefined()
   })

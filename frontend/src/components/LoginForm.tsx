@@ -11,7 +11,7 @@ export const inputCls =
 // split that stood in for it. currentColor carries the amber, so this is the
 // same artwork proxploy-web ships with no second copy of the colours.
 export function Brand() {
-  return <Logo className="h-[30px] w-auto text-amber" />
+  return <Logo className="h-[30px] w-auto" />
 }
 
 type LoginResult = { ok?: true; user?: unknown; totp_required?: true; pending?: string }

@@ -26,6 +26,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 }))
 
 import { Topbar } from '../components/Topbar'
+import { applyStoredTheme } from '../lib/theme'
 
 const wrap = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -41,9 +42,16 @@ describe('Topbar', () => {
   // not an svg), but asserting on the tag would still miss <Logo> being
   // swapped for some other svg. Logo carries `role="img"
   // aria-label="Proxploy"`; assert that specifically.
-  it('carries the brand mark', () => {
+  it('carries the brand mark, one variant per theme', () => {
     wrap()
-    expect(screen.getByRole('img', { name: 'Proxploy' })).toBeInTheDocument()
+    // Both variants are in the markup and CSS decides which shows, so that
+    // the swap lands in the same frame as the theme. jsdom applies no CSS and
+    // therefore sees both; a browser gives the hidden one display:none, which
+    // takes it out of the accessibility tree, so exactly one is announced.
+    const marks = screen.getAllByRole('img', { name: 'Proxploy' })
+    expect(marks).toHaveLength(2)
+    expect(marks.map(m => m.getAttribute('src'))).toEqual(
+      ['/proxploy-logo-dark.svg', '/proxploy-logo-light.svg'])
   })
 
   // The emoji became SVGs; the accessible names must not have moved with them.
@@ -61,5 +69,36 @@ describe('Topbar', () => {
     const { container } = wrap()
     const header = container.querySelector('header')!
     expect(header.textContent ?? '').not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+  })
+})
+
+describe('theme defaulting', () => {
+  it('follows the system when nobody has chosen', () => {
+    // It used to be a flat default of dark, so a machine in light mode was
+    // handed a dark app and had to go and find the toggle.
+    localStorage.removeItem('pp_theme')
+    const spy = vi.spyOn(window, 'matchMedia').mockReturnValue(
+      { matches: true } as MediaQueryList)
+    expect(applyStoredTheme()).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    spy.mockRestore()
+  })
+
+  it('lets an explicit choice beat the system', () => {
+    // Someone who reached for the toggle meant it.
+    localStorage.setItem('pp_theme', 'dark')
+    const spy = vi.spyOn(window, 'matchMedia').mockReturnValue(
+      { matches: true } as MediaQueryList)
+    expect(applyStoredTheme()).toBe('dark')
+    spy.mockRestore()
+    localStorage.removeItem('pp_theme')
+  })
+
+  it('falls back to dark where the browser cannot say', () => {
+    localStorage.removeItem('pp_theme')
+    const spy = vi.spyOn(window, 'matchMedia').mockReturnValue(
+      { matches: false } as MediaQueryList)
+    expect(applyStoredTheme()).toBe('dark')
+    spy.mockRestore()
   })
 })

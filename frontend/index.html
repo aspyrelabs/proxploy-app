@@ -2,12 +2,32 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- The tab bar is painted by the browser chrome, which follows the
+         operating system, NOT this app's theme. So these are scoped to
+         prefers-color-scheme rather than swapped when someone uses the theme
+         toggle: a light mark on a dark tab strip would be the bug. -->
+    <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-dark.svg"
+          media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-light.svg"
+          media="(prefers-color-scheme: light)" />
+    <!-- No media query: a browser that ignores the two above still needs one
+         icon it will take, and Safari picks the last matching link. -->
+    <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-dark.svg" />
     <!-- iOS ignores SVG icons, so a real PNG for the home screen. -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#0B0F16" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Proxploy</title>
+    <!-- Runs before first paint, so a light-mode machine does not get a
+         frame of dark first. main.tsx calls applyStoredTheme again on module
+         load; this is only the part that has to happen sooner than that. -->
+    <script>
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem('pp_theme') ??
+          (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      } catch (e) { /* private mode, stay on the markup default */ }
+    </script>
   </head>
   <body>
     <div id="root"></div>
