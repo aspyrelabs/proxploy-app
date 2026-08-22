@@ -10,6 +10,7 @@ import { useSchedules } from '../api/schedules'
 import { actionLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
 import { ChannelForm } from '../components/ChannelForm'
+import { EventsMatrix } from '../components/EventsMatrix'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostEditDialog } from '../components/HostEditDialog'
 import { HostForm } from '../components/HostForm'
@@ -674,6 +675,10 @@ export function SettingsPage() {
       </Card>
       </CardLoadingOverlay>
       </>}
+
+      {active === 'events' && <Card title="Events">
+        <EventsMatrix />
+      </Card>}
 
       {active === 'schedules' && <SchedulesCard />}
 
