@@ -9,16 +9,23 @@ const KINDS = [
   { kind: 'ntfy', label: 'ntfy', setup_url: 'https://appriseit.com/services/ntfy/',
     fields: [
       { key: 'host', label: 'Server', required: true, secret: false,
-        placeholder: '', default: 'ntfy.sh', help: 'Leave as ntfy.sh unless you run your own.' },
+        placeholder: '', default: 'ntfy.sh', help: 'Leave as ntfy.sh unless you run your own.',
+        pattern: '^[A-Za-z0-9][A-Za-z0-9.\\-]*(:\\d{1,5})?$',
+        hint: 'A hostname or address, optionally with :port. No scheme, no path.' },
       { key: 'topic', label: 'Topic', required: true, secret: false,
-        placeholder: 'proxploy-alerts', default: '', help: '' },
+        placeholder: 'proxploy-alerts', default: '', help: '',
+        pattern: '^[A-Za-z0-9_-]{1,64}$',
+        hint: 'Letters, numbers, dashes and underscores, up to 64 characters.' },
     ] },
   { kind: 'telegram', label: 'Telegram', setup_url: 'https://appriseit.com/services/telegram/',
     fields: [
       { key: 'bot_token', label: 'Bot token', required: true, secret: true,
-        placeholder: '', default: '', help: 'What BotFather gave you.' },
+        placeholder: '', default: '', help: 'What BotFather gave you.',
+        pattern: '^[0-9]+:[A-Za-z0-9_-]+$',
+        hint: 'Digits, a colon, then the key, exactly as BotFather sent it.' },
       { key: 'chat_id', label: 'Chat ID', required: true, secret: false,
-        placeholder: '123456789', default: '', help: '' },
+        placeholder: '123456789', default: '', help: '',
+        pattern: '^(-?[0-9]+|@[A-Za-z0-9_]+)$', hint: 'A numeric id, or @channelname.' },
     ] },
 ]
 
@@ -139,5 +146,56 @@ describe('ChannelForm', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Telegram' }))
     fireEvent.click(await screen.findByRole('button', { name: /back/i }))
     expect(await screen.findByRole('button', { name: 'ntfy' })).toBeInTheDocument()
+  })
+})
+
+
+describe('field rules', () => {
+  beforeEach(() => { posted.length = 0; failNext = null })
+
+  it('says what is wrong before you can submit, not after', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'n' } })
+    fireEvent.change(await screen.findByLabelText('Topic'),
+                     { target: { value: 'NOT A TOPIC!!' } })
+    expect(await screen.findByText(
+      'Letters, numbers, dashes and underscores, up to 64 characters.'))
+      .toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add channel/i })).toBeDisabled()
+    expect(posted).toHaveLength(0)
+  })
+
+  it('clears the complaint once the value is right', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'n' } })
+    const topic = await screen.findByLabelText('Topic')
+    fireEvent.change(topic, { target: { value: 'bad topic' } })
+    await screen.findByText(/up to 64 characters/)
+    fireEvent.change(topic, { target: { value: 'good-topic' } })
+    await waitFor(() =>
+      expect(screen.queryByText(/up to 64 characters/)).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /add channel/i })).toBeEnabled()
+  })
+
+  it('does not complain about an empty optional field', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Telegram' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'n' } })
+    expect(screen.queryByText(/BotFather sent it/)).not.toBeInTheDocument()
+  })
+
+  it('marks the offending field for a screen reader, not just visually', async () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ntfy' }))
+    const topic = await screen.findByLabelText('Topic')
+    fireEvent.change(topic, { target: { value: '!!' } })
+    await waitFor(() => expect(topic).toHaveAttribute('aria-invalid', 'true'))
+  })
+
+  it('shows a skeleton while the services are still loading, not an empty box', () => {
+    wrap(<ChannelForm onSaved={() => {}} />)
+    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument()
   })
 })

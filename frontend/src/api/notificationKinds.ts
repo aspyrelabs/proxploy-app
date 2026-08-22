@@ -12,6 +12,26 @@ export type KindField = {
   placeholder: string
   default: string
   help: string
+  /** The rule the value must match, as a string the RegExp constructor takes.
+   *  It is the SAME string services/notification_catalog.py gates on, handed
+   *  over so the two cannot drift into disagreeing about what is acceptable.
+   *  Empty means no rule. */
+  pattern: string
+  /** What to show when the rule refuses. Never the pattern itself. */
+  hint: string
+}
+
+/** Does this value satisfy its field? An empty value is not a rule failure,
+ *  it is the required check's business, and a pattern the browser cannot
+ *  compile must never make a field permanently unfillable. */
+export function fieldError(field: KindField, value: string): string | null {
+  if (!value || !field.pattern) return null
+  try {
+    if (new RegExp(field.pattern).test(value)) return null
+  } catch {
+    return null
+  }
+  return field.hint || `${field.label} is not right.`
 }
 
 export type NotificationKind = {

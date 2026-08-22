@@ -124,3 +124,14 @@ describe('EventsMatrix', () => {
     expect(screen.getByText(/goes to every channel/i)).toBeInTheDocument()
   })
 })
+
+describe('EventsMatrix while loading', () => {
+  it('shows skeleton rows rather than one line of text', async () => {
+    // Nineteen rows arriving at once makes the section jump if the
+    // placeholder is smaller than what replaces it.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><EventsMatrix /></QueryClientProvider>)
+    expect(screen.getByRole('status',
+      { name: 'Loading notification types' })).toBeInTheDocument()
+  })
+})

@@ -237,10 +237,13 @@ def test_guided_create_reports_a_missing_field_by_name(
         assert "Topic is required" in r.text
 
 
-def test_guided_create_refuses_details_apprise_cannot_send_to(
+def test_guided_create_refuses_a_field_that_breaks_its_rule(
         tmp_path, csrf_header, bootstrap_admin):
     """The point of validating before storing: a channel that saves cleanly and
-    then never delivers is worse than a 422 while the form is still open."""
+    then never delivers is worse than a 422 while the form is still open.
+
+    The field rule is the first of two gates and catches this one, so the
+    message names the field rather than mentioning Apprise at all."""
     from tests.support import make_app
 
     with TestClient(make_app(tmp_path)) as c:
@@ -248,6 +251,27 @@ def test_guided_create_refuses_details_apprise_cannot_send_to(
         r = c.post("/api/v1/notifications/channels",
                    json={"name": "n", "kind": "telegram",
                          "fields": {"bot_token": "not-a-token", "chat_id": "x"}},
+                   headers=csrf_header(c))
+        assert r.status_code == 422
+        assert "Bot token" in r.text
+        assert "BotFather" in r.text
+
+
+def test_guided_create_still_refuses_what_only_apprise_can_judge(
+        tmp_path, csrf_header, bootstrap_admin, monkeypatch):
+    """The second gate. Field rules are deliberately permissive, because a
+    rule that rejects something which actually works is worse than the rubbish
+    it was meant to stop, so Apprise's own parser stays behind them as the
+    backstop for anything a pattern cannot express."""
+    from proxploy.api import notifications
+    from tests.support import make_app
+
+    monkeypatch.setattr(notifications, "parses", lambda url: False)
+    with TestClient(make_app(tmp_path)) as c:
+        bootstrap_admin(c)
+        r = c.post("/api/v1/notifications/channels",
+                   json={"name": "n", "kind": "ntfy",
+                         "fields": {"host": "ntfy.sh", "topic": "fine-topic"}},
                    headers=csrf_header(c))
         assert r.status_code == 422
         assert "Apprise" in r.text

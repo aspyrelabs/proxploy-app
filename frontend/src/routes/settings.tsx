@@ -614,7 +614,7 @@ export function SettingsPage() {
           own first fetch. `isPending`, not `isFetching`, so this stays quiet
           on the invalidation refetches the mutations below trigger. */}
       <CardLoadingOverlay state={{ firstLoad: ent.isPending || (channelsAllowed && channels.isPending) }}>
-      <Card title="Notifications"
+      <Card title="Channels"
             action={channelsAllowed && <Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
               {addingChannel ? 'Close' : 'Add channel'}
             </Button>}>

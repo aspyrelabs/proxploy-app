@@ -4,6 +4,7 @@ import { useEntitlements } from '../api/hooks'
 import { useNotificationTypes, useSetNotificationTypes } from '../api/notificationTypes'
 import type { TypeRow } from '../api/notificationTypes'
 import type { ChannelRow } from './ChannelForm'
+import { Skeleton, SkeletonGroup } from './ui/skeleton'
 
 /**
  * What Proxploy tells you about, and where each thing goes.
@@ -63,7 +64,19 @@ export function EventsMatrix() {
   }
 
   if (types.isPending) {
-    return <p className="text-[12px] text-text-3">Loading notification types…</p>
+    // Nineteen rows, so a single line of text under-describes what is coming
+    // and the section jumps when it lands.
+    return (
+      <SkeletonGroup label="Loading notification types" className="space-y-2">
+        <Skeleton className="h-[14px] w-40" />
+        {Array.from({ length: 10 }, (_, i) => (
+          <div key={i} className="flex items-center gap-4">
+            <Skeleton className="h-[14px] flex-1" />
+            <Skeleton className="h-[14px] w-8" />
+          </div>
+        ))}
+      </SkeletonGroup>
+    )
   }
 
   const groups: string[] = []

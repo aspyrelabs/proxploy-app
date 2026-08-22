@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { useNotificationKinds } from '../api/notificationKinds'
+import { fieldError, useNotificationKinds } from '../api/notificationKinds'
 import type { NotificationKind } from '../api/notificationKinds'
 import { Button } from './ui/button'
+import { Skeleton, SkeletonGroup } from './ui/skeleton'
 
 export type ChannelRow = {
   id: number; name: string; kind: string; events: string[]
@@ -79,7 +80,15 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
     return (
       <div className="space-y-3">
         <p className="text-[12px] text-text-3">Where should notifications go?</p>
-        {kinds.isPending && <p className="text-[12px] text-text-3">Loading services…</p>}
+        {kinds.isPending && (
+          // The grid is twenty tiles, so an empty box for the length of the
+          // fetch reads as "no services" rather than as "not yet".
+          <SkeletonGroup label="Loading services" className="flex flex-wrap gap-2">
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className="h-[30px] w-24 rounded-ctl" />
+            ))}
+          </SkeletonGroup>
+        )}
         <div className="flex flex-wrap gap-2">
           {kinds.data?.map((k) => (
             <Button key={k.kind} variant="ghost" onClick={() => choose(k.kind)}>
@@ -92,7 +101,12 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
     )
   }
 
-  const ready = name && (picked === PASTE
+  const errors: Record<string, string> = {}
+  for (const f of service?.fields ?? []) {
+    const e = fieldError(f, fields[f.key] ?? '')
+    if (e) errors[f.key] = e
+  }
+  const ready = name && Object.keys(errors).length === 0 && (picked === PASTE
     ? url
     : (service?.fields ?? []).every((f) => !f.required || fields[f.key]))
 
@@ -133,12 +147,19 @@ export function ChannelForm({ onSaved }: { onSaved: () => void }) {
           <label className="block text-[12px] text-text-3" htmlFor={`ch-${f.key}`}>
             {f.label}
           </label>
-          <input id={`ch-${f.key}`} className={input}
+          <input id={`ch-${f.key}`}
+                 className={`${input} ${errors[f.key] ? 'border-red' : ''}`}
                  type={f.secret ? 'password' : 'text'}
+                 aria-invalid={errors[f.key] ? true : undefined}
+                 aria-describedby={errors[f.key] ? `ch-${f.key}-err` : undefined}
                  value={fields[f.key] ?? ''} placeholder={f.placeholder}
                  onChange={(e) =>
                    setFields((prev) => ({ ...prev, [f.key]: e.target.value }))} />
-          {f.help && <p className="mt-1 text-[11.5px] text-text-3">{f.help}</p>}
+          {errors[f.key]
+            ? <p id={`ch-${f.key}-err`} className="mt-1 text-[11.5px] text-red">
+                {errors[f.key]}
+              </p>
+            : f.help && <p className="mt-1 text-[11.5px] text-text-3">{f.help}</p>}
         </div>
       ))}
 

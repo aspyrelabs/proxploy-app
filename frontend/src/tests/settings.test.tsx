@@ -126,7 +126,7 @@ describe('SettingsPage, notification channels', () => {
     // TeamsCard also renders "Not included in your plan." (teams.rbac is off
     // in this test's entitlements mock too) -- scope to the Notifications
     // section specifically so the two identical messages don't collide.
-    const section = (await screen.findByRole('heading', { name: 'Notifications' })).closest('section')!
+    const section = (await screen.findByRole('heading', { name: 'Channels' })).closest('section')!
     expect(await within(section).findByText('Not included in your plan.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add channel' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
@@ -308,8 +308,11 @@ describe('SettingsPage sections', () => {
     wrap()
     expect(await screen.findByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
     // The point of the rail: one section is on screen, not twelve cards.
-    for (const other of ['Notifications', 'Schedules', 'Teams', 'Users', 'API keys',
-                         'Sessions', 'Console', 'Updates', 'Plan']) {
+    // "Channels" and "Events", not "Notifications": that is now the group
+    // caption above them, and asserting on it here would pass whether or not
+    // either section rendered.
+    for (const other of ['Channels', 'Events', 'Schedules', 'Teams', 'Users',
+                         'API keys', 'Sessions', 'Console', 'Updates', 'Plan']) {
       expect(screen.queryByRole('heading', { name: other })).toBeNull()
     }
   })
@@ -318,9 +321,9 @@ describe('SettingsPage sections', () => {
     wrap()
     await screen.findByRole('heading', { name: 'Hosts' })
     const rail = screen.getByRole('navigation', { name: 'Settings sections' })
-    for (const label of ['Hosts', 'Notifications', 'Schedules', 'Teams', 'Users',
-                         'API keys', 'Profile', 'Sessions', 'Console', 'Plan',
-                         'Updates']) {
+    for (const label of ['Hosts', 'Channels', 'Events', 'Schedules', 'Teams',
+                         'Users', 'API keys', 'Profile', 'Sessions', 'Console',
+                         'Plan', 'Updates']) {
       expect(within(rail).getByText(label)).toBeInTheDocument()
     }
     // Every entry carries a real ?section=, so a setting can be linked to and
