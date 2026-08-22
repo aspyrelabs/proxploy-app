@@ -55,19 +55,19 @@ const wrap = () => {
 describe('AlertsPage', () => {
   beforeEach(() => { firingErrors = false; historyErrors = false; rulesErrors = false })
 
-  it('says nothing is firing when nothing is', async () => {
+  it('says nothing is triggered when nothing is', async () => {
     posted.length = 0; firing = []; rules = []
     wrap()
-    await waitFor(() => expect(screen.getByText(/nothing is firing/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/nothing is triggered/i)).toBeInTheDocument())
   })
 
-  it('says the firing alerts could not be read rather than showing "nothing is firing"', async () => {
+  it('says the alerts could not be read rather than showing "nothing is triggered"', async () => {
     // The bug: a failed fetch renders identically to a healthy, quiet cluster.
     posted.length = 0; firing = []; rules = []
     firingErrors = true
     wrap()
     await waitFor(() => expect(screen.getByText(/alerts not readable/i)).toBeInTheDocument())
-    expect(screen.queryByText(/nothing is firing/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nothing is triggered/i)).not.toBeInTheDocument()
   })
 
   it('says the alert history could not be read rather than showing "no resolved alerts"', async () => {

@@ -91,7 +91,7 @@ export function AlertsPage() {
 
       <section className={card}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-[15px] font-semibold">Firing</h2>
+          <h2 className="font-display text-[15px] font-semibold">Triggered</h2>
           <Button variant="ghost" onClick={() => setShowResolved((s) => !s)}>
             {showResolved ? 'Hide resolved' : 'Show resolved'}
           </Button>
@@ -101,10 +101,10 @@ export function AlertsPage() {
                       {/* Severity, Alert, Target, Since, acknowledge. */}
                       <SkeletonTable rows={3} cols={['w-16', 'w-40', 'w-24', 'w-16', 'w-20']} />
                     </SkeletonGroup>}
-                    emptyTitle="Nothing is firing"
+                    emptyTitle="Nothing is triggered"
                     emptyNote="Rules are checked every poll cycle."
                     errorTitle="Alerts not readable"
-                    errorNote="Proxploy could not reach the backend to check what is firing.">
+                    errorNote="Proxploy could not reach the backend to check what has triggered.">
           {(rows) => (
             <table className="w-full text-left">
               <thead><tr className={th}>
