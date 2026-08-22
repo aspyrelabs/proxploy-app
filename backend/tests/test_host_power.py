@@ -137,8 +137,12 @@ def test_reboot_job_actually_reboots_the_node_and_reaches_a_terminal_status(tmp_
         with app.state.sessionmaker() as db:
             job = db.get(Job, job_id)
             assert job.status == "succeeded", job.error
-            assert job.result["exitstatus"] == "OK"
             assert job.result["node"] == "pve1"
+            # No UPID, and so no exitstatus: Proxmox forks no task for a node
+            # reboot. See the null-UPID test below for why that is the point
+            # rather than a gap.
+            assert job.result["upid"] is None
+            assert job.result["exitstatus"] is None
             from proxploy.models import JobEvent
             messages = [e.message for e in db.query(JobEvent)
                        .filter_by(job_id=job_id).order_by(JobEvent.seq)]
@@ -174,6 +178,72 @@ def test_power_off_job_calls_proxmox_with_shutdown_and_succeeds(tmp_path):
         with app.state.sessionmaker() as db:
             assert db.get(Job, job_id).status == "succeeded"
         assert fake.node_power_calls == [("pve1", "shutdown")]
+
+    asyncio.run(run())
+
+
+def test_a_power_off_never_asks_proxmox_for_the_log_of_a_task_it_did_not_start(
+        tmp_path, monkeypatch):
+    """The hardware bug: POST /nodes/{node}/status returns null, not a UPID,
+    so run_host_power called GET /nodes/pve1/tasks/None/log on every power
+    off. The node shut down exactly as asked and the job then died with "task
+    log failed for None: 400 Bad Request: Parameter verification failed -
+    limit/start not defined in schema", which reads as a shutdown that did not
+    work.
+
+    Watches the client rather than the result: a UPID reappearing in the
+    result is caught by the test above, but a task read against a stale or
+    invented UPID would not be, and that read is the thing that must not
+    happen.
+    """
+    from proxploy.jobs import JobBackend
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.support import make_job_app, seed_host_row
+
+    looked: list[tuple[str, object]] = []
+    for name in ("task_log", "task_status"):
+        orig = getattr(ProxmoxClient, name)
+
+        def spy(self, node, upid, *a, _n=name, _o=orig, **kw):
+            looked.append((_n, upid))
+            return _o(self, node, upid, *a, **kw)
+
+        monkeypatch.setattr(ProxmoxClient, name, spy)
+
+    async def run():
+        from tests.fakes.pve import FakePVE
+
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.guestjobs  # noqa: F401
+        backend = JobBackend(app)
+        with app.state.sessionmaker() as db:
+            h = seed_host_row(db, node="pve1")
+            from proxploy.models import HostCredential
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
+            db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.commit()
+            job_id = backend.enqueue(
+                db, kind="host.shutdown", target_type="host", target_id=h.id,
+                params={"host_id": h.id, "node": "pve1",
+                        "command": "shutdown"}).id
+        await backend.wait(job_id, timeout=10)
+
+        with app.state.sessionmaker() as db:
+            job = db.get(Job, job_id)
+            assert job.status == "succeeded", job.error
+            from proxploy.models import JobEvent
+            messages = [e.message for e in db.query(JobEvent)
+                        .filter_by(job_id=job_id).order_by(JobEvent.seq)]
+            # The transcript says what happened rather than going quiet: an
+            # operator reading this log should not be left wondering where the
+            # usual "proxmox task UPID:..." line went.
+            assert any("with no task to follow" in m for m in messages)
+            assert not any("proxmox task" in m for m in messages)
+        assert fake.node_power_calls == [("pve1", "shutdown")]
+        assert looked == []
 
     asyncio.run(run())
 

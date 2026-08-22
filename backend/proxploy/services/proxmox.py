@@ -426,8 +426,20 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"node status failed for node {node!r}", e) from e
 
-    def node_power(self, node: str, command: str) -> str:
-        """POST /nodes/{node}/status?command=reboot|shutdown -> UPID.
+    def node_power(self, node: str, command: str) -> str | None:
+        """POST /nodes/{node}/status?command=reboot|shutdown -> None, usually.
+
+        Returns None, NOT a UPID, and that is Proxmox's design, not a failure:
+        PVE::API2::Nodes's node_cmd runs the reboot/shutdown straight out of
+        the request handler (`returns => { type => "null" }`) instead of
+        forking a task the way vzdump, migrate and every guest action do. A
+        node on its way down cannot host the worker that would write that
+        task's log, so there is nothing for a UPID to point at.
+
+        Every other POST on this client hands back a UPID, so the caller has
+        to be told; the annotation says `str | None` rather than `None`
+        because this only promises to relay what Proxmox sends, and a future
+        PVE that did mint a task here would come straight through.
 
         The host actions menu's Reboot/Power off. Deliberately separate from
         guest_action: this acts on the NODE, not a guest, so it is gated far

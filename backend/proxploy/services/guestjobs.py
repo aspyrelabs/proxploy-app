@@ -120,13 +120,26 @@ async def run_host_power(ctx: JobContext, params: dict) -> dict:
     verb = "rebooting" if command == "reboot" else "powering off"
     ctx.log(f"{verb} node {node} ({host_name})")
     upid = await asyncio.to_thread(client.node_power, node, command)
-    status = await await_task(ctx, client, node, upid, report_progress=False,
-                              timeout_s=app.state.settings.pve_task_timeout_s)
+    # Proxmox answers this one with null, not a UPID: node_cmd reboots or
+    # shuts the node down inside the request handler rather than forking a
+    # task (see ProxmoxClient.node_power). Feeding that None to await_task
+    # asked the node for the log of a task called "None", so every real power
+    # off ended as a failed job reading "task log failed for None: 400 Bad
+    # Request" while the node powered off perfectly well behind it. Only
+    # follow a task when Proxmox actually gave us one.
+    exitstatus = None
+    if upid:
+        status = await await_task(ctx, client, node, upid, report_progress=False,
+                                  timeout_s=app.state.settings.pve_task_timeout_s)
+        exitstatus = status.get("exitstatus")
+    else:
+        ctx.log(f"proxmox ran the {command} on {node} directly, with no task "
+                f"to follow")
     ctx.log(f"{node} accepted the {command} command; whether it actually "
             f"{'reboots' if command == 'reboot' else 'powers off'} is not "
             f"tracked here")
     app.state.bus.publish("resource", {"type": "host", "id": host_id, "change": "power"})
-    return {"upid": upid, "exitstatus": status.get("exitstatus"), "node": node,
+    return {"upid": upid, "exitstatus": exitstatus, "node": node,
             "host_id": host_id, "command": command}
 
 

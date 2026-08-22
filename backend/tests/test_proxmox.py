@@ -251,7 +251,11 @@ def test_node_power_reboot_posts_the_reboot_command():
     fake = FakePVE()
     upid = _fake_client(fake).node_power("pve1", "reboot")
     assert fake.node_power_calls == [("pve1", "reboot")]
-    assert upid.startswith("UPID:")
+    # Not a UPID: PVE::API2::Nodes runs the reboot in the request handler and
+    # its schema returns null, so there is no task to hand back. This asserted
+    # a UPID because the fake used to mint one, which is how the null went
+    # unnoticed until a real power off failed on it.
+    assert upid is None
 
 
 def test_node_power_shutdown_posts_the_shutdown_command():

@@ -678,7 +678,8 @@ class _NodeStatusLeaf:
     """nodes(n).status: GET reads /nodes/{n}/status (cpuinfo etc, host page);
     POST is the DIFFERENT verb /nodes/{n}/status?command=reboot|shutdown, the
     node power action (host actions menu). Same path, proxmoxer disambiguates
-    by HTTP method, so this fake does too."""
+    by HTTP method, so this fake does too, and the two answer differently: the
+    GET returns a status dict, the POST returns nothing at all."""
 
     def __init__(self, owner, node):
         self._owner, self._node = owner, node
@@ -705,7 +706,14 @@ class _NodeStatusLeaf:
             raise RuntimeError(f"403 Forbidden: Permission check failed "
                                f"(/nodes/{self._node}, Sys.PowerMgmt)")
         self._owner.node_power_calls.append((self._node, kwargs.get("command")))
-        return self._owner._record_action("node", 0, kwargs.get("command") or "power")
+        # None, deliberately, and this is the whole shape of the endpoint: PVE
+        # runs the reboot/shutdown in the request handler and its schema
+        # returns null, unlike every other POST in this fake. Minting a UPID
+        # here (which this did) made services/guestjobs.py::run_host_power look
+        # correct in every test while it failed on real hardware on every
+        # single power off, asking the node for the log of a task named "None".
+        self._owner.actions.append(("node", 0, kwargs.get("command") or "power"))
+        return None
 
 
 class _FwNode:
