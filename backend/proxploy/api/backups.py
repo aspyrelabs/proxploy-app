@@ -422,6 +422,29 @@ def verify_backup_route(request: Request, backup_id: int, db=Depends(get_db),
                              params={"backup_id": b.id})
 
 
+class TestRestoreIn(BaseModel):
+    storage: str | None = None
+
+
+@router.post("/{backup_id}/test-restore", status_code=202,
+             dependencies=[Depends(_restore)])
+def test_restore_route(request: Request, backup_id: int,
+                       body: TestRestoreIn = Body(default=TestRestoreIn()),
+                       db=Depends(get_db), user: User = Depends(_restore)):
+    """Prove an archive by restoring it into a throwaway id.
+
+    `_restore`, not `_run`: this really does create a guest, even though it
+    deletes it again, so it needs the permission that creating one needs.
+    """
+    b = _backup_or_404(db, backup_id)
+    _refuse_on_pbs(request, b)
+    _refuse_a_second_check(db, b.host_id)
+    return enqueue_and_audit(request, db, user, kind="backup.test_restore",
+                             target_type="host", target_id=b.host_id,
+                             target_name=b.guest_name or b.volid,
+                             params={"backup_id": b.id, "storage": body.storage})
+
+
 # services/selfguard.py is deliberately untouched by this task: DESTRUCTIVE
 # holds guest *lifecycle verbs* and its only consumer is enqueue_lifecycle,
 # which backup routes never call: see this task's brief header note.

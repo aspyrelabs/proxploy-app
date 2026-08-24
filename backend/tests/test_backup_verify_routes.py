@@ -82,3 +82,34 @@ def test_verify_is_refused_on_a_pbs_archive(tmp_path, csrf_header, bootstrap_adm
         assert "Proxmox Backup Server" in r.json()["detail"]
         with app.state.sessionmaker() as db:
             assert db.query(Job).filter_by(kind="backup.verify").count() == 0
+
+
+def test_test_restore_enqueues_with_the_chosen_storage(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, bid = _seed(app)
+        _snapshot(app, hid)
+        r = c.post(f"/api/v1/backups/{bid}/test-restore",
+                   json={"storage": "local-lvm"}, headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        with app.state.sessionmaker() as db:
+            job = db.query(Job).filter_by(kind="backup.test_restore").one()
+            assert job.params == {"backup_id": bid, "storage": "local-lvm"}
+            assert job.target_id == hid
+
+
+def test_test_restore_is_refused_on_a_pbs_archive(tmp_path, csrf_header,
+                                                  bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, bid = _seed(app, storage="pbs-ds")
+        _snapshot(app, hid, storage="pbs-ds", type_="pbs")
+        r = c.post(f"/api/v1/backups/{bid}/test-restore", json={},
+                   headers=csrf_header(c))
+        assert r.status_code == 409
+        assert "Proxmox Backup Server" in r.json()["detail"]
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).filter_by(kind="backup.test_restore").count() == 0
