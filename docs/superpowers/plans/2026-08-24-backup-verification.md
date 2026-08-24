@@ -18,6 +18,8 @@
 - **The scratch guest is always destroyed**, on the success path and the failure path. A destroy that itself fails makes the job fail, naming the vmid and node.
 - **PBS archives are refused** at the route with 409, per archive, by the datastore's type.
 - **Test with what exists:** `tests/fakes/ssh.py::FakeSSHConnection` + `make_fake_connect_factory` for SSH, `tests/fakes/pve.py::FakePVE` for the API, `tests/support.py::make_job_app` / `make_app` for the app.
+- **Calling a job handler directly in a test** takes `JobContext(JobBackend(app), job_id=1)`, with `JobBackend` imported from `proxploy.jobs`. NOT `JobContext(app.state.jobs, ...)`: `make_job_app` leaves `state.jobs` as None and the handler dereferences `ctx.backend.app`. `tests/test_appstore_install.py` and `tests/test_backup_verify.py` both show the real idiom; copy it.
+- **The plan's "Expected: FAIL with ..." lines have been wrong every time so far.** They mean "this test must fail before you implement", not an exact string to match. Do not chase the wording.
 - **Commit after every task.** Backend tests: `cd backend && .venv/bin/python -m pytest <file> -q`. Frontend: `cd frontend && npx vitest run <file>` and `npx tsc --noEmit`.
 
 ---
@@ -271,7 +273,7 @@ def test_a_clean_verify_marks_the_archive_ok(tmp_path):
                                 stderr_lines=[], exit_status=0)
         app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
         _, bid = _seed(app)
-        out = await verify_backup(JobContext(app.state.jobs, 1), {"backup_id": bid})
+        out = await verify_backup(JobContext(JobBackend(app), job_id=1), {"backup_id": bid})
         assert out["verdict"] == "ok"
         with app.state.sessionmaker() as db:
             row = db.get(Backup, bid)
@@ -293,7 +295,7 @@ def test_a_corrupt_archive_is_a_finished_job_with_a_failed_archive(tmp_path):
                                 exit_status=1)
         app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
         _, bid = _seed(app)
-        out = await verify_backup(JobContext(app.state.jobs, 1), {"backup_id": bid})
+        out = await verify_backup(JobContext(JobBackend(app), job_id=1), {"backup_id": bid})
         assert out["verdict"] == "failed"
         with app.state.sessionmaker() as db:
             assert db.get(Backup, bid).verify_state == "failed"
@@ -316,7 +318,7 @@ def test_an_unresolvable_path_fails_the_job_and_marks_nothing(tmp_path):
         app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
         _, bid = _seed(app)
         try:
-            await verify_backup(JobContext(app.state.jobs, 1), {"backup_id": bid})
+            await verify_backup(JobContext(JobBackend(app), job_id=1), {"backup_id": bid})
             raise AssertionError("expected JobFailed")
         except JobFailed as e:
             assert "could not be read" in str(e)
@@ -717,7 +719,7 @@ def test_a_passing_test_restore_destroys_the_copy_and_marks_the_archive(tmp_path
                                            "enabled": 1, "avail": 10 ** 12}]}
         app = make_job_app(tmp_path, fake=fake)
         _, bid = _seed(app)
-        out = await test_restore_backup(JobContext(app.state.jobs, 1),
+        out = await test_restore_backup(JobContext(JobBackend(app), job_id=1),
                                         {"backup_id": bid, "storage": "local-lvm"})
         assert out["verdict"] == "ok"
         assert fake.guest_deletes == [("qemu", "pve1", out["scratch_vmid"])]
@@ -743,7 +745,7 @@ def test_a_failed_restore_still_destroys_the_scratch_guest(tmp_path):
         app = make_job_app(tmp_path, fake=fake)
         _, bid = _seed(app)
         try:
-            await test_restore_backup(JobContext(app.state.jobs, 1),
+            await test_restore_backup(JobContext(JobBackend(app), job_id=1),
                                       {"backup_id": bid, "storage": "local-lvm"})
             raise AssertionError("expected JobFailed")
         except JobFailed:
@@ -769,7 +771,7 @@ def test_it_refuses_before_touching_pve_when_the_store_is_too_small(tmp_path):
         app = make_job_app(tmp_path, fake=fake)
         _, bid = _seed(app, size_bytes=10 ** 9)
         try:
-            await test_restore_backup(JobContext(app.state.jobs, 1),
+            await test_restore_backup(JobContext(JobBackend(app), job_id=1),
                                       {"backup_id": bid, "storage": "local-lvm"})
             raise AssertionError("expected JobFailed")
         except JobFailed as e:
@@ -1382,7 +1384,7 @@ def test_the_sweep_checks_the_oldest_unchecked_archives_up_to_its_cap(tmp_path):
             db.add(Backup(host_id=hid, volid="nfs-bk:backup/b.vma.zst", storage="nfs-bk",
                           guest_type="vm"))
             db.commit()
-        out = await verify_backup(JobContext(app.state.jobs, 1),
+        out = await verify_backup(JobContext(JobBackend(app), job_id=1),
                                   {"host_id": hid, "max": 10})
         assert out["checked"] == 2      # the seeded one plus b, never a
         with app.state.sessionmaker() as db:
