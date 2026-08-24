@@ -363,6 +363,65 @@ def restore_backup_route(request: Request, backup_id: int,
                                      "storage": body.storage})
 
 
+def _backup_or_404(db, backup_id: int) -> Backup:
+    b = db.get(Backup, backup_id)
+    if b is None:
+        raise HTTPException(404, "backup not found")
+    return b
+
+
+def _refuse_on_pbs(request: Request, b: Backup) -> None:
+    """Proxmox Backup Server verifies its own archives against stored digests,
+    on its own schedule. Ours reads the whole thing back over the network and
+    knows less, so offering it there would only overwrite a better verdict with
+    a worse one. Per archive, not per install: PBS for the important guests and
+    an NFS share for the rest is an ordinary layout."""
+    snap = request.app.state.poller.snapshots.get(b.host_id)
+    for st in (snap.storage if snap else []):
+        if st.get("storage") == b.storage and (st.get("type") or "") == "pbs":
+            raise HTTPException(409, "Proxmox Backup Server checks this archive "
+                                     "itself, on its own schedule.")
+
+
+def _refuse_a_second_check(db, host_id: int) -> None:
+    """One check per host at a time.
+
+    A check reads the entire archive back off the datastore: 40 GB over 1GbE
+    saturates the link for six minutes, and two at once on one host halve each
+    other while doubling nothing. Serialising is the same reasoning
+    `sync_in_flight` already applies to the sync sweep, applied at the door
+    instead of in the handler, so the caller is told rather than silently
+    queued behind something.
+    """
+    running = (db.query(Job)
+               .filter(Job.kind.in_(("backup.verify", "backup.test_restore")),
+                       Job.target_id == host_id,
+                       Job.status.in_(("queued", "running")))
+               .first())
+    if running is not None:
+        raise HTTPException(409, "A backup check is already running on this host. "
+                                 "Wait for it to finish, it reads the whole "
+                                 "archive back.")
+
+
+@router.post("/{backup_id}/verify", status_code=202, dependencies=[Depends(_run)])
+def verify_backup_route(request: Request, backup_id: int, db=Depends(get_db),
+                        user: User = Depends(_run)):
+    """Read one archive back and record whether it is intact.
+
+    `_run`, the same permission a backup itself needs: this reads an archive
+    and writes a verdict, and anyone allowed to create archives is allowed to
+    find out whether they are any good.
+    """
+    b = _backup_or_404(db, backup_id)
+    _refuse_on_pbs(request, b)
+    _refuse_a_second_check(db, b.host_id)
+    return enqueue_and_audit(request, db, user, kind="backup.verify",
+                             target_type="host", target_id=b.host_id,
+                             target_name=b.guest_name or b.volid,
+                             params={"backup_id": b.id})
+
+
 # services/selfguard.py is deliberately untouched by this task: DESTRUCTIVE
 # holds guest *lifecycle verbs* and its only consumer is enqueue_lifecycle,
 # which backup routes never call: see this task's brief header note.
