@@ -129,8 +129,25 @@ nothing else does.
   `frontend/src/api/schedules.ts`, so New job can create "Verify backups, Sunday
   3am". Params: `host_id`, optional `storage`, and a cap on how many archives one
   sweep walks. It takes unverified archives on non-PBS stores, oldest first.
-- **Limitations card**: drops the claim that nothing checks an archive, and says
-  instead that Proxploy can check them itself, less thoroughly than PBS.
+- **Limitations card** (`components/BackupLimitsDialog.tsx`): the "nothing checks
+  that a backup is readable" item is replaced rather than deleted, because the
+  limit did not disappear, it got smaller. The new item says what Proxploy does
+  about it and what it still cannot promise:
+  - Proxmox VE never checks an archive after writing it, so **Proxploy checks
+    them for you**, two ways, from the row's own actions or on a schedule.
+  - **Verify** reads the whole archive and checks its structure. For a virtual
+    machine that is Proxmox's own `vma verify`; for a container it is a full
+    read of the compressed tar, which catches a truncated or corrupted file but
+    inspects less than the VM check does.
+  - **Test restore** restores the backup into a spare id, confirms Proxmox
+    finished, and deletes the copy straight away. Nothing is started, nothing
+    is left behind, and your real machine is never touched. It is the strongest
+    proof available without PBS, and it needs as much free space as the archive.
+  - Still true, and said plainly: **neither check is as thorough as Proxmox
+    Backup Server's**, which verifies every block against a stored digest on a
+    schedule, without reading the archive back over the network each time.
+  The three remaining items (full copies, whole-machine restore, no encryption)
+  are unchanged, and the PBS recommendation panel stays.
 - **Verified · 30d**: starts reporting on PVE-only setups, because our checks
   now populate the column it reads. The "Backups completed · 30d" fallback stays
   for the case where nothing has been checked yet.
