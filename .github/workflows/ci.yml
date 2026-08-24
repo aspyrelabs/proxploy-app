@@ -1,14 +1,35 @@
 name: ci
-# Manual only. Removed the push trigger at the owner's request: run this
-# from the Actions tab, or `gh workflow run ci.yml`.
-# The weekly schedule went with it. Nothing now watches for upstream or
-# licensing drift on its own, so that check only happens when someone runs
-# this workflow by hand.
+# Mostly manual: run the whole thing from the Actions tab, or
+# `gh workflow run ci.yml`. Only `frontend` and `e2e` also run on a push, and
+# only when a push touched code they actually cover. Every other job carries
+# `if: github.event_name != 'push'` and stays hand-run, which is what the
+# owner asked for when the blanket push trigger came out.
+#
+# The two exceptions are here because they are the jobs that rot silently.
+# They assert on the UI as it is drawn, so a rename, a control moved into a
+# menu, or an added wizard step breaks them without breaking anything a unit
+# test looks at. Between 2026-08-09 and 2026-08-24 nobody dispatched this
+# workflow, and in that window the e2e suite went fully dark: journey.spec.ts
+# failed its first step and the `chromium` project depends on it, so the other
+# 14 tests reported "did not run" rather than failing. Six separate drifts had
+# piled up by the time anyone looked.
+#
+# The weekly schedule is still gone, so upstream and licensing drift is still
+# only checked when someone runs this by hand.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      # The e2e job boots the real backend (playwright.config.ts webServer),
+      # so a server-side change can break it with no frontend file touched.
+      - 'backend/proxploy/**'
+      - '.github/workflows/ci.yml'
 
 jobs:
   backend:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: backend}}
     steps:
@@ -24,6 +45,7 @@ jobs:
         run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"
 
   backend-postgres:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -68,6 +90,7 @@ jobs:
   # a panel over its cap. Needs no backend and no dev server; the harness
   # serves itself on an ephemeral port.
   geometry:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: frontend}}
     steps:
@@ -119,6 +142,7 @@ jobs:
         working-directory: frontend
 
   scripts:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +154,7 @@ jobs:
       - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
 
   install-harness:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -146,6 +171,7 @@ jobs:
   # claim nothing tests is not a claim; the `backend` job above runs 3.12, so
   # this leg holds the floor honest.
   backend-py311:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: backend}}
     steps:
