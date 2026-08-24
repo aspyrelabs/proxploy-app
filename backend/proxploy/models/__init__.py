@@ -748,6 +748,11 @@ class Backup(TimestampMixin, Base):
     taken_at: Mapped[datetime | None] = mapped_column(DateTime)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     verify_state: Mapped[str | None] = mapped_column(Text)
+    # When Proxploy last checked this archive itself (services/backupjobs.py's
+    # backup.verify / backup.test_restore). `verify_state` holds the verdict
+    # whoever produced it: PBS writes it through the sync when PBS is the
+    # datastore, we write it when nothing else will. NULL means nobody has.
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime)
     notes: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     __table_args__ = (

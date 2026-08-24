@@ -5,7 +5,7 @@ import asyncio
 import json
 import time
 
-from proxploy.models import App, Backup, Host, HostCredential, Job, Vm
+from proxploy.models import App, Backup, Host, HostCredential, Job, Vm, utcnow
 
 VOLID_CT = "local:backup/vzdump-lxc-150-2026_07_30-02_00_00.tar.zst"
 VOLID_VM = "local:backup/vzdump-qemu-201-2026_07_30-03_00_00.vma.zst"
@@ -478,3 +478,145 @@ def test_the_newest_backups_are_read_from_an_index_not_a_full_sort(tmp_path):
     assert "ix_backups_taken_at" in plan, plan
     # The tell that the index is doing the ordering, not just being read.
     assert "USE TEMP B-TREE FOR ORDER BY" not in plan, plan
+
+
+def _seed_peer(app, cluster="lab"):
+    """A second enrolled node of the SAME cluster, seeing the same archives."""
+    with app.state.sessionmaker() as db:
+        first = db.query(Host).order_by(Host.id).first()
+        first.cluster_name = cluster
+        peer = Host(name="host-02", address="https://10.0.0.8:8006", node_name="pve1",
+                    status="connected", pve_version="8.4.1", cluster_name=cluster)
+        db.add(peer)
+        db.commit()
+        blob, ver = app.state.secretstore.encrypt(json.dumps(
+            {"token_id": "proxploy@pve!bk", "token_secret": "s3cret"}).encode())
+        db.add(HostCredential(host_id=peer.id, kind="api_token:backup", encrypted_blob=blob,
+                              key_version=ver, public_meta="proxploy@pve!bk"))
+        db.commit()
+        return peer.id
+
+
+def test_a_shared_datastore_is_mirrored_once_per_cluster_not_once_per_node(tmp_path):
+    """Every node of a cluster reports the same archives off a shared store, and
+    each node is its own Host row, so one backup of one VM was listed twice: once
+    "on node1" and once "on node2"."""
+    from proxploy.services.backupjobs import sync_host_backups
+    from tests.support import make_job_app
+
+    async def run():
+        fake = _fake_with_backups()
+        fake.storages_by_node = {"pve1": [
+            {"storage": "nfs-backups", "type": "nfs", "content": "backup", "shared": 1},
+        ]}
+        fake.content_by_storage = {"nfs-backups": [
+            {"volid": VOLID_VM, "ctime": 1753844400, "size": 5368709120,
+             "format": "vma.zst", "content": "backup"},
+        ]}
+        app = make_job_app(tmp_path, fake=fake)
+        hid = _seed_host(app)
+        peer_id = _seed_peer(app)
+
+        assert sync_host_backups(app, hid)["synced"] == 1
+        # The peer sees the identical archive and must not add a second row.
+        assert sync_host_backups(app, peer_id)["synced"] == 0
+        with app.state.sessionmaker() as db:
+            assert db.query(Backup).count() == 1
+            assert db.query(Backup).one().host_id == hid
+
+    asyncio.run(run())
+
+
+def test_a_node_local_store_is_still_mirrored_by_every_node(tmp_path):
+    """Two nodes each holding their own `local` store hold two different files,
+    so the cluster rule must not reach them."""
+    from proxploy.services.backupjobs import sync_host_backups
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=_fake_with_backups())
+        hid = _seed_host(app)
+        peer_id = _seed_peer(app)
+        assert sync_host_backups(app, hid)["synced"] == 2
+        assert sync_host_backups(app, peer_id)["synced"] == 2
+        with app.state.sessionmaker() as db:
+            assert db.query(Backup).count() == 4
+
+    asyncio.run(run())
+
+
+def test_a_run_that_wrote_nothing_is_not_counted_as_a_completed_backup(tmp_path,
+                                                                       bootstrap_admin):
+    """vzdump over a node with no guests finishes with exitstatus OK having
+    written nothing, so counting job status alone reported three completed
+    backups on a system holding one archive."""
+    from fastapi.testclient import TestClient
+
+    from proxploy.models import Job
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    c = TestClient(app)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            db.add(Job(kind="backup.run", status="succeeded", target_type="host",
+                       result={"vmids": [108], "guests": 1}))
+            db.add(Job(kind="backup.run", status="succeeded", target_type="host",
+                       result={"vmids": [], "guests": 0}))       # empty node
+            db.add(Job(kind="backup.run", status="failed", target_type="host",
+                       result=None))
+            db.commit()
+        stats = c.get("/api/v1/backups").json()["stats"]
+        assert stats["runs_ok_30d"] == 1
+        assert stats["runs_failed_30d"] == 1
+        assert stats["run_rate_30d"] == 50.0
+
+
+def test_sync_leaves_our_verdict_alone_when_upstream_reports_no_verification(tmp_path):
+    """A non-PBS store reports no `verification` at all, and writing "none"
+    over our own check erased it on the next sweep, fifteen minutes later."""
+    from proxploy.services.backupjobs import sync_host_backups
+    from tests.support import make_job_app
+
+    # No `verification` key at all, which is what a plain dir or NFS store
+    # actually returns. The shared fixture reports one, so it cannot show this.
+    quiet = _fake_with_backups([
+        {"volid": VOLID_VM, "ctime": 1753844400, "size": 5368709120,
+         "format": "vma.zst", "content": "backup", "notes": None},
+    ])
+
+    async def run():
+        app = make_job_app(tmp_path, fake=quiet)
+        hid = _seed_host(app)
+        sync_host_backups(app, hid)
+        with app.state.sessionmaker() as db:
+            row = db.query(Backup).filter_by(volid=VOLID_VM).one()
+            row.verify_state, row.checked_at = "ok", utcnow()
+            db.commit()
+        sync_host_backups(app, hid)
+        with app.state.sessionmaker() as db:
+            row = db.query(Backup).filter_by(volid=VOLID_VM).one()
+            assert row.verify_state == "ok"
+            assert row.checked_at is not None
+
+    asyncio.run(run())
+
+
+def test_sync_still_takes_the_verdict_pbs_reports(tmp_path):
+    """Where PBS does speak, PBS is authoritative and overwrites ours."""
+    from proxploy.services.backupjobs import sync_host_backups
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=_fake_with_backups())
+        hid = _seed_host(app)
+        sync_host_backups(app, hid)          # fixture reports ok / failed
+        with app.state.sessionmaker() as db:
+            db.query(Backup).filter_by(volid=VOLID_CT).one().verify_state = "failed"
+            db.commit()
+        sync_host_backups(app, hid)
+        with app.state.sessionmaker() as db:
+            assert db.query(Backup).filter_by(volid=VOLID_CT).one().verify_state == "ok"
+
+    asyncio.run(run())

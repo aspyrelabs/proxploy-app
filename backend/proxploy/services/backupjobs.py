@@ -16,6 +16,8 @@ import asyncio
 import re
 from datetime import datetime, timezone
 
+from sqlalchemy import func
+
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, Job, Vm, to_iso, utcnow
 from proxploy.services.hostclient import client_for_host
@@ -60,6 +62,29 @@ def _taken_at(ctime) -> datetime | None:
     return datetime.fromtimestamp(int(ctime), timezone.utc).replace(tzinfo=None)
 
 
+def _syncs_shared_stores(db, host: Host) -> bool:
+    """Whether this host is the one that mirrors the cluster's SHARED backup
+    datastores.
+
+    A cluster's nodes all report the same archives off a shared store, and each
+    node is a separate Host row with its own `backups` rows keyed
+    ux_backups(host_id, volid), so a single backup of a single VM appeared once
+    per enrolled node. Picking one host to own those rows is what makes the
+    list say one archive once.
+
+    The lowest CONNECTED host id in the cluster, so the answer is the same
+    whichever host's sync runs first, and so a disconnected owner hands the
+    rows to a sibling on the next sweep rather than taking the whole cluster's
+    backup list offline with it. A standalone host always owns its own.
+    """
+    if host.cluster_name is None:
+        return True
+    lowest = (db.query(func.min(Host.id))
+              .filter(Host.cluster_name == host.cluster_name,
+                      Host.status == "connected").scalar())
+    return lowest is None or lowest == host.id
+
+
 def sync_host_backups(app, host_id: int) -> dict:
     """Blocking. Mirror one host's backup archives into `backups`.
 
@@ -79,9 +104,18 @@ def sync_host_backups(app, host_id: int) -> dict:
         # node-local vzdump archives on a sibling node of a cluster are missed
         # until Host models its nodes. Upgrade path: iterate the poller's
         # snapshot node list instead of this single name.
+        shared_here = _syncs_shared_stores(db, host)
         rows: list[dict] = []
         for st in client.storages(node):
             if not _has_backup_content(st):
+                continue
+            # A shared datastore reports the SAME archive from every node of the
+            # cluster, and each enrolled node is its own Host row with its own
+            # `backups` rows, so one backup of one VM was listed once per node.
+            # Only the cluster's canonical host mirrors those; a node-LOCAL
+            # store is still synced by every host, because there the same volid
+            # on two nodes really is two different files.
+            if st.get("shared") and not shared_here:
                 continue
             name = st.get("storage")
             for item in client.storage_content(node, name, content="backup"):
@@ -107,7 +141,15 @@ def sync_host_backups(app, host_id: int) -> dict:
             b.guest_name = ct_names.get(gvmid) if gtype == "ct" else vm_names.get(gvmid)
             b.taken_at = _taken_at(item.get("ctime"))
             b.size_bytes = int(item["size"]) if item.get("size") is not None else None
-            b.verify_state = (item.get("verification") or {}).get("state") or "none"
+            # Only when upstream actually reports one. A non-PBS store carries
+            # no `verification` at all, and writing "none" there erased the
+            # verdict services/backupjobs.py's own check had just written, on
+            # the next sweep. PBS still wins wherever PBS speaks.
+            upstream = (item.get("verification") or {}).get("state")
+            if upstream:
+                b.verify_state = upstream
+            elif b.verify_state is None:
+                b.verify_state = "none"
             b.notes = item.get("notes")
             b.synced_at = now
         dropped = 0
@@ -264,6 +306,38 @@ def guests_on_host(app, host_id: int) -> tuple[list[int], bool]:
         return sorted(int(v) for v in vmids if v is not None), host.last_seen_at is not None
 
 
+_PCT_LINE = re.compile(r"\b(\d{1,3})%")
+
+
+def _vzdump_pct(total: int):
+    """Read vzdump's own percentage out of its task log, across `total` guests.
+
+    PVE's task STATUS carries no percentage, so the only honest source is the
+    log this task already streams: vzdump prints
+    "INFO:  37% (4.1 GiB of 11.0 GiB) in 12s, read: ..." per guest, and starts
+    again from 0% for the next one. So a guest's own figure is folded into the
+    run's: guests finished, plus how far the current one is, over the total.
+
+    `total` is the selection size, or the guests the last poll saw for a
+    whole-host run. It can be wrong (a guest created since that poll is still
+    backed up), which only makes the bar conservative: await_task never reports
+    a percentage backwards, and the handler sets 100 at the end regardless.
+    """
+    done = {"n": 0}
+
+    def parse(line: str) -> int | None:
+        if "Finished Backup of" in line:
+            done["n"] = min(total, done["n"] + 1)
+            return int(done["n"] / total * 100)
+        m = _PCT_LINE.search(line)
+        if m is None:
+            return None
+        within = min(100, int(m.group(1)))
+        return int((done["n"] + within / 100) / total * 100)
+
+    return parse
+
+
 async def run_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.run`, one vzdump task over the selected guests, or all of them."""
     app = ctx.backend.app
@@ -271,7 +345,15 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
     client, node, host_name = await asyncio.to_thread(_host_target, app, host_id)
     vmids = [int(v) for v in (params.get("vmids") or [])]
     call = {"mode": params.get("mode") or "snapshot",
-            "compress": params.get("compress") or "zstd"}
+            "compress": params.get("compress") or "zstd",
+            # The archive's FILENAME is PVE's and cannot be templated:
+            # vzdump-lxc-150-2026_08_24-02_00_00.tar.zst is parsed back into
+            # guest type, vmid and time by the backup listing and by restore,
+            # so a friendlier name would orphan the archive. The note is the
+            # one label that is ours to write, and it is what makes an archive
+            # identifiable as "Immich" rather than as 150. Synced into
+            # backups.notes by sync_backups and shown in Recent backups.
+            "notes-template": "{{guestname}} ({{vmid}}) on {{node}}"}
     if params.get("storage"):
         call["storage"] = params["storage"]
     # Named in every line below. With no storage chosen PVE picks a backup store
@@ -321,9 +403,17 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
                    if known else ", none known here yet, Proxploy has not polled it"))
     upid = await asyncio.to_thread(client.vzdump, node, call)
     status = await await_task(ctx, client, node, upid,
-                              timeout_s=app.state.settings.pve_task_timeout_s)
+                              timeout_s=app.state.settings.pve_task_timeout_s,
+                              pct_from=_vzdump_pct(len(vmids) or len(known) or 1))
     await _resync(ctx, host_id)
-    return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmids": vmids}
+    # `guests` is what the Backups page counts, not the job's status: PVE
+    # returns exitstatus OK for a vzdump that wrote nothing, so a bare success
+    # cannot tell a real backup from an empty one. The early return above
+    # reports 0 for a node with nothing on it; here it is what was actually
+    # handed to vzdump (`known` for an all:1 run, which is the last poll's
+    # count and may undercount a guest created since).
+    return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmids": vmids,
+            "guests": len(vmids) or len(known)}
 
 
 HANDLERS["backup.run"] = run_backup

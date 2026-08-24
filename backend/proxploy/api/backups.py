@@ -18,7 +18,7 @@ from sqlalchemy import func
 
 from proxploy.api.deps import authorize, get_db, require_entitlement, scope_backup
 from proxploy.api.jobs import enqueue_and_audit
-from proxploy.models import App, Backup, Host, User, Vm, to_iso, utcnow
+from proxploy.models import App, Backup, Host, Job, User, Vm, to_iso, utcnow
 from proxploy.services.backupjobs import SYNCED_AT_KEY, sync_in_flight
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
@@ -56,6 +56,7 @@ def _backup_out(b: Backup, host_name: str | None) -> dict:
         "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
         "guest_name": b.guest_name, "taken_at": to_iso(b.taken_at),
         "size_bytes": b.size_bytes, "verify_state": b.verify_state,
+        "checked_at": to_iso(b.checked_at),
         "notes": b.notes,
     }
 
@@ -103,6 +104,28 @@ def _stats(db) -> dict:
                   .filter(Backup.taken_at >= cutoff)
                   .group_by(Backup.verify_state))
     ok_30d, bad_30d = recent.get("ok", 0), recent.get("failed", 0)
+    # The fallback for a PVE-only setup. `verify_state` is written by Proxmox
+    # BACKUP SERVER and by nothing else, so on a plain NFS or directory store
+    # every archive is "none" for ever and the rate above is null on a system
+    # whose backups are running perfectly well. What we do know there is
+    # whether the runs themselves finished, which is a different question and
+    # is labelled as one by the caller: a completed vzdump says an archive was
+    # written, never that it can be restored.
+    #
+    # A succeeded run that wrote NOTHING is excluded from both sides rather
+    # than counted as a win. vzdump over a node with no guests finishes with
+    # exitstatus OK having written zero bytes, so the job status alone reported
+    # three completed backups on a system holding one archive. The handler
+    # records `guests` for exactly this; a run from before it did is counted,
+    # since "no answer" is not the same as "wrote nothing".
+    run_ok = run_bad = 0
+    for status, result in db.query(Job.status, Job.result).filter(
+            Job.kind == "backup.run", Job.created_at >= cutoff,
+            Job.status.in_(("succeeded", "failed"))):
+        if status == "failed":
+            run_bad += 1
+        elif (result or {}).get("guests") != 0:
+            run_ok += 1
     return {
         "total": sum(d["count"] for d in stores.values()),
         "total_bytes": sum(d["size_bytes"] for d in stores.values()),
@@ -114,6 +137,10 @@ def _stats(db) -> dict:
         # verification switched off reports None instead of a fake 100%.
         "success_rate_30d": (round(ok_30d / (ok_30d + bad_30d) * 100, 1)
                              if (ok_30d + bad_30d) else None),
+        "runs_ok_30d": run_ok,
+        "runs_failed_30d": run_bad,
+        "run_rate_30d": (round(run_ok / (run_ok + run_bad) * 100, 1)
+                         if (run_ok + run_bad) else None),
         "datastores": sorted(stores.values(), key=lambda d: -d["size_bytes"]),
     }
 
@@ -167,40 +194,49 @@ class RunIn(BaseModel):
     compress: str = "zstd"
 
 
-def _resolve_guests(db, body: RunIn) -> tuple[int, list[int]]:
-    """-> (host_id, vmids). One vzdump call runs on one node, so a selection
-    spanning hosts is a client error, not a silent partial backup."""
+def _resolve_guests(db, body: RunIn) -> tuple[int, list[int], list[str]]:
+    """-> (host_id, vmids, names). One vzdump call runs on one node, so a
+    selection spanning hosts is a client error, not a silent partial backup.
+
+    `names` is empty for a whole-host run and carries one label per guest
+    otherwise, so the job can say what it is backing up rather than naming the
+    node it runs on: "backing up node1" was the feed's line for a run over a
+    single VM, which reads as a backup of the whole node."""
     if body.guests == "all":
         hosts = db.query(Host).all()
         if body.host_id is None:
             if len(hosts) != 1:
                 raise HTTPException(422, "host_id is required when more than one "
                                          "host is registered")
-            return hosts[0].id, []
+            return hosts[0].id, [], []
         if db.get(Host, body.host_id) is None:
             raise HTTPException(404, "host not found")
-        return body.host_id, []
+        return body.host_id, [], []
     vmids: list[int] = []
+    names: list[str] = []
     host_ids: set[int] = set()
     for g in body.guests:
         if g.type == "app":
             row = db.get(App, g.id)
             vmid = row.ctid if row else None
+            kind = "CT"
         elif g.type == "vm":
             row = db.get(Vm, g.id)
             vmid = row.vmid if row else None
+            kind = "VM"
         else:
             raise HTTPException(422, "guest type must be 'app' or 'vm'")
         if row is None:
             raise HTTPException(404, f"{g.type} {g.id} not found")
         vmids.append(int(vmid))
+        names.append(f"{row.name} ({kind} {vmid})")
         host_ids.add(row.host_id)
     if not vmids:
         raise HTTPException(422, "select at least one guest, or pass guests='all'")
     if len(host_ids) != 1:
         raise HTTPException(422, "every guest in one backup run must live on the "
                                  "same host")
-    return host_ids.pop(), vmids
+    return host_ids.pop(), vmids, names
 
 
 @router.post("/run", status_code=202,
@@ -208,9 +244,16 @@ def _resolve_guests(db, body: RunIn) -> tuple[int, list[int]]:
                            Depends(require_entitlement("backups.run"))])
 def run_backup_route(request: Request, body: RunIn = Body(default=RunIn()),
                      db=Depends(get_db), user: User = Depends(_run)):
-    host_id, vmids = _resolve_guests(db, body)
+    host_id, vmids, names = _resolve_guests(db, body)
+    # The job still RUNS on the host (one vzdump, one node), but what it is
+    # about is the guests, and the feed reads target_name. Left alone for a
+    # whole-host run, where the host IS the answer.
+    target_name = None if not names else (
+        ", ".join(names) if len(names) <= 3
+        else f"{', '.join(names[:3])} and {len(names) - 3} more")
     return enqueue_and_audit(request, db, user, kind="backup.run",
                              target_type="host", target_id=host_id,
+                             target_name=target_name,
                              params={"host_id": host_id, "vmids": vmids,
                                      "storage": body.storage, "mode": body.mode,
                                      "compress": body.compress})
