@@ -627,7 +627,7 @@ def verify_backup_route(request: Request, backup_id: int, db=Depends(get_db),
     find out whether they are any good.
     """
     b = _backup_or_404(db, backup_id)
-    _refuse_on_pbs(request, db, b)
+    _refuse_on_pbs(request, b)   # signature as shipped in Task 3: no `db`
     _refuse_a_second_check(db, b.host_id)
     return enqueue_and_audit(request, db, user, kind="backup.verify",
                              target_type="host", target_id=b.host_id,
@@ -1016,7 +1016,7 @@ def test_restore_route(request: Request, backup_id: int,
     deletes it again, so it needs the permission that creating one needs.
     """
     b = _backup_or_404(db, backup_id)
-    _refuse_on_pbs(request, db, b)
+    _refuse_on_pbs(request, b)   # signature as shipped in Task 3: no `db`
     _refuse_a_second_check(db, b.host_id)
     return enqueue_and_audit(request, db, user, kind="backup.test_restore",
                              target_type="host", target_id=b.host_id,
