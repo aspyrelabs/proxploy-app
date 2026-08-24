@@ -30,10 +30,14 @@ function acknowledge(): void {
   }
 }
 
-/** Each limit, and what Proxploy does about it. A list of four things that are
- *  wrong leaves the reader with a problem and no move; one of these four we
- *  genuinely answer, and saying plainly which one is the point of the card. */
-const LIMITS: { limit: string; body: string; answer: string }[] = [
+/** Each limit, and what Proxploy does about it where it does anything.
+ *
+ *  A list of four things that are wrong leaves the reader with a problem and no
+ *  move, so the two we answer carry an answer. The two we do not are left as
+ *  the plain statement they are: a "Proxploy cannot fix it" line adds nothing a
+ *  reader of "there is no way to pull a single file out of it" did not already
+ *  understand, and repeating it turns the card into a list of apologies. */
+const LIMITS: { limit: string; body: string; answer?: string }[] = [
   {
     limit: 'Every backup is a full copy',
     body: 'Proxmox writes the whole guest every time. Ten nightly backups of a '
@@ -54,14 +58,13 @@ const LIMITS: { limit: string; body: string; answer: string }[] = [
   },
   {
     limit: 'You restore a whole machine, not one file',
-    body: 'There is no way to open a backup and pull a single file out of it.',
-    answer: 'Cannot fix it. A vzdump archive carries no file index to browse.',
+    body: 'There is no way to open a backup and pull a single file out of it. '
+      + 'Restoring brings back the entire container or virtual machine.',
   },
   {
     limit: 'Backups are not encrypted',
-    body: 'Anyone who can read the share they sit on can read what is inside them.',
-    answer: 'Cannot fix it. Whatever the share and the filesystem give you is what '
-      + 'you have.',
+    body: 'Archives are written as they are. Anyone who can read the share they '
+      + 'sit on can read what is inside them.',
   },
 ]
 
@@ -80,9 +83,14 @@ export function BackupLimitsDialog({ onClose, onAgree }:
           <div key={l.limit}>
             <dt className="text-[13px] font-semibold text-text">{l.limit}</dt>
             <dd className="mt-0.5 text-[12.5px] text-text-3">{l.body}</dd>
-            <dd className="mt-1 text-[12.5px] text-text-2">
-              <span className="text-text-3">Proxploy: </span>{l.answer}
-            </dd>
+            {/* Only where there is one. A limit we cannot do anything about
+                reads as the plain statement it is, not as a "Proxploy:" with
+                an apology after it. */}
+            {l.answer && (
+              <dd className="mt-1 text-[12.5px] text-text-2">
+                <span className="text-text-3">Proxploy: </span>{l.answer}
+              </dd>
+            )}
           </div>
         ))}
       </dl>

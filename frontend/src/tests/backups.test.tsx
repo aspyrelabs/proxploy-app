@@ -461,7 +461,10 @@ describe('the backup limitations card', () => {
     expect(screen.getByText(/limits of Proxmox VE itself, not of Proxploy/)).toBeInTheDocument()
     // The one we answer, and the two we cannot.
     expect(screen.getByText(/Checks them for you/)).toBeInTheDocument()
-    expect(screen.getAllByText(/Cannot fix it/).length).toBeGreaterThanOrEqual(2)
+    // The two we cannot help with carry no "Proxploy:" line at all: a limit
+    // with an apology after it reads worse than the limit on its own.
+    expect(screen.getByText(/You restore a whole machine/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Proxploy:/).length).toBe(2)
     expect(screen.getByText(/Proxmox Backup Server/)).toBeInTheDocument()
   })
 
