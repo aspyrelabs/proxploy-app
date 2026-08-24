@@ -285,6 +285,69 @@ export const STATUS_LABEL: Record<string, string> = {
   unreachable: 'Host Unreachable',
 }
 
+/**
+ * Kinds that read better as one phrase per outcome than as a neutral label
+ * plus a status word. "Backup Run Done" is what the two-part rule produced,
+ * and it is not a sentence anyone says: a backup starts, completes, fails or
+ * is stopped, and each of those is its own event to an operator watching a
+ * 40-minute vzdump.
+ *
+ * Deliberately narrow. The two-part composition below is still the rule, and
+ * a kind stays out of here unless its outcomes genuinely have their own names;
+ * an entry that only reworded "Done" would be a second vocabulary for nothing.
+ */
+const JOB_PHRASE: Record<string, Record<string, string>> = {
+  'backup.run': {
+    queued: 'Backup Queued',
+    running: 'Backup Started',
+    succeeded: 'Backup Completed',
+    failed: 'Backup Failed',
+    canceled: 'Backup Stopped',
+    interrupted: 'Backup Interrupted',
+  },
+  'backup.restore': {
+    queued: 'Restore Queued',
+    running: 'Restore Started',
+    succeeded: 'Restore Completed',
+    failed: 'Restore Failed',
+    canceled: 'Restore Stopped',
+    interrupted: 'Restore Interrupted',
+  },
+  'backup.delete': {
+    queued: 'Delete Queued',
+    running: 'Deleting Backup',
+    succeeded: 'Backup Deleted',
+    failed: 'Delete Failed',
+    canceled: 'Delete Stopped',
+    interrupted: 'Delete Interrupted',
+  },
+  'backup.prune': {
+    queued: 'Prune Queued',
+    running: 'Pruning Backups',
+    succeeded: 'Backups Pruned',
+    failed: 'Prune Failed',
+    canceled: 'Prune Stopped',
+    interrupted: 'Prune Interrupted',
+  },
+  'backup.sync': {
+    queued: 'Refresh Queued',
+    running: 'Refreshing Backups',
+    succeeded: 'Backups Refreshed',
+    failed: 'Refresh Failed',
+    canceled: 'Refresh Stopped',
+    interrupted: 'Refresh Interrupted',
+  },
+}
+
+/** The phrase for one (kind, status), or null when the kind has no map and
+ *  the caller should compose a label and a status the usual way. */
+export function jobPhrase(kind: string | null | undefined,
+                          status: string | null | undefined): string | null {
+  if (!kind || !status) return null
+  const byStatus = Object.hasOwn(JOB_PHRASE, kind) ? JOB_PHRASE[kind] : null
+  return byStatus && Object.hasOwn(byStatus, status) ? byStatus[status] : null
+}
+
 /** hasOwn, not `STATUS_LABEL[s]`: a status of 'toString' would otherwise
  *  answer with the function on Object.prototype and render as JS source. */
 export function statusLabel(status: string | null | undefined): string {

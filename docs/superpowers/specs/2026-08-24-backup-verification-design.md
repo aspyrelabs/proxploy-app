@@ -34,16 +34,36 @@ This wires both into Proxploy for the setups that have no PBS.
    muddy the column. An archive on NFS/CIFS/dir on the same cluster still gets
    ours.
 
-## Open decisions, defaulted
+## Settled after review
 
-These were raised at design time and defaulted rather than blocking. Both are
-cheap to flip before implementation:
-
-- **Entitlement**: a new `backups.verify` key, defaulting on. Not folded into
-  `backups.pbs` (that key is about attaching the datastore) or
-  `backups.retention` (about deleting archives).
+- **No entitlement key.** Both actions ship ungated. Everything is open today,
+  and inventing `backups.verify` now would be guessing at a plan boundary
+  nobody has drawn. The routes still carry their normal `authorize()` checks.
 - **Test restore target storage**: defaults to the datastore the archive names,
   changeable in the dialog with the same picker the backup dialogs use.
+
+## Job phrasing
+
+Neither kind gets a neutral label plus a status word: "Backup Verify Done" is
+the thing this product stopped saying. They join `JOB_PHRASE` in
+`frontend/src/lib/activityDisplay.ts`, which already carries the five existing
+backup kinds:
+
+| Status | `backup.verify` | `backup.test_restore` |
+|---|---|---|
+| queued | Check Queued | Test Restore Queued |
+| running | Checking Backup | Test Restore Started |
+| succeeded | Check Finished | Test Restore Completed |
+| failed | Check Could Not Run | Test Restore Failed |
+| canceled | Check Stopped | Test Restore Stopped |
+| interrupted | Check Interrupted | Test Restore Interrupted |
+
+"Check Finished" and "Check Could Not Run", deliberately, rather than Passed
+and Failed: a verify job's success means the check RAN, and whether the archive
+passed is the row's own verdict. A toast reading "Verify Failed" over an
+archive that is merely corrupt, or "Verify Succeeded" over one that just failed
+its check, would state the opposite of what happened. The four words are worth
+it.
 
 ## Job kinds
 
@@ -174,8 +194,7 @@ nothing else does.
   job.
 - `sync_host_backups` no longer clobbers a verdict when upstream reports no
   verification, and still honours PBS's when it does.
-- Route tests: PBS archive refused, entitlement enforced, verdict and
-  `checked_at` written.
+- Route tests: PBS archive refused, verdict and `checked_at` written.
 - Frontend: row actions disabled with the reason on a PBS archive, the
   post-backup checkbox reaching the request body, and the schedule form
   offering the new kind.
