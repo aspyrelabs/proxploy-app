@@ -693,13 +693,17 @@ export function BackupsPage() {
                             })}>
                       Test restore
                     </Button>
-                    <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                    {/* size="sm", not the px/py/text className these carried:
+                        those collide with the component's default size and lose
+                        in the emitted CSS, so these two rendered full height
+                        next to the two sm buttons above them. */}
+                    <Button variant="ghost" size="sm" className="ml-2"
                             disabled={restoreDenied}
                             title={restoreDenied ? 'Not included in your plan' : undefined}
                             onClick={() => setRestoring(b)}>
                       Restore
                     </Button>
-                    <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                    <Button variant="danger" size="sm" className="ml-2"
                             disabled={deleteDenied}
                             title={deleteDenied ? 'Not included in your plan' : undefined}
                             onClick={() => drop(b)}>
