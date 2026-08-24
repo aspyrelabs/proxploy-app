@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
 import { notify } from '../lib/notify'
-import { api } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { GuestPicker, useBackupStores, useHostGuests } from '../components/BackupPickers'
 import { useEntitlements } from '../api/hooks'
-import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
+import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup,
+         useTestRestore, useVerifyBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
 import { useSchedules } from '../api/schedules'
@@ -443,6 +444,16 @@ export function BackupsPage() {
   // by store, so it only knows the stores that already hold something.
   const storage = useStorage()
   const backupStores = (storage.data ?? []).filter((s) => s.content.includes('backup'))
+  const verify = useVerifyBackup()
+  const testRestore = useTestRestore()
+  // Which datastores Proxmox Backup Server owns. An archive on one of those is
+  // checked properly, on a schedule, against stored digests; our own check
+  // reads the whole thing back over the network and knows less, so it is not
+  // offered there. Per archive, not per install: PBS for the important guests
+  // and an NFS share for the rest is an ordinary layout.
+  const pbsStores = new Set((storage.data ?? [])
+    .filter((s) => s.type === 'pbs').map((s) => s.storage))
+  const pbsOwned = (b: BackupRow) => b.storage != null && pbsStores.has(b.storage)
   // services/backupjobs.py::sync_backups is the only genuinely granular
   // progress in the product (per-host, not a fixed handful of steps), and
   // this stale banner is the one place `backup.sync` is ever displayed:
@@ -650,7 +661,29 @@ export function BackupsPage() {
                       : b.verify_state === 'failed' ? 'failed' : 'unverified'}
                   </td>
                   <td className="py-2.5 text-right">
-                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                    <Button variant="ghost" size="sm"
+                            disabled={verify.isPending || pbsOwned(b)}
+                            title={pbsOwned(b)
+                              ? 'Proxmox Backup Server checks this archive itself'
+                              : 'Read the archive back and check it is intact'}
+                            onClick={() => verify.mutate(b.id, {
+                              onError: (e) => notify.error(
+                                apiErrorDetail(e, 'Could not start that check, try again.')),
+                            })}>
+                      Verify
+                    </Button>
+                    <Button variant="ghost" size="sm" className="ml-2"
+                            disabled={testRestore.isPending || pbsOwned(b)}
+                            title={pbsOwned(b)
+                              ? 'Proxmox Backup Server checks this archive itself'
+                              : 'Restore into a throwaway id, then delete it'}
+                            onClick={() => testRestore.mutate({ id: b.id }, {
+                              onError: (e) => notify.error(
+                                apiErrorDetail(e, 'Could not start that test restore, try again.')),
+                            })}>
+                      Test restore
+                    </Button>
+                    <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
                             disabled={restoreDenied}
                             title={restoreDenied ? 'Not included in your plan' : undefined}
                             onClick={() => setRestoring(b)}>

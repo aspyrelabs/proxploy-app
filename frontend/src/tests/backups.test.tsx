@@ -4,14 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const BACKUPS = {
   backups: [
-    { id: 11, host_id: 1, host_name: 'host-01', storage: 'pbs-ds',
-      volid: 'pbs-ds:backup/ct/150/2026-07-30T02:00:00Z', guest_type: 'ct',
+    // On `local`, a plain directory store, which is the setup the two checks
+    // exist for. The pbs-ds row below is the one they are refused on.
+    { id: 11, host_id: 1, host_name: 'host-01', storage: 'local',
+      volid: 'local:backup/ct/150/2026-07-30T02:00:00Z', guest_type: 'ct',
       guest_vmid: 150, guest_name: 'Immich', taken_at: '2026-07-30T02:00:00Z',
-      size_bytes: 1073741824, verify_state: 'ok', notes: 'nightly' },
-    { id: 12, host_id: 1, host_name: 'host-01', storage: 'pbs-ds',
-      volid: 'pbs-ds:backup/vm/201/2026-07-30T03:00:00Z', guest_type: 'vm',
+      size_bytes: 1073741824, verify_state: 'ok', notes: 'nightly',
+      checked_at: null },
+    { id: 12, host_id: 1, host_name: 'host-01', storage: 'local',
+      volid: 'local:backup/vm/201/2026-07-30T03:00:00Z', guest_type: 'vm',
       guest_vmid: 201, guest_name: 'win11', taken_at: '2026-07-30T03:00:00Z',
-      size_bytes: 5368709120, verify_state: 'failed', notes: null },
+      size_bytes: 5368709120, verify_state: 'failed', notes: null,
+      checked_at: null },
+    { id: 13, host_id: 1, host_name: 'host-01', storage: 'pbs-ds',
+      volid: 'pbs-ds:backup/vm/999/2026-07-30T04:00:00Z', guest_type: 'vm',
+      guest_vmid: 999, guest_name: 'pbs-guest', taken_at: '2026-07-30T04:00:00Z',
+      size_bytes: 1024, verify_state: 'ok', notes: null, checked_at: null },
   ],
   stats: {
     total: 2, total_bytes: 6442450944, ok_count: 1, failed_count: 1,
@@ -66,6 +74,11 @@ vi.mock('../api/client', () => {
   }
   return {
     ApiError,
+    apiErrorDetail: (e: unknown, fallback: string) => {
+      const detail = e instanceof ApiError
+        ? (e.body as { detail?: unknown } | null)?.detail : null
+      return typeof detail === 'string' ? detail : fallback
+    },
     api: vi.fn((path: string, opts?: RequestInit) => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
@@ -405,6 +418,48 @@ describe('BackupsPage', () => {
       { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
       { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
     ]
+  })
+
+  it('verifies one archive from its row', async () => {
+    calls.length = 0
+    wrap()
+    await screen.findByText('pbs-guest')
+    const rows = screen.getAllByRole('row')
+    const immich = rows.find((r) => within(r).queryByText('Immich'))!
+    fireEvent.click(within(immich).getByRole('button', { name: 'Verify' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/11/verify')
+    expect(calls[0].method).toBe('POST')
+  })
+
+  it('offers no check on an archive Proxmox Backup Server already verifies', async () => {
+    // pbs-ds is type pbs in the storage fixture, so both actions are disabled
+    // with the reason rather than hidden: an operator who cannot see the
+    // button cannot tell it is missing on purpose.
+    calls.length = 0
+    wrap()
+    await screen.findByText('pbs-guest')
+    const rows = screen.getAllByRole('row')
+    const pbs = rows.find((r) => within(r).queryByText('pbs-guest'))!
+    for (const name of ['Verify', 'Test restore']) {
+      const btn = within(pbs).getByRole('button', { name })
+      expect(btn).toBeDisabled()
+      expect(btn).toHaveAttribute('title', expect.stringContaining('Proxmox Backup Server'))
+    }
+    fireEvent.click(within(pbs).getByRole('button', { name: 'Verify' }))
+    expect(calls.length).toBe(0)
+  })
+
+  it('starts a test restore from the row, letting the handler pick the storage', async () => {
+    calls.length = 0
+    wrap()
+    await screen.findByText('pbs-guest')
+    const rows = screen.getAllByRole('row')
+    const win11 = rows.find((r) => within(r).queryByText('win11'))!
+    fireEvent.click(within(win11).getByRole('button', { name: 'Test restore' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/12/test-restore')
+    expect(calls[0].body).toEqual({ storage: null })
   })
 
   // services/backupjobs.py::sync_backups is the only genuinely granular

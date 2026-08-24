@@ -15,6 +15,10 @@ export type BackupRow = {
   taken_at: string | null
   size_bytes: number | null
   verify_state: string | null
+  /** When Proxploy last checked this archive itself. `verify_state` holds the
+   *  verdict whoever produced it, so this is the only thing that says a check
+   *  of ours ever ran. null means nobody has. */
+  checked_at: string | null
   notes: string | null
 }
 
@@ -107,6 +111,29 @@ export function useRunBackup() {
           ...(v.storage ? { storage: v.storage } : {}),
         }),
       }),
+    onSettled: jobSettled(qc),
+  })
+}
+
+/** Read one archive back and record whether it is intact. Settles like every
+ *  other job mutation here: ['jobs'] and the activity feed, never ['backups'],
+ *  which the handler's own resource delta refreshes once the verdict exists. */
+export function useVerifyBackup() {
+  const qc = useQueryClient()
+  return useMutation<{ job: JobRow }, ApiError, number>({
+    mutationFn: (id) => api<{ job: JobRow }>(`/backups/${id}/verify`, { method: 'POST' }),
+    onSettled: jobSettled(qc),
+  })
+}
+
+/** Restore into a throwaway id and delete it again. `storage` is where the
+ *  throwaway copy lands; null lets the handler pick one that can hold it. */
+export function useTestRestore() {
+  const qc = useQueryClient()
+  return useMutation<{ job: JobRow }, ApiError, { id: number; storage?: string | null }>({
+    mutationFn: (v) => api<{ job: JobRow }>(`/backups/${v.id}/test-restore`, {
+      method: 'POST', body: JSON.stringify({ storage: v.storage ?? null }),
+    }),
     onSettled: jobSettled(qc),
   })
 }
