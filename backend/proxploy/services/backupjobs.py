@@ -372,6 +372,36 @@ def _verify_command(volid: str, guest_type: str | None) -> str:
     return f"bash -c {shlex.quote(script)}"
 
 
+async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
+    """Verify the archives nobody has verified yet, oldest first.
+
+    Capped, because verifying reads every byte of every archive it takes and a
+    year of daily backups is not a thing to start at 3am without a ceiling.
+    """
+    app = ctx.backend.app
+    host_id = int(params["host_id"])
+    limit = max(1, min(int(params.get("max") or 20), 200))
+    want_storage = params.get("storage")
+    with app.state.sessionmaker() as db:
+        q = (db.query(Backup.id)
+             .filter(Backup.host_id == host_id, Backup.checked_at.is_(None)))
+        if want_storage:
+            q = q.filter(Backup.storage == want_storage)
+        ids = [i for (i,) in q.order_by(Backup.taken_at.asc()).limit(limit)]
+    word = "archive" if len(ids) == 1 else "archives"
+    ctx.log(f"{len(ids)} {word} have never been verified, reading them back now")
+    checked = failed = 0
+    for i, bid in enumerate(ids):
+        out = await verify_backup(ctx, {"backup_id": bid})
+        checked += 1
+        failed += 1 if out["verdict"] == "failed" else 0
+        # verify_backup reports 100 for its own archive; the sweep's real figure
+        # goes out right after, so the bar only ever jumps forward at the end.
+        ctx.progress(int((i + 1) / len(ids) * 100))
+    ctx.log(f"verified {checked}, {failed} did not read back")
+    return {"checked": checked, "failed": failed}
+
+
 async def verify_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.verify`: read one archive back and record whether it is intact.
 
@@ -380,6 +410,11 @@ async def verify_backup(ctx: JobContext, params: dict) -> dict:
     worse than a check that has to borrow the installer's transport.
     """
     app = ctx.backend.app
+    if "backup_id" not in params:
+        # Sweep form, which is what a schedule fires. One job over several
+        # archives, so the transcript reads as one pass rather than filling the
+        # activity feed with a row per file.
+        return await _verify_sweep(ctx, params)
     backup_id = int(params["backup_id"])
     with app.state.sessionmaker() as db:
         row = db.get(Backup, backup_id)

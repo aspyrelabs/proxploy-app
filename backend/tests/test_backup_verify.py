@@ -180,3 +180,55 @@ def test_a_run_without_the_flag_queues_nothing(tmp_path):
                                            status="queued").count() == 0
 
     asyncio.run(run())
+
+
+def test_the_sweep_checks_the_unverified_archives_up_to_its_cap(tmp_path):
+    """The sweep form a schedule fires: same job kind, no `backup_id`."""
+    from proxploy.models import utcnow
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=["ok"],
+                                stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        hid, _ = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.add(Backup(host_id=hid, volid="nfs-bk:backup/a.vma.zst", storage="nfs-bk",
+                          guest_type="vm", checked_at=utcnow()))       # already checked
+            db.add(Backup(host_id=hid, volid="nfs-bk:backup/b.vma.zst", storage="nfs-bk",
+                          guest_type="vm"))
+            db.commit()
+        out = await verify_backup(_ctx(app), {"host_id": hid, "max": 10})
+        assert out["checked"] == 2      # the seeded one plus b, never a
+        with app.state.sessionmaker() as db:
+            done = db.query(Backup).filter(Backup.checked_at.isnot(None)).count()
+            assert done == 3
+
+    asyncio.run(run())
+
+
+def test_the_sweep_stops_at_its_cap_and_can_be_held_to_one_storage(tmp_path):
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=["ok"],
+                                stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        hid, _ = _seed(app)
+        with app.state.sessionmaker() as db:
+            for n in range(3):
+                db.add(Backup(host_id=hid, volid=f"other:backup/{n}.vma.zst",
+                              storage="other", guest_type="vm"))
+            db.commit()
+        out = await verify_backup(_ctx(app), {"host_id": hid, "storage": "other",
+                                              "max": 2})
+        assert out["checked"] == 2
+        with app.state.sessionmaker() as db:
+            # The seeded nfs-bk archive was never in scope, cap or no cap.
+            assert db.get(Backup, 1).checked_at is None
+
+    asyncio.run(run())

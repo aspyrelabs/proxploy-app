@@ -23,6 +23,9 @@ export const SCHEDULABLE: { kind: string; label: string; needs: 'host' | 'app' |
   // this label is the only description of the job, and "guests" is Proxmox's
   // word, not an operator's.
   { kind: 'backup.run', label: 'Back up every container and VM on a host', needs: 'host' },
+  // Spelled as what the schedule does, not as the job kind: on the Settings
+  // page this label is the whole description of the schedule.
+  { kind: 'backup.verify', label: "Verify a host's backups are readable", needs: 'host' },
   { kind: 'app.update', label: 'Update an app', needs: 'app' },
   { kind: 'catalog.refresh', label: 'Refresh the app catalog', needs: null },
   { kind: 'metrics.maintain', label: 'Roll up and prune metrics', needs: null },
