@@ -149,25 +149,23 @@ nothing else does.
   `frontend/src/api/schedules.ts`, so New job can create "Verify backups, Sunday
   3am". Params: `host_id`, optional `storage`, and a cap on how many archives one
   sweep walks. It takes unverified archives on non-PBS stores, oldest first.
-- **Limitations card** (`components/BackupLimitsDialog.tsx`): the "nothing checks
-  that a backup is readable" item is replaced rather than deleted, because the
-  limit did not disappear, it got smaller. The new item says what Proxploy does
-  about it and what it still cannot promise:
-  - Proxmox VE never checks an archive after writing it, so **Proxploy checks
-    them for you**, two ways, from the row's own actions or on a schedule.
-  - **Verify** reads the whole archive and checks its structure. For a virtual
-    machine that is Proxmox's own `vma verify`; for a container it is a full
-    read of the compressed tar, which catches a truncated or corrupted file but
-    inspects less than the VM check does.
-  - **Test restore** restores the backup into a spare id, confirms Proxmox
-    finished, and deletes the copy straight away. Nothing is started, nothing
-    is left behind, and your real machine is never touched. It is the strongest
-    proof available without PBS, and it needs as much free space as the archive.
-  - Still true, and said plainly: **neither check is as thorough as Proxmox
-    Backup Server's**, which verifies every block against a stored digest on a
-    schedule, without reading the archive back over the network each time.
-  The three remaining items (full copies, whole-machine restore, no encryption)
-  are unchanged, and the PBS recommendation panel stays.
+- **Limitations card** (`components/BackupLimitsDialog.tsx`) is restructured, not
+  edited. Today it is a list of four things that are wrong, which leaves the
+  reader with a problem and no move. It becomes four pairs: what Proxmox VE
+  cannot do, and what Proxploy does about it. Two of the four we genuinely help
+  with, two we cannot, and saying which is which is the point of the card.
+
+  | Proxmox VE's limit | What Proxploy does |
+  |---|---|
+  | Every backup is a full copy. Ten nightly backups of a 40 GB machine take ten times the space. | Cannot fix it, it is how vzdump writes. Proxploy gives you retention rules and a prune preview that shows exactly what a rule would delete before it deletes it. |
+  | Nothing checks that an archive is readable. It can sit in this list looking fine and fail when you need it. | **Checks them for you.** Verify reads the whole archive and checks its structure: Proxmox's own `vma verify` for a virtual machine, a full read of the compressed tar for a container. Test restore goes further and restores the backup into a spare id, confirms Proxmox finished, then deletes the copy immediately, without touching your real machine. Run either from a backup's row, after every backup, or on a schedule. |
+  | You restore a whole machine, not one file. | Cannot fix it. There is no file index in a vzdump archive to browse. |
+  | Archives are not encrypted. Anyone who can read the share can read what is in them. | Cannot fix it. Whatever the share and the filesystem give you is what you have. |
+
+  The card then keeps its closing panel, with one sentence added: the checks
+  Proxploy runs are **not as thorough as Proxmox Backup Server's**, which
+  verifies every block against a stored digest on its own schedule instead of
+  reading the whole archive back over the network each time.
 - **Verified · 30d**: starts reporting on PVE-only setups, because our checks
   now populate the column it reads. The "Backups completed · 30d" fallback stays
   for the case where nothing has been checked yet.
