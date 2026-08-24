@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
 from datetime import datetime, timezone
 
 from sqlalchemy import func
 
+from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, Backup, Host, Job, Vm, to_iso, utcnow
 from proxploy.services.hostclient import client_for_host
@@ -336,6 +338,106 @@ def _vzdump_pct(total: int):
         return int((done["n"] + within / 100) / total * 100)
 
     return parse
+
+
+def _verify_command(volid: str, guest_type: str | None) -> str:
+    """One shell command: resolve the archive's path, then read it back.
+
+    One command rather than an SSH round trip per step, because the path is
+    only useful to the reader that follows it, and because a single exit status
+    is what the caller has to judge.
+
+    `pvesm path`, not `/mnt/pve/<store>/dump/...`: the mount point belongs to
+    the storage plugin, and a guessed path breaks on the first non-default one.
+
+    `set -o pipefail` is load bearing. Without it the pipeline's status is the
+    verifier's alone, and a truncated archive that makes `zstdcat` die still
+    reports whatever `vma verify` said about the bytes it did get.
+
+    Exit 90 is reserved for "the path could not be resolved", which is a broken
+    check rather than a bad archive; the caller tells those two apart.
+    """
+    reader = "vma verify -v -" if guest_type == "vm" else "tar -tf - >/dev/null"
+    script = (
+        "set -o pipefail; "
+        f"P=\"$(pvesm path {shlex.quote(volid)})\"; "
+        "test -n \"$P\" || { echo 'pvesm path returned nothing' >&2; exit 90; }; "
+        "test -r \"$P\" || { echo \"cannot read $P\" >&2; exit 90; }; "
+        "case \"$P\" in "
+        "*.zst) D=zstdcat;; *.lzo) D='lzop -dc';; *.gz) D=zcat;; *) D=cat;; esac; "
+        f"$D \"$P\" | {reader}"
+    )
+    # Explicitly bash: `set -o pipefail` is not in POSIX sh, and the whole
+    # point of the pipeline above is that its status is honest.
+    return f"bash -c {shlex.quote(script)}"
+
+
+async def verify_backup(ctx: JobContext, params: dict) -> dict:
+    """`backup.verify`: read one archive back and record whether it is intact.
+
+    The only backup path that runs over SSH. Neither `pvesm path` nor
+    `vma verify` exists on the PVE HTTP API, and a check that cannot be run is
+    worse than a check that has to borrow the installer's transport.
+    """
+    app = ctx.backend.app
+    backup_id = int(params["backup_id"])
+    with app.state.sessionmaker() as db:
+        row = db.get(Backup, backup_id)
+        if row is None:
+            raise JobFailed(f"backup {backup_id} is no longer in the list")
+        host = db.get(Host, row.host_id)
+        if host is None:
+            raise JobFailed("the host this archive belongs to is gone")
+        volid, guest_type, storage = row.volid, row.guest_type, row.storage
+        host_id, address, host_name = host.id, host.address, host.name
+        fingerprint = host.ssh_host_key_fingerprint
+        label = row.guest_name or volid
+
+    executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
+
+    def on_new_fingerprint(fp: str) -> None:
+        with app.state.sessionmaker() as db:
+            h = db.get(Host, host_id)
+            if h is not None:
+                h.ssh_host_key_fingerprint = fp
+                db.commit()
+
+    ctx.log(f"reading {volid} back off {storage} to check it")
+    ctx.progress(5)
+    try:
+        status = await executor.run_for_host(
+            app.state.sessionmaker, app.state.secretstore, host_id, address,
+            _verify_command(volid, guest_type),
+            pinned_fingerprint=fingerprint, on_new_fingerprint=on_new_fingerprint,
+            on_line=lambda stream, line: ctx.log(line, stream=stream),
+            timeout_s=app.state.settings.pve_task_timeout_s)
+    except LookupError as e:
+        # executor/keys.py raises this when the host carries no ssh_key.
+        raise JobFailed(
+            f"checking a backup needs SSH access to {host_name}, which is not "
+            f"set up: {e}") from e
+    if status == 90:
+        raise JobFailed(f"{volid} could not be read on the node, so it was not "
+                        f"checked. Its storage may be offline.")
+    # A non-zero status from the reader is a successful check with a bad
+    # answer, not a failed job: the archive really is unreadable, and raising
+    # here would report a broken checker instead.
+    verdict = "ok" if status == 0 else "failed"
+    with app.state.sessionmaker() as db:
+        row = db.get(Backup, backup_id)
+        if row is not None:
+            row.verify_state = verdict
+            row.checked_at = utcnow()
+            db.commit()
+    ctx.progress(100)
+    ctx.log(f"{label}: "
+            + ("the archive read back intact" if verdict == "ok"
+               else "the archive did not read back, it is not usable"))
+    app.state.bus.publish("resource", {"type": "backup", "change": "list"})
+    return {"volid": volid, "verdict": verdict, "exit_status": status}
+
+
+HANDLERS["backup.verify"] = verify_backup
 
 
 async def run_backup(ctx: JobContext, params: dict) -> dict:
