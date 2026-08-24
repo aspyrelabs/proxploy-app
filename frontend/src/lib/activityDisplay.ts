@@ -75,7 +75,7 @@ export const GERUND: Record<string, string> = {
   'backup.delete': 'deleting the backup for',
   'backup.prune': 'pruning backups on',
   'backup.sync': 'syncing backups on',
-  'backup.verify': 'checking the backups of',
+  'backup.verify': 'verifying the backups of',
   'backup.test_restore': 'test restoring',
   'catalog.classify_backlog': 'checking compatibility on',
   'catalog.refresh': 'refreshing the catalog on',
@@ -174,7 +174,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'backup.run': 'Backup Run',
   'backup.sync': 'Backup Sync',
   'backup.test_restore': 'Test Restore',
-  'backup.verify': 'Backup Check',
+  'backup.verify': 'Backup Verify',
   'catalog.classify_backlog': 'Compatibility Check',
   'catalog.refresh': 'Store Refresh',
   'console.open': 'Console Open',
@@ -346,12 +346,12 @@ const JOB_PHRASE: Record<string, Record<string, string>> = {
   // reading "Verify Failed" over an archive that is merely corrupt would state
   // the opposite of what happened.
   'backup.verify': {
-    queued: 'Check Queued',
-    running: 'Checking Backup',
-    succeeded: 'Check Finished',
-    failed: 'Check Could Not Run',
-    canceled: 'Check Stopped',
-    interrupted: 'Check Interrupted',
+    queued: 'Verify Queued',
+    running: 'Verifying Backup',
+    succeeded: 'Verify Finished',
+    failed: 'Verify Could Not Run',
+    canceled: 'Verify Stopped',
+    interrupted: 'Verify Interrupted',
   },
   'backup.test_restore': {
     queued: 'Test Restore Queued',

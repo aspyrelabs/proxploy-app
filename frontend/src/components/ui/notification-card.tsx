@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Button } from './button'
 import { Icon } from './icon'
-import { Loading } from './loading'
+import { Progress, ProgressLabel, ProgressValue } from './progress'
 
 /**
  * Vendored by hand from ReUI's `alert` component (https://reui.io/r/alert.json,
@@ -131,9 +131,21 @@ export function NotificationCard({
           </div>
         )}
         {footer && (
-          <div className="col-start-2 mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-text-3">
-            {progress != null && <Loading value={progress} label="Progress" size={16} />}
+          <div className="col-start-2 mt-0.5 font-mono text-[11px] text-text-3">
             <span>{footer}</span>
+          </div>
+        )}
+        {/* A bar, not the ring this used to draw. A 16px ring next to a line of
+            11px text reads as a spinner, so "10%" was a number nobody could
+            see; the bar spans the card's text column and carries its own
+            figure. Below the footer rather than beside it, because the footer
+            can wrap. */}
+        {progress != null && (
+          <div className="col-start-2 mt-1">
+            <Progress value={progress}>
+              <ProgressLabel>Progress</ProgressLabel>
+              <ProgressValue />
+            </Progress>
           </div>
         )}
       </div>

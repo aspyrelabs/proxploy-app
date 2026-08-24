@@ -231,14 +231,17 @@ describe('BellPopover', () => {
   // JOBS[0] (app.start) is 'running' with progress_pct: 40. footerOf used to
   // fold that into the plain-text footer line as "40%"; it now renders as
   // the shared ring instead.
-  it("shows a progress ring on a running job's card instead of plain percent text", async () => {
+  // A bar, not the ring this used to draw: a 16px ring beside 11px text reads
+  // as a spinner, and the figure inside it was unreadable. The bar spans the
+  // card's text column and states the number.
+  it("shows a progress bar on a running job's card", async () => {
     wrap()
     await openBell()
     const cards = await screen.findAllByRole('alert')
     const running = cards.find((c) => c.textContent?.includes('App Start'))!
-    expect(within(running).getByRole('status')).toHaveAttribute(
-      'aria-label', expect.stringContaining('40 percent'))
-    expect(within(running).queryByText('40%')).toBeNull()
+    const bar = within(running).getByRole('progressbar')
+    expect(bar).toHaveAttribute('aria-valuenow', '40')
+    expect(within(running).getByText('40%')).toBeInTheDocument()
   })
 
   // JOBS[1] (app.stop) already succeeded, even though it carries
