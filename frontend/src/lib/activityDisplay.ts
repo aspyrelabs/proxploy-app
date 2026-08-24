@@ -75,6 +75,8 @@ export const GERUND: Record<string, string> = {
   'backup.delete': 'deleting the backup for',
   'backup.prune': 'pruning backups on',
   'backup.sync': 'syncing backups on',
+  'backup.verify': 'checking the backups of',
+  'backup.test_restore': 'test restoring',
   'catalog.classify_backlog': 'checking compatibility on',
   'catalog.refresh': 'refreshing the catalog on',
   'host.reboot': 'rebooting',
@@ -171,6 +173,8 @@ export const ACTION_LABEL: Record<string, string> = {
   'backup.restore': 'Backup Restore',
   'backup.run': 'Backup Run',
   'backup.sync': 'Backup Sync',
+  'backup.test_restore': 'Test Restore',
+  'backup.verify': 'Backup Check',
   'catalog.classify_backlog': 'Compatibility Check',
   'catalog.refresh': 'Store Refresh',
   'console.open': 'Console Open',
@@ -336,6 +340,26 @@ const JOB_PHRASE: Record<string, Record<string, string>> = {
     failed: 'Refresh Failed',
     canceled: 'Refresh Stopped',
     interrupted: 'Refresh Interrupted',
+  },
+  // "Check Finished", not "Check Passed": the job succeeding means the check
+  // RAN, and whether the archive passed is the row's own verdict. A toast
+  // reading "Verify Failed" over an archive that is merely corrupt would state
+  // the opposite of what happened.
+  'backup.verify': {
+    queued: 'Check Queued',
+    running: 'Checking Backup',
+    succeeded: 'Check Finished',
+    failed: 'Check Could Not Run',
+    canceled: 'Check Stopped',
+    interrupted: 'Check Interrupted',
+  },
+  'backup.test_restore': {
+    queued: 'Test Restore Queued',
+    running: 'Test Restore Started',
+    succeeded: 'Test Restore Completed',
+    failed: 'Test Restore Failed',
+    canceled: 'Test Restore Stopped',
+    interrupted: 'Test Restore Interrupted',
   },
 }
 

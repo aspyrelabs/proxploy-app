@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const BACKUPS = {
   backups: [
@@ -51,6 +51,7 @@ let vms: any[] = [{ id: 9, host_id: 1, name: 'win11', vmid: 201 }]
 let stores: any[] = [
   { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
   { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+  { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
 ]
 
 /** Set to a pending promise to hold GET /apps; null lets it answer at once. */
@@ -133,14 +134,19 @@ const wrap = () => {
   return render(<QueryClientProvider client={qc}><BackupsPage /></QueryClientProvider>)
 }
 
+// The first-visit limitations card would otherwise cover every test here. Its
+// own behaviour is asserted in the describe at the bottom of this file.
+beforeEach(() => localStorage.setItem('proxploy.backups.limits-ack', 'yes'))
+
 describe('BackupsPage', () => {
   it('renders the datastore header, the three stat cards and the recent-backups table', async () => {
     calls.length = 0; restoreGuard = null
     wrap()
-    expect(await screen.findByText(/Proxmox Backup Server · pbs-ds/)).toBeInTheDocument()
+    expect(await screen.findByText(/2 datastores accept backups · 2 archives/)).toBeInTheDocument()
     expect(screen.getByText('Next scheduled')).toBeInTheDocument()
     expect(screen.getByText('Datastore used')).toBeInTheDocument()
-    expect(screen.getByText('Success rate · 30d')).toBeInTheDocument()
+    // The verified card, because this fixture's archives carry a verify_state.
+    expect(screen.getByText('Verified · 30d')).toBeInTheDocument()
     expect(screen.getByText('50%')).toBeInTheDocument()
     expect(screen.getByText('Immich')).toBeInTheDocument()
     expect(screen.getByText('win11')).toBeInTheDocument()
@@ -179,7 +185,7 @@ describe('BackupsPage', () => {
     expect(screen.queryByLabelText(/archive lands on/i)).toBeNull()
 
     open()
-    expect(await screen.findByText(/2 guests on host-01 will be backed up/)).toBeInTheDocument()
+    expect(await screen.findByText(/All 2 on this host/)).toBeInTheDocument()
     expect(screen.getByLabelText(/archive lands on/i)).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: 'Checking what is on this host' })).toBeNull()
     appsGate = null
@@ -202,17 +208,42 @@ describe('BackupsPage', () => {
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 
+  it('sends only the ticked guests, and `all` when none were unticked', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByLabelText('win11 (VM 201)'))
+    expect(screen.getByText(/1 of 2 selected/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    // Proxploy row ids, which is what POST /backups/run resolves; the guest
+    // that was unticked is not in the list.
+    expect(calls[0].body).toEqual({
+      guests: [{ type: 'app', id: 7 }], host_id: 1, storage: 'local',
+    })
+  })
+
+  it('will not start once every guest has been unticked', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear' }))
+    expect(screen.getByText(/Nothing selected/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start backup' })).toBeDisabled()
+    expect(calls.length).toBe(0)
+  })
+
   it('names the guests and the storage before the run, not after it', async () => {
     calls.length = 0
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
     // The scope was only ever in the source comments: one vzdump over every
-    // guest on the chosen node. Saying so is what answers "what is it backing
-    // up?" before the click instead of leaving it to be inferred from a
-    // success line.
-    expect(await screen.findByText(/2 guests on host-01 will be backed up/))
-      .toBeInTheDocument()
-    expect(screen.getByText(/Immich \(CT 150\), win11 \(VM 201\)/)).toBeInTheDocument()
+    // guest on the chosen node. Naming them, and letting them be unticked, is
+    // what answers "what is it backing up?" before the click instead of
+    // leaving it to be inferred from a success line.
+    expect(await screen.findByLabelText('Immich (CT 150)')).toBeChecked()
+    expect(screen.getByLabelText('win11 (VM 201)')).toBeChecked()
+    expect(screen.getByText(/All 2 on this host/)).toBeInTheDocument()
     // Only the store that carries `backup` content is on offer.
     const target = screen.getByLabelText(/archive lands on/i)
     expect(within(target as HTMLElement).getByRole('option', { name: /local \(dir\)/ }))
@@ -253,6 +284,7 @@ describe('BackupsPage', () => {
     stores = [
       { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
       { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+      { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
     ]
   })
 
@@ -340,15 +372,39 @@ describe('BackupsPage', () => {
     expect(screen.getByText(/deletes nothing/i)).toBeInTheDocument()
   })
 
-  it('offers PBS datastore connect, reusing StorageForm pre-set to type pbs', async () => {
+  it('opens the Storage page\'s own attach form, not a PBS-only one', async () => {
     // doc 10 lists "PBS datastore connect" as a Phase 6 Backups deliverable.
-    // Connecting PBS *is* attaching a storage of type pbs, so this asserts the
-    // affordance exists and opens Task 13's form in the right mode, not that
-    // a second, parallel PBS form was built.
+    // Connecting PBS is just attaching a storage of type pbs, and NFS, SMB and
+    // a plain folder are backup targets too, so the button opens the same form
+    // in the same state the Storage page does rather than pinning one plugin.
     wrap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect PBS' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add storage' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByLabelText(/Type/i)).toHaveValue('pbs')
+    expect(within(dialog).getByLabelText(/Type/i)).toHaveValue('dir')
+  })
+
+  // The header used to read off the `backups` cache, so it announced no
+  // datastore at all until the first archive landed in one.
+  it('counts a store that accepts backups, even with nothing in it yet', async () => {
+    stores = [{ host_id: 1, storage: 'pbs-fresh', type: 'pbs', content: ['backup'] }]
+    wrap()
+    expect(await screen.findByText(/1 datastore accepts backups/)).toBeInTheDocument()
+    stores = [
+      { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
+      { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+      { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
+    ]
+  })
+
+  it('says what to add when nothing on the cluster accepts backups', async () => {
+    stores = [{ host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir'] }]
+    wrap()
+    expect(await screen.findByText(/No backup datastore found/)).toBeInTheDocument()
+    stores = [
+      { host_id: 1, storage: 'local', type: 'dir', content: ['backup', 'iso'] },
+      { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir', 'images'] },
+      { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
+    ]
   })
 
   // services/backupjobs.py::sync_backups is the only genuinely granular
@@ -387,9 +443,66 @@ describe('BackupsPage', () => {
       const { api } = await import('../api/client')
       vi.mocked(api).mockClear()
       wrap()
-      await screen.findByText(/Proxmox Backup Server/)
+      await screen.findByText(/datastores accept backups/)
       expect(vi.mocked(api).mock.calls.some(
         (c) => c[0] === '/jobs?status=running&kind=backup.sync')).toBe(false)
     })
+  })
+})
+
+// Proxmox VE's vzdump has four limits worth knowing BEFORE you trust it, and
+// none of them is a Proxploy decision. Shown on the first visit, and every
+// visit after that until it is acknowledged.
+describe('the backup limitations card', () => {
+  it('pairs each Proxmox limit with what Proxploy does about it', async () => {
+    localStorage.removeItem('proxploy.backups.limits-ack')
+    wrap()
+    expect(await screen.findByText(/Before you rely on these backups/)).toBeInTheDocument()
+    expect(screen.getByText(/limits of Proxmox VE itself, not of Proxploy/)).toBeInTheDocument()
+    // The one we answer, and the two we cannot.
+    expect(screen.getByText(/Checks them for you/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Cannot fix it/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/Proxmox Backup Server/)).toBeInTheDocument()
+  })
+
+  it('"Remind me later" leaves nothing behind, so the next visit asks again', async () => {
+    localStorage.removeItem('proxploy.backups.limits-ack')
+    const first = wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remind me later' }))
+    expect(screen.queryByText(/Before you rely on these backups/)).toBeNull()
+    first.unmount()
+
+    wrap()   // leaving the page and coming back
+    expect(await screen.findByText(/Before you rely on these backups/)).toBeInTheDocument()
+  })
+
+  it('"I understand" is remembered, so it never asks again', async () => {
+    localStorage.removeItem('proxploy.backups.limits-ack')
+    const first = wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'I understand' }))
+    first.unmount()
+
+    wrap()
+    await screen.findByRole('button', { name: 'Run now' })
+    expect(screen.queryByText(/Before you rely on these backups/)).toBeNull()
+  })
+})
+
+// verify_state is written by Proxmox Backup Server and by nothing else, so on
+// a plain NFS or directory store the verified rate is null for ever. The card
+// falls back to whether the RUNS finished, and says so.
+describe('the success card without PBS verification', () => {
+  it('reports completed runs instead, and does not claim they were verified', async () => {
+    const verified = BACKUPS.stats.success_rate_30d
+    BACKUPS.stats.success_rate_30d = null
+    Object.assign(BACKUPS.stats, { runs_ok_30d: 7, runs_failed_30d: 1, run_rate_30d: 87.5 })
+    wrap()
+    expect(await screen.findByText('Backups completed · 30d')).toBeInTheDocument()
+    // The label renders while the card is still loading, the figure does not.
+    expect(await screen.findByText('88%')).toBeInTheDocument()   // fmtPct rounds
+    expect(screen.getByText(/7 finished · 1 failed/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing checks that an archive can be restored/)).toBeInTheDocument()
+    expect(screen.queryByText('Verified · 30d')).toBeNull()
+    BACKUPS.stats.success_rate_30d = verified
   })
 })
