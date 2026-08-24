@@ -27,7 +27,17 @@
  * workers in no particular order. journey.spec.ts stays the only spec that
  * drives a fresh install; this one seeds an admin like every other spec.
  */
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
+
+/** Edit is no longer a button sitting in the row: it is an item in the row's
+ *  "Actions for <host>" dropdown (components/HostActionsMenu.tsx). Radix
+ *  portals the open menu out of the table, so the row locates the trigger and
+ *  the page locates the item. The trigger is matched on its prefix because the
+ *  label carries the host's own name, which differs per row. */
+async function openRowEdit(page: Page, row: Locator) {
+  await row.getByRole('button', { name: /^Actions for / }).click()
+  await page.getByRole('menuitem', { name: 'Edit' }).click()
+}
 
 import { goToNavPage, seedAdmin, signIn } from './helpers'
 
@@ -94,7 +104,7 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
       // The form closes on Skip and the hosts table refetches, so the host
       // that WAS added being in it is what makes the two absences mean
       // something rather than being a table that had not loaded yet.
-      await expect(page.getByRole('cell', { name: FIRST.name })).toBeVisible()
+      await expect(page.getByRole('cell', { name: FIRST.name, exact: true })).toBeVisible()
       await expect(page.getByRole('cell', { name: SECOND.node, exact: true })).toHaveCount(0)
       await expect(page.getByRole('cell', { name: PEER.node, exact: true })).toHaveCount(0)
     })
@@ -127,7 +137,7 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
     await test.step('the peer is a host of its own with its own tokens', async () => {
       const row = page.getByRole('row', { name: new RegExp(`^${PEER.node} `) })
       await expect(row).toContainText(PEER.address)
-      await row.getByRole('button', { name: 'Edit' }).click()
+      await openRowEdit(page, row)
       const dialog = page.getByRole('dialog')
       // Its own credential rows, each verified against pve4 itself before it
       // was written, not a note that the origin holds them.
@@ -152,8 +162,7 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
     // once a cluster has been enrolled.
     await test.step('the Edit dialog offers the same panel to a host added by hand',
       async () => {
-        await page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) })
-          .getByRole('button', { name: 'Edit' }).click()
+        await openRowEdit(page, page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) }))
         const dialog = page.getByRole('dialog')
         await expect(dialog.getByText(`${FIRST.node} is part of cluster ${CLUSTER}. `
           + 'Proxploy found 2 other nodes in it.')).toBeVisible({ timeout: 15_000 })
@@ -181,8 +190,7 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
     // against the same code path instead of faked into this spec.
     await test.step('one Save stores a capability token on every node of the cluster',
       async () => {
-        await page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) })
-          .getByRole('button', { name: 'Edit' }).click()
+        await openRowEdit(page, page.getByRole('row', { name: new RegExp(`^${FIRST.name} `) }))
         const dialog = page.getByRole('dialog')
         await dialog.getByRole('button', { name: 'Add Backup token, show fields' }).click()
         await dialog.getByLabel('Backup token id').fill('proxploy@pve!backup')
@@ -199,8 +207,7 @@ test('the peer panel offers the rest of the cluster and adds only what is ticked
     await test.step('each peer holds that token itself, not a note that pve2 has it',
       async () => {
         for (const name of [SECOND.name, PEER.node]) {
-          await page.getByRole('row', { name: new RegExp(`^${name} `) })
-            .getByRole('button', { name: 'Edit' }).click()
+          await openRowEdit(page, page.getByRole('row', { name: new RegExp(`^${name} `) }))
           const dialog = page.getByRole('dialog')
           await expect(dialog.getByRole('button',
             { name: 'Backup token already stored' })).toBeVisible({ timeout: 15_000 })

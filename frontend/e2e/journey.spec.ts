@@ -95,6 +95,15 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // Task 14: a click used to be taken on its word. FakeSSHConnection
     // (exit_status 0) is what makes this call actually succeed.
     await page.getByRole('button', { name: 'Verify access' }).click()
+    await expect(page.getByRole('heading', { name: 'Which host is this?' })).toBeVisible()
+  })
+
+  await test.step('onboarding: Proxploy is not on a managed host', async () => {
+    // The self-host step sits between Verify and Done, so this is not a screen
+    // to click past: "None of these" is the real answer here. The e2e backend
+    // fakes pve-01 over SSH and Proxploy does not run on it, and saveSelfHost
+    // (null) is what stores that and advances the wizard.
+    await page.getByRole('button', { name: 'None of these' }).click()
     await expect(page.getByRole('button', { name: /open the dashboard/i })).toBeVisible()
   })
 
@@ -109,14 +118,14 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // catalog sync hits community-scripts/ProxmoxVE on GitHub) so this is
     // never ambiguous with a second "Install" button.
     await page.getByRole('button', { name: 'Install', exact: true }).click()
-    // Neither InstallDialog nor VmCreateWizard below use role="dialog", and
-    // the overlay never unmounts the page underneath it, an unscoped
+    // The overlay never unmounts the page underneath it, so an unscoped
     // getByRole('button', { name: 'Install' }) on the dialog's own submit
     // button would also match the StoreCard button still sitting behind the
-    // overlay. `.fixed.inset-0` is both dialogs' own overlay wrapper.
-    const dialog = page.locator('.fixed.inset-0')
+    // overlay. Both dialogs render through ui/dialog.tsx's Radix
+    // DialogPrimitive.Content, which is what supplies role="dialog".
+    const dialog = page.getByRole('dialog')
     await dialog.getByRole('combobox').selectOption({ label: HOST_NAME })
-    await dialog.getByPlaceholder('App name').fill(APP_NAME)
+    await dialog.getByLabel('App name').fill(APP_NAME)
     await dialog.getByPlaceholder('Container ID (CTID)').fill(APP_CTID)
     await dialog.getByLabel('I understand this runs as root on the node').check()
     await dialog.getByRole('button', { name: 'Install' }).click()
@@ -150,10 +159,14 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
 
     await goToNavPage(page, 'Virtual Machines')
     await page.getByRole('button', { name: 'New VM' }).click()
-    const dialog = page.locator('.fixed.inset-0')
+    const dialog = page.getByRole('dialog')
 
     await dialog.getByLabel('Host').selectOption({ label: HOST_NAME })
-    await dialog.getByLabel('Node').selectOption({ label: 'pve1' })
+    // No Node select to answer: VmCreateWizard renders that field only when
+    // the chosen host has more than one PVE node (nodeOpts.length !== 1), and
+    // an effect fills f.node in for a single-node host. The fake host here has
+    // exactly one, pve1, so asking would be the question the Host select just
+    // answered.
     await dialog.getByLabel('VM name').fill(VM_NAME)
     await dialog.getByRole('button', { name: 'Next' }).click()
 
@@ -185,6 +198,10 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
 
   await test.step('schedule a backup', async () => {
     await goToNavPage(page, 'Settings')
+    // Settings is sectioned now (lib/settings-sections.ts), and lands on its
+    // default section, Hosts. Schedules is a rail link rather than a card
+    // already on the page, so this is a navigation, not a scroll.
+    await page.getByRole('link', { name: 'Schedules' }).click()
     await page.getByRole('button', { name: 'New schedule' }).click()
     await page.getByLabel('Name').fill(SCHEDULE_NAME)
     // "What to run" defaults to backup.run ("Backup guests on a host") and
