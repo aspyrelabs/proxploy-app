@@ -120,8 +120,11 @@ nothing else does.
   itself." The existing Status column already renders verified / failed /
   unverified and now reflects our checks too.
 - **After a backup**: a checkbox in the Run now dialog and in the schedule form,
-  "Check the archive afterwards", which chains a `backup.verify` over what the
-  run just wrote.
+  "Check the archive afterwards", carried as `params.verify` on the
+  `backup.run` job. The run handler enqueues a SEPARATE `backup.verify` job
+  after its resync, rather than verifying inline: a backup that succeeded must
+  read as succeeded even when the check that follows it fails, and the two have
+  very different durations.
 - **Scheduled sweep**: `backup.verify` joins `SCHEDULABLE` in
   `frontend/src/api/schedules.ts`, so New job can create "Verify backups, Sunday
   3am". Params: `host_id`, optional `storage`, and a cap on how many archives one
