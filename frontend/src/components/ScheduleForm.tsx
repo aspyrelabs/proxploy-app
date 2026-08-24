@@ -76,6 +76,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   // after this job is saved".
   const [store, setStore] = useState(String(savedParams.storage ?? ''))
   const [only, setOnly] = useState<Set<string> | null>(null)
+  // Chains a check per archive after the run. Read back from the saved job the
+  // same way `storage` is, so an edit does not silently turn it off.
+  const [verifyAfter, setVerifyAfter] = useState(savedParams.verify === true)
 
   const spec = SCHEDULABLE.find((s) => s.kind === kind)
   const needs = spec?.needs ?? null
@@ -135,6 +138,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
         if (chosen.size !== onHost.guests.length) {
           params.vmids = onHost.guests.filter((g) => chosen.has(g.key)).map((g) => g.vmid)
         }
+        // Absent rather than false when off, so a saved job carries only the
+        // keys that mean something.
+        if (verifyAfter) params.verify = true
       }
       // PATCH sends the same body: every field on it is one this form owns, so
       // there is nothing to merge and nothing the edit could silently drop.
@@ -239,6 +245,13 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
                   </option>
                 ))}
             </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+              <input type="checkbox" checked={verifyAfter}
+                     onChange={(e) => setVerifyAfter(e.target.checked)} />
+              Check each archive afterwards
+            </label>
           </div>
         </>
       )}

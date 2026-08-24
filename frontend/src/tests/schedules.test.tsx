@@ -306,6 +306,17 @@ describe('ScheduleForm, backup targets', () => {
     expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds' })
   })
 
+  it('saves the after-backup check on the schedule', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    fireEvent.click(await screen.findByLabelText('Check each archive afterwards'))
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body.params.verify).toBe(true)
+  })
+
   it('will not save a job whose guest list has been emptied', async () => {
     posted.length = 0
     hosts = [{ id: 1, name: 'host-01' }]

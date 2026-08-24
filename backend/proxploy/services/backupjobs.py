@@ -440,6 +440,45 @@ async def verify_backup(ctx: JobContext, params: dict) -> dict:
 HANDLERS["backup.verify"] = verify_backup
 
 
+def _queue_checks(ctx: JobContext, host_id: int, vmids: list[int]) -> None:
+    """One `backup.verify` per archive the run that just finished wrote.
+
+    A separate job per archive, deliberately. A backup that wrote its archive
+    succeeded, whatever a later check says about the bytes, and reading an
+    archive back can take as long again as writing it did.
+
+    The newest archive per guest is what "this run wrote": the resync just
+    before this recorded it, and the older ones were whatever ran before. There
+    is no id to match on, vzdump names its own files and PVE reports no link
+    between a task and the volids it produced.
+    """
+    app = ctx.backend.app
+    # A host-wide run over a host Proxploy has never polled knows no vmids at
+    # all, so it falls back to the newest handful rather than every archive on
+    # the datastore. Each one is a full read over the network.
+    cap = len(vmids) or 5
+    with app.state.sessionmaker() as db:
+        q = db.query(Backup).filter(Backup.host_id == host_id)
+        if vmids:
+            q = q.filter(Backup.guest_vmid.in_(vmids))
+        fresh: list[Backup] = []
+        seen: set[int | None] = set()
+        for b in q.order_by(Backup.taken_at.desc()).all():
+            if b.guest_vmid in seen:
+                continue
+            seen.add(b.guest_vmid)
+            fresh.append(b)
+            if len(fresh) == cap:
+                break
+        for b in fresh:
+            ctx.backend.enqueue(db, kind="backup.verify", target_type="host",
+                                target_id=host_id,
+                                target_name=b.guest_name or b.volid,
+                                params={"backup_id": b.id})
+    word = "archive" if len(fresh) == 1 else "archives"
+    ctx.log(f"queued a check for {len(fresh)} {word}")
+
+
 async def run_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.run`, one vzdump task over the selected guests, or all of them."""
     app = ctx.backend.app
@@ -508,6 +547,8 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
                               timeout_s=app.state.settings.pve_task_timeout_s,
                               pct_from=_vzdump_pct(len(vmids) or len(known) or 1))
     await _resync(ctx, host_id)
+    if params.get("verify"):
+        _queue_checks(ctx, host_id, vmids or known)
     # `guests` is what the Backups page counts, not the job's status: PVE
     # returns exitstatus OK for a vzdump that wrote nothing, so a bare success
     # cannot tell a real backup from an empty one. The early return above

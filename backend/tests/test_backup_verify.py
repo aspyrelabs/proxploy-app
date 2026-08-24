@@ -34,10 +34,10 @@ def _seed(app, volid=VOLID_VM, guest_type="vm"):
         return host.id, b.id
 
 
-def _ctx(app):
+def _ctx(app, job_id=1):
     from proxploy.jobs import JobBackend, JobContext
 
-    return JobContext(JobBackend(app), job_id=1)
+    return JobContext(JobBackend(app), job_id=job_id)
 
 
 def test_the_vm_command_resolves_the_path_and_pipes_into_vma_verify():
@@ -120,5 +120,63 @@ def test_an_unresolvable_path_fails_the_job_and_marks_nothing(tmp_path):
             assert "could not be read" in str(e)
         with app.state.sessionmaker() as db:
             assert db.get(Backup, bid).verify_state is None
+
+    asyncio.run(run())
+
+
+def _fake_listing_the_seeded_archive():
+    """A run ends in a resync, which DELETES any archive PVE no longer lists.
+    So the fake has to report the seeded one back, or the row the chained check
+    is supposed to name is gone before it is queued."""
+    from tests.fakes.pve import FakePVE
+
+    fake = FakePVE()
+    fake.storages_by_node = {"pve1": [{"storage": "nfs-bk", "type": "nfs",
+                                       "content": "backup"}]}
+    fake.content_by_storage = {"nfs-bk": [
+        {"volid": VOLID_VM, "ctime": 1753844400, "size": 1024,
+         "format": "vma.zst", "content": "backup"}]}
+    return fake
+
+
+def test_a_run_with_verify_set_enqueues_a_check_for_what_it_wrote(tmp_path):
+    """A separate job, not an inline check: a backup that succeeded must read
+    as succeeded even when the check that follows it finds a bad archive, and
+    the two take very different amounts of time."""
+    from proxploy.services.backupjobs import run_backup
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=_fake_listing_the_seeded_archive())
+        hid, bid = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.add(Job(id=2, kind="backup.run", status="running"))
+            db.commit()
+        await run_backup(_ctx(app, 2),
+                         {"host_id": hid, "vmids": [201], "verify": True})
+        with app.state.sessionmaker() as db:
+            # status, because _seed's own stand-in job is a backup.verify too.
+            queued = db.query(Job).filter_by(kind="backup.verify",
+                                             status="queued").all()
+            assert len(queued) == 1
+            assert queued[0].params["backup_id"] == bid
+
+    asyncio.run(run())
+
+
+def test_a_run_without_the_flag_queues_nothing(tmp_path):
+    from proxploy.services.backupjobs import run_backup
+    from tests.support import make_job_app
+
+    async def run():
+        app = make_job_app(tmp_path, fake=_fake_listing_the_seeded_archive())
+        hid, _ = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.add(Job(id=2, kind="backup.run", status="running"))
+            db.commit()
+        await run_backup(_ctx(app, 2), {"host_id": hid, "vmids": [201]})
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).filter_by(kind="backup.verify",
+                                           status="queued").count() == 0
 
     asyncio.run(run())

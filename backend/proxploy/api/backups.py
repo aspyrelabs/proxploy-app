@@ -192,6 +192,9 @@ class RunIn(BaseModel):
     storage: str | None = None
     mode: str = "snapshot"
     compress: str = "zstd"
+    # Chains a backup.verify per archive once the run has written them, rather
+    # than checking inline: the backup's own result must not depend on it.
+    verify: bool = False
 
 
 def _resolve_guests(db, body: RunIn) -> tuple[int, list[int], list[str]]:
@@ -256,7 +259,8 @@ def run_backup_route(request: Request, body: RunIn = Body(default=RunIn()),
                              target_name=target_name,
                              params={"host_id": host_id, "vmids": vmids,
                                      "storage": body.storage, "mode": body.mode,
-                                     "compress": body.compress})
+                                     "compress": body.compress,
+                                     "verify": body.verify})
 
 
 class RestoreIn(BaseModel):

@@ -101,7 +101,8 @@ export type BackupGuest = { type: 'app' | 'vm'; id: number }
 export function useRunBackup() {
   const qc = useQueryClient()
   return useMutation<{ job: JobRow }, ApiError,
-    { hostId: number | null; storage?: string | null; guests?: BackupGuest[] }>({
+    { hostId: number | null; storage?: string | null; guests?: BackupGuest[];
+      verify?: boolean }>({
     mutationFn: (v) =>
       api<{ job: JobRow }>('/backups/run', {
         method: 'POST',
@@ -109,6 +110,9 @@ export function useRunBackup() {
           guests: v.guests ?? 'all',
           ...(v.hostId ? { host_id: v.hostId } : {}),
           ...(v.storage ? { storage: v.storage } : {}),
+          // Sent only when asked for: the route defaults it to false, and an
+          // explicit `verify: false` on every run would say nothing.
+          ...(v.verify ? { verify: true } : {}),
         }),
       }),
     onSettled: jobSettled(qc),

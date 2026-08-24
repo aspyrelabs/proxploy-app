@@ -89,6 +89,8 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   // null is "every guest on the host", which POST /backups/run still receives
   // as `all`: a subset is a list of ids, and the two are different requests.
   const [only, setOnly] = useState<Set<string> | null>(null)
+  // Off by default: reading every archive back doubles what the run costs.
+  const [check, setCheck] = useState(false)
   const [jobId, setJobId] = useState<number | null>(null)
   // null until the job's first progress frame: an indeterminate bar is the
   // honest state before vzdump has said anything.
@@ -203,6 +205,13 @@ function RunDialog({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
+            {/* Queued as its own job once the run has written the archives, so
+                the backup's own result never depends on how the check goes. */}
+            <label className="mt-3 flex items-center gap-2 text-[12.5px] text-text-2">
+              <input type="checkbox" checked={check}
+                     onChange={(e) => setCheck(e.target.checked)} />
+              Check the archive afterwards
+            </label>
           </>
         )}
         <div className="mt-4 flex justify-end gap-2">
@@ -221,6 +230,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
                     guests: chosen.size === guests ? undefined
                       : onHost.guests.filter((g) => chosen.has(g.key))
                           .map((g) => ({ type: g.type, id: g.id })),
+                    verify: check,
                   }, {
                     onSuccess: (r) => setJobId(r.job.id),
                     onError: () => notify.error('Could not start the backup, try again.'),

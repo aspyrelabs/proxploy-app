@@ -246,6 +246,16 @@ describe('BackupsPage', () => {
     expect(calls.length).toBe(0)
   })
 
+  it('asks for a check afterwards only when the box is ticked', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByLabelText('Check the archive afterwards'))
+    fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].body.verify).toBe(true)
+  })
+
   it('names the guests and the storage before the run, not after it', async () => {
     calls.length = 0
     wrap()
