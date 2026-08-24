@@ -15,7 +15,7 @@ export function LockVeil({ locked, title, subtitle, children }:
           <div className="mb-2 text-[22px] text-amber">🔒</div>
           <div className="font-display text-[15px] font-semibold">{title}</div>
           <p className="mb-3 mt-1 text-[12.5px] text-text-3">{subtitle}</p>
-          <Button variant="go" onClick={() => navigate({ to: '/settings' })}>Unlock Pro</Button>
+          <Button variant="go" onClick={() => navigate({ to: '/settings', search: { section: 'plan' } })}>Unlock Pro</Button>
         </div>
       </div>
     </div>

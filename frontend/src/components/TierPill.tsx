@@ -30,7 +30,7 @@ export function TierPill() {
   const cls = grace?.in_grace ? 'border-amber text-amber'
     : tier === 'builtin' ? 'border-line text-text-3' : 'border-amber/40 text-amber'
   return (
-    <Link to="/settings" className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[9.5px] tracking-[.08em] ${cls}`}>
+    <Link to="/settings" search={{ section: 'plan' }} className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 font-mono text-[9.5px] tracking-[.08em] ${cls}`}>
       <span className="sm:hidden">{shortLabel}</span>
       <span className="hidden sm:inline">{label}</span>
     </Link>
