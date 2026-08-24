@@ -232,3 +232,35 @@ def test_the_sweep_stops_at_its_cap_and_can_be_held_to_one_storage(tmp_path):
             assert db.get(Backup, 1).checked_at is None
 
     asyncio.run(run())
+
+
+def test_the_sweep_leaves_pbs_archives_to_pbs(tmp_path):
+    """PBS verifies its own against stored digests, on its own schedule. The
+    per-archive routes refuse those at the door; a schedule has no door."""
+    from proxploy.models import Backup
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app, seed_snapshot
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=["ok"],
+                                stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        hid, _ = _seed(app)
+        seed_snapshot(app, hid, storage=[
+            {"storage": "nfs-bk", "node": "pve1", "type": "nfs", "content": ["backup"],
+             "shared": True, "status": "available", "used_bytes": 1, "total_bytes": 100},
+            {"storage": "pbs-ds", "node": "pve1", "type": "pbs", "content": ["backup"],
+             "shared": True, "status": "available", "used_bytes": 1, "total_bytes": 100},
+        ])
+        with app.state.sessionmaker() as db:
+            db.add(Backup(host_id=hid, volid="pbs-ds:backup/vm/9/x", storage="pbs-ds",
+                          guest_type="vm"))
+            db.commit()
+        out = await verify_backup(_ctx(app), {"host_id": hid, "max": 10})
+        # The seeded nfs-bk archive only. The PBS one is left alone.
+        assert out["checked"] == 1
+        with app.state.sessionmaker() as db:
+            pbs_row = db.query(Backup).filter_by(storage="pbs-ds").one()
+            assert pbs_row.checked_at is None
+    asyncio.run(run())

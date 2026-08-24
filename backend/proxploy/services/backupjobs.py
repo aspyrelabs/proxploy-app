@@ -382,12 +382,25 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
     host_id = int(params["host_id"])
     limit = max(1, min(int(params.get("max") or 20), 200))
     want_storage = params.get("storage")
+    # Proxmox Backup Server verifies its own archives against stored digests on
+    # its own schedule, so a sweep that read them back over the network would
+    # spend hours re-answering a question PBS has already answered better. The
+    # per-archive routes refuse the same thing at the door
+    # (api/backups.py::_refuse_on_pbs); a schedule has no door, so it filters.
+    snap = app.state.poller.snapshots.get(host_id)
+    pbs_stores = {st.get("storage") for st in (snap.storage if snap else [])
+                  if (st.get("type") or "") == "pbs"}
     with app.state.sessionmaker() as db:
-        q = (db.query(Backup.id)
+        q = (db.query(Backup.id, Backup.storage)
              .filter(Backup.host_id == host_id, Backup.checked_at.is_(None)))
         if want_storage:
             q = q.filter(Backup.storage == want_storage)
-        ids = [i for (i,) in q.order_by(Backup.taken_at.asc()).limit(limit)]
+        if pbs_stores:
+            q = q.filter(Backup.storage.notin_(pbs_stores))
+        ids = [i for (i, _) in q.order_by(Backup.taken_at.asc()).limit(limit)]
+    if pbs_stores:
+        ctx.log(f"skipping {', '.join(sorted(s for s in pbs_stores if s))}: "
+                f"Proxmox Backup Server verifies those itself")
     word = "archive" if len(ids) == 1 else "archives"
     ctx.log(f"{len(ids)} {word} have never been verified, reading them back now")
     checked = failed = 0
