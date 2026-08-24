@@ -50,8 +50,11 @@ describe('Topbar', () => {
     // takes it out of the accessibility tree, so exactly one is announced.
     const marks = screen.getAllByRole('img', { name: 'Proxploy' })
     expect(marks).toHaveLength(2)
+    // Dark-INKED artwork on the light theme, near-white on the dark one. The
+    // file names describe the ink, not the theme, and wiring them the obvious
+    // way round put black on near-black.
     expect(marks.map(m => m.getAttribute('src'))).toEqual(
-      ['/proxploy-logo-dark.svg', '/proxploy-logo-light.svg'])
+      ['/proxploy-logo-light.svg', '/proxploy-logo-dark.svg'])
   })
 
   // The emoji became SVGs; the accessible names must not have moved with them.

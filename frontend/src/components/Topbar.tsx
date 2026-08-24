@@ -23,19 +23,21 @@ export function Topbar() {
     // justify-end is gone with the search lane's arrival: a flex-1 child
     // absorbs every pixel of free space, so there is nothing left to justify.
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
-      {/* GhostMark below sm: Logo's viewBox (aspect ratio 5.6) renders it
-          134px wide at h-6, which alone overruns a 375px header once search,
+      {/* GhostMark below sm: Logo's viewBox (aspect ratio ~4.9) renders it
+          217px wide at h-11, which alone overruns a 375px header once search,
           bell, tier pill, theme toggle and avatar are laid out beside it.
           The ghost is the mark's small-screen form (see Logo.tsx); swapping
-          to it below sm keeps the same h-6 footprint down to a 24px square. */}
-      {/* h-9 is the tallest the mark can be without changing the bar: the
-          header is h-14 (56px) and items-center, so a 36px mark leaves exactly
-          10px above and below it. Growing the mark must not grow the bar:
-          the sidebar sticks at top-14 and its height is calc(100vh-3.5rem),
-          both of which are that 56px. */}
+          to it below sm keeps the mark square down to a 36px footprint. */}
+      {/* h-11 (44px) in an h-14 (56px) items-center header leaves 6px above and
+          below. Growing the mark must not grow the BAR: the sidebar sticks at
+          top-14 and its height is calc(100vh-3.5rem), both of which are that
+          56px, so h-12 is the hard ceiling and this sits one step under it.
+          The artwork itself carries no padding any more (the source files were
+          a 1024x768 canvas holding a 201-unit-tall lockup, so 74% of every
+          rendered pixel was empty and the mark looked tiny at any height). */}
       <Link to={'/hosts' as never} aria-label="Proxploy" className="shrink-0 text-amber">
         <GhostMark className="h-9 w-9 sm:hidden" />
-        <Logo className="hidden h-9 w-auto sm:block" />
+        <Logo className="hidden h-11 w-auto sm:block" />
       </Link>
       {/* Centred in a flex-1 lane rather than absolutely positioned: the bar
           already overran a 375px phone once, and an absolutely-centred control

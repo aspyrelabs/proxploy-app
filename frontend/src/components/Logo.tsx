@@ -41,16 +41,26 @@ export function GhostMark({ className = "" }: { className?: string }) {
   );
 }
 
-/** Mark plus wordmark, 967x188 in its own units, so callers set a height and
- *  leave the width to `w-auto`. */
+/**
+ * Mark plus wordmark, 1010x205 in its own units (aspect ratio ~4.9), so callers
+ * set a height and leave the width to `w-auto`.
+ *
+ * READ THE FILE NAMES AS THE INK, NOT THE THEME. `-dark` is the dark-inked
+ * artwork, which belongs on a LIGHT background, and `-light` is the near-white
+ * one for a DARK background. They were wired the other way round at first,
+ * which puts black on near-black in dark mode and all but hides the wordmark.
+ * The favicon pair below is named the other way (by theme) and is correct as
+ * it stands; do not "make them consistent" by flipping one without looking at
+ * the fills in both.
+ */
 export default function Logo({ className = "" }: { className?: string }) {
   return (
     <>
       <span className="hidden dark:contents">
-        <img src="/proxploy-logo-dark.svg" alt="Proxploy" className={className} />
+        <img src="/proxploy-logo-light.svg" alt="Proxploy" className={className} />
       </span>
       <span className="contents dark:hidden">
-        <img src="/proxploy-logo-light.svg" alt="Proxploy" className={className} />
+        <img src="/proxploy-logo-dark.svg" alt="Proxploy" className={className} />
       </span>
     </>
   );

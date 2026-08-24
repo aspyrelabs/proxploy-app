@@ -8,10 +8,13 @@ export const inputCls =
   'w-full rounded-ctl border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-text-3 focus:border-amber focus:outline-none'
 
 // The real brand mark, replacing the gradient "P" tile and the Prox/ploy
-// split that stood in for it. currentColor carries the amber, so this is the
-// same artwork proxploy-web ships with no second copy of the colours.
+// split that stood in for it. Two artwork files rather than currentColor,
+// because the mark is multi-coloured; Logo.tsx picks by theme.
+//
+// Nothing is competing for space on a sign-in screen, so this is the one place
+// the mark is allowed to be large.
 export function Brand() {
-  return <Logo className="h-[30px] w-auto" />
+  return <Logo className="h-12 w-auto" />
 }
 
 type LoginResult = { ok?: true; user?: unknown; totp_required?: true; pending?: string }
