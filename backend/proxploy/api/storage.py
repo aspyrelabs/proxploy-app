@@ -28,8 +28,8 @@ from pydantic import BaseModel
 from proxploy.api.deps import (authorize, cluster_scope, get_db,
                                require_entitlement, scope_host)
 from proxploy.api.jobs import enqueue_and_audit
-from proxploy.pollers import pool_key
-from proxploy.models import Host, User
+from proxploy.pollers import pool_key, storage_snapshot_rows
+from proxploy.models import Host, Schedule, User
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
@@ -68,6 +68,75 @@ class StorageAttachIn(BaseModel):
 
 class StorageEditIn(BaseModel):
     config: dict
+
+
+def _resync_snapshot(request: Request, db, host: Host) -> None:
+    """The LIST above is served from the poll snapshot, so a change PVE has
+    already applied stays invisible for up to a whole poll interval: unticking
+    `backup` on a datastore left the Backups page still counting it, until the
+    poller came round and it changed under the operator's hands. One
+    cluster_resources() call, the same one the poller makes, is enough for the
+    next read to tell the truth.
+
+    Read on MONITORING, never on the lifecycle client these routes write with.
+    /cluster/resources returns only what the token may audit, and the Lifecycle
+    role deliberately carries no Datastore.Audit (services/pveum.py), so that
+    client sees an EMPTY cluster: reading through it wiped every datastore off
+    the Storage page for a whole poll interval after any edit.
+
+    Written to EVERY enrolled member of the same cluster, not just the host the
+    write went to. /cluster/resources answers for the whole cluster, so each
+    member's snapshot holds its own copy of these same rows, and the LIST above
+    dedupes across all of them keeping whichever it sees FIRST. Refreshing one
+    host therefore fixed nothing on a two-node cluster whenever the peer's
+    stale copy won that race.
+
+    Best effort in both directions: the write has already succeeded by the time
+    this runs, so a failure here must not fail the request, and the poller
+    corrects the snapshots within the cycle regardless.
+    """
+    snaps = request.app.state.poller.snapshots
+    try:
+        rows = storage_snapshot_rows(
+            client_for_host(request.app, db, host).cluster_resources())
+    except Exception:  # noqa: BLE001  (never fail a write that already succeeded)
+        return
+    # An empty read is not proof the cluster has no storage, it is equally a
+    # token that may not see it or a node that answered thin. The same reason
+    # pollers/__init__.py::_absence_is_trustworthy exists: leave the snapshot
+    # alone and let the poller, which can tell those apart, decide.
+    if not rows:
+        return
+    scope = cluster_scope(host)
+    for h in db.query(Host).all():
+        if cluster_scope(h) == scope and h.id in snaps:
+            snaps[h.id].storage = rows
+
+
+def _backup_job_on(request: Request, db, host: Host, name: str) -> str | None:
+    """The name of an enabled backup schedule this detach would strand, or None.
+
+    A scheduled `backup.run` carries no storage of its own (ScheduleForm sends
+    only `host_id`, and services/backupjobs.py lets PVE pick from whatever
+    accepts `backup` content), so detaching one of several backup datastores
+    strands nothing and is NOT refused. Detaching the last one leaves the job
+    with nowhere to write, which is what the guard is for.
+
+    A host with no snapshot has never been polled, so "another target exists"
+    cannot be shown to be true; that counts as the last one rather than
+    assuming the operator is safe.
+    """
+    snap = request.app.state.poller.snapshots.get(host.id)
+    others = [r for r in (snap.storage if snap else [])
+              if r.get("storage") != name and "backup" in _content_list(r.get("content"))]
+    if others:
+        return None
+    for s in (db.query(Schedule)
+                .filter(Schedule.job_kind == "backup.run", Schedule.enabled.is_(True))
+                .all()):
+        if (s.params or {}).get("host_id") == host.id:
+            return s.name
+    return None
 
 
 def _pct(used: float, total: float) -> float:
@@ -359,9 +428,9 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     # route says it is attaching: storage.py has no _SAFE_KEY filter at all
     # (deliberate free-form plugin passthrough), so this collision is even
     # more open than network.py's.
+    client = client_for_host(request.app, db, host, capability="lifecycle")
     try:
-        client_for_host(request.app, db, host, capability="lifecycle").storage_create(
-            {**body.config, "storage": body.storage, "type": body.type})
+        client.storage_create({**body.config, "storage": body.storage, "type": body.type})
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
                     target_type="storage", target_id=host.id, target_name=label,
@@ -370,6 +439,7 @@ def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.create",
                 target_type="storage", target_id=host.id, target_name=label,
                 params=body.model_dump(), ip=ip)
+    _resync_snapshot(request, db, host)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})
     return {"host_id": host.id, "storage": body.storage, "type": body.type}
@@ -387,8 +457,9 @@ def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
     keys = sorted(body.config)
     ip = request.client.host if request.client else None
     label = f"{name} on {host.name}"
+    client = client_for_host(request.app, db, host, capability="lifecycle")
     try:
-        client_for_host(request.app, db, host, capability="lifecycle").storage_update(name, body.config)
+        client.storage_update(name, body.config)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
                     target_type="storage", target_id=host.id, target_name=label,
@@ -397,6 +468,7 @@ def edit_storage(request: Request, host_id: int, name: str, body: StorageEditIn,
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.update",
                 target_type="storage", target_id=host.id, target_name=label,
                 params={"storage": name, "keys": keys}, ip=ip)
+    _resync_snapshot(request, db, host)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})
     return {"host_id": host.id, "storage": name, "updated": keys}
@@ -413,8 +485,14 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
     host = _host_or_404(db, host_id)
     ip = request.client.host if request.client else None
     label = f"{name} on {host.name}"
+    stranded = _backup_job_on(request, db, host, name)
+    if stranded is not None:
+        raise HTTPException(409, f'The backup job "{stranded}" writes to {name}, and it is '
+                                 f"the last storage on {host.name} that accepts backups. "
+                                 "Update or remove the job before detaching this storage.")
+    client = client_for_host(request.app, db, host, capability="lifecycle")
     try:
-        client_for_host(request.app, db, host, capability="lifecycle").storage_remove(name)
+        client.storage_remove(name)
     except ProxmoxError as e:
         write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
                     target_type="storage", target_id=host.id, target_name=label,
@@ -423,6 +501,7 @@ def detach_storage(request: Request, host_id: int, name: str, db=Depends(get_db)
     write_audit(db, actor_type="user", actor_id=user.id, action="storage.remove",
                 target_type="storage", target_id=host.id, target_name=label,
                 params={"storage": name}, ip=ip)
+    _resync_snapshot(request, db, host)
     request.app.state.bus.publish("resource", {"type": "storage", "id": host.id,
                                                "change": "list"})
     return {"host_id": host.id, "storage": name, "detached": True}

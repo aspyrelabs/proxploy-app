@@ -4,6 +4,7 @@ import { api, apiErrorDetail } from '../api/client'
 import { useApplyUpdate, useUpdateStatus } from '../api/account'
 import { notify } from '../lib/notify'
 import { Button, amberLinkCls } from './ui/button'
+import { Progress, ProgressLabel } from './ui/progress'
 import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
 // Matches backend/proxploy/config.py's update_timeout_s default. The updater
@@ -109,6 +110,15 @@ export function UpdateCard() {
                 className={`ml-3 text-[12px] ${amberLinkCls}`}>
                 Release notes
               </a>
+            )}
+            {poll === 'polling' && (
+              // Indeterminate on purpose: this waits for the server to come
+              // back on a new version, and there is no percentage anywhere in
+              // that. The bar says "busy" honestly, which is the whole reason
+              // ui/progress.tsx has a null mode.
+              <Progress className="mt-3 max-w-sm">
+                <ProgressLabel>Updating Proxploy, it will restart itself</ProgressLabel>
+              </Progress>
             )}
             {poll === 'timeout' && (
               <p className="mt-2 text-[12.5px] text-red">

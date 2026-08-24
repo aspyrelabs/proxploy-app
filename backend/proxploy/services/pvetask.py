@@ -14,6 +14,7 @@ stopped task with a missing exitstatus is an unknown outcome, not a success.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from proxploy.jobs import JobContext, JobFailed
 from proxploy.services.proxmox import ProxmoxClient
@@ -30,7 +31,8 @@ TASK_TIMEOUT_S = 300.0
 async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: str, *,
                      timeout_s: float = TASK_TIMEOUT_S, poll_s: float = TASK_POLL_S,
                      start_pct: int = 10, end_pct: int = 100,
-                     report_progress: bool = True) -> dict:
+                     report_progress: bool = True,
+                     pct_from: Callable[[str], int | None] | None = None) -> dict:
     """Log the UPID, poll it to completion, stream its task log into the job.
 
     Returns the final task-status dict (`{status, exitstatus, ...}`). Raises
@@ -43,20 +45,39 @@ async def await_task(ctx: JobContext, client: ProxmoxClient, node: str, upid: st
     up, so a percentage here would claim certainty the job does not have).
     The polling, logging and exitstatus handling stay identical either way;
     every other caller keeps reporting by default.
+
+    `pct_from` reads a real percentage out of the task log PVE is already
+    streaming here, and is the only way this loop can report anything between
+    start_pct and the end: /tasks/{upid}/status carries no percentage at all,
+    so without it a 40-minute vzdump sat on 10% until it finished. Return None
+    for a line that says nothing about progress; the returned 0..100 is scaled
+    into the caller's [start_pct, end_pct] band. Never reported backwards, so a
+    per-guest counter that restarts cannot make the bar go left.
     """
     ctx.log(f"proxmox task {upid}")
     if report_progress:
         ctx.progress(start_pct)
 
     seen = 0
+    reported = start_pct
     deadline = asyncio.get_running_loop().time() + timeout_s
     try:
         while True:
             status = await asyncio.to_thread(client.task_status, node, upid)
             rows = await asyncio.to_thread(client.task_log, node, upid, seen)
             for r in rows:
-                ctx.log(str(r.get("t", "")))
+                line = str(r.get("t", ""))
+                ctx.log(line)
                 seen = max(seen, int(r.get("n", seen)))
+                if pct_from is None or not report_progress:
+                    continue
+                p = pct_from(line)
+                if p is None:
+                    continue
+                scaled = start_pct + (end_pct - start_pct) * max(0, min(100, p)) // 100
+                if scaled > reported:
+                    reported = scaled
+                    ctx.progress(reported)
             if status.get("status") != "running":
                 break
             if asyncio.get_running_loop().time() > deadline:

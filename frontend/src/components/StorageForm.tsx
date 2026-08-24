@@ -14,6 +14,16 @@ type HostRow = { id: number; name: string }
 
 const TYPES = ['dir', 'nfs', 'cifs', 'pbs'] as const
 
+// PVE's plugin names said in full. `cifs` is SMB (the name is historical, the
+// driver speaks SMB2/SMB3), and `dir` is a folder on the node itself, not
+// anything shared: neither is guessable from four letters in a dropdown.
+const TYPE_LABEL: Record<string, string> = {
+  dir: 'dir · folder on the node',
+  nfs: 'nfs · NFS share',
+  cifs: 'cifs · SMB or CIFS share',
+  pbs: 'pbs · Proxmox Backup Server',
+}
+
 // Per-plugin field lists. The backend forwards `config` to Proxmox unvalidated
 // on purpose (Proxmox is the authority on what a plugin accepts), so this map
 // is a CONVENIENCE, not a schema: an unlisted key is a missing input here, not
@@ -28,13 +38,32 @@ const FIELDS: Record<string, [string, string, string][]> = {
         ['fingerprint', 'Fingerprint', 'text']],
 }
 
+// Proxmox's content types, in the order its own storage dialog lists them.
+// A free-text box here let a typo ("backups", "isos") through to PVE, and the
+// operator only found out when nothing could write to the datastore.
+const CONTENT_ALL = ['images', 'rootdir', 'vztmpl', 'iso', 'backup', 'snippets', 'import']
+const CONTENT_LABEL: Record<string, string> = {
+  images: 'Disk images',
+  rootdir: 'Container volumes',
+  vztmpl: 'Container templates',
+  iso: 'ISO images',
+  backup: 'Backups',
+  snippets: 'Snippets',
+  import: 'Importable disks',
+}
+// A PBS datastore holds backups and nothing else. Every other plugin takes the
+// full set, INCLUDING a type this map has never heard of: Edit opens on any row
+// the Storage page lists (lvmthin, zfspool, rbd), and narrowing those by guess
+// would hide a tick the datastore already carries.
+const CONTENT_FOR: Record<string, string[]> = { pbs: ['backup'] }
+
 const errText = (e: unknown) =>
   e instanceof ApiError
     ? String((e.body as any)?.detail ?? (e.body as any)?.title ?? e.message)
     : 'Request failed'
 
-export function StorageForm({ existing, onClose, defaultType = 'dir' }:
-  { existing: StorageRow | null; onClose: () => void; defaultType?: string }) {
+export function StorageForm({ existing, onClose }:
+  { existing: StorageRow | null; onClose: () => void }) {
   const editing = existing != null
   const ent = useEntitlements()
   // ent.has() returns false until the first fetch resolves, so gating on
@@ -51,25 +80,34 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
 
   const [hostId, setHostId] = useState<number | null>(existing?.host_id ?? null)
   const [name, setName] = useState(existing?.storage ?? '')
-  // `defaultType` lets the Backups page open this same form pre-set to `pbs`
-  // for its "Connect PBS datastore" affordance (doc 10's Phase 6 Backups
-  // deliverable), connecting PBS *is* attaching a storage of type pbs, so it
-  // reuses this form rather than growing a second, near-identical one.
-  // Editing keeps whatever Proxmox reported, including nothing: `?? defaultType`
-  // turned "this datastore reports no type" into a confident "dir".
-  const [type, setType] = useState<string>(existing ? existing.type ?? '' : defaultType)
+  // Editing keeps whatever Proxmox reported, including nothing: defaulting the
+  // empty case turned "this datastore reports no type" into a confident "dir".
+  // The Backups page opens this same form for its own "Add storage" button
+  // rather than growing a second, near-identical one, and it opens on the same
+  // type the Storage page does.
+  const [type, setType] = useState<string>(existing ? existing.type ?? '' : 'dir')
   const [cfg, setCfg] = useState<Record<string, string>>({
     content: existing?.content.join(',') ?? '',
   })
   const set = (k: string, v: string) => setCfg((s) => ({ ...s, [k]: v }))
 
-  const fields: [string, string, string][] = [
-    ...(FIELDS[type] ?? []), ['content', 'Content', 'text'],
-  ]
+  const fields: [string, string, string][] = FIELDS[type] ?? []
+  // `content` stays a comma string in state, the shape both PVE and the rest
+  // of this form already speak; the checkboxes below are just a view of it.
+  const ticked = new Set((cfg.content ?? '').split(',').map((c) => c.trim()).filter(Boolean))
+  const contentOpts = [...new Set([...(CONTENT_FOR[type] ?? CONTENT_ALL), ...ticked])]
+  const toggleContent = (c: string) => {
+    const next = new Set(ticked)
+    if (!next.delete(c)) next.add(c)
+    // Written back in the list's own order, not click order, so the same set
+    // of ticks always produces the same string.
+    set('content', contentOpts.filter((o) => next.has(o)).join(','))
+  }
   // Blank means "not supplied", on edit that is how a password stays
   // unchanged, and on attach it is how an optional plugin key is omitted.
   const filled = Object.fromEntries(
-    fields.map(([k]) => [k, (cfg[k] ?? '').trim()]).filter(([, v]) => v !== ''),
+    [...fields.map(([k]) => k), 'content']
+      .map((k) => [k, (cfg[k] ?? '').trim()]).filter(([, v]) => v !== ''),
   ) as Record<string, string>
 
   const canAttach = hostId != null && name.trim() !== '' && Object.keys(filled).length > 0
@@ -142,8 +180,13 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
           <label htmlFor="sf-type"
             className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">Type</label>
           <select id="sf-type" className={inputCls} value={type} disabled={editing}
-            onChange={(e) => setType(e.target.value)}>
-            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            onChange={(e) => {
+              setType(e.target.value)
+              // Same reason the initial state pre-ticks it: pbs has one content
+              // type and switching to it should not silently clear the set.
+              if (e.target.value === 'pbs') set('content', 'backup')
+            }}>
+            {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t] ?? t}</option>)}
             {/* TYPES is the four plugins this form can ATTACH. Edit opens on
                 ANY row the Storage page lists, and a real cluster is full of
                 lvmthin, zfspool and rbd, none of which is here. With no
@@ -161,10 +204,25 @@ export function StorageForm({ existing, onClose, defaultType = 'dir' }:
             <label htmlFor={`sf-${k}`}
               className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
             <input id={`sf-${k}`} className={inputCls} type={inputType}
-              value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)}
-              placeholder={k === 'content' ? 'iso,vztmpl,backup' : ''} />
+              value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)} />
           </div>
         ))}
+        <fieldset>
+          <legend className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
+            Content
+          </legend>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {contentOpts.map((c) => (
+              <label key={c} className="flex items-center gap-2 text-[13px]">
+                <input type="checkbox" checked={ticked.has(c)}
+                  onChange={() => toggleContent(c)} />
+                {/* An unknown key can only come from the datastore's own
+                    reported content, so it is shown as PVE named it. */}
+                <span>{CONTENT_LABEL[c] ?? c}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <div className="flex items-center gap-2 pt-1">
           <Button type="submit" variant="primary" disabled={busy || (!editing && !canAttach)}>
             {editing ? 'Save' : 'Attach'}

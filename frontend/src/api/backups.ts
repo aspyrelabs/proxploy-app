@@ -25,8 +25,16 @@ export type BackupStats = {
   total_bytes: number
   ok_count: number
   failed_count: number
-  /** null when nothing in the window was verified, never a fake 100%. */
+  /** null when nothing in the window was verified, never a fake 100%. Only
+   *  Proxmox Backup Server ever verifies an archive, so this stays null for
+   *  the whole life of a PVE-only setup and the three below are what the card
+   *  falls back to. */
   success_rate_30d: number | null
+  /** `backup.run` jobs in the same 30 days: an archive was written, which is
+   *  a weaker claim than "it verified" and is labelled as one. */
+  runs_ok_30d: number
+  runs_failed_30d: number
+  run_rate_30d: number | null
   datastores: Datastore[]
 }
 

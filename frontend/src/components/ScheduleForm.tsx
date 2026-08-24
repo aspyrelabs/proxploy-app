@@ -2,14 +2,16 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, apiErrorDetail } from '../api/client'
 import { SCHEDULABLE } from '../api/schedules'
+import type { ScheduleRow } from '../api/schedules'
 import { fmtCron } from '../lib/format'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
+import { GuestPicker, useBackupStores, useHostGuests } from './BackupPickers'
 
 const input = 'w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13px] text-text'
 const label = 'mb-1 block text-[11.5px] uppercase tracking-wide text-text-3'
 
-type Named = { id: number; name: string }
+type Named = { id: number; name: string; cluster_name?: string | null }
 
 /** Every IANA zone the browser knows, no dependency and no bundled list to go
  *  stale: `Intl.supportedValuesOf` is the platform's own answer (418 zones on
@@ -32,21 +34,48 @@ const TIMEZONES: string[] = typeof Intl.supportedValuesOf === 'function'
  *  fmtCron describes whichever of the two is in effect. */
 type Every = 'hour' | 'day' | 'week' | 'custom'
 
-/** Create one schedule. `jobKind` pins the kind and hides the picker, which is
- *  how the Backups page's "New job" reuses this without a second component. */
-export function ScheduleForm({ jobKind, onSaved }:
-  { jobKind?: string; onSaved: () => void }) {
+/** The presets, read backwards, so editing a saved job opens on the control
+ *  that WROTE its cron instead of dumping five fields on the operator. Only
+ *  the three shapes the presets themselves emit are recognised; anything else
+ *  is genuinely custom and is shown as the expression it is. */
+function presetOf(cron: string): { every: Every; time: string; dow: string } {
+  const f = cron.trim().split(/\s+/)
+  const two = (n: string) => String(Number(n)).padStart(2, '0')
+  const fallback = { every: 'custom' as Every, time: '02:00', dow: '1' }
+  if (f.length !== 5 || f[2] !== '*' || f[3] !== '*') return fallback
+  if (f[0] === '0' && f[1] === '*' && f[4] === '*') return { ...fallback, every: 'hour' }
+  if (!/^\d{1,2}$/.test(f[0]) || !/^\d{1,2}$/.test(f[1])) return fallback
+  const time = `${two(f[1])}:${two(f[0])}`
+  if (f[4] === '*') return { every: 'day', time, dow: '1' }
+  if (/^[0-6]$/.test(f[4])) return { every: 'week', time, dow: f[4] }
+  return fallback
+}
+
+/** Create or edit one schedule. `jobKind` pins the kind and hides the picker,
+ *  which is how the Backups page's "New job" reuses this without a second
+ *  component; `existing` switches the same fields to a PATCH, so editing a job
+ *  is the form that made it rather than a second, near-identical one. */
+export function ScheduleForm({ jobKind, existing, onSaved }:
+  { jobKind?: string; existing?: ScheduleRow; onSaved: () => void }) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState(jobKind ?? 'backup.run')
-  const [every, setEvery] = useState<Every>('day')
-  const [time, setTime] = useState('02:00')      // native <input type="time">
-  const [dow, setDow] = useState('1')            // cron day-of-week, 0 = Sunday
-  const [rawCron, setRawCron] = useState('0 2 * * *')
+  const preset = presetOf(existing?.cron ?? '0 2 * * *')
+  const savedParams = (existing?.params ?? {}) as Record<string, unknown>
+  const [name, setName] = useState(existing?.name ?? '')
+  const [kind, setKind] = useState(existing?.job_kind ?? jobKind ?? 'backup.run')
+  const [every, setEvery] = useState<Every>(preset.every)
+  const [time, setTime] = useState(preset.time)  // native <input type="time">
+  const [dow, setDow] = useState(preset.dow)     // cron day-of-week, 0 = Sunday
+  const [rawCron, setRawCron] = useState(existing?.cron ?? '0 2 * * *')
   // The browser's zone, not UTC: someone typing "2am" means 2am where they
   // live, and the backend stores an IANA name so DST is handled for them.
-  const [tz, setTz] = useState(BROWSER_TZ)
-  const [targetId, setTargetId] = useState('')
+  const [tz, setTz] = useState(existing?.timezone ?? BROWSER_TZ)
+  const [targetId, setTargetId] = useState(
+    String(savedParams.host_id ?? savedParams.app_id ?? ''))
+  // Both only apply to backup.run. `store` empty means "the first eligible
+  // one", `only` null means "every guest on the host, including any added
+  // after this job is saved".
+  const [store, setStore] = useState(String(savedParams.storage ?? ''))
+  const [only, setOnly] = useState<Set<string> | null>(null)
 
   const spec = SCHEDULABLE.find((s) => s.kind === kind)
   const needs = spec?.needs ?? null
@@ -71,16 +100,56 @@ export function ScheduleForm({ jobKind, onSaved }:
   // on host_id/app_id at fire time.
   const effectiveTargetId = targetId || (targets.data?.length === 1 ? String(targets.data[0].id) : '')
 
+  // A scheduled backup used to send nothing but host_id, so it dumped every
+  // guest on the node onto whichever datastore Proxmox felt like: the same two
+  // unanswered questions the ad-hoc Run now dialog already answers, on the runs
+  // nobody is watching. services/backupjobs.py::run_backup reads `vmids` and
+  // `storage` out of params and always has, so this is the form catching up.
+  const isBackup = kind === 'backup.run'
+  const hostId = isBackup && effectiveTargetId ? Number(effectiveTargetId) : null
+  const onHost = useHostGuests(hostId)
+  // A saved job stores PVE vmids; the tick list is keyed on Proxploy row ids,
+  // so the two are matched up here once the guest list has loaded. Null all the
+  // way through means "everything", which is what an absent `vmids` meant when
+  // the job was saved and must still mean after an edit.
+  const savedVmids = Array.isArray(savedParams.vmids)
+    ? (savedParams.vmids as number[]) : null
+  const selected = only ?? (savedVmids
+    ? new Set(onHost.guests.filter((g) => savedVmids.includes(g.vmid)).map((g) => g.key))
+    : null)
+  const chosen = selected ?? new Set(onHost.guests.map((g) => g.key))
+  const { stores } = useBackupStores(
+    hostId, targets.data?.find((h) => h.id === hostId)?.cluster_name)
+  const target = stores.some((s) => s.storage === store) ? store : (stores[0]?.storage ?? '')
+
   const create = useMutation({
     mutationFn: () => {
-      const params: Record<string, number> = {}
+      const params: Record<string, unknown> = {}
       if (needs === 'host' && effectiveTargetId) params.host_id = Number(effectiveTargetId)
       if (needs === 'app' && effectiveTargetId) params.app_id = Number(effectiveTargetId)
-      return api('/schedules', {
-        method: 'POST',
-        body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz,
-                               params, enabled: true }),
-      })
+      if (isBackup) {
+        if (target) params.storage = target
+        // PVE vmids, not Proxploy row ids: params go straight to the handler,
+        // which passes them to vzdump. Omitted when everything is ticked, so
+        // the job keeps covering guests created after it was saved.
+        if (chosen.size !== onHost.guests.length) {
+          params.vmids = onHost.guests.filter((g) => chosen.has(g.key)).map((g) => g.vmid)
+        }
+      }
+      // PATCH sends the same body: every field on it is one this form owns, so
+      // there is nothing to merge and nothing the edit could silently drop.
+      // `enabled` is deliberately absent on an edit, it belongs to the row's
+      // own Enable/Disable control.
+      return existing
+        ? api(`/schedules/${existing.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz, params }),
+        })
+        : api('/schedules', {
+          method: 'POST',
+          body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz,
+                                 params, enabled: true }),
+        })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })
@@ -115,7 +184,9 @@ export function ScheduleForm({ jobKind, onSaved }:
         <div>
           <label className={label} htmlFor="sc-kind">What to run</label>
           <select id="sc-kind" className={input} value={kind}
-                  onChange={(e) => { setKind(e.target.value); setTargetId('') }}>
+                  onChange={(e) => {
+                    setKind(e.target.value); setTargetId(''); setOnly(null); setStore('')
+                  }}>
             {SCHEDULABLE.map((s) =>
               <option key={s.kind} value={s.kind}>{s.label}</option>)}
           </select>
@@ -133,7 +204,11 @@ export function ScheduleForm({ jobKind, onSaved }:
               gated spelling is the one that stays correct if that changes. */}
           <select id="sc-target" className={input} value={effectiveTargetId}
                   disabled={targets.isError || targets.isLoading}
-                  onChange={(e) => setTargetId(e.target.value)}>
+                  onChange={(e) => {
+                    // A tick list and a datastore from the previous host mean
+                    // nothing on this one.
+                    setTargetId(e.target.value); setOnly(null); setStore('')
+                  }}>
             {targets.isError
               ? <option value="">Could not load {needs === 'app' ? 'apps' : 'hosts'}</option>
               : targets.isLoading
@@ -143,6 +218,29 @@ export function ScheduleForm({ jobKind, onSaved }:
               <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
+      )}
+
+      {isBackup && hostId != null && (
+        <>
+          <div className="sm:col-span-2">
+            <GuestPicker guests={onHost.guests} selected={selected}
+                         onChange={setOnly} idPrefix="sc-guest" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label} htmlFor="sc-store">Archive lands on</label>
+            <select id="sc-store" className={input} value={target}
+                    disabled={stores.length === 0}
+                    onChange={(e) => setStore(e.target.value)}>
+              {stores.length === 0
+                ? <option value="">No storage on this host accepts backups</option>
+                : stores.map((s) => (
+                  <option key={s.storage} value={s.storage}>
+                    {s.storage}{s.type ? ` (${s.type})` : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
+        </>
       )}
 
       <div>
@@ -190,17 +288,21 @@ export function ScheduleForm({ jobKind, onSaved }:
 
       <div>
         <label className={label} htmlFor="sc-tz">Timezone</label>
-        {/* input + datalist, not a select: the list is a suggestion, so any
-            valid IANA name can still be typed (the backend validates it and
-            422s with zoneinfo's own message), and a resolved zone missing from
-            the list is shown rather than silently dropped. */}
-        <input id="sc-tz" className={`${input} font-mono`} value={tz} required
-               list={TIMEZONES.length ? 'sc-tz-list' : undefined}
-               onChange={(e) => setTz(e.target.value)} />
-        {TIMEZONES.length > 0 && (
-          <datalist id="sc-tz-list">
-            {TIMEZONES.map((z) => <option key={z} value={z} />)}
-          </datalist>
+        {/* A select, not the input+datalist this was: a datalist has no
+            affordance at all, so the field sat next to two real dropdowns
+            looking like a label that happened to say Asia/Calcutta, and the
+            418 zones behind it were invisible. BROWSER_TZ is unioned into the
+            list (see TIMEZONES) precisely so the resolved zone always has an
+            entry to be selected. The free-text fallback stays for a browser
+            with no supportedValuesOf, where there is no list to pick from. */}
+        {TIMEZONES.length > 0 ? (
+          <select id="sc-tz" className={`${input} font-mono`} value={tz} required
+                  onChange={(e) => setTz(e.target.value)}>
+            {TIMEZONES.map((z) => <option key={z} value={z}>{z}</option>)}
+          </select>
+        ) : (
+          <input id="sc-tz" className={`${input} font-mono`} value={tz} required
+                 onChange={(e) => setTz(e.target.value)} />
         )}
       </div>
 
@@ -214,8 +316,12 @@ export function ScheduleForm({ jobKind, onSaved }:
 
       <div className="sm:col-span-2">
         <Button type="submit"
-                disabled={create.isPending || (needs != null && !effectiveTargetId)}>
-          Create schedule
+                disabled={create.isPending || (needs != null && !effectiveTargetId)
+                          // `only` null is "everything", which is still valid on
+                          // a host with no guests yet; an EMPTY explicit list is
+                          // the operator having cleared every tick.
+                          || (selected != null && selected.size === 0)}>
+          {existing ? 'Save changes' : 'Create schedule'}
         </Button>
       </div>
     </form>

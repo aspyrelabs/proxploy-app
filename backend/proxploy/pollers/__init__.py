@@ -335,6 +335,33 @@ def _refresh_os_type(v: Vm, g: dict, client) -> None:
 POOL_FORGET_AFTER_S = 900
 
 
+def storage_snapshot_rows(resources: list[dict]) -> list[dict]:
+    """The snapshot's storage shape, from raw /cluster/resources rows.
+
+    `type`, `content`, `shared` and `status` ride on the SAME row the two byte
+    counts come from: the poller used to discard them, and reading them here is
+    what lets GET /storage answer from the snapshot instead of adding a
+    per-datastore PVE call, which doc 02 §3's O(nodes) budget forbids.
+
+    Module-level and shared with api/storage.py, which rebuilds these rows after
+    a mutation rather than waiting out a poll interval. It was inline in
+    ingest_cycle first, and the copy that grew in the API wrote RAW resource
+    rows into the same field: every datastore then reported type "storage" (the
+    resource type, not the plugin) and 0 bytes until the next cycle corrected
+    it. One transform, one shape.
+    """
+    return [
+        {"storage": r.get("storage"), "node": r.get("node"),
+         "used_bytes": int(r.get("disk") or 0),
+         "total_bytes": int(r.get("maxdisk") or 0),
+         "type": r.get("plugintype"),
+         "content": [c for c in str(r.get("content") or "").split(",") if c],
+         "shared": bool(r.get("shared")),
+         "status": r.get("status") or "unknown"}
+        for r in resources if r.get("type") == "storage"
+    ]
+
+
 def pool_key(row: dict) -> tuple:
     """A SHARED datastore is reported once per node and is ONE pool; a LOCAL
     datastore with the same name on two nodes is two distinct pools.
@@ -811,20 +838,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         if kind == "lxc" and vmid not in mapped_ctids
     ]
 
-    snap_storage = [
-        {"storage": r.get("storage"), "node": r.get("node"),
-         "used_bytes": int(r.get("disk") or 0),
-         "total_bytes": int(r.get("maxdisk") or 0),
-         # These four ride on the SAME /cluster/resources row the two above come
-         # from: the poller used to discard them. Reading them here is what
-         # lets GET /storage answer from the snapshot instead of adding a
-         # per-datastore PVE call, which doc 02 §3's O(nodes) budget forbids.
-         "type": r.get("plugintype"),
-         "content": [c for c in str(r.get("content") or "").split(",") if c],
-         "shared": bool(r.get("shared")),
-         "status": r.get("status") or "unknown"}
-        for r in storage_rows
-    ]
+    snap_storage = storage_snapshot_rows(storage_rows)
 
     # Reaping: the CT behind these apps is gone, so the app is gone. The row is
     # DELETED rather than flagged, which is what makes it disappear everywhere

@@ -73,7 +73,10 @@ export function TrustedDevicesCard() {
                   <td className="text-text-3">{new Date(r.created_at).toLocaleDateString()}</td>
                   <td className="text-text-3">{new Date(r.expires_at).toLocaleDateString()}</td>
                   <td className="py-2 text-right">
-                    <Button variant="danger" className="px-2 py-1 text-[11px]"
+                    {/* size="sm" for the reason SessionsCard's row button
+                        carries: the className size was silently losing to the
+                        default one. */}
+                    <Button variant="danger" size="sm"
                       disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>
                       {r.current ? 'Forget this one' : 'Forget'}
                     </Button>

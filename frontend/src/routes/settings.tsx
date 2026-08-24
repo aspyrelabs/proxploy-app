@@ -107,11 +107,18 @@ function Card({ title, children, action }: { title: string; children: React.Reac
   )
 }
 
-export function SchedulesCard() {
+/**
+ * Every schedule, or just the kinds one page owns: the Backups page shows the
+ * `backup.run` rows with `only`, so scheduled jobs are managed where they are
+ * read rather than only in Settings. One card, one set of row actions.
+ */
+export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
+  { only?: string[]; title?: string; canAdd?: boolean } = {}) {
   const qc = useQueryClient()
   const ent = useEntitlements()
   const schedules = useSchedules()
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<ScheduleRow | null>(null)
   // Wait for the first entitlements fetch before deciding (alerts.tsx
   // precedent), POST/PATCH /schedules require sched.windows, so offering
   // "New schedule"/"Run now" to everyone flashes controls that always 403.
@@ -139,10 +146,13 @@ export function SchedulesCard() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   })
 
+  // `canAdd` is off on the Backups page, which already has "New job" in its
+  // own header: two buttons opening the same form is a choice nobody has.
   return (
-    <Card title="Schedules"
-          action={windowsAllowed && (
-            <Button variant="ghost" onClick={() => setAdding(a => !a)}>
+    <Card title={title}
+          action={canAdd && windowsAllowed && (
+            <Button variant="ghost"
+                    onClick={() => { setEditing(null); setAdding(a => !a) }}>
               {adding ? 'Close' : 'New schedule'}
             </Button>
           )}>
@@ -155,7 +165,14 @@ export function SchedulesCard() {
                   emptyNote="Add one for nightly backups or an auto-update window."
                   errorTitle="Schedules not readable"
                   errorNote="Proxploy could not reach the backend to list your schedules.">
-        {(rows) => (
+        {(all) => {
+          const rows = only ? all.filter((s) => only.includes(s.job_kind)) : all
+          return rows.length === 0 ? (
+            <p className="text-[12.5px] text-text-3">
+              No scheduled jobs yet, &quot;{canAdd ? 'New schedule' : 'New job'}&quot;
+              {' '}creates one.
+            </p>
+          ) : (
           <table className="w-full text-left text-[13px]">
             <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
               <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
@@ -202,6 +219,15 @@ export function SchedulesCard() {
                             onClick={() => toggle.mutate(s)}>
                       {s.enabled ? 'Disable' : 'Enable'}
                     </Button>
+                    {windowsAllowed && (
+                      <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                              onClick={() => {
+                                setAdding(false)
+                                setEditing((e) => (e?.id === s.id ? null : s))
+                              }}>
+                        {editing?.id === s.id ? 'Close' : 'Edit'}
+                      </Button>
+                    )}
                     <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
                             onClick={() => {
                               if (window.confirm(`Remove schedule "${s.name}"?`)) {
@@ -213,11 +239,18 @@ export function SchedulesCard() {
               ))}
             </tbody>
           </table>
-        )}
+          )
+        }}
       </QueryState>
-      {adding && <div className="mt-4 border-t border-line-soft pt-4">
-        <ScheduleForm onSaved={() => setAdding(false)} />
-      </div>}
+      {(adding || editing) && (
+        <div className="mt-4 border-t border-line-soft pt-4">
+          {/* Keyed on the row so switching straight from one Edit to another
+              rebuilds the fields instead of keeping the first row's state. */}
+          <ScheduleForm key={editing?.id ?? 'new'} existing={editing ?? undefined}
+                        jobKind={only?.length === 1 ? only[0] : undefined}
+                        onSaved={() => { setAdding(false); setEditing(null) }} />
+        </div>
+      )}
     </Card>
   )
 }

@@ -249,14 +249,17 @@ describe('StorageForm', () => {
     fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'nfs' } })
     fireEvent.change(screen.getByLabelText('Server'), { target: { value: '10.0.0.30' } })
     fireEvent.change(screen.getByLabelText('Export'), { target: { value: '/media' } })
-    fireEvent.change(screen.getByLabelText('Content'), { target: { value: 'iso,vztmpl' } })
+    fireEvent.click(screen.getByLabelText('ISO images'))
+    fireEvent.click(screen.getByLabelText('Container templates'))
     fireEvent.click(screen.getByRole('button', { name: 'Attach' }))
 
     await waitFor(() => expect(calls.some((c) => c.path === '/storage' && c.opts?.method === 'POST')).toBe(true))
     const post = calls.find((c) => c.path === '/storage' && c.opts?.method === 'POST')!
     expect(JSON.parse(post.opts.body)).toEqual({
       host_id: 1, storage: 'nfs-media', type: 'nfs',
-      config: { server: '10.0.0.30', export: '/media', content: 'iso,vztmpl' },
+      // Written in the checkbox list's own order, whatever order they were
+      // clicked in.
+      config: { server: '10.0.0.30', export: '/media', content: 'vztmpl,iso' },
     })
   })
 
@@ -291,12 +294,22 @@ describe('StorageForm', () => {
 
   it('PATCHes only the fields the operator filled in edit mode', async () => {
     withQuery(<StorageForm existing={LOCAL} onClose={vi.fn()} />)
-    fireEvent.change(await screen.findByLabelText('Content'), { target: { value: 'iso,backup' } })
+    // local carries iso,vztmpl,backup; unticking one is the whole edit.
+    fireEvent.click(await screen.findByLabelText('Container templates'))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls.some((c) => c.opts?.method === 'PATCH')).toBe(true))
     const patch = calls.find((c) => c.opts?.method === 'PATCH')!
     expect(patch.path).toBe('/storage/1/local')
     expect(JSON.parse(patch.opts.body)).toEqual({ config: { content: 'iso,backup' } })
+  })
+
+  // A PBS datastore holds backups and nothing else, so the Backups page's
+  // "Connect PBS" must not open on an unticked box PVE would override anyway.
+  it('offers backups only, already ticked, when the type is pbs', async () => {
+    withQuery(<StorageForm existing={null} onClose={vi.fn()} />)
+    fireEvent.change(await screen.findByLabelText('Type'), { target: { value: 'pbs' } })
+    expect(screen.getByLabelText('Backups')).toBeChecked()
+    expect(screen.queryByLabelText('ISO images')).toBeNull()
   })
 
   it('confirms before detaching and does nothing when the operator cancels', async () => {

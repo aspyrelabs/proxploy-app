@@ -69,7 +69,10 @@ export function SessionsCard() {
                     {r.current ? (
                       <span className="text-[11px] text-green">current</span>
                     ) : (
-                      <Button variant="danger" className="px-2 py-1 text-[11px]"
+                      // size="sm", not a className: px-2/py-1/text-[11px]
+                      // collides with size md's own, and the emit order decides
+                      // which wins. It lost, so this rendered full size.
+                      <Button variant="danger" size="sm"
                         disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>
                         Sign out
                       </Button>

@@ -59,13 +59,17 @@ _KIND_PREFIX: dict[str, str] = {
     "app.update": "app.update",
     "app.uninstall": "app.uninstall",
     "backup.run": "backup",
-    "backup.sync": "backup",
     "backup.restore": "backup.restore",
     # The two built-in system schedules, plus the backup retention work that
-    # runs on the same unattended footing.
+    # runs on the same unattended footing. `backup.sync` sits here and not
+    # under "backup": nobody asks for one, GET /backups enqueues it whenever
+    # the cache is stale (api/backups.py::list_backups), so filing it as a
+    # backup outcome toasted "Backup Sync Succeeded" at anyone who left the
+    # Backups page open.
     "catalog.refresh": "housekeeping",
     "catalog.classify_backlog": "housekeeping",
     "metrics.maintain": "housekeeping",
+    "backup.sync": "housekeeping",
     "backup.delete": "housekeeping",
     "backup.prune": "housekeeping",
 }

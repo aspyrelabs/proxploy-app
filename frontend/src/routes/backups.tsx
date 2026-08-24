@@ -4,19 +4,22 @@ import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
 import { notify } from '../lib/notify'
 import { api } from '../api/client'
-import { servedTo } from '../components/install/pools'
+import { GuestPicker, useBackupStores, useHostGuests } from '../components/BackupPickers'
 import { useEntitlements } from '../api/hooks'
-import type { AppRow, VmRow } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
 import { useSchedules } from '../api/schedules'
 import { useStorage } from '../api/storage'
+import { BackupLimitsDialog, limitsAcknowledged } from '../components/BackupLimitsDialog'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { LockVeil } from '../components/LockVeil'
 import { RestoreDialog } from '../components/RestoreDialog'
 import { ScheduleForm } from '../components/ScheduleForm'
+// From the route, not a copy: SchedulesCard owns the row actions (run, enable,
+// edit, remove) and there is no second implementation of them.
+import { SchedulesCard } from './settings'
 import { StorageForm } from '../components/StorageForm'
 import { UsageBar, STORAGE_GRADIENT } from '../components/UsageBar'
 import { Button } from '../components/ui/button'
@@ -24,6 +27,7 @@ import { inputCls } from '../components/LoginForm'
 import { fmtBytes, fmtPct } from '../lib/format'
 import { Dialog } from '../components/ui/dialog'
 import { Loading } from '../components/ui/loading'
+import { Progress, ProgressLabel, ProgressValue } from '../components/ui/progress'
 import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -78,42 +82,34 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   //
   // Same query keys the Apps, VMs and Storage pages already fetch under, so
   // this shares their cache rather than adding three requests.
-  const apps = useQuery({ queryKey: ['apps', {}], queryFn: () => api<AppRow[]>('/apps') })
-  const vms = useQuery({ queryKey: ['vms', {}], queryFn: () => api<VmRow[]>('/vms') })
-  const storage = useStorage()
   const run = useRunBackup()
   const [picked, setPicked] = useState<number | null>(null)
   const [store, setStore] = useState('')
+  // null is "every guest on the host", which POST /backups/run still receives
+  // as `all`: a subset is a list of ids, and the two are different requests.
+  const [only, setOnly] = useState<Set<string> | null>(null)
   const [jobId, setJobId] = useState<number | null>(null)
+  // null until the job's first progress frame: an indeterminate bar is the
+  // honest state before vzdump has said anything.
+  const [pct, setPct] = useState<number | null>(null)
   // One vzdump task runs on one node, so the backend requires host_id whenever
   // more than one host is registered; with exactly one there is nothing to ask.
   const hostId = picked ?? (hosts.data?.length === 1 ? hosts.data[0].id : null)
 
   const hostName = hosts.data?.find((h) => h.id === hostId)?.name ?? 'that host'
-  // Named, not just counted. The scope of this button is every guest on the
-  // node, which the code has always known (see this function's own comment)
-  // and the dialog never said, so an operator could not tell whether it was
-  // about their apps and VMs or about Proxploy's own data. It is the former:
-  // vzdump captures containers and virtual machines, and an installed app IS a
-  // container, so listing them by name is the whole answer.
-  const named = hostId == null ? []
-    : [...(apps.data ?? []).filter((a) => a.host_id === hostId)
-        .map((a) => `${a.name} (CT ${a.ctid})`),
-       ...(vms.data ?? []).filter((v) => v.host_id === hostId)
-        .map((v) => `${v.name} (VM ${v.vmid})`)]
-  const guests = named.length
-  // servedTo, not `s.host_id === hostId`: GET /storage drops host_id from its
-  // dedupe key, so on a cluster every row comes back owned by whichever host
-  // polled first and the others matched nothing at all. Same defect the VM
-  // create wizard and the install dialog both had.
-  const stores = hostId == null ? []
-    : (storage.data ?? []).filter((s) =>
-        servedTo(s, hostId, (hosts.data ?? []).find((h) => h.id === hostId)?.cluster_name)
-        && s.content.includes('backup'))
-  // Nothing is concluded while those three are still in flight: an empty list
-  // means "not fetched yet" exactly as readily as "nothing there", and this
-  // page must not state a finding before it has looked (StatCard's rule).
-  const checking = apps.isPending || vms.isPending || storage.isPending
+  // Ticked, not just counted. The scope of this button used to be every guest
+  // on the node with no way to say otherwise, so an operator who wanted one
+  // container had to dump the lot; vzdump takes a vmid list and always did.
+  const onHost = useHostGuests(hostId)
+  const guests = onHost.guests.length
+  const chosen = only ?? new Set(onHost.guests.map((g) => g.key))
+  const store$ = useBackupStores(
+    hostId, (hosts.data ?? []).find((h) => h.id === hostId)?.cluster_name)
+  const stores = store$.stores
+  // Nothing is concluded while those are still in flight: an empty list means
+  // "not fetched yet" exactly as readily as "nothing there", and this page
+  // must not state a finding before it has looked (StatCard's rule).
+  const checking = onHost.pending || store$.pending
   // Reset to the first eligible store whenever the chosen host changes, so a
   // leftover name from the previous host is never sent to a node that has no
   // such store. Never left empty while a store exists: an unset storage is
@@ -132,20 +128,30 @@ function RunDialog({ onClose }: { onClose: () => void }) {
     <Dialog title={'Run a backup now'} width={480} onClose={onClose}>
     {jobId != null ? (
       <div className="mt-4">
-        <JobLog jobId={jobId} />
+        {/* Fed by the job's own progress frames, which now carry vzdump's
+            per-guest percentage out of the task log rather than sitting on 10
+            until the whole run finishes (services/pvetask.py::await_task). */}
+        <Progress value={pct} className="mb-3">
+          <ProgressLabel>Backing up</ProgressLabel>
+          <ProgressValue />
+        </Progress>
+        <JobLog jobId={jobId} onProgress={setPct} />
         <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
     ) : (
       <>
         <p className="mt-2 text-[12.5px] text-text-3">
-          Backs up <strong className="text-text-2">every container and virtual machine</strong>{' '}
-          on the selected host, in snapshot mode, so the guests keep running. That is your
-          installed apps (each one is a container) and your VMs. It does not back up
-          Proxploy&apos;s own settings or database.
+          Backs up the{' '}
+          <strong className="text-text-2">containers and virtual machines you tick</strong>{' '}
+          below, in snapshot mode, so they keep running. That is your installed apps (each
+          one is a container) and your VMs. It does not back up Proxploy&apos;s own settings
+          or database.
         </p>
         <select className={`${inputCls} mt-4`} value={hostId ?? ''}
                 aria-label="Host" disabled={hosts.isError || hosts.isLoading}
-                onChange={(e) => { setPicked(Number(e.target.value) || null); setStore('') }}>
+                onChange={(e) => {
+                  setPicked(Number(e.target.value) || null); setStore(''); setOnly(null)
+                }}>
           {hosts.isError
             ? <option value="">Could not load hosts</option>
             : hosts.isLoading
@@ -178,15 +184,14 @@ function RunDialog({ onClose }: { onClose: () => void }) {
           </SkeletonGroup>
         ) : hostId != null && (
           <>
-            {/* The scope, before the click. "One vzdump over every guest on the
-                chosen host" was only ever in this file's comments; naming the
-                guests is what stops "Run now" reading as an unqualified
-                "backup" of something unspecified. */}
-            <p className="mt-3 text-[12.5px] text-text-3">
-              {guests} {guests === 1 ? 'guest' : 'guests'} on {hostName} will be backed up:{' '}
-              <span className="text-text-2">{named.slice(0, 6).join(', ')}</span>
-              {named.length > 6 && ` and ${named.length - 6} more`}.
-            </p>
+            {/* The scope, before the click, and now editable. "One vzdump over
+                every guest on the chosen host" was only ever in this file's
+                comments; the list is what stops "Run now" reading as an
+                unqualified "backup" of something unspecified. */}
+            <div className="mt-3">
+              <GuestPicker guests={onHost.guests} selected={only}
+                           onChange={setOnly} idPrefix="bk-run" />
+            </div>
             <label className="mt-4 block text-[11px] uppercase tracking-wide text-text-3"
                    htmlFor="bk-store">Archive lands on</label>
             <select id="bk-store" className={inputCls} value={target}
@@ -201,9 +206,21 @@ function RunDialog({ onClose }: { onClose: () => void }) {
         )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={hostId == null || blocked != null || run.isPending}
+          <Button disabled={hostId == null || blocked != null || run.isPending
+                            // An empty EXPLICIT list only, see ScheduleForm: a
+                            // host with no guests is already `blocked` above.
+                            || (only != null && only.size === 0)}
                   title={blocked ?? undefined}
-                  onClick={() => run.mutate({ hostId, storage: target }, {
+                  onClick={() => run.mutate({
+                    hostId,
+                    storage: target,
+                    // Omitted when everything is ticked, so the hook keeps
+                    // sending `all` and a guest created between opening this
+                    // dialog and the job running is still included.
+                    guests: chosen.size === guests ? undefined
+                      : onHost.guests.filter((g) => chosen.has(g.key))
+                          .map((g) => ({ type: g.type, id: g.id })),
+                  }, {
                     onSuccess: (r) => setJobId(r.job.id),
                     onError: () => notify.error('Could not start the backup, try again.'),
                   })}>
@@ -223,10 +240,11 @@ function ScheduleDialog({ onClose }: { onClose: () => void }) {
     {/* Same sentence as RunDialog, for the same reason: "backup" on its own
         reads as an unqualified backup of something unspecified, and an operator
         reasonably wondered whether these buttons were about Proxploy's own
-        data. They are about the guests. */}
+        data. They are about the guests. No longer promises "every" one of
+        them: the form below picks which. */}
     <p className="mt-2 text-[12.5px] text-text-3">
-      Runs on a schedule and backs up{' '}
-      <strong className="text-text-2">every container and virtual machine</strong> on the
+      Runs on a schedule and backs up the{' '}
+      <strong className="text-text-2">containers and virtual machines you tick</strong> on the
       host you choose: your installed apps and your VMs, not Proxploy&apos;s own settings.
     </p>
     <div className="mt-4">
@@ -420,6 +438,11 @@ function RetentionSection({ data, pending }: {
 export function BackupsPage() {
   const ent = useEntitlements()
   const { data, isError, isPending } = useBackups()
+  // Whether there is anywhere to back UP to is a question about storage, not
+  // about archives. `stats.datastores` (below) is the `backups` cache grouped
+  // by store, so it only knows the stores that already hold something.
+  const storage = useStorage()
+  const backupStores = (storage.data ?? []).filter((s) => s.content.includes('backup'))
   // services/backupjobs.py::sync_backups is the only genuinely granular
   // progress in the product (per-host, not a fixed handful of steps), and
   // this stale banner is the one place `backup.sync` is ever displayed:
@@ -429,6 +452,10 @@ export function BackupsPage() {
   const [restoring, setRestoring] = useState<BackupRow | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [scheduling, setScheduling] = useState(false)
+  // Read once on mount, so "Remind me later" lasts exactly as long as this
+  // visit: leaving the page unmounts the route and coming back asks again,
+  // while "I understand" is written to localStorage and never asks.
+  const [limits, setLimits] = useState(() => !limitsAcknowledged())
   const del = useDeleteBackup()
 
   const schedules = useSchedules()
@@ -461,17 +488,33 @@ export function BackupsPage() {
         <div>
           <h1 className="font-display text-[22px] font-semibold">Backups</h1>
           <div className="text-[12px] text-text-3">
-            {isPending
+            {isPending || storage.isPending
               ? (
                 <SkeletonGroup label="Loading backup datastore">
                   <SkeletonLine className="w-64 max-w-full text-[12px]" />
                 </SkeletonGroup>
               )
-              : data
-                ? (biggest
-                    ? `Proxmox Backup Server · ${biggest.storage}`
-                    : 'No backup datastore found yet')
-                : '…'}
+              /* This used to read off `biggest`, so a datastore that accepts
+                 backups but holds none yet, exactly what you have the moment
+                 you attach one, was reported as no datastore at all while the
+                 Storage page listed it. "Nothing in it yet" is the Datastore
+                 used card's line to say, not this one's. It also called every
+                 store a Proxmox Backup Server; an NFS export with the backup
+                 content type is not one. */
+              : storage.isError
+                ? 'Could not read the storage list'
+                : backupStores.length === 0
+                  ? 'No backup datastore found. Add a Proxmox Backup Server, an NFS or '
+                    + 'SMB share, or a folder on the node, with Backups ticked as its content.'
+                  /* Which stores they are is the Storage page's job; this says
+                     whether there is somewhere to write and what is already
+                     there. The archive COUNT, because the card below this one
+                     reports the size and nothing else reports the count. */
+                  : `${backupStores.length} datastore`
+                    + `${backupStores.length === 1 ? ' accepts' : 's accept'} backups · `
+                    + (stats?.total
+                        ? `${stats.total} archive${stats.total === 1 ? '' : 's'}`
+                        : 'no archives yet')}
             {data?.stale && (
               <span className="ml-2 inline-flex items-center gap-1.5 text-amber">
                 {/* Only when the sync job has actually reported something:
@@ -486,14 +529,15 @@ export function BackupsPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {/* doc 10's "PBS datastore connect". Connecting PBS is exactly
-              attaching a storage of type `pbs`, so this opens Task 13's
-              StorageForm pre-set rather than duplicating it. Shown always,
-              not only when empty, a second datastore is a normal thing to
-              add. Server enforces `storage.manage`; the form carries its own
+          {/* doc 10's "PBS datastore connect", widened: connecting PBS is
+              just attaching a storage of type `pbs`, and the same form the
+              Storage page uses already attaches any of them, so this says
+              what it does rather than naming one plugin. Shown always, not
+              only when empty, a second datastore is a normal thing to add.
+              Server enforces `storage.manage`; the form carries its own
               LockVeil, so no gate is needed on the trigger. */}
           <Button variant="ghost" onClick={() => setConnecting(true)}>
-            Connect PBS
+            Add storage
           </Button>
           <Button variant="ghost" onClick={() => setScheduling(true)}>
             New job
@@ -524,11 +568,34 @@ export function BackupsPage() {
               </span>
             </>
           } />
-        <StatCard label="Success rate · 30d" loading={isPending}
-          value={fmtPct(stats?.success_rate_30d)}
-          note={stats?.success_rate_30d == null
-            ? 'Nothing verified in the last 30 days, unverified archives are left out rather than counted as passes.'
-            : `${stats.ok_count} verified · ${stats.failed_count} failed`} />
+        {/* Two different questions, and the label says which one is answered.
+            "Verified" is the better one and needs Proxmox Backup Server: it is
+            the only thing that writes verify_state, so on a plain NFS or
+            directory store this card read "unknown" for ever while backups ran
+            perfectly. What is knowable there is whether the RUNS finished,
+            which says an archive was written, never that it restores. */}
+        {stats?.success_rate_30d != null ? (
+          <StatCard label="Verified · 30d" loading={isPending}
+            value={fmtPct(stats.success_rate_30d)}
+            note={`${stats.ok_count} verified · ${stats.failed_count} failed`} />
+        ) : (
+          <StatCard label="Backups completed · 30d" loading={isPending}
+            value={fmtPct(stats?.run_rate_30d)}
+            note={stats?.run_rate_30d == null
+              ? 'No backup has run in the last 30 days.'
+              : `${stats.runs_ok_30d} finished · ${stats.runs_failed_30d} failed. `
+                + 'Nothing checks that an archive can be restored without '
+                + 'Proxmox Backup Server.'} />
+        )}
+      </div>
+
+      {/* The jobs, above the archives they produce. This page listed only what
+          had already run, so the one place a scheduled backup could be edited,
+          paused, fired by hand or removed was a card in Settings that a person
+          looking at their backups had no reason to open. Same card, filtered to
+          the kind this page owns. */}
+      <div className="mt-4">
+        <SchedulesCard only={['backup.run']} title="Scheduled jobs" canAdd={false} />
       </div>
 
       <div className={`${card} mt-4`}>
@@ -608,9 +675,13 @@ export function BackupsPage() {
       {running && <RunDialog onClose={() => setRunning(false)} />}
       {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} />}
       {connecting && (
-        <StorageForm existing={null} defaultType="pbs" onClose={() => setConnecting(false)} />
+        <StorageForm existing={null} onClose={() => setConnecting(false)} />
       )}
       {scheduling && <ScheduleDialog onClose={() => setScheduling(false)} />}
+      {limits && (
+        <BackupLimitsDialog onClose={() => setLimits(false)}
+                            onAgree={() => setLimits(false)} />
+      )}
     </div>
   )
 }

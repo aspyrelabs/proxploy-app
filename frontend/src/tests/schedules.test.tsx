@@ -9,6 +9,14 @@ let schedules: any[] = []
 let hosts: any[] = [{ id: 1, name: 'host-01' }]
 let features: Record<string, boolean> = { 'sched.windows': true, 'store.auto_update': true }
 let postError: { status: number; body: any } | null = null
+let guests = {
+  apps: [{ id: 7, host_id: 1, name: 'Immich', ctid: 150 }] as any[],
+  vms: [{ id: 9, host_id: 1, name: 'win11', vmid: 201 }] as any[],
+}
+let stores: any[] = [
+  { host_id: 1, storage: 'pbs-ds', type: 'pbs', content: ['backup'] },
+  { host_id: 1, storage: 'local-lvm', type: 'lvmthin', content: ['rootdir'] },
+]
 let schedulesError = false
 
 const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
@@ -38,6 +46,11 @@ vi.mock('../api/client', () => {
         return Promise.resolve(schedules)
       }
       if (path === '/hosts') return Promise.resolve(hosts)
+      // What a scheduled backup can now be pointed at: the guests on the host,
+      // and the datastores that accept backups.
+      if (path === '/apps') return Promise.resolve(guests.apps)
+      if (path === '/vms') return Promise.resolve(guests.vms)
+      if (path === '/storage') return Promise.resolve(stores)
       if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
       return Promise.resolve([])
     }),
@@ -94,10 +107,11 @@ describe('ScheduleForm', () => {
     posted.length = 0
     const { container } = wrap(<ScheduleForm onSaved={() => {}} />)
     const field = screen.getByLabelText(/timezone/i)
-    // Suggestions, not a closed select: any valid IANA name can still be typed
-    // and the backend validates it.
-    expect(field).toHaveAttribute('list', 'sc-tz-list')
-    const offered = [...container.querySelectorAll('#sc-tz-list option')]
+    // A real dropdown, not the input+datalist this was: a datalist draws no
+    // affordance, so the field read as a label that happened to say the
+    // resolved zone and the 418 behind it were invisible.
+    expect(field.tagName).toBe('SELECT')
+    const offered = [...container.querySelectorAll('#sc-tz option')]
       .map((o) => o.getAttribute('value'))
     expect(offered.length).toBeGreaterThan(100)
     expect(offered).toContain('Europe/London')
@@ -261,5 +275,44 @@ describe('SchedulesCard', () => {
     expect(screen.queryByRole('button', { name: /new schedule/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /run now/i })).toBeNull()
     features = { 'sched.windows': true, 'store.auto_update': true }
+  })
+})
+
+describe('ScheduleForm, backup targets', () => {
+  // A scheduled backup used to carry nothing but host_id: it dumped every guest
+  // on the node onto whichever datastore Proxmox picked, and the form could not
+  // say which. run_backup has always read `vmids` and `storage` out of params.
+  it('sends the ticked guests as vmids and the chosen datastore', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    fireEvent.click(await screen.findByLabelText('win11 (VM 201)'))   // untick the VM
+    expect(screen.getByLabelText(/archive lands on/i)).toHaveValue('pbs-ds')
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    // PVE vmids, not Proxploy row ids: params go straight to the job handler.
+    expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds', vmids: [150] })
+  })
+
+  it('omits vmids entirely while every guest is ticked, so later ones are covered', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    await screen.findByLabelText('Immich (CT 150)')
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds' })
+  })
+
+  it('will not save a job whose guest list has been emptied', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear' }))
+    expect(screen.getByRole('button', { name: /create schedule/i })).toBeDisabled()
+    expect(posted.length).toBe(0)
   })
 })

@@ -19,6 +19,12 @@ def _seed(app):
         db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!store"))
+        # Mandatory at enrolment, and the ONLY token that may audit
+        # /cluster/resources: the post-write snapshot refresh reads on this one,
+        # never on the lifecycle token it wrote with (see _resync_snapshot).
+        db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
+                              encrypted_blob=blob, key_version=ver,
+                              public_meta="proxploy@pve!audit"))
         db.commit()
         return host.id
 
@@ -209,3 +215,152 @@ def test_upstream_failure_is_a_502_that_leaks_no_secret(tmp_path, csrf_header,
         assert r.status_code == 502
         assert PBS_PASSWORD not in r.text
         assert "s3cret" not in r.text  # the host API token, scrubbed by _wrap
+
+
+def _schedule(app, host_id, name="Nightly backup", enabled=True):
+    from proxploy.models import Schedule
+
+    with app.state.sessionmaker() as db:
+        db.add(Schedule(name=name, job_kind="backup.run", cron="0 2 * * *",
+                        timezone="UTC", params={"host_id": host_id}, enabled=enabled))
+        db.commit()
+
+
+def test_detach_is_refused_when_it_would_strand_a_backup_job(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    """A scheduled backup.run names no storage of its own, so PVE writes to
+    whichever one accepts `backup` content. Detaching the last of those leaves
+    the job with nowhere to write, and it only finds out at 2am."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_snapshot
+
+    fake = FakePVE()
+    app, c, hid = _api(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        _schedule(app, hid)
+        seed_snapshot(app, hid, storage=[
+            {"type": "storage", "storage": "pbs-ds", "content": "backup"},
+            {"type": "storage", "storage": "local-lvm", "content": "rootdir,images"},
+        ])
+        r = c.delete(f"/api/v1/storage/{hid}/pbs-ds", headers=csrf_header(c))
+        assert r.status_code == 409
+        assert "Nightly backup" in r.json()["detail"]
+        assert fake.storage_removes == []
+
+
+def test_detach_allows_one_of_several_backup_datastores(tmp_path, csrf_header,
+                                                        bootstrap_admin):
+    """The guard is about stranding the job, not about the content type: with
+    another datastore still accepting backups the job keeps running."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_snapshot
+
+    fake = FakePVE()
+    app, c, hid = _api(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        _schedule(app, hid)
+        seed_snapshot(app, hid, storage=[
+            {"type": "storage", "storage": "pbs-ds", "content": "backup"},
+            {"type": "storage", "storage": "nfs-media", "content": "backup,iso"},
+        ])
+        r = c.delete(f"/api/v1/storage/{hid}/pbs-ds", headers=csrf_header(c))
+        assert r.status_code == 200
+        assert fake.storage_removes == ["pbs-ds"]
+
+
+def test_edit_refreshes_the_snapshot_the_list_is_served_from(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    """GET "" reads the poll snapshot, so without this the Backups page kept
+    counting a datastore whose `backup` content had just been unticked, until
+    the next poll came round. Asserted through the LIST, in the snapshot's own
+    row shape: writing raw /cluster/resources rows back into that field reported
+    every datastore as type "storage" (the resource type, not the plugin) with
+    0 bytes."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_snapshot
+
+    fake = FakePVE(resources=[{"type": "storage", "storage": "nfs-media", "node": "pve1",
+                               "plugintype": "nfs", "content": "iso", "shared": 1,
+                               "status": "available", "disk": 10, "maxdisk": 100}])
+    app, c, hid = _api(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        seed_snapshot(app, hid, storage=[{"storage": "nfs-media", "node": "pve1",
+                                          "type": "nfs", "content": ["backup", "iso"],
+                                          "shared": True, "status": "available",
+                                          "used_bytes": 10, "total_bytes": 100}])
+        r = c.patch(f"/api/v1/storage/{hid}/nfs-media",
+                    json={"config": {"content": "iso"}}, headers=csrf_header(c))
+        assert r.status_code == 200
+        row = c.get("/api/v1/storage").json()[0]
+        assert row["content"] == ["iso"]          # the edit, without waiting for a poll
+        assert row["type"] == "nfs"               # the plugin, not the resource type
+        assert row["total_bytes"] == 100
+
+
+def test_edit_refreshes_the_snapshot_of_every_member_of_the_cluster(tmp_path, csrf_header,
+                                                                    bootstrap_admin):
+    """GET "" dedupes storage across every enrolled member's snapshot and keeps
+    whichever it sees first, so refreshing only the host that was written to
+    left a peer's stale copy to win that race on a two-node cluster."""
+    from proxploy.models import Host, HostCredential
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_snapshot
+
+    stale = {"storage": "nfs-media", "node": "pve1", "type": "nfs",
+             "content": ["iso"], "shared": True, "status": "available",
+             "used_bytes": 10, "total_bytes": 100}
+    fake = FakePVE(resources=[{"type": "storage", "storage": "nfs-media", "node": "pve1",
+                               "plugintype": "nfs", "content": "iso,backup", "shared": 1,
+                               "status": "available", "disk": 10, "maxdisk": 100}])
+    app, c, hid = _api(tmp_path, fake=fake)
+    with c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            db.get(Host, hid).cluster_name = "lab"
+            peer = Host(name="host-02", address="https://10.0.0.10:8006", node_name="pve2",
+                        status="connected", cluster_name="lab")
+            db.add(peer)
+            db.commit()
+            peer_id = peer.id
+            blob, ver = app.state.secretstore.encrypt(json.dumps(
+                {"token_id": "proxploy@pve!store", "token_secret": "s3cret"}).encode())
+            db.add(HostCredential(host_id=peer_id, kind="api_token:lifecycle",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="proxploy@pve!store"))
+            db.add(HostCredential(host_id=peer_id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver,
+                                  public_meta="proxploy@pve!audit"))
+            db.commit()
+        # The peer is seeded FIRST, so its copy is the one the dedupe keeps.
+        seed_snapshot(app, peer_id, storage=[dict(stale)])
+        seed_snapshot(app, hid, storage=[dict(stale)])
+        r = c.patch(f"/api/v1/storage/{hid}/nfs-media",
+                    json={"config": {"content": "iso,backup"}}, headers=csrf_header(c))
+        assert r.status_code == 200
+        assert c.get("/api/v1/storage").json()[0]["content"] == ["iso", "backup"]
+
+
+def test_a_read_that_sees_no_storage_never_wipes_the_snapshot(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """The refresh reads /cluster/resources, which returns only what the token
+    may audit. Reading it on the LIFECYCLE token (no Datastore.Audit) came back
+    empty, and writing that emptiness into the snapshot took every datastore off
+    the Storage page until the next poll. An empty read changes nothing."""
+    from tests.fakes.pve import FakePVE
+    from tests.support import seed_snapshot
+
+    had = [{"storage": "local-lvm", "node": "pve1", "type": "lvmthin",
+            "content": ["rootdir", "images"], "shared": False,
+            "status": "available", "used_bytes": 10, "total_bytes": 100}]
+    app, c, hid = _api(tmp_path, fake=FakePVE(resources=[]))
+    with c:
+        bootstrap_admin(c)
+        seed_snapshot(app, hid, storage=[dict(had[0])])
+        r = c.patch(f"/api/v1/storage/{hid}/local-lvm",
+                    json={"config": {"content": "rootdir,images"}}, headers=csrf_header(c))
+        assert r.status_code == 200
+        assert app.state.poller.snapshots[hid].storage == had
+        assert len(c.get("/api/v1/storage").json()) == 1

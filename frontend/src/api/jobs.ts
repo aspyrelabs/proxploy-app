@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type { ApiError } from './client'
-import { actionLabel, statusLabel } from '../lib/activityDisplay'
+import { actionLabel, jobPhrase, statusLabel } from '../lib/activityDisplay'
 
 export type JobStatus =
   | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted'
@@ -37,7 +37,9 @@ export type ActivityRow = {
  *  status verbatim. Doc 13 names both: the kind neutrally, so no status word
  *  contradicts it, and the status on its own. */
 export function jobLabel(j: { kind: string; status: string }): string {
-  return `${actionLabel(j.kind)} ${statusLabel(j.status)}`
+  // A kind with its own per-outcome phrasing answers first: see JOB_PHRASE.
+  return jobPhrase(j.kind, j.status)
+    ?? `${actionLabel(j.kind)} ${statusLabel(j.status)}`
 }
 
 /** 10s while the bell popover is open, never otherwise (`enabled` gates it). */
