@@ -503,6 +503,8 @@ class _GuestNS:
         if self._owner.fail:
             raise ConnectionError("fake PVE unreachable")
         self._owner.guest_deletes.append((self._kind, self._node, self._vmid))
+        if self._owner.delete_error:
+            raise RuntimeError(self._owner.delete_error)
         return self._owner._record_action(self._kind, self._vmid, "destroy")
 
 
@@ -926,6 +928,11 @@ class FakePVE:
         self.guest_deletes: list[tuple[str, str, int]] = []
         self.create_error: str | None = None
         self.clone_error: str | None = None
+        # A DELETE that PVE itself refuses, as distinct from `task_exit`, which
+        # fails the destroy task after PVE accepted it. backup.test_restore
+        # needs the two apart: its restore task and its cleanup task share the
+        # one `task_exit`, so failing only the cleanup takes its own knob.
+        self.delete_error: str | None = None
         # migration (Phase 8 Task 14/15): (kind, node, vmid, params)
         self.migrations: list[tuple[str, str, int, dict]] = []
         # node task-log passthrough (PXP-17): what nodes(n).tasks.get() returns,

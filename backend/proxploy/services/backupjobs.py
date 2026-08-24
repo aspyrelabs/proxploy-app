@@ -604,6 +604,142 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
 HANDLERS["backup.restore"] = restore_backup
 
 
+def _scratch_vmid(client, floor: int = 900) -> int:
+    """Blocking: the lowest free guest id at or above `floor`.
+
+    Not `cluster_nextid()`, which answers from 100 and would hand back an id in
+    the range a human reads as "my guests". Ids from 900 up are the convention
+    for throwaway work, and a test restore is the definition of throwaway.
+
+    Read fresh from /cluster/resources rather than the poll snapshot: the
+    snapshot can be a poll interval old, and this number is about to have a
+    guest created on it.
+    """
+    used = {int(r["vmid"]) for r in client.cluster_resources()
+            if r.get("type") in ("qemu", "lxc") and r.get("vmid") is not None}
+    vmid = floor
+    while vmid in used:
+        vmid += 1
+    return vmid
+
+
+def _free_bytes(client, node: str, storage: str) -> int | None:
+    """Blocking: free space on one datastore, or None when PVE does not say.
+
+    None means "unknown", and unknown never blocks: refusing a restore over a
+    number we do not have would be worse than trying it.
+    """
+    for st in client.storages(node):
+        if st.get("storage") == storage:
+            avail = st.get("avail")
+            return int(avail) if avail is not None else None
+    return None
+
+
+def _fmt_bytes(n: int) -> str:
+    """Sizes for a job log line. GiB is the unit an operator reads a datastore
+    in, but a handful of bytes rounds to 0.0 GiB and reads as a bug."""
+    gib = n / (1024 ** 3)
+    return f"{gib:.1f} GiB" if gib >= 0.1 else f"{n} bytes"
+
+
+async def test_restore_backup(ctx: JobContext, params: dict) -> dict:
+    """`backup.test_restore`: restore into a throwaway id, then destroy it.
+
+    The strongest proof available without PBS: not "the file reads back" but
+    "Proxmox built a guest out of it". The copy is never started, never
+    networked and never kept, so the only lasting effect is the verdict.
+    """
+    app = ctx.backend.app
+    backup_id = int(params["backup_id"])
+    with app.state.sessionmaker() as db:
+        row = db.get(Backup, backup_id)
+        if row is None:
+            raise JobFailed(f"backup {backup_id} is no longer in the list")
+        volid, host_id = row.volid, row.host_id
+        kind = "lxc" if row.guest_type == "ct" else "qemu"
+        size = int(row.size_bytes or 0)
+        label = row.guest_name or volid
+
+    # Lifecycle, not backup: this really does create a guest, and the Backup
+    # role holds neither VM.Allocate nor SDN.Use (see restore_backup).
+    client, node, host_name = await asyncio.to_thread(_host_target, app, host_id,
+                                                      "lifecycle")
+    target = params.get("storage")
+    if not target:
+        want = "rootdir" if kind == "lxc" else "images"
+        target = await asyncio.to_thread(storage_for_content, client, node, want)
+        if target is None:
+            raise JobFailed(f"no storage on {host_name} can hold a restored "
+                            f"{'container' if kind == 'lxc' else 'virtual machine'}")
+
+    # Preflight, before anything is created: filling the pool to prove a backup
+    # is good is a worse outcome than not knowing. `size` is the COMPRESSED
+    # archive, so it is a floor on what the restore needs, never a ceiling; a
+    # store that fails this one would certainly have run out.
+    free = await asyncio.to_thread(_free_bytes, client, node, target)
+    if free is not None and size and free < size:
+        raise JobFailed(f"{target} has {_fmt_bytes(free)} free and this archive "
+                        f"needs at least {_fmt_bytes(size)}. Choose another "
+                        f"storage or make room. Nothing was created.")
+
+    vmid = await asyncio.to_thread(_scratch_vmid, client)
+    ctx.log(f"restoring {volid} onto {target} as a throwaway {kind} {vmid} on "
+            f"{host_name}/{node}, it will be deleted when the check finishes")
+    ctx.progress(5)
+
+    call = ({"ostemplate": volid, "restore": 1, "storage": target} if kind == "lxc"
+            else {"archive": volid, "storage": target})
+    created = False
+    verdict = "failed"
+    try:
+        upid = await asyncio.to_thread(client.restore_guest, kind, node, vmid, call)
+        created = True
+        await await_task(ctx, client, node, upid,
+                         timeout_s=app.state.settings.pve_task_timeout_s,
+                         start_pct=10, end_pct=90)
+        verdict = "ok"
+    finally:
+        # Only once PVE accepted the call. A restore that never started proves
+        # nothing about the archive, the same way verify's exit 90 does not,
+        # and marking it "failed" would blame the archive for a broken check.
+        if created:
+            # The verdict is written BEFORE the cleanup, deliberately: a
+            # destroy that fails must not also lose what the restore proved.
+            with app.state.sessionmaker() as db:
+                b = db.get(Backup, backup_id)
+                if b is not None:
+                    b.verify_state = verdict
+                    b.checked_at = utcnow()
+                    db.commit()
+            app.state.bus.publish("resource", {"type": "backup", "change": "list"})
+            ctx.log(f"deleting the throwaway {kind} {vmid}")
+            try:
+                del_upid = await asyncio.to_thread(client.guest_delete, kind, node,
+                                                   vmid)
+                await await_task(ctx, client, node, del_upid,
+                                 timeout_s=app.state.settings.pve_task_timeout_s,
+                                 report_progress=False)
+            except Exception as e:  # noqa: BLE001
+                # Never swallowed. A guest nobody knows about, holding a disk,
+                # is worse than a red job.
+                raise JobFailed(
+                    f"the archive was restored but the throwaway {kind} {vmid} "
+                    f"on {node} could not be deleted: {e}. Delete it by hand."
+                ) from e
+            finally:
+                # The guest was created either way, so the poller's mirror is
+                # stale whether or not the delete landed.
+                app.state.poller.wake(host_id)
+
+    ctx.progress(100)
+    ctx.log(f"{label}: restored cleanly, and the throwaway copy was deleted")
+    return {"volid": volid, "verdict": verdict, "scratch_vmid": vmid}
+
+
+HANDLERS["backup.test_restore"] = test_restore_backup
+
+
 async def delete_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.delete`, remove one archive upstream, then re-mirror."""
     app = ctx.backend.app
