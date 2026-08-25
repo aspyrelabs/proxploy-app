@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 
+from pathlib import Path
+
 import pytest
 
 from proxploy.config import Settings
@@ -45,6 +47,14 @@ def rig():
     the dev database or a token is missing, matching every other
     pve_integration suite in this repo."""
     s = Settings()
+    # Ahead of the SecretStore, not after: this drives the developer's own
+    # enrolled cluster out of the dev database, and a machine with no data/
+    # dir is not that machine. Opening the key first raised FileNotFoundError
+    # from fixture setup, which is an ERROR and not the skip this docstring
+    # promises, so pve-integration was red on every runner.
+    if not Path(s.master_key_file).exists():
+        pytest.skip("no dev database on this machine: these drive the "
+                    "developer's own enrolled cluster, not a fixture")
     db = make_sessionmaker(make_engine(s))()
     store = SecretStore(s.master_key_file)
     host = db.query(Host).first()

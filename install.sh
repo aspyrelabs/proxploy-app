@@ -415,9 +415,17 @@ configure_tls() {
   else
     log "installing caddy from its official Debian repo"
     apt-get install -y -qq debian-keyring debian-archive-keyring gnupg apt-transport-https
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+    # --retry: these two are the only third-party fetches in the whole install,
+    # and a blip on dl.cloudsmith.io aborts it under `set -e` with curl's exit
+    # 35 after everything else has already succeeded. Seen in CI 2026-08-25,
+    # passing and failing 28 minutes apart with no change in between. A home
+    # server on a flaky link hits the same thing, and retrying a GET of a
+    # public key is safe.
+    curl -1sLf --retry 5 --retry-delay 2 --retry-all-errors \
+      'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
       | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+    curl -1sLf --retry 5 --retry-delay 2 --retry-all-errors \
+      'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
       > /etc/apt/sources.list.d/caddy-stable.list
     apt-get update -qq
     apt-get install -y -qq caddy
