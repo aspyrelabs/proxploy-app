@@ -634,24 +634,44 @@ HANDLERS["backup.run"] = run_backup
 
 
 def storage_for_content(client, node: str, want: str) -> str | None:
-    """Blocking: first active storage on `node` whose `content` list includes
+    """Blocking: the roomiest active storage on `node` whose `content` includes
     `want` ("rootdir" for a CT, "images" for a VM).
 
     Public because services/migrate.py needs the same pick for the same
     reason: PVE defaults a restore to `local`, which on a stock layout holds
     no rootfs.
 
-    ponytail: first match wins, in whatever order PVE lists them. A host with
-    several eligible pools gets an arbitrary one of them, which is still
-    strictly better than the `local` PVE would otherwise pick and always fail
-    on. Let the caller pass `storage` to choose deliberately.
+    Roomiest, not first-listed. First-listed is how a test restore on node1
+    wrote a 32 GiB scratch disk across NFS while a local LVM pool with nearly
+    three times the room sat beside it, and, worse, how callers that pick a
+    pool and THEN check free space (test_restore_backup) refused an archive
+    that would have fitted somewhere else on the host: "choose another storage
+    or make room", with room right there. Picking the largest makes that
+    refusal honest, because if the largest eligible pool cannot hold it then no
+    eligible pool can.
+
+    A pool that does not report `avail` sorts last rather than counting as
+    infinite, but still beats having no candidate at all.
     """
+    best, best_free = None, None
     for s in client.storages(node):
         if not s.get("active", 1):
             continue
-        if want in (s.get("content") or "").split(","):
-            return s.get("storage")
-    return None
+        # PVE has been seen returning `content` both ways; migrate.py's
+        # rootfs_candidates reads the same field off the same call and already
+        # defends against the list form.
+        content = s.get("content") or ""
+        parts = content if isinstance(content, list) else content.split(",")
+        if want not in [str(p).strip() for p in parts]:
+            continue
+        name = s.get("storage")
+        if not name:
+            continue
+        avail = s.get("avail")
+        free = int(avail) if avail is not None else None
+        if best is None or (free is not None and (best_free is None or free > best_free)):
+            best, best_free = name, free
+    return best
 
 
 async def restore_backup(ctx: JobContext, params: dict) -> dict:
