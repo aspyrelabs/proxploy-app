@@ -4,7 +4,9 @@ import { shellRoute } from './shell'
 import { useEntitlements } from '../api/hooks'
 import { notify } from '../lib/notify'
 import { errBody, useApplyNetwork, useBridges, useDeleteBridge, useRevertNetwork, useThroughput } from '../api/network'
-import type { Attachment, HostThroughput, Iface, NetSeries, NodeIfaces } from '../api/network'
+import type { Attachment, Iface, NodeIfaces } from '../api/network'
+import { combineThroughput } from '../lib/throughput'
+import { useNodes } from './hosts'
 import { BridgeForm } from '../components/BridgeForm'
 import { ConfirmSelfDialog } from '../components/ConfirmSelfDialog'
 import { EmptyState } from '../components/EmptyState'
@@ -19,10 +21,11 @@ import { fmtBps } from '../lib/format'
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 const th = 'pb-2 font-medium'
 
-/** Newest non-null sample, or null for an empty window. */
-function lastValue(s?: NetSeries): number | null {
-  const v = s?.value ?? []
-  for (let i = v.length - 1; i >= 0; i--) if (v[i] != null) return v[i] as number
+/** Newest non-null sample, or null for an empty window. Takes the values
+ *  array rather than a NetSeries, so it reads a combined series as readily as
+ *  a per-host one. */
+function lastValue(values: (number | null)[]): number | null {
+  for (let i = values.length - 1; i >= 0; i--) if (values[i] != null) return values[i]
   return null
 }
 
@@ -107,12 +110,18 @@ function ThroughputCard() {
   // 1h window, matching the cluster page's network card.
   const { data, isPending } = useThroughput(1)
   const hosts = data?.hosts ?? []
-  const total = (pick: (h: HostThroughput) => NetSeries) =>
-    hosts.length ? hosts.reduce((a, h) => a + (lastValue(pick(h)) ?? 0), 0) : null
-  // ponytail: the two sparklines chart the first host's series, the same
-  // simplification cluster.tsx made for its network card, the ↓/↑ figures above
-  // them are already fleet-wide. Summed series when a real fleet shows it matters.
-  const first = hosts[0]
+  // Deduped by cluster, not summed across hosts, and the same combineThroughput
+  // the Hosts page's tile uses. Both halves of this card were wrong in
+  // different directions: the charts drew the FIRST host and said so, while the
+  // figures added every host up and said nothing. A Host row is one API
+  // endpoint and the poller records that endpoint's view of the WHOLE cluster,
+  // so on a two-host cluster the figures were reporting twice the traffic that
+  // existed. One combined series now feeds both, so they cannot disagree and
+  // neither needs a caveat under it.
+  const { data: nodes } = useNodes()
+  const clusterOf = (hostId: number) =>
+    (nodes ?? []).find((n) => n.host_id === hostId)?.cluster ?? null
+  const net = combineThroughput(hosts, clusterOf)
   if (isPending) {
     // Sparkline with no samples renders an empty div of its own height
     // (charts/Sparkline.tsx), so without this the card was two silent gaps
@@ -140,17 +149,12 @@ function ThroughputCard() {
     <div className={card}>
       <h2 className="mb-1 font-display text-[16px] font-semibold">Throughput</h2>
       <div className="mb-3 font-mono text-[13px] text-text-2">
-        ↓ {fmtBps(total((h) => h.in))} · ↑ {fmtBps(total((h) => h.out))}
+        ↓ {fmtBps(lastValue(net.inValues))} · ↑ {fmtBps(lastValue(net.outValues))}
       </div>
       <div className="text-[11px] uppercase tracking-wide text-text-3">In</div>
-      <Sparkline ts={first?.in.ts ?? []} values={first?.in.value ?? []} color="#5B9DF9" />
+      <Sparkline ts={net.ts} values={net.inValues} color="#5B9DF9" />
       <div className="mt-3 text-[11px] uppercase tracking-wide text-text-3">Out</div>
-      <Sparkline ts={first?.out.ts ?? []} values={first?.out.value ?? []} color="#34D3C6" />
-      {hosts.length > 1 && (
-        <p className="mt-3 text-[11.5px] text-text-3">
-          Figures are fleet-wide; the charts show {first?.host_name}.
-        </p>
-      )}
+      <Sparkline ts={net.ts} values={net.outValues} color="#34D3C6" />
     </div>
   )
 }

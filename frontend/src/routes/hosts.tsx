@@ -49,7 +49,9 @@ function useSummary() {
   })
 }
 
-function useNodes() {
+/** Exported for routes/network.tsx, which needs the same cluster lookup to
+ *  dedupe its throughput. Same query key, so the two share one fetch. */
+export function useNodes() {
   return useQuery({
     queryKey: ['cluster', 'nodes'],
     queryFn: () => api<NodeRow[]>('/cluster/nodes'),
