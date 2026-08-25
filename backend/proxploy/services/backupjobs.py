@@ -401,8 +401,16 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
     if pbs_stores:
         ctx.log(f"skipping {', '.join(sorted(s for s in pbs_stores if s))}: "
                 f"Proxmox Backup Server verifies those itself")
-    word = "archive" if len(ids) == 1 else "archives"
-    ctx.log(f"{len(ids)} {word} have never been verified, reading them back now")
+    if not ids:
+        # Not "0 archives have never been verified", which reads as a failure
+        # to find something rather than as the good news it is.
+        ctx.log("every archive on this host has been checked already, "
+                "nothing to do")
+    elif len(ids) == 1:
+        ctx.log("1 archive has never been verified, reading it back now")
+    else:
+        ctx.log(f"{len(ids)} archives have never been verified, "
+                f"reading them back now")
     checked = failed = 0
     for i, bid in enumerate(ids):
         out = await verify_backup(ctx, {"backup_id": bid})

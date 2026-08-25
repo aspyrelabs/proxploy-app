@@ -234,6 +234,54 @@ def test_the_sweep_stops_at_its_cap_and_can_be_held_to_one_storage(tmp_path):
     asyncio.run(run())
 
 
+def test_the_sweep_counts_out_loud_in_the_right_number(tmp_path):
+    """The transcript is what an operator reads, so it has to parse.
+
+    It said "1 archive have never been verified, reading them back now" for a
+    single archive, seen on hardware 2026-08-25, and "0 archives have never
+    been verified" for a host with nothing to do, which reads as a failure to
+    find something rather than as the good news it is.
+    """
+    from proxploy.models import utcnow
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run(rows: int) -> str:
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=["ok"],
+                                stderr_lines=[], exit_status=0)
+        # Its own data dir per case: make_job_app reuses the SQLite file under
+        # tmp_path, and _seed would then insert a second host-01.
+        case = tmp_path / f"case{rows}"
+        case.mkdir()
+        app = make_job_app(case, ssh_factory=make_fake_connect_factory(ssh))
+        hid, seeded = _seed(app)
+        with app.state.sessionmaker() as db:
+            # The seeded archive is what _seed leaves unchecked; mark it done so
+            # each case controls its own count exactly.
+            db.get(Backup, seeded).checked_at = utcnow()
+            for i in range(rows):
+                db.add(Backup(host_id=hid, volid=f"nfs-bk:backup/s{i}.vma.zst",
+                              storage="nfs-bk", guest_type="vm"))
+            db.commit()
+        lines: list[str] = []
+        ctx = _ctx(app)
+        real = ctx.log
+        ctx.log = lambda line, stream="stdout": (lines.append(line), real(line, stream))[0]
+        await verify_backup(ctx, {"host_id": hid, "max": 10})
+        return " | ".join(lines)
+
+    none_at_all = asyncio.run(run(0))
+    assert "has been checked already" in none_at_all
+    assert "0 archives" not in none_at_all
+
+    just_one = asyncio.run(run(1))
+    assert "1 archive has never been verified, reading it back now" in just_one
+
+    several = asyncio.run(run(3))
+    assert "3 archives have never been verified, reading them back now" in several
+
+
 def test_the_sweep_leaves_pbs_archives_to_pbs(tmp_path):
     """PBS verifies its own against stored digests, on its own schedule. The
     per-archive routes refuse those at the door; a schedule has no door."""
