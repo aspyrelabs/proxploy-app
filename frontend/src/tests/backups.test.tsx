@@ -116,6 +116,13 @@ vi.mock('../api/client', () => {
       if (path === '/backups/run') {
         return Promise.resolve({ job: { id: 31, kind: 'backup.run', status: 'queued' } })
       }
+      // The host sweep, which is what an unticked Backup box posts. Without
+      // this the mock fell through to `null`, the dialog's onSuccess read
+      // `r.job.id` off it, and the resulting unhandled rejection failed the
+      // whole vitest run while every individual test still passed.
+      if (path === '/backups/verify') {
+        return Promise.resolve({ job: { id: 32, kind: 'backup.verify', status: 'queued' } })
+      }
       if (path.endsWith('/restore')) {
         if (body.mode === 'in_place' && restoreGuard === 'self') {
           // Unconditional refusal, `confirm` does not bypass it. Flat body,
