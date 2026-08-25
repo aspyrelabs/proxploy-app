@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // PXP-17 item 8: POST /backups/prune shipped on the backend with no UI at
 // all. This covers wiring execution into the retention preview already on
@@ -85,6 +85,12 @@ const runPreview = async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Preview retention' }))
   await screen.findByText('remove')
 }
+
+// BackupsPage opens BackupLimitsDialog on mount for anyone who has not
+// acknowledged it, and it is modal: Radix aria-hidden's the rest of the page,
+// so RetentionSection below it is invisible to getByRole. Same line as
+// backups.test.tsx, for the same reason.
+beforeEach(() => localStorage.setItem('proxploy.backups.limits-ack', 'yes'))
 
 describe('Backups retention: run prune', () => {
   it('refuses to submit with no keep-* value set, without waiting on the 422', async () => {

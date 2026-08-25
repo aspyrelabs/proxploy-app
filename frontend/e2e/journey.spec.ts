@@ -213,7 +213,17 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // no backward-compatibility link for, a real backend's zoneinfo would
     // accept it, this container's just doesn't. Overwritten with a zone
     // guaranteed to resolve rather than depending on the CI host's tzdata.
-    await page.getByLabel('Timezone').fill('UTC')
+    //
+    // selectOption, not fill: the field became a <select> over the full IANA
+    // list (ScheduleForm.tsx), the input+datalist it used to be having had no
+    // visible affordance. fill() on a <select> throws outright.
+    //
+    // Europe/London rather than UTC, which is what this used to type in:
+    // Intl.supportedValuesOf('timeZone') returns region zones only and carries
+    // neither "UTC" nor any "Etc/*", so that option is not in the list to be
+    // picked. Europe/London is canonical, is in the list, and is in every
+    // tzdata, which is the whole property this line needs.
+    await page.getByLabel('Timezone').selectOption('Europe/London')
     await page.getByRole('button', { name: 'Create schedule' }).click()
     await expect(page.getByRole('cell', { name: SCHEDULE_NAME })).toBeVisible()
   })

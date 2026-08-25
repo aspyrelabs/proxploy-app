@@ -122,9 +122,34 @@ async function seedAdminOnce(baseURL: string) {
   }
 }
 
+/**
+ * Start this page having already read the backups limitations dialog.
+ *
+ * BackupsPage opens BackupLimitsDialog on first visit for anyone who has not
+ * acknowledged it, and it is a modal: Radix aria-hidden's the page behind it,
+ * so /backups has no reachable <h1> and goToNavPage never resolves. That is
+ * correct modal behaviour, not a bug, and none of these specs are about the
+ * dialog. A spec that wants to SEE it should removeItem this key instead.
+ *
+ * addInitScript, not an evaluate after goto: the value has to be in storage
+ * before the route mounts, because it reads it exactly once.
+ *
+ * Called per PAGE rather than folded into signIn alone: light-theme.spec.ts
+ * signs in once and then hands every test a fresh page carrying only the
+ * session COOKIES, so a page there never runs signIn and would otherwise walk
+ * straight back into the dialog.
+ */
+export async function ackBackupLimits(page: Page) {
+  await page.addInitScript(() => {
+    try { localStorage.setItem('proxploy.backups.limits-ack', 'yes') }
+    catch { /* storage blocked: the dialog simply shows, as it does for a real operator */ }
+  })
+}
+
 /** Fill and submit the login form. Does not assert what renders next, 
  *  callers want different things after (a heading, a console-error check). */
 export async function signIn(page: Page) {
+  await ackBackupLimits(page)
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
   await page.getByLabel('Email').fill(ADMIN_EMAIL)

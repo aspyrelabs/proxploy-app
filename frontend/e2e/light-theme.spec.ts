@@ -8,7 +8,7 @@
  */
 import { expect, test, type Cookie } from '@playwright/test'
 
-import { goToNavPage, NAV_PAGES, seedAdmin, signIn } from './helpers'
+import { ackBackupLimits, goToNavPage, NAV_PAGES, seedAdmin, signIn } from './helpers'
 
 const DARK_LITERAL = 'rgb(29, 39, 51)' // #1d2733, the bypass colour Task 11 removed
 
@@ -44,6 +44,9 @@ test.describe('light theme', () => {
     // any app script runs so that first mount picks up 'light' rather than
     // the default.
     await page.addInitScript(() => localStorage.setItem('pp_theme', 'light'))
+    // Only the cookies are carried over from beforeAll's context, so this
+    // page has never run signIn and starts with an empty localStorage.
+    await ackBackupLimits(page)
     await context.addCookies(sessionCookies)
   })
 
