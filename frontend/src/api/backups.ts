@@ -130,6 +130,22 @@ export function useVerifyBackup() {
   })
 }
 
+/** Check every archive on a host that nobody has checked yet.
+ *
+ *  The verify half of "back up now, verify separately": no archive is named,
+ *  so the handler sweeps the host, oldest first, capped, leaving PBS stores to
+ *  PBS. useVerifyBackup above is the one-archive form. */
+export function useVerifySweep() {
+  const qc = useQueryClient()
+  return useMutation<{ job: JobRow }, ApiError, { hostId: number; storage?: string }>({
+    mutationFn: (v) => api<{ job: JobRow }>('/backups/verify', {
+      method: 'POST',
+      body: JSON.stringify({ host_id: v.hostId, storage: v.storage || undefined }),
+    }),
+    onSettled: jobSettled(qc),
+  })
+}
+
 /** Restore into a throwaway id and delete it again. `storage` is where the
  *  throwaway copy lands; null lets the handler pick one that can hold it. */
 export function useTestRestore() {

@@ -420,6 +420,46 @@ def _refuse_a_second_check(db, host_id: int) -> None:
                                  "archive back.")
 
 
+class VerifySweepIn(BaseModel):
+    host_id: int
+    storage: str | None = None
+    max: int | None = None
+
+
+# BEFORE /{backup_id}/verify, and it has to stay there: FastAPI matches in
+# declaration order, and "verify" would otherwise be tried as a backup_id and
+# 422 on the path type.
+@router.post("/verify", status_code=202, dependencies=[Depends(_run)])
+def verify_sweep_route(request: Request, body: VerifySweepIn,
+                       db=Depends(get_db), user: User = Depends(_run)):
+    """Check the archives on one host that nobody has checked yet.
+
+    The other half of "back up now, verify separately". The sweep handler
+    shipped with the schedule that fires it and had no door of its own, so a
+    Verify Backup with no single archive to name could be scheduled and never
+    run once. Same handler either way: `backup.verify` reads a missing
+    `backup_id` as "sweep this host", oldest first, capped, PBS left alone.
+
+    `_run`, matching the per-archive route: anyone who may create archives may
+    find out whether they are any good.
+    """
+    host = db.get(Host, body.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    _refuse_a_second_check(db, host.id)
+    params: dict = {"host_id": host.id}
+    # Omitted rather than sent as null: the handler reads `params.get("max")`
+    # against its own default, and a null would have to be special-cased there
+    # instead of simply not being here.
+    if body.storage:
+        params["storage"] = body.storage
+    if body.max is not None:
+        params["max"] = body.max
+    return enqueue_and_audit(request, db, user, kind="backup.verify",
+                             target_type="host", target_id=host.id,
+                             target_name=host.name, params=params)
+
+
 @router.post("/{backup_id}/verify", status_code=202, dependencies=[Depends(_run)])
 def verify_backup_route(request: Request, backup_id: int, db=Depends(get_db),
                         user: User = Depends(_run)):

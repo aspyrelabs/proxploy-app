@@ -226,8 +226,11 @@ describe('BackupsPage', () => {
     await waitFor(() => expect(calls.length).toBe(1))
     expect(calls[0].path).toBe('/backups/run')
     // `storage` is sent, not left for PVE to pick: without it nothing on the
-    // page or in the transcript could say where the archive went.
-    expect(calls[0].body).toEqual({ guests: 'all', host_id: 1, storage: 'local' })
+    // page or in the transcript could say where the archive went. `verify` is
+    // on because both boxes start ticked.
+    expect(calls[0].body).toEqual({
+      guests: 'all', host_id: 1, storage: 'local', verify: true,
+    })
     expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 
@@ -242,7 +245,7 @@ describe('BackupsPage', () => {
     // Proxploy row ids, which is what POST /backups/run resolves; the guest
     // that was unticked is not in the list.
     expect(calls[0].body).toEqual({
-      guests: [{ type: 'app', id: 7 }], host_id: 1, storage: 'local',
+      guests: [{ type: 'app', id: 7 }], host_id: 1, storage: 'local', verify: true,
     })
   })
 
@@ -256,14 +259,58 @@ describe('BackupsPage', () => {
     expect(calls.length).toBe(0)
   })
 
-  it('asks for a check afterwards only when the box is ticked', async () => {
+  it('backs up and verifies by default, both boxes ticked', async () => {
+    // A backup nobody read back is a backup you are guessing about, so the
+    // pair is the normal thing to want and the dialog starts there.
     calls.length = 0
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
-    fireEvent.click(await screen.findByLabelText('Check the archive afterwards'))
+    expect(await screen.findByLabelText('Backup')).toBeChecked()
+    expect(screen.getByLabelText('Verify Backup')).toBeChecked()
     fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
     await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/run')
     expect(calls[0].body.verify).toBe(true)
+  })
+
+  it('leaves verify off the run when Verify Backup is unticked', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByLabelText('Verify Backup'))
+    fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/run')
+    // Absent, not false: useRunBackup sends the key only when asked for, and
+    // the route defaults it off.
+    expect(calls[0].body.verify).toBeUndefined()
+  })
+
+  it('sweeps the host instead of running one when only Verify is ticked', async () => {
+    // The other half of "back up now, verify separately": no archive is
+    // written, the ones already there are read back.
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByLabelText('Backup'))
+    expect(screen.getByRole('button', { name: 'Start check' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Start check' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].path).toBe('/backups/verify')
+    expect(calls[0].body.host_id).toBe(1)
+  })
+
+  it('starts nothing at all with neither box ticked', async () => {
+    calls.length = 0
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+    fireEvent.click(await screen.findByLabelText('Backup'))
+    fireEvent.click(screen.getByLabelText('Verify Backup'))
+    const btn = screen.getByRole('button', { name: 'Start check' })
+    expect(btn).toBeDisabled()
+    expect(btn).toHaveAttribute('title', 'Tick Backup, Verify Backup, or both')
+    fireEvent.click(btn)
+    expect(calls.length).toBe(0)
   })
 
   it('names the guests and the storage before the run, not after it', async () => {

@@ -102,6 +102,59 @@ def test_verify_404s_on_an_archive_that_is_gone(tmp_path, csrf_header, bootstrap
                       headers=csrf_header(c)).status_code == 404
 
 
+def test_a_host_sweep_can_be_asked_for_without_naming_an_archive(tmp_path,
+                                                                csrf_header,
+                                                                bootstrap_admin):
+    """The verify half of "back up now, verify separately".
+
+    The sweep handler shipped with the schedule and had no door of its own:
+    /{backup_id}/verify is one archive, so a Verify Backup with no backup to
+    name it against could only be scheduled, never run. This is that door.
+    """
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, _ = _seed(app)
+        _snapshot(app, hid)
+        r = c.post("/api/v1/backups/verify", json={"host_id": hid},
+                   headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+        with app.state.sessionmaker() as db:
+            job = db.query(Job).filter_by(kind="backup.verify").one()
+            # No backup_id is the whole point: that is what the handler reads
+            # as "sweep this host" rather than "read this one archive".
+            assert "backup_id" not in job.params
+            assert job.params["host_id"] == hid
+            assert job.target_id == hid
+
+
+def test_a_sweep_on_an_unknown_host_is_a_404(tmp_path, csrf_header, bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        assert c.post("/api/v1/backups/verify", json={"host_id": 999},
+                      headers=csrf_header(c)).status_code == 404
+
+
+def test_a_sweep_waits_for_the_check_already_running_on_that_host(tmp_path,
+                                                                  csrf_header,
+                                                                  bootstrap_admin):
+    """Same door the per-archive route stands behind, and for the same reason:
+    two full read-backs on one host halve each other and double nothing."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, _ = _seed(app)
+        _snapshot(app, hid)
+        with app.state.sessionmaker() as db:
+            db.add(Job(kind="backup.verify", status="running", target_type="host",
+                       target_id=hid, params={"host_id": hid}))
+            db.commit()
+        r = c.post("/api/v1/backups/verify", json={"host_id": hid},
+                   headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+
+
 def test_only_one_check_runs_on_a_host_at_a_time(tmp_path, csrf_header,
                                                  bootstrap_admin):
     """A check reads the whole archive off the share. Two at once on one host

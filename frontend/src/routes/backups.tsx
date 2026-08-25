@@ -7,7 +7,7 @@ import { api, apiErrorDetail } from '../api/client'
 import { GuestPicker, useBackupStores, useHostGuests } from '../components/BackupPickers'
 import { useEntitlements } from '../api/hooks'
 import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup,
-         useTestRestore, useVerifyBackup } from '../api/backups'
+         useTestRestore, useVerifyBackup, useVerifySweep } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
 import { useSchedules } from '../api/schedules'
@@ -84,13 +84,22 @@ function RunDialog({ onClose }: { onClose: () => void }) {
   // Same query keys the Apps, VMs and Storage pages already fetch under, so
   // this shares their cache rather than adding three requests.
   const run = useRunBackup()
+  const sweep = useVerifySweep()
   const [picked, setPicked] = useState<number | null>(null)
   const [store, setStore] = useState('')
   // null is "every guest on the host", which POST /backups/run still receives
   // as `all`: a subset is a list of ids, and the two are different requests.
   const [only, setOnly] = useState<Set<string> | null>(null)
-  // Off by default: reading every archive back doubles what the run costs.
-  const [check, setCheck] = useState(false)
+  // Both on by default: a backup you have not read back is a backup you are
+  // guessing about, so the pair is the normal thing to want.
+  //
+  // They are independent, and that is the point. Backup alone writes archives
+  // and leaves them; Verify Backup alone reads back what is already there,
+  // which is the same host sweep a schedule fires (POST /backups/verify) and
+  // needs no backup to have been taken just now. Untick both and there is
+  // nothing to start, which the button says rather than guesses at.
+  const [doBackup, setDoBackup] = useState(true)
+  const [doVerify, setDoVerify] = useState(true)
   const [jobId, setJobId] = useState<number | null>(null)
   // null until the job's first progress frame: an indeterminate bar is the
   // honest state before vzdump has said anything.
@@ -205,37 +214,70 @@ function RunDialog({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </select>
-            {/* Queued as its own job once the run has written the archives, so
-                the backup's own result never depends on how the check goes. */}
-            <label className="mt-3 flex items-center gap-2 text-[12.5px] text-text-2">
-              <input type="checkbox" checked={check}
-                     onChange={(e) => setCheck(e.target.checked)} />
-              Check the archive afterwards
-            </label>
+            {/* Verify is queued as its own job once the run has written the
+                archives, so the backup's own result never depends on how the
+                check goes. With Backup unticked there is no run to follow and
+                Verify sweeps what is already on the host instead. */}
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+                <input type="checkbox" checked={doBackup}
+                       onChange={(e) => setDoBackup(e.target.checked)} />
+                Backup
+              </label>
+              <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+                <input type="checkbox" checked={doVerify}
+                       onChange={(e) => setDoVerify(e.target.checked)} />
+                Verify Backup
+              </label>
+            </div>
           </>
         )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={hostId == null || blocked != null || run.isPending
+          <Button disabled={hostId == null || blocked != null
+                            || run.isPending || sweep.isPending
+                            // Neither ticked is not a job. Said on the button
+                            // rather than by starting nothing and looking
+                            // broken.
+                            || (!doBackup && !doVerify)
+                            // The guest list only constrains a run; a verify
+                            // sweep is about archives already written and does
+                            // not care which guests are ticked.
                             // An empty EXPLICIT list only, see ScheduleForm: a
                             // host with no guests is already `blocked` above.
-                            || (only != null && only.size === 0)}
-                  title={blocked ?? undefined}
-                  onClick={() => run.mutate({
-                    hostId,
-                    storage: target,
-                    // Omitted when everything is ticked, so the hook keeps
-                    // sending `all` and a guest created between opening this
-                    // dialog and the job running is still included.
-                    guests: chosen.size === guests ? undefined
-                      : onHost.guests.filter((g) => chosen.has(g.key))
-                          .map((g) => ({ type: g.type, id: g.id })),
-                    verify: check,
-                  }, {
-                    onSuccess: (r) => setJobId(r.job.id),
-                    onError: () => notify.error('Could not start the backup, try again.'),
-                  })}>
-            {run.isPending ? 'Starting…' : 'Start backup'}
+                            || (doBackup && only != null && only.size === 0)}
+                  title={!doBackup && !doVerify
+                    ? 'Tick Backup, Verify Backup, or both'
+                    : blocked ?? undefined}
+                  onClick={() => {
+                    if (!doBackup) {
+                      // Verify on its own: nothing is written, the host's
+                      // unchecked archives are read back. Same job kind a
+                      // schedule fires, so the feed reads identically.
+                      sweep.mutate({ hostId: hostId as number, storage: target }, {
+                        onSuccess: (r) => setJobId(r.job.id),
+                        onError: () => notify.error(
+                          'Could not start that check, try again.'),
+                      })
+                      return
+                    }
+                    run.mutate({
+                      hostId,
+                      storage: target,
+                      // Omitted when everything is ticked, so the hook keeps
+                      // sending `all` and a guest created between opening this
+                      // dialog and the job running is still included.
+                      guests: chosen.size === guests ? undefined
+                        : onHost.guests.filter((g) => chosen.has(g.key))
+                            .map((g) => ({ type: g.type, id: g.id })),
+                      verify: doVerify,
+                    }, {
+                      onSuccess: (r) => setJobId(r.job.id),
+                      onError: () => notify.error('Could not start the backup, try again.'),
+                    })
+                  }}>
+            {run.isPending || sweep.isPending ? 'Starting…'
+              : doBackup ? 'Start backup' : 'Start check'}
           </Button>
         </div>
       </>

@@ -76,9 +76,22 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   // after this job is saved".
   const [store, setStore] = useState(String(savedParams.storage ?? ''))
   const [only, setOnly] = useState<Set<string> | null>(null)
+  // Backup and Verify Backup, both on by default and independent of each
+  // other. Together they are one backup.run that chains a check per archive;
+  // Verify alone is a backup.verify sweep over the archives already on the
+  // host, which is a kind SCHEDULABLE has always carried and this form could
+  // not reach while the Backups page pinned it to backup.run.
+  const [doBackup, setDoBackup] = useState(existing?.job_kind !== 'backup.verify')
   // Chains a check per archive after the run. Read back from the saved job the
   // same way `storage` is, so an edit does not silently turn it off.
-  const [verifyAfter, setVerifyAfter] = useState(savedParams.verify === true)
+  // A NEW schedule starts ticked, like the Run now dialog: a backup nobody
+  // reads back is a backup you are guessing about. An EDIT reads the saved job
+  // instead, so opening a job that never verified does not silently turn it
+  // on; a saved backup.verify is a check by definition and reads as ticked.
+  const [verifyAfter, setVerifyAfter] = useState(
+    existing
+      ? existing.job_kind === 'backup.verify' || savedParams.verify === true
+      : true)
 
   const spec = SCHEDULABLE.find((s) => s.kind === kind)
   const needs = spec?.needs ?? null
@@ -108,7 +121,15 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   // unanswered questions the ad-hoc Run now dialog already answers, on the runs
   // nobody is watching. services/backupjobs.py::run_backup reads `vmids` and
   // `storage` out of params and always has, so this is the form catching up.
-  const isBackup = kind === 'backup.run'
+  // Either half of the pair puts this form in backup mode; which of the two
+  // kinds it SAVES is the checkboxes' answer, below.
+  const backupMode = kind === 'backup.run' || kind === 'backup.verify'
+  // Guests and a target storage are a run's questions. A sweep reads back what
+  // is already written, so it asks neither.
+  const isBackup = backupMode && doBackup
+  const savedKind = backupMode ? (doBackup ? 'backup.run' : 'backup.verify') : kind
+  // Neither ticked is not a schedule.
+  const nothingToDo = backupMode && !doBackup && !verifyAfter
   const hostId = isBackup && effectiveTargetId ? Number(effectiveTargetId) : null
   const onHost = useHostGuests(hostId)
   // A saved job stores PVE vmids; the tick list is keyed on Proxploy row ids,
@@ -149,11 +170,11 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
       return existing
         ? api(`/schedules/${existing.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz, params }),
+          body: JSON.stringify({ name, job_kind: savedKind, cron, timezone: tz, params }),
         })
         : api('/schedules', {
           method: 'POST',
-          body: JSON.stringify({ name, job_kind: kind, cron, timezone: tz,
+          body: JSON.stringify({ name, job_kind: savedKind, cron, timezone: tz,
                                  params, enabled: true }),
         })
     },
@@ -192,6 +213,10 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
           <select id="sc-kind" className={input} value={kind}
                   onChange={(e) => {
                     setKind(e.target.value); setTargetId(''); setOnly(null); setStore('')
+                    // Keep the pair in step with a kind chosen by hand, so the
+                    // boxes never disagree with the row that gets saved.
+                    if (e.target.value === 'backup.verify') setDoBackup(false)
+                    if (e.target.value === 'backup.run') setDoBackup(true)
                   }}>
             {SCHEDULABLE.map((s) =>
               <option key={s.kind} value={s.kind}>{s.label}</option>)}
@@ -246,14 +271,24 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
                 ))}
             </select>
           </div>
-          <div className="sm:col-span-2">
-            <label className="flex items-center gap-2 text-[12.5px] text-text-2">
-              <input type="checkbox" checked={verifyAfter}
-                     onChange={(e) => setVerifyAfter(e.target.checked)} />
-              Check each archive afterwards
-            </label>
-          </div>
         </>
+      )}
+
+      {/* Outside the isBackup block above, deliberately: with Backup unticked
+          that block is gone and these two are the only way back. */}
+      {backupMode && (
+        <div className="sm:col-span-2 space-y-2">
+          <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+            <input type="checkbox" checked={doBackup}
+                   onChange={(e) => setDoBackup(e.target.checked)} />
+            Backup
+          </label>
+          <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+            <input type="checkbox" checked={verifyAfter}
+                   onChange={(e) => setVerifyAfter(e.target.checked)} />
+            Verify Backup
+          </label>
+        </div>
       )}
 
       <div>
@@ -330,10 +365,14 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
       <div className="sm:col-span-2">
         <Button type="submit"
                 disabled={create.isPending || (needs != null && !effectiveTargetId)
+                          // Neither box ticked is not a schedule.
+                          || nothingToDo
                           // `only` null is "everything", which is still valid on
                           // a host with no guests yet; an EMPTY explicit list is
-                          // the operator having cleared every tick.
-                          || (selected != null && selected.size === 0)}>
+                          // the operator having cleared every tick. Only a run
+                          // has a guest list at all.
+                          || (isBackup && selected != null && selected.size === 0)}
+                title={nothingToDo ? 'Tick Backup, Verify Backup, or both' : undefined}>
           {existing ? 'Save changes' : 'Create schedule'}
         </Button>
       </div>

@@ -292,7 +292,9 @@ describe('ScheduleForm, backup targets', () => {
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
     // PVE vmids, not Proxploy row ids: params go straight to the job handler.
-    expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds', vmids: [150] })
+    expect(posted[0].body.params).toEqual({
+      host_id: 1, storage: 'pbs-ds', vmids: [150], verify: true,
+    })
   })
 
   it('omits vmids entirely while every guest is ticked, so later ones are covered', async () => {
@@ -303,18 +305,69 @@ describe('ScheduleForm, backup targets', () => {
     await screen.findByLabelText('Immich (CT 150)')
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
-    expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds' })
+    expect(posted[0].body.params).toEqual({ host_id: 1, storage: 'pbs-ds', verify: true })
   })
 
-  it('saves the after-backup check on the schedule', async () => {
+  it('saves a backup that verifies, which is what both boxes ticked means', async () => {
     posted.length = 0
     hosts = [{ id: 1, name: 'host-01' }]
     wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
-    fireEvent.click(await screen.findByLabelText('Check each archive afterwards'))
+    expect(await screen.findByLabelText('Backup')).toBeChecked()
+    expect(screen.getByLabelText('Verify Backup')).toBeChecked()
+    // The pair renders before /hosts resolves now that it sits outside the
+    // host-loaded block, so waiting on it is not waiting for the target.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /create schedule/i })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body.job_kind).toBe('backup.run')
     expect(posted[0].body.params.verify).toBe(true)
+  })
+
+  it('saves a plain backup when Verify Backup is unticked', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
+    fireEvent.click(await screen.findByLabelText('Verify Backup'))
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body.job_kind).toBe('backup.run')
+    // Absent rather than false, so a saved job carries only keys that mean
+    // something.
+    expect(posted[0].body.params.verify).toBeUndefined()
+  })
+
+  it('saves a verify sweep when only Verify Backup is ticked', async () => {
+    // The separate verify job: no run, just a check over what is already on
+    // the host. backup.verify has always been schedulable; this form could not
+    // reach it while the Backups page pinned the kind to backup.run.
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Weekly check' } })
+    fireEvent.click(await screen.findByLabelText('Backup'))
+    fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
+    await waitFor(() => expect(posted.length).toBe(1))
+    expect(posted[0].body.job_kind).toBe('backup.verify')
+    expect(posted[0].body.params.host_id).toBe(1)
+    // A sweep reads back what is already written, so it asks for neither.
+    expect(posted[0].body.params.vmids).toBeUndefined()
+    expect(posted[0].body.params.storage).toBeUndefined()
+  })
+
+  it('will not save with neither box ticked', async () => {
+    posted.length = 0
+    hosts = [{ id: 1, name: 'host-01' }]
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nothing' } })
+    fireEvent.click(await screen.findByLabelText('Backup'))
+    fireEvent.click(screen.getByLabelText('Verify Backup'))
+    const btn = screen.getByRole('button', { name: /create schedule/i })
+    expect(btn).toBeDisabled()
+    fireEvent.click(btn)
+    expect(posted.length).toBe(0)
   })
 
   it('will not save a job whose guest list has been emptied', async () => {
