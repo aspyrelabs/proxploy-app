@@ -13,8 +13,29 @@
 # touch the database, and must leave exactly one enabled unit.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ${BASH_SOURCE[0]:-} , not ${BASH_SOURCE[0]}: piped to bash there is no source
+# file at all, and under `set -u` the bare form aborts on line 16 with
+# "BASH_SOURCE[0]: unbound variable" before anything can explain itself.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
 # shellcheck source=packaging/lib/common.sh
+if [ ! -r "$SCRIPT_DIR/packaging/lib/common.sh" ]; then
+  # The advertised one-liner (`curl ... | bash`) lands here: a piped script has
+  # no directory of its own, so this relative source cannot resolve and the
+  # installer dies two lines in with a path nobody can act on. Say what to do
+  # instead. The real fix is a release-time bundle that splices common.sh into
+  # a single-file install.sh; common.sh is shared with packaging/proxploy-update
+  # and packaging/build_release.sh, so it cannot simply be inlined here.
+  printf 'error: %s\n' \
+    "install.sh needs packaging/lib/common.sh beside it and cannot find it." \
+    "" \
+    "This happens when the script is piped (curl ... | bash), which leaves it" \
+    "with no directory to look in. Download the release and run it from there:" \
+    "" \
+    "  curl -fsSLO https://proxploy.com/proxploy-install.tar.gz" \
+    "  tar xzf proxploy-install.tar.gz && cd proxploy-install" \
+    "  sudo ./install.sh" >&2
+  exit 1
+fi
 . "$SCRIPT_DIR/packaging/lib/common.sh"
 
 SHAPE=""
@@ -463,7 +484,20 @@ configure_tls() {
   # PROXPLOY_COOKIE_SECURE=true is already in the env block written in step 5
   # above; verified there rather than written a second time here.
 
+  # enable --now, THEN reload. `apt-get install caddy` above already enabled
+  # and started the unit against the stock Debian Caddyfile, so `enable --now`
+  # on its own is a no-op on a running service: it does not re-read config.
+  # The file written a few lines up was therefore never loaded, Caddy kept
+  # serving its default :80 site, nothing listened on 443, and the last line
+  # this installer prints told the operator to browse to https://<host>/ and
+  # get a refused connection. Seen on a clean Debian 12 CT: `caddy validate`
+  # called the new file valid while the running process was still on :80.
+  #
+  # reload rather than restart: Caddy reloads config with no dropped
+  # connections, and `|| systemctl restart caddy` covers a unit whose reload
+  # is not wired up rather than leaving TLS down on a technicality.
   systemctl enable --now caddy
+  systemctl reload caddy || systemctl restart caddy
 }
 configure_tls
 
