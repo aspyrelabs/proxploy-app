@@ -19,11 +19,13 @@ from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso, utcnow
 from proxploy.services import migrate as migrate_service
+from proxploy.executor import SSHExecutor
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
 from proxploy.services.catalog_icons import served_icon_url
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.lifecycle import APP_ACTIONS, busy_guests, job_kind
+from proxploy.services.portdetect import detect_command, rank_ports
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
 from proxploy.services.webui import installed_parts, scheme_for
@@ -349,6 +351,67 @@ def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)
         raise HTTPException(404, "app not found")
     raise HTTPException(501, "CT log tailing is not implemented yet; there is no "
                              "journal/exec channel to the guest in this backend")
+
+
+@router.get("/{app_id}/ports", dependencies=[Depends(_read)])
+async def detect_ports(app_id: int, request: Request, db=Depends(get_db),
+                       user: User = Depends(_read_scoped)):
+    """What this container is listening on, ranked, as a GUESS.
+
+    For an app adopted by hand: the catalog knows nothing about it, so
+    `web_port` is empty, so there is no Open button and no way to get one short
+    of the operator already knowing the number. Proxmox cannot answer it either
+    (`pct config` describes the NIC and no API route exposes sockets), so the
+    only place the answer exists is inside the container.
+
+    A GET that runs a command, which is unusual and deliberate: it reads state
+    and changes nothing, and it never writes web_port. The caller is handed
+    candidates and picks one, because a container can serve two UIs and this
+    ranking is a heuristic, not a fact. `accurate: false` is in the response so
+    a client cannot present it as one by accident.
+
+    User-triggered only, never the poller: this is one command per guest, which
+    is exactly what the O(nodes) poll budget forbids (services/proxmox.py's
+    "per-guest, user-triggered calls" note, the same rule the network
+    attachment map is annotated with).
+    """
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    host = db.get(Host, a.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    executor = SSHExecutor(connect_factory=request.app.state.ssh_connect_factory)
+    lines: list[str] = []
+
+    def on_new_fingerprint(fp: str) -> None:
+        with request.app.state.sessionmaker() as fdb:
+            h = fdb.get(Host, a.host_id)
+            if h is not None:
+                h.ssh_host_key_fingerprint = fp
+                fdb.commit()
+
+    try:
+        status = await executor.run_for_host(
+            request.app.state.sessionmaker, request.app.state.secretstore,
+            a.host_id, host.address, detect_command(a.ctid),
+            pinned_fingerprint=host.ssh_host_key_fingerprint,
+            on_new_fingerprint=on_new_fingerprint,
+            on_line=lambda stream, line: lines.append(line) if stream == "stdout" else None,
+            timeout_s=request.app.state.settings.pve_task_timeout_s)
+    except LookupError as e:
+        # executor/keys.py raises this when the host carries no ssh_key. A 409
+        # naming the missing thing, matching how a missing API token reads.
+        raise HTTPException(409, f"looking inside a container needs SSH access to "
+                                 f"{host.name}, which is not set up: {e}") from e
+    if status != 0:
+        raise HTTPException(502, f"could not read the container's listening ports "
+                                 f"(exit {status}). It may be stopped.")
+    return {"ports": rank_ports("\n".join(lines)),
+            # Stated in the payload, not left to the UI to remember: this is a
+            # snapshot of what was listening a moment ago, ranked by a
+            # heuristic, and it can be wrong in both directions.
+            "accurate": False}
 
 
 def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 
@@ -40,15 +40,37 @@ export function AdminAccountStep({ existing, onCreated }: {
 
   async function createAdmin() {
     setError('')
+    // TWO try blocks, and the error is the SERVER's, not a guess. One try
+    // wrapped both calls and reported every failure as "password: 12+
+    // characters", so a rejected EMAIL (a .local address, say, which the
+    // validator refuses as a reserved name) told the operator their password
+    // was too short while they stared at a perfectly good one. Reported from
+    // onboarding on a fresh install, 2026-08-26. profile-password.test.tsx
+    // already fixed exactly this for the password panel below; the wizard kept
+    // its copy.
     try {
       await api('/users', { method: 'POST', body: JSON.stringify(admin) })
+    } catch (e) {
+      setReviewing(false)
+      setError(apiErrorDetail(e, 'Could not create the admin account.'))
+      return
+    }
+    // The account EXISTS now, so a failure here is not a failed signup and
+    // must not send them back to the form to make it twice.
+    try {
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: admin.email, password: admin.password }) })
-      onCreated()
     } catch {
-      setReviewing(false)
-      setError('Could not create the admin account (password: 12+ characters).')
+      // A FIXED message, not the server's detail: by here the account exists,
+      // and that is the thing the operator most needs to know. Surfacing a raw
+      // "boom" from the login call loses it and reads like the signup failed,
+      // which is how they end up trying to create it a second time. Same
+      // choice the password panel below makes, for the same reason.
+      setError('The account was created, but signing in failed. '
+               + 'Sign in with the password you just chose.')
+      return
     }
+    onCreated()
   }
 
   if (existing) return <EditPanel existing={existing} />
@@ -124,12 +146,23 @@ function EditPanel({ existing }: { existing: Existing }) {
     try {
       await api(`/users/${existing.id}/password`, { method: 'POST',
         body: JSON.stringify({ password: pw }) })
-      // The reset revokes every session, this one included. Logging straight
-      // back in is what stops the wizard dropping you at the login screen.
+    } catch (e) {
+      setError(apiErrorDetail(e, 'Could not set the password.'))
+      return
+    }
+    // The reset revokes every session, this one included. Logging straight
+    // back in is what stops the wizard dropping you at the login screen. Its
+    // own try: the password HAS changed by here, and saying otherwise sends
+    // someone to change a password that is already what they wanted.
+    try {
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: existing.email, password: pw }) })
-      setPw(''); setNote('Password updated.')
-    } catch { setError('Could not set the password (12+ characters).') }
+    } catch {
+      setError('The password was changed, but signing in again failed. '
+               + 'Sign in with the new password.')
+      return
+    }
+    setPw(''); setNote('Password updated.')
   }
 
   return (

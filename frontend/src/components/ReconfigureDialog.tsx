@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api } from '../api/client'
+import { api, apiErrorDetail } from '../api/client'
 import type { AppRow } from '../api/hooks'
 import { errBody } from '../api/network'
+import { useDetectPorts } from '../api/apps-ports'
 import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
@@ -31,6 +32,7 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
   const [webProtocol, setWebProtocol] = useState(app.web_protocol ?? '')
   const [webPath, setWebPath] = useState(app.web_path ?? '')
   const [error, setError] = useState('')
+  const detect = useDetectPorts(app.id)
 
   const changed = (): Record<string, unknown> => {
     const body: Record<string, unknown> = {}
@@ -114,6 +116,51 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
             <label htmlFor="reconf-port" className={label}>Web port</label>
             <input id="reconf-port" className={inputCls} type="number" min={1}
               value={webPort} onChange={(e) => setWebPort(e.target.value)} />
+            {/* For an app adopted by hand, the catalog knows no port, so this
+                field is empty and the row has no Open button. Detect looks
+                inside the container and offers what it found. It fills the
+                field and never saves: the guess has to pass through the
+                operator, which is also why the caveat sits under the results
+                rather than in a tooltip nobody opens. */}
+            <Button variant="ghost" size="sm" className="mt-1"
+                    disabled={detect.isPending}
+                    onClick={() => detect.mutate(undefined, {
+                      onError: (e) => setError(apiErrorDetail(
+                        e, 'Could not read the container ports.')),
+                    })}>
+              {detect.isPending ? 'Looking…' : 'Detect'}
+            </Button>
+            {detect.data && (
+              <div className="mt-1.5">
+                {detect.data.ports.length === 0 ? (
+                  <p className="text-[11.5px] text-text-3">
+                    Nothing was listening that a browser could reach. The app
+                    may be stopped, or it may only listen on localhost.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-1">
+                      {detect.data.ports.map((c) => (
+                        <Button key={c.port} variant={String(c.port) === webPort
+                          ? 'go' : 'ghost'} size="sm"
+                          title={`${c.process ?? 'unknown process'} on ${c.address}`}
+                          onClick={() => setWebPort(String(c.port))}>
+                          {c.port}{c.process ? ` · ${c.process}` : ''}
+                        </Button>
+                      ))}
+                    </div>
+                    {/* Said plainly, every time, next to the numbers it is
+                        about. These are ranked guesses read out of the
+                        container a moment ago, not something Proxmox told us:
+                        Proxmox does not know. */}
+                    <p className="mt-1 text-[11.5px] text-text-3">
+                      A guess, not a reading from Proxmox, which does not know.
+                      Best first. Pick one and check it opens.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <div>
             <label htmlFor="reconf-protocol" className={label}>Protocol</label>
