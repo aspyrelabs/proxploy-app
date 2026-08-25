@@ -9,6 +9,7 @@ import { SkeletonGroup } from '../components/ui/skeleton'
 import { Button } from '../components/ui/button'
 import { VmCreateWizard } from '../components/VmCreateWizard'
 import { VmTable, VmTableSkeleton } from '../components/VmTable'
+import { TableSorter, useSorted } from '../components/TableSorter'
 
 export function VmsPage() {
   const search = useSearch({ strict: false }) as { open?: number }
@@ -22,6 +23,10 @@ export function VmsPage() {
   })
   const vms = vmsQuery.data
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
+  // Client-side, on rows the query already holds (usePaged precedent on
+  // /backups). Not in the URL beside `open`: that names a VM someone can be
+  // sent to, this is only which order the rows are stacked in.
+  const sorted = useSorted(vms ?? [])
   // ent.has() is false until /entitlements resolves, gate on ent.data != null
   // too, or every plan sees a dead "New VM" button for the whole first fetch.
   const createDenied = ent.data != null && !ent.has('vms.create')
@@ -34,11 +39,17 @@ export function VmsPage() {
             {vms ? `${vms.length} VMs · ${running} running` : '…'}
           </div>
         </div>
-        <Button className="ml-auto" disabled={createDenied}
-          title={createDenied ? 'Not included in your plan' : undefined}
-          onClick={() => setCreating(true)}>
-          New VM
-        </Button>
+        {/* The sort sits with the action rather than above the table: this
+            header is the whole toolbar the page has. */}
+        <div className="ml-auto flex items-center gap-3">
+          <TableSorter sort={sorted.sort} onSort={sorted.setSort}
+                       label="virtual machines" />
+          <Button disabled={createDenied}
+            title={createDenied ? 'Not included in your plan' : undefined}
+            onClick={() => setCreating(true)}>
+            New VM
+          </Button>
+        </div>
       </div>
       <QueryState query={vmsQuery}
                   loading={<SkeletonGroup label="Loading virtual machines">
@@ -49,13 +60,17 @@ export function VmsPage() {
                   errorTitle="VMs not readable"
                   errorNote="Proxploy could not reach the backend to list your VMs.">
         {/* Which row is expanded lives in the URL, so /vms?open=9 opens
-            straight onto that VM the way its own page used to. */}
-        {(rows) => <VmTable vms={rows} open={search.open}
-                            onOpen={(open) => navigate({
-                              to: '/vms' as never,
-                              search: { ...search, open } as never,
-                              replace: true,
-                            })} />}
+            straight onto that VM the way its own page used to.
+
+            The sorted rows, not the ones handed in: QueryState is still what
+            decides between loading, error, empty and data, it just does not
+            own the order. Both are the same fetch. */}
+        {() => <VmTable vms={sorted.rows} open={search.open}
+                        onOpen={(open) => navigate({
+                          to: '/vms' as never,
+                          search: { ...search, open } as never,
+                          replace: true,
+                        })} />}
       </QueryState>
       {creating && <VmCreateWizard onClose={() => setCreating(false)} />}
     </div>

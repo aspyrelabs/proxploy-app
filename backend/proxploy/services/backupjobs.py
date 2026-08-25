@@ -22,7 +22,8 @@ from sqlalchemy import or_ as sa_or
 
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
-from proxploy.models import App, Backup, Host, Job, Vm, to_iso, utcnow
+from proxploy.models import (App, Backup, CatalogEntry, Host, Job, Vm,
+                             to_iso, utcnow)
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.pvetask import await_task
@@ -693,6 +694,54 @@ def storage_for_content(client, node: str, want: str) -> str | None:
     return best
 
 
+def adopt_restored(app, backup_id: int, new_vmid: int) -> str | None:
+    """Blocking: make a restored container Proxploy's own, and say what it is.
+
+    Returns the catalog slug it matched, or None.
+
+    A CT is "tracked" only when an App row exists for (host_id, ctid), and a
+    restore-as-new takes a FRESH vmid from cluster_nextid(), so the restored
+    container matched nothing and turned up in the discovered list asking to be
+    adopted. Which is absurd for the one container Proxploy knows the origin of
+    perfectly well, because it put it there.
+
+    The catalog is matched on the backup's own guest name, through the same
+    exact normalised-name match the discovered list already suggests with
+    (pollers/__init__.py::_suggest). That is a guess, and it is allowed to miss:
+    a name the catalog does not know adopts with no slug, which is exactly what
+    adopting it by hand would have produced. Not knowing what a container IS
+    must not mean leaving it to ask.
+
+    Nothing here is done for a VM. Vm rows are mirrored by the poller and have
+    no adoption step at all.
+    """
+    from proxploy.pollers import _norm, _suggest
+
+    with app.state.sessionmaker() as db:
+        b = db.get(Backup, backup_id)
+        if b is None or b.guest_type != "ct":
+            return None
+        # An in-place restore overwrote a guest whose row is still here, and a
+        # second restore onto the same id must not collide with
+        # ux_apps_host_ctid. Either way there is nothing to adopt.
+        if db.query(App).filter_by(host_id=b.host_id, ctid=new_vmid).first():
+            return None
+        name = b.guest_name or f"ct-{new_vmid}"
+        catalog = {_norm(c.slug): c.slug for c in db.query(CatalogEntry).all()}
+        slug = _suggest(catalog, name)
+        entry = (db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
+                 if slug else None)
+        db.add(App(host_id=b.host_id, ctid=new_vmid, name=name,
+                   # Same shape adopt_apps builds, so a restored app and a
+                   # hand-adopted one are the same kind of row.
+                   slug=f"{slug or 'adopted'}-{b.host_id}-{new_vmid}",
+                   catalog_slug=slug, web_path="/", adopted=True,
+                   category=entry.category if entry else None,
+                   web_port=entry.port if entry else None))
+        db.commit()
+        return slug
+
+
 async def restore_backup(ctx: JobContext, params: dict) -> dict:
     """`backup.restore`, in place (same vmid, force=1) or as new (fresh vmid).
 
@@ -743,6 +792,21 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
     status = await await_task(ctx, lifecycle_client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, info["host_id"])
+    # A container Proxploy restored is Proxploy's. Without this it landed on a
+    # fresh vmid, matched no App row, and turned up in the discovered list
+    # asking to be adopted, which is a strange question about the one guest we
+    # know the origin of. BEFORE the poller wake below, so the mirror refreshes
+    # with the row already there and the app never appears as discovered even
+    # for one cycle.
+    if not in_place:
+        slug = await asyncio.to_thread(
+            adopt_restored, app, int(params["backup_id"]), vmid)
+        if slug:
+            ctx.log(f"adopted {kind} {vmid} as {slug}")
+        elif info["guest_type"] == "ct":
+            ctx.log(f"adopted {kind} {vmid}; the store does not recognise "
+                    f"{info['guest_name'] or 'it'}, so pick its app type by hand "
+                    f"if you want update checks")
     # _resync above refreshes the BACKUP cache. A restore also creates (or
     # overwrites) a guest, and that half of the picture belongs to the poller's
     # mirror, so it needs the same wake create_vm gets or the restored guest

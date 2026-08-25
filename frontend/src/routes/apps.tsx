@@ -13,6 +13,7 @@ import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { QueryState } from '../components/QueryState'
 import { SkeletonGroup } from '../components/ui/skeleton'
+import { TableSorter, useSorted } from '../components/TableSorter'
 import { Loading } from '../components/ui/loading'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { StatusPill } from '../components/StatusPill'
@@ -57,6 +58,11 @@ export function AppsPage() {
     refetchInterval: 30_000,
   })
   const discovered = discoveredQuery.data
+  // Client-side, on rows the query already holds (usePaged precedent on
+  // /backups). The chosen order is NOT in the URL next to the filters: those
+  // change which apps you are looking at and are worth sending someone, this
+  // changes only the order they are stacked in.
+  const sorted = useSorted(apps ?? [])
 
   const setSearch = (patch: Partial<{ host?: number; q?: string; open?: number }>) =>
     navigate({ to: '/apps' as never, search: { ...search, ...patch } as never, replace: true })
@@ -142,6 +148,9 @@ export function AppsPage() {
         <span className="rounded-full bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-text-2">
           {apps?.length ?? 0} shown
         </span>
+        {/* Last in the row, and outside the filters: host and text NARROW the
+            list, this only reorders what they left. */}
+        <TableSorter sort={sorted.sort} onSort={sorted.setSort} label="apps" />
       </div>
 
       <QueryState query={appsQuery}
@@ -159,9 +168,13 @@ export function AppsPage() {
 
             Which row is expanded lives in the URL, next to the filters, so
             /apps?open=3 opens straight onto that app the way its own page
-            used to. */}
-        {(rows) => <AppTable apps={rows} open={search.open}
-                             onOpen={(open) => setSearch({ open })} />}
+            used to.
+
+            The sorted rows, not the ones handed in: QueryState is still what
+            decides between loading, error, empty and data, it just does not
+            own the order. Both are the same fetch. */}
+        {() => <AppTable apps={sorted.rows} open={search.open}
+                         onOpen={(open) => setSearch({ open })} />}
       </QueryState>
 
       {adopting && discovered && <BulkAdoptDialog items={discovered} onClose={() => setAdopting(false)} />}
