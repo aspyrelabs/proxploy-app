@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useEntitlements, type AppRow } from '../api/hooks'
+import { useNavigate } from '@tanstack/react-router'
+import { useEntitlements, useMe, type AppRow } from '../api/hooks'
+import { canEditFirewall } from '../routes/firewall'
 import { useAppActionGates } from '../api/app-gates'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useLifecycle } from '../api/jobs'
@@ -81,6 +83,11 @@ export function AppIconMenu({ app, lifecycle = true, children }: {
   const ent = useEntitlements()
   const run = useLifecycle()
   const openWebUi = useOpenWebUi(app)
+  const navigate = useNavigate()
+  const me = useMe()
+  // Innocent until proven guilty, the rule every gate here follows: an
+  // unresolved /auth/me withholds nothing, it only changes the title.
+  const canEdit = me.data == null || canEditFirewall(me.data.role, 'guest')
   const [guard, setGuard] = useState<Guard | null>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const pending = app.status === 'pending' || run.isPending
@@ -152,6 +159,17 @@ export function AppIconMenu({ app, lifecycle = true, children }: {
             <DropdownMenu.Item className={itemCls}
               onSelect={() => openLogsWindow(app.id)}>
               <Icon name="description" size={16} /> Logs
+            </DropdownMenu.Item>
+            {/* Outside the `lifecycle` switch, so BOTH surfaces carry it: this
+                is not one of the three the table row keeps as buttons. Never
+                gated to a role, matching the button it replaced, because it
+                only navigates and the Firewall page itself withholds the edit
+                from anyone below operator. */}
+            <DropdownMenu.Item className={itemCls}
+              title={canEdit ? `Manage ${app.name}'s firewall`
+                             : `View ${app.name}'s firewall`}
+              onSelect={() => navigate({ to: `/firewall/guest/app/${app.id}` as never })}>
+              <Icon name="shield" size={16} /> Firewall
             </DropdownMenu.Item>
             <DropdownMenu.Item className={itemCls}
               disabled={reconfigureDenied} title={reconfigureDenied ? NOT_IN_PLAN : undefined}

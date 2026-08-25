@@ -53,7 +53,15 @@ class Settings(BaseSettings):
     # which is a real fault rather than one unlucky night.
     catalog_stale_after_s: float = 172800.0
     poll_enabled: bool = True
-    poll_interval_s: float = 30.0
+    # 5s, not 30s. Everything a cycle reads out of /cluster/resources (node and
+    # guest CPU, memory, status, and the guest netin/netout counters the guest
+    # rates are diffed from) is as fresh as this number, so the tables and
+    # cards move at 5s now. The two things that do NOT are deliberate and live
+    # in pollers/__init__.py: node network throughput comes from PVE's RRD,
+    # which buckets at 60s and cannot go faster whatever we do here, and
+    # MetricSample recording stays on 30s so the charts' storage does not grow
+    # sixfold to draw the same lines.
+    poll_interval_s: float = 5.0
     poll_timeout_s: float = 20.0
     console_ticket_ttl_s: float = 30.0
     console_idle_timeout_s: float = 1800.0

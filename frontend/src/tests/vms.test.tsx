@@ -116,14 +116,15 @@ describe('VmActionBar', () => {
     vi.mocked(notify.error).mockClear()
   })
 
-  it('offers Stop, Restart, Console and Firewall beside a menu while the VM is running', () => {
+  it('offers Stop, Restart and Console beside a menu while the VM is running', () => {
     wrap({ ...VM, status: 'running' })
-    expect(labels()).toEqual(['Stop', 'Restart', 'Console', 'Firewall', 'More actions for win11'])
+    // Three, not four: Firewall moved into the menu, matching AppActionBar.
+    expect(labels()).toEqual(['Stop', 'Restart', 'Console', 'More actions for win11'])
   })
 
-  it('offers Start instead of Stop while it is not running, Console and Firewall either way', () => {
+  it('offers Start instead of Stop while it is not running, Console either way', () => {
     wrap(VM)
-    expect(labels()).toEqual(['Start', 'Console', 'Firewall', 'More actions for win11'])
+    expect(labels()).toEqual(['Start', 'Console', 'More actions for win11'])
   })
 
   it('has no Open button: there is no web interface to point a tab at', () => {
@@ -131,9 +132,13 @@ describe('VmActionBar', () => {
     expect(within(screen.getByRole('group')).queryByRole('button', { name: 'Open' })).toBeNull()
   })
 
-  it('opens the guest firewall route from the Firewall button', () => {
+  it('opens the guest firewall route from the Firewall menu item', async () => {
+    // The row keeps three buttons; Firewall navigates from the menu now.
     wrap(VM)
-    fireEvent.click(screen.getByRole('button', { name: 'Firewall' }))
+    expect(within(screen.getByRole('group')).queryByRole('button', { name: 'Firewall' }))
+      .toBeNull()
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /firewall/i }))
     expect(navigate).toHaveBeenCalledWith({ to: '/firewall/guest/vm/9' })
   })
 
@@ -155,7 +160,8 @@ describe('VmActionBar', () => {
   it('lists the menu actions in order, Delete last and destructive', async () => {
     wrap({ ...VM, status: 'running' })
     openMenu()
-    expect(await items()).toEqual(['Shutdown', 'Pause', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Shutdown', 'Pause', 'Firewall', 'Options', 'Clone',
+                                   'Backup', 'Delete'])
     const all = screen.getAllByRole('menuitem')
     const del = all[all.length - 1]
     // The destructive vocabulary is the text-red token, and the border above
@@ -172,7 +178,7 @@ describe('VmActionBar', () => {
     // running guest now branches on status the way Pause always did.
     wrap({ ...VM, status: 'stopped' })
     openMenu()
-    expect(await items()).toEqual(['Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Firewall', 'Options', 'Clone', 'Backup', 'Delete'])
   })
 
   it('offers Resume only while the VM is paused, in place of Pause', async () => {
@@ -182,7 +188,8 @@ describe('VmActionBar', () => {
     // suspended guest, so the way out is Resume and then Shutdown.
     wrap({ ...VM, status: 'paused' })
     openMenu()
-    expect(await items()).toEqual(['Resume', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Resume', 'Firewall', 'Options', 'Clone', 'Backup',
+                                   'Delete'])
   })
 
   it('does not repeat the row buttons inside the menu', async () => {

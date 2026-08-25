@@ -51,18 +51,24 @@ export function AppCard({ app }: { app: AppRow }) {
       <div className="mt-3 space-y-2">
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">CPU</span>
-          <div className="flex-1"><UsageBar pct={app.cpu_pct} gradient={CPU_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(app.cpu_pct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={app.cpu_pct} gradient={CPU_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(app.cpu_pct)}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">RAM</span>
-          <div className="flex-1"><UsageBar pct={memPct} gradient={RAM_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(memPct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={memPct} gradient={RAM_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(memPct)}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">DSK</span>
-          <div className="flex-1"><UsageBar pct={diskPct} gradient={STORAGE_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(diskPct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={diskPct} gradient={STORAGE_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(diskPct)}</span>
+          </div>
         </div>
         <div className="font-mono text-[11px] text-text-2">
           {app.disk_total_bytes

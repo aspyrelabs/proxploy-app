@@ -132,7 +132,7 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       <span className="font-mono text-[11px] text-text-3">{g.label}</span>
       {g.update && <UpdateDot />}
       <StatusPill status={g.status} />
-      <div className="flex w-28 items-center gap-2">
+      <div className="flex w-28 items-center gap-[3px]">
         <div className="flex-1"><UsageBar pct={g.cpu_pct} gradient={CPU_GRADIENT} /></div>
         <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(g.cpu_pct)}</span>
       </div>

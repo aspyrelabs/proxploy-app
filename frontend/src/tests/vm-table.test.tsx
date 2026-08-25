@@ -86,7 +86,10 @@ describe('VmTable', () => {
     expect(within(row).getAllByText('50%')).toHaveLength(2)
     expect(within(row).getByText('50.0 GiB / 100.0 GiB')).toBeInTheDocument()
     // fmtBps multiplies by 8: 1250000 B/s = 10.0 Mbps, 125000 = 1.0 Mbps.
-    expect(within(row).getByText(/10\.0 Mbps.*1\.0 Mbps/)).toBeInTheDocument()
+    // Down and up are their own elements now, stacked with a rule between, so
+    // they are matched separately rather than as one run of text.
+    expect(within(row).getByText(/↓ 10\.0 Mbps/)).toBeInTheDocument()
+    expect(within(row).getByText(/↑ 1\.0 Mbps/)).toBeInTheDocument()
   })
 
   it('wears its OS as the tile the apps row uses for a logo', () => {
@@ -189,9 +192,11 @@ describe('VmTable', () => {
     wrap([{ ...VM, cpu_pct: null, mem_bytes: null, net_in_bps: null, net_out_bps: null }])
     const row = rowFor('win11')
     // The CPU and RAM meters, plus both halves of the network cell, all say so
-    // rather than drawing a nought. The network figures share one cell, so
-    // that is one element carrying two.
+    // rather than drawing a nought. The two network figures are their own
+    // stacked elements now, so they are two more matches rather than one
+    // element carrying both.
     expect(within(row).getAllByText('unknown')).toHaveLength(2)
-    expect(within(row).getByText(/unknown.*unknown/)).toBeInTheDocument()
+    expect(within(row).getByText(/↓ unknown/)).toBeInTheDocument()
+    expect(within(row).getByText(/↑ unknown/)).toBeInTheDocument()
   })
 })

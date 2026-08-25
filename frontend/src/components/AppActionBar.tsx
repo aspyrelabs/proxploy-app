@@ -1,9 +1,6 @@
-import { useNavigate } from '@tanstack/react-router'
 import type { AppRow } from '../api/hooks'
-import { useMe } from '../api/hooks'
 import { useAppActionGates } from '../api/app-gates'
 import { useOpenWebUi } from '../api/open-web-ui'
-import { canEditFirewall } from '../routes/firewall'
 import { AppIconMenu } from './AppIconMenu'
 import { LifecycleActions } from './LifecycleActions'
 import { Button } from './ui/button'
@@ -11,10 +8,10 @@ import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 import { Icon } from './ui/icon'
 
 /**
- * One app's actions, welded into a single control: Start or Stop, Restart,
- * Open and Firewall as buttons, then everything else behind a three-dots menu.
+ * One app's actions, welded into a single control: Start or Stop, Restart and
+ * Open as buttons, then everything else behind a three-dots menu.
  *
- * Four buttons, not nine. These are what an operator reaches for repeatedly on
+ * Three buttons, not nine. These are what an operator reaches for repeatedly on
  * a list of running apps; Console, Logs, Reconfigure, Migrate, Backup and
  * Delete are things you do to one app, once, and a row that showed them all
  * would be a wall of words per app. AppIconMenu carries them, the same
@@ -31,10 +28,10 @@ import { Icon } from './ui/icon'
  * nothing to point a tab at, and a dead button invites a click that cannot go
  * anywhere. Same rule the icon menu follows.
  *
- * Firewall is always offered, never gated to a role: it only navigates to the
- * guest's Firewall page, and reading a firewall is a viewer permission. The
- * page it opens is what actually withholds an edit from anyone below
- * operator, so this button never needs to.
+ * Firewall used to be a fourth button and is now a menu item (AppIconMenu),
+ * which is where a thing you open once per app belongs; three is the number
+ * this row keeps. It is still never gated to a role, for the reason it never
+ * was: it only navigates, and the Firewall page itself withholds the edit.
  *
  * Every button stops the click from bubbling: the table row around this one
  * expands when clicked, and acting on an app must not also fold or unfold the
@@ -43,12 +40,6 @@ import { Icon } from './ui/icon'
 export function AppActionBar({ app }: { app: AppRow }) {
   const gates = useAppActionGates(app.host_id)
   const openWebUi = useOpenWebUi(app)
-  const navigate = useNavigate()
-  const me = useMe()
-  // Innocent until proven guilty, the same rule every gate on this bar
-  // follows: an unresolved /auth/me withholds nothing, it only changes the
-  // button's title once the role is known.
-  const canEdit = me.data == null || canEditFirewall(me.data.role, 'guest')
   return (
     <ButtonGroup>
       <LifecycleActions target="app" id={app.id} name={app.name}
@@ -80,15 +71,6 @@ export function AppActionBar({ app }: { app: AppRow }) {
           </Button>
         </>
       )}
-      <ButtonGroupSeparator />
-      <Button variant="ghost" size="sm"
-        title={canEdit ? `Manage ${app.name}'s firewall` : `View ${app.name}'s firewall`}
-        onClick={(e) => {
-          e.stopPropagation()
-          navigate({ to: `/firewall/guest/app/${app.id}` as never })
-        }}>
-        Firewall
-      </Button>
       <ButtonGroupSeparator />
       <AppIconMenu app={app} lifecycle={false}>
         {/* No text, so the name has to be spelled out for anyone who cannot

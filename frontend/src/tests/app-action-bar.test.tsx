@@ -76,16 +76,18 @@ describe('AppActionBar', () => {
     capabilities = { lifecycle: true, console: true }
   })
 
-  it('offers Stop, Restart, Open and Firewall beside a menu while the app is running', () => {
+  it('offers Stop, Restart and Open beside a menu while the app is running', () => {
+    // Three, not four: Firewall moved into the menu, which is where a thing
+    // you open once per app belongs.
     wrap(APP)
-    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'Firewall', 'More actions for Immich'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Open', 'More actions for Immich'])
   })
 
-  it('offers Start instead of Stop while it is not running, Firewall either way', () => {
+  it('offers Start instead of Stop while it is not running', () => {
     // Never both: an app is either running or it is not, and offering the
     // pair would invite the wrong one.
     wrap({ ...APP, status: 'stopped' })
-    expect(labels()).toEqual(['Start', 'Open', 'Firewall', 'More actions for Immich'])
+    expect(labels()).toEqual(['Start', 'Open', 'More actions for Immich'])
   })
 
   it('colours Start green and Stop red, the two opposite outcomes', () => {
@@ -106,12 +108,16 @@ describe('AppActionBar', () => {
     // Absent, not disabled: a dead button invites a click that cannot go
     // anywhere.
     wrap({ ...APP, catalog_port: null })
-    expect(labels()).toEqual(['Stop', 'Restart', 'Firewall', 'More actions for Immich'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'More actions for Immich'])
   })
 
-  it('opens the guest firewall route from the Firewall button', () => {
+  it('opens the guest firewall route from the Firewall menu item', async () => {
+    // The row keeps three buttons; Firewall navigates from the menu now.
     wrap(APP)
-    fireEvent.click(screen.getByRole('button', { name: 'Firewall' }))
+    expect(within(screen.getByRole('group')).queryByRole('button', { name: 'Firewall' }))
+      .toBeNull()
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /firewall/i }))
     expect(navigate).toHaveBeenCalledWith({ to: '/firewall/guest/app/1' })
   })
 
@@ -136,12 +142,12 @@ describe('AppActionBar', () => {
     expect(await screen.findByRole('menuitem', { name: /console/i })).toBeInTheDocument()
   })
 
-  it('lists the six other actions in the menu, Delete last and destructive', async () => {
+  it('lists the seven other actions in the menu, Delete last and destructive', async () => {
     wrap(APP)
     openMenu()
     const items = await screen.findAllByRole('menuitem')
     expect(items.map((i) => i.textContent?.trim()))
-      .toEqual(['Console', 'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
+      .toEqual(['Console', 'Logs', 'Firewall', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
     const del = items[items.length - 1]
     // The destructive vocabulary is the text-red token, and the border above
     // it is the separator keeping it off the end of the ordinary list.

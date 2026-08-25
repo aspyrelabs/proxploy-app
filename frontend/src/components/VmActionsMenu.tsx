@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAppActionGates, useVmLifecycleGate } from '../api/app-gates'
 import { api, ApiError, apiErrorDetail } from '../api/client'
-import { useEntitlements, type VmRow } from '../api/hooks'
+import { useEntitlements, useMe, type VmRow } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
 import { useLifecycle } from '../api/jobs'
 import { openConsoleWindow } from '../lib/console-window'
@@ -15,6 +16,7 @@ import { JobLog } from './JobLog'
 import { VmOptionsDialog } from './VmOptionsDialog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { canEditFirewall } from '../routes/firewall'
 import { Icon } from './ui/icon'
 
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
@@ -103,6 +105,11 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
   children: React.ReactNode
 }) {
   const lifecycleGate = useVmLifecycleGate(vm.host_id)
+  const navigate = useNavigate()
+  const me = useMe()
+  // Innocent until proven guilty, the rule every gate here follows: an
+  // unresolved /auth/me withholds nothing, it only changes the title.
+  const canEdit = me.data == null || canEditFirewall(me.data.role, 'guest')
   // The console gate is host-shaped, not guest-shaped: it reads the host's
   // console token and no entitlement flag, which is why ConsoleButton reads
   // this same hook for VMs already. Sharing it is what keeps the menu item
@@ -203,6 +210,16 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
             )}
             {/* No plan gate: reading and editing a VM's own settings is not a
                 metered capability, unlike cloning or backing one up. */}
+            {/* Outside the `lifecycle` switch, so both surfaces carry it: it is not
+                one of the three the table row keeps as buttons. Never gated to
+                a role, as the button it replaced was not: it only navigates,
+                and the Firewall page itself withholds the edit. */}
+            <DropdownMenu.Item className={itemCls}
+              title={canEdit ? `Manage ${vm.name}'s firewall`
+                             : `View ${vm.name}'s firewall`}
+              onSelect={() => navigate({ to: `/firewall/guest/vm/${vm.id}` as never })}>
+              <Icon name="shield" size={16} /> Firewall
+            </DropdownMenu.Item>
             <DropdownMenu.Item className={itemCls}
               onSelect={() => setPanel('options')}>
               <Icon name="tune" size={16} /> Options

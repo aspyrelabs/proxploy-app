@@ -137,21 +137,27 @@ export function NodeCard({ node }: {
       <div className="mt-3 space-y-2">
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">CPU</span>
-          <div className="flex-1"><UsageBar pct={node.cpu_pct} gradient={CPU_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.cpu_pct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={node.cpu_pct} gradient={CPU_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.cpu_pct)}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">RAM</span>
-          <div className="flex-1"><UsageBar pct={node.mem_pct} gradient={RAM_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.mem_pct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={node.mem_pct} gradient={RAM_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.mem_pct)}</span>
+          </div>
         </div>
         {/* Storage of THIS node, shared datastores included: they are storage
             this node can really use. Do not add these up across a cluster,
             that double-counts every shared pool (see api/cluster.py). */}
         <div className="flex items-center gap-2">
           <span className="w-8 text-[10.5px] uppercase text-text-3">Disk</span>
-          <div className="flex-1"><UsageBar pct={node.disk_pct} gradient={STORAGE_GRADIENT} /></div>
-          <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.disk_pct)}</span>
+          <div className="flex flex-1 items-center gap-[3px]">
+            <div className="flex-1"><UsageBar pct={node.disk_pct} gradient={STORAGE_GRADIENT} /></div>
+            <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(node.disk_pct)}</span>
+          </div>
         </div>
       </div>
     </div>

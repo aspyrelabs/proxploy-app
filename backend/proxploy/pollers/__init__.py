@@ -34,6 +34,23 @@ POLL_BACKOFF_CAP_S = 300
 # in memory, so a restart re-checks immediately, which is the useful direction.
 CAPABILITY_GAP_INTERVAL_S = 1800
 
+# Not everything in a cycle wants the cycle's cadence, and since the cycle got
+# quick (poll_interval_s is 5s) two things have to opt out of it explicitly.
+#
+# RRD_INTERVAL_S: node network throughput exists only in PVE's RRD, whose
+# finest series buckets at exactly 60s (measured on node1: 59 points, 60s
+# apart). Fetching it every 5s would return the same numbers twelve times over
+# and cost a call per node each time. Between fetches the last answer is
+# carried forward, because the reading is still the current one, not a gap.
+#
+# METRIC_SAMPLE_INTERVAL_S: the charts read MetricSample, and their resolution
+# is a storage decision rather than a freshness one. At 5s this table would
+# take six times the rows for the same 48h of raw retention to draw the same
+# lines. The UI's live numbers come off the snapshot and the cached columns,
+# which DO refresh every cycle; only the recorded history stays on 30s.
+RRD_INTERVAL_S = 60
+METRIC_SAMPLE_INTERVAL_S = 30
+
 
 log = logging.getLogger(__name__)
 
@@ -514,7 +531,8 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  status_rows: list[dict] | None = None,
                  client=None,
                  ip_checked: dict[int, datetime] | None = None,
-                 fs_checked: dict[int, datetime] | None = None) -> CycleResult:
+                 fs_checked: dict[int, datetime] | None = None,
+                 record_samples: bool = True) -> CycleResult:
     # A fresh PoolMemory has nothing to carry forward, so a caller that does
     # not keep one across cycles (every test that drives a single cycle) gets
     # exactly what this cycle's rows say.
@@ -868,7 +886,12 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         events.append(("resource", {"type": "host", "id": host.id,
                                     "change": "apps"}))
 
-    write_samples(db, samples)
+    # Default True so every existing caller (and every test that drives one
+    # cycle) records exactly as it did; the poller passes False on the cycles
+    # between recordings. The cached columns and the snapshot are written
+    # either way, so the UI is fresh on a cycle that stored nothing.
+    if record_samples:
+        write_samples(db, samples)
     db.commit()
 
     events.insert(0, ("metrics", {"targets": targets}))
@@ -893,6 +916,15 @@ class Poller:
         # host_id -> when its tokens were last checked against their roles. In
         # memory on purpose: a restart re-checks straight away.
         self._gaps_checked_at: dict[int, datetime] = {}
+        # host_id -> when the RRD was last fetched, and the last answer. The
+        # answer is KEPT, not discarded: between fetches it is still the
+        # current reading, and dropping it would zero the network figures for
+        # eleven cycles out of twelve.
+        self._rrd_at: dict[int, datetime] = {}
+        self._rrd_cache: dict[int, dict[str, list[dict]]] = {}
+        self._rrd_degraded: dict[int, str | None] = {}
+        # host_id -> when MetricSample rows were last written for it.
+        self._metrics_at: dict[int, datetime] = {}
         # host_id -> the datastore sizes disk_pct divides by. Has to outlive a
         # cycle or a pool that drops out of one read moves the percentage; see
         # PoolMemory.
@@ -926,6 +958,10 @@ class Poller:
                         self._ip_checked.pop(hid, None)
                         self._fs_checked.pop(hid, None)
                         self._wakes.pop(hid, None)
+                        self._rrd_at.pop(hid, None)
+                        self._rrd_cache.pop(hid, None)
+                        self._rrd_degraded.pop(hid, None)
+                        self._metrics_at.pop(hid, None)
             except Exception:  # noqa: BLE001  (supervisor never dies)
                 pass
             # Doc 10 Phase 7: "alert_rules CRUD + evaluator riding the poll
@@ -1077,13 +1113,38 @@ class Poller:
             # /nodes/<n>/rrddata (Sys.Audit), and letting that escape cost the
             # whole cycle: discovery, node_name and status all went with it,
             # and the host was reported unreachable while answering fine.
-            rrd, lost = {}, []
-            for n in node_names:
-                try:
-                    rrd[n] = client.node_rrddata(n)
-                except ProxmoxError as e:
-                    lost.append(f"{n}: {e}")
-            degraded = (f"metrics unavailable, {'; '.join(lost)}" if lost else None)
+            # Only when the 60s bucket could have turned over; otherwise the
+            # previous answer is reused verbatim. `degraded` is carried with
+            # it, since "we could not read the metrics" is still true on a
+            # cycle that did not try.
+            # `_rrd_at` is only ever stamped by a clean fetch, so "never
+            # fetched" and "last fetch failed" both land here as due.
+            rrd_due = (self._rrd_at.get(host_id) is None
+                       or (utcnow() - self._rrd_at[host_id]).total_seconds()
+                       >= RRD_INTERVAL_S)
+            if rrd_due:
+                rrd, lost = {}, []
+                for n in node_names:
+                    try:
+                        rrd[n] = client.node_rrddata(n)
+                    except ProxmoxError as e:
+                        lost.append(f"{n}: {e}")
+                degraded = (f"metrics unavailable, {'; '.join(lost)}"
+                            if lost else None)
+                # The 60s hold is earned by SUCCESS, and only by success: it
+                # exists because we already hold this minute's numbers, and a
+                # failed fetch holds nothing. Latching a failure for a minute
+                # would leave the host flagged degraded for up to 60s after it
+                # recovered, so a failure retries on the next cycle instead.
+                # That is the same treatment version() and cluster_status()
+                # already get, both of which are attempted every cycle.
+                if not lost:
+                    self._rrd_at[host_id] = utcnow()
+                self._rrd_cache[host_id] = rrd
+                self._rrd_degraded[host_id] = degraded
+            else:
+                rrd = self._rrd_cache.get(host_id, {})
+                degraded = self._rrd_degraded.get(host_id)
 
             # Optional, like rrddata above: a token that reads
             # /cluster/resources can still 403 on /version, and losing the
@@ -1119,6 +1180,11 @@ class Poller:
                               exc_info=True)
 
             prev = self.snapshots.get(host_id)
+            m_at = self._metrics_at.get(host_id)
+            record = (m_at is None
+                      or (utcnow() - m_at).total_seconds() >= METRIC_SAMPLE_INTERVAL_S)
+            if record:
+                self._metrics_at[host_id] = utcnow()
             result = ingest_cycle(db, host, resources, rrd, utcnow(),
                                   version=version, node_name=node_name,
                                   cluster_name=cluster_name, quorate=quorate,
@@ -1127,7 +1193,8 @@ class Poller:
                                   status_rows=status_rows,
                                   client=client,
                                   ip_checked=self._ip_checked.setdefault(host_id, {}),
-                                  fs_checked=self._fs_checked.setdefault(host_id, {}))
+                                  fs_checked=self._fs_checked.setdefault(host_id, {}),
+                                  record_samples=record)
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears
             # it, or a one-off blip would look permanent.

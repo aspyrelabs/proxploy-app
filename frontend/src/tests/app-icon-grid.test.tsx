@@ -153,7 +153,7 @@ describe('AppIconGrid', () => {
     // passes lifecycle={false} instead, because it carries those as buttons.
     expect(items.map((i) => i.textContent?.trim()))
       .toEqual(['Stop', 'Restart', 'Console', 'Open',
-                'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
+                'Logs', 'Firewall', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
   })
 
   it('offers Start instead of Stop when the app is stopped', async () => {
@@ -162,7 +162,7 @@ describe('AppIconGrid', () => {
     const items = await screen.findAllByRole('menuitem')
     expect(items.map((i) => i.textContent?.trim()))
       .toEqual(['Start', 'Console', 'Open',
-                'Logs', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
+                'Logs', 'Firewall', 'Reconfigure', 'Migrate', 'Backup', 'Delete'])
   })
 
   it('puts Delete last, below a separator and styled as destructive', async () => {
@@ -372,7 +372,8 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Start', 'Console', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(labels).toEqual(['Start', 'Console', 'Firewall', 'Options', 'Clone',
+                            'Backup', 'Delete'])
   })
 
   it('offers Console on the tile, the only way into a VM at all', async () => {
@@ -407,7 +408,8 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Resume', 'Console', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(labels).toEqual(['Resume', 'Console', 'Firewall', 'Options', 'Clone',
+                            'Backup', 'Delete'])
   })
 
   it('does not offer to shut down a VM that is already stopped', async () => {
@@ -429,7 +431,7 @@ describe('VmIconGrid', () => {
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
     expect(labels).toEqual(['Stop', 'Restart', 'Shutdown', 'Pause', 'Console',
-                            'Options', 'Clone', 'Backup', 'Delete'])
+                            'Firewall', 'Options', 'Clone', 'Backup', 'Delete'])
   })
 
   it('says Working rather than guessing an action set while a job is in flight', async () => {

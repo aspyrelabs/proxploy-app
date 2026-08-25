@@ -144,9 +144,17 @@ function AppTableRow({ app, open, onToggle }: {
             : fmtBytes(app.disk_bytes)}
         </div>
       </td>
-      {/* No bar: a rate has no denominator to draw one against. */}
-      <td className={`${td} whitespace-nowrap font-mono text-[11px] text-text-2`}>
-        ↓ {fmtBps(app.net_in_bps)} ↑ {fmtBps(app.net_out_bps)}
+      {/* No bar: a rate has no denominator to draw one against.
+          Stacked rather than side by side: the two rates ran together on one
+          line as a single run of digits and arrows, and at four significant
+          figures each the cell was the widest thing in the row. Down over up,
+          in that order, with a hairline between so the pair reads as two
+          readings rather than one number that wrapped. */}
+      <td className={`${td} font-mono text-[11px] text-text-2`}>
+        <div className="whitespace-nowrap">↓ {fmtBps(app.net_in_bps)}</div>
+        <div className="mt-1 whitespace-nowrap border-t border-line-soft pt-1">
+          ↑ {fmtBps(app.net_out_bps)}
+        </div>
       </td>
       {/* The actions are their own targets, never the row's: stopping the
           click here covers every control in the bar at once, including any
@@ -183,8 +191,11 @@ function AppTableRow({ app, open, onToggle }: {
 }
 
 function Meter({ pct, gradient }: { pct: number | null; gradient: string }) {
+  // gap-[3px], not gap-2: 8px of air between a bar and the number that reads
+  // it left the pair looking like two separate things. Whole pixels because a
+  // fraction lands on a device-pixel boundary and blurs.
   return (
-    <div className="flex w-28 items-center gap-2">
+    <div className="flex w-28 items-center gap-[3px]">
       <div className="flex-1"><UsageBar pct={pct} gradient={gradient} /></div>
       <span className="w-9 text-right font-mono text-[11px] text-text-2">{fmtPct(pct)}</span>
     </div>
