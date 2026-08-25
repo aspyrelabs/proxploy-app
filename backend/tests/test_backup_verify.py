@@ -234,6 +234,91 @@ def test_the_sweep_stops_at_its_cap_and_can_be_held_to_one_storage(tmp_path):
     asyncio.run(run())
 
 
+def test_the_bar_follows_vma_rather_than_sitting_at_the_opening_figure(tmp_path):
+    """`vma verify -v -` counts its way through the archive on stdout, and that
+    is the only real figure available for a check. It was logged and thrown
+    away, so the bar sat at 5 and jumped to done."""
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(
+            host_key_fingerprint="SHA256:abc",
+            stdout_lines=["CFG: size: 462 name: qemu-server.conf",
+                          "progress 25% (read 8589934592 bytes, duration 5 sec)",
+                          "progress 50% (read 17179869184 bytes, duration 9 sec)",
+                          "progress 100% (read 34359738368 bytes, duration 20 sec)"],
+            stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        _, bid = _seed(app)
+        seen: list[int] = []
+        ctx = _ctx(app)
+        real = ctx.progress
+        ctx.progress = lambda p: (seen.append(p), real(p))[0]
+        await verify_backup(ctx, {"backup_id": bid})
+        # The opening figure, the three it read off vma, then done.
+        assert seen == [5, 28, 52, 100, 100]
+
+    asyncio.run(run())
+
+
+def test_a_container_archive_has_no_figure_to_show_and_says_nothing(tmp_path):
+    """`tar -tf -` prints no percentage, so there is no progress to report.
+    Holding at the opening figure is honest; inventing 0% of one is not."""
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc",
+                                stdout_lines=["./", "./etc/", "./etc/hostname"],
+                                stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        _, bid = _seed(app, volid=VOLID_CT, guest_type="ct")
+        seen: list[int] = []
+        ctx = _ctx(app)
+        real = ctx.progress
+        ctx.progress = lambda p: (seen.append(p), real(p))[0]
+        await verify_backup(ctx, {"backup_id": bid})
+        assert seen == [5, 100]
+
+    asyncio.run(run())
+
+
+def test_each_archive_in_a_sweep_gets_its_own_slice_of_the_bar(tmp_path):
+    """One archive's 100 used to be the whole sweep's 100: verify_backup was
+    handed the entire range, and progress never moves backwards, so the bar sat
+    at 100 from the first archive to the last."""
+    from proxploy.models import utcnow
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc",
+                                stdout_lines=["ok"], stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        hid, seeded = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.get(Backup, seeded).checked_at = utcnow()
+            for i in range(4):
+                db.add(Backup(host_id=hid, volid=f"nfs-bk:backup/x{i}.vma.zst",
+                              storage="nfs-bk", guest_type="vm"))
+            db.commit()
+        seen: list[int] = []
+        ctx = _ctx(app)
+        real = ctx.progress
+        ctx.progress = lambda p: (seen.append(p), real(p))[0]
+        await verify_backup(ctx, {"host_id": hid, "max": 10})
+        # Four archives, a quarter of the bar each: each one opens on its own
+        # floor and closes on the next archive's. It arrives at 100 once, at
+        # the end, rather than on the first archive.
+        assert seen == [0, 25, 25, 50, 50, 75, 75, 100]
+
+    asyncio.run(run())
+
+
 def test_the_sweep_counts_out_loud_in_the_right_number(tmp_path):
     """The transcript is what an operator reads, so it has to parse.
 

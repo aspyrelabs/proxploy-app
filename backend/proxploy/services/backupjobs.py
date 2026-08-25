@@ -428,17 +428,20 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
                 f"reading them back now")
     checked = failed = 0
     for i, bid in enumerate(ids):
-        out = await verify_backup(ctx, {"backup_id": bid})
+        # Each archive gets its OWN slice of the bar, so one archive's figure
+        # is the sweep's figure. It used to be handed the whole 5..100 range:
+        # the first archive reported 100, and since progress never moves
+        # backwards the bar then sat at 100 for the entire rest of the sweep.
+        out = await verify_backup(ctx, {"backup_id": bid}, band=(
+            int(i / len(ids) * 100), int((i + 1) / len(ids) * 100)))
         checked += 1
         failed += 1 if out["verdict"] == "failed" else 0
-        # verify_backup reports 100 for its own archive; the sweep's real figure
-        # goes out right after, so the bar only ever jumps forward at the end.
-        ctx.progress(int((i + 1) / len(ids) * 100))
     ctx.log(f"verified {checked}, {failed} did not read back")
     return {"checked": checked, "failed": failed}
 
 
-async def verify_backup(ctx: JobContext, params: dict) -> dict:
+async def verify_backup(ctx: JobContext, params: dict, *,
+                        band: tuple[int, int] = (5, 100)) -> dict:
     """`backup.verify`: read one archive back and record whether it is intact.
 
     The only backup path that runs over SSH. Neither `pvesm path` nor
@@ -473,14 +476,30 @@ async def verify_backup(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
+    lo, hi = band
     ctx.log(f"reading {volid} back off {storage} to check it")
-    ctx.progress(5)
+    ctx.progress(lo)
+
+    # `vma verify -v -` counts its way through the archive on stdout:
+    # "progress 42% (read 14431092736 bytes, duration 25 sec)". Read off the
+    # stream it is already logging, so the bar moves instead of sitting at the
+    # opening figure and jumping to done. `tar -tf -` says nothing of the kind,
+    # so a container archive still has no figure to show and holds at `lo`,
+    # which is honest: there is no progress to report, not 0% of one.
+    def on_line(stream: str, line: str) -> None:
+        ctx.log(line, stream=stream)
+        if stream != "stdout" or not line.startswith("progress "):
+            return
+        m = _PCT_LINE.search(line)
+        if m is not None:
+            ctx.progress(lo + (hi - lo) * min(100, int(m.group(1))) // 100)
+
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, host_id, address,
             _verify_command(volid, guest_type),
             pinned_fingerprint=fingerprint, on_new_fingerprint=on_new_fingerprint,
-            on_line=lambda stream, line: ctx.log(line, stream=stream),
+            on_line=on_line,
             timeout_s=app.state.settings.pve_task_timeout_s)
     except LookupError as e:
         # executor/keys.py raises this when the host carries no ssh_key.
@@ -500,7 +519,7 @@ async def verify_backup(ctx: JobContext, params: dict) -> dict:
             row.verify_state = verdict
             row.checked_at = utcnow()
             db.commit()
-    ctx.progress(100)
+    ctx.progress(hi)
     ctx.log(f"{label}: "
             + ("the archive read back intact" if verdict == "ok"
                else "the archive did not read back, it is not usable"))
