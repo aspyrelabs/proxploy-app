@@ -161,7 +161,7 @@ export function UsersCard() {
                         rowErrors plumbing are all still here. Restore by
                         uncommenting.
 
-                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="ghost"
                       disabled={toggleActive.isPending}
                       onClick={() => {
                         if (u.is_active && !window.confirm(
@@ -171,12 +171,12 @@ export function UsersCard() {
                       {u.is_active ? 'Deactivate' : 'Reactivate'}
                     </Button>
                     */}
-                    <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="ghost"
                       onClick={() => setResetting(u)}>
                       Reset password
                     </Button>
                     {/*
-                    <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="danger" className="ml-2"
                       onClick={() => setDeleting(u)}>
                       Delete
                     </Button>

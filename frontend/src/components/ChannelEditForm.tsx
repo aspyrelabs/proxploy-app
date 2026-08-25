@@ -98,9 +98,8 @@ export function ChannelEditForm({ channel, onSaved, onCancel }: {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[12px] text-text-3">Service</span>
             {kinds.data?.map((k) => (
-              <Button key={k.kind}
+              <Button size="sm" key={k.kind}
                       variant={k.kind === kind ? 'primary' : 'ghost'}
-                      className="px-2 py-1 text-[11px]"
                       aria-pressed={k.kind === kind}
                       onClick={() => switchService(k.kind)}>
                 {k.label}

@@ -329,7 +329,7 @@ export function StorePage() {
               : `The app catalog has not synced in ${fmtUptime(status.data.age_s)}.`}
           </span>{' '}
           Installable apps and their default sizing may be out of date.{' '}
-          <Button variant="ghost" className="ml-1 px-2 py-1 text-[11px]"
+          <Button size="sm" variant="ghost" className="ml-1"
                   disabled={refreshBusy || refreshDenied}
                   title={refreshDenied ? 'Not included in your plan' : undefined}
                   onClick={startRefresh}>

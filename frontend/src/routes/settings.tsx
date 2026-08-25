@@ -210,17 +210,17 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
                   </td>
                   <td className="py-2 text-right whitespace-nowrap">
                     {windowsAllowed && (
-                      <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                      <Button size="sm" variant="ghost"
                               disabled={runNow.isPending}
                               onClick={() => runNow.mutate(s.id)}>Run now</Button>
                     )}
-                    <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="ghost" className="ml-2"
                             disabled={toggle.isPending}
                             onClick={() => toggle.mutate(s)}>
                       {s.enabled ? 'Disable' : 'Enable'}
                     </Button>
                     {windowsAllowed && (
-                      <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                      <Button size="sm" variant="ghost" className="ml-2"
                               onClick={() => {
                                 setAdding(false)
                                 setEditing((e) => (e?.id === s.id ? null : s))
@@ -228,7 +228,7 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
                         {editing?.id === s.id ? 'Close' : 'Edit'}
                       </Button>
                     )}
-                    <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="danger" className="ml-2"
                             onClick={() => {
                               if (window.confirm(`Remove schedule "${s.name}"?`)) {
                                 remove.mutate(s.id)
@@ -605,7 +605,7 @@ export function SettingsPage() {
                             pane, and it can only do that if the cell reports
                             its real width. */}
                         <div className="flex flex-nowrap justify-end gap-1.5">
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="ghost"
                             disabled={syncHost.isPending && syncHost.variables?.id === h.id}
                             onClick={() => syncHost.mutate(h)}>
                             {syncHost.isPending && syncHost.variables?.id === h.id ? 'Syncing…' : 'Sync'}
@@ -691,20 +691,20 @@ export function SettingsPage() {
                           {ch.enabled ? 'enabled' : 'disabled'}
                         </td>
                         <td className="py-2 text-right">
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="ghost"
                                   aria-label={`Edit ${ch.name}`}
                                   onClick={() => setEditingChannel(
                                     editingChannel === ch.id ? null : ch.id)}>
                             Edit
                           </Button>
-                          <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="ghost" className="ml-2"
                                   disabled={toggleChannel.isPending}
                                   onClick={() => toggleChannel.mutate(ch)}>
                             {ch.enabled ? 'Disable' : 'Enable'}
                           </Button>
-                          <Button variant="ghost" className="ml-2 px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="ghost" className="ml-2"
                                   onClick={() => testChannel.mutate(ch.id)}>Test</Button>
-                          <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="danger" className="ml-2"
                                   onClick={() => removeChannel(ch)}>Remove</Button>
                         </td>
                       </tr>

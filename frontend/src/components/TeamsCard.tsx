@@ -115,7 +115,7 @@ function TeamMembers({ team, users, usersError, usersLoading, onRemove }: {
           onChange={(e) => setPickRole(e.target.value)} className={selectCls}>
           {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
-        <Button variant="ghost" className="px-2 py-1 text-[11px]"
+        <Button size="sm" variant="ghost"
           disabled={!pickUserId || addMember.isPending}
           onClick={() => addMember.mutate({ userId: Number(pickUserId), role: pickRole })}>
           Add

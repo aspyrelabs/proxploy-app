@@ -215,7 +215,7 @@ function AttachmentMap({ attachments, nodes, pending }: {
                 </td>
                 <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? 'unknown'}</td>
                 <td className="py-2.5 text-right">
-                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                  <Button size="sm" variant="ghost"
                           disabled={denied}
                           title={denied ? 'Not included in your plan' : undefined}
                           onClick={() => setEditing(a)}>
@@ -321,13 +321,17 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <SkeletonLine className="w-20 text-[13px]" />
                 <SkeletonLine className="w-28 text-[11.5px]" />
-                {/* Add bridge, Discard staged, Apply staged config. Button is
-                    px-2 py-1 text-[11px] inside a 1px border: 11 * 1.45 line
-                    box + 8px + 2px = 26px, and rounded-ctl like the control. */}
+                {/* Add bridge, Discard staged, Apply staged config, all
+                    size="sm". h-8 (32px) is measured off a real rendered sm ghost in
+                    Chromium, not computed: the old 26px here was arithmetic on
+                    `px-2 py-1 text-[11px]`, which those buttons carried as a
+                    className and which never applied at all (it collides with
+                    the component's own size classes and loses in the emitted
+                    CSS), so the control this stood in for was really 37px. */}
                 <div className="ml-auto flex gap-2">
-                  <Skeleton className="h-[26px] w-20 rounded-ctl" />
-                  <Skeleton className="h-[26px] w-28 rounded-ctl" />
-                  <Skeleton className="h-[26px] w-36 rounded-ctl" />
+                  <Skeleton className="h-8 w-20 rounded-ctl" />
+                  <Skeleton className="h-8 w-28 rounded-ctl" />
+                  <Skeleton className="h-8 w-36 rounded-ctl" />
                 </div>
               </div>
               {/* Interface, Type, Subnet, Ports, State, and the two buttons. */}
@@ -340,11 +344,11 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                 <h3 className="font-mono text-[13px]">{n.node}</h3>
                 <span className="text-[11.5px] text-text-3">{n.host_name}</span>
                 <div className="ml-auto flex gap-2">
-                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                  <Button size="sm" variant="ghost"
                           onClick={() => setEditing({ hostId: n.host_id, node: n.node, iface: null })}>
                     Add bridge
                   </Button>
-                  <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                  <Button size="sm" variant="ghost"
                           disabled={revert.isPending}
                           onClick={() => revert.mutate({ hostId: n.host_id, node: n.node }, {
                             onSuccess: () => notify.info(`Staged changes discarded on ${n.node}`),
@@ -352,7 +356,7 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                           })}>
                     Discard staged
                   </Button>
-                  <Button variant="danger" className="px-2 py-1 text-[11px]"
+                  <Button size="sm" variant="danger"
                           disabled={apply.isPending}
                           onClick={() => fire(n.host_id, n.node)}>
                     Apply staged config
@@ -385,11 +389,11 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                         {i.active ? 'up' : 'down'}
                       </td>
                       <td className="py-2.5 text-right">
-                        <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                        <Button size="sm" variant="ghost"
                                 onClick={() => setEditing({ hostId: n.host_id, node: n.node, iface: i })}>
                           Edit
                         </Button>
-                        <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                        <Button size="sm" variant="danger" className="ml-2"
                                 onClick={() => drop(n.host_id, n.node, i.iface)}>
                           Remove
                         </Button>

@@ -67,9 +67,8 @@ function VolumeTable({ volumes, hostId, node, storage }:
             <td className="py-2.5 font-mono text-text-2">{v.vmid ?? 'unknown'}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtCtime(v.ctime)}</td>
             <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
-              <Button
+              <Button size="sm"
                 variant="danger"
-                className="px-2 py-1 text-[11px]"
                 disabled={del.isPending}
                 onClick={() => {
                   if (window.confirm(`Delete ${v.volid}? This removes the volume from ${storage} and cannot be undone.`)) {
@@ -106,11 +105,11 @@ export function ContentBrowser({ row, onClose, onManage }:
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+          <Button size="sm" variant="ghost"
             onClick={() => setUploading(true)}>Upload</Button>
-          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+          <Button size="sm" variant="ghost"
             onClick={() => onManage(row)}>Manage</Button>
-          <Button variant="ghost" className="px-2 py-1 text-[11px]" onClick={onClose}>Close</Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
         </div>
       </div>
 

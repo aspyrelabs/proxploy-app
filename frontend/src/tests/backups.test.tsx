@@ -2,7 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const BACKUPS = {
+import type { BackupsResponse } from '../api/backups'
+
+// Typed against the real response rather than left to inference: the fixture
+// literal makes success_rate_30d look like a `number`, so the test below that
+// sets it to null (which is exactly what a non-PBS store reports for ever)
+// failed to compile, while the API type has always said `number | null`.
+const BACKUPS: BackupsResponse = {
   backups: [
     // On `local`, a plain directory store, which is the setup the two checks
     // exist for. The pbs-ds row below is the one they are refused on.
@@ -24,6 +30,10 @@ const BACKUPS = {
   stats: {
     total: 2, total_bytes: 6442450944, ok_count: 1, failed_count: 1,
     success_rate_30d: 50.0,
+    // Present because BackupStats requires them, and consistent with the two
+    // archives above. Inert for every test that leaves success_rate_30d set:
+    // the card only falls back to these three when it is null.
+    runs_ok_30d: 1, runs_failed_30d: 1, run_rate_30d: 50.0,
     datastores: [{ storage: 'pbs-ds', count: 2, size_bytes: 6442450944 }],
   },
   synced_at: '2026-07-31T09:00:00Z',

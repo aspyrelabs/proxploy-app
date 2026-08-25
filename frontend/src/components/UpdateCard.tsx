@@ -136,7 +136,7 @@ export function UpdateCard() {
                                px-2 py-1.5 font-mono text-[12px] text-text">
                 {s.compose_hint}
               </code>
-              <Button variant="ghost" className="px-2 py-1 text-[11px]"
+              <Button size="sm" variant="ghost"
                 onClick={() => { void navigator.clipboard?.writeText(s.compose_hint ?? '') }}>
                 Copy
               </Button>

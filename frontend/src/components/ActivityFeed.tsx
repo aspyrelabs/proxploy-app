@@ -64,7 +64,7 @@ function Item({ row }: { row: ActivityRow }) {
         <Loading value={row.progress_pct} label="Progress" size={20} className="mt-0.5 shrink-0" />
       )}
       {isCancellable(row) && (
-        <Button variant="ghost" className="shrink-0 self-center px-2 py-1 text-[11px]"
+        <Button size="sm" variant="ghost" className="shrink-0 self-center"
                 disabled={cancel.isPending} onClick={onCancel}>
           Cancel
         </Button>

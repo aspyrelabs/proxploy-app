@@ -92,10 +92,13 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
             <SkeletonLine className="w-9 text-[11px]" />
           </div>
           <SkeletonLine className="w-24 text-[11px]" />
-          {/* LifecycleActions at size="sm", then the Console ghost. */}
+          {/* LifecycleActions at size="sm", then the Console ghost. Both are
+              32px (h-8), measured off a real rendered sm button. The 30px and
+              24px here were each a different guess at a control whose size
+              classes were being dropped on the floor. */}
           <div className="ms-auto flex items-center gap-2">
-            <Skeleton className="h-[30px] w-24 rounded-ctl" />
-            <Skeleton className="h-6 w-16 rounded-ctl" />
+            <Skeleton className="h-8 w-24 rounded-ctl" />
+            <Skeleton className="h-8 w-16 rounded-ctl" />
           </div>
         </div>
       ))}

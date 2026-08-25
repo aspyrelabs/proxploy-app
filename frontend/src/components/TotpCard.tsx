@@ -31,7 +31,7 @@ function RecoveryCodesBlock({ codes }: { codes: string[] }) {
           </code>
         ))}
       </div>
-      <Button variant="ghost" className="mt-2 px-2 py-1 text-[11px]"
+      <Button size="sm" variant="ghost" className="mt-2"
         onClick={() => copyText(codes.join('\n'))}>
         Copy all codes
       </Button>
@@ -248,7 +248,7 @@ export function TotpCard() {
                                  bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-text">
                   {enrollment.secret}
                 </code>
-                <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                <Button size="sm" variant="ghost"
                   onClick={() => copyText(enrollment.secret)}>
                   Copy
                 </Button>

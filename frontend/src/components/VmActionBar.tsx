@@ -49,11 +49,12 @@ export function VmActionBar({ vm }: { vm: VmRow }) {
       <LifecycleActions target="vm" id={vm.id} name={vm.name}
                         status={vm.status} hostId={vm.host_id} size="sm" grouped />
       <ButtonGroupSeparator />
-      {/* Its own window, never a route (lib/console-window.ts). `grouped` is
-          what puts it on Button's own size table, the same scale the
-          lifecycle buttons welded beside it are drawn at; the console
-          capability gate stays inside the shared component. */}
-      <ConsoleButton hostId={vm.host_id} grouped
+      {/* Its own window, never a route (lib/console-window.ts). It is drawn at
+          the same 'sm' scale as the lifecycle buttons welded beside it, which
+          is now the only size it has rather than something this call site
+          asked for; the console capability gate stays inside the shared
+          component. */}
+      <ConsoleButton hostId={vm.host_id}
                      onClick={() => openConsoleWindow('vm', vm.id)} />
       <ButtonGroupSeparator />
       <Button variant="ghost" size="sm"

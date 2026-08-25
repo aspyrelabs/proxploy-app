@@ -48,7 +48,7 @@ function AlertRowView({ a, onAck, acking }:
           ? <span className="text-[11.5px] text-text-3">
               acknowledged by {a.acked_by_email ?? 'someone'}
             </span>
-          : <Button variant="ghost" className="px-2 py-1 text-[11px]"
+          : <Button size="sm" variant="ghost"
                     disabled={acking} onClick={() => onAck(a.id)}>Ack</Button>}
       </td>
     </tr>
@@ -214,12 +214,12 @@ export function AlertsPage() {
                           {r.enabled ? 'enabled' : 'disabled'}
                         </td>
                         <td className="py-2 text-right">
-                          <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="ghost"
                                   disabled={toggleRule.isPending}
                                   onClick={() => toggleRule.mutate(r)}>
                             {r.enabled ? 'Disable' : 'Enable'}
                           </Button>
-                          <Button variant="danger" className="ml-2 px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="danger" className="ml-2"
                                   onClick={() => {
                                     if (window.confirm(`Remove alert rule "${r.name}"? Its fired alerts go with it.`)) {
                                       removeRule.mutate(r.id)

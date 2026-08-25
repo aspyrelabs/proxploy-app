@@ -116,11 +116,13 @@ export function AppCardSkeleton() {
         <SkeletonLine className="w-28 text-[11px]" />
         <SkeletonLine className="w-40 text-[11px]" />
       </div>
-      {/* LifecycleActions + Console, both `px-2 py-1 text-[11px]` ghosts, so
-          ~24px tall. */}
+      {/* LifecycleActions (size="sm") + the Console ghost, both 32px: h-8 is
+          measured off a real rendered sm button, not computed. These were h-6
+          on the old belief that `px-2 py-1 text-[11px]` made a ~24px control;
+          that className never applied, so the real bar was 37px. */}
       <div className="mt-3 flex items-center gap-2 border-t border-line-soft pt-3">
-        <Skeleton className="h-6 w-16 rounded-ctl" />
-        <Skeleton className="h-6 w-20 rounded-ctl" />
+        <Skeleton className="h-8 w-16 rounded-ctl" />
+        <Skeleton className="h-8 w-20 rounded-ctl" />
       </div>
     </div>
   )

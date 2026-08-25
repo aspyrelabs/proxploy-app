@@ -138,11 +138,11 @@ export function ApiKeysCard() {
                                  bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-text">
                   {justCreated.key}
                 </code>
-                <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                <Button size="sm" variant="ghost"
                   onClick={() => { void navigator.clipboard?.writeText(justCreated.key) }}>
                   Copy
                 </Button>
-                <Button variant="ghost" className="px-2 py-1 text-[11px]"
+                <Button size="sm" variant="ghost"
                   onClick={() => setJustCreated(null)}>
                   Dismiss
                 </Button>
@@ -180,7 +180,7 @@ export function ApiKeysCard() {
                       </td>
                       <td className="py-2 text-right">
                         {!k.revoked_at && (
-                          <Button variant="danger" className="px-2 py-1 text-[11px]"
+                          <Button size="sm" variant="danger"
                             disabled={revokeKey.isPending} onClick={() => revoke(k)}>
                             Revoke
                           </Button>

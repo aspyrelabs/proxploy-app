@@ -159,12 +159,12 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
                     {s.size_bytes == null ? 'unknown' : fmtBytes(s.size_bytes)}
                   </td>
                   <td className="flex items-center gap-2 py-2.5">
-                    <Button variant="go" className="px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="go"
                       disabled={denied || run.isPending} title={planTitle}
                       onClick={() => fire('rollback', s.name)}>
                       Rollback
                     </Button>
-                    <Button variant="danger" className="px-2 py-1 text-[11px]"
+                    <Button size="sm" variant="danger"
                       disabled={denied || run.isPending} title={planTitle}
                       onClick={() => removeSnapshot(s)}>
                       Delete

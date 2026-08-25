@@ -43,16 +43,15 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // is actually still running. Show one honest "Working…" affordance instead
   // of guessing which action set the pre-mutation status implied.
   const actions = status === 'pending' ? null : status === 'running' ? RUNNING_ACTIONS : STOPPED_ACTIONS
-  // 'sm' keeps its hand-rolled numbers: existing call sites (AppCard, the
-  // guest list, the VM rows) are pinned to them. 'xs' goes through Button's
-  // own size table instead, so a grouped bar shares one scale with the
-  // buttons welded beside it rather than drifting a pixel out.
-  // Grouped bars go through Button's own size table, so every control welded
-  // into one group shares a scale exactly. Ungrouped callers (the app card,
-  // the guest list, the VM rows) keep the hand-rolled 'sm' string their
-  // layouts are pinned to, so nothing moves for them.
-  const cls = !grouped && size === 'sm' ? 'px-2 py-1 text-[11px]' : ''
-  const btnSize = size === 'xs' ? 'xs' : grouped && size === 'sm' ? 'sm' : undefined
+  // Every size goes through Button's own size table, grouped or not. The
+  // ungrouped 'sm' callers (AppCard, the guest list, the VM rows) used to be
+  // handed `px-2 py-1 text-[11px]` as a className instead, on the belief that
+  // their layouts were pinned to those exact numbers. They never were: those
+  // classes collide with the component's own size classes and LOSE in the
+  // emitted CSS (`.px-3\.5` is written after `.px-2`), so every one of those
+  // call sites has been rendering at full 'md' size all along. 'md' is
+  // Button's default and needs no entry here.
+  const btnSize = size === 'md' ? undefined : size
   // Why an unresolved fetch withholds nothing: api/app-gates.ts. Both gates
   // come from that file now, the VM one because VmActionsMenu offers these
   // same actions as menu items and needs the identical answer.
@@ -84,7 +83,7 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // row for a fragment with separators, which is what lets a ButtonGroup weld
   // these to the actions beside them without a double border down the seam.
   const buttons = actions === null ? (
-    <Button variant="ghost" size={btnSize} className={cls} disabled>
+    <Button variant="ghost" size={btnSize} disabled>
       Working…
     </Button>
   ) : actions.map((a, i) => (
@@ -93,7 +92,6 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
       <Button
         variant={a === 'stop' ? 'danger' : a === 'start' ? 'success' : 'ghost'}
         size={btnSize}
-        className={cls}
         disabled={pending || denied}
         title={reason}
         onClick={(e) => { e.stopPropagation(); fire(a) }}
@@ -124,20 +122,19 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
  * capability shape, so the capabilities.console gate lives here once instead
  * of being copied into each call site.
  */
-export function ConsoleButton({ hostId, onClick, grouped = false }: {
+export function ConsoleButton({ hostId, onClick }: {
   hostId: number
   onClick: () => void
-  /** Render at Button's own `sm` scale, for a parent ButtonGroup, instead of
-   *  the hand-rolled string the spaced call sites are pinned to. Same switch
-   *  and same reason as LifecycleActions' `grouped`: welded controls have to
-   *  share one size table or the seam between them is a pixel off. */
-  grouped?: boolean
 }) {
   // Why an unresolved fetch withholds nothing: api/app-gates.ts.
   const gates = useAppActionGates(hostId)
+  // One size, welded or spaced. There used to be a `grouped` prop choosing
+  // between Button's 'sm' and a hand-rolled `px-2 py-1 text-[11px]`, but both
+  // branches were asking for the same small control and the className one
+  // never took effect, so the prop only ever decided whether this button came
+  // out small or full-size by accident.
   return (
-    <Button variant="ghost" size={grouped ? 'sm' : undefined}
-      className={grouped ? '' : 'px-2 py-1 text-[11px]'} disabled={gates.console.denied}
+    <Button variant="ghost" size="sm" disabled={gates.console.denied}
       title={gates.console.reason}
       // Stopped here, not left to the caller: this now renders inside a table
       // row that expands when clicked, and opening a console must not also
