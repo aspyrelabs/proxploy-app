@@ -662,7 +662,12 @@ export function BackupsPage() {
           looking at their backups had no reason to open. Same card, filtered to
           the kind this page owns. */}
       <div className="mt-4">
-        <SchedulesCard only={['backup.run']} title="Scheduled jobs" canAdd={false} />
+        {/* Both kinds this page can CREATE. It filtered to backup.run alone,
+            so the verify-only job the New job dialog had just learned to save
+            was invisible on the page that saved it, which reads as the save
+            having failed. */}
+        <SchedulesCard only={['backup.run', 'backup.verify']} title="Scheduled jobs"
+                       canAdd={false} />
       </div>
 
       <div className={`${card} mt-4`}>

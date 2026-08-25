@@ -276,6 +276,10 @@ export const ACTION_LABEL: Record<string, string> = {
  * something the title does not already say.
  */
 export const STATUS_LABEL: Record<string, string> = {
+  // Not "Pending", which is what a QUEUE is: this one means the guest is
+  // being acted on right now and its real status is not known until the
+  // action reports back.
+  pending: 'Working',
   queued: 'Waiting',
   running: 'Running',
   succeeded: 'Done',

@@ -12,9 +12,12 @@ import json as jsonlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from proxploy.models import App, CatalogEntry, Host, HostCredential, MetricSample, Vm, to_iso, utcnow
+from sqlalchemy import or_ as sa_or
+
+from proxploy.models import (App, CatalogEntry, Host, HostCredential, Job,
+                             MetricSample, Vm, to_iso, utcnow)
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import (capability_gaps,
                                           cluster_identity_from,
@@ -48,6 +51,23 @@ CAPABILITY_GAP_INTERVAL_S = 1800
 # take six times the rows for the same 48h of raw retention to draw the same
 # lines. The UI's live numbers come off the snapshot and the cached columns,
 # which DO refresh every cycle; only the recorded history stays on 30s.
+# The lifecycle verbs, as job kinds ("app.stop", "vm.restart", ...). A guest
+# with one of these in flight is mid-action, and PVE still reports the OLD
+# status the whole time a stop is running: writing that back flips the pill
+# from Working to Running and then to Stopped a moment later. Reported on
+# hardware 2026-08-25 against anytype-server. It was always possible and
+# became easy to hit at a 5s cycle, where a poll almost always lands inside
+# the action rather than after it.
+# How long a lifecycle job may hold its guest's status before the poller takes
+# it back. A hold that outlives its job would freeze a guest for ever on a
+# worker that died mid-action, so it is a ceiling and not a promise: past it
+# Proxmox is the truth again whatever the job row still claims.
+LIFECYCLE_HOLD_S = 300
+
+LIFECYCLE_KINDS = frozenset(
+    f"{t}.{v}" for t in ("app", "vm")
+    for v in ("start", "stop", "restart", "shutdown", "pause", "resume"))
+
 RRD_INTERVAL_S = 60
 METRIC_SAMPLE_INTERVAL_S = 30
 
@@ -537,6 +557,21 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # not keep one across cycles (every test that drives a single cycle) gets
     # exactly what this cycle's rows say.
     pools = pools if pools is not None else PoolMemory()
+    # Guests the poller must not answer for this cycle, because something is
+    # already acting on them and knows better. One query per cycle rather than
+    # per guest. Their OTHER readings (cpu, memory, disk) are still written:
+    # those are measurements and stay true mid-action, it is only `status` that
+    # a running stop makes stale.
+    # started_at is NULL while a job is still queued, which is the moment it
+    # most deserves the hold, so a missing stamp counts as fresh and only a job
+    # that has actually been running past the ceiling loses it.
+    stale_before = now - timedelta(seconds=LIFECYCLE_HOLD_S)
+    busy = {(t, i) for t, i in db.query(Job.target_type, Job.target_id)
+            .filter(Job.kind.in_(LIFECYCLE_KINDS),
+                    Job.status.in_(("queued", "running")),
+                    Job.target_id.isnot(None),
+                    sa_or(Job.started_at.is_(None),
+                          Job.started_at >= stale_before)).all()}
     # `client` is the only argument that lets this function make a PVE call of
     # its own, and it is optional so the bulk-read-in, caches-out contract still
     # holds without one: no client means addresses are simply not refreshed
@@ -730,10 +765,15 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                                             "change": "status", "status": "unknown"}))
             continue
         a.missing_since = None
-        if a.status_cached != g["status"]:
-            events.append(("resource", {"type": "app", "id": a.id,
-                                        "change": "status", "status": g["status"]}))
-        a.status_cached, a.cpu_pct_cached = g["status"], g["cpu_pct"]
+        if ("app", a.id) in busy:
+            # Mid-action: leave the status alone and let the job's own result
+            # write it (services/lifecycle.py::RESULT_STATUS).
+            a.cpu_pct_cached = g["cpu_pct"]
+        else:
+            if a.status_cached != g["status"]:
+                events.append(("resource", {"type": "app", "id": a.id,
+                                            "change": "status", "status": g["status"]}))
+            a.status_cached, a.cpu_pct_cached = g["status"], g["cpu_pct"]
         a.mem_bytes_cached, a.uptime_s_cached = g["mem_bytes"], g["uptime_s"]
         # 0 from PVE means "no reading", not "zero bytes used": a stopped
         # container reports 0 disk. None keeps that distinguishable from a
@@ -784,7 +824,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                    template=g["template"])
             db.add(v)
             membership_changed = True
-        elif v.status != g["status"]:
+        elif v.status != g["status"] and ("vm", v.id) not in busy:
             events.append(("resource", {"type": "vm", "id": v.id,
                                         "change": "status", "status": g["status"]}))
         v.name = g["name"] or v.name
@@ -795,7 +835,11 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # Refreshed every cycle: `qm template <id>` converts a guest in place,
         # so this changes without the row being recreated.
         v.template = g["template"]
-        v.status, v.uptime_s = g["status"], g["uptime_s"]
+        # Mid-action: the status is the job's to write, not this cycle's. See
+        # `busy` above. uptime is a measurement and stays true either way.
+        if ("vm", v.id) not in busy:
+            v.status = g["status"]
+        v.uptime_s = g["uptime_s"]
         # ALLOCATION, which is what this row used to hold under the names
         # mem_bytes and disk_bytes while those same names meant USAGE on an
         # App. Migration a1f4d80c3e69 moved the allocation into these two and
