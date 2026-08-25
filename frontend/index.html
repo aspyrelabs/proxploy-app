@@ -6,14 +6,21 @@
          operating system, NOT this app's theme. So these are scoped to
          prefers-color-scheme rather than swapped when someone uses the theme
          toggle: a light mark on a dark tab strip would be the bug. -->
-    <!-- The unconditional fallback goes FIRST, for a browser that understands
-         no media query here. It used to sit last, and since a browser takes
-         the LAST link whose media matches, this one matched every time and
-         won every time: on a light desktop the light mark was in the document
-         and never once used. Measured in Chromium, both schemes resolved to
-         proxploy-favicon-dark.svg. Ordering is the whole fix; put anything
-         after the two scoped links and the bug comes straight back. -->
-    <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-dark.svg" />
+    <!-- These two and NOTHING else. There used to be a third, unconditional
+         link as a fallback for a browser that reads no media query here, and
+         it is why the light mark sat in this file unused: measured in a real
+         Chromium, an unconditional link is fetched alongside the scoped one
+         and wins, in BOTH schemes, wherever it is placed. Reordering it did
+         not help; only removing it did.
+
+         Verified by watching what the browser actually requests, because
+         headless Chromium does not fetch favicons at all and cannot answer
+         this. With both scoped links alone: dark -> dark, light -> light.
+
+         The cost is a browser that ignores `media` on an icon link, which now
+         takes whichever of these two it likes rather than a guaranteed one.
+         That is a worse icon on an old browser against no theming at all on
+         current ones. Do not "restore the fallback". -->
     <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-dark.svg"
           media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/proxploy-favicon-light.svg"

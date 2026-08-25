@@ -1,15 +1,14 @@
 /**
  * The favicon a browser will actually pick, per OS colour scheme.
  *
- * A browser takes the LAST <link rel="icon"> whose media matches. The
- * unconditional fallback used to sit after the two scoped links, so it matched
- * in both schemes and won in both: proxploy-favicon-light.svg was in the
- * document and never once used, and a light desktop got the near-white mark
- * meant for a dark tab strip. Measured in Chromium before the fix, both
- * schemes resolved to proxploy-favicon-dark.svg.
+ * An unconditional <link rel="icon"> is fetched alongside a media-scoped one
+ * and wins over it, in BOTH schemes, wherever it sits in the document. That is
+ * why proxploy-favicon-light.svg was in the file and never once used, and
+ * moving the fallback to the front did not fix it: only removing it did.
  *
- * This asserts the resolution, not the order, so the file can be rearranged
- * however it likes as long as the answer stays right.
+ * Measured by watching what a real Chromium requests. Headless does not fetch
+ * favicons, so it cannot answer this and neither can a DOM-only assertion;
+ * what this file can still hold is the shape that made the answer right.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -25,24 +24,27 @@ function iconLinks(): { href: string; media: string | null }[] {
   }))
 }
 
-/** What the browser lands on: last match wins. */
-function resolve(scheme: 'dark' | 'light'): string {
-  const matching = iconLinks().filter(
-    (l) => l.media === null || l.media.includes(`prefers-color-scheme: ${scheme}`))
-  return matching[matching.length - 1].href
+/** The icons a browser could choose from in one scheme. Exactly one, or the
+ *  unconditional link is back and the scoped ones are being overridden. */
+function candidates(scheme: 'dark' | 'light'): string[] {
+  return iconLinks()
+    .filter((l) => l.media === null || l.media.includes(`prefers-color-scheme: ${scheme}`))
+    .map((l) => l.href)
 }
 
 describe('favicon', () => {
-  it('gives a dark tab strip the light-inked mark', () => {
-    expect(resolve('dark')).toBe('/proxploy-favicon-dark.svg')
+  it('gives a dark tab strip the light-inked mark, and nothing competes', () => {
+    expect(candidates('dark')).toEqual(['/proxploy-favicon-dark.svg'])
   })
 
-  it('gives a light tab strip the dark-inked mark', () => {
-    // The one that regressed: an unconditional link placed last overrides this.
-    expect(resolve('light')).toBe('/proxploy-favicon-light.svg')
+  it('gives a light tab strip the dark-inked mark, and nothing competes', () => {
+    expect(candidates('light')).toEqual(['/proxploy-favicon-light.svg'])
   })
 
-  it('still carries an unconditional icon for a browser that reads no media', () => {
-    expect(iconLinks().some((l) => l.media === null)).toBe(true)
+  it('carries no unconditional icon link, which is what broke this', () => {
+    // An unconditional link is fetched alongside the scoped one and wins in
+    // both schemes, wherever it is placed. Re-adding one silently restores
+    // the bug, so it is asserted away rather than left to a comment.
+    expect(iconLinks().filter((l) => l.media === null)).toEqual([])
   })
 })
