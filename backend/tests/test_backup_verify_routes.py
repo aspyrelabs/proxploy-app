@@ -1,7 +1,9 @@
 """The Verify action, and the one archive it refuses: PBS verifies its own."""
 from fastapi.testclient import TestClient
 
-from proxploy.models import Backup, Host, Job
+import json
+
+from proxploy.models import Backup, Host, HostCredential, Job
 from tests.support import make_app, seed_snapshot
 
 
@@ -10,6 +12,16 @@ def _seed(app, storage="nfs-bk"):
         host = Host(name="host-01", address="https://10.0.0.7:8006",
                     node_name="pve1", status="connected")
         db.add(host)
+        db.commit()
+        # Test restore creates a guest, so its route now checks for the
+        # lifecycle token before queueing rather than letting the handler
+        # discover it is missing. Verify itself does not need this (it goes
+        # over SSH), but one seed serves both files' tests.
+        blob, ver = app.state.secretstore.encrypt(json.dumps(
+            {"token_id": "proxploy@pve!lc", "token_secret": "s3cret"}).encode())
+        db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
+                              encrypted_blob=blob, key_version=ver,
+                              public_meta="proxploy@pve!lc"))
         db.commit()
         b = Backup(host_id=host.id, storage=storage, guest_type="vm", guest_vmid=201,
                    volid=f"{storage}:backup/vzdump-qemu-201-x.vma.zst")

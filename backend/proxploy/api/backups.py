@@ -443,6 +443,18 @@ def test_restore_route(request: Request, backup_id: int,
     b = _backup_or_404(db, backup_id)
     _refuse_on_pbs(request, b)
     _refuse_a_second_check(db, b.host_id)
+    # Same door restore_backup_route stands behind, and for the same reason: a
+    # host missing the token accepted the job and then failed inside the
+    # handler. `lifecycle` ALONE, unlike /restore, which also names `backup`:
+    # this one creates a guest and never reads the archive itself, PVE does
+    # that, so test_restore_backup asks for exactly one client and asking for
+    # a backup token here would refuse hosts that can run the job perfectly
+    # well. No network call happens: client_for_host raises
+    # CapabilityNotConfigured on a missing credential alone, and main.py turns
+    # that into a 409 naming the capability and where to add it.
+    host = db.get(Host, b.host_id)
+    if host is not None:
+        client_for_host(request.app, db, host, capability="lifecycle")
     return enqueue_and_audit(request, db, user, kind="backup.test_restore",
                              target_type="host", target_id=b.host_id,
                              target_name=b.guest_name or b.volid,

@@ -599,6 +599,38 @@ def test_selfguard_destructive_set_is_unchanged():
     assert DESTRUCTIVE == frozenset({"stop", "shutdown", "restart", "pause"})
 
 
+def test_test_restore_is_refused_before_queueing_when_the_host_has_no_lifecycle_token(
+        tmp_path, csrf_header, bootstrap_admin):
+    """Same door as /restore below, for the same reason.
+
+    A test restore really does create a guest (services/backupjobs.py's
+    test_restore_backup asks for the `lifecycle` client by name), so a host
+    carrying no lifecycle token accepted the job and then failed inside it,
+    which is the exact shape doc 11 open item 3 closed for /restore.
+    """
+    from fastapi.testclient import TestClient
+
+    from proxploy.models import HostCredential, Job
+    from tests.support import make_app
+
+    app = make_app(tmp_path, fake=_fake())
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        ids = _seed(app)
+        with app.state.sessionmaker() as db:
+            (db.query(HostCredential)
+             .filter_by(host_id=ids["host_id"], kind="api_token:lifecycle").delete())
+            db.commit()
+            backup_id = ids["ct_backup"]
+
+        r = c.post(f"/api/v1/backups/{backup_id}/test-restore", json={},
+                   headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        assert "lifecycle" in r.json()["detail"]
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).count() == 0
+
+
 def test_restore_is_refused_before_queueing_when_the_host_has_no_lifecycle_token(
         tmp_path, csrf_header, bootstrap_admin):
     """A restore creates a guest, so it needs Lifecycle, and finding that out
