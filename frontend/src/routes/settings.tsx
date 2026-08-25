@@ -9,6 +9,7 @@ import { useEntitlements } from '../api/hooks'
 import { useSchedules } from '../api/schedules'
 import { actionLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
+import { SIX_COL, TablePager, usePaged } from '../components/TablePager'
 import { ChannelForm } from '../components/ChannelForm'
 import { ChannelEditForm } from '../components/ChannelEditForm'
 import { EventsMatrix } from '../components/EventsMatrix'
@@ -112,6 +113,101 @@ function Card({ title, children, action }: { title: string; children: React.Reac
  * `backup.run` rows with `only`, so scheduled jobs are managed where they are
  * read rather than only in Settings. One card, one set of row actions.
  */
+/** The schedules table, its own component ONLY so it can hold a hook: the
+ *  card above renders it from an Async render prop, and a hook called in there
+ *  would be called conditionally on the loading state.
+ *
+ *  Ten to a page, and the same six column widths the Recent backups table
+ *  uses, because the two sit one above the other on /backups and were sizing
+ *  their columns independently. */
+function ScheduleTable({ rows, editing, setEditing, setAdding, windowsAllowed,
+                        remove, runNow, toggle }: {
+  rows: ScheduleRow[]
+  editing: ScheduleRow | null
+  setEditing: (f: (e: ScheduleRow | null) => ScheduleRow | null) => void
+  setAdding: (v: boolean) => void
+  windowsAllowed: boolean
+  remove: { mutate: (id: number) => void }
+  runNow: { mutate: (id: number) => void; isPending: boolean }
+  toggle: { mutate: (s: ScheduleRow) => void; isPending: boolean }
+}) {
+  const paged = usePaged(rows)
+  return (
+    <>
+                <table className="w-full table-fixed text-left text-[13px]">
+            {SIX_COL}
+            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
+              <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
+              <th>State</th><th /></tr></thead>
+            <tbody>
+              {paged.rows.map((s: ScheduleRow) => (
+                <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
+                  <td className="truncate py-2" title={s.name}>
+                    {s.name}
+                    {s.created_by == null && (
+                      <span className="ml-2 rounded-tile bg-panel-2 px-1.5 py-0.5
+                                       font-mono text-[10px] uppercase text-text-3">
+                        system
+                      </span>
+                    )}
+                  </td>
+                  {/* The job kind read as a name, not as the raw identifier.
+                      Monospace went with it: that face was signalling "this is
+                      a machine value", which stopped being true. The raw kind
+                      is still what the API returns and what the backend keys
+                      on, it is just not what this column is for.
+
+                      actionLabel with no status, which is the whole label:
+                      the labels are neutral now, so "Backup Run" is both what
+                      this schedule runs and what a finished row is called.
+                      jobKindLabel existed only to dodge the past-tense map. */}
+                  <td className="text-[12px] text-text-2">{actionLabel(s.job_kind)}</td>
+                  <td className="truncate font-mono text-[12px] text-text-2"
+                      title={s.cron}>{s.cron}</td>
+                  <td className="font-mono text-[11.5px] text-text-3">
+                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : 'unknown'}
+                    <span className="ml-1">{s.timezone}</span>
+                  </td>
+                  <td className={s.enabled ? 'text-green' : 'text-text-3'}>
+                    {s.enabled ? 'enabled' : 'disabled'}
+                  </td>
+                  <td className="whitespace-nowrap py-2 text-right">
+                    {windowsAllowed && (
+                      <Button size="sm" variant="ghost"
+                              disabled={runNow.isPending}
+                              onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                    )}
+                    <Button size="sm" variant="ghost" className="ml-2"
+                            disabled={toggle.isPending}
+                            onClick={() => toggle.mutate(s)}>
+                      {s.enabled ? 'Disable' : 'Enable'}
+                    </Button>
+                    {windowsAllowed && (
+                      <Button size="sm" variant="ghost" className="ml-2"
+                              onClick={() => {
+                                setAdding(false)
+                                setEditing((e) => (e?.id === s.id ? null : s))
+                              }}>
+                        {editing?.id === s.id ? 'Close' : 'Edit'}
+                      </Button>
+                    )}
+                    <Button size="sm" variant="danger" className="ml-2"
+                            onClick={() => {
+                              if (window.confirm(`Remove schedule "${s.name}"?`)) {
+                                remove.mutate(s.id)
+                              }
+                            }}>Remove</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+      <TablePager page={paged.page} pages={paged.pages} onPage={paged.setPage}
+                  label="Scheduled jobs pages" />
+    </>
+  )
+}
+
 export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
   { only?: string[]; title?: string; canAdd?: boolean } = {}) {
   const qc = useQueryClient()
@@ -173,72 +269,9 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
               {' '}creates one.
             </p>
           ) : (
-          <table className="w-full text-left text-[13px]">
-            <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
-              <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
-              <th>State</th><th /></tr></thead>
-            <tbody>
-              {rows.map(s => (
-                <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
-                  <td className="py-2">
-                    {s.name}
-                    {s.created_by == null && (
-                      <span className="ml-2 rounded-tile bg-panel-2 px-1.5 py-0.5
-                                       font-mono text-[10px] uppercase text-text-3">
-                        system
-                      </span>
-                    )}
-                  </td>
-                  {/* The job kind read as a name, not as the raw identifier.
-                      Monospace went with it: that face was signalling "this is
-                      a machine value", which stopped being true. The raw kind
-                      is still what the API returns and what the backend keys
-                      on, it is just not what this column is for.
-
-                      actionLabel with no status, which is the whole label:
-                      the labels are neutral now, so "Backup Run" is both what
-                      this schedule runs and what a finished row is called.
-                      jobKindLabel existed only to dodge the past-tense map. */}
-                  <td className="text-[12px] text-text-2">{actionLabel(s.job_kind)}</td>
-                  <td className="font-mono text-[12px] text-text-2">{s.cron}</td>
-                  <td className="font-mono text-[11.5px] text-text-3">
-                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : 'unknown'}
-                    <span className="ml-1">{s.timezone}</span>
-                  </td>
-                  <td className={s.enabled ? 'text-green' : 'text-text-3'}>
-                    {s.enabled ? 'enabled' : 'disabled'}
-                  </td>
-                  <td className="py-2 text-right whitespace-nowrap">
-                    {windowsAllowed && (
-                      <Button size="sm" variant="ghost"
-                              disabled={runNow.isPending}
-                              onClick={() => runNow.mutate(s.id)}>Run now</Button>
-                    )}
-                    <Button size="sm" variant="ghost" className="ml-2"
-                            disabled={toggle.isPending}
-                            onClick={() => toggle.mutate(s)}>
-                      {s.enabled ? 'Disable' : 'Enable'}
-                    </Button>
-                    {windowsAllowed && (
-                      <Button size="sm" variant="ghost" className="ml-2"
-                              onClick={() => {
-                                setAdding(false)
-                                setEditing((e) => (e?.id === s.id ? null : s))
-                              }}>
-                        {editing?.id === s.id ? 'Close' : 'Edit'}
-                      </Button>
-                    )}
-                    <Button size="sm" variant="danger" className="ml-2"
-                            onClick={() => {
-                              if (window.confirm(`Remove schedule "${s.name}"?`)) {
-                                remove.mutate(s.id)
-                              }
-                            }}>Remove</Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+<ScheduleTable rows={rows} editing={editing} setEditing={setEditing}
+                         setAdding={setAdding} windowsAllowed={windowsAllowed}
+                         remove={remove} runNow={runNow} toggle={toggle} />
           )
         }}
       </QueryState>

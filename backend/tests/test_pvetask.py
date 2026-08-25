@@ -42,7 +42,7 @@ def _run_probe(tmp_path, fake, *, body, kind="test.await"):
             job = db.get(Job, job_id)
             events = [(e.message, e.stream) for e in db.query(JobEvent)
                       .filter_by(job_id=job_id).order_by(JobEvent.seq)]
-            return SimpleNamespace(status=job.status, error=job.error,
+            return SimpleNamespace(id=job_id, status=job.status, error=job.error,
                                    result=job.result, progress=job.progress_pct,
                                    events=events)
 
@@ -78,11 +78,17 @@ def test_report_progress_false_never_calls_ctx_progress(tmp_path, monkeypatch):
     """
     from proxploy.jobs import backend as jobs_backend
 
-    calls = []
+    # Recorded WITH the job id, and filtered by it below. The spy is patched
+    # onto the class, so it hears every JobContext alive in the process, not
+    # just this handler's: a job left finishing by an earlier test reported its
+    # own 100 into this list and failed the assertion. Seen on CI 2026-08-25,
+    # on a runner where the suite took 1028s against 356s locally, which is
+    # exactly when that overlap gets wide enough to happen.
+    calls: list[tuple[int, int]] = []
     orig = jobs_backend.JobContext.progress
 
     def spy(self, pct):
-        calls.append(pct)
+        calls.append((self.job_id, pct))
         return orig(self, pct)
 
     monkeypatch.setattr(jobs_backend.JobContext, "progress", spy)
@@ -96,7 +102,8 @@ def test_report_progress_false_never_calls_ctx_progress(tmp_path, monkeypatch):
 
     out = _run_probe(tmp_path, fake, body=body)
     assert out.status == "succeeded", out.error
-    assert calls == []  # never reported a percentage while the job ran
+    # This job never reported a percentage while it ran.
+    assert [pct for jid, pct in calls if jid == out.id] == []
     # JobBackend._finish stamps every succeeded job's progress_pct to 100 on
     # its own, a terminal invariant every job kind shares regardless of what
     # it reported while running, not a progress call this handler made.

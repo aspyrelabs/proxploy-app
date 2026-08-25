@@ -10,6 +10,7 @@ import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup,
          useTestRestore, useVerifyBackup, useVerifySweep } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
+import { SIX_COL, TablePager, usePaged } from '../components/TablePager'
 import { useSchedules } from '../api/schedules'
 import { useStorage } from '../api/storage'
 import { BackupLimitsDialog, limitsAcknowledged } from '../components/BackupLimitsDialog'
@@ -491,6 +492,9 @@ function RetentionSection({ data, pending }: {
 export function BackupsPage() {
   const ent = useEntitlements()
   const { data, isError, isPending } = useBackups()
+  // Client-side: the rows are already here (GET /backups sends the newest 200
+  // in one go), so paging them asks the server for nothing.
+  const paged = usePaged(data?.backups ?? [])
   // Whether there is anywhere to back UP to is a question about storage, not
   // about archives. `stats.datastores` (below) is the `backups` cache grouped
   // by store, so it only knows the stores that already hold something.
@@ -681,7 +685,9 @@ export function BackupsPage() {
           <EmptyState title="No backups yet"
             note="Archives Proxmox already holds appear here after the first sync." />
         ) : (
-          <table className="w-full text-left text-[13px]">
+          <>
+          <table className="w-full table-fixed text-left text-[13px]">
+            {SIX_COL}
             <thead>
               <tr className="text-[11px] uppercase text-text-3">
                 <th scope="col" className={th}>Guest</th>
@@ -695,15 +701,16 @@ export function BackupsPage() {
               </tr>
             </thead>
             <tbody>
-              {(data?.backups ?? []).map((b) => (
+              {paged.rows.map((b) => (
                 <tr key={b.id} className="border-t border-line-soft hover:bg-panel-2">
-                  <td className="py-2.5 font-mono">
+                  <td className="truncate py-2.5 font-mono">
                     {b.guest_name ?? 'unknown'}
                     <span className="ml-2 text-[11px] text-text-3">
                       {b.guest_type?.toUpperCase()} {b.guest_vmid}
                     </span>
                   </td>
-                  <td className="py-2.5 text-text-2">{b.host_name ?? 'unknown'}</td>
+                  <td className="truncate py-2.5 text-text-2"
+                      title={b.host_name ?? 'unknown'}>{b.host_name ?? 'unknown'}</td>
                   <td className="py-2.5 text-text-2">{fmtWhen(b.taken_at)}</td>
                   <td className="py-2.5 font-mono text-text-2">{fmtBytes(b.size_bytes)}</td>
                   <td className={`py-2.5 text-[12px] ${
@@ -712,7 +719,7 @@ export function BackupsPage() {
                     {b.verify_state === 'ok' ? 'verified'
                       : b.verify_state === 'failed' ? 'failed' : 'unverified'}
                   </td>
-                  <td className="py-2.5 text-right">
+                  <td className="whitespace-nowrap py-2.5 text-right">
                     <Button variant="ghost" size="sm"
                             disabled={verify.isPending || pbsOwned(b)}
                             title={pbsOwned(b)
@@ -756,6 +763,9 @@ export function BackupsPage() {
               ))}
             </tbody>
           </table>
+          <TablePager page={paged.page} pages={paged.pages} onPage={paged.setPage}
+                      label="Recent backups pages" />
+          </>
         )}
       </div>
 
