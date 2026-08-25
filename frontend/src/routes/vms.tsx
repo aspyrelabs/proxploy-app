@@ -39,8 +39,9 @@ export function VmsPage() {
             {vms ? `${vms.length} VMs · ${running} running` : '…'}
           </div>
         </div>
-        {/* The sort sits with the action rather than above the table: this
-            header is the whole toolbar the page has. */}
+        {/* Far right, with the action: this header is the whole toolbar the
+            page has, and the sort belongs at the end of it rather than beside
+            the heading. */}
         <div className="ml-auto flex items-center gap-3">
           <TableSorter sort={sorted.sort} onSort={sorted.setSort}
                        label="virtual machines" />

@@ -10,9 +10,9 @@ import { useMemo, useState } from 'react'
  * no refetch and no skeleton flash in between.
  */
 
-/** What the two pages can be sorted by. `none` is the default and means the
+/** What the two pages can be sorted by. Name is the default: it is what the
  *  order the API sent, which is what both lists showed before this existed. */
-export type SortKey = 'none' | 'name' | 'host' | 'status'
+export type SortKey = 'name' | 'host' | 'status'
 
 /** The three fields both row shapes carry. Deliberately not AppRow | VmRow:
  *  the sort has no business knowing about ctids, guest agents or update
@@ -50,7 +50,6 @@ const cmpText = (a: string, b: string) =>
 /** Order rows by one key. Exported for the tests and for anything that already
  *  holds the chosen key; pages use the hook below. */
 export function sortRows<T extends Sortable>(rows: T[], sort: SortKey): T[] {
-  if (sort === 'none') return rows
   // A copy, never in place: these arrays come straight out of react-query's
   // cache and nothing is allowed to reorder what other readers are holding.
   return [...rows].sort((a, b) => {
@@ -65,10 +64,10 @@ export function sortRows<T extends Sortable>(rows: T[], sort: SortKey): T[] {
   })
 }
 
-/** Sort a list client-side, holding the chosen key. Starts at `none`, so a
+/** Sort a list client-side, holding the chosen key. Starts on name, so a
  *  page that renders this and changes nothing else looks exactly as it did. */
 export function useSorted<T extends Sortable>(rows: T[]) {
-  const [sort, setSort] = useState<SortKey>('none')
+  const [sort, setSort] = useState<SortKey>('name')
   return { sort, setSort, rows: useMemo(() => sortRows(rows, sort), [rows, sort]) }
 }
 
@@ -76,13 +75,20 @@ export function useSorted<T extends Sortable>(rows: T[]) {
 // make sense in a stacked form: no `w-full`, because this select sits in a
 // row of filters and would eat it, and no `mb-1 block` on the label for the
 // same reason.
-const input = 'rounded-ctl border border-line bg-panel-2 px-3 py-1.5 text-[13px] text-text'
-const label = 'text-[11.5px] uppercase tracking-wide text-text-3'
+// One step down from the form vocabulary it started in (px-3 py-1.5
+// text-[13px]). A filter bar's controls are not the same weight as a dialog's
+// fields: this one sits at the end of a toolbar and should read as a smaller
+// thing than the table it reorders.
+const input = 'rounded-ctl border border-line bg-panel-2 px-2 py-1 text-[11px] text-text'
+// Sentence case, NOT the uppercase of ScheduleForm's `label`: that vocabulary
+// is for a field heading stacked above its input in a form, and shouting one
+// word sideways at a control it sits next to is a different thing entirely.
+const label = 'text-[11px] text-text-3'
 
 const OPTIONS: { key: SortKey; text: string }[] = [
-  // Named for what it is rather than "None": the list is in an order either
-  // way, and this one is the server's.
-  { key: 'none', text: 'Default order' },
+  // No "Default order" entry. The server already hands these back by name, so
+  // it offered a choice that did nothing and named it after a distinction
+  // nobody could see. Name IS the default.
   { key: 'name', text: 'Name' },
   { key: 'host', text: 'Host' },
   { key: 'status', text: 'Status' },

@@ -148,9 +148,12 @@ export function AppsPage() {
         <span className="rounded-full bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-text-2">
           {apps?.length ?? 0} shown
         </span>
-        {/* Last in the row, and outside the filters: host and text NARROW the
-            list, this only reorders what they left. */}
-        <TableSorter sort={sorted.sort} onSort={sorted.setSort} label="apps" />
+        {/* Pushed to the far right by ml-auto, away from the filters: host and
+            text NARROW the list, this only reorders what they left, and the two
+            jobs should not read as one row of controls. */}
+        <div className="ml-auto">
+          <TableSorter sort={sorted.sort} onSort={sorted.setSort} label="apps" />
+        </div>
       </div>
 
       <QueryState query={appsQuery}

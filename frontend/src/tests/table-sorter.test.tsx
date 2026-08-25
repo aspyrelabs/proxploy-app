@@ -3,7 +3,7 @@
  * obvious: status is ordered by urgency rather than by the alphabet, names are
  * compared the way a human reads them, and equal keys never swap places.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { STATUS_ORDER, TableSorter, sortRows, useSorted } from '../components/TableSorter'
@@ -25,11 +25,13 @@ function Harness({ rows }: { rows: ReturnType<typeof row>[] }) {
 }
 
 describe('table sorting', () => {
-  it('leaves the API order alone until an order is chosen', () => {
-    // The whole point of the `none` default: a page that renders the control
-    // and changes nothing else looks exactly as it did before.
-    const rows = [row('zulu'), row('alpha'), row('mike')]
-    expect(sortRows(rows, 'none')).toBe(rows)
+  it('starts on name, with no do-nothing option to pick', () => {
+    // There was a "Default order" entry, and the server already hands these
+    // back by name, so it offered a choice that changed nothing and named it
+    // after a distinction nobody could see. Name IS the default.
+    const { result } = renderHook(() => useSorted([row('zulu'), row('alpha')]))
+    expect(result.current.sort).toBe('name')
+    expect(names(result.current.rows)).toEqual(['alpha', 'zulu'])
   })
 
   it('sorts by name', () => {
@@ -79,12 +81,26 @@ describe('table sorting', () => {
   })
 
   it('reorders the list when the control is used', () => {
-    render(<Harness rows={[row('zulu'), row('alpha'), row('mike')]} />)
+    // Opens on name, so the move under test is name -> something else.
+    render(<Harness rows={[row('zulu', 'h2'), row('alpha', 'h3'), row('mike', 'h1')]} />)
     const select = screen.getByRole('combobox', { name: 'Sort apps' })
     expect(screen.getAllByRole('listitem').map((l) => l.textContent))
-      .toEqual(['zulu', 'alpha', 'mike'])
-    fireEvent.change(select, { target: { value: 'name' } })
-    expect(screen.getAllByRole('listitem').map((l) => l.textContent))
       .toEqual(['alpha', 'mike', 'zulu'])
+    fireEvent.change(select, { target: { value: 'host' } })
+    expect(screen.getAllByRole('listitem').map((l) => l.textContent))
+      .toEqual(['mike', 'zulu', 'alpha'])
+  })
+
+  it('offers no do-nothing entry in the control either', () => {
+    render(<Harness rows={[row('zulu')]} />)
+    expect(screen.getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Name', 'Host', 'Status'])
+  })
+
+  it('labels the control in sentence case, not shouted', () => {
+    // ScheduleForm's uppercase `label` is for a field heading stacked above its
+    // input. One word sideways at a control is a different thing.
+    render(<Harness rows={[row('zulu')]} />)
+    expect(screen.getByText('Sort').className).not.toContain('uppercase')
   })
 })
