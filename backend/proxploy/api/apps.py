@@ -6,7 +6,7 @@ import difflib
 import hashlib
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from proxploy.api import firewall as fwapi
@@ -1078,6 +1078,13 @@ class ReconfigureIn(BaseModel):
     web_port: int | None = None
     web_protocol: str | None = None
     web_path: str | None = None
+    # The tile an app wears when the catalog has no icon for it, which is every
+    # app adopted by hand: `icon_url` is served from the CATALOG entry
+    # (served_icon_url), so an app with no catalog slug can never have one, and
+    # initials plus a colour pair is the icon it CAN have. IconTile already
+    # draws exactly this.
+    icon_initials: str | None = Field(default=None, max_length=3)
+    icon_colors: dict | None = None
 
 
 @router.delete("/{app_id}", dependencies=[Depends(_remove),
@@ -1188,7 +1195,8 @@ def reconfigure_app(request: Request, app_id: int,
                                      "blank to let Proxploy ask the app.")
 
     changed = dict(pve_config)
-    for field in ("name", "web_port", "web_protocol", "web_path"):
+    for field in ("name", "web_port", "web_protocol", "web_path",
+                  "icon_initials", "icon_colors"):
         value = getattr(body, field)
         # web_protocol is the one field a None can mean "clear this" for, so
         # it is applied when the caller sent the key at all rather than when

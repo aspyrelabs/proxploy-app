@@ -133,7 +133,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       // className in the app against its own size and variant: zero sites
       // dropped a class. It is here so the next one cannot go wrong.
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed',
+        // whitespace-nowrap: a label is a phrase, and breaking it mid-phrase
+        // reads as two buttons stacked rather than one. "Set up" came out as
+        // "Set" over "up" in a ButtonGroup with four controls in it; every
+        // two-word label here ("Test restore", "Run now") could do the same in
+        // a row narrow enough, and none of them ever wants to. A caller that
+        // genuinely needs wrapping can still say so in its className, which
+        // now wins (see cn below).
+        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed',
         sizes[size], variants[variant], className)}
       {...props}
     />

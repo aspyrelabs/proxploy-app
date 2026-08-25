@@ -1,7 +1,10 @@
+import { useState } from 'react'
+
 import type { AppRow } from '../api/hooks'
 import { useAppActionGates } from '../api/app-gates'
 import { useOpenWebUi } from '../api/open-web-ui'
 import { AppIconMenu } from './AppIconMenu'
+import { AppSetupDialog } from './AppSetupDialog'
 import { LifecycleActions } from './LifecycleActions'
 import { Button } from './ui/button'
 import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
@@ -40,6 +43,7 @@ import { Icon } from './ui/icon'
 export function AppActionBar({ app }: { app: AppRow }) {
   const gates = useAppActionGates(app.host_id)
   const openWebUi = useOpenWebUi(app)
+  const [settingUp, setSettingUp] = useState(false)
   return (
     <ButtonGroup>
       <LifecycleActions target="app" id={app.id} name={app.name}
@@ -48,6 +52,21 @@ export function AppActionBar({ app }: { app: AppRow }) {
           second, so the button is offered exactly when there is one. Reading
           only the catalog's hid the button on an app whose port the operator
           had set by hand. */}
+      {/* No port known at all: the row used to show NOTHING here, so an adopted
+          app was a row with a gap where the useful button goes and no hint
+          that anything was missing or fixable. The fix lived inside
+          Reconfigure, which is not where anyone notices. Set up asks for the
+          port and the tile, and afterwards this slot is the ordinary Open. */}
+      {(app.web_port ?? app.catalog_port) == null && (
+        <>
+          <ButtonGroupSeparator />
+          <Button variant="ghost" size="sm"
+            title={`${app.name} was adopted, so Proxploy does not know its port`}
+            onClick={(e) => { e.stopPropagation(); setSettingUp(true) }}>
+            Set up
+          </Button>
+        </>
+      )}
       {(app.web_port ?? app.catalog_port) != null && (
         <>
           <ButtonGroupSeparator />
@@ -81,6 +100,7 @@ export function AppActionBar({ app }: { app: AppRow }) {
           <Icon name="more_vert" size={16} />
         </Button>
       </AppIconMenu>
+      {settingUp && <AppSetupDialog app={app} onClose={() => setSettingUp(false)} />}
     </ButtonGroup>
   )
 }

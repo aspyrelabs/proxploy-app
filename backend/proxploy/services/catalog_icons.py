@@ -234,7 +234,7 @@ def _cache_one(row_data: tuple[int, str, str, str | None, str | None, str | None
     return out
 
 
-def sync_icons(db, data_dir: Path) -> dict:
+def sync_icons(db, data_dir: Path, on_progress=None) -> dict:
     """Mirror every catalog icon into the local cache. Best effort throughout.
 
     Returns an outcome dict for the caller to log; it does not raise. Rows are
@@ -242,6 +242,14 @@ def sync_icons(db, data_dir: Path) -> dict:
     names exactly as they were, so the worst case for any row is that it keeps
     serving the icon it already had, or falls back to the upstream URL if it
     never had one.
+
+    `on_progress(done, total)` is called as downloads land, and exists because
+    this is the longest phase of a catalog refresh and used to report nothing
+    at all. A steady-state sync fetches zero files and finishes instantly, but
+    a cold cache fetches every icon: measured at 8.0s of an 11.0s refresh,
+    629 files over 631 requests, with the job's bar frozen at 82% throughout.
+    That is what "stuck at 82%" was. It is called from the POOL's thread, so a
+    caller that touches the event loop has to marshal it itself.
     """
     directory = icon_dir(data_dir)
     try:
@@ -269,8 +277,17 @@ def sync_icons(db, data_dir: Path) -> dict:
         return {"ok": True, "cached": 0, "unchanged": 0, "skipped": skipped,
                 "failed": 0, "requests": 0, "reason": None}
 
+    total = len(pending)
+    done = 0
+    results = []
     with ThreadPoolExecutor(max_workers=_CONCURRENCY) as pool:
-        results = list(pool.map(lambda d: _cache_one(d, directory), pending))
+        # imap-style consumption rather than pool.map's list(), so a count can
+        # be reported as each one lands instead of only when all of them have.
+        for result in pool.map(lambda d: _cache_one(d, directory), pending):
+            results.append(result)
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total)
 
     cached = unchanged = failed = 0
     for result in results:

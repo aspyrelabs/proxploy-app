@@ -562,9 +562,37 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     # here it is best effort and double wrapped: a CDN outage leaves every
     # previously cached file in place and every uncached row falling back to
     # the upstream URL, which is exactly the behaviour before this existed.
+    # The bar moves THROUGH this phase rather than jumping over it. It is the
+    # longest step of a refresh by a wide margin whenever the icon cache is
+    # cold: measured at 8.0s of an 11.0s run, 629 files, and the whole time the
+    # job sat at PCT_POPULARITY_SYNCED with nothing to say. Reported as "stuck
+    # at 82%", which is exactly what it looked like.
+    loop = asyncio.get_running_loop()
+    # Only ever announces a number it has not announced yet. 629 icons into a
+    # ten point span is the same percentage over and over, and every repeat is
+    # a job row write and an SSE frame that tell a reader nothing they did not
+    # already have. This collapses those to at most one per point.
+    last_reported = [PCT_POPULARITY_SYNCED]
+
+    def _report(done: int, total: int) -> None:
+        # Called from the download pool's thread. ctx.progress touches the job
+        # row and the SSE bus, so it is handed back to the loop rather than
+        # invoked here.
+        #
+        # The span stops one short of PCT_ICONS_SYNCED: the phase is not done
+        # when the last download lands, it is done when the rows below have
+        # been written, and that boundary belongs to the single call after this
+        # block. Reporting 92 here would announce the same number twice.
+        span = PCT_ICONS_SYNCED - PCT_POPULARITY_SYNCED - 1
+        pct = PCT_POPULARITY_SYNCED + span * done // max(1, total)
+        if pct <= last_reported[0]:
+            return
+        last_reported[0] = pct
+        loop.call_soon_threadsafe(ctx.progress, pct)
+
     def _sync_icons() -> dict:
         with app.state.sessionmaker() as db:
-            return sync_icons(db, app.state.settings.data_dir)
+            return sync_icons(db, app.state.settings.data_dir, on_progress=_report)
 
     try:
         icons = await asyncio.to_thread(_sync_icons)

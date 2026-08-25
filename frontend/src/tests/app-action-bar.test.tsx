@@ -104,11 +104,15 @@ describe('AppActionBar', () => {
     expect(restart).not.toContain('text-green')
   })
 
-  it('hides Open when there is nothing to point a tab at', () => {
-    // Absent, not disabled: a dead button invites a click that cannot go
-    // anywhere.
+  it('offers Set up instead of Open when no port is known', () => {
+    // It used to show NOTHING in this slot, so an app adopted by hand was a
+    // row with a gap where the useful button goes and no hint that anything
+    // was missing or fixable. The only fix lived inside Reconfigure, which is
+    // not where anyone notices. Open is still absent rather than disabled: a
+    // dead button invites a click that cannot go anywhere. This one goes
+    // somewhere.
     wrap({ ...APP, catalog_port: null })
-    expect(labels()).toEqual(['Stop', 'Restart', 'More actions for Immich'])
+    expect(labels()).toEqual(['Stop', 'Restart', 'Set up', 'More actions for Immich'])
   })
 
   it('opens the guest firewall route from the Firewall menu item', async () => {

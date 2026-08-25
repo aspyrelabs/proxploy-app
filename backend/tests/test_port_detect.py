@@ -142,3 +142,42 @@ def test_the_route_says_it_is_not_accurate(tmp_path, bootstrap_admin):
         body = r.json()
         assert body["accurate"] is False
         assert [p["port"] for p in body["ports"]] == [443, 80]
+
+
+def test_an_adopted_app_can_be_given_a_port_and_a_tile(tmp_path, csrf_header,
+                                                       bootstrap_admin):
+    """The other half of the Set up flow: what it saves.
+
+    icon_url is served from the CATALOG entry, so an app adopted by hand can
+    never have one and the tile it CAN have is initials plus a colour pair.
+    Both were unpatchable, so the dialog had nothing to write to.
+    """
+    from fastapi.testclient import TestClient
+
+    from proxploy.models import App, Host
+    from tests.support import make_app
+
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        with app.state.sessionmaker() as db:
+            host = Host(name="host-01", address="https://10.0.0.7:8006",
+                        node_name="pve1", status="connected")
+            db.add(host)
+            db.commit()
+            row = App(host_id=host.id, ctid=950, name="Proxploy-Test",
+                      slug="adopted-1-950")
+            db.add(row)
+            db.commit()
+            app_id = row.id
+
+        r = c.patch(f"/api/v1/apps/{app_id}",
+                    json={"web_port": 443, "icon_initials": "PT",
+                          "icon_colors": {"c1": "#F5B544", "c2": "#E79126"}},
+                    headers=csrf_header(c))
+        assert r.status_code == 200, r.text
+        with app.state.sessionmaker() as db:
+            saved = db.get(App, app_id)
+            assert saved.web_port == 443
+            assert saved.icon_initials == "PT"
+            assert saved.icon_colors == {"c1": "#F5B544", "c2": "#E79126"}
