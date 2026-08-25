@@ -96,7 +96,13 @@ class _StorageContentNS:
             raise ConnectionError("fake PVE unreachable")
         self._owner.last_content_call = (self._node, self._storage,
                                          kwargs.get("content"))
-        rows = self._owner.content_by_storage.get(self._storage, [])
+        # Per-node first, falling back to the storage-wide table. A SHARED
+        # datastore answers the same either way, which is what content_by_storage
+        # models; a node-LOCAL one holds different files per node, and that is
+        # the only case that needs the pair key.
+        rows = self._owner.content_by_node_storage.get(
+            (self._node, self._storage),
+            self._owner.content_by_storage.get(self._storage, []))
         want = kwargs.get("content")
         return [r for r in rows if not want or r.get("content") == want]
 
@@ -834,6 +840,10 @@ class FakePVE:
         self.storages_by_node: dict[str, list[dict]] = {}
         self.storage_status_response: dict = {}
         self.content_by_storage: dict[str, list[dict]] = {}
+        # (node, storage) -> rows, for a node-local store whose contents differ
+        # per node. Empty by default, so every existing test keeps answering
+        # out of content_by_storage above.
+        self.content_by_node_storage: dict[tuple[str, str], list[dict]] = {}
         # per-storage failure injection (Phase 6 Task 8 review): a storage
         # name in here raises on .content.get() while its siblings succeed, 
         # unlike `fail`, which is all-or-nothing across the whole fake.

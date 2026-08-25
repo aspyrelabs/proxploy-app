@@ -756,6 +756,14 @@ class Backup(TimestampMixin, Base):
     # PBS archive on the host. sync_host_backups is handed the type by PVE
     # anyway, so it writes it down.
     storage_type: Mapped[str | None] = mapped_column(Text)
+    # Which node of the host's cluster this archive is ON, which is not always
+    # the node Proxploy is enrolled at. A shared datastore (PBS, NFS, CephFS)
+    # answers identically from every node and records the enrolled one; a
+    # node-LOCAL dump dir holds different files per node under the SAME volid,
+    # so the node is what tells those apart and is part of the key below.
+    # It is also the node verify and restore have to run on: reading pve2's
+    # archive on pve1 finds nothing.
+    node: Mapped[str | None] = mapped_column(Text)
     # When Proxploy last checked this archive itself (services/backupjobs.py's
     # backup.verify / backup.test_restore). `verify_state` holds the verdict
     # whoever produced it: PBS writes it through the sync when PBS is the
@@ -764,7 +772,11 @@ class Backup(TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     __table_args__ = (
-        UniqueConstraint("host_id", "volid", name="ux_backups"),
+        # (host, node, volid), not (host, volid): `local:backup/vzdump-lxc-110
+        # -a.tar.zst` is a valid volid on every node of a cluster and means a
+        # different file on each, so the pair collided and one node's archives
+        # silently replaced the other's.
+        UniqueConstraint("host_id", "node", "volid", name="ux_backups"),
         Index("ix_backups_guest", "guest_type", "guest_vmid"),
         # api/backups.py reads the newest rows with ORDER BY taken_at DESC
         # LIMIT. Without this the limit bounds the response and not the work:

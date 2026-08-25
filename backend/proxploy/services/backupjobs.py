@@ -102,46 +102,84 @@ def sync_host_backups(app, host_id: int) -> dict:
             client = client_for_host(app, db, host, capability="backup")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
-        node = host.node_name or ""
-        # ponytail: one node per Host row. Shared datastores (PBS, NFS, CephFS)
-        # report identically from any node, so this is complete for them;
-        # node-local vzdump archives on a sibling node of a cluster are missed
-        # until Host models its nodes. Upgrade path: iterate the poller's
-        # snapshot node list instead of this single name.
+        enrolled = host.node_name or ""
+        # EVERY node of the cluster, not just the enrolled one. A node-local
+        # dump dir holds its own archives, and reading one node meant a
+        # multi-node user without a shared datastore simply never saw the rest
+        # of their backups. The node list is the poller's, which is the upgrade
+        # path this used to name as a ponytail note.
+        #
+        # Falling back to the enrolled node alone when there is no snapshot
+        # yet: before the first poll there is nothing to iterate, and a backup
+        # list that stayed empty until a poll landed would be a worse bug than
+        # the one this fixes.
+        snap = app.state.poller.snapshots.get(host_id)
+        nodes = [n.get("node") for n in (snap.nodes if snap else []) if n.get("node")]
+        if not nodes:
+            nodes = [enrolled]
         shared_here = _syncs_shared_stores(db, host)
         rows: list[dict] = []
-        for st in client.storages(node):
-            if not _has_backup_content(st):
-                continue
-            # A shared datastore reports the SAME archive from every node of the
-            # cluster, and each enrolled node is its own Host row with its own
-            # `backups` rows, so one backup of one VM was listed once per node.
-            # Only the cluster's canonical host mirrors those; a node-LOCAL
-            # store is still synced by every host, because there the same volid
-            # on two nodes really is two different files.
-            if st.get("shared") and not shared_here:
-                continue
-            name = st.get("storage")
-            for item in client.storage_content(node, name, content="backup"):
-                # `_type` rides along with `_storage`: PVE hands both back
-                # here, and _refuse_on_pbs / the sweep otherwise have to ask
-                # the poller, which has nothing to say before the first poll.
-                rows.append({"_storage": name, "_type": st.get("type"), **item})
+        # A shared store answers identically from every node, so it is read
+        # ONCE and recorded against the enrolled node. Reading it per node
+        # would turn one archive into one row per node, which is the same
+        # double count _syncs_shared_stores exists to prevent one level up.
+        shared_done: set[str] = set()
+        for node in nodes:
+            for st in client.storages(node):
+                if not _has_backup_content(st):
+                    continue
+                name = st.get("storage")
+                # Only the cluster's canonical host mirrors a shared store;
+                # a node-LOCAL store is synced by every host, because there the
+                # same volid on two nodes really is two different files.
+                if st.get("shared"):
+                    if not shared_here or name in shared_done:
+                        continue
+                    shared_done.add(name)
+                for item in client.storage_content(node, name, content="backup"):
+                    # `_type` rides along with `_storage`: PVE hands both back
+                    # here, and _refuse_on_pbs / the sweep otherwise have to ask
+                    # the poller, which has nothing to say before the first poll.
+                    # `_node` is what tells two identical volids apart.
+                    rows.append({"_storage": name, "_type": st.get("type"),
+                                 "_node": enrolled if st.get("shared") else node,
+                                 **item})
 
         ct_names = {a.ctid: a.name for a in db.query(App).filter_by(host_id=host_id)}
         vm_names = {v.vmid: v.name for v in db.query(Vm).filter_by(host_id=host_id)}
-        existing = {b.volid: b for b in db.query(Backup).filter_by(host_id=host_id)}
+        # Keyed on (node, volid), matching ux_backups: the same volid on two
+        # nodes of a cluster is two different files on a node-local store.
+        prior = db.query(Backup).filter_by(host_id=host_id).all()
+        existing = {(b.node, b.volid): b for b in prior}
+        # Rows written before `node` existed carry NULL, and matching them on
+        # the pair alone would MISS, build a second row for the same archive,
+        # and drop the first: every verdict this install had recorded would go
+        # with it on the first sync after upgrade. Adopted below instead, which
+        # is the whole backfill the migration deliberately does not do.
+        unplaced = {b.volid: b for b in prior if b.node is None}
         now = utcnow()
-        seen: set[str] = set()
+        seen: set[tuple[str | None, str]] = set()
         for item in rows:
             volid = item.get("volid")
-            if not volid or volid in seen:
+            key = (item.get("_node"), volid)
+            if not volid or key in seen:
                 continue
-            seen.add(volid)
-            b = existing.get(volid)
+            seen.add(key)
+            b = existing.get(key)
             if b is None:
-                b = Backup(host_id=host_id, volid=volid)  # ux_backups(host_id, volid)
-                db.add(b)
+                b = unplaced.pop(volid, None)
+                if b is not None:
+                    # Same archive, now placed. Its verify_state and checked_at
+                    # come with it. The OLD (None, volid) entry has to go from
+                    # `existing` as well: the drop loop below deletes every key
+                    # it did not see, and a row adopted under a new key would
+                    # be deleted under its old one.
+                    existing.pop((None, volid), None)
+                    b.node = item.get("_node")
+                    existing[key] = b
+                else:
+                    b = Backup(host_id=host_id, volid=volid, node=item.get("_node"))
+                    db.add(b)
             gtype, gvmid = parse_volid(volid)
             b.storage = item.get("_storage")
             b.storage_type = item.get("_type")
@@ -161,8 +199,8 @@ def sync_host_backups(app, host_id: int) -> dict:
             b.notes = item.get("notes")
             b.synced_at = now
         dropped = 0
-        for volid, b in existing.items():
-            if volid not in seen:
+        for key, b in existing.items():
+            if key not in seen:
                 db.delete(b)  # gone upstream = gone here; the mirror is droppable
                 dropped += 1
         db.commit()
@@ -264,9 +302,15 @@ def _backup_target(app, backup_id: int):
             raise JobFailed(f"host {b.host_id} not found")
         info = {"host_id": b.host_id, "volid": b.volid, "storage": b.storage,
                 "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
-                "guest_name": b.guest_name}
+                "guest_name": b.guest_name, "node": b.node or host.node_name or ""}
         try:
-            return client_for_host(app, db, host, capability="backup"), host.node_name or "", info
+            # The ARCHIVE's node, not the host's. A node-local archive on a
+            # sibling of the enrolled node is only readable there: `pvesm path`
+            # on the wrong node finds nothing, and a restore would build the
+            # guest somewhere else entirely. Falls back to the enrolled node
+            # for a row synced before `node` existed.
+            return (client_for_host(app, db, host, capability="backup"),
+                    info["node"], info)
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
 
