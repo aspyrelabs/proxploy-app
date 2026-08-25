@@ -52,6 +52,48 @@ def test_verify_enqueues_a_job_for_an_archive_on_a_plain_store(tmp_path, csrf_he
             assert job.target_id == hid
 
 
+def test_a_pbs_archive_is_refused_before_the_first_poll_lands(tmp_path, csrf_header,
+                                                              bootstrap_admin):
+    """The refusal must not depend on having polled yet.
+
+    _refuse_on_pbs read the storage type out of poller.snapshots, so between
+    boot and the first poll there is no snapshot, every archive looks like a
+    plain store, and a PBS archive is accepted for a full read-back over the
+    network. The scheduler starts in that same window, so a sweep due at boot
+    would do it to every PBS archive on the host. The type is recorded on the
+    row at sync time instead, where PVE already told us.
+    """
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, bid = _seed(app, storage="pbs-ds")
+        with app.state.sessionmaker() as db:
+            db.get(Backup, bid).storage_type = "pbs"
+            db.commit()
+        # Deliberately NO _snapshot(): this is the cold window.
+        assert not app.state.poller.snapshots.get(hid)
+        r = c.post(f"/api/v1/backups/{bid}/verify", headers=csrf_header(c))
+        assert r.status_code == 409, r.text
+        assert "Backup Server" in r.json()["detail"]
+        with app.state.sessionmaker() as db:
+            assert db.query(Job).filter_by(kind="backup.verify").count() == 0
+
+
+def test_a_plain_archive_is_still_offered_before_the_first_poll(tmp_path, csrf_header,
+                                                                bootstrap_admin):
+    """The cold window must not refuse everything, only what PBS owns."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        hid, bid = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.get(Backup, bid).storage_type = "nfs"
+            db.commit()
+        assert not app.state.poller.snapshots.get(hid)
+        r = c.post(f"/api/v1/backups/{bid}/verify", headers=csrf_header(c))
+        assert r.status_code == 202, r.text
+
+
 def test_verify_404s_on_an_archive_that_is_gone(tmp_path, csrf_header, bootstrap_admin):
     app = make_app(tmp_path)
     with TestClient(app) as c:

@@ -282,6 +282,38 @@ def test_the_sweep_counts_out_loud_in_the_right_number(tmp_path):
     assert "3 archives have never been verified, reading them back now" in several
 
 
+def test_the_sweep_leaves_pbs_alone_before_the_first_poll_too(tmp_path):
+    """The sweep filtered PBS out using poller.snapshots, which is empty
+    between boot and the first poll, and the scheduler starts in that same
+    window. A sweep due at boot would therefore read back every PBS archive on
+    the host over the network, which is the hours of redundant work the filter
+    exists to avoid. It reads the row's own recorded type now.
+    """
+    from proxploy.services.backupjobs import verify_backup
+    from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
+    from tests.support import make_job_app
+
+    async def run():
+        ssh = FakeSSHConnection(host_key_fingerprint="SHA256:abc", stdout_lines=["ok"],
+                                stderr_lines=[], exit_status=0)
+        app = make_job_app(tmp_path, ssh_factory=make_fake_connect_factory(ssh))
+        hid, seeded = _seed(app)
+        with app.state.sessionmaker() as db:
+            db.get(Backup, seeded).storage_type = "nfs"
+            db.add(Backup(host_id=hid, volid="pbs-ds:backup/ct/150/x", storage="pbs-ds",
+                          guest_type="ct", storage_type="pbs"))
+            db.commit()
+        # No snapshot seeded at all: this is the cold window.
+        assert not app.state.poller.snapshots.get(hid)
+        out = await verify_backup(_ctx(app), {"host_id": hid, "max": 10})
+        assert out["checked"] == 1          # the nfs one only
+        with app.state.sessionmaker() as db:
+            pbs = db.query(Backup).filter_by(storage="pbs-ds").one()
+            assert pbs.checked_at is None   # never touched
+
+    asyncio.run(run())
+
+
 def test_the_sweep_leaves_pbs_archives_to_pbs(tmp_path):
     """PBS verifies its own against stored digests, on its own schedule. The
     per-archive routes refuse those at the door; a schedule has no door."""

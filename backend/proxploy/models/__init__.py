@@ -748,6 +748,14 @@ class Backup(TimestampMixin, Base):
     taken_at: Mapped[datetime | None] = mapped_column(DateTime)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     verify_state: Mapped[str | None] = mapped_column(Text)
+    # The datastore's PVE type ("pbs", "nfs", "dir", ...) as it was when this
+    # archive was last synced. Recorded rather than looked up because the
+    # lookup used to be poller.snapshots, which is empty between boot and the
+    # first poll: api/backups.py::_refuse_on_pbs then offered a full read-back
+    # of an archive PBS already verifies, and the sweep did the same to every
+    # PBS archive on the host. sync_host_backups is handed the type by PVE
+    # anyway, so it writes it down.
+    storage_type: Mapped[str | None] = mapped_column(Text)
     # When Proxploy last checked this archive itself (services/backupjobs.py's
     # backup.verify / backup.test_restore). `verify_state` holds the verdict
     # whoever produced it: PBS writes it through the sync when PBS is the

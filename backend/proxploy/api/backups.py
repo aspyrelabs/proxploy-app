@@ -380,11 +380,23 @@ def _refuse_on_pbs(request: Request, b: Backup) -> None:
     knows less, so offering it there would only overwrite a better verdict with
     a worse one. Per archive, not per install: PBS for the important guests and
     an NFS share for the rest is an ordinary layout."""
+    refuse = lambda: HTTPException(  # noqa: E731
+        409, "Proxmox Backup Server checks this archive itself, on its own "
+             "schedule.")
+    # The row's own type first. This used to read poller.snapshots only, which
+    # is empty between boot and the first poll, so in that window every archive
+    # looked like a plain store and a PBS one was accepted for a full
+    # read-back. sync_host_backups records the type PVE gave it.
+    if b.storage_type:
+        if b.storage_type == "pbs":
+            raise refuse()
+        return
+    # NULL means synced before that column existed; the snapshot is the only
+    # thing that knows, until the next sync fills the row in.
     snap = request.app.state.poller.snapshots.get(b.host_id)
     for st in (snap.storage if snap else []):
         if st.get("storage") == b.storage and (st.get("type") or "") == "pbs":
-            raise HTTPException(409, "Proxmox Backup Server checks this archive "
-                                     "itself, on its own schedule.")
+            raise refuse()
 
 
 def _refuse_a_second_check(db, host_id: int) -> None:

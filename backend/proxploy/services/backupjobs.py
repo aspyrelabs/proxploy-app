@@ -18,6 +18,7 @@ import shlex
 from datetime import datetime, timezone
 
 from sqlalchemy import func
+from sqlalchemy import or_ as sa_or
 
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
@@ -121,7 +122,10 @@ def sync_host_backups(app, host_id: int) -> dict:
                 continue
             name = st.get("storage")
             for item in client.storage_content(node, name, content="backup"):
-                rows.append({"_storage": name, **item})
+                # `_type` rides along with `_storage`: PVE hands both back
+                # here, and _refuse_on_pbs / the sweep otherwise have to ask
+                # the poller, which has nothing to say before the first poll.
+                rows.append({"_storage": name, "_type": st.get("type"), **item})
 
         ct_names = {a.ctid: a.name for a in db.query(App).filter_by(host_id=host_id)}
         vm_names = {v.vmid: v.name for v in db.query(Vm).filter_by(host_id=host_id)}
@@ -139,6 +143,7 @@ def sync_host_backups(app, host_id: int) -> dict:
                 db.add(b)
             gtype, gvmid = parse_volid(volid)
             b.storage = item.get("_storage")
+            b.storage_type = item.get("_type")
             b.guest_type, b.guest_vmid = gtype, gvmid
             b.guest_name = ct_names.get(gvmid) if gtype == "ct" else vm_names.get(gvmid)
             b.taken_at = _taken_at(item.get("ctime"))
@@ -387,12 +392,22 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
     # spend hours re-answering a question PBS has already answered better. The
     # per-archive routes refuse the same thing at the door
     # (api/backups.py::_refuse_on_pbs); a schedule has no door, so it filters.
+    # The snapshot is the FALLBACK now, not the source. It is empty between
+    # boot and the first poll, and the scheduler starts in that same window, so
+    # a sweep due at boot used to read back every PBS archive on the host: the
+    # exact hours of redundant work this filter exists to prevent. Rows carry
+    # the type sync_host_backups was given by PVE; the snapshot only still
+    # covers rows synced before that column existed.
     snap = app.state.poller.snapshots.get(host_id)
     pbs_stores = {st.get("storage") for st in (snap.storage if snap else [])
                   if (st.get("type") or "") == "pbs"}
     with app.state.sessionmaker() as db:
         q = (db.query(Backup.id, Backup.storage)
-             .filter(Backup.host_id == host_id, Backup.checked_at.is_(None)))
+             .filter(Backup.host_id == host_id, Backup.checked_at.is_(None),
+                     # NULL storage_type is "not known to be PBS", which is what
+                     # a pre-migration row is until its next sync.
+                     sa_or(Backup.storage_type.is_(None),
+                           Backup.storage_type != "pbs")))
         if want_storage:
             q = q.filter(Backup.storage == want_storage)
         if pbs_stores:
