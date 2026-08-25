@@ -297,6 +297,90 @@ case "$SHAPE" in
   systemd|lxc) ;;
   *) die "--shape must be systemd or lxc, got: $SHAPE" ;;
 esac
+# --- 0. platform ------------------------------------------------------------
+# Refused UP FRONT, not discovered halfway. There was no check of either kind:
+# the script installed whatever `python3` the distro shipped and only found out
+# when pip refused the wheel, several minutes and one system user in, with an
+# error about requires-python that names no fix. An Ubuntu 22.04 box (Python
+# 3.10) is the case that made this worth writing; it is still widely deployed.
+#
+# The PYTHON check is the authoritative one, because it is the actual
+# requirement (backend/pyproject.toml: requires-python = ">=3.11"). The OS
+# check exists to say so earlier and in the operator's own vocabulary.
+#
+# Version FLOORS rather than a list of blessed releases: a hardcoded allowlist
+# has to be edited every time Debian or Ubuntu ships, and the edit is exactly
+# what nobody remembers to do. Debian 12 and Ubuntu 24.04 are the oldest
+# releases carrying Python 3.11 or newer, so anything at or above them passes
+# and anything newer keeps passing without a code change.
+#
+#   Debian 12 bookworm  3.11    oldest supported
+#   Debian 13 trixie    3.13
+#   Ubuntu 24.04 LTS    3.12    oldest supported
+#   Ubuntu 25.04        3.13
+#   Ubuntu 26.04 LTS    3.14
+#   Debian 11           3.9     refused
+#   Ubuntu 22.04 LTS    3.10    refused
+PY_MIN_MAJOR=3
+PY_MIN_MINOR=11
+
+check_platform() {
+  [ -r /etc/os-release ] || die "cannot read /etc/os-release, so this system\
+ cannot be identified. Proxploy installs on Debian 12+ or Ubuntu 24.04+."
+  # Sourced in a SUBSHELL, never into this scope. /etc/os-release defines
+  # VERSION ("12 (bookworm)" on Debian 12), and this script already has a
+  # VERSION of its own: the Proxploy release being installed, which names the
+  # directory under /opt/proxploy/releases and the `current` symlink. Sourcing
+  # it directly overwrote that, so the installer announced "Proxploy 12
+  # (bookworm) installed", unpacked into a directory called `12 (bookworm)`
+  # and pointed `current` at it, orphaning the release it had just verified.
+  # Caught on a real Debian 12 box; nothing in the harness would have seen it.
+  local os_line id ver like major
+  # shellcheck disable=SC1091  # read at runtime on the target, not in this repo
+  os_line=$(. /etc/os-release 2>/dev/null \
+            && printf '%s\t%s\t%s' "${ID:-unknown}" "${VERSION_ID:-0}" "${ID_LIKE:-}")
+  IFS="$(printf '\t')" read -r id ver like <<EOS
+$os_line
+EOS
+  major="${ver%%.*}"
+
+  case "$id" in
+    debian)
+      [ "$major" -ge 12 ] 2>/dev/null || die \
+        "Debian $ver is too old: Proxploy needs Python 3.11 or newer and this\
+ release ships an older one. Debian 12 (bookworm) or newer." ;;
+    ubuntu)
+      # Compared as a number so 24.04 < 25.04 < 26.04 sorts correctly and a
+      # string compare cannot get 9.10 vs 24.04 wrong.
+      awk -v v="$ver" 'BEGIN { exit !(v + 0 >= 24.04) }' || die \
+        "Ubuntu $ver is too old: Proxploy needs Python 3.11 or newer and this\
+ release ships an older one. Ubuntu 24.04 LTS or newer." ;;
+    *)
+      # Not refused: this installer only needs apt and systemd, and a Debian
+      # derivative that has both may well be fine. The Python check below is
+      # the real gate, so say what is unverified and carry on rather than
+      # blocking someone whose system works.
+      case "$like" in
+        *debian*|*ubuntu*) log "note: $id $ver is not a tested platform;\
+ continuing because it is Debian-based" ;;
+        *) die "$id is not supported: Proxploy installs on Debian 12+ or\
+ Ubuntu 24.04+, which is what its apt and systemd steps assume." ;;
+      esac ;;
+  esac
+
+  command -v python3 >/dev/null 2>&1 || die \
+    "python3 is not installed, and Proxploy needs $PY_MIN_MAJOR.$PY_MIN_MINOR\
+ or newer."
+  # Asked of the interpreter rather than parsed out of --version: the string
+  # format is not a promise and this is the number that actually decides.
+  python3 - "$PY_MIN_MAJOR" "$PY_MIN_MINOR" <<'EOF' || die \
+    "python3 $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')\
+ is too old: Proxploy needs 3.11 or newer. Debian 12+ or Ubuntu 24.04+ ships one."
+import sys
+sys.exit(0 if sys.version_info[:2] >= (int(sys.argv[1]), int(sys.argv[2])) else 1)
+EOF
+}
+
 resolve_version
 if [ -z "$PUBKEY" ]; then
   # No bundled default existed before this: RELEASE_PUBKEY_PEM (near the
@@ -311,6 +395,7 @@ if [ "$DRY_PARSE" -eq 1 ]; then
 fi
 
 need_root
+check_platform
 
 # --- 1. OS dependencies -----------------------------------------------------
 # Idempotent: apt/dpkg already skip installed packages. sqlite3 is required
