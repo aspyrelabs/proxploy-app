@@ -43,6 +43,8 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 
+from pathlib import Path
+
 import pytest
 
 from proxploy.config import Settings
@@ -95,6 +97,17 @@ def rig():
     """(host, monitoring client, lifecycle client, monitoring token, lifecycle
     token) from the first enrolled host's own stored tokens."""
     s = Settings()
+    # Before the SecretStore below, not after: these two modules drive the
+    # developer's OWN cluster, read out of the dev database, and a machine with
+    # no data/ dir is simply not that machine. Opening the key file first threw
+    # FileNotFoundError('data/master.key') out of fixture setup, which is an
+    # ERROR rather than a skip, so the whole pve-integration job went red on
+    # every runner while its own step is named "skips cleanly when secrets are
+    # absent". Seen on CI 2026-08-25: 90 errors, 9 skipped, nothing actually
+    # run against hardware.
+    if not Path(s.master_key_file).exists():
+        pytest.skip("no dev database on this machine: these drive the "
+                    "developer's own enrolled cluster, not a fixture")
     db = make_sessionmaker(make_engine(s))()
     store = SecretStore(s.master_key_file)
     host = db.query(Host).first()

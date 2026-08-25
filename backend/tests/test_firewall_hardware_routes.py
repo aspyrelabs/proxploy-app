@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -91,6 +93,17 @@ def rig(tmp_path_factory):
     from tests.support import make_app
 
     s = Settings()
+    # Before the SecretStore below, not after: these two modules drive the
+    # developer's OWN cluster, read out of the dev database, and a machine with
+    # no data/ dir is simply not that machine. Opening the key file first threw
+    # FileNotFoundError('data/master.key') out of fixture setup, which is an
+    # ERROR rather than a skip, so the whole pve-integration job went red on
+    # every runner while its own step is named "skips cleanly when secrets are
+    # absent". Seen on CI 2026-08-25: 90 errors, 9 skipped, nothing actually
+    # run against hardware.
+    if not Path(s.master_key_file).exists():
+        pytest.skip("no dev database on this machine: these drive the "
+                    "developer's own enrolled cluster, not a fixture")
     dev = make_sessionmaker(make_engine(s))()
     store = SecretStore(s.master_key_file)
     src = dev.query(Host).first()
