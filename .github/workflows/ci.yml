@@ -21,10 +21,18 @@ name: ci
 # 14 tests reported "did not run" rather than failing. Six separate drifts had
 # piled up by the time anyone looked.
 #
-# The weekly schedule is still gone, so upstream and licensing drift is still
-# only checked when someone runs this by hand.
+# The weekly schedule is back as of 2026-08-25, at the cron it had before
+# 051b04d removed it. Hand-running was the plan, and for 16 days nobody did:
+# between 2026-08-09 and 2026-08-25 the six dispatch-only jobs never ran once,
+# and the first dispatch after that gap found pve-integration erroring on
+# EVERY runner (a fixture opening the dev master key before its own skip
+# guard). A job that is always red stops carrying information, which is how
+# that survived in plain sight. A schedule event is not a push, so this runs
+# the whole workflow, licence audit and disposable-PVE matrix included, which
+# is the drift check that was the point of it.
 on:
   workflow_dispatch:
+  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
   push:
     branches: [main]
     paths:
