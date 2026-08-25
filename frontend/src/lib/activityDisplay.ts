@@ -280,6 +280,9 @@ export const STATUS_LABEL: Record<string, string> = {
   // being acted on right now and its real status is not known until the
   // action reports back.
   pending: 'Working',
+  // An app being uninstalled. Its own word rather than "Working", because a
+  // removal is the one action that ends with the row gone.
+  removing: 'Removing',
   queued: 'Waiting',
   running: 'Running',
   succeeded: 'Done',

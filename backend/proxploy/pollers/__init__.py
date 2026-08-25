@@ -23,6 +23,7 @@ from proxploy.services.hostclient import (capability_gaps,
                                           cluster_identity_from,
                                           cluster_member_count,
                                           cluster_quorate)
+from proxploy.services.lifecycle import busy_guests
 from proxploy.services.metrics import write_samples
 from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError,
                                        routable_addresses)
@@ -51,26 +52,8 @@ CAPABILITY_GAP_INTERVAL_S = 1800
 # take six times the rows for the same 48h of raw retention to draw the same
 # lines. The UI's live numbers come off the snapshot and the cached columns,
 # which DO refresh every cycle; only the recorded history stays on 30s.
-# The lifecycle verbs, as job kinds ("app.stop", "vm.restart", ...). A guest
-# with one of these in flight is mid-action, and PVE still reports the OLD
-# status the whole time a stop is running: writing that back flips the pill
-# from Working to Running and then to Stopped a moment later. Reported on
-# hardware 2026-08-25 against anytype-server. It was always possible and
-# became easy to hit at a 5s cycle, where a poll almost always lands inside
-# the action rather than after it.
-# How long a lifecycle job may hold its guest's status before the poller takes
-# it back. A hold that outlives its job would freeze a guest for ever on a
-# worker that died mid-action, so it is a ceiling and not a promise: past it
-# Proxmox is the truth again whatever the job row still claims.
-LIFECYCLE_HOLD_S = 300
-
-LIFECYCLE_KINDS = frozenset(
-    f"{t}.{v}" for t in ("app", "vm")
-    for v in ("start", "stop", "restart", "shutdown", "pause", "resume"))
-
 RRD_INTERVAL_S = 60
 METRIC_SAMPLE_INTERVAL_S = 30
-
 
 log = logging.getLogger(__name__)
 
@@ -565,13 +548,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     # started_at is NULL while a job is still queued, which is the moment it
     # most deserves the hold, so a missing stamp counts as fresh and only a job
     # that has actually been running past the ceiling loses it.
-    stale_before = now - timedelta(seconds=LIFECYCLE_HOLD_S)
-    busy = {(t, i) for t, i in db.query(Job.target_type, Job.target_id)
-            .filter(Job.kind.in_(LIFECYCLE_KINDS),
-                    Job.status.in_(("queued", "running")),
-                    Job.target_id.isnot(None),
-                    sa_or(Job.started_at.is_(None),
-                          Job.started_at >= stale_before)).all()}
+    busy = busy_guests(db, now)
     # `client` is the only argument that lets this function make a PVE call of
     # its own, and it is optional so the bulk-read-in, caches-out contract still
     # holds without one: no client means addresses are simply not refreshed

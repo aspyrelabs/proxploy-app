@@ -23,6 +23,49 @@ from proxploy.services.pvetask import TASK_POLL_S, TASK_TIMEOUT_S, await_task
 APP_ACTIONS = ("start", "stop", "restart", "shutdown")
 VM_ACTIONS = ("start", "stop", "restart", "shutdown", "pause", "resume")
 
+# Everything that makes a guest's status untrustworthy while it runs, as job
+# kinds ("app.stop", "vm.restart", "app.uninstall"). Proxmox reports the OLD
+# status for as long as one of these is actually running, so both the poller
+# and the list routes have to know to stop answering for that guest.
+LIFECYCLE_KINDS = frozenset(
+    [f"app.{v}" for v in APP_ACTIONS] + [f"vm.{v}" for v in VM_ACTIONS]
+    # Removal belongs here for the same reason: the container is still there,
+    # and still reads `running`, right up until it is not there at all.
+    + ["app.uninstall"])
+
+# How long one of those may hold its guest before the truth is Proxmox's
+# again. A hold that outlives its job would freeze a guest for ever on a
+# worker that died mid-action, so this is a ceiling, not a promise.
+LIFECYCLE_HOLD_S = 300
+
+
+def busy_guests(db, now):
+    """{(target_type, target_id): status} for guests with a job in flight.
+
+    The value is what the guest should READ as, not the job kind: "removing"
+    for an uninstall, "pending" for everything else. A removal deserves its own
+    word because it is the one that ends with the row gone, and "Working" on a
+    thing that is about to disappear tells you less than "Removing" does.
+
+    One query, for a whole list or a whole poll cycle. `started_at` is NULL
+    while a job is still queued, which is the moment it most deserves the
+    hold, so a missing stamp counts as fresh.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import or_ as sa_or
+
+    from proxploy.models import Job
+
+    stale_before = now - timedelta(seconds=LIFECYCLE_HOLD_S)
+    return {(t, i): ("removing" if k == "app.uninstall" else "pending")
+            for t, i, k in db.query(Job.target_type, Job.target_id, Job.kind)
+            .filter(Job.kind.in_(LIFECYCLE_KINDS),
+                    Job.status.in_(("queued", "running")),
+                    Job.target_id.isnot(None),
+                    sa_or(Job.started_at.is_(None),
+                          Job.started_at >= stale_before)).all()}
+
 PVE_VERB = {
     "start": "start",
     "stop": "stop",          # hard kill

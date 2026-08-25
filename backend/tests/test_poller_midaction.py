@@ -14,7 +14,7 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from proxploy.models import App, Host, HostCredential, Job, Vm, utcnow
-from proxploy.pollers import LIFECYCLE_HOLD_S
+from proxploy.services.lifecycle import LIFECYCLE_HOLD_S
 from tests.fakes.pve import FakePVE
 from tests.support import make_app
 

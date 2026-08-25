@@ -17,13 +17,13 @@ from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
                                    OptionsIn, RuleIn, RulePatch, RulePos)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
-from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso
+from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso, utcnow
 from proxploy.services import migrate as migrate_service
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
 from proxploy.services.catalog_icons import served_icon_url
 from proxploy.services.hostclient import client_for_host
-from proxploy.services.lifecycle import APP_ACTIONS, job_kind
+from proxploy.services.lifecycle import APP_ACTIONS, busy_guests, job_kind
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import DESTRUCTIVE, is_self
 from proxploy.services.webui import installed_parts, scheme_for
@@ -52,12 +52,17 @@ _fw_read = authorize("firewall", "read", scope_of=scope_app())
 _fw_guest = authorize("firewall", "guest", scope_of=scope_app())
 
 
-def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
+def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
+             busy: dict[tuple[str, int], str] | None = None) -> dict:
     """`entry` is the catalog row this app was installed from, or None when it
     has no catalog slug or that slug no longer resolves. Deliberately a
     required argument with no default: it is only ever used for the icon, and a
     default of None would let a future caller silently serve every app without
-    one."""
+    one.
+
+    `busy` maps a guest to what it should READ as while a job acts on it, from
+    services/lifecycle.py::busy_guests."""
+    busy = busy or {}
     snap = snapshots.get(a.host_id)
     g = snap.guests.get(("lxc", a.ctid)) if snap else None
     return {
@@ -86,7 +91,14 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None) -> dict:
         # app row. No catalog entry / no port on it means no button, not a
         # prompt for one, so None here is what hides the action client-side.
         "catalog_port": entry.port if entry else None,
-        "status": a.status_cached or "unknown", "ip": a.ip_cached,
+        # "pending" while an action is in flight, whatever the cached column
+        # says. Proxmox reports the OLD status for as long as a stop or a
+        # removal is actually running, so answering with it put the pill back
+        # to Running mid-action on every refetch. The browser's optimistic
+        # patch cannot cover this on its own: it only exists in the tab that
+        # clicked, and any refetch there overwrote it from here.
+        "status": busy.get(("app", a.id)) or a.status_cached or "unknown",
+        "ip": a.ip_cached,
         "cpu_pct": a.cpu_pct_cached, "mem_bytes": a.mem_bytes_cached,
         "mem_total_bytes": g["mem_total_bytes"] if g else None,
         # Storage is a pair so the card can draw a bar; network is two rates
@@ -125,8 +137,9 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
     slugs = {a.catalog_slug for a in rows if a.catalog_slug}
     entries = {e.slug: e for e in db.query(CatalogEntry)
                .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
+    busy = busy_guests(db, utcnow())
     return [_app_out(a, hosts[a.host_id], request.app.state.poller.snapshots,
-                     entries.get(a.catalog_slug))
+                     entries.get(a.catalog_slug), busy)
             for a in rows]
 
 
@@ -319,7 +332,8 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     host = db.get(Host, a.host_id)
     entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
              if a.catalog_slug else None)
-    return _app_out(a, host, request.app.state.poller.snapshots, entry)
+    return _app_out(a, host, request.app.state.poller.snapshots, entry,
+                    busy_guests(db, utcnow()))
 
 
 @router.get("/{app_id}/logs")

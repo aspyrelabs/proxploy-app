@@ -29,6 +29,15 @@ describe('StatusPill', () => {
     }
   })
 
+  it('spins and says Removing while an app is being uninstalled', () => {
+    // Its own word and its own colour: a removal ends with the row gone, so it
+    // is not the same news as a stop.
+    const { container } = render(<StatusPill status="removing" />)
+    expect(screen.getByText('Removing')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="spinner"]')).not.toBeNull()
+    expect(container.firstElementChild?.className).toContain('text-red')
+  })
+
   it('hides the spinner from a screen reader, since the label already says it', () => {
     const { container } = render(<StatusPill status="pending" />)
     expect(container.querySelector('[data-slot="spinner"]'))

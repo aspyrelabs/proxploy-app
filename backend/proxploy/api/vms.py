@@ -16,10 +16,10 @@ from proxploy.api.firewall import (AliasIn, AliasPatch, IpSetIn, MemberIn,
                                    OptionsIn, RuleIn, RulePatch, RulePos)
 from proxploy.api.jobs import enqueue_and_audit, job_out
 from proxploy.api.network import NicIn, guest_nics, set_guest_nic
-from proxploy.models import Host, User, Vm
+from proxploy.models import Host, User, Vm, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.hostclient import client_for_host, guest_node
-from proxploy.services.lifecycle import VM_ACTIONS
+from proxploy.services.lifecycle import VM_ACTIONS, busy_guests
 from proxploy.services.netconfig import build_net, parse_net
 from proxploy.services.proxmox import ProxmoxError
 from proxploy.services.selfguard import is_self
@@ -43,12 +43,17 @@ _fw_read = authorize("firewall", "read", scope_of=scope_vm())
 _fw_guest = authorize("firewall", "guest", scope_of=scope_vm())
 
 
-def _vm_out(v: Vm, host: Host, snapshots) -> dict:
+def _vm_out(v: Vm, host: Host, snapshots,
+            busy: dict[tuple[str, int], str] | None = None) -> dict:
+    busy = busy or {}
     snap = snapshots.get(v.host_id)
     g = snap.guests.get(("qemu", v.vmid)) if snap else None
     return {
         "id": v.id, "host_id": v.host_id, "host_name": host.name,
-        "vmid": v.vmid, "name": v.name, "status": v.status,
+        "vmid": v.vmid, "name": v.name,
+        # See _app_out: "pending" while an action is in flight, because PVE
+        # reports the old status right through one.
+        "status": busy.get(("vm", v.id)) or v.status,
         # PVE's RAW ostype: "l26", "win11", "w2k19", "other", and so on. It is
         # deliberately not collapsed to "linux"/"windows" here, because that
         # mapping is presentation and the specific value is information the
@@ -99,7 +104,8 @@ def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
     # this listed each VM once per enrolled host (doc 12 check 18).
     rows = dedupe_vms(query.all(), hosts)
     rows.sort(key=lambda v: (v.name or "", v.id))
-    return [_vm_out(v, hosts[v.host_id], request.app.state.poller.snapshots)
+    busy = busy_guests(db, utcnow())
+    return [_vm_out(v, hosts[v.host_id], request.app.state.poller.snapshots, busy)
             for v in rows]
 
 
@@ -109,7 +115,8 @@ def vm_detail(request: Request, vm_id: int, db=Depends(get_db),
     v = db.get(Vm, vm_id)
     if v is None:
         raise HTTPException(404, "vm not found")
-    return _vm_out(v, db.get(Host, v.host_id), request.app.state.poller.snapshots)
+    return _vm_out(v, db.get(Host, v.host_id), request.app.state.poller.snapshots,
+                   busy_guests(db, utcnow()))
 
 
 def _vm_and_host(db, vm_id: int):
