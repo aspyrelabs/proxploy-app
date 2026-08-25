@@ -693,8 +693,8 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
 HANDLERS["backup.restore"] = restore_backup
 
 
-def _scratch_vmid(client, floor: int = 900) -> int:
-    """Blocking: the lowest free guest id at or above `floor`.
+def _scratch_vmid_from(client, host_name: str, floor: int = 900) -> int:
+    """Blocking: the lowest free guest id at or above `floor`, or refuse.
 
     Not `cluster_nextid()`, which answers from 100 and would hand back an id in
     the range a human reads as "my guests". Ids from 900 up are the convention
@@ -703,13 +703,52 @@ def _scratch_vmid(client, floor: int = 900) -> int:
     Read fresh from /cluster/resources rather than the poll snapshot: the
     snapshot can be a poll interval old, and this number is about to have a
     guest created on it.
+
+    The refusal is the load-bearing part. /cluster/resources is filtered by the
+    permissions of the token that asks, and a token that may not read guests is
+    told so with an empty list, not with a 403. Measured on node1 2026-08-25:
+    the lifecycle token got 2 rows (both nodes, no guests, no storage) while
+    the monitoring token got 22 on the same cluster, which was running twelve
+    guests. Read literally, that says "nothing is in use", so this function
+    answered `floor` unconditionally: not the lowest free id, just the first
+    one, safe only for as long as nobody has a guest on 900.
+
+    A cluster with no guests is a real state, though, and must still get an id.
+    The tell is not "no guests", it is "no guests AND no storage": any token
+    that can read the cluster at all sees the storage rows, so guests-absent
+    with storage-present is an honest answer about an empty node.
     """
-    used = {int(r["vmid"]) for r in client.cluster_resources()
-            if r.get("type") in ("qemu", "lxc") and r.get("vmid") is not None}
+    rows = client.cluster_resources()
+    guests = [r for r in rows if r.get("type") in ("qemu", "lxc")
+              and r.get("vmid") is not None]
+    if not guests and not any(r.get("type") == "storage" for r in rows):
+        raise JobFailed(
+            f"Proxploy cannot tell which guest ids are in use on {host_name}, "
+            f"so it will not pick one to restore onto. The token it asked with "
+            f"cannot read guests; give {host_name} a monitoring token, or add "
+            f"VM.Audit to the one it has.")
+    used = {int(r["vmid"]) for r in guests}
     vmid = floor
     while vmid in used:
         vmid += 1
     return vmid
+
+
+def _scratch_vmid(app, host_id: int, fallback, host_name: str,
+                  floor: int = 900) -> int:
+    """Blocking: `_scratch_vmid_from` asked through the right client.
+
+    Monitoring, not the lifecycle client doing the restore: "which ids exist"
+    is a read, and monitoring is the capability that reads. Any host being
+    polled already has one, so this is not a new thing to configure in
+    practice. A host without one falls back to the caller's own client, which
+    then either answers honestly or trips the refusal above.
+    """
+    try:
+        survey, _, _ = _host_target(app, host_id, "monitoring")
+    except (JobFailed, ProxmoxError):
+        survey = fallback
+    return _scratch_vmid_from(survey, host_name, floor)
 
 
 def _free_bytes(client, node: str, storage: str) -> int | None:
@@ -772,7 +811,7 @@ async def test_restore_backup(ctx: JobContext, params: dict) -> dict:
                         f"needs at least {_fmt_bytes(size)}. Choose another "
                         f"storage or make room. Nothing was created.")
 
-    vmid = await asyncio.to_thread(_scratch_vmid, client)
+    vmid = await asyncio.to_thread(_scratch_vmid, app, host_id, client, host_name)
     ctx.log(f"restoring {volid} onto {target} as a throwaway {kind} {vmid} on "
             f"{host_name}/{node}, it will be deleted when the check finishes")
     ctx.progress(5)

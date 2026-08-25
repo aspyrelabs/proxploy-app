@@ -6,10 +6,21 @@ anything behind.
 import asyncio
 import json
 
+import pytest
+
+from proxploy.jobs.backend import JobFailed
 from proxploy.models import Backup, Host, HostCredential, Job
 
 STORE_10TB = [{"storage": "local-lvm", "type": "lvmthin", "content": "images",
                "active": 1, "enabled": 1, "avail": 10 ** 12}]
+
+# A bare FakePVE() reports an EMPTY /cluster/resources, which is what an
+# under-permissioned token looks like, and _scratch_vmid now refuses to pick an
+# id off one of those rather than assuming nothing is in use. A real cluster
+# always has storage rows, so these stand in for "readable, and genuinely has
+# no guests".
+READABLE = [{"type": "node", "node": "pve1"},
+            {"type": "storage", "storage": "local-lvm", "node": "pve1"}]
 
 
 def _seed(app, size_bytes=1024):
@@ -43,7 +54,7 @@ def _ctx(app):
 
 
 def test_the_scratch_id_starts_at_900_and_skips_what_is_in_use():
-    from proxploy.services.backupjobs import _scratch_vmid
+    from proxploy.services.backupjobs import _scratch_vmid_from
     from proxploy.services.proxmox import ProxmoxClient
     from tests.fakes.pve import FakePVE, make_fake_factory
 
@@ -53,7 +64,49 @@ def test_the_scratch_id_starts_at_900_and_skips_what_is_in_use():
     ])
     client = ProxmoxClient("https://10.0.0.7:8006", "proxploy@pve!life", "s",
                            factory=make_fake_factory(fake))
-    assert _scratch_vmid(client) == 902
+    assert _scratch_vmid_from(client, "host-01") == 902
+
+
+def test_a_blind_resource_list_refuses_rather_than_handing_back_the_floor():
+    """/cluster/resources is filtered by the token's own permissions, so a
+    client that cannot read guests gets an empty list rather than an error.
+
+    Measured on node1 2026-08-25: the lifecycle token returned 2 rows (both
+    nodes, no guests, no storage) on a cluster running twelve guests, while
+    the monitoring token returned 22. _scratch_vmid read that as "nothing is
+    in use" and answered 900 every time, on any cluster, which is not the
+    lowest free id and is only safe while 900 happens to be free.
+    """
+    from proxploy.services.backupjobs import _scratch_vmid_from
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.fakes.pve import FakePVE, make_fake_factory
+
+    # What an under-permissioned token actually sends back: nodes, nothing else.
+    blind = ProxmoxClient("https://10.0.0.7:8006", "proxploy@pve!life", "s",
+                          factory=make_fake_factory(FakePVE(resources=[
+                              {"type": "node", "node": "pve1"},
+                              {"type": "node", "node": "pve2"}])))
+    with pytest.raises(JobFailed) as e:
+        _scratch_vmid_from(blind, "host-01")
+    assert "cannot tell" in str(e.value).lower()
+
+
+def test_a_genuinely_empty_cluster_is_not_mistaken_for_a_blind_one():
+    """An empty node is a real state, and it must still get an id.
+
+    The tell is not "no guests", it is "no guests AND no storage": a token
+    that can read the cluster at all sees the storage rows, so a list with
+    storage in it and no guests is an honest answer about an empty node.
+    """
+    from proxploy.services.backupjobs import _scratch_vmid_from
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.fakes.pve import FakePVE, make_fake_factory
+
+    empty = ProxmoxClient("https://10.0.0.7:8006", "proxploy@pve!life", "s",
+                          factory=make_fake_factory(FakePVE(resources=[
+                              {"type": "node", "node": "pve1"},
+                              {"type": "storage", "storage": "local"}])))
+    assert _scratch_vmid_from(empty, "host-01") == 900
 
 
 def test_a_passing_test_restore_destroys_the_copy_and_marks_the_archive(tmp_path):
@@ -62,7 +115,7 @@ def test_a_passing_test_restore_destroys_the_copy_and_marks_the_archive(tmp_path
     from tests.support import make_job_app
 
     async def run():
-        fake = FakePVE()
+        fake = FakePVE(resources=list(READABLE))
         fake.storages_by_node = {"pve1": STORE_10TB}
         app = make_job_app(tmp_path, fake=fake)
         _, bid = _seed(app)
@@ -85,7 +138,8 @@ def test_a_failed_restore_still_destroys_the_scratch_guest(tmp_path):
     from tests.support import make_job_app
 
     async def run():
-        fake = FakePVE(task_exit="restore failed: archive is corrupt")
+        fake = FakePVE(resources=list(READABLE),
+                       task_exit="restore failed: archive is corrupt")
         fake.storages_by_node = {"pve1": STORE_10TB}
         app = make_job_app(tmp_path, fake=fake)
         _, bid = _seed(app)
@@ -111,7 +165,7 @@ def test_a_destroy_that_fails_fails_the_job_and_names_the_guest(tmp_path):
     from tests.support import make_job_app
 
     async def run():
-        fake = FakePVE()
+        fake = FakePVE(resources=list(READABLE))
         fake.storages_by_node = {"pve1": STORE_10TB}
         fake.delete_error = "VM is locked (create)"
         app = make_job_app(tmp_path, fake=fake)
@@ -135,7 +189,7 @@ def test_it_refuses_before_touching_pve_when_the_store_is_too_small(tmp_path):
     from tests.support import make_job_app
 
     async def run():
-        fake = FakePVE()
+        fake = FakePVE(resources=list(READABLE))
         fake.storages_by_node = {"pve1": [{"storage": "local-lvm", "type": "lvmthin",
                                            "content": "images", "active": 1,
                                            "enabled": 1, "avail": 10}]}

@@ -1,11 +1,18 @@
 name: ci
 # Mostly manual: run the whole thing from the Actions tab, or
-# `gh workflow run ci.yml`. Only `frontend` and `e2e` also run on a push, and
-# only when a push touched code they actually cover. Every other job carries
-# `if: github.event_name != 'push'` and stays hand-run, which is what the
-# owner asked for when the blanket push trigger came out.
+# `gh workflow run ci.yml`. Only `frontend`, `e2e` and `backend` also run on a
+# push, and only when a push touched code they actually cover. Every other job
+# carries `if: github.event_name != 'push'` and stays hand-run, which is what
+# the owner asked for when the blanket push trigger came out.
 #
-# The two exceptions are here because they are the jobs that rot silently.
+# `backend` joined them on 2026-08-25. Its 2000-odd tests were running nowhere
+# except on a developer's laptop, so a backend regression could be pushed to
+# main and reported green by a run that had never executed a single backend
+# test. Its license-audit STEP keeps the manual gate, because the hand-run
+# licensing check is a deliberate decision and not the thing that was broken.
+#
+# The frontend/e2e exceptions are here because they are the jobs that rot
+# silently.
 # They assert on the UI as it is drawn, so a rename, a control moved into a
 # menu, or an added wizard step breaks them without breaking anything a unit
 # test looks at. Between 2026-08-09 and 2026-08-24 nobody dispatched this
@@ -25,11 +32,16 @@ on:
       # The e2e job boots the real backend (playwright.config.ts webServer),
       # so a server-side change can break it with no frontend file touched.
       - 'backend/proxploy/**'
+      # `backend` runs on push now, so the things that decide whether it passes
+      # have to be able to trigger it. A test-only or dependency-only change
+      # used to start no run at all.
+      - 'backend/tests/**'
+      - 'backend/pyproject.toml'
+      - 'backend/scripts/**'
       - '.github/workflows/ci.yml'
 
 jobs:
   backend:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: backend}}
     steps:
@@ -41,7 +53,10 @@ jobs:
       - run: python scripts/check_executor_isolation.py
       - name: openapi schema exports cleanly
         run: python scripts/export_openapi.py /tmp/openapi.json
+      # Still hand-run, unlike the rest of this job: upstream and licensing
+      # drift is checked deliberately, not on every push (see the header).
       - name: license audit (doc 03 protocol, fails on anything outside brief §3)
+        if: github.event_name != 'push'
         run: pip-licenses --partial-match --ignore-packages proxploy --allow-only "MIT;MIT License;BSD;BSD License;Apache;Apache Software License;ISC;Python Software Foundation;PSF-2.0;PostgreSQL;Public Domain;Mozilla Public License 2.0;Eclipse Public License v2.0;EPL-2.0;The Unlicense;CMU License (MIT-CMU)"
 
   backend-postgres:
