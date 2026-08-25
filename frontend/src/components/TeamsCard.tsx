@@ -85,7 +85,7 @@ function TeamMembers({ team, users, usersError, usersLoading, onRemove }: {
                     </select>
                   </td>
                   <td className="text-right">
-                    <Button variant="danger" className="px-2 py-0.5 text-[11px]"
+                    <Button variant="danger" size="sm"
                       onClick={() => onRemove(team, m)}>Remove</Button>
                   </td>
                 </tr>

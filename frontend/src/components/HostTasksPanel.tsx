@@ -50,7 +50,7 @@ export function HostTasksPanel({ hostId }: { hostId: number }) {
                   </td>
                   <td className="text-text-3">{fmtTime(t.starttime)}</td>
                   <td className="text-right">
-                    <Button variant="ghost" className="px-2 py-0.5 text-[11px]"
+                    <Button variant="ghost" size="sm"
                       onClick={() => setSelected((s) => (s === t.upid ? null : t.upid))}>
                       {selected === t.upid ? 'Hide log' : 'View log'}
                     </Button>

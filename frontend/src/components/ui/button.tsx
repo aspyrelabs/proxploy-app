@@ -1,6 +1,8 @@
 import { forwardRef } from 'react'
 import type { ButtonHTMLAttributes } from 'react'
 
+import { cn } from '@/lib/utils'
+
 /* ---------------------------------------------------------------------------
    Text buttons, which are class strings rather than variants.
 
@@ -119,7 +121,20 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <button
       ref={ref}
-      className={`inline-flex items-center justify-center gap-2 rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed ${sizes[size]} ${variants[variant]} ${className}`}
+      // cn, not a template string. Concatenation put the caller's className in
+      // the same class list as this component's own and let the CSS decide,
+      // which the CSS does by file order, not by who asked last: `.px-3\.5` is
+      // emitted after `.px-2`, so a call site passing `px-2 py-1 text-[11px]`
+      // got the full `md` control it was trying to shrink, silently, at 37
+      // sites. cn (tailwind-merge) resolves the conflict the way every one of
+      // those authors assumed it already worked: the caller wins.
+      //
+      // This changed nothing when it landed, checked by merging every literal
+      // className in the app against its own size and variant: zero sites
+      // dropped a class. It is here so the next one cannot go wrong.
+      className={cn(
+        'inline-flex items-center justify-center gap-2 rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed',
+        sizes[size], variants[variant], className)}
       {...props}
     />
   )

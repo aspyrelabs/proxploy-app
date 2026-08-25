@@ -63,8 +63,13 @@ function PaginationButton({ className, ...props }: ComponentProps<typeof Button>
   return (
     <Button
       variant="ghost"
+      // size, not padding/font in the className: those collide with Button's
+      // own size classes and lose in the emitted CSS, so this control was
+      // rendering at full `md` rather than the compact one it reads as. Before
+      // {...props} so a caller can still choose a different size.
+      size="sm"
       data-slot="pagination-link"
-      className={cn("px-2.5 py-1.5 text-[12px]", className)}
+      className={className}
       {...props}
     />
   )
