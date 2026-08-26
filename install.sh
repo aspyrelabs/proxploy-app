@@ -646,6 +646,28 @@ systemctl daemon-reload
 # running, so a second run never restarts (and never disturbs) a live service.
 systemctl enable --now proxploy.service
 
+# `systemctl enable --now` returns as soon as the process is spawned. A unit
+# that starts, throws during startup and gets picked back up by
+# Restart=on-failure therefore exits 0 here, which is how this installer came
+# to print "Proxploy 1.0.0 installed. Browse to https://<this-host>/" over a
+# service that had never served a request, leaving the 502 for the operator to
+# discover. A crashlooping unit alternates activating and failed and is never
+# `active`, so waiting for `active` is what separates the two.
+wait_for_service() {  # wait_for_service <unit>
+  local unit="$1" tries=0
+  until [ "$(systemctl is-active "$unit" 2>/dev/null)" = "active" ]; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 30 ]; then
+      log "$unit never came up. Its last 30 log lines:"
+      journalctl -u "$unit" -n 30 --no-pager >&2 || true
+      die "$unit is $(systemctl is-active "$unit" 2>/dev/null) after 60s, so\
+ this install is not usable. The log above says why."
+    fi
+    sleep 2
+  done
+}
+wait_for_service proxploy.service
+
 # --- 10. TLS -------------------------------------------------------------------
 # Caddy is arm's-length (doc 00:47): installed from its own official Debian
 # repo and run as its own systemd service. We write config; we never vendor,
@@ -721,6 +743,30 @@ configure_tls() {
 }
 configure_tls
 
-# --- 11. done ------------------------------------------------------------------
+# --- 11. prove it, then say so ----------------------------------------------
+# Everything above can succeed and still leave nothing answering: Caddy running
+# on its stock config, the app bound but refusing, a reverse_proxy pointed at a
+# port nobody listens on. The line below tells the operator to open a URL, so
+# open it first. Any HTTP status is a pass except a 5xx (Caddy reached nothing
+# usable) and curl's 000 (nothing answered at all); a 404 still proves the
+# whole chain from TLS to uvicorn is live.
+verify_serving() {
+  local code
+  code=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://127.0.0.1/" \
+         2>/dev/null) || code="000"
+  case "$code" in
+    000) log "nothing answered on https://127.0.0.1/. caddy is\
+ $(systemctl is-active caddy 2>/dev/null), proxploy is\
+ $(systemctl is-active proxploy 2>/dev/null)."
+         die "the install finished but nothing is serving." ;;
+    5*)  log "https://127.0.0.1/ answered $code. Caddy is up but got nothing\
+ usable from the app on 127.0.0.1:8000. Its last 30 log lines:"
+         journalctl -u proxploy -n 30 --no-pager >&2 || true
+         die "the install finished but the app is not serving." ;;
+  esac
+  log "https://127.0.0.1/ answered $code"
+}
+verify_serving
+
 log "Proxploy $VERSION installed."
 log "Browse to https://<this-host>/ to create the first account."
