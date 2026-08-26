@@ -172,9 +172,8 @@ export function SkeletonField({ label = 'w-20', className = '' }: {
 }
 
 /**
- * One CPU/RAM/Disk row, matching components/UsageBar.tsx in its two call
- * sites (AppCard, NodeCard): a fixed-width label, the 6px track, a fixed-width
- * figure. The track needs no skeleton of its own -- an unfilled UsageBar IS a
+ * One CPU/RAM/Disk row, matching components/UsageBar.tsx as NodeCard stacks
+ * it three deep: a fixed-width label, the 6px track, a fixed-width figure. The track needs no skeleton of its own -- an unfilled UsageBar IS a
  * `bg-elev` 6px rounded bar, which is exactly what `Skeleton` draws, so this
  * renders the real empty track shape and pulses it.
  */

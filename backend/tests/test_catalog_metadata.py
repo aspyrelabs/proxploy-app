@@ -1,7 +1,6 @@
 """Upstream presentation metadata: mapping, the enforced write set, the
 cold-start-only fallback, and the many normal ways a slug simply does not
-match (design:
-docs/superpowers/specs/2026-08-13-app-store-upstream-metadata-design.md).
+match.
 
 Everything here is offline: the PocketBase corpus and the archived frontend
 are both faked at `catalog_metadata._fetch`, and the scripts tree at

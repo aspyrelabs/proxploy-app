@@ -10,8 +10,6 @@ page asks for them.
 These are NOT jobs. Every firewall write returns null rather than a UPID
 (measured on pve-manager 9.2.11, 2026-08-21), so there is no PVE task to
 follow. Same call shape as api/network.py::set_guest_nic.
-
-Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 """
 from __future__ import annotations
 

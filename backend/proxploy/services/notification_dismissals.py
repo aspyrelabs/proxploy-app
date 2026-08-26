@@ -1,5 +1,5 @@
 """Per-user persistence for the bell tray's job-backed notifications (see
-components/BellPopover.tsx and docs/notes/persist-cleared-notifications-report.md).
+components/BellPopover.tsx).
 
 Only /jobs rows need this. The tray's other source -- notify.tsx's action
 toasts, and an SSE job/alert event the next /jobs poll hasn't confirmed yet

@@ -47,10 +47,9 @@ type SshRotateResult = { public_key?: string; consent_note?: string }
  * pin. Hosts are pinned at enrolment, and without this a renewed certificate
  * would leave a host row nobody could fix from the UI.
  *
- * The same peer panel HostForm shows after adding a host is mounted here too
- * (docs/notes/cluster-peer-auto-enrolment-plan.md, phase 6), so a host
- * enrolled before that shipped gets the same offer without being removed and
- * re-added. It renders nothing at all on a standalone host. It sits below the
+ * The same peer panel HostForm shows after adding a host is mounted here too,
+ * so a host enrolled before that shipped gets the same offer without being
+ * removed and re-added. It renders nothing at all on a standalone host. It sits below the
  * occasional-maintenance half of the dialog and above the certificate
  * warning, which stays next to the Test connection button that produces it,
  * because that warning is the one thing here someone may need to act on

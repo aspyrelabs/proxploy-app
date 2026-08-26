@@ -58,8 +58,9 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
 
 /** One row shape for both kinds of guest.
  *
- *  This replaces an AppCard grid beside a bare three-column VM table. The
- *  unification goes upward on purpose: VMs gain the CPU bar, the lifecycle
+ *  This page used to show its two kinds of guest two different ways, a card
+ *  grid for the apps beside a bare three-column table for the VMs. The
+ *  unification went upward on purpose: VMs gained the CPU bar, the lifecycle
  *  controls and the console that apps already had, rather than apps being
  *  flattened to name/id/status to match the VMs. */
 export function GuestList({ guests }: { guests: Guest[] }) {
@@ -85,7 +86,7 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
           {/* The kind chip: px-2 py-0.5 around a 10px line box. */}
           <Skeleton className="h-[20.5px] w-11 rounded-full" />
           <SkeletonLine className="w-14 text-[11px]" />
-          {/* StatusPill, the same 19px AppCardSkeleton derives. */}
+          {/* StatusPill: px-2 py-0.5 around a 10.5px line box, so 19px. */}
           <Skeleton className="h-[19px] w-20 rounded-full" />
           <div className="flex w-28 items-center gap-2">
             <div className="flex-1"><Skeleton className="h-1.5 w-full rounded-full" /></div>

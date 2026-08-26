@@ -36,7 +36,7 @@ import { Icon } from './icon'
  *    both themes.
  *  - `motion-reduce:` opt-outs added on both the blur and the spin (neither
  *    exists upstream), matching the pattern already used by
- *    UsageBar/SidebarNav/AppCard: the blur drops to none and the spin stops,
+ *    UsageBar/SidebarNav/AppTable: the blur drops to none and the spin stops,
  *    but the veil itself, and `aria-busy`, stay -- the loading state is not
  *    lost, only the motion.
  *  - This is a plain visual veil, not a modal -- the same category as

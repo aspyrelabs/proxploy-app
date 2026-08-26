@@ -4,8 +4,6 @@ Four scopes (cluster, node, guest, security group) share one rule schema, so
 they share one set of client methods and differ only in the location dict built
 here. Nothing in this module imports FastAPI: the API layer decides who may ask
 for a scope, this module decides what that scope points at.
-
-Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 """
 from __future__ import annotations
 

@@ -5,8 +5,8 @@ p-lines generated from PERMISSIONS below, g-lines derived from team_members.
 The casbin_rules table stays empty, doc 04's "mirrored into casbin_rules"
 design would be two sources of truth for the same memberships; team_members
 is authoritative and the enforcer is a pure function of it (rebuilt at boot,
-patched by sync_user() on every membership write). Amendment recorded in
-docs/notes/phase-8-scale.md, mirroring Phase 7's APScheduler precedent.
+patched by sync_user() on every membership write). The amendment mirrors
+Phase 7's APScheduler precedent.
 """
 from __future__ import annotations
 

@@ -4,8 +4,7 @@ Revision ID: c8f2a4b71d90
 Revises: b4d7c9e21a35
 Create Date: 2026-08-13
 
-The App Store's metadata source moved out of the scripts repo (see
-docs/superpowers/specs/2026-08-13-app-store-upstream-metadata-design.md).
+The App Store's metadata source moved out of the scripts repo.
 community-scripts/ProxmoxVE is scripts only now: its tree at HEAD has 2009
 entries and four .json files, all CI config. The live source is PocketBase at
 db.community-scripts.org, which is what upstream's own ProxmoxVE-Local client

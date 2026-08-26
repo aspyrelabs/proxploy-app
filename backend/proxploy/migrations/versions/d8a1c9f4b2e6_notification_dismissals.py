@@ -1,7 +1,6 @@
 """notification dismissals
 
-Per-user memory of what the bell tray has cleared (see
-docs/notes/persist-cleared-notifications-report.md). One row per user: a
+Per-user memory of what the bell tray has cleared. One row per user: a
 watermark (the highest job id cleared as of the last "clear all") plus a
 small list of individually dismissed job ids newer than that watermark. The
 watermark is what keeps this bounded on a busy cluster instead of growing a

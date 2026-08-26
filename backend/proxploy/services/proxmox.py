@@ -675,7 +675,7 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"reverting staged network config failed on {node}", e) from e
 
-    # ---- Firewall (spec: docs/superpowers/specs/2026-08-21-firewall-design.md)
+    # ---- Firewall
     #
     # Four scopes share one rule schema, so they share one set of methods and
     # differ only in which proxmoxer node they hang off. `loc` is built by

@@ -1,6 +1,6 @@
 # backend/tests/test_hosts_peers.py
 """GET /hosts/{id}/peers (discovery, phase 2) and POST /hosts/{id}/peers
-(enrolment, phase 4) of docs/notes/cluster-peer-auto-enrolment-plan.md.
+(enrolment, phase 4) of the cluster peer auto-enrolment work.
 
 Discovery is read only: nothing above the enrolment section may create a host
 row or a credential row as a side effect of it.

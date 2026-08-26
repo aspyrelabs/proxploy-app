@@ -1,8 +1,7 @@
 """catalog.refresh job handler: discovery, the upstream metadata sync, the
 telemetry popularity sync, the progress it reports, and the low-priority
 background classification pass it schedules (catalog expansion plan, decisions
-1 and 2; metadata design doc
-docs/superpowers/specs/2026-08-13-app-store-upstream-metadata-design.md).
+1 and 2).
 
 Every scenario here patches all THREE upstream hosts (api.github.com, the
 PocketBase metadata source and the telemetry service), because a refresh now

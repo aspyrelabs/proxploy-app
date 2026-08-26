@@ -77,9 +77,11 @@ describe('AppTable', () => {
     expect(within(row).getByText('Immich')).toBeInTheDocument()
     expect(within(row).getByText(/CT 150/)).toBeInTheDocument()
     expect(within(row).getByText(/running/i)).toBeInTheDocument()
-    // Pinned against the real formatters (frontend/src/lib/format.ts), same
-    // fixture values Task 5 pinned for AppCard: fmtBytes(5368709120) = "5.0
-    // GiB", fmtBytes(17179869184) = "16.0 GiB", fmtBps(1200000) = "9.6 Mbps".
+    // Pinned against the real formatters (frontend/src/lib/format.ts) rather
+    // than against hand-typed strings, so a change to fmtBytes or fmtBps fails
+    // here instead of quietly changing what every row prints:
+    // fmtBytes(5368709120) = "5.0 GiB", fmtBytes(17179869184) = "16.0 GiB",
+    // fmtBps(1200000) = "9.6 Mbps".
     expect(within(row).getByText(/5\.0 GiB \/ 16\.0 GiB/)).toBeInTheDocument()
     expect(within(row).getByText(/9\.6 Mbps/)).toBeInTheDocument()
   })

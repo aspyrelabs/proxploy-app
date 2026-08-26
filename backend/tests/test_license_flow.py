@@ -4,7 +4,7 @@ import json
 class StubLicenseClient:
     """Mints a token + a cert from the shared contract fixture's TEST-ONLY
     root, mirroring what proxploy-api's dormant license service will hand
-    back (docs/09)."""
+    back."""
     def __init__(self, fixture_path, *, refresh_returns_cert=True):
         fx = json.loads(fixture_path.read_text())
         self._fx = fx

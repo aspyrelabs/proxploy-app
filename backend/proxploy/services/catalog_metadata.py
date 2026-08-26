@@ -1,7 +1,6 @@
 """Upstream presentation metadata for the App Store: names, descriptions,
 categories, icons, website and docs links, cached into `catalog_entries` and
-rendered cache-first (design:
-docs/superpowers/specs/2026-08-13-app-store-upstream-metadata-design.md).
+rendered cache-first.
 
 WHERE THIS COMES FROM, AND WHY IT MOVED. The premise that per-app JSON lives
 in community-scripts/ProxmoxVE is no longer true: that repo is scripts only

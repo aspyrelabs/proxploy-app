@@ -242,7 +242,7 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # line. That line's text is frozen at this commit, but the framework file
     # it names is still fetched live from `main` at execution time, one level
     # down. Full transitive vendoring of the community-scripts framework is a
-    # separate, larger piece of work: see docs/notes/phase-4-store.md.
+    # separate, larger piece of work.
     # The URL is quoted, the `$(...)` around it is not: `bash -c "$(curl ...)"`
     # runs the downloaded script, while quoting the whole substitution would
     # make its output a command *word* instead, which is a different thing.
@@ -620,7 +620,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     services/classifier.py classifies INSTALL feasibility only. An update path
     that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
     the full transcript archived, the honest outcome. Classifying update paths
-    is separate, larger work; see docs/notes/phase-7-operate.md.
+    is separate, larger work, not attempted here.
 
     A SECOND, more severe residual limitation (Task 5 review B4): the post-
     check is an id-SET comparison (before vs. after), and a set diff is blind
@@ -662,7 +662,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     # `main`: identical rule and identical raw_url() helper as run_install,
     # and it carries the same one-level-down residual: the pinned script's own
     # `source <(curl ... /main/misc/build.func)` line is frozen text but still
-    # fetches live. See docs/notes/phase-4-store.md.
+    # fetches live.
     #
     # Run it INSIDE the container, not on the host. build.func's start() picks
     # install-vs-update by where it is running, nothing else:

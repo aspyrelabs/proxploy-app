@@ -8,7 +8,7 @@ import { Loading } from './ui/loading'
 
 /**
  * The offer to add the other nodes of a cluster, once one node of it has been
- * added (docs/notes/cluster-peer-auto-enrolment-plan.md, phase 5).
+ * added.
  *
  * Its own component rather than more JSX in HostForm because the same panel is
  * mounted from HostEditDialog for hosts enrolled before this shipped.

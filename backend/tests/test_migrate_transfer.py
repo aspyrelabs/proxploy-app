@@ -482,8 +482,8 @@ def test_transfer_strategy_success_cleanup_spends_the_backup_token(tmp_path, mon
     the same handler already cleans up with (see the host-key-mismatch test
     above), and the one backupjobs.py::delete_backup spends on the identical
     storage_delete_volume call. Datastore.AllocateSpace is granted through the
-    Backup role as well as the Lifecycle one (docs/08 §roles), so a host that
-    only carries it on Backup answers the lifecycle token with a 403 here, and
+    Backup role as well as the Lifecycle one, so a host that only carries it
+    on Backup answers the lifecycle token with a 403 here, and
     `_cleanup_volume` swallows every exception by design: spending the wrong
     token leaves multi-GB dump files on both hosts after every successful
     migration and never says so. FakePVE ignores token identity, so the token

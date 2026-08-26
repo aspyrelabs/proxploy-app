@@ -1,5 +1,4 @@
 // api/firewall.ts, firewall server state for every scope.
-// Spec: docs/superpowers/specs/2026-08-21-firewall-design.md
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, apiErrorDetail } from './client'
 import { notify } from '../lib/notify'
