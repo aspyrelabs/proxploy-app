@@ -125,6 +125,7 @@ tar "${tar_nometa[@]}" \
     --exclude='./data' --exclude='./data/*' \
     --exclude='dod_verify_*' --exclude='mutants' --exclude='.pytest_cache' \
     --exclude='.ruff_cache' --exclude='.mypy_cache' --exclude='.coverage' \
+    --exclude='./scripts' --exclude='./scripts/*' --exclude='.gitignore' \
     --exclude='*.egg-info' --exclude='.git' --exclude='._*' \
     --exclude='.DS_Store' \
     -cf - -C "$backend_dir" . | tar "${tar_nometa[@]}" xf - -C "$stage/backend"
@@ -143,12 +144,24 @@ tar "${tar_nometa[@]}" --exclude='._*' --exclude='.DS_Store' \
 # directory, which is what lets a piped one-liner (curl | bash) work at all:
 # it has no directory. Shipping them here also puts them under the manifest
 # signature, where copying them from an unsigned working tree never was.
-# tests/ is the harness, not part of an install.
-log "staging packaging/ (excluding tests/)..."
-mkdir -p "$stage/packaging"
-tar "${tar_nometa[@]}" --exclude='tests' --exclude='.DS_Store' \
-    --exclude='._*' -cf - -C "$root/packaging" . \
-  | tar "${tar_nometa[@]}" xf - -C "$stage/packaging"
+#
+# An ALLOWLIST, not an exclude list, and that distinction is the whole lesson
+# of this file. Excluding what should not ship means every file nobody thought
+# to name ships by default: that is how backend/data/proxploy.db and its master
+# key reached a public URL, and it also shipped publishing-a-release.md (the
+# signing-key runbook, which names where the private key lives), this script
+# including its --poison flag, and packaging/docker/. Naming what SHOULD ship
+# means a new file in packaging/ is invisible to a release until someone adds
+# it here on purpose. These four are the complete set install.sh reads;
+# `grep PP_PKG install.sh` is the check.
+log "staging packaging/ (only the four files a target reads)..."
+for rel in proxploy-update lib/common.sh proxploy.service caddy/Caddyfile.tmpl; do
+  src="$root/packaging/$rel"
+  [ -f "$src" ] || { echo "error: packaging/$rel is missing" >&2; exit 1; }
+  mkdir -p "$stage/packaging/$(dirname "$rel")"
+  cat "$src" > "$stage/packaging/$rel"
+done
+chmod 0755 "$stage/packaging/proxploy-update"
 
 log "overriding staged version to $version..."
 printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
