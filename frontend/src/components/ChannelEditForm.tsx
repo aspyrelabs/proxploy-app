@@ -12,15 +12,10 @@ import {
 /**
  * Rename a channel, and replace its credentials without losing it.
  *
- * Credentials are replace-only rather than editable, and that is a property of
- * the data rather than a shortcut: `_out` has never returned the URL and the
- * stored value is not recoverable, so there is nothing to prefill. Showing
- * dots in a box that cannot be read back would be a lie about what the form
- * is doing.
- *
- * The point of editing at all is the id. Rotating a bot token by deleting the
- * channel and adding it again loses its column in the Events matrix and
- * everything ticked in it; an edit keeps both.
+ * Credentials are replace-only rather than editable: `_out` never returned the
+ * URL and the stored secret is not recoverable, so there is nothing to
+ * prefill. Editing keeps the channel's id — deleting and re-adding would lose
+ * its Events-matrix column and everything ticked in it.
  */
 export function ChannelEditForm({ channel, onSaved, onCancel }: {
   channel: ChannelRow

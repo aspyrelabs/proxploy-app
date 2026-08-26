@@ -1,10 +1,8 @@
 """Where a thing lives in the UI, and how to say that absolutely.
 
-Two callers need this and they must not disagree. api/search.py builds hrefs
-for the command palette, and notifications now build the same paths so a
-message about a failed backup can offer to open the thing it failed on. The
-one time these were written twice, the backend generated /settings/hosts/{id}
-for a route that never existed and nothing noticed until someone clicked it.
+Two callers need this and they must not disagree: api/search.py builds hrefs
+for the command palette, and notifications build the same paths so a message
+about a failed backup can offer to open the thing it failed on.
 
 Paths are relative here. Making one absolute needs `public_url`, which nobody
 can derive: `api_base_url` in config is the licence server, and the Host

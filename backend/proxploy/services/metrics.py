@@ -13,9 +13,8 @@ from datetime import datetime, timedelta, timezone
 from proxploy.jobs import HANDLERS
 from proxploy.models import MetricRollup, MetricSample, utcnow
 
-# Phase 7 adds mem_pct and disk_pct: doc 04's alert_rules.metric enum names
-# both, and api/metrics.py 422s any metric not listed here: so a chart of the
-# very metric an alert fired on would have been unqueryable.
+# mem_pct/disk_pct must stay listed here: api/metrics.py 422s any metric not
+# in this tuple, so a metric an alert fired on would otherwise be unqueryable.
 METRICS = ("cpu_pct", "mem_pct", "disk_pct", "mem_bytes", "disk_bytes",
            "net_in_bps", "net_out_bps", "io_read_bps", "io_write_bps")
 
@@ -115,19 +114,13 @@ def query_series(db, target_type: str, target_id: int, metric: str,
 
 
 async def maintain(ctx, params: dict) -> dict:
-    """`metrics.maintain`, hourly rollups + retention prune, as a real job.
-
-    Doc 04: "All pruning runs as scheduled system jobs (visible in the activity
-    feed like any other job)". This replaces Phase 2's silent `metrics_loop`
-    lifespan task, which is why the lookbacks are wider than that loop's:
-    running hourly instead of every five minutes, 13 five-minute buckets covers
-    the full hour and then some. Rollups are idempotent (delete+insert over the
-    window), so an overlapping lookback is free and a missed run self-heals on
-    the next one.
-
-    Charts under six hours read RAW samples (`pick_resolution`), so nothing
-    user-visible lags by moving the 5m rollup from a 5-minute to a 60-minute
-    cadence.
+    """`metrics.maintain`, hourly rollups + retention prune, as a real job
+    (replacing Phase 2's silent `metrics_loop`). Running hourly instead of
+    every five minutes is why the 5m lookback is 13: thirteen five-minute
+    buckets cover the full hour plus overlap. Rollups are idempotent
+    (delete+insert over the window), so a missed run self-heals. Charts under
+    six hours read raw samples (`pick_resolution`), so nothing user-visible
+    lags on the 5m cadence move.
     """
     app = ctx.backend.app
 

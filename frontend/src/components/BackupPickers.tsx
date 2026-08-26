@@ -1,10 +1,4 @@
 /**
- * What to back up, and where to. Both questions are asked by the ad-hoc "Run
- * now" dialog and by the "New job" schedule form, and the answers must not
- * differ between them: a scheduled run that could not name its guests or its
- * datastore was the last place in the product where Proxmox picked and nobody
- * could say what it had picked.
- *
  * The hooks share the query keys the Apps, VMs and Storage pages already use,
  * so a dialog that opens over any of them costs no request at all.
  */

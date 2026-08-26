@@ -113,9 +113,7 @@ export function UsersCard() {
         <h2 className="font-display text-[15px] font-semibold">Users</h2>
       </div>
       <QueryState query={users}
-                  // Three rows, not five: this is a self-hosted admin's own
-                  // team, so a placeholder the size of a page of results
-                  // would collapse to one line on nearly every install.
+                  // Three rows, not five: a self-hosted team rarely fills a page.
                   loading={<SkeletonGroup label="Loading users">
                     {/* Email, Name, State, and the Reset password button. */}
                     <SkeletonTable rows={3} cols={['w-44', 'w-28', 'w-20', 'w-24']} />
@@ -132,12 +130,9 @@ export function UsersCard() {
               <th className="pb-2 font-normal">State</th>
               <th className="pb-2" /></tr></thead>
             <tbody>
-              {/* align-middle, not align-top: the actions cell is taller than a
-                  line of text (a button, and sometimes an error above it), so
-                  pinning to the top left the email and state sitting high while
-                  the button hung below them. Every cell carries the same py-2
-                  for the same reason: uneven padding reads as misalignment even
-                  when the text baselines agree. */}
+              {/* align-middle (not align-top) and uniform py-2: the actions cell
+                  is taller than a line of text, so top-pinning or uneven padding
+                  reads as misalignment. */}
               {rows.map((u) => (
                 <tr key={u.id} className="border-t border-line-soft align-middle hover:bg-panel-2">
                   <td className="py-2 font-mono">{u.email}</td>
@@ -149,18 +144,10 @@ export function UsersCard() {
                     {rowErrors[u.id] && (
                       <div className="mb-1 text-[11.5px] text-red">{rowErrors[u.id]}</div>
                     )}
-                    {/* HIDDEN UNTIL THERE IS MORE THAN ONE USER TO MANAGE.
-                        With a single account, both of these can only fail:
-                        auth.py refuses self_delete and last_owner on DELETE
-                        /users/{id}, and self_deactivate and last_owner on
-                        PATCH. So the buttons were affordances whose only
-                        possible outcome was an error dialog.
-
-                        Nothing behind them was touched: both endpoints, the
-                        toggleActive mutation, ConfirmSelfDialog and the
-                        rowErrors plumbing are all still here. Restore by
-                        uncommenting.
-
+                    {/* Hidden until there is more than one user to manage: with a
+                        single account, auth.py refuses self_delete/last_owner on
+                        DELETE and self_deactivate/last_owner on PATCH, so these
+                        buttons could only ever error. Restore by uncommenting.
                     <Button size="sm" variant="ghost"
                       disabled={toggleActive.isPending}
                       onClick={() => {

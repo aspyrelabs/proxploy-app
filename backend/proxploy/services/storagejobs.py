@@ -1,22 +1,12 @@
-# backend/proxploy/services/storagejobs.py
-"""Storage content job handlers (doc 05 §Storage, doc 01 §5 "Content browser").
+"""Storage content job handlers.
 
-Both handlers are the shape services/lifecycle.py established and Task 2
-extracted: resolve in a thread, POST to Proxmox, hand the UPID to `await_task`.
-
-The upload one carries one extra obligation. Proxmox's upload endpoint takes a
-multipart body; there is no "fetch this URL yourself" variant, so an ISO is
-transferred TWICE: browser -> Proxploy (spooled to `data_dir/uploads` by the
-route, never buffered in RAM) and Proxploy -> PVE (read back here). The Proxploy
-host therefore needs transient free disk equal to the file size for the life of
-the job, and the upload takes about twice as long as a direct PVE upload. That
-is the accepted cost of proxying it; what is not acceptable is holding the file
-in memory, which is why the route streams and this handler takes a path rather
-than bytes. The spool file is deleted by the job runner (jobs/backend.py::
-JobBackend._run's `finally`, keyed on the `spool_path` param) on EVERY exit,
-success, PVE failure, timeout, cancellation; because nothing else ever will,
-and because a job cancelled while it is still queued settles without this
-handler ever being called at all.
+Upload proxies the ISO twice — browser -> Proxploy (spooled to
+`data_dir/uploads` by the route, never buffered in RAM) and Proxploy -> PVE —
+so the host needs transient free disk equal to the file size and the upload
+takes about twice as long as a direct PVE upload. The spool file is deleted by
+the job runner (JobBackend._run's `finally`, keyed on the `spool_path` param)
+on EVERY exit — success, PVE failure, timeout, cancellation, or a job cancelled
+while queued — which is why this handler takes a path, not bytes.
 """
 from __future__ import annotations
 
@@ -32,11 +22,9 @@ from proxploy.services.pvetask import await_task
 def _resolve(app, host_id: int, node: str | None):
     """Blocking: host_id -> (ProxmoxClient, node). Runs in a thread.
 
-    `capability="lifecycle"`: uploading an ISO or deleting a stray volume
-    needs Datastore.AllocateSpace, a node-infrastructure privilege that
-    lives on the lifecycle role (the per-capability token sweep found this
-    was granted nowhere at all before -- host-token-privileges-step-one-
-    report.md), not monitoring's read-only set.
+    `capability="lifecycle"`: uploading an ISO or deleting a volume needs
+    Datastore.AllocateSpace, a node-infrastructure privilege on the lifecycle
+    role, not monitoring's read-only set.
     """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)

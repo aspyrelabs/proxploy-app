@@ -10,11 +10,8 @@ const card = 'rounded-card border border-line-soft bg-panel p-5'
 const label = 'mb-1 block text-[10.5px] uppercase tracking-wide text-text-3'
 
 /**
- * Change your own password, and stay signed in here while every other session
- * is dropped.
- *
- * Lifted out of routes/profile.tsx with its logic untouched; see AccountCard
- * for why that page went away.
+ * Change your own password, stay signed in here while every other session is
+ * dropped.
  */
 export function PasswordCard() {
   const { data: me } = useMe()

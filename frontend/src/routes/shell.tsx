@@ -37,9 +37,9 @@ export const shellRoute = createRoute({
   ),
   beforeLoad: async () => {
     // Left uncaught on purpose: errorComponent above is what renders this
-    // failure now (finding F1). A 500 or an unreachable backend here must not
-    // read as "you have not onboarded"; that would bounce a fully set-up
-    // user back into the wizard.
+    // failure now. A 500 or an unreachable backend here must not read as "you
+    // have not onboarded"; that would bounce a fully set-up user back into
+    // the wizard.
     const ob = await api<Onboarding>('/meta/onboarding')
     if (!ob.complete) throw redirect({ to: '/onboarding' })
     try {

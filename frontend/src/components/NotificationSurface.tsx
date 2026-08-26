@@ -5,9 +5,7 @@ import {
 import type { StoreNotification } from '../lib/notificationStore'
 import { NotificationCard } from './ui/notification-card'
 
-/** How long a card sits under the bell before it collapses into the tray on
- *  its own. Errors linger longer: a "Saved." is confirmation you can glance
- *  past, a failure is something to actually read. */
+/** Auto-collapse delay under the bell; destructive errors linger longest. */
 const AUTO_COLLAPSE_MS: Record<StoreNotification['severity'], number> = {
   success: 4000,
   info: 4000,
@@ -16,32 +14,13 @@ const AUTO_COLLAPSE_MS: Record<StoreNotification['severity'], number> = {
 }
 
 /**
- * The answer to "how does a new notification get seen without the user
- * clicking the bell": mounted once (AppShell), independent of the
- * `notify.inapp` entitlement that gates the tray itself (BellPopover) --
- * action notifications from notify.tsx fire for every user regardless of
- * that entitlement, same as they did through sonner before this change, so
- * this has to as well.
+ * Surfaces new notifications near the bell without a click. Mounted once
+ * (AppShell) and independent of the `notify.inapp` entitlement that gates the
+ * tray (BellPopover) — action notifications from notify.tsx fire for every
+ * user regardless of entitlement, so this must too.
  *
- * The newest arrivals appear briefly near the bell, then collapse into the
- * tray on their own: nothing is lost, the card just stops floating on top of
- * the page. Three constraints shaped this over the alternative of briefly
- * auto-opening the popover itself:
- *  - It must never sit on top of the popover the user already opened by
- *    hand, which auto-opening cannot promise (this component instead simply
- *    renders nothing while the tray is open -- there is nothing to add, the
- *    user is already looking at the tray).
- *  - It must not steal focus. Auto-opening a Radix Popover does not move
- *    focus by itself, but reads as "the app just did something" in a way a
- *    quiet card under the bell does not; this is ambient information, not an
- *    interruption.
- *  - NotificationCard already renders role="alert" (an assertive live
- *    region) regardless of where it is hosted, so screen readers announce a
- *    new arrival here exactly as they did for the sonner toast this
- *    replaces -- no new ARIA pattern to get wrong.
- *
- * Whatever was already in the store when this mounts is history, not an
- * arrival, so it is seeded into `seen` up front rather than shown.
+ * Renders nothing while the tray is open; whatever was already in the store
+ * at mount is seeded into `seen`, not shown as an arrival.
  */
 export function NotificationSurface() {
   const [visible, setVisible] = useState<StoreNotification[]>([])
@@ -77,10 +56,9 @@ export function NotificationSurface() {
     const timer = timers.current.get(id)
     if (timer) { clearTimeout(timer); timers.current.delete(id) }
     setVisible((v) => v.filter((x) => x.id !== id))
-    // Only hides the transient card here -- the notification itself stays in
-    // the store (and therefore the tray) exactly as if it had simply timed
-    // out, so dismissing early never loses history the way clearing the
-    // tray's own "Clear all" does; see BellPopover.tsx.
+    // Only hides the transient card; the notification stays in the store
+    // (and tray) as if it had timed out, so early dismissal never loses
+    // history the way the tray's "Clear all" does (see BellPopover.tsx).
   }
 
   if (visible.length === 0 || trayOpen) return null

@@ -1,26 +1,12 @@
-"""Category derivation, automatic (catalog expansion plan, decision 3: no
-hand-maintained 584-entry map, no dependency on the website taxonomy).
+"""Fallback category derivation, network-free.
 
-Two mechanical sources, in priority order:
+Non-ct types map from their directory (TYPE_CATEGORY). ct/ entries use the
+keyword-substring heuristic below, not a per-slug map, so unseen slugs still
+categorize; misses fall back to "Uncategorized".
 
-1. Directory placement, for the four non-ct/ types: which directory a script
-   lives in already says what kind of thing it is (services/catalog.py's
-   discover_tree), so vm/pve/addon/turnkey entries get a fixed category from
-   their type alone, free, always in sync.
-2. For ct/ entries (the only type with no further directory structure to
-   read), a small keyword heuristic over the slug. This is NOT a per-slug map:
-   it is a short list of (keyword, category) pairs checked by substring, so it
-   generalizes to slugs it has never seen (e.g. "postgresql-15" still matches
-   "postgres"). Anything it doesn't recognize honestly falls back to
-   "Uncategorized" rather than a guess, exactly as the decision allows.
-
-This is now the FALLBACK, not the primary: services/catalog_metadata.py syncs
-upstream's own 26-category vocabulary onto every slug that matches an upstream
-record, and discovery only calls this for a row that has no category yet
-(services/catalog.py::_upsert_skeleton). What is left for this module is the
-37-odd ct/ rows upstream has never heard of, mostly alpine-* variants plus
-mysql, which would otherwise render with no category at all. It stays
-deliberately network-free so a cold, offline install still groups sensibly.
+Primary path is services/catalog_metadata.py (upstream's own vocabulary); this
+runs only for rows left uncategorized by discovery, so a cold offline install
+still groups sensibly.
 """
 
 TYPE_CATEGORY = {

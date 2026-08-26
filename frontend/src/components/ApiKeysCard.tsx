@@ -102,12 +102,10 @@ export function ApiKeysCard() {
       // this must stay quiet through the background refetch that follows
       // every mutation's invalidateQueries below.
       firstLoad: ent.isPending || (apiTokensAllowed && keys.isPending),
-      // Both mutations are defined directly on this card (not in a nested
-      // subcomponent) and both change what the card shows wholesale: a
-      // successful create reveals the one-time-secret panel and closes the
-      // form, a revoke flips a row's state. Row-level `disabled={x.isPending}`
-      // treatment stays on the buttons too; the veil is the card-level signal
-      // that something is in flight, not a replacement for it.
+      // Both mutations are defined here (not nested) and change the card
+      // wholesale: create reveals the secret panel + closes the form, revoke
+      // flips a row. The veil is the card-level in-flight signal; row-level
+      // `disabled={x.isPending}` still stays on the buttons.
       mutating: createKey.isPending || revokeKey.isPending,
     }}>
     <section className="rounded-card border border-line-soft bg-panel p-5">

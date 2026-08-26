@@ -16,21 +16,15 @@ export type TrayItem = {
 }
 
 /**
- * GET /jobs and GET /alerts?state=firing (server truth, both survive a reload)
- * merged with the client-side store (notify.tsx's action notifications,
- * LiveProvider's SSE job/alert pushes -- gone on reload). `toJobItem` builds a job's card fields; it is a
- * parameter rather than baked in here so BellPopover's existing
- * severityOf/messageOf/footerOf/progressOf stay exactly where they are.
+ * Merge server sources (GET /jobs, GET /alerts?state=firing — survive reload)
+ * with the client-side store (action notifications, SSE pushes — ephemeral).
+ * `toJobItem` is a parameter so BellPopover's field helpers stay where they are.
  *
- * The one rule this exists to enforce: a job's SSE-delivered terminal event
- * lands in the store the instant it arrives, keyed `job:<id>`
- * (notificationStore.pushJobEvent). The next time GET /jobs is polled, the
- * same job shows up there too. Once it does, the /jobs row wins -- it is the
- * server's own record, more current than the copy that arrived earlier over
- * SSE -- and the store's copy is dropped rather than rendered a second time.
- * A store entry whose job has not shown up in /jobs yet (SSE beat the next
- * poll) is kept: dropping it would mean a notification blinks out of
- * existence before the tray was ever opened to see it.
+ * Dedup rule: an SSE-delivered job event lands in the store as `job:<id>`
+ * before the next /jobs poll returns it. Once the poll catches up, the
+ * server-side row wins (it's more current) and the store copy is dropped to
+ * avoid double-rendering. A store entry whose job hasn't shown up in /jobs
+ * yet is kept — dropping it would blink the notification out of the tray.
  */
 export function mergeNotifications(
   jobs: JobRow[],

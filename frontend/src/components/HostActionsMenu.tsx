@@ -8,37 +8,23 @@ import { Icon } from './ui/icon'
 
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
              + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text'
-// The same destructive vocabulary Button's `danger` variant and AccountMenu's
-// Sign out item already use -- text-red/bg-red-dim tokens, never a literal
-// hex (src/tests/no-hardcoded-colors.test.ts).
+// text-red / bg-red-dim tokens, not a literal hex (a test enforces no
+// hardcoded colors: src/tests/no-hardcoded-colors.test.ts).
 const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t border-line-soft '
                           + 'px-3 py-2 text-[13px] text-red outline-none data-[highlighted]:bg-red-dim'
 
 type Panel = 'edit' | 'reboot' | 'poweroff' | null
 
 /**
- * The individual host page's actions menu: Edit, Reboot, Power off, behind
- * one EllipsisVertical-style trigger. Translated from a shadcn+lucide
- * reference into what this codebase already has -- Radix's dropdown-menu
- * (see AccountMenu.tsx), the hand-rolled Button (`ghost`/`icon-xs`), and
- * Material Symbols via Icon -- rather than the reference's own primitives,
- * none of which exist here (no DropdownMenuShortcut, no `variant=
- * "destructive"` item, no `render={}` trigger prop).
+ * The host page's actions menu: Edit, Reboot, Power off behind an
+ * EllipsisVertical-style trigger.
  *
- * Reboot and Power off do not act directly: each opens HostPowerDialog,
- * which is the actual typed-confirmation gate (doc 02 §9, doc 08 §1/§9 row
- * 14). This menu is just the entry point.
- *
- * `nodePowerMissing` (GET /hosts/{id}'s own field, doc 08 §2/§9) is
- * informational, not a disable switch: Reboot/Power off never grey out,
- * matching NodeShellButton's own precedent in routes/hosts.tsx for the exact
- * same shape of problem (a greyed control reads as broken, not as "ask
- * first"). When it is confirmed True, selecting either item explains which
- * privilege is missing and how to grant it instead of opening a dialog that
- * would only fail with Proxmox's own 403. `false` or unknown (the host has
- * not been probed since this existed) still opens the dialog as normal; the
- * improved 403 message (services/proxmox.py::node_power) is the backstop if
- * it turns out to be missing after all.
+ * Reboot and Power off open HostPowerDialog (the typed-confirmation gate)
+ * rather than act directly. `nodePowerMissing` is informational, not a
+ * disable switch — a greyed control reads as broken — so when true, selecting
+ * either item explains the missing privilege instead of opening a dialog that
+ * would 403. `false`/unknown still opens the dialog; proxmox.py::node_power's
+ * 403 message is the backstop.
  */
 export function HostActionsMenu({ hostId, node, host, nodePowerMissing }: {
   hostId: number

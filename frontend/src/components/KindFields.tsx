@@ -4,12 +4,8 @@ import { InfoHint } from './ui/info-hint'
 
 export const inputClass = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
-/** Every field of one service, with its rule enforced as you type.
- *
- *  Shared by the add form and the edit form rather than written twice: the
- *  two differ only in what happens on save, and a second copy is how the
- *  edit path ends up without the rules the add path has.
- */
+/** Every field of one service, with its rule enforced as you type. Shared by
+ *  add and edit forms; a second copy is how the edit path loses the rules. */
 export function KindFields({ service, values, errors, onChange, idPrefix = 'ch',
                             keepBlank = [] }: {
   service: NotificationKind
@@ -61,9 +57,7 @@ export function KindFields({ service, values, errors, onChange, idPrefix = 'ch',
   )
 }
 
-/** What the (i) says: the rule first when there is one, then an example.
- *  Both, because "letters and numbers, at least 20 characters" and
- *  "o.AbCdEfGh..." answer different halves of the same question. */
+/** What the (i) says: the rule first when there is one, then an example. */
 export function hintText(f: KindField): string {
   const parts = [f.hint, f.example && `Example: ${f.example}`].filter(Boolean)
   return parts.join(' ')
@@ -81,8 +75,7 @@ export function fieldErrors(service: NotificationKind | undefined,
 }
 
 /** Are all the required ones filled in? Separate from fieldErrors because an
- *  empty required field is not a rule failure, it is simply not done yet, and
- *  shouting "that is not right" at an untouched box is obnoxious. */
+ *  empty required field is not a rule failure, it is simply not done yet. */
 export function allRequiredFilled(service: NotificationKind | undefined,
                                   values: Record<string, string>,
                                   alreadySet: string[] = []): boolean {

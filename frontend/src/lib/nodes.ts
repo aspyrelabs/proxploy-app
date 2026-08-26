@@ -5,9 +5,9 @@ import type { NodeRow } from '../api/hooks'
  *  Enrol two endpoints into the same cluster and a two-node cluster arrives as
  *  four rows: each physical node once per endpoint that can see it.
  *
- *  Collapsing them is not cosmetic. Undeduped, a node is drawn as many times
- *  as it has endpoints, its CPU/RAM/disk gauges repeat, and the group's own
- *  "N nodes" count reports endpoints-times-nodes rather than nodes.
+ *  Collapsing them is not cosmetic: undeduped, a node is drawn once per
+ *  endpoint, its gauges repeat, and the group's "N nodes" count reports
+ *  endpoints-times-nodes rather than nodes.
  *
  *  Two rows are the SAME physical node only when they agree on the node name
  *  AND sit in the same cluster: outside a cluster, `node1` behind one endpoint

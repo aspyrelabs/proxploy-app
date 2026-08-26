@@ -1,20 +1,12 @@
 import type { ConsoleKind } from '../api/consoles'
 
-/** Every console (node shell, app console, VM console) opens in a window of
- *  its own rather than in a tab on the page it came from.
+/** Consoles open in a window of their own, not a tab on the page they came
+ *  from: navigating a tab away kills the session behind it.
  *
- *  A console is a working surface you keep beside the page while you do
- *  something else with it; a tab is a place you navigate to, and navigating
- *  away from a tab kills the session behind it.
- *
- *  The window NAME is the load-bearing part. It is stable per target, so a
- *  second click on Console focuses the window that is already open instead of
- *  opening another one. Without it, every click would redeem another
- *  single-use ticket and start another PTY against the same guest, which is
- *  the situation the ticket design exists to prevent.
- *
- *  `noopener,noreferrer` for the usual reason: the console window gets no
- *  handle on the app window through `window.opener`.
+ *  The window NAME is the load-bearing part — stable per target, so a second
+ *  click focuses the window already open instead of redeeming another
+ *  single-use ticket and starting another PTY against the same guest.
+ *  `noopener,noreferrer` so the console window gets no `window.opener` handle.
  */
 export function consoleWindowName(kind: ConsoleKind, id: number): string {
   return `proxploy-console-${kind}-${id}`

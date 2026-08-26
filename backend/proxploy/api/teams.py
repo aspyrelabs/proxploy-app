@@ -1,16 +1,10 @@
-"""Teams CRUD + membership (doc 05 Teams row, Task 6). ROUTE TEMPLATE:
-authorize -> require_entitlement -> work -> audit (hosts.py idiom).
+"""Teams CRUD + membership.
 
-Both `_read` and `_manage` are deliberately GLOBAL (no scope_of): unlike
-host/app/vm, which are scoped to the team that owns them, "team" itself is
-the multi-tenancy admin plane, same status as ("user", "manage"). An owner
-with membership in only the default team still needs to administer a
-brand-new team that has zero members yet -- scoping team,manage to the
-team_id in the path would lock its own creator out of populating it, since
-enforce()'s domain-scoped branch requires a g-line IN that exact domain.
-Every membership write calls sync_user() after commit: the enforcer is
-in-memory (services/authz.py docstring), so skipping this leaves the change
-invisible until the process restarts.
+_read/_manage are deliberately global (no scope_of): scoping team,manage to the
+team_id in the path would lock a new team's creator out of populating it.
+
+Every membership write must call sync_user() after commit — the enforcer is
+in-memory, so skipping it leaves the change invisible until restart.
 """
 import re
 

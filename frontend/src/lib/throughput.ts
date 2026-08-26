@@ -24,8 +24,7 @@ import type { HostThroughput } from '../api/network'
  */
 export function combineThroughput(
   hosts: HostThroughput[],
-  /** The cluster a host belongs to, or null when it stands alone. The Hosts
-   *  page reads this off the nodes it has already fetched. */
+  /** The cluster a host belongs to, or null when it stands alone. */
   clusterOf: (hostId: number) => string | null,
 ): { ts: number[]; inValues: (number | null)[]; outValues: (number | null)[] } {
   const seen = new Set<string>()

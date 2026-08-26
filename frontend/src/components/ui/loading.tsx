@@ -1,25 +1,16 @@
 /**
- * The app's one loading indicator, in two modes.
- *
- * The ring is vendored from MagicUI's `animated-circular-progress-bar`
- * (https://magicui.design/r/animated-circular-progress-bar.json). Adapted:
+ * The app's one loading indicator, in two modes. Ring vendored from MagicUI's
+ * animated-circular-progress-bar, adapted:
  *
  *  - No `cn` helper: this repo has no clsx/tailwind-merge.
- *  - Colours default to CSS variables rather than the literals asked for.
- *    `var(--amber)` IS #F5B544 on the dark theme, and #C77E14 on the light one,
- *    so the token keeps the brand colour while letting the light theme work.
- *    A literal would also fail `no-hardcoded-colors.test.ts`. Same reasoning
- *    for the track: rgba(255,255,255,0.1) is invisible on a light background,
- *    where `var(--line)` is the faint rule this codebase already uses.
- *  - The demo's self-incrementing setInterval is not here. It is a preview
- *    device. A percentage that climbs on a timer is a lie about progress.
- *  - Upstream is determinate only: it has no looping mode. So an indeterminate
- *    wait gets a spinning arc with NO number rather than a fake one.
- *
- * Which mode to use is not a style choice:
- *  - Pass `value` only where a real completion signal drives it.
- *  - Omit `value` when we are simply waiting. The ring then spins, announces
- *    itself as busy, and shows no figure at all.
+ *  - Colours are CSS variables, not literals: a literal would fail
+ *    no-hardcoded-colors.test.ts, and var(--amber) keeps the brand colour
+ *    across light/dark. var(--line) is the track rule this codebase uses
+ *    (rgba white 0.1 is invisible on light backgrounds).
+ *  - No self-incrementing setInterval: a percentage that climbs on a timer is
+ *    a lie about progress.
+ *  - Upstream is determinate only; indeterminate mode (spinning arc, no
+ *    number) added here.
  */
 
 const CIRCUMFERENCE = 2 * Math.PI * 45
@@ -32,7 +23,7 @@ export function Loading({
   gaugeSecondaryColor = 'var(--line)',
   className = '',
 }: {
-  /** 0..100. Omit for indeterminate: there is no honest number to show. */
+  /** 0..100; omit for indeterminate. */
   value?: number
   /** The accessible name, and the visible caption when one is rendered. */
   label?: string
@@ -63,9 +54,6 @@ export function Loading({
           cx="50" cy="50" r="45" strokeWidth="10" strokeLinecap="round"
           style={{
             stroke: gaugePrimaryColor,
-            // Determinate: the arc IS the percentage. Indeterminate: a fixed
-            // quarter arc that spins, which reads as motion without claiming a
-            // figure.
             strokeDasharray: determinate
               ? `${(pct / 100) * CIRCUMFERENCE} ${CIRCUMFERENCE}`
               : `${CIRCUMFERENCE / 4} ${CIRCUMFERENCE}`,

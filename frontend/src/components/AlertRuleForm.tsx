@@ -19,13 +19,8 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   const qc = useQueryClient()
   const metrics = useAlertMetrics()
   const specs = metrics.data?.metrics ?? []
-  // Not "the metric list is slow", but "this form does not exist yet".
-  // GET /alert-rules/metrics decides which metrics can be picked at all,
-  // whether the Threshold pair is shown (needs_threshold) and which targets
-  // the Target select offers, so rendering before it lands puts up a form with
-  // an empty Metric box and fields that appear and disappear underneath the
-  // reader's cursor a moment later. This is the case the Form pattern is for:
-  // the shape is known, the values are not.
+  // The form's shape (threshold field, target options) comes from
+  // GET /alert-rules/metrics, so render nothing until it lands.
   const loadingSpecs = metrics.isPending
 
   const [name, setName] = useState('')
@@ -141,11 +136,9 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
       {targetType === 'host' && (
         <div>
           <label className={label} htmlFor="ar-host">Host</label>
-          {/* `isLoading`, not `isPending`: these three queries are enabled-gated
-              on the target kind above, and a disabled query sits at isPending
-              for ever, so isPending would put "Loading…" on a select that is
-              simply not being asked yet. isLoading is isPending && isFetching,
-              which is exactly "the first fetch is in flight". */}
+          {/* isLoading, not isPending: these queries are enabled-gated on the
+              target kind, and a disabled query stays isPending forever.
+              isLoading (isPending && isFetching) = "first fetch in flight". */}
           <select id="ar-host" className={input} value={targetId}
                   disabled={hosts.isError || hosts.isLoading}
                   onChange={(e) => setTargetId(e.target.value)}>

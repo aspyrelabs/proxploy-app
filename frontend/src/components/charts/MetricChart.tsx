@@ -4,23 +4,13 @@ import { Skeleton, SkeletonGroup, SkeletonLine } from '../ui/skeleton'
 import { TimeChart, type ChartAccent, type ChartUnit } from './TimeChart'
 import { segment } from '../ui/button'
 
-/** TimeChart's own `height` default. Repeated here rather than exported from
- *  there, because the placeholder has to reserve the plot's height before
- *  TimeChart is rendered at all, and a placeholder of a different height is
- *  the layout jump this whole file is trying to avoid. */
+/** TimeChart height default. Repeated here (not imported) so the skeleton
+ *  placeholder reserves the plot's height before TimeChart renders. */
 const DEFAULT_HEIGHT = 168
 
-/** A chart that owns its own time range.
- *
- *  The range lives here rather than on the page because each chart answers a
- *  different question: "is the CPU spiking right now" wants 30m, "did storage
- *  creep all week" wants 24h, and forcing one range on all three makes at
- *  least one of them useless.
- *
- *  Ranges start at 30m deliberately. The poller samples every 30s
- *  (PROXPLOY_POLL_INTERVAL_S), so anything shorter is two or three points
- *  pretending to be a trend.
- */
+/** Chart that owns its own time range (per-chart, not page-level). Ranges
+ *  start at 30m: the poller samples every 30s (PROXPLOY_POLL_INTERVAL_S),
+ *  so anything shorter is 2–3 points pretending to be a trend. */
 export const RANGES = [
   { label: '30m', hours: 0.5 },
   { label: '1h', hours: 1 },
@@ -64,17 +54,12 @@ export function MetricChart({
           ))}
         </div>
       </div>
-      {/* `target != null` as well as isPending: useMetrics is `enabled:
-          !!target`, and a disabled query sits at pending forever, so keying on
-          isPending alone would pulse an empty chart on a page that has no
-          target to chart at all.
-
-          Why this branch exists: TimeChart draws its dashed "No data yet" box
-          whenever `ts` is empty, and `ts` is empty for the whole of the first
-          fetch. So a chart that had samples said it had none, which is a
-          different and wrong answer, and it said it again on every range
-          button, since each range is a fresh query key with nothing cached.
-          The range group above stays live throughout, this is only the plot. */}
+      {/* Guard on `target != null` as well as isPending: useMetrics is
+          `enabled: !!target`, so a disabled query sits at pending forever.
+          Keying on isPending alone would pulse an empty chart on a page with
+          no target. TimeChart draws "No data yet" when `ts` is empty, which
+          is a wrong answer while the first fetch is in flight (and on every
+          range change, since each range is a fresh query key). */}
       {q.isPending && target != null ? (
         <SkeletonGroup label={`Loading ${label}`}>
           {/* TimeChart's own figure line ("47% · peak 61% · axis to 80%"). */}

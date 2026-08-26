@@ -159,12 +159,8 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
                 <option key={m.macro} value={m.macro}>{m.macro}</option>
               ))}
             </select>
-            {/* Only when a macro is actually chosen. Proxmox gives a macro's name
-                and description and does not say which ports it opens, so this
-                shows exactly what Proxmox said about the macro in the box above
-                and nothing more. A description shown under a select reading
-                "None" describes a macro the operator did not pick, whatever its
-                text says. */}
+            {/* Proxmox gives a macro's name and description but not which ports
+                it opens; shown only when a macro is actually chosen. */}
             {form.macro && (
               <p className="mt-1 text-[12px] text-text-3">
                 {(macros.data?.macros ?? []).find(m => m.macro === form.macro)?.descr}
@@ -201,10 +197,10 @@ export function FirewallRuleForm({ scope, hostId, rule, onClose }: {
         </div>
       )}
 
-      {/* The failure is not repeated here. useScopeMutation's onError notifies
-          through apiErrorDetail, and NotificationSurface sits at z-40 against
-          this dialog's z-30 scrim, so the message is readable with the dialog
-          still open and still holding what was typed. */}
+      {/* Errors are not repeated here: useScopeMutation's onError notifies via
+          apiErrorDetail, and NotificationSurface (z-40) sits above this
+          dialog's z-30 scrim so the message stays readable with the dialog
+          still open. */}
 
       {/* Measured on pve-manager 9.2.11: PVE prepends a new rule, so it lands
           at position 0 and outranks every rule below it. Rule order IS

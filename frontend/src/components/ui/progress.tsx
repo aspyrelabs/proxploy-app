@@ -2,32 +2,16 @@ import { createContext, useContext, useId } from 'react'
 import type { ReactNode } from 'react'
 
 /**
- * The linear counterpart to ui/loading.tsx's ring, in the same two modes and
- * for the same reason.
+ * Linear counterpart to ui/loading.tsx's ring.
  *
- *  - Pass `value` only where a real completion signal drives it.
- *  - Pass null/undefined while we are only waiting. The bar then sweeps,
- *    announces itself busy, and shows no figure at all.
+ * Determinate only where a real completion signal drives `value`; pass
+ * null/undefined while merely waiting (the bar sweeps, announces busy, and
+ * shows no figure). No self-incrementing timer: a percentage that climbs on
+ * its own is a lie about progress (see JobContext.progress,
+ * backend/proxploy/jobs/backend.py).
  *
- * There is deliberately no self-incrementing timer and no "nearly there"
- * easing toward 100: a percentage that climbs on its own is a lie about
- * progress. The backend says the same thing from the other end, where
- * JobContext.progress documents why a job must never sit on a phase's high
- * water mark instead of showing honest progress
- * (backend/proxploy/jobs/backend.py).
- *
- * Compound rather than a pile of props, so a call site composes only the
- * parts it wants:
- *
- *   <Progress value={56} className="w-full max-w-sm">
- *     <ProgressLabel>Upload progress</ProgressLabel>
- *     <ProgressValue />
- *   </Progress>
- *
- * Both children are optional and either can be omitted. `ProgressLabel` also
- * supplies the bar's accessible name through aria-labelledby, so a Progress
- * rendered without one is an unnamed progressbar: give it a label unless the
- * surrounding copy already says what is happening.
+ * ProgressLabel supplies the bar's accessible name via aria-labelledby, so a
+ * Progress without one is an unnamed progressbar.
  */
 
 type ProgressCtx = {
@@ -39,7 +23,7 @@ type ProgressCtx = {
 const Ctx = createContext<ProgressCtx>({ pct: null, labelId: '' })
 
 export function Progress({ value, className = '', children }: {
-  /** 0..100. null/undefined means indeterminate: there is no honest number yet. */
+  /** 0..100; null/undefined = indeterminate. */
   value?: number | null
   className?: string
   children?: ReactNode
@@ -67,10 +51,9 @@ export function Progress({ value, className = '', children }: {
         )}
         <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-elev">
           {pct == null ? (
-            // A fixed-width sliver sweeping the track, the bar-shaped version
-            // of Loading's spinning quarter arc: motion without a figure.
-            // motion-reduce parks it at the left; aria-busy above still
-            // carries the state, so only the movement is lost.
+            // A fixed-width sliver sweeping the track: motion without a figure.
+            // motion-reduce parks it at the left; aria-busy above still carries
+            // the state, so only the movement is lost.
             <div className="pp-progress-sweep h-full w-1/3 rounded-full bg-amber" />
           ) : (
             <div
@@ -95,8 +78,7 @@ export function ProgressLabel({ className = '', children }: {
   )
 }
 
-/** The figure, when there is one. Renders nothing at all while the bar is
- *  indeterminate rather than a placeholder that could be read as a value. */
+/** The figure, when there is one. Renders nothing while indeterminate. */
 export function ProgressValue({ className = '' }: { className?: string }) {
   const { pct } = useContext(Ctx)
   if (pct == null) return null

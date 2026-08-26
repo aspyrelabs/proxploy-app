@@ -1,16 +1,12 @@
-"""What Proxploy can tell you about, and which job kind counts as which.
+"""Which notification type owns which job outcome.
 
-Nineteen rows rather than one per job kind. Eleven of the 33 registered kinds
-earn a named row; the other 22 (VM power actions, snapshots, network apply,
-storage upload, host reboot, migration) fall through to the generic Job rows.
-The catch-all is load-bearing: without it, adding a job kind would silently
-stop notifying rather than notify generically, and today's bell behaviour
-would narrow the day this shipped.
-
-Each kind owns exactly two of the four terminal outcomes. Cancel and interrupt
-are global rows, because a cancelled app install firing against both
+Nineteen rows, not one per job kind: eleven of the 33 registered kinds earn a
+named row; the other 22 fall through to the generic Job rows. The catch-all is
+load-bearing — without it, adding a job kind would silently stop notifying.
+Each kind owns two of the four terminal outcomes; cancel and interrupt are
+global rows, because a cancelled app install firing against both
 `app.install.failed` and `job.canceled` is the double-notify this mapping
-exists to prevent.
+prevents.
 """
 from __future__ import annotations
 
@@ -60,12 +56,11 @@ _KIND_PREFIX: dict[str, str] = {
     "app.uninstall": "app.uninstall",
     "backup.run": "backup",
     "backup.restore": "backup.restore",
-    # The two built-in system schedules, plus the backup retention work that
-    # runs on the same unattended footing. `backup.sync` sits here and not
-    # under "backup": nobody asks for one, GET /backups enqueues it whenever
-    # the cache is stale (api/backups.py::list_backups), so filing it as a
-    # backup outcome toasted "Backup Sync Succeeded" at anyone who left the
-    # Backups page open.
+    # The two built-in system schedules, plus backup retention work on the
+    # same unattended footing. `backup.sync` sits under "housekeeping", not
+    # "backup": nobody asks for one, GET /backups enqueues it whenever the
+    # cache is stale (api/backups.py::list_backups), so filing it as a backup
+    # outcome toasted "Backup Sync Succeeded" at anyone on the Backups page.
     "catalog.refresh": "housekeeping",
     "catalog.classify_backlog": "housekeeping",
     "metrics.maintain": "housekeeping",

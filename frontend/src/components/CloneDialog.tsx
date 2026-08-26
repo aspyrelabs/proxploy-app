@@ -13,10 +13,6 @@ import { Loading } from './ui/loading'
 type StorageRow = { host_id: number; node: string; storage: string; content: string[]
                    cluster_name: string | null }
 
-/**
- * Clone a VM: new name, full vs linked, target storage. Same InstallDialog
- * pattern, fire, keep the job id, swap the body for the job log.
- */
 export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
   const qc = useQueryClient()
   const [name, setName] = useState(`${vm.name}-clone`)
@@ -130,9 +126,8 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
           {error && <p className="text-[12.5px] text-red">{error}</p>}
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
-          {/* Nothing in the clone path calls ctx.progress() (checked against
-              backend/proxploy/services/), so starting the job is a wait with
-              no honest figure to show: the ring, never a number. */}
+          {/* The clone path never calls ctx.progress(), so the wait has no
+              honest figure: the ring, never a number. */}
           {clone.isPending && <Loading label="Starting the clone" size={18} className="mr-auto" />}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button disabled={clone.isPending || name.trim() === ''} onClick={submit}>Clone</Button>

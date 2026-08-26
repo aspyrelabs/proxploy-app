@@ -1,14 +1,9 @@
 """Alert rules and fired alerts (doc 05 §Alerts).
 
-The substance here is validation. The worst failure mode in alerting is a rule
-that looks configured, sits `enabled`, and can never fire; nobody discovers it
-until the outage it was meant to catch. So every combination the evaluator
-cannot answer is a 422 at write time: unknown metric, a (metric, target_type)
-pair outside services/alerts.py::METRIC_TARGETS, a target id that names
-nothing, a channel id that names nothing.
-
-`GET /alert-rules/metrics` exists so the frontend renders the enum from the
-backend rather than hard-coding a second copy that can drift.
+Validation is the substance: the worst failure mode is a rule that looks
+configured but can never fire, so every combination the evaluator cannot
+answer is a 422 at write time. `GET /alert-rules/metrics` serves the metric
+enum so the frontend doesn't hard-code a second copy that can drift.
 """
 from __future__ import annotations
 
@@ -104,8 +99,6 @@ def _validate(db, *, metric: str, target_type: str, target_id: int | None,
             raise HTTPException(422, f"no notification channel with id {cid}")
 
 
-# --- rules ------------------------------------------------------------------
-
 @router.get("/alert-rules/metrics",
             dependencies=[Depends(_read),
                           Depends(require_entitlement("alerts.rules"))])
@@ -196,8 +189,6 @@ def delete_rule(request: Request, rule_id: int, db=Depends(get_db),
     return Response(status_code=204)
 
 
-# --- fired alerts -----------------------------------------------------------
-
 ALERTS_MAX = 200
 
 
@@ -244,12 +235,9 @@ def _lookups(db, rows: list[Alert]) -> tuple[dict, dict, dict]:
 @router.get("/alerts", dependencies=[Depends(_read)])
 def list_alerts(state: str | None = None, limit: int = 50, db=Depends(get_db),
                 user: User = Depends(_read)):
-    """Doc 05 leaves the entitlement column blank here on purpose: the Alerts
-    page is reachable from every tier's nav (SidebarNav does not gate the
-    link), and the bell tray (BellPopover) fetches this before entitlements
-    have even resolved (Topbar shows it while that fetch is still pending).
-    Gating this endpoint on a plan flag would 403 both of those regardless of
-    tier."""
+    """No entitlement gate here on purpose: the bell tray (BellPopover) fetches
+    this before entitlements resolve, and the Alerts page is on every tier's
+    nav, so a plan flag would 403 both regardless of tier."""
     limit = max(1, min(limit, ALERTS_MAX))
     q = db.query(Alert)
     if state:

@@ -5,25 +5,15 @@ const lbl = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
 const selectCls = 'w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]'
 
 /**
- * The two storage pickers in the install dialog's Advanced block, each
- * filtered by content type.
+ * The two storage pickers in the install dialog's Advanced block.
  *
  * `rootdir` and `vztmpl` are different questions: a pool that holds container
- * templates cannot necessarily hold a container's rootfs. Offering every pool
- * for both fields lets an operator choose a vztmpl-only pool as the rootfs,
- * which fails at `pct create` with a raw Proxmox error, AFTER this form told
- * them it was fine. `resolve_storage_pools`
- * (backend/proxploy/services/appstore.py) still revalidates against the
- * node's live content list and refuses an invalid or ambiguous pool; this
- * filter is only the friendly early path, not the enforcement, and must not
- * try to duplicate that check.
- *
- * Candidates come from useStoragePools (pools.ts), the SAME computation
- * Default mode's prompt counts, so the two modes can never disagree about how
- * many pools a host has: they are per host AND per node, deduped, and
- * status-filtered there. InstallDialog owns clearing any already-picked pool
- * name when the target host changes, since a name valid on the old host is
- * not necessarily valid on the new one.
+ * templates cannot necessarily hold a container's rootfs, so offering every
+ * pool for both would let an operator pick a vztmpl-only pool as the rootfs
+ * and fail at `pct create` after this form said it was fine. This filter is
+ * only the friendly early path — `resolve_storage_pools`
+ * (backend/proxploy/services/appstore.py) revalidates against the node's live
+ * content list and refuses invalid or ambiguous pools, so don't duplicate it.
  */
 export function StorageFields({ hostId, node, clusterName, container, template,
                                 onChange }: {
@@ -36,19 +26,10 @@ export function StorageFields({ hostId, node, clusterName, container, template,
 }) {
   const { rootdir, vztmpl, state } = useStoragePools(hostId, node, clusterName)
 
-  // `state`, not just the lists. pools.ts carries it for exactly this reason
-  // and says so: the snapshot is EMPTY until the first poll after a backend
-  // restart and absent entirely on a 403, so an empty list is
+  // `state`, not just the lists: the snapshot is EMPTY until the first poll
+  // after a backend restart and absent entirely on a 403, so an empty list is
   // indistinguishable from "this host has no storage" unless the load state
-  // travels with it. Destructuring it away, which this component did, put two
-  // pickers reading "Select a pool..." with nothing behind them directly under
-  // InstallDialog's own notice saying the pools were still being read. The
-  // notice was right and the controls contradicted it.
-  //
-  // Placeholders rather than a second message: InstallDialog already explains
-  // WHY above this block, and already blocks Install on the same condition
-  // (storageUnknown), so all that is missing here is for the fields to stop
-  // claiming an answer they do not have.
+  // travels with it.
   if (state !== 'ok') {
     return (
       <SkeletonGroup label="Reading the storage pools for this host"

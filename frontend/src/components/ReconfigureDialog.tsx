@@ -18,8 +18,8 @@ const label = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
  * alone" server-side and the backend 422s on an empty body ("nothing to
  * change"), so a submit with no edits is disabled here rather than sent.
  *
- * GET /apps/{id} never reports the CT's current cores/memory/swap (doc 05's
- * App row is presentation state, not PVE's own config), so those three start
+ * GET /apps/{id} never reports the CT's current cores/memory/swap (the App
+ * row is presentation state, not PVE's own config), so those three start
  * blank: there is nothing honest to prefill them with.
  */
 export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () => void }) {
@@ -116,12 +116,9 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
             <label htmlFor="reconf-port" className={label}>Web port</label>
             <input id="reconf-port" className={inputCls} type="number" min={1}
               value={webPort} onChange={(e) => setWebPort(e.target.value)} />
-            {/* For an app adopted by hand, the catalog knows no port, so this
-                field is empty and the row has no Open button. Detect looks
-                inside the container and offers what it found. It fills the
+            {/* Detect offers ports found inside the container. It fills the
                 field and never saves: the guess has to pass through the
-                operator, which is also why the caveat sits under the results
-                rather than in a tooltip nobody opens. */}
+                operator. */}
             <Button variant="ghost" size="sm" className="mt-1"
                     disabled={detect.isPending}
                     onClick={() => detect.mutate(undefined, {
@@ -149,10 +146,6 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
                         </Button>
                       ))}
                     </div>
-                    {/* Said plainly, every time, next to the numbers it is
-                        about. These are ranked guesses read out of the
-                        container a moment ago, not something Proxmox told us:
-                        Proxmox does not know. */}
                     <p className="mt-1 text-[11.5px] text-text-3">
                       A guess, not a reading from Proxmox, which does not know.
                       Best first. Pick one and check it opens.
@@ -164,12 +157,9 @@ export function ReconfigureDialog({ app, onClose }: { app: AppRow; onClose: () =
           </div>
           <div>
             <label htmlFor="reconf-protocol" className={label}>Protocol</label>
-            {/* Three choices, not free text. Only two values open in a
-                browser, and the blank one is the useful default rather than
-                an empty field: it means Proxploy asks the app which scheme it
-                speaks when Open is clicked, which is right for the apps that
-                serve https on a plain-looking port. Pick a value only to
-                override that. */}
+            {/* Blank = "Ask the app": Proxploy asks which scheme the app
+                speaks when Open is clicked, right for apps serving https on a
+                plain-looking port. Pick a value only to override it. */}
             <select id="reconf-protocol" className={inputCls} value={webProtocol}
               onChange={(e) => setWebProtocol(e.target.value)}>
               <option value="">Ask the app</option>

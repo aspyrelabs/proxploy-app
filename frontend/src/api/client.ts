@@ -26,30 +26,18 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
 }
 
 /**
- * The shared funnel from a caught ApiError to toast/inline text. FastAPI
- * wraps whatever a route raises as `HTTPException(status, X)` into a
- * response body of `{"detail": X}`, and X is either a plain string or, at
- * roughly 20 call sites that raise 502 when a call to Proxmox itself fails,
- * an object of `{"error": <kind>, "detail": <text>}`. Both shapes are read
- * here so every caller does not have to unwrap the nested one by hand.
+ * Shared funnel from a caught ApiError to text. FastAPI wraps a route's
+ * raise as `HTTPException(status, X)` → `{"detail": X}`, where X is a plain
+ * string or, at the ~20 sites that raise 502 when a Proxmox call fails, an
+ * object `{"error": <kind>, "detail": <text>}`. `detail` also arrives as an
+ * ARRAY of `{loc, msg, type, ...}` for FastAPI 422 validation errors, and as
+ * a plain string in RFC 9457 problem+json responses.
  *
- * `fallback` is caller-supplied on purpose: it is user-facing copy specific
- * to what that caller was trying to do ("Could not remove that host, try
- * again."), and must not be flattened into one generic sentence here.
+ * `fallback` is caller-supplied user-facing copy (specific to what that
+ * caller was doing) and must not be flattened into one generic sentence.
  *
- * A 502 means Proxploy could not complete a call to Proxmox, not that
- * Proxploy itself is broken; read verbatim the passed-through text looks
- * like a Proxploy bug, so a 502's text alone gets a prefix that says whose
- * side failed. 4xx text is returned exactly as the backend wrote it.
- *
- * Two more shapes read here besides the plain/nested string above:
- * FastAPI's own RequestValidationError handler (main.py) answers a 422 with
- * `detail` as an ARRAY of `{loc, msg, type, ...}`, one per invalid field,
- * which the old code's `typeof detail === 'string'` check fell straight
- * through on, showing the network fallback for an error the server had
- * already explained. And main.py's problem_handler/capability_not_configured_
- * handler answer RFC 9457 problem+json, `{type, title, status, detail}`
- * with `detail` a plain string, already covered by the string branch above.
+ * A 502 means Proxmox (not Proxploy) failed; its text alone gets the prefix
+ * "Proxmox could not do this:". 4xx text is returned exactly as written.
  */
 function detailText(detail: unknown): string | undefined {
   if (typeof detail === 'string') return detail

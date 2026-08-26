@@ -2,27 +2,16 @@ import { type ReactNode, useRef, useState } from 'react'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel } from './ui/alert-dialog'
 
-/**
- * Doc 06: destructive actions against the CT Proxploy itself runs in route
- * through a stronger typed-confirmation instead of the one-click action, with
- * an explicit warning that stopping it can strand its own recovery path.
- *
- * The typed gate is deliberately ours, not Radix's. Radix supplies the modal
- * behaviour; what counts as a correct phrase, and the fact that the confirm
- * control stays disabled until it matches, is product logic.
- */
+/** The typed gate is deliberately ours, not Radix's: the phrase and the
+ *  disabled-until-match rule are product logic, not modal behaviour. */
 export function ConfirmSelfDialog({ phrase, detail, title, children, onConfirm, onCancel }: {
   phrase: string
   detail: string
-  /** Defaults to the self-CT heading. Phase 6's network apply and in-place
-   *  restore reuse the same typed-confirmation control for a different danger,
-   *  and a false heading above the most destructive button in the product is
-   *  worse than a prop. */
+  /** Defaults to the self-CT heading; network apply and in-place restore pass
+   *  their own. */
   title?: string
-  /** Rendered above the typed field, for the one caller that needs the operator
-   *  to choose HOW MUCH as well as confirm: the audit log clear takes an
-   *  "older than" cutoff. It belongs inside this dialog rather than beside the
-   *  table's own date filters, where it would read as a fifth filter. */
+  /** Rendered above the typed field for the audit-log-clear caller, which
+   *  needs an "older than" cutoff as well as a confirm. */
   children?: ReactNode
   onConfirm: (typed: string) => void
   onCancel: () => void
@@ -35,20 +24,14 @@ export function ConfirmSelfDialog({ phrase, detail, title, children, onConfirm, 
       title={title ?? "This is Proxploy's own container"}
       description={detail}
       onCancel={onCancel}
-      // Radix focuses the cancel control first, which is the right default for
-      // a yes/no destructive prompt. This one asks you to type a name, so the
-      // field is where the caret belongs. The gate below is what makes that
-      // safe, not the focus order.
+      // Radix focuses the cancel control first (right for a yes/no prompt);
+      // this one asks you to type a name, so the caret belongs in the field.
       onOpenAutoFocus={(event) => { event.preventDefault(); input.current?.focus() }}
     >
       {children}
-      {/* The phrase is a CODE CHIP, not just a monospace run inside the
-          sentence. This is the one string the operator has to reproduce
-          exactly, and set in the flow of "Type x to confirm" it read as part
-          of the sentence rather than as the thing to copy. A border and a
-          panel behind it make where the name starts and stops unambiguous,
-          which matters most for the names that contain spaces or end in
-          punctuation. */}
+      {/* The phrase is a code chip because it is the one string the operator
+          must reproduce exactly; its boundaries must stay unambiguous for
+          names with spaces or trailing punctuation. */}
       <label className="mt-4 block text-[12px] text-text-3" htmlFor="self-confirm">
         Type{' '}
         <span className="mx-0.5 inline-block rounded border border-line bg-panel-2

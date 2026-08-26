@@ -2,15 +2,8 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 
 /**
- * What backups can and cannot do here, said once before the operator relies on
- * them. Every limit below is Proxmox VE's own `vzdump`, not a Proxploy choice,
- * and the card says so: someone who reads "no incremental backups" on our page
- * will otherwise conclude we skipped the feature.
- *
- * Acknowledged per browser, the same way lib/sidebar.ts and lib/console-prefs.ts
- * keep their state. Not a server-side per-user flag: this is a "have you read
- * this" note, and the worst case of losing it is reading it again. Say so if a
- * fleet ever wants it recorded centrally.
+ * Acknowledgement is per-browser (localStorage), not a server-side per-user
+ * flag: worst case of losing it is reading the card again.
  */
 const ACK_KEY = 'proxploy.backups.limits-ack'
 
@@ -30,13 +23,6 @@ function acknowledge(): void {
   }
 }
 
-/** Each limit, and what Proxploy does about it where it does anything.
- *
- *  A list of four things that are wrong leaves the reader with a problem and no
- *  move, so the two we answer carry an answer. The two we do not are left as
- *  the plain statement they are: a "Proxploy cannot fix it" line adds nothing a
- *  reader of "there is no way to pull a single file out of it" did not already
- *  understand, and repeating it turns the card into a list of apologies. */
 const LIMITS: { limit: string; body: string; answer?: string }[] = [
   {
     limit: 'Every backup is a full copy',
@@ -83,9 +69,6 @@ export function BackupLimitsDialog({ onClose, onAgree }:
           <div key={l.limit}>
             <dt className="text-[13px] font-semibold text-text">{l.limit}</dt>
             <dd className="mt-0.5 text-[12.5px] text-text-3">{l.body}</dd>
-            {/* Only where there is one. A limit we cannot do anything about
-                reads as the plain statement it is, not as a "Proxploy:" with
-                an apology after it. */}
             {l.answer && (
               <dd className="mt-1 text-[12.5px] text-text-2">
                 <span className="text-text-3">Proxploy: </span>{l.answer}

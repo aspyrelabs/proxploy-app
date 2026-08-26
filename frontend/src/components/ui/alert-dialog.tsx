@@ -5,17 +5,13 @@ import { Button } from './button'
 import { dialogOverlayClass, dialogPanelClass, useRadixClose } from './overlay'
 
 /**
- * The destructive modal: removing a host, uninstalling an app, confirming an
- * action against the container Proxploy itself runs in.
+ * Destructive modal (host removal, app uninstall, etc.).
  *
- * Separate from Dialog because the behaviour genuinely differs. Radix's
- * AlertDialog does not close on a click outside and focuses the cancel control
- * first, which is what you want when the panel is asking whether to destroy
- * something. role="alertdialog" also tells a screen reader this is not a
- * routine form.
+ * Separate from Dialog: Radix AlertDialog does not close on click-outside,
+ * focuses the cancel control first, and role="alertdialog" tells screen
+ * readers this is not a routine form.
  *
- * The typed-name confirmation gate is NOT here. It lives in the call sites
- * that need it, because what counts as a correct phrase is theirs to decide.
+ * Typed-name confirmation gate lives in call sites — they own the phrase.
  */
 export function AlertDialog({
   title,
@@ -27,13 +23,7 @@ export function AlertDialog({
 }: {
   title: ReactNode
   description: ReactNode
-  /** Any CSS width, for a panel that holds something other than a short
-   *  question. The uninstall dialog turns into a job transcript once the run
-   *  starts, and 420px wrapped community-scripts' output mid-line, which is
-   *  where the useful part is. Left unset the panel keeps its 420, which is
-   *  the right size for the yes/no this component is mostly used for. The
-   *  92vw cap applies either way, so a percentage cannot push it off a narrow
-   *  screen. */
+  /** Override panel width (default 420px). 92vw cap applies either way. */
   width?: number | string
   /** Escape and the cancel control both route here. */
   onCancel: () => void

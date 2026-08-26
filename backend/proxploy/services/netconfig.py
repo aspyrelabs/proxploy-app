@@ -2,16 +2,16 @@
 
 Proxmox stores a guest NIC as one comma-joined `k=v` string, and the NIC model
 and its MAC address share a single head token: `virtio=AA:BB:CC:DD:EE:FF`.
-That is the whole reason this module exists. Editing a NIC means read the
-string, change one key, write the string back; never rebuild it from a typed
-struct, because anything the struct does not model (the MAC, `queues`, an
-option a future PVE adds) would be dropped, and a dropped MAC means Proxmox
-mints a new random one at next start, breaking every DHCP reservation and
-MAC-bound licence pointed at that guest.
+Editing a NIC means read the string, change one key, write it back — never
+rebuild it from a typed struct, because anything the struct does not model
+(the MAC, `queues`, an option a future PVE adds) would be dropped, and a
+dropped MAC makes Proxmox mint a new random one at next start, breaking every
+DHCP reservation and MAC-bound licence pointed at that guest.
 
-So: parse to an ORDER-PRESERVING dict of raw strings, mutate that dict, join it
-back. No key is interpreted, no value is normalised, nothing is sorted.
-`build_net(parse_net(s)) == s` for every string PVE emits (tests/test_netconfig.py).
+Parse to an ORDER-PRESERVING dict of raw strings, mutate it, join it back. No
+key is interpreted, no value is normalised, nothing is sorted.
+`build_net(parse_net(s)) == s` for every string PVE emits
+(tests/test_netconfig.py).
 """
 from __future__ import annotations
 

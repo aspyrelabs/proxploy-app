@@ -5,30 +5,18 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 /**
- * shadcn/ui `pagination`, vendored by `npx shadcn@latest add pagination` and
- * then adapted in exactly two places. Everything else (the nav/ul/li
- * structure, the data-slot attributes, the class lists) is upstream's.
+ * shadcn/ui `pagination`, vendored and adapted in two places (the nav/ul/li
+ * structure, data-slot attributes, and class lists are upstream's):
  *
- * 1. Upstream renders each control as `<Button asChild variant="outline"
- *    size="icon"><a href="..."/></Button>`. This project has its own
- *    hand-written components/ui/button.tsx that predates shadcn: it has no
- *    `asChild`, and its variants are primary/ghost/danger/go with sizes
- *    md/icon-xs, so upstream's call would have passed `asChild` straight
- *    through to the DOM and asked for a variant and a size that do not
- *    exist. `shadcn add` offered to overwrite button.tsx to fix that from
- *    its end; it was declined, because every other route in the app renders
- *    through that Button and its API is not shadcn's to change. So the
- *    adaptation happens here, in the new file, rather than there, in the
- *    old one.
+ * 1. This project's hand-written ui/button.tsx predates shadcn: no `asChild`,
+ *    and its variants are primary/ghost/danger/go with sizes md/icon-xs. The
+ *    adaptation happens here (variant="ghost", size="sm") rather than
+ *    overwriting Button, which every route renders through.
  *
- * 2. Upstream's controls are anchors, because the registry example is a
- *    static demo where `href="#"` stands in for a real route. An anchor to
- *    "#" navigates and jumps the scroll position, and it cannot be
- *    meaningfully disabled: `aria-disabled` on a link still follows on
- *    click. The first and last page need a control that is genuinely
- *    inert, so these are real `<button>` elements with a real `disabled`
- *    attribute, which is also what makes them announce correctly and pick
- *    up the existing Button's disabled styling for free.
+ * 2. Upstream's controls are anchors (the registry demo uses href="#"); an
+ *    anchor to "#" navigates and jumps scroll, and `aria-disabled` on a link
+ *    still follows on click. First/last page need to be genuinely inert, so
+ *    these are real {@code <button>}s with a real `disabled` attribute.
  */
 
 function Pagination({ className, ...props }: ComponentProps<"nav">) {
@@ -57,16 +45,13 @@ function PaginationItem({ ...props }: ComponentProps<"li">) {
   return <li data-slot="pagination-item" {...props} />
 }
 
-/** The shared control. `variant`/`size` are this app's Button's own, not
- *  shadcn's, for the reason in the header note. */
+/** The shared control. `variant`/`size` are this app's Button's, not shadcn's. */
 function PaginationButton({ className, ...props }: ComponentProps<typeof Button>) {
   return (
     <Button
       variant="ghost"
-      // size, not padding/font in the className: those collide with Button's
-      // own size classes and lose in the emitted CSS, so this control was
-      // rendering at full `md` rather than the compact one it reads as. Before
-      // {...props} so a caller can still choose a different size.
+      // Use size (not className padding/font, which loses to Button's own
+      // size classes in CSS). Before {...props} so a caller can override it.
       size="sm"
       data-slot="pagination-link"
       className={className}
