@@ -2,9 +2,9 @@
 
 Recovery-code hashes live in their own table (`TotpRecoveryCode`), NOT packed
 as JSON inside `users.totp_secret_enc` as the original plan called for --
-see the migration docstring (6cf6a0722d23_0005_totp_recovery_codes.py) and
-docs/notes/phase-8-scale.md for why that zero-migration design was rejected
-mid-implementation. `totp_secret_enc` holds exactly what its name says: the
+see the migration docstring (6cf6a0722d23_0005_totp_recovery_codes.py) for
+why that zero-migration design was rejected mid-implementation.
+`totp_secret_enc` holds exactly what its name says: the
 Fernet-encrypted base32 TOTP seed, nothing else.
 
 Recovery codes are `secrets.token_hex(2)` x2 joined with "-" (e.g.

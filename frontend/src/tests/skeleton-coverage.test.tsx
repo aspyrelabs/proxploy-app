@@ -25,7 +25,6 @@ vi.mock('../lib/notify', () => ({
   notify: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
 
-import { ActivityFeed } from '../components/ActivityFeed'
 import { AlertRuleForm } from '../components/AlertRuleForm'
 import { SessionsCard } from '../components/SessionsCard'
 import { SnapshotPanel } from '../components/SnapshotPanel'
@@ -126,28 +125,6 @@ describe('a form whose fields are decided by a fetch', () => {
                             needs_threshold: true }] })
 
     await waitFor(() => expect(screen.getByLabelText('Metric')).toBeInTheDocument())
-    expect(pulses(container)).toBe(0)
-  })
-})
-
-describe('the Avatar shape in a real surface', () => {
-  // ActivityFeed: a kind badge, a title line and a quieter line under it, one
-  // set per row, as many rows as the feed is going to show.
-  it('draws one placeholder row per row it is about to draw', async () => {
-    const d = deferred<unknown>()
-    routes['/cluster/activity?limit=3'] = d.promise
-    const { container } = wrap(<ActivityFeed limit={3} />)
-
-    expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Loading activity')
-    // The badge tile is the one rounded-tile per row; a count that drifts from
-    // `limit` is a feed that resizes when the rows arrive.
-    expect(container.querySelectorAll('.rounded-tile')).toHaveLength(3)
-
-    d.resolve([{ kind: 'job', id: 1, title: 'app.install', status: 'success',
-                 at: '2026-01-01T00:00:00Z', actor: 'admin', target_type: null,
-                 target_id: null, progress_pct: null, job_id: 1 }])
-
-    await waitFor(() => expect(screen.getByText('success', { exact: false })).toBeInTheDocument())
     expect(pulses(container)).toBe(0)
   })
 })

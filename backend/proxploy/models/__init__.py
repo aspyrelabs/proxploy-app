@@ -1,4 +1,4 @@
-"""All Proxploy entities, schema per docs/04-data-model.md, portable SQLite/Postgres subset."""
+"""All Proxploy entities, portable SQLite/Postgres subset."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -67,11 +67,11 @@ class User(TimestampMixin, Base):
 
 
 class TotpRecoveryCode(Base):
-    """One row per recovery code (Phase 8 Task 8 amendment, see
-    docs/notes/phase-8-scale.md: the plan's zero-migration design packed
-    these inside `users.totp_secret_enc`; a real column replaces that so
-    burning a code is an ordinary UPDATE, never a decrypt-mutate-re-encrypt
-    of a blob shared with a concurrent TOTP verify). `code_hash_enc` is the
+    """One row per recovery code (Phase 8 Task 8 amendment: the plan's
+    zero-migration design packed these inside `users.totp_secret_enc`; a
+    real column replaces that so burning a code is an ordinary UPDATE,
+    never a decrypt-mutate-re-encrypt of a blob shared with a concurrent
+    TOTP verify). `code_hash_enc` is the
     argon2 hash (services/authn.py::hash_password's idiom, never the raw
     code) Fernet-encrypted at rest via SecretStore, same as
     `totp_secret_enc`. Burning sets `used_at`; the atomic single-use
@@ -867,7 +867,7 @@ class NotificationDismissal(TimestampMixin, Base):
     """One row per user: the bell tray's server-side memory of what has
     already been cleared, so a clear survives a reload, a reboot, and a
     login from a different browser or machine (a per-user fact, not a
-    per-browser one -- see docs/notes/persist-cleared-notifications-report.md).
+    per-browser one).
 
     `cleared_through_job_id` is a watermark, not a growing list: "clear all"
     records the highest job id that existed at the moment of the clear, and

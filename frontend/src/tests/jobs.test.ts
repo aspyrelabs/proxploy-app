@@ -39,7 +39,6 @@ describe('applyJob', () => {
       (t) => toasts.push(t))
     expect(toasts).toEqual([{ kind: 'ok', text: 'App Start Done', jobId: 3 }])
     expect(spy).toHaveBeenCalledWith({ queryKey: ['apps'] })
-    expect(spy).toHaveBeenCalledWith({ queryKey: ['cluster', 'activity'] })
   })
 
   it('uses the error toast kind for a failed job', () => {

@@ -12,8 +12,7 @@ doc 04's sentence rules out.
 
 Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists, only
 4.0.0a1..a6 (verified against PyPI 2026-08-01), and doc 03 marks Scheduling
-"Provisional (seam: `Scheduler`)", so this ships on the stable 3.11 line. See
-docs/notes/phase-7-operate.md.
+"Provisional (seam: `Scheduler`)", so this ships on the stable 3.11 line.
 
 Failure policy: one malformed row must never stop the other schedules. A row
 whose cron/timezone no longer parses, or whose `job_kind` has no registered

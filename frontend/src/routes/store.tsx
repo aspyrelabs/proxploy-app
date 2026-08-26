@@ -14,7 +14,6 @@ import { QueryState } from '../components/QueryState'
 import { Skeleton, SkeletonGroup, SkeletonLine } from '../components/ui/skeleton'
 import { Button, segment } from '../components/ui/button'
 import { Dialog } from '../components/ui/dialog'
-import { Field, FieldLabel } from '@/components/ui/field'
 import {
   Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
 } from '@/components/ui/pagination'
@@ -406,10 +405,11 @@ export function StorePage() {
             popularity one, and holding the number would land the operator
             somewhere arbitrary. */}
         <div className="mt-3 flex flex-wrap justify-end">
-          <Field orientation="horizontal" className="w-fit">
-            <FieldLabel htmlFor="select-store-sort" className="text-[12px] text-text-2">
+          <div role="group" className="flex w-fit items-center gap-2">
+            <label htmlFor="select-store-sort"
+                   className="flex w-fit flex-auto select-none items-center gap-2 text-[12px] leading-snug font-medium text-text-2">
               Sort by
-            </FieldLabel>
+            </label>
             <Select value={sort}
                     onValueChange={(v) => setFilter({ sort: isStoreSort(v) ? v : undefined })}>
               <SelectTrigger className="w-44" id="select-store-sort" size="sm">
@@ -423,7 +423,7 @@ export function StorePage() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </Field>
+          </div>
         </div>
       </div>
 
@@ -445,10 +445,11 @@ export function StorePage() {
                       onInstall={(slug) => setInstalling(slug)} />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-              <Field orientation="horizontal" className="w-fit">
-                <FieldLabel htmlFor="select-rows-per-page" className="text-[12px] text-text-2">
+              <div role="group" className="flex w-fit items-center gap-2">
+                <label htmlFor="select-rows-per-page"
+                       className="flex w-fit flex-auto select-none items-center gap-2 text-[12px] leading-snug font-medium text-text-2">
                   Apps per page
-                </FieldLabel>
+                </label>
                 <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
                   <SelectTrigger className="w-20" id="select-rows-per-page" size="sm">
                     <SelectValue />
@@ -461,7 +462,7 @@ export function StorePage() {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              </Field>
+              </div>
 
               <div className="flex flex-wrap items-center gap-3">
                 {/* Prev/Next alone say nothing about where you are in 556

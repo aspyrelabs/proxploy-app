@@ -73,7 +73,7 @@ esac
 # script. That is sound because the script itself arrives over TLS from a
 # host the user already chose to trust: the same trust the curl already
 # places. Replacing this block is step 1 of
-# docs/runbooks/publishing-a-release.md.
+# packaging/publishing-a-release.md.
 RELEASE_PUBKEY_PEM='-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAGZ/rStVno38RgOMWbVnHIRHHSk0WGVwhb4hMJnUkj/k=
 -----END PUBLIC KEY-----'

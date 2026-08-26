@@ -1,7 +1,7 @@
-"""Install-feasibility classifier (doc 01 §3, doc 04 `catalog_entries`,
-docs/notes/phase-4-spike.md). Mechanical, not a guess: every
-community-scripts install script runs under `catch_errors()`'s
-`set -Ee -o pipefail` + `trap ERR` (misc/error_handler.func), so a bare
+"""Install-feasibility classifier (doc 01 §3, doc 04 `catalog_entries`).
+Mechanical, not a guess: every community-scripts install script runs under
+`catch_errors()`'s `set -Ee -o pipefail` + `trap ERR`
+(misc/error_handler.func), so a bare
 `read`/`whiptail`/`dialog` prompt returns a non-zero exit on EOF and
 hard-aborts the whole install rather than defaulting, confirmed
 empirically in the spike, not assumed. A prompt only counts as safe if it's

@@ -1,6 +1,5 @@
 /**
- * The peer offer HostForm makes once a host of a cluster has been added
- * (docs/notes/cluster-peer-auto-enrolment-plan.md, phase 5).
+ * The peer offer HostForm makes once a host of a cluster has been added.
  *
  * Every fixture here is the shape the shipped routes actually return,
  * backend/proxploy/api/hosts.py::list_peers and ::enrol_peers, including the

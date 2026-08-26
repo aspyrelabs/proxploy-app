@@ -220,7 +220,6 @@ vi.mock('../api/client', () => ({
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'host:1', metric: 'net_in_bps', resolution: 'raw', ts: [], value: [] })
     }
-    if (path.startsWith('/cluster/activity')) return Promise.resolve([])
     return Promise.resolve(null)
   }),
   ApiError: class extends Error {},

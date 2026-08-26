@@ -4,7 +4,7 @@ Revision ID: 6cf6a0722d23
 Revises: 2330a95b98d2
 Create Date: 2026-08-05
 
-Phase 8 Task 8 amendment (docs/notes/phase-8-scale.md): the plan called for
+Phase 8 Task 8 amendment: the plan called for
 zero migrations this phase, packing recovery-code hashes as JSON inside the
 existing `users.totp_secret_enc` Fernet blob. That was rejected during
 implementation -- burning a single recovery code would have meant

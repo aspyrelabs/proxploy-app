@@ -165,9 +165,9 @@ export function NodeCard({ node }: {
 }
 
 /**
- * NodeCard's placeholder. Same rule as AppCardSkeleton: the classes are copied
- * from the card above so the two are the same height, and the two live in one
- * file so a change to either is visible from the other.
+ * NodeCard's placeholder. The classes are copied from the card above so the
+ * two come out the same height, and the two live in one file so a change to
+ * either is visible from the other.
  *
  * The unreachable-endpoints line is not reproduced. It is conditional on the
  * real card and usually absent, and a placeholder that reserved space for a

@@ -3,19 +3,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from proxploy.api.deps import (authorize, cluster_scope, dedupe_vms, get_db,
-                               require_entitlement)
+from proxploy.api.deps import authorize, cluster_scope, dedupe_vms, get_db
 from proxploy.pollers import pool_key
-from proxploy.models import Alert, AlertRule, App, AuditEvent, Host, Job, User, Vm, to_iso
+from proxploy.models import App, Host, User, Vm, to_iso
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])
 
 # Cluster reads are host-shaped aggregates, not a distinct "cluster" resource
 #; there is no ("cluster", "read") entry in PERMISSIONS, so this reuses
-# ("host", "read"). Same singleton for the route-level dependencies=[...] copy
-# and the parameter-level copy (see _read's use on /activity below) so
-# FastAPI's dependency cache collapses them into one call that runs first:
-# ordering fix, doc 10 "auth before entitlement" invariant.
+# ("host", "read").
 _read = authorize("host", "read")
 
 
@@ -226,84 +222,3 @@ def cluster_nodes(request: Request, db=Depends(get_db),
                 "mem_total_bytes": n["mem_total_bytes"],
                 "uptime_s": n["uptime_s"]})
     return out
-
-
-ACTIVITY_MAX = 100
-
-
-@router.get("/activity",
-            dependencies=[Depends(_read),
-                          Depends(require_entitlement("cluster.activity_feed"))])
-def activity(limit: int = 20, db=Depends(get_db),
-            user: User = Depends(_read)):
-    """Jobs + alerts + audit highlights, merged newest-first (doc 05, doc 06
-    ActivityFeed).
-
-    An audit row that spawned a job is skipped: the job entry already represents
-    it, and showing both would double every lifecycle action. Alerts are the
-    third source; the `kind` discriminator lets the frontend distinguish all
-    three without extra endpoints.
-
-    Paging: each source is independently queried with `LIMIT limit` (not
-    `limit // 3`), so the merged-then-sliced result is always the true
-    top-`limit` rows across all three kinds; the top `limit` merged rows can
-    contain at most `limit` rows from any one source, and each source already
-    supplies that many. A source can only return fewer than `limit` rows
-    (including zero) than the feed asks for when it genuinely has fewer
-    displayable rows, e.g. every audit row in view is a job-spawned dupe that
-    gets skipped; that is the intended dedup, not starvation.
-
-    The merge sorts on the raw `datetime`, not the serialized `.isoformat()`
-    string used for the `at` field: Python's `isoformat()` drops the
-    microsecond component when it is exactly 0, which would make a same-instant
-    row from one source sort inconsistently against a row from the other if
-    compared as strings.
-    """
-    limit = max(1, min(limit, ACTIVITY_MAX))
-    emails = {u.id: u.email for u in db.query(User).all()}
-
-    jobs = (db.query(Job).order_by(Job.created_at.desc(), Job.id.desc())
-            .limit(limit).all())
-    job_rows = [(j.created_at, {
-        "kind": "job", "id": j.id, "at": to_iso(j.created_at),
-        "title": j.kind, "status": j.status, "target_type": j.target_type,
-        "target_id": j.target_id, "target_name": j.target_name,
-        "actor": emails.get(j.requested_by),
-        "job_id": j.id, "progress_pct": j.progress_pct,
-        "severity": None, "message": None}) for j in jobs]
-
-    audits = (db.query(AuditEvent).filter(AuditEvent.job_id.is_(None))
-              .order_by(AuditEvent.ts.desc(), AuditEvent.id.desc())
-              .limit(limit).all())
-    audit_rows = [(a.ts, {
-        "kind": "audit", "id": a.id, "at": to_iso(a.ts),
-        "title": a.action, "status": a.result, "target_type": a.target_type,
-        "target_id": a.target_id, "target_name": a.target_name,
-        "actor": emails.get(a.actor_id),
-        "job_id": None, "progress_pct": None,
-        "severity": None, "message": None}) for a in audits]
-
-    # Third source (doc 05: "jobs + alerts + audit highlights, merged"). Like
-    # the two above it is queried with the FULL `limit`, not `limit // 3`; 
-    # that is what makes the merged-then-sliced result the true top-`limit`.
-    alerts = (db.query(Alert).order_by(Alert.created_at.desc(), Alert.id.desc())
-              .limit(limit).all())
-    rule_names = {r.id: (r.name, r.severity) for r in db.query(AlertRule)
-                  .filter(AlertRule.id.in_({a.rule_id for a in alerts})).all()
-                  } if alerts else {}
-    alert_rows = [(a.created_at, {
-        "kind": "alert", "id": a.id, "at": to_iso(a.created_at),
-        "title": rule_names.get(a.rule_id, (a.message, "warning"))[0],
-        "status": a.state,
-        "severity": rule_names.get(a.rule_id, (None, "warning"))[1],
-        "target_type": a.target_type, "target_id": a.target_id,
-        # Alerts already carry their own label on api/alerts.py; this
-        # feed only needs the key present so every row has one shape.
-        "target_name": None,
-        "actor": None,          # nobody triggers an alert; the evaluator does
-        "job_id": None, "progress_pct": None,
-        "message": a.message}) for a in alerts]
-
-    merged = sorted(job_rows + audit_rows + alert_rows,
-                    key=lambda pair: pair[0], reverse=True)
-    return [row for _, row in merged[:limit]]

@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { notifyError } = vi.hoisted(() => ({ notifyError: vi.fn() }))
-vi.mock('../lib/notify', () => ({ notify: { error: notifyError, success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
+vi.mock('../lib/notify', () => ({ notify: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class extends Error {
@@ -12,51 +11,16 @@ const { ApiError } = vi.hoisted(() => ({
   },
 }))
 
-let activityResult: 'ok' | 'empty' | 'error' | 'refused' = 'ok'
 let jobEventsError = false
-let cancelResult: 'ok' | 'forbidden' | 'conflict' = 'ok'
-const cancelCalls: Array<{ path: string; method?: string }> = []
 
 vi.mock('../api/client', () => ({
   ApiError,
-  api: vi.fn((path: string, opts?: RequestInit) => {
-    const method = opts?.method
-    if (path.startsWith('/jobs/') && path.endsWith('/cancel') && method === 'POST') {
-      cancelCalls.push({ path, method })
-      if (cancelResult === 'forbidden') return Promise.reject(new ApiError(403, { detail: 'forbidden' }))
-      if (cancelResult === 'conflict') return Promise.reject(new ApiError(409, { detail: 'job is already succeeded' }))
-      return Promise.resolve({ id: 13, status: 'canceled' })
-    }
+  api: vi.fn((path: string) => {
     if (path.startsWith('/jobs/12/events')) {
       if (jobEventsError) return Promise.reject(new Error('boom'))
       return Promise.resolve([
         { seq: 1, ts: '2026-07-29T09:00:00Z', stream: 'stdout', message: 'starting CT 150' },
         { seq: 2, ts: '2026-07-29T09:00:04Z', stream: 'status', message: 'succeeded: ok' },
-      ])
-    }
-    if (path.startsWith('/cluster/activity')) {
-      if (activityResult === 'error') return Promise.reject(new Error('boom'))
-      if (activityResult === 'empty') return Promise.resolve([])
-      // Two rows that did NOT happen: a migration the backend refused
-      // (write_audit result 'denied') and a delete job that blew up.
-      if (activityResult === 'refused') return Promise.resolve([
-        { kind: 'audit', id: 7, at: '2026-07-29T09:00:00Z', title: 'app.migrate',
-          status: 'denied', target_type: 'app', target_id: 1,
-          actor: 'admin@example.com', job_id: null, progress_pct: null },
-        { kind: 'job', id: 14, at: '2026-07-29T08:58:00Z', title: 'vm.delete',
-          status: 'failed', target_type: 'vm', target_id: 3,
-          actor: 'admin@example.com', job_id: 14, progress_pct: null },
-      ])
-      return Promise.resolve([
-        { kind: 'job', id: 12, at: '2026-07-29T09:00:00Z', title: 'app.start',
-          status: 'succeeded', target_type: 'app', target_id: 1,
-          actor: 'admin@example.com', job_id: 12, progress_pct: 100 },
-        { kind: 'audit', id: 4, at: '2026-07-29T08:59:00Z', title: 'host.create',
-          status: 'ok', target_type: 'host', target_id: 1,
-          actor: 'admin@example.com', job_id: null, progress_pct: null },
-        { kind: 'job', id: 13, at: '2026-07-29T09:01:00Z', title: 'app.stop',
-          status: 'running', target_type: 'app', target_id: 2,
-          actor: 'ops@example.com', job_id: 13, progress_pct: 40 },
       ])
     }
     if (path === '/entitlements') {
@@ -66,7 +30,6 @@ vi.mock('../api/client', () => ({
   }),
 }))
 
-import { ActivityFeed } from '../components/ActivityFeed'
 import { JobLog } from '../components/JobLog'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
@@ -89,104 +52,6 @@ describe('TerminalPanel', () => {
   it('shows an honest empty state instead of a blank box', () => {
     wrap(<TerminalPanel lines={[]} />)
     expect(screen.getByText(/no output yet/i)).toBeInTheDocument()
-  })
-})
-
-describe('ActivityFeed', () => {
-  beforeEach(() => {
-    activityResult = 'ok'
-    cancelResult = 'ok'
-    cancelCalls.length = 0
-    notifyError.mockClear()
-  })
-
-  it('renders merged job and audit rows with their actor', async () => {
-    wrap(<ActivityFeed />)
-    expect(await screen.findByText('App Start')).toBeInTheDocument()
-    expect(screen.getByText('Host Add')).toBeInTheDocument()
-    expect(screen.getAllByText(/admin@example.com/).length).toBe(2)
-  })
-
-  it('says activity could not be read rather than showing "nothing has happened yet"', async () => {
-    activityResult = 'error'
-    wrap(<ActivityFeed />)
-    expect(await screen.findByText(/activity not readable/i)).toBeInTheDocument()
-    expect(screen.queryByText('Nothing has happened yet.')).not.toBeInTheDocument()
-  })
-
-  it('shows the real empty-activity copy when there genuinely is none', async () => {
-    activityResult = 'empty'
-    wrap(<ActivityFeed />)
-    expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument()
-  })
-
-  // The feed prints the result underneath, but the title is what gets read,
-  // and the first word of a refused row has to be the refusal, not the name of
-  // the destructive thing that did not happen.
-  it('does not title a refused action or a failed job as though it went through', async () => {
-    activityResult = 'refused'
-    wrap(<ActivityFeed />)
-    // app.migrate carries the neutral "App Migrate", not doc 13's "Migration
-    // Refused": that identifier is written for real migrations too, so the
-    // doc's label would make a success read as a refusal. The label is neutral
-    // and nothing is prefixed onto it, so a refused row reads by its own name
-    // and its status carries the verdict. A FAILED job still takes the verdict
-    // word, which is the one affix doc 13 rule 2 allows.
-    expect(await screen.findByText('App Migrate')).toBeInTheDocument()
-    expect(screen.queryByText(/^Blocked/)).not.toBeInTheDocument()
-    expect(screen.getByText('VM Delete Failed')).toBeInTheDocument()
-    expect(screen.queryByText('App Migrated')).not.toBeInTheDocument()
-    expect(screen.queryByText('VM Deleted')).not.toBeInTheDocument()
-  })
-
-  it('offers Cancel only on the running job row, not the succeeded job or the audit row', async () => {
-    wrap(<ActivityFeed />)
-    await screen.findByText('App Stop')
-    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
-    const row = screen.getByText('App Stop').closest('div')!
-    expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
-  })
-
-  // app.stop is 'running' with progress_pct: 40, the one row in this fixture
-  // a determinate ring may honestly appear on.
-  it('shows a progress ring on the running job row', async () => {
-    wrap(<ActivityFeed />)
-    await screen.findByText('App Stop')
-    const row = screen.getByText('App Stop').closest('div')!
-    expect(within(row).getByRole('status')).toHaveAttribute(
-      'aria-label', expect.stringContaining('40 percent'))
-  })
-
-  // host.create is an audit row: progress_pct is null. No ring, and no zero
-  // standing in for "no figure" either.
-  it('shows no ring on a row with no progress figure', async () => {
-    wrap(<ActivityFeed />)
-    await screen.findByText('Host Add')
-    const row = screen.getByText('Host Add').closest('div')!
-    expect(within(row).queryByRole('status')).toBeNull()
-  })
-
-  // app.start already finished (status: succeeded) even though it carries
-  // progress_pct: 100. A determinate ring is for a job still running.
-  it('shows no ring on a finished job even though it carries a progress figure', async () => {
-    wrap(<ActivityFeed />)
-    await screen.findByText('App Start')
-    const row = screen.getByText('App Start').closest('div')!
-    expect(within(row).queryByRole('status')).toBeNull()
-  })
-
-  it('pressing Cancel posts to /jobs/{id}/cancel for that row', async () => {
-    wrap(<ActivityFeed />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(cancelCalls.some(
-      (c) => c.path === '/jobs/13/cancel' && c.method === 'POST')).toBe(true))
-  })
-
-  it('a rejected cancel surfaces an error toast rather than failing silently', async () => {
-    cancelResult = 'conflict'
-    wrap(<ActivityFeed />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('job is already succeeded'))
   })
 })
 

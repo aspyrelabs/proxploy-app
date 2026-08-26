@@ -181,7 +181,6 @@ export function useUploadContent() {
     onSettled: () => {
       xhrRef.current = null
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
   return {
@@ -237,7 +236,6 @@ export function useDeleteVolume() {
       ),
     onSettled: (_d, _e, v) => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
       // The content listing is a live passthrough, not a poll-stomped resource
       // cache, so re-reading it after the job is enqueued is correct here; 
       // the opposite of useLifecycle's rule for ['vms'].

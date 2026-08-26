@@ -1,7 +1,6 @@
 /**
- * Cluster peer auto enrolment (docs/notes/cluster-peer-auto-enrolment-plan.md)
- * in a real browser: one node of a cluster is added, the panel offers the
- * other nodes, and only what is ticked is added.
+ * Cluster peer auto enrolment in a real browser: one node of a cluster is
+ * added, the panel offers the other nodes, and only what is ticked is added.
  *
  * What this proves: the panel's own logic and wiring against the two routes it
  * calls, end to end, including that each peer is offered with the address the

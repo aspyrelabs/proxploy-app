@@ -1,7 +1,7 @@
 /** The activity drawer was deleted in favour of toasts, but that also deleted
  *  the only UI path to an arbitrary job's log and its error text. This is
- *  the replacement: a popover anchored to the topbar bell, reading /jobs
- *  (not /cluster/activity, whose ActivityRow has no `error` field). */
+ *  the replacement: a popover anchored to the topbar bell, reading /jobs,
+ *  the one source that carries a job's `error` field. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -220,8 +220,8 @@ describe('BellPopover', () => {
   })
 
   // A failure's reason is the whole point of surfacing it: the drawer showed
-  // it, the feed cannot (ActivityRow carries no error field), so this card is
-  // the only place it appears.
+  // it and nothing replaced that until this card, so this is the only place
+  // it appears.
   it("carries a failed job's error text in the card", async () => {
     wrap()
     await openBell()

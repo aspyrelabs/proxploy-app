@@ -387,9 +387,10 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
         # would have marked it installable and an install would have produced
         # an empty container filed as a success, which run_install's "exited 0
         # but no CT" guard cannot catch because the CT really does exist. The
-        # fix for that is a real second execution step, specified separately
-        # in docs/superpowers/specs/2026-08-13-addon-delegated-installs-design.md,
-        # not a softer verdict here.
+        # fix for that is a real second execution step, and one that never
+        # answers a prompt on the operator's behalf: either the operator
+        # picked the value in a form beforehand or answers it live. Not a
+        # softer verdict here.
         installable, reason = False, UNSUPPORTED_ADDON_DELEGATED
     else:
         installable, reason = classify_install_feasibility(ct_resp.text,

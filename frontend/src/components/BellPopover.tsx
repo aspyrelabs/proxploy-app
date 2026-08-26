@@ -237,8 +237,8 @@ function isPersistedDismissed(state: DismissedState | undefined, jobId: number):
 
 /**
  * The bell's popover: what the activity drawer used to show, without the
- * full-height sheet. Reads GET /jobs (not /cluster/activity: ActivityRow
- * has no `error` field, and this is the one surface that has to show it).
+ * full-height sheet. Reads GET /jobs, which is the one source carrying the
+ * `error` field this surface has to show.
  *
  * A popover rather than DropdownMenu: this list holds buttons (Cancel) and
  * an expandable log, and DropdownMenu's role="menu" semantics hijack arrow

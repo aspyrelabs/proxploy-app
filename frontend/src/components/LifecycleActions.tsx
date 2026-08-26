@@ -44,8 +44,8 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
   // of guessing which action set the pre-mutation status implied.
   const actions = status === 'pending' ? null : status === 'running' ? RUNNING_ACTIONS : STOPPED_ACTIONS
   // Every size goes through Button's own size table, grouped or not. The
-  // ungrouped 'sm' callers (AppCard, the guest list, the VM rows) used to be
-  // handed `px-2 py-1 text-[11px]` as a className instead, on the belief that
+  // ungrouped 'sm' callers, the guest list among them, used to be handed
+  // `px-2 py-1 text-[11px]` as a className instead, on the belief that
   // their layouts were pinned to those exact numbers. They never were: those
   // classes collide with the component's own size classes and LOSE in the
   // emitted CSS (`.px-3\.5` is written after `.px-2`), so every one of those
@@ -117,8 +117,8 @@ export function LifecycleActions({ target, id, name, status, hostId, size = 'md'
 }
 
 /**
- * The "Console" ghost button that sits beside LifecycleActions everywhere it
- * renders (AppCard, GuestList, the VM row's action bar): same host, same
+ * The "Console" ghost button that sits beside LifecycleActions wherever a
+ * console is offered (GuestList, the VM row's action bar): same host, same
  * capability shape, so the capabilities.console gate lives here once instead
  * of being copied into each call site.
  */

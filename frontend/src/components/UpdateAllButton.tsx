@@ -35,11 +35,8 @@ export function UpdateAllButton() {
     onError: () => notify.error('Could not start the updates, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
-      // ['cluster','activity'] used to be invalidated here too, to move the
-      // Recent activity feed that sat beside this button. The feed is gone and
-      // nothing reads that key any more, so invalidating it would be work with
-      // no reader. The toast points at the bell, which LiveProvider fills from
-      // the SSE stream rather than from a query.
+      // The toast points at the bell, which LiveProvider fills from the SSE
+      // stream rather than from a query, so there is nothing else to refetch.
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
   })

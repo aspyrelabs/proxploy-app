@@ -78,7 +78,8 @@ export function Ring({ label, pct, sub, stops, unknown }: {
  * divide a used figure by a total; link speed is not reliably knowable from the
  * PVE API, and real traffic sits so far below line rate that an arc against it
  * would read "fine" at every hour of every day. That is a decoration, not a
- * reading. The same call AppCard makes about its own network row.
+ * reading. AppTable's Network column makes the same call: it prints the two
+ * rates as figures and draws no bar behind them.
  *
  * WHAT CHANGED, and why the two big arrows went. This tile used to be two 26px
  * two-tone arrow glyphs that blinked while traffic moved, with the actual

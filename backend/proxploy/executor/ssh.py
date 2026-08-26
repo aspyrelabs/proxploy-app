@@ -3,10 +3,10 @@ one (besides executor/keys.py) allowed to import asyncssh, enforced by
 scripts/check_executor_isolation.py.
 
 Stdin is always closed (asyncssh.DEVNULL), never left open: the Phase 4
-entry-gate spike (docs/notes/phase-4-spike.md) proved that an unguarded
-upstream `read` prompt hard-aborts under closed stdin but hangs forever
-under an open, idle stdin; closed stdin is the only choice that fails fast
-instead of parking a JobBackend semaphore slot indefinitely.
+entry-gate spike proved that an unguarded upstream `read` prompt hard-aborts
+under closed stdin but hangs forever under an open, idle stdin; closed stdin
+is the only choice that fails fast instead of parking a JobBackend semaphore
+slot indefinitely.
 """
 from __future__ import annotations
 

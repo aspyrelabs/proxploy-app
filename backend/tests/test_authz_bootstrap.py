@@ -1,5 +1,5 @@
-"""Phase 8 amendment A1 (docs/notes/phase-8-scale.md): authorization is
-fail-closed, and the first-run bootstrap owner is the stated exception.
+"""Phase 8 amendment A1: authorization is fail-closed, and the first-run
+bootstrap owner is the stated exception.
 
 Both directions are guarantees now, not incidental behavior. Before Phase 8,
 `api/deps.py::user_role()` fell back to "viewer" for a user in no team, so a

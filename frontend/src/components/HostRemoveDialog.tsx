@@ -38,7 +38,7 @@ export function HostRemoveDialog({ hostId, hostName, onClose, onRemoved }: {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['vms'] })
       // The ['cluster'] prefix, not ['cluster','nodes'] alone: removing a host
-      // takes its nodes, its summary counts and its activity with it. The
+      // takes its nodes and its summary counts with it. The
       // footer that counts nodes is mounted on every page including this one,
       // so leaving it stale meant the sidebar kept counting a host that is
       // gone, and could keep calling it unreachable, for up to 30s.

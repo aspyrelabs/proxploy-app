@@ -54,7 +54,7 @@ function request(v: SnapshotVars) {
 
 /**
  * All three snapshot operations fire jobs, so they follow useLifecycle's
- * onSettled rule: invalidate ['jobs'] and ['cluster','activity'].
+ * onSettled rule: invalidate ['jobs'].
  *
  * They ALSO invalidate ['vms', id, 'snapshots'], which useLifecycle deliberately
  * does not do for ['vms'], and the difference is real, not an inconsistency.
@@ -72,7 +72,6 @@ export function useSnapshotAction() {
     mutationFn: request,
     onSettled: (_data, _err, v) => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
       qc.invalidateQueries({ queryKey: ['vms', v.vmId, 'snapshots'] })
     },
   })

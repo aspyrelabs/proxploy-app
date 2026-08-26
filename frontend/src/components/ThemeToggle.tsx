@@ -37,7 +37,7 @@ import { applyStoredTheme, setStoredTheme } from '../lib/theme'
  *  - Added a prefers-reduced-motion escape hatch (upstream has none): skip
  *    the view transition and flip the theme directly, matching the
  *    `motion-reduce:` intent already used elsewhere (UsageBar, SidebarNav,
- *    AppCard).
+ *    AppTable).
  *  - Dropped upstream's `variant`/`fromCenter` shape system (square,
  *    triangle, diamond, hexagon, rectangle, star, viewport-centred origin)
  *    and its `duration` prop. This app has exactly one toggle and only

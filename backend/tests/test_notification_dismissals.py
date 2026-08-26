@@ -1,5 +1,5 @@
 """Per-user persistence of the bell tray's dismissed job-backed notifications
-(see components/BellPopover.tsx and docs/notes/persist-cleared-notifications-report.md).
+(see components/BellPopover.tsx).
 
 Self-service surface, same as api_keys/sessions: no team, no role, scoped by
 user_id alone. These tests exercise the /notifications/dismissed endpoints

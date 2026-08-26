@@ -119,10 +119,9 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
       }),
     }),
     // useLifecycle's rule: the job is only *accepted* here, so refetching ['vms']
-    // would show nothing new. ['jobs'] + activity are what actually moved.
+    // would show nothing new. ['jobs'] is what actually moved.
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 

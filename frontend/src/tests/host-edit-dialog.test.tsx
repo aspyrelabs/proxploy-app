@@ -229,9 +229,8 @@ describe('HostEditDialog', () => {
     expect(screen.queryByText(/certificate has changed/i)).not.toBeInTheDocument()
   })
 
-  // Phase 6 of docs/notes/cluster-peer-auto-enrolment-plan.md: a host enrolled
-  // before the panel shipped gets the same offer here, so nobody has to remove
-  // and re-add a host to get it.
+  // A host enrolled before the panel shipped gets the same offer here, so
+  // nobody has to remove and re-add a host to get it.
   const peer = (over: Record<string, unknown> = {}) => ({
     node: 'node2', address: 'https://10.0.0.6:8006', online: true, reachable: true,
     tls_fingerprint: 'AB:CD:EF', already_enrolled_as: null, error: null, ...over,

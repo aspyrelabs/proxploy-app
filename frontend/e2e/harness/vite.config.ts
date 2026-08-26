@@ -16,13 +16,11 @@ export default defineConfig({
   resolve: { alias: { '@': join(here, '../../src') } },
   build: {
     outDir: join(here, 'dist'), emptyOutDir: true,
-    // Three pages: cards (index.html), the detail popup (dialog.html), and the
-    // cluster-usage row's network tile (network.html).
+    // Two pages: cards (index.html) and the detail popup (dialog.html).
     rollupOptions: {
       input: {
         index: join(here, 'index.html'),
         dialog: join(here, 'dialog.html'),
-        network: join(here, 'network.html'),
       },
     },
   },

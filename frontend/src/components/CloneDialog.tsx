@@ -46,7 +46,6 @@ export function CloneDialog({ vm, onClose }: { vm: VmRow; onClose: () => void })
     }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 

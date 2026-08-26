@@ -37,7 +37,6 @@ export function UninstallDialog({ app, onClose }: { app: AppRow; onClose: () => 
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['apps'] })
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 

@@ -139,13 +139,12 @@ describe('applyJob, failure toast detail', () => {
 })
 
 describe('applyAlert', () => {
-  it('invalidates the firing-alerts query and the activity feed', () => {
+  it('invalidates the firing-alerts query', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     applyAlert(qc, { id: 1, state: 'firing', severity: 'warning', message: 'x' })
     const keys = spy.mock.calls.map(c => JSON.stringify((c[0] as any).queryKey))
     expect(keys).toContain(JSON.stringify(['alerts', 'firing']))
-    expect(keys).toContain(JSON.stringify(['cluster', 'activity']))
   })
 
   it('toasts a firing alert at warning and above', () => {

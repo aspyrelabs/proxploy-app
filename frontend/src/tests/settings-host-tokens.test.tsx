@@ -116,8 +116,7 @@ describe('Settings host tokens', () => {
       { name: 'Add Lifecycle token, show fields' })).toBeInTheDocument()
   })
 
-  // Phase 7 of docs/notes/cluster-peer-auto-enrolment-plan.md, section 5: a
-  // token stored on one node of a cluster reaches the others, offered as one
+  // A token stored on one node of a cluster reaches the others, offered as one
   // pre ticked checkbox before Save rather than a prompt afterwards.
   describe('storing the same token on the other nodes of the cluster', () => {
     it('offers the peers, pre ticked and named, above Save', async () => {

@@ -1,24 +1,10 @@
 /**
- * Shared status colouring and relative-time formatting for anything that
- * renders a job/audit/alert row: ActivityFeed (the dashboard feed) and
- * BellPopover (the bell's job list). Kept in a plain .ts file rather than
- * exported alongside a component so oxlint's react/only-export-components
- * (fast-refresh) rule has nothing to flag here.
+ * Shared naming and relative-time formatting for anything that renders a
+ * job/audit/alert row: BellPopover (the bell's job list), the audit log, the
+ * StatusPill on hosts and guests, and the job toasts api/jobs.ts writes. Kept
+ * in a plain .ts file rather than exported alongside a component so oxlint's
+ * react/only-export-components (fast-refresh) rule has nothing to flag here.
  */
-
-export const TINT: Record<string, string> = {
-  succeeded: 'bg-green-dim text-green',
-  ok: 'bg-green-dim text-green',
-  resolved: 'bg-green-dim text-green',
-  failed: 'bg-red-dim text-red',
-  error: 'bg-red-dim text-red',
-  denied: 'bg-red-dim text-red',
-  firing: 'bg-red-dim text-red',
-  running: 'bg-blue-dim text-blue',
-  queued: 'bg-blue-dim text-blue',
-  canceled: 'bg-panel-2 text-text-3',
-  interrupted: 'bg-amber-dim text-amber',
-}
 
 /** What a row acted on, named for a person.
  *
@@ -264,10 +250,9 @@ export const ACTION_LABEL: Record<string, string> = {
 /**
  * Job status, audit result, alert state and host status, as doc 13 names them.
  *
- * Keyed on the raw value the API sends, same as TINT above, so one map serves
- * the activity feed's status line, the audit log's Result column and the
- * StatusPill on hosts and guests. Anything absent falls through to the raw
- * value.
+ * Keyed on the raw value the API sends, so one map serves the bell's job
+ * cards, the audit log's Result column and the StatusPill on hosts and
+ * guests. Anything absent falls through to the raw value.
  *
  * `denied` and `error` are not in doc 13, which spends its denied row on the
  * "Blocked" title prefix and never names the Result cell. Without them the
