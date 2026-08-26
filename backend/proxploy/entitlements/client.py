@@ -18,10 +18,8 @@ from proxploy.models import EntitlementCache, utcnow
 from proxploy.pubkey import load_public_key, to_pem
 
 LEEWAY = timedelta(seconds=300)  # clock-skew leeway for a token's grace_until/iat (doc 07 §8)
-# 24h, not LEEWAY's 300s: leeway should be proportional to the window it
-# guards. 300s against a 72h token is 0.1% of it; 24h against a 180-day cert
-# is 0.55%, the same order of tolerance scaled to a signer that is rotated
-# far less often than a token.
+# 24h, not LEEWAY's 300s: leeway scales to the window it guards — a cert's
+# signer is rotated far less often than a token.
 CERT_LEEWAY = timedelta(hours=24)  # clock-skew leeway for a cert's nbf/exp
 
 

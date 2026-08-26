@@ -18,16 +18,14 @@ EXPORT_COLUMNS = ("id", "ts", "actor_type", "actor_id", "action", "target_type",
 
 
 def _search_clause(db, search: str):
-    """Match the stored action OR the item the row is about.
+    """Match the stored action OR the item the row is about (substring,
+    case-insensitive).
 
-    Substring and case-insensitive, not exact: this is ONE box on the screen,
-    and typing "pve-lab" into it and getting nothing back because no action is
-    literally named that would read as a broken filter. The older `action=`
-    parameter stays exact and untouched; the CLI (`proxploy audit export
-    --action app.stop`) and anyone scripting the export depend on it.
-
-    Names are resolved to ids first, one query per target kind, so this is a
-    fixed handful of lookups per request rather than a join against nine tables.
+    The older `action=` parameter stays exact and untouched; the CLI
+    (`proxploy audit export --action app.stop`) and anyone scripting the
+    export depend on it. Names are resolved to ids first, one query per
+    target kind, so this is a fixed handful of lookups rather than a join
+    against nine tables.
     """
     like = f"%{search.lower()}%"
     clauses = [func.lower(AuditEvent.action).like(like),
@@ -47,12 +45,8 @@ def _search_clause(db, search: str):
 def _filtered(db, action, actor, from_, to, *, actor_type=None, search=None):
     """The one filter definition, shared by the viewer and the export.
 
-    An export that answers a different question than the list above it is
-    worse than no export: someone hands the file to an auditor believing it
-    matches what they were looking at.
-
     `actor_type` and `search` are keyword-only so cli.py's positional call
-    keeps working: the CLI has its own smaller flag set on purpose.
+    keeps working.
     """
     q = db.query(AuditEvent)
     if action:
@@ -109,12 +103,10 @@ def row_dict(r: AuditEvent, actors: dict | None = None,
          "params": r.params, "result": r.result, "ip": r.ip,
          "job_id": r.job_id}
     if actors is not None:
-        # Screen-only additions, and only when the caller asked: EXPORT_COLUMNS
-        # is a machine-readable contract with tests behind it, and the JSONL
-        # export writes whatever this function returns, so two extra keys there
-        # would change a file someone else already parses. Either label is None
-        # when nothing answers to that id, which is the deleted-host case: the
-        # row still lists, reading "host #2".
+        # Screen-only additions, only when the caller asked: EXPORT_COLUMNS is
+        # a machine-readable contract and the JSONL export writes whatever this
+        # returns, so extra keys there would change a file someone parses.
+        # A label is None when nothing answers that id (the deleted-host case).
         d["actor_label"] = actors.get((r.actor_type, r.actor_id))
         # The name captured when the row was written wins over anything we
         # can look up now: it is the only one that survives the target being
@@ -139,11 +131,6 @@ CLEAR_PHRASE = "clear audit log"
 # `_read` first, then the entitlement: a bare require_entitlement in this list
 # would land at position 0 and 403 an anonymous caller, leaking which flags are
 # armed. See tests/test_route_auth_invariant.py.
-#
-# doc 01 lists this route as gated on `audit.log`, and until now only RBAC was
-# enforced, so the documented control did not exist. It costs nothing to arm
-# today (tiers.yaml keeps all_entitled) and stops the docs describing a gate
-# that isn't there.
 AUDIT_PAGE_MAX = 200
 
 
@@ -179,8 +166,8 @@ def export_audit(db=Depends(get_db), format: str = "csv",
     `yield_per` keeps a multi-year table off the heap while doing it.
 
     Registered before the `/{...}`-free list route is irrelevant, but it MUST
-    stay a literal segment: there is no /audit/{id} route today and adding one
-    later would shadow this unless it is declared after.
+    stay a literal segment: a future /audit/{id} route would shadow this
+    unless declared after.
     """
     if format not in ("csv", "jsonl"):
         from fastapi import HTTPException

@@ -16,17 +16,12 @@ from proxploy.models import KIND_FROM_SCHEME, NotificationChannel, utcnow
 
 logger = logging.getLogger(__name__)
 
-# Apprise's logger propagates to the root logger by default, which would defeat
-# "never logged" (see module docstring) the moment any handler is configured, 
-# set once at import; this doesn't require apprise itself to be imported yet.
-#
-# This alone is NOT sufficient: Apprise's plugins send over `requests`, whose
-# connection pooling logs the request line (method + full path/query: for
-# schemes where the token lives in the path, e.g. json/form/xml webhooks, that
-# IS the token) via a separate "urllib3" logger tree that never touches
-# "apprise" at all. Silencing "apprise" alone leaves that tree fully live, 
-# confirmed by capturing a real failed send at DEBUG with propagation on
-# before this line existed: the token showed up under "urllib3.connectionpool".
+# Apprise and urllib3 both propagate to the root logger; silencing only
+# "apprise" is not enough. Its plugins send over `requests`, whose
+# "urllib3.connectionpool" logger logs the request line (method + full
+# path/query — for schemes where the token lives in the path, that IS the
+# token) via a separate tree that never touches "apprise". Set at import;
+# neither line requires apprise itself to be imported yet.
 logging.getLogger("apprise").propagate = False
 logging.getLogger("urllib3").propagate = False
 

@@ -53,19 +53,12 @@ export function consoleWsUrl(kind: ConsoleKind, id: number, ticket: string): str
 const MAX_RECONNECT_ATTEMPTS = 3
 const BACKOFF_MS = [1000, 2000, 4000]
 
-/**
- * Why a ticket request failed, in words, for the three console panes.
+/** Why a ticket request failed, in words.
  *
- * `failed` on useReconnectingTicket only ever comes from a WebSocket drop, so
- * it cannot describe a ticket POST that never succeeded: no socket was opened
- * to drop. Without this the pane sat on "Opening console…" forever, with no
- * error and no way out, which is what an unreachable host or a plan without
- * the entitlement actually looked like.
- *
- * The entitlement 403 is checked first because its body carries the reason in
- * `error` and leaves `detail` generic; every other case reads better as the
- * backend's own sentence, including the 502 prefix apiErrorDetail adds.
- */
+ *  `failed` only ever comes from a WebSocket drop, so it cannot describe a
+ *  ticket POST that never succeeded (no socket opened to drop). The
+ *  entitlement 403 is checked first because its body carries the reason in
+ *  `error` and leaves `detail` generic. */
 export function consoleFailure(e: unknown): { title: string; note: string } {
   if (e instanceof ApiError && (e.body as { error?: string } | null)?.error
       === 'entitlement_required') {

@@ -13,29 +13,17 @@ import { linkCls } from './ui/button'
 type HostRow = { id: number; address: string }
 
 /** One NODE, not one host: a Host is a single Proxmox API endpoint and the
- *  cluster behind it has as many nodes as it has.
- *
- *  Card click opens the node, deliberately diverging from doc 06's original
- *  "NodeCard click -> /apps?host=..." (the doc row is updated to match): this
- *  was the only card in the product that opened something other than the thing
- *  it depicts. The apps filter survives as its own affordance on the "N Apps"
- *  meta item. */
+ *  cluster behind it has as many nodes as it has. */
 export function NodeCard({ node }: {
   node: NodeRow & { endpoints?: { host_id: number; name: string; status: string }[] }
 }) {
   const navigate = useNavigate()
-  // The ['hosts'] key half a dozen components already read (CloneDialog,
-  // VmCreateWizard, StorageForm and the rest), so a page of these cards costs
-  // ONE request however many nodes a cluster has: react-query serves them all
-  // from the one cache entry. GET /nodes does not carry the address, and a
-  // fetch per card would be a request per node.
+  // GET /nodes doesn't carry the address; /hosts is already cached under the
+  // shared ['hosts'] key, so a page of cards is one request, not one per node.
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
-  // The ENDPOINT's address, so on a cluster this opens the web UI of the
-  // machine Proxploy talks to rather than of this particular node. Proxmox's
-  // own UI is cluster-wide so it shows the whole cluster either way, and it is
-  // the same link the node detail page already offers. A deep link that
-  // preselects one node is a URL shape that differs across PVE versions, so it
-  // is not worth inventing here.
+  // The ENDPOINT's address, not the node's: Proxmox's own UI is cluster-wide,
+  // and a deep link preselecting one node has a URL shape that differs across
+  // PVE versions, so it's not worth inventing here.
   const webUrl = (hosts.data ?? []).find((h) => h.id === node.host_id)?.address
   // A host with no snapshot yet has no node name to route on; /hosts/$hostId
   // still resolves (it redirects to the entry node once one is known).
@@ -46,14 +34,10 @@ export function NodeCard({ node }: {
     { host_id: node.host_id, name: node.name, status: node.status },
   ]
   const unreachable = endpoints.filter((e) => e.status !== 'connected')
-  // Named only when there is exactly ONE, because only then is "the endpoint
-  // this node is reached through" a fact about the node. Once a cluster is
-  // enrolled through several endpoints they ALL see every node, so a count
-  // ("via 2 endpoints") described Proxploy's own plumbing rather than
-  // anything about the machine on the card -- unreadable to the person
-  // looking at it, and the same jargon failure as the old bare "entry" badge.
-  // The case where it genuinely matters is an endpoint being DOWN, and the
-  // amber line below says that in words.
+  // Named only when there is exactly ONE: with several endpoints they ALL see
+  // every node, so a count describes Proxploy's plumbing, not the machine.
+  // The case that matters is an endpoint being DOWN, which the amber line
+  // below says in words.
   const via = endpoints.length === 1 ? endpoints[0].name : null
   const open = () => (node.node
     ? navigate({ to: '/hosts/$hostId/$node' as never,
@@ -73,17 +57,11 @@ export function NodeCard({ node }: {
     >
       <div className="flex items-center justify-between">
         <Link
-          to={'/hosts/$hostId/$node' as never} // node detail, keyed on (host, node)
+          to={'/hosts/$hostId/$node' as never}
           params={{ hostId: String(node.host_id), node: node.node ?? '' } as never}
           onClick={(e) => e.stopPropagation()}
           className={`font-mono text-[13px] ${linkCls}`}
         >
-          {/* The NODE leads, not the host. This card depicts one node, and
-              titling it with the host name meant a cluster drew several cards
-              under the same title, each with a different node in the subline
-              -- so the card that showed node2's gauges was headed
-              "node1.example.com". The endpoint moved to the meta row below,
-              which is where "how do we reach this" belongs. */}
           {node.node ?? 'node unknown'}
         </Link>
         <div className="flex items-center gap-2">
@@ -106,18 +84,15 @@ export function NodeCard({ node }: {
         </div>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-text-3">
-        {/* The cluster's own name, not "in <name>": these cards already sit
-            under a "Cluster <name>" heading, so the preposition just said the
-            same thing twice. Standalone nodes have no heading above them,
-            which is why they still say so here. */}
+        {/* Cluster name, not "in <name>": cards already sit under a
+            "Cluster <name>" heading; standalone nodes have no heading. */}
         <span>{node.cluster ?? 'standalone'}</span>
         {via && <span>· {via}</span>}
       </div>
       {unreachable.length > 0 && (
-        /* Deduping the cards removed the only place a dead endpoint used to be
-           visible: its rows collapsed into the surviving node's card and its
-           StatusPill went with them. The node itself may be perfectly healthy
-           and still be one enrolled endpoint down, so it is said in words. */
+        /* Dedup collapsed a dead endpoint's row into the surviving card, so
+           its StatusPill vanished with it. A node can be healthy while one
+           enrolled endpoint is down, so it's said in words. */
         <div className="mt-1 text-[11px] text-amber">
           {unreachable.length === 1
             ? `${unreachable[0].name} cannot be reached`
@@ -165,13 +140,10 @@ export function NodeCard({ node }: {
 }
 
 /**
- * NodeCard's placeholder. The classes are copied from the card above so the
- * two come out the same height, and the two live in one file so a change to
- * either is visible from the other.
- *
- * The unreachable-endpoints line is not reproduced. It is conditional on the
- * real card and usually absent, and a placeholder that reserved space for a
- * warning would make the layout settle downward when the good case arrives.
+ * NodeCard's placeholder. Classes copied from the card above so the two come
+ * out the same height. The unreachable-endpoints line is not reproduced:
+ * reserving space for it would make the layout settle downward when the good
+ * case arrives.
  */
 export function NodeCardSkeleton() {
   return (

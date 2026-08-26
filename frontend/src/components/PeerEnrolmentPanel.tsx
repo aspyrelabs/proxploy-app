@@ -7,14 +7,11 @@ import { Button } from './ui/button'
 import { Loading } from './ui/loading'
 
 /**
- * The offer to add the other nodes of a cluster, once one node of it has been
- * added.
+ * Offers the other nodes of a cluster for enrolment once one node is added.
  *
- * Its own component rather than more JSX in HostForm because the same panel is
- * mounted from HostEditDialog for hosts enrolled before this shipped.
- *
- * Nothing here writes anything until the operator presses Add these nodes.
- * Discovery is read-only and leaving the page adds nothing.
+ * Its own component (not more JSX in HostForm) because HostEditDialog mounts
+ * the same panel. Nothing is written until Add these nodes is pressed;
+ * discovery is read-only and leaving the page adds nothing.
  */
 
 /** Ticked only if it can actually be added: a peer already in Proxploy cannot
@@ -50,13 +47,10 @@ export function PeerEnrolmentPanel({ hostId, node, cluster, onDone }: {
   const peers = q.data?.peers ?? []
   const entitled = q.data?.multi_host_entitled !== false
   const chosen = ticked ?? peers.filter(addable).map(p => p.node)
-  // A standalone node has no peers, so there is no panel and the flow ends
-  // exactly where it ended before this existed. A discovery failure ends the
-  // same way rather than blocking a host that was added successfully: the
-  // offer is not the enrolment, and HostEditDialog makes it again.
-  // Results outrank a later discovery: once peers have been added, what
-  // happened to them is the panel's job to show, whatever the refetch below
-  // says next.
+  // A discovery failure (q.isError) also ends the flow, rather than blocking a
+  // host that was added successfully. `!results` lets results outrank a later
+  // discovery: once peers are added, showing what happened to them is this
+  // panel's job regardless of what the refetch below says.
   const nothingToOffer = !results && ((q.isSuccess && peers.length === 0) || q.isError)
   // onDone is a fresh closure on every render of the parent, so depending on
   // it would fire it again on every render rather than once.

@@ -7,12 +7,9 @@ import { matchSettingsSections } from '../lib/settings-sections'
 import type { SearchResult } from '../api/search'
 import { Dialog } from './ui/dialog'
 
-// The trigger (Topbar's search button) and the palette (mounted once in
-// AppShell) are siblings, and there is no shared Dialog primitive to route
-// state through, so this is the smallest way to let one open what the other
-// renders: a module-level flag plus React's built-in external-store hook,
-// same shape the router-search-param hooks elsewhere in this app already use
-// for cross-component overlay state, minus the URL persistence this doesn't need.
+// Trigger and palette are siblings with no shared state to route through, so
+// this is the smallest way to let one open what the other renders: a
+// module-level flag plus React's built-in external-store hook.
 let paletteOpen = false
 const listeners = new Set<() => void>()
 function setPaletteOpen(v: boolean): void {
@@ -42,27 +39,17 @@ export function CommandPalette() {
   const open = useSyncExternalStore(subscribe, () => paletteOpen)
   const navigate = useNavigate()
   const ent = useEntitlements()
-  // TWO GATES, mirroring backend/proxploy/api/search.py, which stopped gating
-  // the whole endpoint on one flag: `ui.global_search` covers apps, VMs and
-  // hosts, `store.catalog` covers the store group, and only a caller with
-  // NEITHER is refused.
-  //
-  // The store half is not a nicety. The App Store's own search box was
-  // removed (routes/store.tsx) and it never checked `ui.global_search`, so
-  // telling a store.catalog plan "not included in your plan" here would take
-  // away a capability they had this morning and dress it up as a UI cleanup.
-  //
-  // has() reads false until the first entitlements fetch resolves, so both
-  // states are additionally gated on the data having arrived; without that,
-  // every plan sees the locked copy during load (same guard as AttachmentMap
-  // in routes/network.tsx).
+  // TWO GATES, mirroring backend/proxploy/api/search.py: `ui.global_search`
+  // covers apps, VMs and hosts, `store.catalog` covers the store group, and
+  // only a caller with NEITHER is refused. has() reads false until the first
+  // entitlements fetch resolves, so both are additionally gated on the data
+  // having arrived.
   const loaded = ent.data != null
   const canSearchAll = ent.has('ui.global_search')
   const storeOnly = loaded && !canSearchAll && ent.has('store.catalog')
   const denied = loaded && !canSearchAll && !ent.has('store.catalog')
-  // What this palette can actually reach, said the same way in the accessible
-  // name, the placeholder and the empty state, so none of the three can
-  // promise a store-only operator something they will not get.
+  // Said the same way in the accessible name, placeholder and empty state, so
+  // none can promise a store-only operator something they will not get.
   const scope = storeOnly ? 'the store' : 'apps, VMs, hosts and the store'
   const [raw, setRaw] = useState('')
   const [query, setQuery] = useState('')
@@ -71,15 +58,9 @@ export function CommandPalette() {
   const groups = groupResults(search.data?.results ?? [])
   const flat = groups.flatMap((g) => g.items)
   // Settings sections are static client-side routes, so they are matched here
-  // rather than by GET /search: there is nothing on the server to scan, and
-  // making an operator wait 250ms and a round trip to reach their own settings
-  // would be slower than the rail they are trying to skip. Matched off `raw`,
-  // not `query`, for the same reason -- the debounce exists for the LIKE scan.
-  //
-  // This became worth doing when Settings grew a rail: a section now has a URL
-  // (?section=), so "trusted devices" is somewhere the palette can actually
-  // send you, and the Profile merge means it is no longer reachable by
-  // scrolling for its heading.
+  // rather than by GET /search (nothing on the server to scan). Matched off
+  // `raw`, not `query`, for the same reason -- the debounce exists for the
+  // LIKE scan.
   const sections = matchSettingsSections(raw.trim().length >= 2 ? raw : '')
 
   const close = (): void => setPaletteOpen(false)
@@ -94,8 +75,6 @@ export function CommandPalette() {
     return () => clearTimeout(t)
   }, [raw])
 
-  // Focus restore used to live here. The shared Dialog primitive captures the
-  // opening element and puts focus back, the same as every other overlay.
   useEffect(() => {
     if (!open) return
     setRaw('')
@@ -103,8 +82,7 @@ export function CommandPalette() {
   }, [open])
 
   // The only global keydown listener in the app: registered once for the
-  // component's whole (app-length) lifetime and cleaned up on unmount. Escape
-  // is no longer handled here; Radix owns it now, along with the focus trap.
+  // component's whole (app-length) lifetime and cleaned up on unmount.
   useEffect(() => {
     function onKeyDown(e: globalThis.KeyboardEvent): void {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -121,14 +99,10 @@ export function CommandPalette() {
 
   if (!open) return null
 
-  // The server hands back one string per result, and some of those strings
-  // carry a query: an app now lives at /apps?open=<id> rather than at a page
-  // of its own. TanStack Router does NOT parse a query out of `to`, it would
-  // look for a route literally named "/apps?open=3" and find nothing, so the
-  // two halves are split here and the search handed over as the object it
-  // expects. Written for any href with a query rather than for that one shape,
-  // because the next result kind to gain a param should not have to come back
-  // and edit this.
+  // Some result hrefs carry a query (an app lives at /apps?open=<id>), and
+  // TanStack Router does NOT parse a query out of `to` -- it would look for a
+  // route literally named "/apps?open=3". So the two halves are split here
+  // and the search handed over as the object it expects.
   const goSection = (id: string): void => {
     close()
     navigate({ to: '/settings' as never, search: { section: id } as never })
@@ -157,9 +131,6 @@ export function CommandPalette() {
           onValueChange={setRaw}
         />
 
-        {/* Said once, up front, rather than left for the operator to infer
-            from results that never contain their apps. This is what they can
-            do, and then what they cannot, in that order. */}
         {storeOnly && (
           <p className="mt-2 px-1 text-[11.5px] text-text-3">
             Searching the app store. Apps, VMs and hosts need Global search, which is not
@@ -190,9 +161,8 @@ export function CommandPalette() {
                   >
                     <span>
                       {sec.label}
-                      {/* The group, not the URL: "Profile · Your account" says
-                          whose setting this is, which is the thing the rail's
-                          own grouping exists to say. */}
+                      {/* Group, not URL: "Profile · Your account" says whose
+                          setting this is. */}
                       <span className="ml-2 text-[11.5px] text-text-3">{sec.group}</span>
                     </span>
                     <span className="text-[11px] text-text-3">Settings</span>

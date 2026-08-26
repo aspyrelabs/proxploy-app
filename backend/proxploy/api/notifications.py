@@ -27,12 +27,10 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 # Reused as BOTH the route-level dependency and the parameter-level one below
 # so FastAPI's dependency cache (keyed on the callable) collapses them into a
 # single call. A bare `dependencies=[Depends(require_entitlement(...))]` sits
-# at position 0 of the dependant and would run BEFORE this auth check,
-# leaking 403 to an anonymous caller who should see 401 (Tasks 3 and 5 hit
-# this: see jobs.py/apps.py). Putting `_manage` first in the dependencies
-# list forces auth -> authz -> entitlement, in that order. Doc 05: every
-# notifications route is admin, no viewer read tier: one permission covers
-# the whole router.
+# at position 0 and would run BEFORE this auth check, leaking 403 to an
+# anonymous caller who should see 401. Putting `_manage` first forces
+# auth -> authz -> entitlement, in that order. Doc 05: every notifications
+# route is admin, no viewer read tier.
 _manage = authorize("channel", "manage")
 
 
@@ -270,12 +268,9 @@ def patch_channel(request: Request, channel_id: int, body: ChannelPatch,
                 action="notify.channel.update", target_type="notification_channel",
                 target_id=row.id,
                 params={"name": row.name, "enabled": row.enabled, "kind": row.kind,
-                        # Just "rotated". This was "url_rotated", and
-                        # redact() blanks any key containing "url" (or
-                        # "credential", or "token"), so the one thing an audit
-                        # reader wants from this row has always been stored as
-                        # "[redacted]". The redactor is right to be blunt
-                        # about key names; the key was wrongly named.
+                        # "rotated", not "url_rotated": redact() blanks any key
+                        # containing "url" (or "credential", or "token"), which
+                        # would redact the one thing an audit reader wants here.
                         "rotated": body.url is not None or body.kind is not None,
                         "events_changed": body.events is not None},
                 ip=_ip(request))

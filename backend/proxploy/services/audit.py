@@ -1,21 +1,18 @@
-"""Append-only audit writer (docs 04/08 §7). There is deliberately no update or
-delete function in this module, archival is a Phase-8+ export job, never mutation."""
+"""Append-only audit writer: no update or delete; archival is an export job,
+never mutation."""
 import logging
 
 from proxploy.models import (AlertRule, ApiKey, App, AuditEvent, Backup, Host,
                              Job, NotificationChannel, Schedule, Team, User, Vm)
 
-# target_type -> (model, the column that holds its human name). One map, used
-# to capture a row's name when it is written (resolve_target_name below), to
-# label a row's Item column in api/audit.py, and to turn that screen's "item or
-# action" search box back into ids, so the box can never match an item the
-# column does not name.
+# target_type -> (model, name column). Used to capture a row's name when it is
+# written (resolve_target_name below), to label the Item column in api/audit.py,
+# and to turn that screen's "item or action" search back into ids.
 #
-# Deliberately no "storage": those rows carry the HOST's id in target_id
-# (api/storage.py), so labelling them from either table would print a name that
-# is wrong or right by accident. Those two routes pass their own name instead.
-# Same reason "session", "alert" and "system" are absent: nothing there is a
-# name a person would recognise.
+# Deliberately no "storage": those rows carry the HOST's id in target_id, so
+# labelling them from either table would print a name that is wrong by accident.
+# Same reason "session"/"alert"/"system" are absent: no name a person would
+# recognise.
 logger = logging.getLogger(__name__)
 
 TARGET_LABELS = {
@@ -37,22 +34,19 @@ TARGET_LABELS = {
 
 def resolve_target_name(db, target_type: str | None,
                         target_id: int | None) -> str | None:
-    """The name of the thing a job or audit row is about, read RIGHT NOW.
+    """The name of the thing a job or audit row is about, captured at write time.
 
     Called from the two write paths (JobBackend.enqueue and write_audit), both
-    of which run before the work does. That ordering is the whole point: a
-    destroy job is enqueued while the guest row still exists, so the name is
-    captured before the thing that owns it is deleted. Resolving at render time
-    instead is what left the history reading "vm 3" for the one case where the
-    name can never be recovered.
+    of which run before the work does: a destroy job is enqueued while the guest
+    row still exists, so the name is captured before the thing that owns it is
+    deleted.
 
-    Returns None for a target with no human name, and for one that is already
-    gone; callers store the None and the UI falls back to "type id".
+    Returns None for a target with no human name, or one already gone; callers
+    store the None and the UI falls back to "type id".
     """
     if not target_type or target_id is None:
         return None
-    # A job's own name is its kind ("vm.delete"), which is not in TARGET_LABELS
-    # because it is not the sort of name the audit screen's Item column wants.
+    # A job's name is its kind ("vm.delete"), not a TARGET_LABELS entry.
     if target_type == "job":
         job = db.get(Job, target_id)
         return job.kind if job is not None else None

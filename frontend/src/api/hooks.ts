@@ -34,12 +34,9 @@ export function useEntitlements() {
   }
 }
 
-// ---- Phase 2 (Observe) row types, mirror the backend response shapes -------
 export type Summary = {
   updated_at: string | null
-  // pct is null when nothing was measured, which is not the same claim as 0%:
-  // a degraded poll used to draw calm 0% rings over an unwritable cluster
-  // (doc 12 check 12).
+  // pct is null when nothing was measured -- not the same claim as 0%.
   cpu: { pct: number | null; used_cores: number; total_cores: number }
   mem: { pct: number | null; used_bytes: number; total_bytes: number }
   storage: { pct: number | null; used_bytes: number; total_bytes: number }
@@ -109,16 +106,9 @@ export type VmRow = {
   id: number; host_id: number; host_name: string; vmid: number; name: string
   status: string; os_type: string | null; cpu_cores: number | null
   cpu_pct: number | null
-  // Used and allocated bytes, the SAME meaning these names carry on AppRow.
-  //
-  // They used to mean the opposite here: a VM's mem_bytes was the memory
-  // ASSIGNED to it and disk_bytes was the disk it was given, because the
-  // poller wrote PVE's maxmem/maxdisk into them. Two rows in one product
-  // cannot have one name meaning used on one and allocated on the other, so
-  // the backend now fills these the way the app rows are filled and the
-  // allocation figures moved to the _total_ fields below. Anything asking how
-  // big a VM is reads mem_total_bytes/disk_total_bytes; anything asking how
-  // much it is using reads these.
+  // Used bytes, the SAME meaning these names carry on AppRow. Allocated size
+  // lives in the _total_ fields below: how big a VM is reads those, how much
+  // it is using reads these.
   mem_bytes: number | null; mem_total_bytes: number | null
   // disk_bytes is null, not zero, on a VM with no QEMU guest agent: PVE cannot
   // see inside the disk image without one, so there is no reading to report.
@@ -138,8 +128,6 @@ export type VmRow = {
   //   null   nobody knows: the poller has not probed it yet, the VM is
   //          stopped so nothing inside it can answer, or its host was
   //          unreachable. Rendered as "unknown", never as "not installed".
-  // Replaced synced_at, which was when the poller last stamped the row and
-  // which nothing computed with.
   guest_agent_ok: boolean | null
   // PVE accepts a linked clone only FROM a template, so the clone dialog gates
   // that option on this rather than letting PVE refuse every time.

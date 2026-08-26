@@ -1,4 +1,3 @@
-// api/firewall.ts, firewall server state for every scope.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, apiErrorDetail } from './client'
 import { notify } from '../lib/notify'
@@ -273,23 +272,13 @@ export function useFirewallLog(scope: LogScope, start = 0, limit = 500) {
 }
 
 /**
- * What turning this firewall on will actually do, in one sentence, or null
- * when there is nothing worth warning about.
- *
- * The whole reason this exists: an ABSENT policy is not "no policy", it is
- * PVE's default, and PVE defaults `policy_in` to DROP. An operator reading an
- * empty options object as "nothing configured, so nothing blocked" is the
- * exact misreading that got the per-NIC toggle removed in the first place.
- * The backend sends `defaults` alongside `options` so this can say what will
- * happen rather than what was typed.
- *
- * Proxploy warns and never blocks here, matching what Proxmox itself allows.
- *
- * `savedEnabled` is the firewall's state as PVE actually has it stored, not
- * whatever the operator is mid-typing: it decides the tense (present, "is
- * being dropped", for a firewall already on, versus conditional, "will be
- * dropped", for one that is not) so the sentence never claims a live outage
- * is hypothetical, or a hypothetical one as already happening.
+ * What turning this firewall on will actually do, or null when there is
+ * nothing worth warning about. An ABSENT policy is not "no policy" -- PVE
+ * defaults `policy_in` to DROP -- so the backend sends `defaults` alongside
+ * `options`. Proxploy warns and never blocks here. `savedEnabled` is the
+ * state PVE actually has stored, not what the operator is mid-typing: it
+ * decides the tense so the sentence never claims a live outage is
+ * hypothetical or a hypothetical one as already happening.
  */
 export function effectiveWarning(options: Options, defaults: Options,
                                  rules: Rule[], savedEnabled: boolean): string | null {

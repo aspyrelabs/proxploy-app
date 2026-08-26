@@ -1,15 +1,12 @@
-"""The shared UPID poll-and-drain loop (doc 02 §3, doc 03).
+"""Shared UPID poll-and-drain loop (doc 02 §3, doc 03).
 
 Every mutating Proxmox call returns a UPID and then has to be watched: poll
 /nodes/{node}/tasks/{upid}/status, drain /log into job_events, fail closed on
-anything that is not exitstatus "OK". services/lifecycle.py proved that shape
-in Phase 3; Phase 6 adds twelve more handlers that need exactly it, so it lives
-here once instead of thirteen times.
+anything that is not exitstatus "OK".
 
-Both the cancellation breadcrumb and the fail-closed exitstatus check are
-carried over verbatim; they are the two pieces a re-derivation gets wrong:
-a cancelled job must never imply the proxmox-side task was undone, and a
-stopped task with a missing exitstatus is an unknown outcome, not a success.
+Two invariants a re-derivation gets wrong: a cancelled job must never imply
+the proxmox-side task was undone, and a stopped task with a missing exitstatus
+is an unknown outcome, not a success.
 """
 from __future__ import annotations
 

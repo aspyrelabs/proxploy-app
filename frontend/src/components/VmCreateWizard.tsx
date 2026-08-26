@@ -11,8 +11,7 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
 
-// Deliberately local, deliberately narrow row types: the wizard reads the
-// endpoints Tasks 3, 6 and 11 built, not Tasks 12/14's page hooks, so the
+// Deliberately local row types: the wizard reads endpoints directly, so the
 // Storage and Network pages stay free to reshape their own hook signatures.
 type HostRow = { id: number; name: string; cluster_name?: string | null }
 type NodeRow = { host_id: number; node: string }
@@ -41,16 +40,6 @@ function Field({ id, label, children }: { id: string; label: string; children: R
   )
 }
 
-/**
- * Doc 06 §(a) row 42's "New VM". Mirrors routes/onboarding.tsx's wizard shape
- * on purpose, a step index, a StepRail down the side, `{step === N && (…)}`
- * blocks; rather than becoming a reusable <Wizard/>: there are exactly two
- * multi-step flows in this app and they share no fields, only the rail's
- * presentation (see StepRail.tsx), which they now both import.
- *
- * On submit it follows InstallDialog: fire the mutation, keep the job id, swap
- * the body for <JobLog/> + Close.
- */
 export function VmCreateWizard({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const [step, setStep] = useState(0)
@@ -82,24 +71,15 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
 
   const nodeOpts = (nodes.data ?? []).filter((n) => n.host_id === hostId)
 
-  // PXP-87: a host is almost always a single PVE node, so asking for the node
-  // right under the host it just resolved from reads as the same question
-  // twice. Pre-fill it silently when there is only one answer; only a real
-  // cluster host (nodeOpts.length > 1) still gets the select below.
+  // A host is almost always a single PVE node; pre-fill it when there is one
+  // answer and only a real cluster host (nodeOpts.length > 1) gets the select.
   useEffect(() => {
     if (nodeOpts.length === 1 && f.node !== nodeOpts[0].node) set('node', nodeOpts[0].node)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostId, nodeOpts.length, nodeOpts[0]?.node])
-  // poolsFrom, not a filter of its own. This used to be
-  // `s.host_id === hostId && s.node === f.node`, which no row GET /storage
-  // returns can satisfy for every host/node pair of a cluster: that endpoint
-  // drops host_id from its dedupe key, so every row is owned by whichever host
-  // polled first, and it collapses a SHARED datastore to a single row under
-  // whichever node was seen first. On the real two-node cluster that showed up
-  // as an attached NFS pool missing on one node and the OTHER host offering no
-  // datastore at all. components/install/pools.ts had already been fixed for
-  // exactly this (see its `servedTo` comment, which names this file); sharing
-  // the function is what stops the two drifting apart a third time.
+  // poolsFrom, not a local filter: /storage drops host_id from its dedupe key,
+  // so a host_id+node filter here collapses shared datastores across a cluster.
+  // pools.ts already fixes this; sharing the function stops the two drifting.
   const selectedHost = (hosts.data ?? []).find((h) => h.id === hostId)
   const storeOpts = (kind: string) =>
     poolsFrom(storages.data, hostId, f.node, selectedHost?.cluster_name, kind)
@@ -179,13 +159,10 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
         {step === 0 && (
           <div className="space-y-3">
             <Field id="vm-host" label="Host">
-              {/* `isLoading` throughout this wizard, never `isPending`: `isos`
-                  and `bridges` are enabled-gated on a host (and a datastore)
-                  being picked first, and a disabled query sits at isPending for
-                  ever, so isPending would label a select that is waiting on the
-                  step before it as "loading" and never stop. isLoading is
-                  isPending && isFetching, so it is true only while a request is
-                  actually out. */}
+              {/* `isLoading`, never `isPending`: enabled-gated queries sit at
+                  isPending forever while disabled, so it would label a waiting
+                  select "loading" indefinitely. isLoading = isPending &&
+                  isFetching, true only while a request is out. */}
               <select id="vm-host" className={inputCls} value={f.host_id}
                 disabled={hosts.isError || hosts.isLoading}
                 onChange={(e) => { set('host_id', e.target.value); set('node', ''); set('iso_storage', ''); set('iso', ''); set('storage', ''); set('bridge', '') }}>
@@ -197,10 +174,6 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
                 {(hosts.data ?? []).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
             </Field>
-            {/* A host with exactly one PVE node has nothing to ask: the effect
-                above already filled f.node in, and this field would just be
-                the same question the host select answered a moment ago. Only
-                a real cluster host, with more than one node, gets asked. */}
             {nodeOpts.length !== 1 && (
               <Field id="vm-node" label="Node">
                 <select id="vm-node" className={inputCls} value={f.node}
@@ -330,9 +303,7 @@ export function VmCreateWizard({ onClose }: { onClose: () => void }) {
         {error && <p className="mt-3 text-[12.5px] text-red">{error}</p>}
 
         <div className="mt-4 flex items-center justify-end gap-2">
-          {/* Nothing in the VM-create path calls ctx.progress() (checked
-              against backend/proxploy/services/), so starting the job is a
-              wait with no honest figure to show: the ring, never a number. */}
+          {/* No progress callbacks in the create path, so the ring, never a number. */}
           {create.isPending && <Loading label="Creating the VM" size={18} className="mr-auto" />}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {step > 0 && (

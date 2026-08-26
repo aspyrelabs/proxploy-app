@@ -31,12 +31,8 @@ export function applyMetrics(qc: QueryClient, data: { targets: MetricTarget[] })
 }
 
 /**
- * `d.type` (resource events) and `d.target_type` (job events) → the root of the
- * query key that owns that resource. One map, both functions, because they
- * used to disagree: applyResource fell through to 'vms' for anything it did
- * not recognise and applyJob invalidated nothing at all, so Phase 6's storage /
- * backup / network events refreshed the VM list while their own pages went
- * stale. An unlisted type now routes NOWHERE, which is the honest answer; 
+ * `d.type` (resource events) and `d.target_type` (job events) → the root of
+ * the query key that owns that resource. An unlisted type routes NOWHERE —
  * a guess here is a wrong cache read somewhere else.
  */
 const RESOURCE_KEY: Record<string, string> = {
@@ -76,14 +72,12 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
   qc.invalidateQueries({ queryKey: [key] })
 }
 
-/** The severity NotificationCard (components/ui/notification-card.tsx) takes,
- *  which LiveProvider's `job`/`alert` SSE handlers render via `toast.custom`
- *  in place of the plain toast.success/toast.error calls those used to be. */
+/** The severity NotificationCard takes; LiveProvider's SSE handlers render it
+ *  via `toast.custom`. */
 export type ToastSeverity = 'info' | 'success' | 'warning' | 'destructive'
 
 /** applyJob's toast kind -> card severity: ok is good news, err is bad news,
- *  anything else (queued/running/progress, an intermediate delta that still
- *  reached the toast callback) is informational rather than either. */
+ *  anything else is informational. */
 export function jobToastSeverity(kind: 'ok' | 'err' | 'info'): ToastSeverity {
   return kind === 'ok' ? 'success' : kind === 'err' ? 'destructive' : 'info'
 }
@@ -119,7 +113,7 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   if (wasTerminal) return
   qc.invalidateQueries({ queryKey: ['jobs'] })
   // ['vms'] is a prefix match, so a vm.snapshot_* job invalidates
-  // ['vms', id, 'snapshots'] here for free; Task 16 adds no wiring.
+  // ['vms', id, 'snapshots'] here for free.
   const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
   if (resourceKey) qc.invalidateQueries({ queryKey: [resourceKey] })
   // catalog.refresh is enqueued with no target_type, because it is not about
@@ -149,29 +143,20 @@ type AlertDelta = {
 }
 type AlertToastFn = (t: { kind: 'ok' | 'err'; text: string; alertId: number }) => void
 
-/** applyAlert's toast kind, plus the severity the alert *payload* itself
- *  carries -> card severity. A resolution is always good news regardless of
- *  how bad the alert was (applyAlert below toasts 'ok' at any severity); a
- *  firing alert keeps the distinction the payload already draws between
- *  'warning' and 'critical' rather than collapsing both into one colour --
- *  applyAlert never calls this for a firing 'info' alert, since it stays
- *  quiet at that severity (doc 06: warning+). */
+/** A resolution is always good news; a firing alert keeps the payload's own
+ *  warning/critical distinction (info never reaches here — doc 06: warning+). */
 export function alertToastSeverity(kind: 'ok' | 'err', payloadSeverity: AlertDelta['severity']): ToastSeverity {
   if (kind === 'ok') return 'success'
   return payloadSeverity === 'critical' ? 'destructive' : 'warning'
 }
 
-/** SSE `alert` event → invalidate `['alerts','firing']`; toast for `firing` at
- *  warning+ severity (doc 06 §d, verbatim).
- *
- *  Invalidate rather than patch: the delta carries four fields and the table
- *  renders eleven (rule name, target label, ack state…), so patching would
- *  write a half-row into the cache. Doc 06's rule is "patch when the delta is
- *  complete, invalidate when it isn't".
- *
- *  A `resolved` transition always toasts, at any severity; an info-level
- *  alert that quietly went away is still worth one line of good news, and it
- *  is the only signal that an earlier toast is stale. */
+/**
+ * SSE `alert` event → invalidate `['alerts','firing']`; toast for `firing` at
+ * warning+ severity. Invalidate rather than patch: the delta carries four
+ * fields, the table renders eleven, so a patch would write a half-row.
+ * A `resolved` transition always toasts (at any severity) — it's the only
+ * signal that an earlier toast is stale.
+ */
 export function applyAlert(qc: QueryClient, d: AlertDelta, toast?: AlertToastFn) {
   qc.invalidateQueries({ queryKey: ['alerts', 'firing'] })
   if (d.state === 'resolved') {

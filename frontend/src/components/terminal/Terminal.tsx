@@ -43,7 +43,6 @@ export function Terminal({ wsUrl, onDrop, bare = false }:
                              fontSize: prefs.fontSize })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    // Addons that cannot fail: no context to acquire, no work at load time.
     // NOT addon-attach, deliberately. It pipes the socket straight into the
     // terminal, and this socket is not raw: the bridge sends JSON control
     // frames for `exit` (carrying the code and the actionable error the

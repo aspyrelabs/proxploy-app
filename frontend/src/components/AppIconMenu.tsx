@@ -45,31 +45,16 @@ type Guard = { phrase: string; detail: string; action: string }
 type Panel = 'reconfigure' | 'migrate' | 'backup' | 'uninstall' | null
 
 /**
- * One app's actions as a menu: the icon grid's tile menu and the Apps table
- * row's three-dots menu are the same list, off one component.
+ * One app's actions as a menu, shared by the icon grid's tile menu and the
+ * Apps table's three-dots menu. A `lifecycle` switch rather than two
+ * components: the surfaces differ only in that the table row already carries
+ * Start/Stop, Restart and Open as buttons beside the menu, so the grid tile's
+ * menu is the only surface that keeps them.
  *
- * ONE menu with a `lifecycle` switch rather than two components, because the
- * two surfaces differ in exactly one way: the table row already carries Start
- * or Stop, Restart and Open as buttons beside the menu, so repeating them
- * inside it would offer the same action twice a centimetre apart. The grid
- * tile has no buttons at all, so its menu is the only way to act and keeps
- * them.
- *
- * Migrate, Reconfigure and Uninstall USED to be deliberately excluded here,
- * on the reasoning that a destructive action one slip from Restart is a bad
- * trade on a dense grid, and that the app detail page had them anyway. That
- * page is gone. An action nothing reaches is worse than a slip risk, and the
- * slip is already covered: Uninstall opens UninstallDialog, which makes you
- * type the app's name before anything is destroyed, so a mis-click lands on a
- * dialog rather than on a deleted container. Delete also sits below a
- * separator, away from Restart, and is styled red so it does not read as
- * another ordinary row.
- *
- * Lifecycle actions route through the same `useLifecycle` mutation
- * LifecycleActions.fire uses, error handling included: a 409 self_target
- * escalates to ConfirmSelfDialog, and everything else surfaces a
- * notify.error toast rather than letting the optimistic "pending" patch
- * revert in silence.
+ * Lifecycle actions route through `useLifecycle` (as LifecycleActions.fire
+ * does): a 409 self_target escalates to ConfirmSelfDialog, everything else
+ * surfaces a notify.error toast rather than letting the optimistic "pending"
+ * patch revert in silence.
  */
 export function AppIconMenu({ app, lifecycle = true, children }: {
   app: AppRow
@@ -160,11 +145,10 @@ export function AppIconMenu({ app, lifecycle = true, children }: {
               onSelect={() => openLogsWindow(app.id)}>
               <Icon name="description" size={16} /> Logs
             </DropdownMenu.Item>
-            {/* Outside the `lifecycle` switch, so BOTH surfaces carry it: this
-                is not one of the three the table row keeps as buttons. Never
-                gated to a role, matching the button it replaced, because it
-                only navigates and the Firewall page itself withholds the edit
-                from anyone below operator. */}
+            {/* Outside the `lifecycle` switch, so BOTH surfaces carry it: it is
+                not one of the three the table row keeps as buttons. Never gated
+                to a role because it only navigates; the Firewall page itself
+                withholds the edit from anyone below operator. */}
             <DropdownMenu.Item className={itemCls}
               title={canEdit ? `Manage ${app.name}'s firewall`
                              : `View ${app.name}'s firewall`}

@@ -1,4 +1,3 @@
-// api/backups.ts, Backups page server state (doc 05 §Backups, doc 06 §a row 45).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -78,25 +77,13 @@ const jobSettled = (qc: ReturnType<typeof useQueryClient>) => () => {
   qc.invalidateQueries({ queryKey: ['jobs'] })
 }
 
-/**
- * `storage` is sent, not left out. POST /backups/run defaults it to null and
- * vzdump then writes to whichever backup store PVE picks, so the operator had
- * no way to know where the archive landed: the same class of problem the
- * migration preflight had before it started naming its target pool, and the
- * reason services/backupjobs.py::restore_backup stopped letting PVE guess.
- * The dialog chooses from the stores that actually carry `backup` content and
- * says which one, so "where did it go" is answered before the run.
- */
+/** `storage` is sent, not left out: POST /backups/run defaults it to null and
+ *  PVE then picks whichever store it likes, leaving the operator no idea where
+ *  the archive landed. */
 export type BackupGuest = { type: 'app' | 'vm'; id: number }
 
-/**
- * `guests` defaults to `'all'` (the host-wide run routes/backups.tsx has
- * always fired), so that page's call site needed no change at all. Passing
- * an explicit list is the one-app dialog's job: backend `_resolve_guests`
- * requires every guest in the list to share one host, which a single app
- * always does, so there is nothing this hook needs to check on the caller's
- * behalf.
- */
+/** `guests` defaults to `'all'`; backend `_resolve_guests` requires every
+ *  guest in an explicit list to share one host. */
 export function useRunBackup() {
   const qc = useQueryClient()
   return useMutation<{ job: JobRow }, ApiError,
@@ -118,9 +105,7 @@ export function useRunBackup() {
   })
 }
 
-/** Read one archive back and record whether it is intact. Settles like every
- *  other job mutation here: ['jobs'], never ['backups'], which the handler's
- *  own resource delta refreshes once the verdict exists. */
+/** One-archive verify; the sweep below is the host-wide form. */
 export function useVerifyBackup() {
   const qc = useQueryClient()
   return useMutation<{ job: JobRow }, ApiError, number>({

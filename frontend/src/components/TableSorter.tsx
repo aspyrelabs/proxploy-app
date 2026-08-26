@@ -1,23 +1,17 @@
 import { useMemo, useState } from 'react'
 
 /**
- * Sorting the Apps and VMs lists, client-side, shared by both (TablePager
- * precedent: a hook plus the small control that drives it, in one file).
- *
- * Client-side because both pages already hold every row they draw. GET /apps
- * and GET /vms answer in one go, so ordering them here asks the server for
- * nothing and reorders on the same frame the operator picks the option, with
- * no refetch and no skeleton flash in between.
+ * Client-side sorting for the Apps and VMs lists, shared by both. Both pages
+ * already hold every row they draw, so sorting here asks the server for
+ * nothing and reorders on the same frame the operator picks an option.
  */
 
-/** What the two pages can be sorted by. Name is the default: it is what the
- *  order the API sent, which is what both lists showed before this existed. */
+/** Name is the default: it is the order the API sent. */
 export type SortKey = 'name' | 'host' | 'status'
 
-/** The three fields both row shapes carry. Deliberately not AppRow | VmRow:
- *  the sort has no business knowing about ctids, guest agents or update
- *  markers, and a structural type is what lets the tests drive it with three
- *  strings instead of two full API rows. */
+/** A structural type rather than AppRow | VmRow: the sort has no business
+ *  knowing the full row shapes, and it lets the tests drive this with three
+ *  strings. */
 type Sortable = { name: string; host_name: string; status: string }
 
 /**
@@ -64,45 +58,34 @@ export function sortRows<T extends Sortable>(rows: T[], sort: SortKey): T[] {
   })
 }
 
-/** Sort a list client-side, holding the chosen key. Starts on name, so a
- *  page that renders this and changes nothing else looks exactly as it did. */
+/** Sort a list client-side, holding the chosen key. Starts on name. */
 export function useSorted<T extends Sortable>(rows: T[]) {
   const [sort, setSort] = useState<SortKey>('name')
   return { sort, setSort, rows: useMemo(() => sortRows(rows, sort), [rows, sort]) }
 }
 
 // ScheduleForm's `input`/`label` vocabulary, minus the two rules that only
-// make sense in a stacked form: no `w-full`, because this select sits in a
-// row of filters and would eat it, and no `mb-1 block` on the label for the
-// same reason.
-// One step down from the form vocabulary it started in (px-3 py-1.5
-// text-[13px]). A filter bar's controls are not the same weight as a dialog's
-// fields: this one sits at the end of a toolbar and should read as a smaller
-// thing than the table it reorders.
+// make sense in a stacked form, and one step smaller (a toolbar control, not
+// a dialog field).
 const input = 'rounded-ctl border border-line bg-panel-2 px-2 py-1 text-[11px] text-text'
-// Sentence case, NOT the uppercase of ScheduleForm's `label`: that vocabulary
-// is for a field heading stacked above its input in a form, and shouting one
-// word sideways at a control it sits next to is a different thing entirely.
+// Sentence case, not ScheduleForm's uppercase: that vocabulary is a field
+// heading stacked above its input, this is a word sitting beside its control.
 const label = 'text-[11px] text-text-3'
 
 const OPTIONS: { key: SortKey; text: string }[] = [
-  // No "Default order" entry. The server already hands these back by name, so
-  // it offered a choice that did nothing and named it after a distinction
-  // nobody could see. Name IS the default.
+  // No "Default order" entry: the server hands these back by name already.
   { key: 'name', text: 'Name' },
   { key: 'host', text: 'Host' },
   { key: 'status', text: 'Status' },
 ]
 
-/** The control. A native select rather than a row of buttons: four mutually
- *  exclusive choices is what a select is for, and it costs no width on a
- *  toolbar that already carries host segments and a filter box. */
+/** The control. A native select, not a row of buttons: four mutually
+ *  exclusive choices is what a select is for, and it costs no toolbar width. */
 export function TableSorter({ sort, onSort, label: what }: {
   sort: SortKey
   onSort: (s: SortKey) => void
-  /** Named for what is being sorted ("apps", "virtual machines"), so the
-   *  control is told apart by anyone not looking at it. Renamed to `what` on
-   *  the way in only because `label` is already the class const above. */
+  /** Named for what is being sorted ("apps", "virtual machines"). Renamed to
+   *  `what` on the way in only because `label` is already the class const. */
   label: string
 }) {
   return (

@@ -20,7 +20,7 @@ import { StatusPill } from '../components/StatusPill'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted so the loading placeholder lays out in the SAME grid as the cards it
-// stands in for. Two copies of the string is one copy too many.
+// stands in for.
 const inputCls ='rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
 
 type HostRow = { id: number; name: string }
@@ -164,18 +164,10 @@ export function AppsPage() {
                   emptyNote="Install from the App Store, or adopt a container Proxploy already found."
                   errorTitle="Apps not readable"
                   errorNote="Proxploy could not reach the backend to list your apps.">
-        {/* One view, deliberately. This page is for scanning every app at
-            once, which is what a table is for; the Hosts page carries the
-            icon glance. A switcher here would offer two ways to read the
-            same thing on a page that only needs one.
-
-            Which row is expanded lives in the URL, next to the filters, so
-            /apps?open=3 opens straight onto that app the way its own page
-            used to.
-
-            The sorted rows, not the ones handed in: QueryState is still what
-            decides between loading, error, empty and data, it just does not
-            own the order. Both are the same fetch. */}
+        {/* Deliberately one view: the table is for scanning every app at once,
+            the Hosts page has the icon glance. The expanded row lives in the
+            URL (`open`); sorted rows are passed because QueryState owns state,
+            not order. */}
         {() => <AppTable apps={sorted.rows} open={search.open}
                          onOpen={(open) => setSearch({ open })} />}
       </QueryState>
@@ -185,10 +177,8 @@ export function AppsPage() {
   )
 }
 
-/** Doc 06 App detail Overview: the Details KV grid's "Update" row plus an
- *  "Update to vX" button. X is a short commit sha, not a version; see
- *  services/appstore.py::mark_updates_available for why that is the only
- *  honest thing community-scripts lets us say. */
+/** "Update to vX": X is a short commit sha, not a version
+ *  (services/appstore.py::mark_updates_available). */
 export function UpdatePanel({ appId, app }:
   { appId: number; app: { name: string; update_available: string | null } }) {
   const qc = useQueryClient()
@@ -259,12 +249,8 @@ export function UpdatePanel({ appId, app }:
       <label className="mb-3 flex items-start gap-2 text-[12.5px] text-text-2">
         <input type="checkbox" checked={consent}
                onChange={(e) => setConsent(e.target.checked)} />
-        {/* The consent names the risk the operator can actually do something
-            about. "Runs as root on the node" was true and useless: it is true
-            of every action in this product, it is not a thing to check before
-            clicking, and it left the one precaution that matters here unsaid.
-            An update rewrites a running container in place, so the question
-            worth asking is whether there is a backup to go back to. */}
+        {/* An update rewrites the running container in place, so the consent
+            asks about a backup to go back to, not the generic "runs as root". */}
         <span>
           I confirm that I have backed up and want to update{' '}
           <span className="font-mono">{app.name}</span>.

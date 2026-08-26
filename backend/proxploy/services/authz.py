@@ -1,12 +1,10 @@
-"""Authorizer seam (doc 08 §6, doc 03 AuthZ row): pycasbin RBAC with domains.
+"""Authorizer seam: pycasbin RBAC with domains.
 
-The ONLY module that imports casbin. The enforcer is in-memory: static
-p-lines generated from PERMISSIONS below, g-lines derived from team_members.
-The casbin_rules table stays empty, doc 04's "mirrored into casbin_rules"
-design would be two sources of truth for the same memberships; team_members
-is authoritative and the enforcer is a pure function of it (rebuilt at boot,
-patched by sync_user() on every membership write). The amendment mirrors
-Phase 7's APScheduler precedent.
+The ONLY module that imports casbin. The enforcer is in-memory: static p-lines
+generated from PERMISSIONS below, g-lines derived from team_members. The
+casbin_rules table stays empty -- team_members is authoritative and the enforcer
+is a pure function of it (rebuilt at boot, patched by sync_user() on every
+membership write).
 """
 from __future__ import annotations
 
@@ -14,11 +12,11 @@ import casbin
 
 from proxploy.models import TeamMember, User
 
-# RBAC with domains (doc 08 §6): sub = user:<id>, dom = team:<id>,
-# obj = resource type, act = verb. p.dom is always "*" (the role→permission
-# matrix is identical in every team; WHICH team a user holds a role in is
-# what the g-lines scope). Matching is exact: no keyMatch, no regex, so an
-# unknown obj/act can never accidentally glob onto a policy.
+# RBAC with domains: sub = user:<id>, dom = team:<id>, obj = resource type,
+# act = verb. p.dom is always "*" (the role→permission matrix is identical in
+# every team; WHICH team a user holds a role in is what the g-lines scope).
+# Matching is exact (no keyMatch, no regex), so an unknown obj/act can never
+# accidentally glob onto a policy.
 MODEL_TEXT = """
 [request_definition]
 r = sub, dom, obj, act
@@ -36,12 +34,11 @@ e = some(where (p.eft == allow))
 m = g(r.sub, p.sub, r.dom) && (p.dom == "*" || p.dom == r.dom) && p.obj == r.obj && p.act == r.act
 """
 
-# (resource, action) -> minimum role. Derived row-by-row from doc 05's Role
-# column. This is the single authoritative matrix: authorize() (api/deps.py)
-# refuses at import time to build a dependency for a pair not listed here.
-# `read` is deliberately the only viewer-reachable action: doc 10's DoD
-# ("a viewer cannot mutate anything") is a property of this table first and
-# a test (test_rbac_invariant.py) second.
+# (resource, action) -> minimum role. This is the single authoritative matrix:
+# authorize() (api/deps.py) refuses at import time to build a dependency for a
+# pair not listed here. `read` is deliberately the only viewer-reachable action
+# ("a viewer cannot mutate anything" is a property of this table first, and a
+# test second).
 PERMISSIONS: dict[tuple[str, str], str] = {
     ("host", "read"): "viewer",
     ("host", "sync"): "operator",
@@ -49,13 +46,13 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("host", "credentials"): "owner",   # rotate stored secrets
     ("host", "remove"): "owner",
     ("host", "power"): "owner",         # reboot/power off the underlying node
-    ("host", "console"): "admin",       # node shell tickets (doc 08 §6 note)
+    ("host", "console"): "admin",       # node shell tickets
     ("app", "read"): "viewer",
     ("app", "lifecycle"): "operator",
     ("app", "configure"): "operator",   # PATCH metadata, guest NICs
     ("app", "update"): "operator",
-    ("app", "script_read"): "operator", # GET script + versions (doc 05 L115/117)
-    ("app", "script"): "admin",         # PUT script, revert (doc 05: admin)
+    ("app", "script_read"): "operator", # GET script + versions
+    ("app", "script"): "admin",         # PUT script, revert
     ("app", "console"): "operator",
     ("app", "install"): "admin",        # store install
     ("app", "adopt"): "admin",
@@ -100,20 +97,13 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("channel", "manage"): "admin",
     ("metric", "read"): "viewer",
     ("audit", "read"): "admin",
-    # admin, matching the route that has always enforced it: GET /audit/export
-    # is gated on ("audit", "read"), and nothing has ever called
-    # authorize("audit", "export"). This entry read "owner" and was therefore a
-    # stale claim rather than a control: it granted a policy row nobody checked
-    # while doc 05 told operators the export needed owner. Corrected to what the
-    # code does rather than tightening the route, because admins can already
-    # export and nobody asked for the restriction.
+    # admin, matching the route: GET /audit/export is gated on ("audit", "read"),
+    # nothing calls authorize("audit", "export").
     ("audit", "export"): "admin",
-    # Erasing the trail sits with host.remove and vm.remove at owner. Reusing
-    # ("audit", "export") would have avoided a row here, but authorize() writes
-    # the DENIED audit row as f"{resource}.{action}", so a refused clear would
-    # have been recorded as a refused export: the wrong sentence on the one
-    # surface this control exists to protect. The clear is itself audited, see
-    # api/audit.py::clear_audit and doc 08 §7.
+    # Erasing the trail sits with host.remove and vm.remove at owner. A separate
+    # row (not reused ("audit", "export")): authorize() writes the DENIED row as
+    # f"{resource}.{action}", so a refused clear would otherwise read as a
+    # refused export. The clear is itself audited (api/audit.py::clear_audit).
     ("audit", "clear"): "owner",
     ("settings", "read"): "admin",
     ("settings", "manage"): "admin",
@@ -124,7 +114,7 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("entitlement", "read"): "viewer",
     ("entitlement", "manage"): "owner",
     ("meta", "read"): "viewer",
-    ("meta", "update"): "owner",        # self-update (Phase 9 route not built yet)
+    ("meta", "update"): "owner",        # self-update (route not built yet)
 }
 
 

@@ -1,23 +1,16 @@
-"""OIDC authorization-code+PKCE flow (doc 08 §6, doc 10 Task 10).
+"""OIDC authorization-code + PKCE flow.
 
-`authlib.jose` is deprecated at 1.7 ("use joserfc instead"), every byte of ID
-token verification here goes through joserfc, never authlib.jose. Authlib
-(OAuth2Client/AsyncOAuth2Client) is used only for the mechanical parts of the
-protocol: building the authorization URL and doing the code/verifier exchange
-over httpx. A signature/claims/nonce failure is always an `OIDCError`, never a
-500 and never a silently-accepted token, see `_verify_id_token`.
+ID-token verification runs through joserfc, never authlib.jose (deprecated);
+authlib is used only for building the authorization URL and the code/verifier
+exchange. Any signature/claims/nonce failure raises OIDCError, never a 500 and
+never a silently-accepted token (see `_verify_id_token`).
 
-JIT provisioning (`_jit_provision`) does not treat an IdP's user population as
-automatically the application's authorized population: auto-admitting every
-identity the directory happens to contain is the accidental-access failure
-mode this deliberately avoids. `settings.oidc_default_role` unset (the
-default) provisions the account with no team membership and `is_active=False`
-a deny-with-an-explanation, not a silent lockout, since `is_active` is the
-same gate `services/authn.py` and the password login path already check.
-Setting it opts into auto-granting that one role in `oidc_default_team_slug`
-instead; both are validated at first use and fail loudly (never silently
-fall back) on a bad value, matching this codebase's fail-closed posture for
-casbin/RBAC (`services/authz.py`, `api/deps.py::authorize`).
+JIT provisioning is fail-closed: with `oidc_default_role` unset (the default), a
+new account is created with no team membership and `is_active=False` -- a
+deny-with-an-explanation, not a silent lockout, since `is_active` is the gate
+the password-login path already checks. Setting the role auto-grants it in
+`oidc_default_team_slug`; both values are validated at first use and fail loudly
+on a bad value.
 """
 from __future__ import annotations
 
@@ -36,15 +29,8 @@ from proxploy.models import AppSetting, Team, TeamMember, User, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.settings import get_setting, set_setting
 
-STATE_TTL_S = 600  # doc 10 Task 10: single-use, 10-minute expiring state store
+STATE_TTL_S = 600  # single-use, 10-minute expiring state store
 
-# Gap review finding: api/auth.py's user-creation route was, before this,
-# the ONLY code path in the tree that ever minted a team_members row. A JIT-
-# provisioned OIDC user with none is invisible to services/authz.py: every
-# enforce() call denies (fail-closed by construction): which is a silent
-# lockout with no explanation, not a security property. This message is what
-# that lockout now says instead, and it is the exact text both the pending-
-# after-creation path and the deactivated-account path raise below.
 PENDING_APPROVAL_MESSAGE = (
     "account awaits administrator approval: no oidc_default_role is "
     "configured, so this OIDC sign-in created an account with no team "
@@ -59,7 +45,7 @@ class OIDCError(Exception):
     redirect, the message here is for logs/tests, never sent to the browser."""
 
 
-# --- Config (settings-backed; client_secret Fernet-encrypted) --------------
+# client_secret is Fernet-encrypted at rest.
 
 def config(db, secretstore) -> dict | None:
     issuer = get_setting(db, "oidc.issuer")
@@ -86,14 +72,12 @@ def clear_config(db) -> None:
 
 
 def configured(db) -> bool:
-    """Cheap existence check (no decrypt) for routes that only need to know
-    whether OIDC is set up, not the secret itself; Task 11's login gate and
-    /meta/onboarding's `oidc` flag both go through this instead of `config()`."""
+    """Existence check (no decrypt) for routes that only need to know whether
+    OIDC is set up, not the secret itself."""
     return bool(get_setting(db, "oidc.issuer") and get_setting(db, "oidc.client_id")
                 and get_setting(db, "oidc.client_secret.enc"))
 
 
-# --- Discovery / JWKS, cached on app.state keyed by issuer ------------------
 
 def _cache(app, attr: str) -> dict:
     cache = getattr(app.state, attr, None)
@@ -128,7 +112,6 @@ async def _jwks(app, issuer: str, metadata: dict, *, refresh: bool = False) -> d
     return cache[issuer]
 
 
-# --- State store: {state: (code_verifier, nonce, expires_at)} --------------
 
 def _states(app) -> dict:
     states = getattr(app.state, "oidc_states", None)
@@ -138,13 +121,12 @@ def _states(app) -> dict:
     now = utcnow()
     # ponytail: single in-memory dict, fine for the single-process deployment
     # this phase targets; a multi-worker deploy needs a shared store (Redis/db
-    # row) instead: same shape of note as the Task 9 pending-TOTP store.
+    # row) instead.
     for k in [k for k, (_, _, exp) in states.items() if exp < now]:
         del states[k]
     return states
 
 
-# --- begin() / complete() ---------------------------------------------------
 
 async def begin(app, db, redirect_uri: str) -> str:
     cfg = config(db, app.state.secretstore)
@@ -155,8 +137,8 @@ async def begin(app, db, redirect_uri: str) -> str:
     nonce = secrets.token_urlsafe(24)
     client = OAuth2Client(cfg["client_id"], cfg["client_secret"],
                           redirect_uri=redirect_uri, code_challenge_method="S256")
-    # TRAP (Global Constraints): code_challenge/code_challenge_method only
-    # appear in the URL when code_verifier= is passed here.
+    # code_challenge/code_challenge_method only appear in the URL when
+    # code_verifier= is passed here.
     url, state = client.create_authorization_url(
         metadata["authorization_endpoint"], nonce=nonce, code_verifier=verifier,
         scope="openid email profile")

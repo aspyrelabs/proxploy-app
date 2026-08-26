@@ -34,9 +34,7 @@ import { amberLinkCls } from './button'
  * reader still sees the words rather than a silent gap.
  */
 
-// Headings, emphasis, lists, code, links, paragraphs. That is the realistic
-// surface of a release note. h1/h2 are included because notes often start at
-// "# 1.2.0"; they are styled down to fit the panel rather than dropped.
+// h1/h2 are styled down to fit the panel rather than dropped.
 const ALLOWED = [
   'p', 'br', 'hr', 'strong', 'em', 'del',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',

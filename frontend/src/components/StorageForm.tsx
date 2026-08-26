@@ -82,9 +82,6 @@ export function StorageForm({ existing, onClose }:
   const [name, setName] = useState(existing?.storage ?? '')
   // Editing keeps whatever Proxmox reported, including nothing: defaulting the
   // empty case turned "this datastore reports no type" into a confident "dir".
-  // The Backups page opens this same form for its own "Add storage" button
-  // rather than growing a second, near-identical one, and it opens on the same
-  // type the Storage page does.
   const [type, setType] = useState<string>(existing ? existing.type ?? '' : 'dir')
   const [cfg, setCfg] = useState<Record<string, string>>({
     content: existing?.content.join(',') ?? '',
@@ -146,10 +143,9 @@ export function StorageForm({ existing, onClose }:
   return (
     <Dialog title={<>{editing ? `Edit ${existing?.storage}` : 'Add storage'}</>} width={520} onClose={onClose}>
 
-    {/* doc 06 §e rule 1: never hide a gated feature, veil it. The Close
-        button below sits OUTSIDE the veil, because LockVeil sets
-        pointer-events:none on its children and a dialog you cannot dismiss
-        is a worse bug than the one being gated. */}
+    {/* Never hide a gated feature, veil it. The Close button sits OUTSIDE the
+        veil: LockVeil sets pointer-events:none on its children, and a dialog
+        you cannot dismiss is worse than the feature being gated. */}
     <LockVeil locked={locked}
       title="Storage management is a Pro feature"
       subtitle="Attach, edit and detach datastores without leaving Proxploy.">
@@ -187,14 +183,10 @@ export function StorageForm({ existing, onClose }:
               if (e.target.value === 'pbs') set('content', 'backup')
             }}>
             {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t] ?? t}</option>)}
-            {/* TYPES is the four plugins this form can ATTACH. Edit opens on
-                ANY row the Storage page lists, and a real cluster is full of
-                lvmthin, zfspool and rbd, none of which is here. With no
-                option matching, the browser selects the first one instead, so
-                editing local-lvm read "dir": not a missing answer, a wrong one
-                about a datastore the caller already knew the type of. Same
-                escape hatch NicForm.tsx keeps for a bridge the node no longer
-                reports. */}
+            {/* Edit opens on any row (lvmthin, zfspool, rbd aren't in TYPES);
+                with no matching option the browser picks the first, so editing
+                such a datastore read "dir" — a wrong answer for a type the
+                caller already knew. */}
             {!TYPES.some((t) => t === type) &&
               <option value={type}>{type === '' ? 'unknown' : type}</option>}
           </select>

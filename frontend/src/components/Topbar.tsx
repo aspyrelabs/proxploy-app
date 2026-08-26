@@ -12,50 +12,25 @@ import Logo, { GhostMark } from './Logo'
 export function Topbar() {
   const ent = useEntitlements()
   return (
-    // h-14 rather than py-2.5: the sidebar now sticks BELOW this bar, so its
-    // offset has to be a number something else can rely on. z-10 is enough to
-    // stay above it: a sticky element with z-index:auto paints in stacking
-    // step 8, any positive z-index in step 9, and the sidebar is still
-    // z-index:auto. (Radix dialogs are also z-index'd, but that tie doesn't
-    // matter here either: Radix portals them to the end of document.body,
-    // later in tree order, so they paint above this header regardless of
-    // what z-index either one carries.)
-    // justify-end is gone with the search lane's arrival: a flex-1 child
-    // absorbs every pixel of free space, so there is nothing left to justify.
+    // h-14 (not py-2.5): the sidebar sticks below this bar and its offset needs
+    // a fixed number to rely on. z-10 suffices: the sidebar is z-index:auto, so
+    // any positive z-index paints above it (Radix dialogs portal to the end of
+    // document.body, so they paint above regardless).
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-line-soft bg-topbar px-5 backdrop-blur-[10px]">
-      {/* GhostMark below sm: Logo's viewBox (aspect ratio ~4.9) renders it
-          217px wide at h-11, which alone overruns a 375px header once search,
-          bell, tier pill, theme toggle and avatar are laid out beside it.
-          The ghost is the mark's small-screen form (see Logo.tsx); swapping
-          to it below sm keeps the mark square down to a 36px footprint. */}
-      {/* h-11 (44px) in an h-14 (56px) items-center header leaves 6px above and
-          below. Growing the mark must not grow the BAR: the sidebar sticks at
-          top-14 and its height is calc(100vh-3.5rem), both of which are that
-          56px, so h-12 is the hard ceiling and this sits one step under it.
-          The artwork itself carries no padding any more (the source files were
-          a 1024x768 canvas holding a 201-unit-tall lockup, so 74% of every
-          rendered pixel was empty and the mark looked tiny at any height). */}
+      {/* GhostMark is the mark's small-screen form: Logo renders ~217px wide at
+          h-11 and alone overruns a 375px header beside the other controls. */}
+      {/* h-11 sits one step under the h-12 ceiling: growing the mark would grow
+          the 56px bar, which the sidebar's top-14 offset depends on. */}
       <Link to={'/hosts' as never} aria-label="Proxploy" className="shrink-0 text-amber">
         <GhostMark className="h-9 w-9 sm:hidden" />
         <Logo className="hidden h-11 w-auto sm:block" />
       </Link>
-      {/* Centred in a flex-1 lane rather than absolutely positioned: the bar
-          already overran a 375px phone once, and an absolutely-centred control
-          would sit under the mark and the account menu instead of pushing
-          against them. The lane centres the box between the two groups and
-          still collapses cleanly when there is no room. */}
+      {/* A flex-1 lane, not absolute centring, so the box pushes against the
+          mark and account menu and collapses when there is no room. */}
       <div className="flex min-w-0 flex-1 justify-center">
-        {/* max-w is 1.5x what it was (220px -> 330px), and it needed no
-            responsive clamp to stay safe. The cap is the only thing that
-            changed: the button is `w-full` inside a `min-w-0 flex-1` lane, so
-            its real width has always been whatever the lane has left after the
-            mark, tier pill, bell, theme toggle and avatar are laid out. Below
-            ~330px of free space the cap never binds and the button simply
-            fills the lane, exactly as before, so nothing is crowded or
-            overflowed at narrow viewports; above it, the box is half again as
-            wide. Growing this does not take space from the controls beside it
-            either, since flex-1 sizes the lane before the cap applies inside
-            it. */}
+        {/* max-w-[330px] is a pure cap: the button is w-full in a min-w-0
+            flex-1 lane, so its real width is the lane's leftover and the cap
+            never steals space from the controls beside it. */}
         <button
           aria-label="Search (Ctrl+K)"
           onClick={openCommandPalette}
@@ -72,22 +47,11 @@ export function Topbar() {
         </button>
       </div>
       <TierPill />
-      {/* Three states, not two. api/hooks.ts keeps has() fail-closed on
-          purpose, but that is a security default and not a statement of
-          fact, so gating the bell on it alone read "your plan does not
-          include this" for every plan while /entitlements was in flight,
-          and forever if that request failed. A user whose entitlements call
-          500s then had no surface at all telling them whether their install
-          worked, and nothing explaining why it had gone.
-
-          pending  -> a placeholder the size of the bell, same answer
-                      TierPill gives beside it: no claim either way, and no
-                      control popping in and out of the bar.
-          errored  -> the bell. Not a fail-open: what the tray shows is
-                      /jobs, which the backend authorises on its own, so
-                      nothing here unlocks anything the server would refuse.
-                      Hiding it would assert a plan limit we could not check.
-          not entitled (data read, feature absent) -> no bell, as before. */}
+      {/* Three states: pending -> a placeholder (no claim either way, nothing
+          pops in and out); errored -> the bell — not a fail-open, since the
+          tray's /jobs is authorised by the backend; not entitled -> no bell.
+          has() fail-closes, so gating on it alone would hide the bell while
+          /entitlements is in flight or after it 500s. */}
       {ent.isPending ? (
         <SkeletonGroup label="Checking your plan" className="shrink-0">
           <Skeleton className="h-8 w-8 rounded-tile" />

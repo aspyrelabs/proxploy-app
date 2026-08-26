@@ -46,10 +46,8 @@ PREFERRED_PORTS = (443, 80, 8443, 8080)
 #   LISTEN 0 4096 *:443 *:* users:(("caddy",pid=8143,fd=3))
 #
 # so this scans for the local address TOKEN rather than anchoring at the start
-# of the line, which is what a fixture written from an awk-sliced copy of the
-# output led me to do first: it matched nothing at all against the real thing.
-# The peer column cannot be mistaken for it, because a peer is `0.0.0.0:*` or
-# `*:*` and never ends in digits.
+# of the line. The peer column cannot be mistaken for it, because a peer is
+# `0.0.0.0:*` or `*:*` and never ends in digits.
 _ADDR_RE = re.compile(r"(?:^|\s)(?P<addr>\[[^\]]+\]|[^\s:]+):(?P<port>\d+)(?=\s|$)")
 _PROC_RE = re.compile(r'users:\(\("(?P<proc>[^"]+)"')
 

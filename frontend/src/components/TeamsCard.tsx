@@ -61,7 +61,6 @@ function TeamMembers({ team, users, usersError, usersLoading, onRemove }: {
                   // the "Add member" controls under this table stay usable
                   // throughout, so this wait belongs to the table alone.
                   loading={<SkeletonGroup label="Loading team members">
-                    {/* Email, Role, and the Remove button. */}
                     <SkeletonTable rows={2} cols={['w-44', 'w-24', 'w-16']} />
                   </SkeletonGroup>}
                   emptyTitle="No members yet."
@@ -142,9 +141,8 @@ export function TeamsCard() {
   const createTeam = useMutation({
     mutationFn: () => api<TeamRow>('/teams', { method: 'POST', body: JSON.stringify({ name }) }),
     onSuccess: () => { setName(''); setAdding(false); qc.invalidateQueries({ queryKey: ['teams'] }) },
-    // Deliberate per Task 20: the "New team" affordance renders for every
-    // role (owner-only enforcement is the backend's job, not UI cosmetics)
-    // -- an operator/admin gets teams.py's 403 back here, verbatim.
+    // The "New team" affordance renders for every role: owner-only
+    // enforcement is the backend's job (teams.py's 403), not UI cosmetics.
     onError: (e) => notify.error(apiErrorDetail(e, 'Request failed, try again.')),
   })
 

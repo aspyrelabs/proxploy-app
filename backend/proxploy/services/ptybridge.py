@@ -1,8 +1,7 @@
 """Bridges a browser-facing FastAPI WebSocket to Proxmox's termproxy/xtermjs
-websocket. See the plan's "Confirmed, not assumed" note for the wire protocol
-(reverse-engineered from Proxmox's own pve-xtermjs client) and the "Spike
-correction" note for the known API-token-vs-termproxy PVE limitation this
-module's PtyBridgeError surfaces rather than hides."""
+websocket (wire protocol reverse-engineered from Proxmox's own pve-xtermjs
+client). PtyBridgeError surfaces the known API-token-vs-termproxy PVE
+limitation rather than hiding it."""
 import asyncio
 import json
 import ssl
@@ -18,9 +17,9 @@ class PtyBridgeError(RuntimeError):
 
 
 # Proxmox's own pve-xtermjs client sends a bare "2" every 30s to keep PVE's
-# own idle timeout from firing on a silent terminal (plan's wire-protocol
-# note). A module-level constant (not a bridge_pty kwarg) so tests can
-# monkeypatch it down without changing bridge_pty's public signature.
+# own idle timeout from firing on a silent terminal. A module-level constant
+# (not a bridge_pty kwarg) so tests can monkeypatch it down without changing
+# bridge_pty's public signature.
 KEEPALIVE_INTERVAL_S = 30.0
 
 
@@ -45,8 +44,6 @@ async def _best_effort(coro) -> None:
 def _as_text(frame) -> str:
     """PVE's termproxy negotiates the `binary` subprotocol, so a real node
     sends every frame as bytes while the browser half of this bridge is text.
-    The in-process fakes send str, which is why nothing below caught this
-    until a live PVE 9.2 handed back b"OK" (2026-08-10).
 
     ponytail: errors="replace" decodes each frame independently, so a
     multi-byte character split across two frames shows one replacement
@@ -62,16 +59,13 @@ async def connect_upstream_pty(*, address: str, node: str, guest_kind: str | Non
                                 verify_tls: bool, tls_fingerprint: str | None,
                                 auth_header: str | None = None,
                                 ws_connect=None) -> tuple:
-    """ws_connect is an injection seam for tests (skips the real TLS/SSRF path
-    against a plain ws:// loopback fake); production callers omit it and get
-    the real wss:// connection below.
+    """ws_connect is an injection seam for tests (skips the real TLS/SSRF path).
 
-    Returns (upstream_ws, buffered: str). `buffered` is whatever PTY output
-    Proxmox already had waiting (e.g. the shell prompt) at the tail of the
-    first "OK"-prefixed frame -- the caller must forward it to the browser
-    before starting bridge_pty's loop, or the user sees a blank terminal until
-    they press Enter (that buffered content is real output, never a literal
-    "OK" sentinel)."""
+    Returns (upstream_ws, buffered: str). `buffered` is PTY output Proxmox
+    already had waiting (e.g. the shell prompt) at the tail of the first
+    "OK"-prefixed frame -- the caller must forward it to the browser before
+    starting bridge_pty's loop, or the user sees a blank terminal until they
+    press Enter (real output, never a literal "OK" sentinel)."""
     if ws_connect is None:
         url = urlparse(address)
         host = url.hostname
@@ -124,10 +118,9 @@ async def _keepalive(upstream_ws) -> None:
 
 
 async def bridge_pty(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None:
-    """Doc 05 framing on the browser side: raw text keystrokes/output, one
-    JSON control frame `{"type":"resize",...}` from the client, one
-    `{"type":"exit","code":...}` from us before close. Proxmox side: see the
-    plan's wire-protocol note (0:/1:/2 framing)."""
+    """Browser side: raw text keystrokes/output, one JSON control frame
+    `{"type":"resize",...}` from the client, one `{"type":"exit","code":...}`
+    from us before close. Proxmox side uses 0:/1:/2 length framing."""
     exit_code = 0
 
     async def from_browser():
@@ -143,12 +136,12 @@ async def bridge_pty(browser_ws, upstream_ws, *, idle_timeout_s: float) -> None:
             except ValueError:
                 control = None
             if isinstance(control, dict) and control.get("type") == "resize":
-                # Trust-boundary validation (doc 08): a malformed frame (missing
-                # keys, non-numeric values) must not crash the bridge, and must
-                # never let arbitrary strings splice into Proxmox's
-                # line-oriented "1:{cols}:{rows}:" control channel -- coerce to
-                # int and drop the frame silently on failure rather than
-                # forwarding it or raising.
+                # Trust-boundary validation: a malformed frame (missing keys,
+                # non-numeric values) must not crash the bridge, and must never
+                # let arbitrary strings splice into Proxmox's line-oriented
+                # "1:{cols}:{rows}:" control channel -- coerce to int and drop
+                # the frame silently on failure rather than forwarding it or
+                # raising.
                 try:
                     cols = int(control.get("cols"))
                     rows = int(control.get("rows"))

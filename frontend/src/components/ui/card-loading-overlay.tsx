@@ -2,54 +2,17 @@ import type { ReactNode } from 'react'
 import { Icon } from './icon'
 
 /**
- * Vendored by hand from ReUI's `c-spinner-11` usage example
+ * Vendored from ReUI's `c-spinner-11` usage example
  * (https://reui.io/r/c-spinner-11.json, fetched 2026-08-12): a translucent,
- * blurred veil pinned over a card while it (re)loads, with the previous
- * content held underneath so nothing jumps.
+ * blurred veil over a card while it loads, previous content held underneath.
+ * ReUI's `spinner` primitive sits behind its paid tier (the registry endpoint
+ * 401s), so the spin is the Material Symbols `progress_activity` glyph driven
+ * by `animate-spin`. `bg-panel/80` because this repo has no `--background`
+ * token; `--panel` is the card surface in both themes.
  *
- * `c-spinner-11` is itself a *usage example* (registry `type: "block"`) of
- * two base primitives named in its own `registryDependencies`: `card` and
- * `spinner`. `card` was not fetched: this app's cards are plain
- * `<section className="rounded-card ...">`, not shadcn's `<Card>`
- * component, and there is nothing to vendor there. `spinner`
- * (https://reui.io/r/spinner.json) could not be fetched at all -- unlike
- * `c-spinner-11.json`, that endpoint 401s with "Provide your license key via
- * Authorization header", it sits behind ReUI's paid tier and this task has
- * no license key for it. The spin is the Material Symbols `progress_activity`
- * glyph (components/ui/icon.tsx; a partial ring, purpose-built by Material
- * Symbols as a loading indicator rather than repurposed from a refresh
- * action) driven by Tailwind's `animate-spin`, standing in for ReUI's own
- * `<Spinner>` primitive.
- *
- * Further adaptations from the fetched example:
- *  - No `cn` helper: this repo has no clsx/tailwind-merge; class lists are
- *    plain template literals.
- *  - Upstream's `bg-background/80` does not exist here: tokens.css has no
- *    `--background`. Mapped onto `bg-panel/80` -- `--panel` is this app's
- *    card surface colour in both themes (see tokens.css), so a translucent
- *    veil at 80% reads as "this same card, temporarily busy" rather than a
- *    foreign colour dropped on top. `text-text-2` (not a hardcoded grey) for
- *    the spinner keeps it visible on both themes' `--panel`.
- *  - `backdrop-blur-xs` (upstream) -> `backdrop-blur-sm`: this repo's
- *    smallest *named* Tailwind blur step in active use; `xs` was never used
- *    anywhere else here and `sm` already reads clearly against `--panel` in
- *    both themes.
- *  - `motion-reduce:` opt-outs added on both the blur and the spin (neither
- *    exists upstream), matching the pattern already used by
- *    UsageBar/SidebarNav/AppTable: the blur drops to none and the spin stops,
- *    but the veil itself, and `aria-busy`, stay -- the loading state is not
- *    lost, only the motion.
- *  - This is a plain visual veil, not a modal -- the same category as
- *    `components/LockVeil.tsx`, not `ui/dialog.tsx`. No focus trap, no
- *    Escape handling, no `aria-modal`, no portal. It is deliberately absent
- *    from overlay-contract.test.ts's dialog sweep because it never uses that
- *    pattern to begin with (no `fixed inset-0` + scrim; this is `absolute
- *    inset-0` scoped to one card, not a viewport-covering modal layer).
- *  - `relative` and `aria-busy` are owned by this component, not by each
- *    call site. `CardLoadingOverlay` wraps `children` in the positioned,
- *    `aria-busy` container itself, so a call site cannot forget to add
- *    `relative` to its card, there is nowhere else in this component for the
- *    veil to be positioned against.
+ * Not a modal (unlike ui/dialog.tsx): no focus trap, Escape handling,
+ * `aria-modal`, or portal -- deliberately absent from
+ * overlay-contract.test.ts's dialog sweep.
  */
 
 export type CardLoadingState = {

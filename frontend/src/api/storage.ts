@@ -1,5 +1,3 @@
-// api/storage.ts, read hooks for the Storage page (doc 05 §Storage, doc 06 §d).
-// Same shape as api/catalog.ts: plain useQuery wrappers, no client-side state.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { ApiError, api } from './client'

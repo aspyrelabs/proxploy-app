@@ -1,21 +1,18 @@
-"""TOTP enrollment and verification (doc 08 §5, Phase 8 Task 8).
+"""TOTP enrollment and verification (doc 08 §5).
 
 Recovery-code hashes live in their own table (`TotpRecoveryCode`), NOT packed
-as JSON inside `users.totp_secret_enc` as the original plan called for --
-see the migration docstring (6cf6a0722d23_0005_totp_recovery_codes.py) for
-why that zero-migration design was rejected mid-implementation.
-`totp_secret_enc` holds exactly what its name says: the
+inside `users.totp_secret_enc`. `totp_secret_enc` holds exactly the
 Fernet-encrypted base32 TOTP seed, nothing else.
 
 Recovery codes are `secrets.token_hex(2)` x2 joined with "-" (e.g.
 "a3f1-9c02", ~32 bits of entropy) -- short enough to copy down by hand, not
-brute-force resistant by length alone. That's by design: the login rate
-limit (10/minute, api/auth.py) and Task 9's 5-attempt pending-session burn
-are what close off guessing, not code length.
+brute-force resistant by length alone. The login rate limit (10/minute,
+api/auth.py) and the 5-attempt pending-session burn are what close off
+guessing, not code length.
 
-Each code's argon2 hash (services/authn.py::hash_password's idiom -- the
-same one-way hashing passwords get, so a code is never stored recoverable)
-is itself Fernet-encrypted at rest via SecretStore, matching how
+Each code's argon2 hash (services/authn.py::hash_password's idiom -- the same
+one-way hashing passwords get, so a code is never stored recoverable) is
+itself Fernet-encrypted at rest via SecretStore, matching how
 totp_secret_enc is handled. Burning a code is a plain
 `UPDATE ... WHERE used_at IS NULL` (services/consoletickets.py's
 atomic-redeem pattern) -- never a decrypt/mutate/re-encrypt of a shared

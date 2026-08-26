@@ -31,11 +31,9 @@ type Status = {
  *  leaving the row out and adding it later. */
 type Fact = [string, ReactNode]
 
-/** The value cell for a row whose figure is still in flight. 11px because that
- *  is what the `dd` beside it is set in, so the bar occupies the same line box
- *  the text will. Widths are passed in and differ per row for the same reason
- *  SkeletonTable takes per-column widths: a column of identical bars reads as
- *  a grey ladder rather than as facts about to arrive. */
+/** Value cell while its figure is in flight. 11px matches the `dd` it will
+ *  replace; widths differ per row so the bars don't read as a uniform grey
+ *  ladder. */
 const waiting = (w: string) => <SkeletonLine className={`${w} text-[11px]`} />
 
 const pct = (used?: number | null, total?: number | null) =>
@@ -204,12 +202,9 @@ function FactGroup({ title, items }: { title: string; items: Fact[] }) {
   )
 }
 
-/** The same box as Bar, with the figure and the fill still to come. The label
- *  is real text: it is not waiting on anything, and "Load" written out is what
- *  tells the reader which of the four bars is the one still filling. The track
- *  needs no placeholder of its own, an unfilled UsageBar is already a bg-elev
- *  rounded bar, so it is drawn for real and pulsed, exactly as
- *  SkeletonMeterRow does it. */
+/** Bar with its figure and fill still to come. The label is real text (it is
+ *  not waiting on anything), and the track needs no placeholder: an unfilled
+ *  UsageBar already reads as an empty bar. */
 function BarSkeleton({ label }: { label: string }) {
   return (
     <div>

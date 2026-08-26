@@ -23,12 +23,8 @@ export type JobRow = {
 
 export type JobEventRow = { seq: number; ts: string; stream: string; message: string }
 
-/** The one line a job toast shows. The raw pair (`app.start succeeded`) was
- *  the last place the product handed a user a stored identifier and a stored
- *  status verbatim. Doc 13 names both: the kind neutrally, so no status word
- *  contradicts it, and the status on its own. */
+/** The one line a job toast shows: kind and status combined into a readable label. */
 export function jobLabel(j: { kind: string; status: string }): string {
-  // A kind with its own per-outcome phrasing answers first: see JOB_PHRASE.
   return jobPhrase(j.kind, j.status)
     ?? `${actionLabel(j.kind)} ${statusLabel(j.status)}`
 }
@@ -45,24 +41,9 @@ export function useJobs(opts: { enabled?: boolean; status?: string } = {}) {
 }
 
 /**
- * One job by id, kept live off the plumbing that already exists.
- *
- * The global SSE stream carries a `job` delta for every state change AND for
- * every ctx.progress() call (backend/proxploy/jobs/backend.py::JobContext.
- * progress fans out to both the per-job stream and the global bus), and
- * api/live.ts::applyJob patches the ['jobs', id] entry this hook creates,
- * detail shape included (tests/jobs.test.ts covers that patch). So a caller
- * watching a job it just enqueued needs no EventSource of its own:
- * JobLog's per-job stream exists for the transcript, and a second connection
- * for a number already arriving on the shared one would be a duplicate
- * subscription, not a second source of truth.
- *
- * The 2s poll is the fallback LiveProvider documents ("query polling is the
- * fallback if SSE dies"), same cadence as useRunningJobOfKind. It stops
- * itself once the job is terminal, so a finished job costs nothing, and
- * `retry: false` means a job that cannot be read (404, a revoked
- * jobs.history entitlement) fails fast into isError rather than leaving a
- * caller's "still running" state hanging for three retries.
+ * One job by id, kept live via the global SSE stream (applyJob patches the
+ * ['jobs', id] cache entry). The 2s poll is a fallback, stops on terminal
+ * status, and retry:false makes a 404 (revoked entitlement) fail fast.
  */
 export function useJob(id: number | null) {
   return useQuery({
@@ -85,18 +66,9 @@ export function useJobEvents(id: number | null) {
 }
 
 /**
- * The one running job of a given kind, if any (`/jobs` supports `kind` as a
- * server-side filter, see backend/proxploy/api/jobs.py::list_jobs). Built for
- * routes/backups.tsx's stale banner, the one surface in the product that
- * displays `backup.sync` at all: GET /backups enqueues that job fire-and-
- * forget and never returns its id, so this is how the banner finds it.
- *
- * Polled only while `enabled`: a page sitting on fresh data has no reason to
- * run a job query on a timer for a banner it isn't even rendering. 2s rather
- * than this app's usual ~30s cadence, deliberately: services/backupjobs.py's
- * sweep is per-host and often finishes well inside 30s, so that cadence would
- * see at most one sample of the only genuinely granular progress in the
- * product, the same coarse jump the app-install/update steps already show.
+ * The one running job of a given kind, if any (`/jobs` supports a `kind`
+ * server-side filter). Polled at 2s while enabled because backup sweeps are
+ * per-host and finish fast; 30s would miss progress entirely.
  */
 export function useRunningJobOfKind(kind: string, enabled: boolean) {
   return useQuery({
@@ -108,16 +80,7 @@ export function useRunningJobOfKind(kind: string, enabled: boolean) {
   })
 }
 
-/** `POST /jobs/{id}/cancel` (doc 05).
- *
- *  Nothing mounts this today. The activity feed's Cancel control was its only
- *  caller and that surface is gone, but the endpoint is real and a cancel
- *  control is still wanted, so the hook stays rather than being written again
- *  from scratch when one lands. Whatever mounts it gets the invalidate for
- *  free.
- *
- *  It used to invalidate the activity feed's key alongside `jobs`; that key no
- *  longer exists, so a caller sees the cancellation on the jobs list only. */
+/** `POST /jobs/{id}/cancel`. Nothing mounts this today; kept for the next cancel control. */
 export function useCancelJob() {
   const qc = useQueryClient()
   return useMutation<{ id: number; status: string }, ApiError, number>({
@@ -134,9 +97,9 @@ export type LifecycleVars = {
 }
 
 /**
- * Optimistic status patch + SSE reconciliation (plan decision 13): the truth
- * arrives with the job's terminal `resource` delta or the next 30s poll, so
- * there is no rollback cache to keep in sync, only an invalidate on error.
+ * Optimistic status patch + SSE reconciliation: the truth arrives with the
+ * job's terminal delta or the next 30s poll, so there's no rollback cache —
+ * only an invalidate on error.
  */
 export function useLifecycle() {
   const qc = useQueryClient()

@@ -133,12 +133,8 @@ export function HardwareTab({ hostId, node }: { hostId: number; node: string }) 
       </section>
     )
   }
-  // Was `return null`, so the tab rendered nothing at all for the couple of
-  // seconds this call takes against a real node: a blank pane that reads as a
-  // broken page rather than a slow one. The placeholders are card shaped and
-  // roughly section sized so the real content does not jump into place when it
-  // arrives, which is the whole reason this veil exists rather than a bare
-  // spinner on an empty pane.
+  // Card-shaped, section-sized placeholders so the real content doesn't jump
+  // into place when it arrives, instead of a bare spinner on an empty pane.
   if (q.isPending) {
     return (
       <CardLoadingOverlay state={{ firstLoad: true }} label="Reading hardware">
