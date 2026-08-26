@@ -1,14 +1,13 @@
-# backend/proxploy/services/backupjobs.py
-"""Backup cache sync + backup mutation job handlers (doc 01 §7, doc 04 §backups).
+"""Backup cache sync and backup mutation job handlers.
 
-`backups` is a droppable mirror, exactly like the poller's `vms` handling: each
-sync writes what Proxmox currently reports and deletes rows whose volid vanished
-upstream. Proxmox is the source of truth; this table only feeds the Backups page.
+`backups` is a droppable mirror, like the poller's `vms` handling: each sync
+writes what Proxmox reports and deletes rows whose volid vanished upstream.
+Proxmox is the source of truth; this table only feeds the Backups page.
 
-Unlike `vms`, this is NOT on the 30 s poll cycle; listing storage content is a
-per-storage call, not part of the `/cluster/resources` bulk read the doc-02 §3
-budget allows. It runs as a job: on demand from the page (when the cache is
-stale) and after every backup mutation.
+Unlike `vms` this is NOT on the 30 s poll cycle: listing storage content is a
+per-storage call, not part of the `/cluster/resources` bulk read the poll
+budget allows. It runs as a job, on demand when the cache is stale and after
+every mutation.
 """
 from __future__ import annotations
 
@@ -31,8 +30,6 @@ from proxploy.services.settings import set_setting
 
 SYNCED_AT_KEY = "backup.synced_at"
 
-# vzdump archives:  local:backup/vzdump-lxc-150-2026_07_30-02_00_00.tar.zst
-# PBS snapshots:    pbs-ds:backup/ct/150/2026-07-30T02:00:00Z
 VZDUMP_RE = re.compile(r"vzdump-(lxc|openvz|qemu)-(\d+)-")
 PBS_RE = re.compile(r":backup/(ct|vm)/(\d+)/")
 _GUEST_KIND = {"lxc": "ct", "openvz": "ct", "ct": "ct", "qemu": "vm", "vm": "vm"}
@@ -41,9 +38,9 @@ _GUEST_KIND = {"lxc": "ct", "openvz": "ct", "ct": "ct", "qemu": "vm", "vm": "vm"
 def parse_volid(volid: str) -> tuple[str | None, int | None]:
     """-> ("ct"|"vm", vmid), or (None, None) for anything that isn't a backup.
 
-    The volid is the identifier upstream (doc 04) and carries the guest it came
-    from in both storage layouts; the content row's own `vmid` field is absent
-    on some PBS shapes, so the name is parsed rather than trusted.
+    The volid is the identifier upstream and carries the guest it came from in
+    both storage layouts. The content row's own `vmid` field is absent on some
+    PBS shapes, so the name is parsed rather than trusted.
     """
     m = VZDUMP_RE.search(volid) or PBS_RE.search(volid)
     if not m:
@@ -70,16 +67,15 @@ def _syncs_shared_stores(db, host: Host) -> bool:
     """Whether this host is the one that mirrors the cluster's SHARED backup
     datastores.
 
-    A cluster's nodes all report the same archives off a shared store, and each
-    node is a separate Host row with its own `backups` rows keyed
-    ux_backups(host_id, volid), so a single backup of a single VM appeared once
-    per enrolled node. Picking one host to own those rows is what makes the
-    list say one archive once.
+    Every node reports the same archives off a shared store, and each node is
+    its own Host row with its own `backups` rows keyed ux_backups(host_id,
+    volid), so one backup of one VM appeared once per enrolled node. One
+    owner is what makes the list say one archive once.
 
-    The lowest CONNECTED host id in the cluster, so the answer is the same
-    whichever host's sync runs first, and so a disconnected owner hands the
-    rows to a sibling on the next sweep rather than taking the whole cluster's
-    backup list offline with it. A standalone host always owns its own.
+    The lowest CONNECTED host id, so the answer is the same whichever sync
+    runs first, and a disconnected owner hands the rows to a sibling on the
+    next sweep instead of taking the cluster's backup list offline with it. A
+    standalone host owns its own.
     """
     if host.cluster_name is None:
         return True
@@ -103,16 +99,12 @@ def sync_host_backups(app, host_id: int) -> dict:
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
         enrolled = host.node_name or ""
-        # EVERY node of the cluster, not just the enrolled one. A node-local
-        # dump dir holds its own archives, and reading one node meant a
-        # multi-node user without a shared datastore simply never saw the rest
-        # of their backups. The node list is the poller's, which is the upgrade
-        # path this used to name as a ponytail note.
-        #
-        # Falling back to the enrolled node alone when there is no snapshot
-        # yet: before the first poll there is nothing to iterate, and a backup
-        # list that stayed empty until a poll landed would be a worse bug than
-        # the one this fixes.
+        # EVERY node of the cluster, not just the enrolled one: a node-local
+        # dump dir holds its own archives, so reading one node meant a
+        # multi-node user without a shared datastore never saw the rest of
+        # their backups. The node list is the poller's, falling back to the
+        # enrolled node before the first poll, because an empty backup list
+        # until a poll landed would be the worse bug.
         snap = app.state.poller.snapshots.get(host_id)
         nodes = [n.get("node") for n in (snap.nodes if snap else []) if n.get("node")]
         if not nodes:
@@ -120,9 +112,9 @@ def sync_host_backups(app, host_id: int) -> dict:
         shared_here = _syncs_shared_stores(db, host)
         rows: list[dict] = []
         # A shared store answers identically from every node, so it is read
-        # ONCE and recorded against the enrolled node. Reading it per node
-        # would turn one archive into one row per node, which is the same
-        # double count _syncs_shared_stores exists to prevent one level up.
+        # ONCE and recorded against the enrolled node. Reading it per node would
+        # turn one archive into one row per node, the same double count
+        # _syncs_shared_stores prevents one level up.
         shared_done: set[str] = set()
         for node in nodes:
             for st in client.storages(node):
@@ -138,9 +130,8 @@ def sync_host_backups(app, host_id: int) -> dict:
                     shared_done.add(name)
                 for item in client.storage_content(node, name, content="backup"):
                     # `_type` rides along with `_storage`: PVE hands both back
-                    # here, and _refuse_on_pbs / the sweep otherwise have to ask
-                    # the poller, which has nothing to say before the first poll.
-                    # `_node` is what tells two identical volids apart.
+                    # here, and asking the poller instead gets nothing before
+                    # the first poll. `_node` tells two identical volids apart.
                     rows.append({"_storage": name, "_type": st.get("type"),
                                  "_node": enrolled if st.get("shared") else node,
                                  **item})
@@ -151,11 +142,10 @@ def sync_host_backups(app, host_id: int) -> dict:
         # nodes of a cluster is two different files on a node-local store.
         prior = db.query(Backup).filter_by(host_id=host_id).all()
         existing = {(b.node, b.volid): b for b in prior}
-        # Rows written before `node` existed carry NULL, and matching them on
-        # the pair alone would MISS, build a second row for the same archive,
-        # and drop the first: every verdict this install had recorded would go
-        # with it on the first sync after upgrade. Adopted below instead, which
-        # is the whole backfill the migration deliberately does not do.
+        # Rows written before `node` existed carry NULL, and matching on the
+        # pair alone would MISS, build a second row for the same archive and
+        # drop the first: every verdict this install recorded would go with it
+        # on the first sync after upgrade. Adopted below instead.
         unplaced = {b.volid: b for b in prior if b.node is None}
         now = utcnow()
         seen: set[tuple[str | None, str]] = set()
@@ -169,11 +159,10 @@ def sync_host_backups(app, host_id: int) -> dict:
             if b is None:
                 b = unplaced.pop(volid, None)
                 if b is not None:
-                    # Same archive, now placed. Its verify_state and checked_at
-                    # come with it. The OLD (None, volid) entry has to go from
-                    # `existing` as well: the drop loop below deletes every key
-                    # it did not see, and a row adopted under a new key would
-                    # be deleted under its old one.
+                    # Same archive, now placed; its verify_state and checked_at
+                    # come with it. The OLD (None, volid) key has to go from
+                    # `existing` too: the drop loop deletes every key it did not
+                    # see, and would delete this row under its old one.
                     existing.pop((None, volid), None)
                     b.node = item.get("_node")
                     existing[key] = b
@@ -189,8 +178,8 @@ def sync_host_backups(app, host_id: int) -> dict:
             b.size_bytes = int(item["size"]) if item.get("size") is not None else None
             # Only when upstream actually reports one. A non-PBS store carries
             # no `verification` at all, and writing "none" there erased the
-            # verdict services/backupjobs.py's own check had just written, on
-            # the next sweep. PBS still wins wherever PBS speaks.
+            # verdict this file's own check had just written. PBS still wins
+            # wherever PBS speaks.
             upstream = (item.get("verification") or {}).get("state")
             if upstream:
                 b.verify_state = upstream
@@ -234,9 +223,9 @@ async def sync_backups(ctx: JobContext, params: dict) -> dict:
         ctx.progress(int((i + 1) / len(host_ids) * 100))
     with app.state.sessionmaker() as db:
         # Recorded even when zero backups were found: "the cache is empty" and
-        # "the cache was never filled" are different, and only this key can tell
-        # the GET route apart: otherwise a cluster with no backups re-enqueues
-        # a sync on every page load.
+        # "the cache was never filled" are different, and only this key tells
+        # the GET route apart, otherwise a cluster with no backups re-enqueues a
+        # sync on every page load.
         set_setting(db, SYNCED_AT_KEY, to_iso(utcnow()))
     ctx.log(f"{synced} backups cached, {dropped} dropped, {len(failed)} host(s) failed")
     ctx.progress(100)
@@ -248,16 +237,13 @@ def sync_in_flight(db) -> bool:
     """A page that refetches while a sync is queued must not pile up a second.
 
     `db.rollback()` first, and it is load-bearing: the caller has already run
-    queries on this session, which pins a read snapshot (SQLite in WAL gives a
-    transaction a consistent view until it ends). A concurrent request that
-    enqueued and committed its Job row AFTER that snapshot opened is invisible
-    here, so the check returns False and a duplicate job is enqueued; which is
-    exactly the race `api/backups.py::_sync_enqueue_lock` looks like it
-    prevents but cannot: the lock serializes the code, not the visibility of
-    the data. Ending the read transaction starts a fresh snapshot.
+    queries on this session, pinning a read snapshot (SQLite in WAL holds a
+    consistent view until the transaction ends). A request that enqueued and
+    committed its Job row after that snapshot opened is invisible here, so
+    the check returns False and a duplicate is enqueued. A lock cannot fix
+    it: it serializes the code, not the visibility of the data.
 
-    Callers must therefore have no uncommitted writes pending on `db`. Every
-    caller today is a read path.
+    Callers must therefore have no uncommitted writes pending on `db`.
     """
     db.rollback()
     return (db.query(Job)
@@ -268,7 +254,6 @@ def sync_in_flight(db) -> bool:
 HANDLERS["backup.sync"] = sync_backups
 
 
-# --- backup mutations (Phase 6 Task 9) --------------------------------------
 
 def _host_target(app, host_id: int, capability: str = "backup"):
     """Blocking: host id -> (client, node, host name).
@@ -304,11 +289,11 @@ def _backup_target(app, backup_id: int):
                 "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
                 "guest_name": b.guest_name, "node": b.node or host.node_name or ""}
         try:
-            # The ARCHIVE's node, not the host's. A node-local archive on a
-            # sibling of the enrolled node is only readable there: `pvesm path`
+            # The ARCHIVE's node, not the host's: a node-local archive on a
+            # sibling of the enrolled node is only readable there, `pvesm path`
             # on the wrong node finds nothing, and a restore would build the
-            # guest somewhere else entirely. Falls back to the enrolled node
-            # for a row synced before `node` existed.
+            # guest elsewhere. Falls back to the enrolled node for a row synced
+            # before `node` existed.
             return (client_for_host(app, db, host, capability="backup"),
                     info["node"], info)
         except ProxmoxError as e:
@@ -317,7 +302,7 @@ def _backup_target(app, backup_id: int):
 
 async def _resync(ctx: JobContext, host_id: int) -> None:
     """Every backup mutation ends here. Without it the cache still lists a
-    volume that was just deleted, or misses one that was just created.
+    volume that was just deleted, or misses one just created.
 
     A failed resync is logged, not raised: the mutation upstream already
     succeeded, and failing the job over a stale cache would misreport it.
@@ -335,19 +320,14 @@ async def _resync(ctx: JobContext, host_id: int) -> None:
 def guests_on_host(app, host_id: int) -> tuple[list[int], bool]:
     """Blocking: (vmids Proxploy knows on this host, whether it was ever polled).
 
-    The poller's own `apps`/`vms` rows, not a live Proxmox read, and that is
-    deliberate: the backup token carries VM.Backup, Datastore.AllocateSpace and
-    Datastore.Audit and no VM.Audit (services/pveum.py), so
-    `cluster_resources()` on that token answers with zero guests for a node
-    that is full of them. These are the same rows
-    api/backups.py::_resolve_guests turns a guest selection into, and
-    sync_host_backups already reads them for archive names, so no new source of
-    truth is introduced here.
+    The poller's own `apps`/`vms` rows, not a live read: the backup token
+    carries no VM.Audit (services/pveum.py), so `cluster_resources()` on it
+    answers with zero guests for a node full of them.
 
-    The second element is the honesty guard. A Host row exists before the first
-    poll cycle writes its guests, and "no rows yet" must never be read as "no
-    guests": `last_seen_at` is set by the poller, so NULL means Proxploy has
-    not looked and the caller must not draw a conclusion from an empty list.
+    The second element is the honesty guard. A Host row exists before the
+    first poll writes its guests, and "no rows yet" must never be read as "no
+    guests": `last_seen_at` is the poller's, so NULL means the caller must
+    conclude nothing from an empty list.
     """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
@@ -366,14 +346,13 @@ def _vzdump_pct(total: int):
 
     PVE's task STATUS carries no percentage, so the only honest source is the
     log this task already streams: vzdump prints
-    "INFO:  37% (4.1 GiB of 11.0 GiB) in 12s, read: ..." per guest, and starts
-    again from 0% for the next one. So a guest's own figure is folded into the
-    run's: guests finished, plus how far the current one is, over the total.
+    "INFO:  37% (4.1 GiB of 11.0 GiB) in 12s, read: ..." per guest and
+    restarts at 0% for the next. A guest's figure is folded into the run's:
+    guests finished, plus how far the current one is, over the total.
 
-    `total` is the selection size, or the guests the last poll saw for a
-    whole-host run. It can be wrong (a guest created since that poll is still
-    backed up), which only makes the bar conservative: await_task never reports
-    a percentage backwards, and the handler sets 100 at the end regardless.
+    `total` can be wrong (a guest created since the last poll is still backed
+    up), which only makes the bar conservative: await_task never reports a
+    percentage backwards.
     """
     done = {"n": 0}
 
@@ -393,19 +372,19 @@ def _vzdump_pct(total: int):
 def _verify_command(volid: str, guest_type: str | None) -> str:
     """One shell command: resolve the archive's path, then read it back.
 
-    One command rather than an SSH round trip per step, because the path is
-    only useful to the reader that follows it, and because a single exit status
-    is what the caller has to judge.
+    One command rather than an SSH round trip per step: the path is only
+    useful to the reader that follows it, and one exit status is what the
+    caller judges.
 
     `pvesm path`, not `/mnt/pve/<store>/dump/...`: the mount point belongs to
-    the storage plugin, and a guessed path breaks on the first non-default one.
+    the storage plugin, so a guessed path breaks on the first non-default one.
 
-    `set -o pipefail` is load bearing. Without it the pipeline's status is the
-    verifier's alone, and a truncated archive that makes `zstdcat` die still
-    reports whatever `vma verify` said about the bytes it did get.
+    `set -o pipefail` is load bearing: without it the status is the
+    verifier's alone, and a truncated archive that kills `zstdcat` still
+    reports whatever `vma verify` made of the bytes it did get.
 
-    Exit 90 is reserved for "the path could not be resolved", which is a broken
-    check rather than a bad archive; the caller tells those two apart.
+    Exit 90 means "the path could not be resolved", a broken check rather
+    than a bad archive; the caller tells those apart.
     """
     reader = "vma verify -v -" if guest_type == "vm" else "tar -tf - >/dev/null"
     script = (
@@ -425,24 +404,20 @@ def _verify_command(volid: str, guest_type: str | None) -> str:
 async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
     """Verify the archives nobody has verified yet, oldest first.
 
-    Capped, because verifying reads every byte of every archive it takes and a
-    year of daily backups is not a thing to start at 3am without a ceiling.
+    Capped: verifying reads every byte of every archive it takes, and a year
+    of daily backups is not a thing to start at 3am without a ceiling.
     """
     app = ctx.backend.app
     host_id = int(params["host_id"])
     limit = max(1, min(int(params.get("max") or 20), 200))
     want_storage = params.get("storage")
     # Proxmox Backup Server verifies its own archives against stored digests on
-    # its own schedule, so a sweep that read them back over the network would
-    # spend hours re-answering a question PBS has already answered better. The
-    # per-archive routes refuse the same thing at the door
-    # (api/backups.py::_refuse_on_pbs); a schedule has no door, so it filters.
-    # The snapshot is the FALLBACK now, not the source. It is empty between
-    # boot and the first poll, and the scheduler starts in that same window, so
-    # a sweep due at boot used to read back every PBS archive on the host: the
-    # exact hours of redundant work this filter exists to prevent. Rows carry
-    # the type sync_host_backups was given by PVE; the snapshot only still
-    # covers rows synced before that column existed.
+    # its own schedule, so a sweep reading them back over the network would
+    # spend hours re-answering a question PBS answers better. The per-archive
+    # routes refuse this at the door (api/backups.py::_refuse_on_pbs); a
+    # schedule has no door, so it filters. The row's own storage_type is the
+    # source, not the poll snapshot, which is empty between boot and the first
+    # poll, exactly when the scheduler starts.
     snap = app.state.poller.snapshots.get(host_id)
     pbs_stores = {st.get("storage") for st in (snap.storage if snap else [])
                   if (st.get("type") or "") == "pbs"}
@@ -462,8 +437,8 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
         ctx.log(f"skipping {', '.join(sorted(s for s in pbs_stores if s))}: "
                 f"Proxmox Backup Server verifies those itself")
     if not ids:
-        # Not "0 archives have never been verified", which reads as a failure
-        # to find something rather than as the good news it is.
+        # Worded as the good news it is: "0 archives have never been verified"
+        # reads as a failure to find something.
         ctx.log("every archive on this host has been checked already, "
                 "nothing to do")
     elif len(ids) == 1:
@@ -473,10 +448,9 @@ async def _verify_sweep(ctx: JobContext, params: dict) -> dict:
                 f"reading them back now")
     checked = failed = 0
     for i, bid in enumerate(ids):
-        # Each archive gets its OWN slice of the bar, so one archive's figure
-        # is the sweep's figure. It used to be handed the whole 5..100 range:
-        # the first archive reported 100, and since progress never moves
-        # backwards the bar then sat at 100 for the entire rest of the sweep.
+        # Each archive gets its OWN slice of the bar. Progress never moves
+        # backwards, so an archive handed the whole range would pin the bar at
+        # 100 for the rest of the sweep.
         out = await verify_backup(ctx, {"backup_id": bid}, band=(
             int(i / len(ids) * 100), int((i + 1) / len(ids) * 100)))
         checked += 1
@@ -489,9 +463,9 @@ async def verify_backup(ctx: JobContext, params: dict, *,
                         band: tuple[int, int] = (5, 100)) -> dict:
     """`backup.verify`: read one archive back and record whether it is intact.
 
-    The only backup path that runs over SSH. Neither `pvesm path` nor
-    `vma verify` exists on the PVE HTTP API, and a check that cannot be run is
-    worse than a check that has to borrow the installer's transport.
+    The only backup path that runs over SSH: neither `pvesm path` nor
+    `vma verify` exists on the PVE HTTP API, and a check that cannot run is
+    worse than one borrowing the installer's transport.
     """
     app = ctx.backend.app
     if "backup_id" not in params:
@@ -525,12 +499,11 @@ async def verify_backup(ctx: JobContext, params: dict, *,
     ctx.log(f"reading {volid} back off {storage} to check it")
     ctx.progress(lo)
 
-    # `vma verify -v -` counts its way through the archive on stdout:
-    # "progress 42% (read 14431092736 bytes, duration 25 sec)". Read off the
-    # stream it is already logging, so the bar moves instead of sitting at the
-    # opening figure and jumping to done. `tar -tf -` says nothing of the kind,
-    # so a container archive still has no figure to show and holds at `lo`,
-    # which is honest: there is no progress to report, not 0% of one.
+    # `vma verify -v -` counts through the archive on stdout: "progress 42%
+    # (read 14431092736 bytes, duration 25 sec)". Read off the stream it is
+    # already logging, so the bar moves instead of jumping from the opening
+    # figure to done. `tar -tf -` says nothing of the kind, so a container
+    # archive holds at `lo`: no progress to report, not 0% of one.
     def on_line(stream: str, line: str) -> None:
         ctx.log(line, stream=stream)
         if stream != "stdout" or not line.startswith("progress "):
@@ -578,19 +551,18 @@ HANDLERS["backup.verify"] = verify_backup
 def _queue_checks(ctx: JobContext, host_id: int, vmids: list[int]) -> None:
     """One `backup.verify` per archive the run that just finished wrote.
 
-    A separate job per archive, deliberately. A backup that wrote its archive
-    succeeded, whatever a later check says about the bytes, and reading an
-    archive back can take as long again as writing it did.
+    A separate job per archive: a backup that wrote its archive succeeded
+    whatever a later check says, and reading one back can take as long again
+    as writing it did.
 
-    The newest archive per guest is what "this run wrote": the resync just
-    before this recorded it, and the older ones were whatever ran before. There
-    is no id to match on, vzdump names its own files and PVE reports no link
-    between a task and the volids it produced.
+    The newest archive per guest is what "this run wrote", recorded by the
+    resync just before. There is no id to match on: vzdump names its own
+    files and PVE reports no link between a task and its volids.
     """
     app = ctx.backend.app
-    # A host-wide run over a host Proxploy has never polled knows no vmids at
-    # all, so it falls back to the newest handful rather than every archive on
-    # the datastore. Each one is a full read over the network.
+    # A host-wide run over a host Proxploy has never polled knows no vmids, so
+    # it falls back to the newest handful rather than every archive on the
+    # datastore: each one is a full read over the network.
     cap = len(vmids) or 5
     with app.state.sessionmaker() as db:
         q = db.query(Backup).filter(Backup.host_id == host_id)
@@ -624,17 +596,15 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
             "compress": params.get("compress") or "zstd",
             # The archive's FILENAME is PVE's and cannot be templated:
             # vzdump-lxc-150-2026_08_24-02_00_00.tar.zst is parsed back into
-            # guest type, vmid and time by the backup listing and by restore,
-            # so a friendlier name would orphan the archive. The note is the
-            # one label that is ours to write, and it is what makes an archive
-            # identifiable as "Immich" rather than as 150. Synced into
-            # backups.notes by sync_backups and shown in Recent backups.
+            # guest type, vmid and time by the listing and by restore, so a
+            # friendlier name would orphan it. The note is the one label that
+            # is ours, and what makes an archive read as "Immich", not 150.
             "notes-template": "{{guestname}} ({{vmid}}) on {{node}}"}
     if params.get("storage"):
         call["storage"] = params["storage"]
-    # Named in every line below. With no storage chosen PVE picks a backup store
-    # itself and the transcript then could not say where the archive went, which
-    # is the same gap the migration preflight closed by naming its target pool.
+    # Named in every line below: with no storage chosen PVE picks a backup
+    # store itself, and the transcript could not otherwise say where the
+    # archive went.
     lands = f"onto {call['storage']}" if call.get("storage") else \
         "onto whichever backup storage Proxmox picks, none was chosen"
     if vmids:
@@ -642,25 +612,18 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
         ctx.log(f"vzdump on {host_name}/{node} {lands}: "
                 f"{', '.join(str(v) for v in vmids)}")
     else:
-        # `all: 1` over a node with no guests is what made a backup of nothing
-        # report plain success. vzdump is handed an empty set, PVE finishes the
-        # task with exitstatus OK, and not one byte is written. Found on
-        # hardware 2026-08-18 on node1, whose `pct list` and `qm list` are both
-        # empty: job 157 stored {"exitstatus": "OK", "vmids": []} and the
-        # `backups` table gained zero rows, and the page reported a successful
-        # backup.
+        # `all: 1` over a node with no guests made a backup of nothing report
+        # plain success: vzdump gets an empty set, PVE finishes with exitstatus
+        # OK, and not one byte is written.
         #
-        # This succeeds and says so rather than raising JobFailed. An empty node
-        # is not an operator error and it is not a Proxmox failure, and a red
-        # `backup.run` job here would raise a `backup_failed` alert, which reads
-        # the latest finished `backup.run` for the host (services/alerts.py), on
-        # a node that is simply empty. The harm was never the exit status, it was
-        # a bare success line that implies an archive now exists.
+        # It succeeds and says so rather than raising JobFailed: an empty node
+        # is not an operator error, and a red `backup.run` would raise a
+        # `backup_failed` alert off the host's latest finished run
+        # (services/alerts.py). The harm was never the exit status, it was a
+        # success line implying an archive now exists.
         #
-        # The vzdump call is SKIPPED rather than made and then explained: PVE's
-        # OK for an empty job cannot be made to mean anything else, so not
-        # making the call is what leaves the transcript free to state what
-        # actually happened.
+        # The call is SKIPPED rather than made and then explained, because
+        # PVE's OK for an empty job cannot be made to mean anything else.
         known, polled = await asyncio.to_thread(guests_on_host, app, host_id)
         if polled and not known:
             detail = (f"{host_name} (node {node}) has no containers and no "
@@ -670,9 +633,9 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
             ctx.progress(100)
             return {"vmids": [], "guests": 0, "detail": detail}
         call["all"] = 1  # empty selection means every guest on the node
-        # Naming them answers "what is it backing up?" in the transcript
-        # itself. `all: 1` is still what PVE is asked for, so a guest the last
-        # poll has not seen yet is included even though it is not listed here.
+        # Naming them answers "what is it backing up?" in the transcript. `all:
+        # 1` is still what PVE is asked for, so a guest the last poll has not
+        # seen is included even though it is not listed here.
         ctx.log(f"vzdump on {host_name}/{node} {lands}: every container and virtual "
                 f"machine on the node"
                 + (f", {len(known)} known here ({', '.join(str(v) for v in known)})"
@@ -685,11 +648,9 @@ async def run_backup(ctx: JobContext, params: dict) -> dict:
     if params.get("verify"):
         _queue_checks(ctx, host_id, vmids or known)
     # `guests` is what the Backups page counts, not the job's status: PVE
-    # returns exitstatus OK for a vzdump that wrote nothing, so a bare success
-    # cannot tell a real backup from an empty one. The early return above
-    # reports 0 for a node with nothing on it; here it is what was actually
-    # handed to vzdump (`known` for an all:1 run, which is the last poll's
-    # count and may undercount a guest created since).
+    # returns exitstatus OK for a vzdump that wrote nothing. The early return
+    # above reports 0 for an empty node; here it is what was handed to vzdump
+    # (`known` for an all:1 run, the last poll's count, which may undercount).
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmids": vmids,
             "guests": len(vmids) or len(known)}
 
@@ -698,24 +659,21 @@ HANDLERS["backup.run"] = run_backup
 
 
 def storage_for_content(client, node: str, want: str) -> str | None:
-    """Blocking: the roomiest active storage on `node` whose `content` includes
-    `want` ("rootdir" for a CT, "images" for a VM).
+    """Blocking: the roomiest active storage on `node` whose `content`
+    includes `want` ("rootdir" for a CT, "images" for a VM).
 
     Public because services/migrate.py needs the same pick for the same
     reason: PVE defaults a restore to `local`, which on a stock layout holds
     no rootfs.
 
-    Roomiest, not first-listed. First-listed is how a test restore on node1
-    wrote a 32 GiB scratch disk across NFS while a local LVM pool with nearly
-    three times the room sat beside it, and, worse, how callers that pick a
-    pool and THEN check free space (test_restore_backup) refused an archive
-    that would have fitted somewhere else on the host: "choose another storage
-    or make room", with room right there. Picking the largest makes that
-    refusal honest, because if the largest eligible pool cannot hold it then no
-    eligible pool can.
+    Roomiest, not first-listed. First-listed put a scratch disk on NFS with a
+    far larger local pool beside it, and made callers that pick a pool and
+    THEN check free space refuse an archive that would have fitted elsewhere.
+    Picking the largest makes that refusal honest: if the largest eligible
+    pool cannot hold it, none can.
 
     A pool that does not report `avail` sorts last rather than counting as
-    infinite, but still beats having no candidate at all.
+    infinite.
     """
     best, best_free = None, None
     for s in client.storages(node):
@@ -744,20 +702,16 @@ def adopt_restored(app, backup_id: int, new_vmid: int) -> str | None:
     Returns the catalog slug it matched, or None.
 
     A CT is "tracked" only when an App row exists for (host_id, ctid), and a
-    restore-as-new takes a FRESH vmid from cluster_nextid(), so the restored
-    container matched nothing and turned up in the discovered list asking to be
-    adopted. Which is absurd for the one container Proxploy knows the origin of
-    perfectly well, because it put it there.
+    restore-as-new takes a fresh vmid, so without this the restored container
+    matches nothing and turns up in the discovered list asking to be adopted.
 
-    The catalog is matched on the backup's own guest name, through the same
-    exact normalised-name match the discovered list already suggests with
-    (pollers/__init__.py::_suggest). That is a guess, and it is allowed to miss:
-    a name the catalog does not know adopts with no slug, which is exactly what
-    adopting it by hand would have produced. Not knowing what a container IS
-    must not mean leaving it to ask.
+    Matched on the backup's guest name through the same normalised match the
+    discovered list suggests with (pollers/__init__.py::_suggest). It may
+    miss: a name the catalog does not know adopts with no slug, exactly as
+    adopting it by hand would have.
 
-    Nothing here is done for a VM. Vm rows are mirrored by the poller and have
-    no adoption step at all.
+    Nothing here is done for a VM: Vm rows are the poller's mirror and have
+    no adoption step.
     """
     from proxploy.pollers import _norm, _suggest
 
@@ -808,12 +762,10 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
     if params.get("storage"):
         call["storage"] = params["storage"]
     else:
-        # Nothing chosen: PVE falls back to `local`, which on a stock layout is
-        # a directory store that holds no rootfs or disk image, so every
-        # restore died on "storage 'local' does not support container
-        # directories". The UI sends no storage at all (api/backups.ts), so
-        # that was every restore-as-new. Pick a store on this node that can
-        # actually hold the guest instead of letting PVE guess wrong.
+        # Nothing chosen: PVE falls back to `local`, a directory store that on
+        # a stock layout holds no rootfs or disk image, so every restore died
+        # on "storage 'local' does not support container directories". The UI
+        # sends no storage, so that was every restore-as-new.
         want = "rootdir" if kind == "lxc" else "images"
         picked = await asyncio.to_thread(storage_for_content, client, node, want)
         if picked is None:
@@ -826,22 +778,19 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
         call["force"] = 1  # overwrite the existing guest; PVE requires it stopped
     ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "
             f"({'in place' if in_place else 'as new'})")
-    # The restore itself runs on LIFECYCLE, not on the backup client that read
-    # the archive above: a restore writes a guest config, so PVE checks
-    # VM.Allocate for a fresh vmid and SDN.Use for the NIC it carries, neither
-    # of which the Backup role holds. Proven on real hardware, doc 12 check 7.
+    # The restore runs on LIFECYCLE, not the backup client that read the
+    # archive: it writes a guest config, so PVE checks VM.Allocate for a fresh
+    # vmid and SDN.Use for the NIC it carries, neither of which the Backup
+    # role holds.
     lifecycle_client, _, _ = await asyncio.to_thread(
         _host_target, app, int(info["host_id"]), "lifecycle")
     upid = await asyncio.to_thread(lifecycle_client.restore_guest, kind, node, vmid, call)
     status = await await_task(ctx, lifecycle_client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)
     await _resync(ctx, info["host_id"])
-    # A container Proxploy restored is Proxploy's. Without this it landed on a
-    # fresh vmid, matched no App row, and turned up in the discovered list
-    # asking to be adopted, which is a strange question about the one guest we
-    # know the origin of. BEFORE the poller wake below, so the mirror refreshes
-    # with the row already there and the app never appears as discovered even
-    # for one cycle.
+    # BEFORE the poller wake below, so the mirror refreshes with the App row
+    # already there and the restored container never appears as discovered,
+    # even for one cycle.
     if not in_place:
         slug = await asyncio.to_thread(
             adopt_restored, app, int(params["backup_id"]), vmid)
@@ -851,10 +800,9 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
             ctx.log(f"adopted {kind} {vmid}; the store does not recognise "
                     f"{info['guest_name'] or 'it'}, so pick its app type by hand "
                     f"if you want update checks")
-    # _resync above refreshes the BACKUP cache. A restore also creates (or
-    # overwrites) a guest, and that half of the picture belongs to the poller's
-    # mirror, so it needs the same wake create_vm gets or the restored guest
-    # takes a poll interval to appear in the list.
+    # _resync above refreshes the BACKUP cache. A restore also creates or
+    # overwrites a guest, and that half belongs to the poller's mirror, so it
+    # needs the same wake create_vm gets.
     app.state.poller.wake(int(info["host_id"]))
     return {"upid": upid, "exitstatus": status.get("exitstatus"), "vmid": vmid,
             "mode": "in_place" if in_place else "new"}
@@ -866,27 +814,23 @@ HANDLERS["backup.restore"] = restore_backup
 def _scratch_vmid_from(client, host_name: str, floor: int = 900) -> int:
     """Blocking: the lowest free guest id at or above `floor`, or refuse.
 
-    Not `cluster_nextid()`, which answers from 100 and would hand back an id in
-    the range a human reads as "my guests". Ids from 900 up are the convention
-    for throwaway work, and a test restore is the definition of throwaway.
+    Not `cluster_nextid()`, which answers from 100 and would hand back an id
+    a human reads as "my guests". Ids from 900 up are the convention for
+    throwaway work.
 
-    Read fresh from /cluster/resources rather than the poll snapshot: the
-    snapshot can be a poll interval old, and this number is about to have a
-    guest created on it.
+    Read fresh from /cluster/resources, not the poll snapshot, which can be a
+    poll interval old.
 
-    The refusal is the load-bearing part. /cluster/resources is filtered by the
-    permissions of the token that asks, and a token that may not read guests is
-    told so with an empty list, not with a 403. Measured on node1 2026-08-25:
-    the lifecycle token got 2 rows (both nodes, no guests, no storage) while
-    the monitoring token got 22 on the same cluster, which was running twelve
-    guests. Read literally, that says "nothing is in use", so this function
-    answered `floor` unconditionally: not the lowest free id, just the first
-    one, safe only for as long as nobody has a guest on 900.
+    The refusal is the load-bearing part. /cluster/resources is filtered by
+    the asking token's permissions, and a token that may not read guests is
+    told so with an empty list, not a 403: on one twelve-guest cluster the
+    lifecycle token saw 2 rows where monitoring saw 22. Read literally that
+    says "nothing is in use", so this would answer `floor` unconditionally,
+    safe only until somebody has a guest on 900.
 
-    A cluster with no guests is a real state, though, and must still get an id.
-    The tell is not "no guests", it is "no guests AND no storage": any token
-    that can read the cluster at all sees the storage rows, so guests-absent
-    with storage-present is an honest answer about an empty node.
+    An empty cluster is a real state and must still get an id. The tell is
+    not "no guests", it is "no guests AND no storage": any token that can
+    read the cluster sees the storage rows.
     """
     rows = client.cluster_resources()
     guests = [r for r in rows if r.get("type") in ("qemu", "lxc")
@@ -909,10 +853,9 @@ def _scratch_vmid(app, host_id: int, fallback, host_name: str,
     """Blocking: `_scratch_vmid_from` asked through the right client.
 
     Monitoring, not the lifecycle client doing the restore: "which ids exist"
-    is a read, and monitoring is the capability that reads. Any host being
-    polled already has one, so this is not a new thing to configure in
-    practice. A host without one falls back to the caller's own client, which
-    then either answers honestly or trips the refusal above.
+    is a read. Any polled host already has one; a host without one falls back
+    to the caller's client, which then either answers honestly or trips the
+    refusal above.
     """
     try:
         survey, _, _ = _host_target(app, host_id, "monitoring")
@@ -972,9 +915,8 @@ async def test_restore_backup(ctx: JobContext, params: dict) -> dict:
                             f"{'container' if kind == 'lxc' else 'virtual machine'}")
 
     # Preflight, before anything is created: filling the pool to prove a backup
-    # is good is a worse outcome than not knowing. `size` is the COMPRESSED
-    # archive, so it is a floor on what the restore needs, never a ceiling; a
-    # store that fails this one would certainly have run out.
+    # is good is worse than not knowing. `size` is the COMPRESSED archive, so
+    # it is a floor on what the restore needs, never a ceiling.
     free = await asyncio.to_thread(_free_bytes, client, node, target)
     if free is not None and size and free < size:
         raise JobFailed(f"{target} has {_fmt_bytes(free)} free and this archive "

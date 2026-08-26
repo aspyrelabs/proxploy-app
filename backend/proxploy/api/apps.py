@@ -1,5 +1,4 @@
-"""Apps read + lifecycle endpoints (doc 05, Phase 2/3 rows). Identity is ours;
-state is cache."""
+"""Apps read and lifecycle endpoints. Identity is ours; state is cache."""
 from __future__ import annotations
 
 import difflib
@@ -32,13 +31,11 @@ from proxploy.services.webui import installed_parts, scheme_for
 
 router = APIRouter(prefix="/apps", tags=["apps"])
 
-# Reused as BOTH the route-level dependency and the parameter-level one below
-# so FastAPI's dependency cache (keyed on the callable) collapses repeated
-# uses into one call per request, and so authorize() runs before
-# require_entitlement: an anonymous caller must get 401, never a leaky 403
-# (test_route_auth_invariant.py). No-id routes (list/discovered/adopt/
-# update-all) use the global (no scope_of) singleton; id-carrying routes use
-# the scope_app()-scoped one.
+# Reused as BOTH the route-level and the parameter-level dependency so
+# FastAPI's dependency cache collapses repeated uses into one call per
+# request, and so authorize() runs before require_entitlement: an anonymous
+# caller must get 401, never a leaky 403. No-id routes use the unscoped
+# singleton; id-carrying routes use the scope_app()-scoped one.
 _read = authorize("app", "read")
 _read_scoped = authorize("app", "read", scope_of=scope_app())
 _lifecycle = authorize("app", "lifecycle", scope_of=scope_app())
@@ -57,13 +54,11 @@ _fw_guest = authorize("firewall", "guest", scope_of=scope_app())
 def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
              busy: dict[tuple[str, int], str] | None = None) -> dict:
     """`entry` is the catalog row this app was installed from, or None when it
-    has no catalog slug or that slug no longer resolves. Deliberately a
-    required argument with no default: it is only ever used for the icon, and a
-    default of None would let a future caller silently serve every app without
-    one.
+    has no catalog slug or that slug no longer resolves. Deliberately required
+    with no default: it is only used for the icon, and a default of None would
+    let a future caller silently serve every app without one.
 
-    `busy` maps a guest to what it should READ as while a job acts on it, from
-    services/lifecycle.py::busy_guests."""
+    `busy` maps a guest to what it should READ as while a job acts on it."""
     busy = busy or {}
     snap = snapshots.get(a.host_id)
     g = snap.guests.get(("lxc", a.ctid)) if snap else None
@@ -72,42 +67,33 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
         "host_id": a.host_id, "host_name": host.name, "node": host.node_name,
         "ctid": a.ctid, "category": a.category, "catalog_slug": a.catalog_slug,
         "icon_initials": a.icon_initials, "icon_colors": a.icon_colors,
-        # The icon of the Store entry this app was installed from, resolved
-        # through the Store's own pipeline rather than copied onto the app row.
-        # A column here would be a second copy of a logo that changes whenever
-        # upstream rebrands, and it would go stale the moment a catalog refresh
-        # moved on without it; resolving it per request costs one lookup and
-        # cannot disagree with the card the operator installed from.
-        #
-        # Null is normal and is NOT an error: no catalog slug, a slug upstream
-        # has dropped, or an entry with no logo all land here, and all three
-        # are the icon_initials/icon_colors tile the card already draws.
+        # The Store entry's icon, resolved through the Store's own pipeline
+        # rather than copied onto the app row, where it would go stale the next
+        # time upstream rebrands or the catalog refreshes. Null is normal and
+        # is NOT an error: no catalog slug, a dropped slug, or an entry with no
+        # logo all land here and all fall back to the icon_initials tile.
         "icon_url": served_icon_url(entry),
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
         # Read-only, and shown so the operator can see what the install script
         # said before deciding whether the three fields above need correcting.
         "installed_url": a.installed_url,
-        # "Open web UI" target port (PXP-85): the catalog's own port, resolved
-        # through `entry` the same way the icon above is, never stored on the
-        # app row. No catalog entry / no port on it means no button, not a
-        # prompt for one, so None here is what hides the action client-side.
+        # "Open web UI" target port: the catalog's own port, resolved through
+        # `entry` like the icon above, never stored on the app row. No entry or
+        # no port on it means no button, so None here hides the action.
         "catalog_port": entry.port if entry else None,
         # "pending" while an action is in flight, whatever the cached column
-        # says. Proxmox reports the OLD status for as long as a stop or a
-        # removal is actually running, so answering with it put the pill back
-        # to Running mid-action on every refetch. The browser's optimistic
-        # patch cannot cover this on its own: it only exists in the tab that
-        # clicked, and any refetch there overwrote it from here.
+        # says. Proxmox reports the OLD status for as long as a stop or removal
+        # is actually running, so answering with it put the pill back to
+        # Running mid-action on every refetch. The browser's optimistic patch
+        # cannot cover this: it only exists in the tab that clicked.
         "status": busy.get(("app", a.id)) or a.status_cached or "unknown",
         "ip": a.ip_cached,
         "cpu_pct": a.cpu_pct_cached, "mem_bytes": a.mem_bytes_cached,
         "mem_total_bytes": g["mem_total_bytes"] if g else None,
-        # Storage is a pair so the card can draw a bar; network is two rates
-        # with no denominator, because there is no link speed to divide by.
-        # The raw netin/netout counters stay on the row: they only mean
-        # something next to the previous reading, which is the poller's
-        # business, not a client's.
+        # Network is two rates with no denominator: there is no link speed to
+        # divide by. The raw netin/netout counters stay on the row, they only
+        # mean something next to the previous reading.
         "disk_bytes": a.disk_bytes_cached,
         "disk_total_bytes": a.disk_total_bytes_cached,
         "net_in_bps": a.net_in_bps_cached,
@@ -133,9 +119,8 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
             continue
         if a.host_id in hosts:
             rows.append(a)
-    # One query for the whole page rather than one per card. A grid of 40 apps
-    # is 40 rows out of the same small table, and the icon is the only thing
-    # any of them wants from it.
+    # One query for the whole page rather than one per card; the icon is all
+    # any of them wants from that table.
     slugs = {a.catalog_slug for a in rows if a.catalog_slug}
     entries = {e.slug: e for e in db.query(CatalogEntry)
                .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
@@ -148,21 +133,17 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
 @router.get("/discovered")
 def discovered(request: Request, db=Depends(get_db),
                user: User = Depends(_read)):
-    """Pre-existing CTs not yet adopted (doc 05). Read-only until Phase 4.
+    """Pre-existing CTs not yet adopted.
 
-    Two Hosts can be two nodes of the SAME cluster; cluster_resources()
-    returns the whole cluster from either one, so every host's snapshot
-    lists the same unadopted CT, each carrying `node`, the CT's real owning
-    node (already correct in the payload; see pollers/__init__.py). Deduped
-    here by (cluster, ctid): a ctid is only unique WITHIN a cluster, so two
-    different clusters (or two standalone hosts, see cluster_scope) can
-    legitimately both have a CT 101 and both must be offered, and
-    attributed to the Host actually registered at that node, not whichever
-    host happened to poll it. An already-tracked App's own poll cycle only
-    checks its own host_id (mapped_ctids is host-scoped), so a CT adopted on
-    one host still shows up as discovered in another host's snapshot of the
-    SAME cluster; checking every App row here, scoped the same way, is what
-    keeps it from being offered for adoption twice.
+    Two Hosts can be two nodes of the SAME cluster, and cluster_resources()
+    returns the whole cluster from either one, so every host's snapshot lists
+    the same unadopted CT. Deduped by (cluster, ctid): a ctid is unique only
+    WITHIN a cluster, so two clusters can legitimately both have a CT 101 and
+    both must be offered, attributed to the Host registered at that CT's own
+    `node` rather than whichever host polled it. An App's poll cycle only
+    checks its own host_id, so a CT adopted on one host still shows as
+    discovered in another host's snapshot of the same cluster; checking every
+    App row here, scoped the same way, stops it being offered twice.
     """
     hosts = {h.id: h for h in db.query(Host).all()}
     by_node = {(cluster_scope(h), h.node_name): h
@@ -206,24 +187,19 @@ class UpdateIn(BaseModel):
                                      Depends(require_entitlement("apps.adopt"))])
 def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
                user: User = Depends(_adopt)):
-    """Bulk-adopt pre-existing/discovered CTs as tracked apps (doc 05, Phase 4).
+    """Bulk-adopt pre-existing/discovered CTs as tracked apps.
 
     One commit for the whole batch: a mid-batch ux_apps_host_ctid conflict
-    rolls back everything flushed so far in this request (nothing partially
-    lands), and a single audit row covers the whole batch rather than one per
-    item.
+    rolls back everything flushed so far, so nothing partially lands, and one
+    audit row covers the batch.
 
-    An adopted app takes its category and its web port from the catalog entry
-    its slug names, the same way services/appstore.py::install copies category
-    onto an app it creates. Without this every adopted app read back with no
-    category at all, so the Apps grid grouped all eight of them under
-    "unknown", and with no web_port, so nothing on the row knew which port its
-    web UI answers on. AdoptIn carries neither field, so there is no caller
-    value to overwrite here; both are copied only when the slug actually
-    resolves, and an unrecognised or absent slug adopts exactly as before.
+    An adopted app takes its category and web port from the catalog entry its
+    slug names, like install does. Without them the grid has no group to file
+    the app under and nothing knows which port its web UI answers on. AdoptIn
+    carries neither field, so no caller value is overwritten, and an absent or
+    unrecognised slug adopts exactly as before.
     """
     slugs = {i.catalog_slug for i in body.items if i.catalog_slug}
-    # One query for the batch rather than one per item, matching list_apps.
     entries = {e.slug: e for e in db.query(CatalogEntry)
                .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
     adopted = []
@@ -245,12 +221,11 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
             raise HTTPException(409, f"CT {item.ctid} on host {item.host_id} is already adopted")
         adopted.append(row.id)
     db.commit()
-    # One row covers the whole batch, so there is no single target to point at
-    # and the row carried no name at all. The names are all right here, and a
-    # list of them is what makes the row answerable later without opening the
-    # params blob, which the audit screen never shows. Capped at five: a
-    # forty-name string is one table cell that pushes every other column off
-    # the screen, and `app_ids` in params still holds the full set.
+    # One audit row covers the whole batch, so there is no single target to
+    # point at. The names make the row answerable without opening the params
+    # blob, which the audit screen never shows. Capped at five: a forty-name
+    # string pushes every other column off the screen, and `app_ids` still
+    # holds the full set.
     names = [i.name or f"CT {i.ctid}" for i in body.items]
     listed = ", ".join(names[:5])
     if len(names) > 5:
@@ -264,32 +239,28 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
 
 # Literal segment, registered ahead of `GET /{app_id}` and the lifecycle
 # wildcard: `{app_id}` would otherwise try to parse "update-all" as an int
-# and 422 (see test_update_all_is_not_matched_as_an_app_id).
+# and 422.
 @router.post("/update-all", status_code=202,
              dependencies=[Depends(_update),
                           Depends(require_entitlement("store.update_all"))])
 def update_all_apps(body: UpdateIn, request: Request, db=Depends(get_db),
                     user: User = Depends(_update)):
-    """One `app.update` job per stale app (doc 05: "per-app results").
+    """One `app.update` job per stale app.
 
     No new queue machinery: JobBackend.MAX_CONCURRENT already runs four at a
-    time and genuinely queues the rest, and each job carries its own status,
-    transcript and result, which is what "per-app results" means.
+    time and queues the rest, and each job carries its own status, transcript
+    and result.
 
-    `skipped` is not decoration. A bare "0 jobs started" is indistinguishable
-    from a broken endpoint, so every app that did not get a job says why.
+    `skipped` is not decoration: a bare "0 jobs started" is indistinguishable
+    from a broken endpoint, so every app that got no job says why.
 
-    Reuses `_update_state` and mirrors POST /{app_id}/update's own skip
-    order exactly, so a bulk run and a single-app run never disagree about
-    why a given app didn't get a job:
+    Mirrors POST /{app_id}/update's skip order exactly, so bulk and single-app
+    runs never disagree about why an app was skipped:
 
-    1. Edited script first: an edited row's `upstream_ref` is NULL, so
-       checking "no pinned script" before "edited" would misreport an
-       edited app as having no upstream at all. Enqueueing anyway would
-       spray a guaranteed-`JobFailed` job (services/appstore.py::
-       _resolve_update refuses to discard local edits), so this is skipped,
-       not enqueued-to-fail.
-    2. No catalog entry / no upstream_sha / no pinned script at all.
+    1. Edited script first: an edited row's `upstream_ref` is NULL, so checking
+       "no pinned script" first would misreport it as having no upstream at
+       all, and enqueueing anyway would spray a guaranteed-`JobFailed` job.
+    2. No catalog entry / no upstream_sha / no pinned script.
     3. Already on the catalog's current commit.
     """
     if not body.consent:
@@ -340,13 +311,11 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
 
 @router.get("/{app_id}/logs")
 def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)):
-    """Doc 05: 'Recent CT log lines (journal tail via pct exec / console
-    channel)'. No such exec/journal channel exists anywhere in this codebase
-    yet; services/lifecycle.py and executor/ only ever run install/update
-    scripts over SSH on the HOST, never a command inside a guest CT, and
-    ProxmoxClient has no pct-exec-equivalent call. Rather than fabricate log
-    lines, this is a real, deliberate 501 so the frontend can render an honest
-    gap (see AppLogs) instead of silently polling a 404 forever."""
+    """No exec or journal channel to a guest exists in this backend: lifecycle
+    and executor/ only run scripts over SSH on the HOST, and ProxmoxClient has
+    no pct-exec equivalent. Rather than fabricate log lines this is a
+    deliberate 501, so the frontend renders an honest gap instead of polling a
+    404 forever."""
     if db.get(App, app_id) is None:
         raise HTTPException(404, "app not found")
     raise HTTPException(501, "CT log tailing is not implemented yet; there is no "
@@ -358,22 +327,18 @@ async def detect_ports(app_id: int, request: Request, db=Depends(get_db),
                        user: User = Depends(_read_scoped)):
     """What this container is listening on, ranked, as a GUESS.
 
-    For an app adopted by hand: the catalog knows nothing about it, so
-    `web_port` is empty, so there is no Open button and no way to get one short
-    of the operator already knowing the number. Proxmox cannot answer it either
-    (`pct config` describes the NIC and no API route exposes sockets), so the
-    only place the answer exists is inside the container.
+    For a hand-adopted app the catalog knows nothing, so `web_port` is empty,
+    and Proxmox cannot answer either: `pct config` describes the NIC and no API
+    route exposes sockets. The only place the answer exists is inside the
+    container.
 
-    A GET that runs a command, which is unusual and deliberate: it reads state
-    and changes nothing, and it never writes web_port. The caller is handed
-    candidates and picks one, because a container can serve two UIs and this
-    ranking is a heuristic, not a fact. `accurate: false` is in the response so
-    a client cannot present it as one by accident.
+    A GET that runs a command, unusual and deliberate: it changes nothing and
+    never writes web_port. The caller picks from the candidates, because a
+    container can serve two UIs and this ranking is a heuristic, not a fact.
+    `accurate: false` is in the response so a client cannot present it as one.
 
-    User-triggered only, never the poller: this is one command per guest, which
-    is exactly what the O(nodes) poll budget forbids (services/proxmox.py's
-    "per-guest, user-triggered calls" note, the same rule the network
-    attachment map is annotated with).
+    User-triggered only, never the poller: one command per guest is exactly
+    what the O(nodes) poll budget forbids.
     """
     a = db.get(App, app_id)
     if a is None:
@@ -408,18 +373,14 @@ async def detect_ports(app_id: int, request: Request, db=Depends(get_db),
         raise HTTPException(502, f"could not read the container's listening ports "
                                  f"(exit {status}). It may be stopped.")
     return {"ports": rank_ports("\n".join(lines)),
-            # Stated in the payload, not left to the UI to remember: this is a
-            # snapshot of what was listening a moment ago, ranked by a
-            # heuristic, and it can be wrong in both directions.
             "accurate": False}
 
 
 def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
-    """Doc 05/10: diff the pinned app_scripts row against the *current*
-    catalog_entries.raw.install_script for this app's catalog_slug, not just
-    against this app's own prior version. A catalog refresh can move upstream
-    forward with the app's pinned content untouched, and that drift has to
-    surface too (see test_upstream_moving_on_after_pin_also_surfaces_a_diff)."""
+    """Diff the pinned app_scripts row against the *current*
+    catalog_entries.raw.install_script for this app's slug, not just against
+    the app's own prior version: a catalog refresh can move upstream forward
+    with the pinned content untouched, and that drift has to surface too."""
     if not app_row.catalog_slug:
         return None
     entry = db.query(CatalogEntry).filter_by(slug=app_row.catalog_slug).one_or_none()
@@ -434,12 +395,9 @@ def _diff_vs_upstream(db, app_row: App, pinned_content: str) -> str | None:
     return "".join(diff)
 
 
-# Literal two-segment/three-segment paths registered here: BEFORE the
-# lifecycle wildcard further down: per that route's own WARNING: Starlette
-# matches path templates in registration order, and `/{app_id}/{action}`
-# would otherwise swallow these (it's POST-only though, so GET/PUT here don't
-# actually collide on method; kept ahead of it anyway for the same reason
-# doc 05's future /{id}/update and /{id}/migrate must be).
+# Registered BEFORE the lifecycle wildcard further down: Starlette matches
+# path templates in registration order, and `/{app_id}/{action}` would
+# otherwise swallow these.
 @router.get("/{app_id}/script", dependencies=[Depends(_script_read),
                                               Depends(require_entitlement("apps.script_edit"))])
 def get_app_script(app_id: int, db=Depends(get_db)):
@@ -460,9 +418,8 @@ class ScriptIn(BaseModel):
                                               Depends(require_entitlement("apps.script_edit"))])
 def put_app_script(app_id: int, body: ScriptIn, request: Request, db=Depends(get_db),
                    user: User = Depends(_script)):
-    # Validate before writing, like every sibling route here: a missing
-    # `content` used to KeyError into a 500, and an unknown app_id used to
-    # 500 on the AppScript FK violation at commit time.
+    # Validate before writing, like every sibling route here: an unknown
+    # app_id otherwise 500s on the AppScript FK violation at commit time.
     if db.get(App, app_id) is None:
         raise HTTPException(404, "app not found")
     content = body.content
@@ -495,18 +452,16 @@ def list_app_script_versions(app_id: int, db=Depends(get_db)):
                           Depends(require_entitlement("apps.script_edit"))])
 def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                       user: User = Depends(_script)):
-    """Task 5 review found a dead end: put_app_script above always writes
-    `source="edited"`, and nothing else ever writes `source="upstream"` except
-    the install/update job handlers, so once an app's script is edited,
-    services/appstore.py::_resolve_update's edited-script guard blocks
-    `app.update` FOREVER, even if the operator pastes the exact upstream text
-    back (there was no way to re-mark a row "upstream"). This route is that
-    way back: pin a NEW version to the catalog's CURRENT install_script,
-    sourced "upstream", so pinned_ref reads the catalog sha again and the
-    guard clears.
+    """Pin a NEW version to the catalog's CURRENT install_script, sourced
+    "upstream", so pinned_ref reads the catalog sha again.
 
-    Never mutates or deletes the edited row being reverted from: the version
-    history is the record, same rule put_app_script already follows.
+    Without this an app is stuck: put_app_script always writes
+    `source="edited"` and only the install/update handlers ever write
+    "upstream", so once a script is edited _resolve_update's guard blocks
+    `app.update` forever, even if the operator pastes the exact upstream text
+    back.
+
+    Never mutates the edited row: the version history is the record.
     """
     a = db.get(App, app_id)
     if a is None:
@@ -533,12 +488,10 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
                     source="upstream", upstream_ref=entry.upstream_sha,
                     created_by=user.id)
     db.add(row)
-    # Pins to the catalog's CURRENT sha, so by definition there is nothing
-    # pending afterwards: mirrors run_update's own reset (services/appstore.py)
-    # rather than leaving GET /update reporting an update against a script that
-    # was just reverted TO that exact commit. A single-row assignment, not
-    # mark_updates_available(db): that recomputes the whole table and this
-    # route only just changed the state of one.
+    # Pins to the catalog's CURRENT sha, so nothing is pending afterwards:
+    # mirrors run_update's own reset rather than reporting an update against a
+    # script just reverted TO that commit. A single-row assignment, not
+    # mark_updates_available(db), which recomputes the whole table.
     a.update_available = None
     db.commit()
     write_audit(db, actor_type="user", actor_id=user.id, action="apps.script_revert",
@@ -548,14 +501,11 @@ def revert_app_script(app_id: int, request: Request, db=Depends(get_db),
 
 
 def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript | None]:
-    """Returns the app, its catalog entry (if any), and its NEWEST AppScript
-    row, the single query both GET and POST /update need. Returning the row
-    itself, not just `.upstream_ref`, lets both callers see `.source` too:
-    `put_app_script` leaves `upstream_ref` NULL on an edited row, and that
-    NULL alone is not enough to tell "edited" apart from "no script pinned at
-    all" (review finding: a bare `from_ref is None` check conflated the two,
-    so GET showed a stale update + a bogus diff for an edited app, and POST's
-    409 blamed a missing catalog entry that was not the actual cause).
+    """The app, its catalog entry (if any), and its NEWEST AppScript row: the
+    single query both GET and POST /update need. Returning the row itself, not
+    just `.upstream_ref`, lets both callers see `.source` too, because
+    `put_app_script` leaves `upstream_ref` NULL on an edited row and that NULL
+    alone cannot tell "edited" from "no script pinned at all".
     """
     a = db.get(App, app_id)
     if a is None:
@@ -573,23 +523,17 @@ def _update_state(db, app_id: int) -> tuple[App, CatalogEntry | None, AppScript 
 def get_app_update(app_id: int, db=Depends(get_db)):
     """What an update would do: which commit to which, and the script diff.
 
-    Doc 10 Phase 7 requires the same diff/consent surface install has, so the
-    diff shown here is the SAME `_diff_vs_upstream` the Config tab renders:
-    one implementation, one answer, no chance of the two disagreeing about
-    what is about to run.
+    The diff is the SAME `_diff_vs_upstream` the Config tab renders, so the two
+    can never disagree about what is about to run.
 
-    Unlike the Config tab's GET /script (which always shows drift, including
-    the rare case where a catalog refresh moves `raw.install_script` without
-    the pinned commit changing), this route only surfaces a diff when there is
-    an update TO show. A caller here is asking "what would `POST .../update`
-    do", and the honest answer when the app is already on the catalog's
-    commit is "nothing", not a diff sourced from unrelated content drift.
+    Unlike GET /script, which always shows drift, this surfaces a diff only
+    when there is an update TO show: the honest answer to "what would POST do"
+    when the app is already on the catalog's commit is "nothing", not a diff
+    sourced from unrelated content drift.
 
-    An edited newest script (`script_source == "edited"`) is reported as no
-    update available at all, never a diff: `upstream_ref` is NULL on that row,
-    so POST will refuse regardless of the catalog state (see update_app), and
-    showing a populated `diff_vs_upstream`/`update_available` here would
-    advertise an action POST is about to reject.
+    An edited newest script reports no update at all, never a diff: POST
+    refuses it regardless of catalog state, so a diff here would advertise an
+    action POST is about to reject.
     """
     a, entry, latest = _update_state(db, app_id)
     to_ref = entry.upstream_sha if entry else None
@@ -614,12 +558,10 @@ def get_app_update(app_id: int, db=Depends(get_db)):
                            Depends(require_entitlement("store.update"))])
 def update_app(app_id: int, body: UpdateIn, request: Request, db=Depends(get_db),
                user: User = Depends(_update_scoped)):
-    """Root-consent gated, exactly like install (api/catalog.py::install_catalog_entry):
-    this re-runs a community script as root on the node, and brief §8 says the
-    honest thing is to make the operator say so out loud. Unlike install
-    (admin-only), doc 05 grants this to operator; a lower bar than the
-    catalog table above intentionally accepts, not an oversight to fix here.
-    """
+    """Root-consent gated, exactly like install: this re-runs a community
+    script as root on the node, so the operator has to say so out loud. Unlike
+    install, which is admin-only, this is granted to operator: a lower bar,
+    deliberately accepted."""
     if not body.consent:
         raise HTTPException(400, "root-consent required: this runs a community "
                                  "script as root on the node")
@@ -869,7 +811,6 @@ def app_fw_log(request: Request, app_id: int, start: int = 0, limit: int = 500,
                            limit=limit, since=since, until=until)
 
 
-# Above the lifecycle wildcard, same as /network directly above.
 @router.get("/{app_id}/web-url",
             dependencies=[Depends(_read_scoped),
                           Depends(require_entitlement("network.guest_config"))])
@@ -877,24 +818,21 @@ def app_web_url(request: Request, app_id: int, db=Depends(get_db),
                 user: User = Depends(_read_scoped)):
     """The whole URL to point a tab at, built here rather than in the browser.
 
-    Three of the four pieces can only be answered on this side. The address is
-    read live off the guest's own NIC config, because a DHCP lease or a manual
-    re-IP moves it and a value cached at install would point at the old one.
-    The scheme is asked of the app itself (services/webui.py), which a page
-    served from Proxploy's own origin cannot do: a cross-origin probe of a
+    The address is read live off the guest's own NIC config, because DHCP or a
+    manual re-IP moves it and a value cached at install would point at the old
+    one. The scheme is asked of the app itself (services/webui.py), which a
+    page on Proxploy's own origin cannot do: a cross-origin probe of a
     self-signed https app fails opaquely, so the browser cannot tell "speaks
     https" from "is not there".
 
-    Port and path follow the same precedence the scheme does (see
-    services/webui.py::scheme_for): what the operator set, then what the
-    install script printed about itself, then the catalog. The operator's
-    value is first everywhere and is never written over, and the catalog is
-    last because it is the only one of the three that describes the app in
-    general rather than this container in particular.
+    Port and path follow the same precedence the scheme does: what the operator
+    set, then what the install script printed, then the catalog. The operator's
+    value is never written over, and the catalog is last because it describes
+    the app in general rather than this container.
 
-    Every failure here is a 409 with a sentence naming what is missing, not a
-    URL built out of a default. Sending someone to a page that cannot load and
-    calling that success is the bug this endpoint exists to end.
+    Every failure is a 409 naming what is missing, never a URL built from a
+    default: sending someone to a page that cannot load and calling that
+    success is the bug this endpoint exists to end.
     """
     a, host = _app_and_host(db, app_id)
     entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
@@ -948,12 +886,10 @@ class MigratePreflightIn(BaseModel):
     storage: str | None = None
 
 
-# Above the lifecycle wildcard (WARNING further down): this is a 3-segment
-# literal path (/{app_id}/migrate/preflight) so it does not actually collide
-# with the 2-segment /{app_id}/{action} template regardless of registration
-# order, but it lives here anyway for the same reason /script and /network
-# do: one place operators look for every non-lifecycle app route, and no
-# surprises if that wildcard's shape ever widens.
+# Three literal segments, so this cannot structurally collide with the
+# 2-segment /{app_id}/{action} template, but it is registered above the
+# lifecycle wildcard anyway: one place operators look for every non-lifecycle
+# app route, and no surprises if that wildcard's shape ever widens.
 @router.post("/{app_id}/migrate/preflight",
              dependencies=[Depends(_migrate),
                           Depends(require_entitlement("migrate.preflight"))])
@@ -963,10 +899,9 @@ def migrate_preflight(request: Request, app_id: int, body: MigratePreflightIn,
     if a is None:
         raise HTTPException(404, "app not found")
     target = db.get(Host, body.target_host_id)
-    # A missing target_host_id and an unreachable/disconnected one are the
-    # same caller-facing problem ("this is not a usable migration target"),
-    # so both collapse to one 409 rather than a 404/409 split the frontend
-    # would have to special-case.
+    # A missing target_host_id and an unreachable one are the same
+    # caller-facing problem ("not a usable migration target"), so both collapse
+    # to one 409 rather than a 404/409 split the frontend must special-case.
     if (target is None or body.target_host_id == a.host_id
             or target.status != "connected"):
         raise HTTPException(409, "target host is unknown, is the app's current "
@@ -982,27 +917,20 @@ class MigrateIn(BaseModel):
     target_host_id: int
     confirm: str | None = None
     # Where the guest's disk should land on the target. None takes preflight's
-    # default (the first pool that can hold a rootfs), which is every migration
-    # before this existed. A name that cannot hold one is a preflight blocker,
-    # never a silent swap.
+    # default, the first pool that can hold a rootfs. A name that cannot hold
+    # one is a preflight blocker, never a silent swap.
     storage: str | None = None
 
 
-# Above the lifecycle wildcard, same reasoning as /migrate/preflight above; 
-# three literal segments so it cannot structurally collide with
-# /{app_id}/{action}, but registered here for the same "one place operators
-# look" reason.
 @router.post("/{app_id}/migrate", status_code=202,
              dependencies=[Depends(_migrate),
                           Depends(require_entitlement("migrate.cross_host"))])
 def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
                       db=Depends(get_db), user: User = Depends(_migrate)):
     """Params handed to the job are ONLY app_id/target_host_id: strategy,
-    target ctid and shared storage all come from a FRESH preflight the
-    handler itself runs, never from this route's own preflight call below; 
-    state (host connectivity, storage, capacity) can change in the gap
-    between this request and the job actually running (Task 15 interfaces
-    note)."""
+    target ctid and storage all come from a FRESH preflight the handler runs
+    itself, because host connectivity, storage and capacity can change between
+    this request and the job actually running."""
     a = db.get(App, app_id)
     if a is None:
         raise HTTPException(404, "app not found")
@@ -1031,15 +959,13 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
                            f"Migrating it can strand its own recovery path. "
                            f"Type the name to confirm."),
             })
-    # Resolve every token this job will spend, BEFORE queueing it. Without this
+    # Resolve every token this job will spend BEFORE queueing it. Without this
     # a host missing its lifecycle or backup token accepted the migration and
-    # discovered the gap inside the handler, which for a transfer means AFTER the
-    # source guest has been stopped. No network call happens here:
+    # discovered the gap inside the handler, which for a transfer means AFTER
+    # the source guest has been stopped. No network call happens here:
     # client_for_host raises CapabilityNotConfigured on a missing credential
-    # alone, and main.py turns that into a 409 naming the capability and where to
-    # add it (doc 11 open item 3). The strategy decides which tokens are needed,
-    # which is why this sits after the preflight above rather than in a
-    # dependency.
+    # alone. The strategy decides which tokens are needed, which is why this
+    # sits after the preflight rather than in a dependency.
     needed = ("lifecycle",) if pf["strategy"] == migrate_service.STRATEGY_CLUSTER \
         else ("lifecycle", "backup")
     for host in (db.get(Host, a.host_id), target):
@@ -1058,9 +984,8 @@ def migrate_app_route(request: Request, app_id: int, body: MigrateIn,
 
 class UninstallIn(BaseModel):
     # The app's own name, typed back. Required for every uninstall that
-    # destroys a container, not only for Proxploy's own CT the way the
-    # lifecycle verbs are: stop is reversible and destroy is not, so the
-    # guard belongs on the operation rather than on the target.
+    # destroys a container, not only for Proxploy's own CT: stop is reversible
+    # and destroy is not, so the guard belongs on the operation.
     confirm: str | None = None
     # Forget the app without touching PVE. The inverse of adopt: the CT keeps
     # running and Proxploy stops tracking it. No confirmation needed because
@@ -1079,10 +1004,8 @@ class ReconfigureIn(BaseModel):
     web_protocol: str | None = None
     web_path: str | None = None
     # The tile an app wears when the catalog has no icon for it, which is every
-    # app adopted by hand: `icon_url` is served from the CATALOG entry
-    # (served_icon_url), so an app with no catalog slug can never have one, and
-    # initials plus a colour pair is the icon it CAN have. IconTile already
-    # draws exactly this.
+    # app adopted by hand: `icon_url` is served from the CATALOG entry, so an
+    # app with no catalog slug can never have one.
     icon_initials: str | None = Field(default=None, max_length=3)
     icon_colors: dict | None = None
 
@@ -1091,12 +1014,10 @@ class ReconfigureIn(BaseModel):
                                           Depends(require_entitlement("apps.uninstall"))])
 def uninstall_app(request: Request, app_id: int, body: UninstallIn = Body(default=UninstallIn()),
                   db=Depends(get_db), user: User = Depends(_remove)):
-    """Remove an app, either by destroying its CT or by forgetting it.
-
-    Doc 01's apps-only model means one app is exactly one LXC container, so
-    "uninstall" is "destroy that container". `keep_ct` is the escape hatch for
-    the operator who wants Proxploy out of the way without losing the
-    workload, and it is the inverse of adopt rather than a softer delete.
+    """Remove an app, either by destroying its CT or by forgetting it. One app
+    is exactly one LXC container, so "uninstall" is "destroy that container";
+    `keep_ct` is the inverse of adopt, for the operator who wants Proxploy out
+    of the way without losing the workload.
     """
     a = db.get(App, app_id)
     if a is None:
@@ -1141,19 +1062,15 @@ def reconfigure_app(request: Request, app_id: int,
     """Resize a CT and/or edit how Proxploy presents the app.
 
     Resource changes go straight to PVE rather than through a job: an lxc
-    config write is synchronous there (see `guest_config_update`), so there is
-    no task to track and reporting one would be theatre.
+    config write is synchronous there, so there is no task to track.
 
     Disk size is deliberately not here. Growing a CT's root volume is a
-    different PVE endpoint and is one-way (PVE cannot shrink), which makes it
-    its own feature with its own confirmation rather than a field on a PATCH.
+    different PVE endpoint and is one-way, since PVE cannot shrink, so it is
+    its own feature with its own confirmation.
 
-    cores/memory/swap are VM.Config.CPU/Memory, lifecycle privileges, so the
-    client below asks for "lifecycle" explicitly: this call site defaulted
-    to whatever `client_for_host` resolved before per-capability tokens
-    existed, which worked only because the one token in play was
-    over-scoped. Found during the sweep (host-token-privileges-step-one-
-    report.md), same class of gap as Sys.PowerMgmt.
+    cores/memory/swap are lifecycle privileges, so the client below asks for
+    "lifecycle" explicitly rather than taking whatever `client_for_host`
+    resolves by default.
     """
     a = db.get(App, app_id)
     if a is None:
@@ -1186,9 +1103,8 @@ def reconfigure_app(request: Request, app_id: int,
 
     if body.web_protocol is not None:
         # Only two values open in a browser, and a third would be stored as
-        # fact and then built into a URL that cannot load. Blank is allowed
-        # and means "clear it": that puts the app back to being asked which
-        # scheme it speaks rather than told (services/webui.py).
+        # fact and then built into a URL that cannot load. Blank is allowed and
+        # clears it, putting the app back to being asked which scheme it speaks.
         body.web_protocol = body.web_protocol.strip().lower() or None
         if body.web_protocol not in (None, "http", "https"):
             raise HTTPException(422, "Protocol must be http or https, or left "
@@ -1227,8 +1143,8 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
                       target, action: str, name: str, confirm: str | None):
     """Shared by the apps and VMs routes, one guardrail, one audit shape.
 
-    Doc 02 §9 / doc 08 §1: a destructive action against the CT Proxploy itself
-    runs in is refused unless the caller types the name back.
+    A destructive action against the CT Proxploy itself runs in is refused
+    unless the caller types the name back.
     """
     ip = request.client.host if request.client else None
     if action in DESTRUCTIVE and is_self(db, target_type, target.id):
@@ -1254,14 +1170,11 @@ def enqueue_lifecycle(request: Request, db, user: User, *, target_type: str,
     return job
 
 
-# WARNING: this wildcard is registered last and Starlette matches routes in
+# WARNING: this wildcard is registered last and Starlette matches in
 # registration order, so it will silently swallow any future two-segment
-# sibling under /apps/{id}/...: e.g. /apps/{id}/update (Phase 7 Task 6) and
-# /apps/{id}/migrate (Phase 8 Task 15) above. Register those routes with
-# their literal action segments BEFORE this one, or they'll hit this handler
-# instead and 422 with "action must be one of start, stop, restart, shutdown"
-# (test_migrate_api.py::test_route_does_not_get_shadowed_by_the_lifecycle_wildcard
-# is the regression check).
+# sibling under /apps/{id}/..., e.g. /apps/{id}/update and /apps/{id}/migrate
+# above. Register such routes with their literal action segments BEFORE this
+# one, or they hit this handler and 422.
 @router.post("/{app_id}/{action}", status_code=202,
              dependencies=[Depends(_lifecycle),
                           Depends(require_entitlement("apps.lifecycle"))])

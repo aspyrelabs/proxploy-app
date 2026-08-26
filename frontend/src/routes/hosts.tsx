@@ -11,10 +11,9 @@ import { Button, amberLinkCls } from '../components/ui/button'
 import { tabTrigger } from '../components/ui/tabs'
 
 // The two controls in a node's header: one opens a shell, one opens Proxmox.
-// They sit side by side and have to read as a pair, and one of them is an <a>,
-// which Button cannot render, so the shared thing is a class string. Not ghost
-// either: these are transparent until pointed at, so they sit quietly in a
-// header rather than stacking two filled boxes next to the node name.
+// They read as a pair and one of them is an <a>, which Button cannot render,
+// so the shared thing is a class string. Transparent until pointed at, so a
+// header does not stack two filled boxes next to the node name.
 const headerCtl = 'rounded-ctl border border-line px-2.5 py-1 text-[12px] text-text-2 ' +
   'transition hover:border-amber hover:text-amber'
 
@@ -39,7 +38,7 @@ import { combineThroughput } from '../lib/throughput'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
 // Hoisted because the loading placeholder has to lay out in the SAME grid as
-// the content it replaces; two copies of the string is one copy too many.
+// the content it replaces.
 const nodeGrid = 'grid grid-cols-1 gap-4 md:grid-cols-3'
 function useSummary() {
   return useQuery({
@@ -61,18 +60,15 @@ export function useNodes() {
 
 
 /** Nodes that share a cluster, under one heading carrying that cluster's own
- *  health.
- *
- *  Grouped by cluster NAME rather than by host, and that is the point: two
- *  Hosts enrolled from the same cluster are two API endpoints into ONE
- *  cluster, so they collapse into a single group instead of drawing the same
- *  cluster twice. */
+ *  health. Grouped by cluster NAME, not by host: two Hosts enrolled from the
+ *  same cluster are two API endpoints into ONE cluster, so they collapse into
+ *  a single group instead of drawing the same cluster twice. */
 function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
   const down = rows.filter((n) => n.status !== 'connected').length
   // Every node connected is not the same as the cluster being usable: without
-  // quorum /etc/pve is read-only and every write fails while every read
-  // answers (doc 12 check 12). "all healthy" was the third place this read as
-  // fine on a cluster that could not accept an install.
+  // quorum /etc/pve is read-only, so every write fails while every read
+  // answers, and "all healthy" would read as fine on a cluster that cannot
+  // accept an install.
   const noQuorum = rows.some((n) => n.quorate === false)
   return (
     <section className="mb-5">
@@ -98,12 +94,9 @@ function ClusterGroup({ name, rows }: { name: string; rows: MergedNode[] }) {
 }
 
 /** Grouped AND sorted, because /cluster/nodes answers in no defined order:
- *  unsorted, the cards were laid out in whatever order the last poll happened
- *  to write, so they reshuffled under the operator on every 30s refetch.
- *
- *  Sorting the rows first is enough for the nodes: a Map keeps insertion
- *  order, so each group and the standalone list inherit it, and only the
- *  cluster headings still need sorting of their own. */
+ *  unsorted, the cards reshuffled under the operator on every 30s refetch.
+ *  Sorting the rows first is enough, since a Map keeps insertion order and
+ *  each group inherits it; only the cluster headings need their own sort. */
 function groupByCluster(rows: MergedNode[]) {
   const clusters = new Map<string, MergedNode[]>()
   const standalone: MergedNode[] = []
@@ -122,12 +115,10 @@ function groupByCluster(rows: MergedNode[]) {
 /** "Add host" where the hosts are, not only buried in Settings.
  *
  *  POST /hosts answers 403 {"error":"entitlement_required","feature":
- *  "hosts.multi"} once one host exists. Saying so BEFORE the form is filled in
- *  is the whole reason this checks the entitlement itself: a raw 403 at the
- *  end of a completed form is the worst possible place to learn it. When the
- *  entitlement fetch itself failed we cannot honestly claim either way, so the
- *  form opens and the backend stays the authority (HostForm renders that 403
- *  in words too). */
+ *  "hosts.multi"} once one host exists, and a raw 403 at the end of a filled
+ *  form is the worst place to learn it. When the entitlement fetch itself
+ *  failed we cannot claim either way, so the form opens and the backend stays
+ *  the authority. */
 function AddHostSection({ hostCount }: { hostCount: number }) {
   const ent = useEntitlements()
   const qc = useQueryClient()
@@ -187,34 +178,25 @@ export function HostsPage() {
   const wide = useMediaQuery('(min-width: 1024px)')
 
   // History for the Network tile's spark. An hour is the SHORTEST window
-  // /network/throughput serves (api/network.py validates 1 <= hours <= 48),
-  // so the tile's footer reads the window off the timestamps it actually got
-  // rather than claiming one.
+  // /network/throughput serves (1 <= hours <= 48), so the tile's footer reads
+  // the window off the timestamps it got rather than claiming one.
   //
   // combineThroughput, never a sum: two hosts enrolled into one cluster each
-  // record that whole cluster's traffic, so adding the rows reports it twice.
-  // The cluster each host belongs to comes off `nodes`, which this page has
-  // already fetched, so this costs one request and no extra state. The live
-  // figures beside the spark stay /cluster/summary's, which is deduped
-  // server-side already.
+  // record that whole cluster's traffic, so adding the rows reports it
+  // twice.
   const throughputQuery = useThroughput(1)
   const clusterOf = (hostId: number) =>
     (nodes ?? []).find((n) => n.host_id === hostId)?.cluster ?? null
   const net = combineThroughput(throughputQuery.data?.hosts ?? [], clusterOf)
 
-  /* The two inventories, built once and placed by the branch below. They are
-     consts rather than two components because they close over the two
-     queries above and take nothing else; a component here would be two props
-     of ceremony for one caller. */
+  /* The two inventories, built once and placed by the branch below. Consts
+     rather than components because they close over the two queries above and
+     take nothing else. */
   const appsColumn = (
     <div>
-      {/* One icon per app with its status, and nothing else. The view
-          switch and Update all moved to the Apps page: this section is a
-          glance at what is installed, not the place to operate on it.
-
-          Every app, with no cap. It used to show the first eight in
-          whatever order /apps answered, which on a cluster meant a missing
-          app could equally be stopped, gone, or simply the ninth. */}
+      {/* One icon per app with its status, and nothing else: this section is a
+          glance at what is installed, not the place to operate on it. Every
+          app, with no cap, so a missing app cannot also mean "the ninth". */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[16px] font-semibold">Apps</h2>
         {/* as never: route typing workaround, see router.tsx */}
@@ -233,18 +215,13 @@ export function HostsPage() {
     </div>
   )
 
-  /* Heading outside the panel, matching Apps beside it: over there the
-     heading row also carries the view switch and Update all, so it has to sit
-     outside. Putting this one inside its box made the two columns read as
-     different kinds of thing. The same flex wrapper keeps both headings on one
-     baseline across the row. */
+  /* Heading outside the panel, matching Apps beside it, whose heading row has
+     to sit outside because it carries the view switch. The same flex wrapper
+     keeps both headings on one baseline across the row. */
   const vmsColumn = (
     <div>
-      {/* The same icon grid the Apps column draws, grouped the same way.
-          It was a Name/Node/Status table showing the first four VMs, which
-          made the two inventories read as two different kinds of thing and
-          hid the fifth VM entirely. The grid carries its own panel, so
-          there is no card wrapper here any more. */}
+      {/* The same icon grid the Apps column draws, grouped the same way. The
+          grid carries its own panel, so there is no card wrapper here. */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[16px] font-semibold">Virtual machines</h2>
         {/* as never: route typing workaround, see router.tsx */}
@@ -279,11 +256,10 @@ export function HostsPage() {
       </div>
 
       <div className={`${card} flex justify-around`}>
-        {/* The pending case has exactly the same problem the error case does,
-            one line down: `pct={summary?.cpu.pct ?? 0}` is 0 until the fetch
-            returns, so all three gauges drew a confident empty ring, and the
-            three subs under them read "unknown", for a cluster that was simply
-            not measured yet. `unknown` is the wrong tool for it, that word is
+        {/* The pending case has the same problem the error case does:
+            `pct={summary?.cpu.pct ?? 0}` is 0 until the fetch returns, so all
+            three gauges drew a confident empty ring over a cluster that was
+            simply not measured yet. `unknown` is wrong here too: that word is
             an answer, and there is no answer yet. */}
         {summaryQuery.isPending ? (
           <SkeletonGroup label="Loading cluster usage" className="flex flex-1 justify-around">
@@ -297,9 +273,6 @@ export function HostsPage() {
         {/* summaryQuery.isError -> unknown: a failed /cluster/summary must not
             draw a calm 0% gauge, which reads as "nothing is being used"
             rather than "we could not check". */}
-        {/* `pct == null` joins isError as unknown: the backend sends null when
-            nothing was measured, so a degraded poll no longer draws a calm 0%
-            gauge over a cluster that cannot even accept a write. */}
         <Ring label="CPU" pct={summary?.cpu.pct ?? 0}
           unknown={summaryQuery.isError || summary?.cpu.pct == null}
           sub={summaryQuery.isError || summary?.cpu.pct == null ? 'unknown'
@@ -315,13 +288,9 @@ export function HostsPage() {
           sub={summaryQuery.isError || summary?.storage.pct == null ? 'unknown'
             : `${fmtBytes(summary.storage.used_bytes)} / ${fmtBytes(summary.storage.total_bytes)}`}
           stops={['#A78BFA', '#6D5AE6']} />
-        {/* Throughput moved up here from a card of its own further down the
-            page. It sits beside the three rings because it is the same kind
-            of reading, cluster-wide right now, and it drew a whole card for
-            two figures. */}
-        {/* No `scope`: every other reading in this row is the whole fleet
-            too, so naming it here would state the obvious. The prop is for a
-            per-node caller, which IS a departure from what the row means. */}
+        {/* No `scope`: every reading in this row is the whole fleet, so
+            naming it would state the obvious. The prop is for a per-node
+            caller. */}
         <NetworkStat inBps={summary?.net.in_bps} outBps={summary?.net.out_bps}
           ts={net.ts} inValues={net.inValues} outValues={net.outValues}
           unknown={summaryQuery.isError || summary?.net.in_bps == null} />
@@ -362,31 +331,21 @@ export function HostsPage() {
         </QueryState>
       </div>
 
-      {/* Apps and Virtual machines side by side: they are the two inventories
-          this page exists to show, and an operator comparing them wants both
-          in view at once rather than one scrolled past the other. The split
-          between them is draggable now, because which of the two deserves the
-          width is a fact about the fleet rather than about the page: a node
-          running twenty apps and one VM wants the bar nowhere near the middle.
-
-          The group draws no border, only the bar. Each inventory already
-          carries its own panel (IconGrid's PANEL), so a box around the pair
-          would be a third edge saying nothing the two inside it do not.
+      {/* Apps and Virtual machines side by side: an operator comparing the two
+          inventories wants both in view at once, and the split is draggable
+          because which one deserves the width is a fact about the fleet. No
+          border on the group, only the bar: each inventory carries its own
+          panel (IconGrid's PANEL).
 
           `height: auto` overrides the library's inline `height: 100%`, which
-          would otherwise resolve against this page's own auto height and is
-          not worth relying on. NEITHER GRID CAPS ITS ROWS: AppIconGrid and
-          VmIconGrid render every app and every VM the fleet has, grouped by
-          node, so any fixed height here is a guess that clips the twenty-first
-          app the day somebody installs it. The panels divide width; height
+          would otherwise resolve against this page's own auto height. NEITHER
+          GRID CAPS ITS ROWS, so any fixed height here clips the twenty-first
+          app the day somebody installs it: the panels divide width, height
           stays whatever the taller inventory needs.
 
-          minSize is 16rem rather than a percentage: the grid inside wants a
-          10rem column plus the panel's padding, and that is a number of
-          pixels, not a fraction of a window nobody has measured.
-
-          They stack below lg, where half a row is too narrow for either, and
-          where a draggable split would divide height instead of width. */}
+          minSize is 16rem, not a percentage: the grid inside wants a 10rem
+          column plus the panel's padding, which is pixels. They stack below
+          lg, where half a row is too narrow for either. */}
       {wide ? (
         <ResizablePanelGroup orientation="horizontal" className="mt-6"
                              style={{ height: 'auto' }}>
@@ -405,10 +364,10 @@ export function HostsPage() {
 }
 
 // Minimal slice of GET /hosts/{id}: the opt-in flag and the address the
-// "Open Proxmox web UI" button links to. The fleet-overview fields (status,
-// uptime, etc.) already come from `node`. node_power_missing (doc 08 §2/§9)
-// feeds HostActionsMenu's Reboot/Power off items, null/undefined meaning
-// "not probed since this existed", not "granted".
+// "Open Proxmox web UI" button links to; the fleet-overview fields come from
+// `node`. node_power_missing feeds HostActionsMenu's Reboot and Power off
+// items, null/undefined meaning "not probed since this existed", not
+// "granted".
 type HostDetail = {
   id: number; name: string; address: string; node_shell_enabled: boolean
   node_power_missing?: boolean | null
@@ -429,15 +388,12 @@ function useHostDetail(id: number) {
   })
 }
 
-/** Opens the node shell in a window of its own, beside the Proxmox web UI
- *  link, and NEVER goes grey.
+/** Opens the node shell in a window of its own and NEVER goes grey.
  *
- *  This replaces a disabled button with a tooltip. Two independent gates could
- *  disable it (the terminal.node entitlement and the per-host opt-in from
- *  doc 08 §9), and a tooltip is invisible on touch and easy to miss anywhere
- *  else, so the honest reading of a greyed control was "this feature is
- *  broken". The control now always works; when a gate is shut it says which
- *  one, and where to open it, instead of opening a dead window. */
+ *  Two independent gates could disable it (the terminal.node entitlement and
+ *  the per-host opt-in), and a tooltip on a greyed control is invisible on
+ *  touch, so the honest reading of it was "this feature is broken". It always
+ *  works; when a gate is shut it says which one, and where to open it. */
 function NodeShellButton({ hostId, nodeShellEnabled }:
   { hostId: number; nodeShellEnabled: boolean | undefined }) {
   const ent = useEntitlements()
@@ -459,10 +415,9 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
           return
         }
         // A console wants its own window rather than a tab: it is a working
-        // surface you keep beside the page, not a place you navigate to.
-        // Shared with the VM and app consoles (lib/console-window.ts), which
-        // is what makes the window naming consistent enough that a second
-        // click focuses the first window instead of opening another session.
+        // surface you keep beside the page. Shared with the VM and app
+        // consoles (lib/console-window.ts), which is what makes a second click
+        // focus the first window instead of opening another session.
         openConsoleWindow('host', hostId)
       }}>
       Node shell ↗
@@ -472,9 +427,8 @@ function NodeShellButton({ hostId, nodeShellEnabled }:
 
 /** (host id, node row, host detail) for whichever of the three host routes is
  *  mounted. `node` is absent on the legacy /hosts/$hostId route, which
- *  resolves to the host's entry node. Keying the lookup on (host, node) is the
- *  fix for a host with several nodes: `nodes.find(n => n.host_id === id)` used
- *  to return whichever one came first. */
+ *  resolves to the entry node. Keyed on (host, node): on a host with several
+ *  nodes, `nodes.find(n => n.host_id === id)` returns whichever came first. */
 function useNodeContext() {
   const { hostId, node: nodeName } = useParams({ strict: false }) as
     { hostId: string; node?: string }
@@ -489,9 +443,8 @@ function useNodeContext() {
   const entry = forHost?.find((n) => n.is_entry)
   const hostQuery = useHostDetail(id)
   // Both lookups are undefined until their query lands, so "no node and no
-  // host" is true on every cold navigation to this URL before it is true of
-  // any missing node. Callers need to tell those two apart, see the top of
-  // NodeDetailPage.
+  // host" is true on every cold navigation before it is true of any missing
+  // node. Callers need to tell those apart.
   const pending = nodesQuery.isPending || hostQuery.isPending
   return { id, node, host: hostQuery.data, entry, pending }
 }
@@ -502,22 +455,19 @@ const TABS = [
 ]
 
 /** The host page's frame: who this machine is, where to open it, and the
- *  tabs. The body is a routed child, matching the app and VM detail pages. */
+ *  tabs. The body is a routed child. */
 export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
   const { id, node, host, pending } = useNodeContext()
   // Capabilities whose token is short of a privilege its role now carries, or
-  // whose token could not be read at all (null, "could not tell"). {} is the
-  // clean case and undefined means never probed; both count as zero.
+  // whose token could not be read at all. {} is the clean case and undefined
+  // means never probed; both count as zero.
   const gapCount = Object.keys(host?.capability_gaps ?? {}).length
-  // Before this check, a cold load of /hosts/1/pve showed "Node not found, it
-  // may have been removed" for as long as /nodes took to answer, and then the
-  // node appeared. Of the four answers, that was the page picking the most
-  // alarming one while it still had none.
+  // Without this check, a cold load of /hosts/1/pve showed "Node not found,
+  // it may have been removed" for as long as /nodes took to answer: the page
+  // picking the most alarming answer while it still had none.
   //
   // Returning early also keeps the Outlet from mounting, so NodeOverview and
-  // NodeHardware, which both bail to `null` on the same missing lookups, do
-  // not need a placeholder of their own; the frame is the whole page until
-  // there is a node to hang a body on.
+  // NodeHardware need no placeholder of their own.
   if (pending) {
     return (
       <SkeletonGroup label="Loading node">
@@ -526,7 +476,6 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
             <SkeletonLine className="w-40 text-[20px]" />
             <SkeletonLine className="w-56 text-[12px]" />
           </div>
-          {/* Node shell, the Proxmox link, the StatusPill, the actions menu. */}
           <div className="flex items-center gap-3">
             <Skeleton className="h-[30px] w-24 rounded-ctl" />
             <Skeleton className="h-[27px] w-44 rounded-ctl" />
@@ -558,8 +507,8 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
         </div>
         <div className="flex items-center gap-3">
           {/* Entry node only: a shell ticket is minted for the host's own
-              node, so offering it under any other node of the cluster would
-              open a shell on a different box than the page is showing. */}
+              node, so offering it elsewhere would open a shell on a different
+              box than the page is showing. */}
           {(node?.is_entry ?? true) && (
             <NodeShellButton hostId={id} nodeShellEnabled={host?.node_shell_enabled} />
           )}
@@ -574,17 +523,13 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
           {node && <StatusPill status={node.status} />}
           {/* A node without quorum answers /version and /cluster/resources
               perfectly and refuses every WRITE, so "Connected" on its own is a
-              lie an operator acts on (doc 12 check 12). Sits beside the status
-              rather than replacing it, because reads really do work. */}
+              lie an operator acts on. Sits beside the status rather than
+              replacing it, because reads really do work. */}
           {/* Privilege drift, shown WITHOUT anyone pressing Test connection: a
-              role gains privileges over time (SDN.Use and VM.Config.HWType both
-              landed on 2026-08-18) and a token generated earlier fails with a
-              403 partway through a job. The poll loop refreshes this every half
-              hour. */}
+              role gains privileges over time and a token generated earlier
+              then fails with a 403 partway through a job. The poll loop
+              refreshes this every half hour. */}
           {gapCount > 0 && (
-            /* /settings/hosts was never a route, so this badge has always
-               dead-ended; the `as never` cast is what let it type-check.
-               Settings grew a section rail, so Hosts now has a real URL. */
             <Link to="/settings" search={{ section: 'hosts' } as never}
               title="Re-run the setup script from Settings to grant them."
               className="rounded-ctl border border-amber/30 bg-amber-dim px-2 py-0.5
@@ -603,9 +548,8 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
             </span>
           )}
           {/* Node-scoped (Reboot/Power off target THIS node) and host-scoped
-              (Edit changes the Host record, shared across every node of its
-              cluster) both live behind one trigger, so both need to be
-              resolved before it can render at all. */}
+              (Edit changes the Host record) both live behind one trigger, so
+              both must resolve before it can render. */}
           {node?.node && host && (
             <HostActionsMenu hostId={id} node={node.node}
               host={{ name: host.name, address: host.address }}
@@ -624,17 +568,16 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
         ))}
       </div>
       {/* The legacy /hosts/$hostId route has no routed children to fill an
-          Outlet, and it renders this page while its redirect resolves; giving
-          it the Overview inline keeps that moment from being a blank frame. */}
+          Outlet and renders this page while its redirect resolves; the inline
+          Overview keeps that moment from being a blank frame. */}
       {inline ? <NodeOverview /> : <Outlet />}
     </div>
   )
 }
 
-/** Charts and the node shell belong to the entry node: the `host:<id>` metric
- *  series is recorded there and the shell ticket is minted for it. Both were
- *  simply absent on every other node of a cluster, which reads as a missing
- *  feature rather than a deliberate one. */
+/** Charts and the node shell belong to the entry node: the `host:<id>` series
+ *  is recorded there and the shell ticket is minted for it. Absent elsewhere,
+ *  they read as a missing feature rather than a deliberate one. */
 function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
   const entryNode = entry?.node
   return (
@@ -659,18 +602,11 @@ function EntryNodeNote({ hostId, entry }: { hostId: number; entry?: NodeRow }) {
 /** What to draw for "Guests on this host", derived from BOTH the apps and
  *  VMs queries at once.
  *
- *  This replaces a single `QueryState query={nodeAppsQuery}` that decided
- *  loading/empty/error from the apps query alone and folded `vms` in only
- *  once apps had already succeeded and come back non-empty, so an
- *  apps-empty node (a fresh install with real VMs and zero adopted apps) hid
- *  its VMs behind "No guests on this node", and an apps-erroring node hid
- *  them behind "Guests not readable". The one behaviour that must hold: if
- *  either list has rows, those rows render. So: pending if either query is
- *  still pending; a hard error only when BOTH failed (there is then truly
- *  nothing to show); otherwise render whatever rows the succeeding side(s)
- *  have, empty only when that combined count is zero, and a partial-failure
- *  note, not a swallowed error, when exactly one side failed but the other
- *  still has something to show. */
+ *  The one behaviour that must hold: if either list has rows, those rows
+ *  render. Pending if either query is still pending; a hard error only when
+ *  BOTH failed; otherwise whatever rows the succeeding side has, empty only
+ *  when that combined count is zero, and a partial-failure note, not a
+ *  swallowed error, when one side failed and the other still has rows. */
 type GuestsState =
   | { kind: 'loading' }
   | { kind: 'error'; title: string; note: string }
@@ -725,9 +661,9 @@ function combineGuestQueries(
 
 export function NodeOverview() {
   const { id, node, host, entry } = useNodeContext()
-  // mem_pct, not mem_bytes: the poller records both for a host, and charting
-  // the percentage puts all three of these on one 0..100 scale so they can be
-  // read side by side. The absolute figures are one row up, in the KV grid.
+  // mem_pct, not mem_bytes: charting the percentage puts all three of these
+  // on one 0..100 scale so they can be read side by side. The absolute figures
+  // are one row up, in the KV grid.
   const nodeAppsQuery = useQuery({
     queryKey: ['apps', { host: id }],
     queryFn: () => api<AppRow[]>(`/apps?host=${id}`),
@@ -746,35 +682,29 @@ export function NodeOverview() {
       {/* minmax(0,1fr), not 1fr: it lets the track shrink below the charts'
           intrinsic content width instead of refusing to shrink at all. */}
       <div className="mb-5 lg:sticky lg:top-16 lg:mb-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
-        {/* The rail is dense reference material, not something worth pinning
-            at the cost of reachability: with /status answering it runs to
-            roughly 700px, and lg:top-16 alone left its bottom rows (Boot,
-            part of Memory & storage) permanently below the fold on any
-            viewport under ~765px tall (a 1366x768 laptop among them),
-            comfortably inside `lg`. max-h + overflow-y-auto trades that for a
-            nested scrollbar, which can always reach the bottom. */}
+        {/* The rail is dense reference material, not worth pinning at the
+            cost of reachability: with /status answering it runs to roughly
+            700px, and lg:top-16 alone left its bottom rows below the fold on
+            any viewport under ~765px tall, comfortably inside `lg`. max-h +
+            overflow-y-auto trades that for a nested scrollbar, which can
+            always reach the bottom. */}
         {node?.node && (
           <NodeIdentityRail hostId={id} node={node.node} snapshot={node} />
         )}
       </div>
       <div>
-        {/* Entry node only: the `host:<id>` metric series is recorded from
-            the node Proxploy connects through, so drawing it under any other
-            node of the cluster would be charting a different machine. */}
+        {/* Entry node only: the `host:<id>` series is recorded from the node
+            Proxploy connects through, so drawing it under any other node would
+            be charting a different machine. */}
         {node && (node.is_entry
           ? (
             /* Each chart owns its range: "is the CPU spiking now" and "did
                storage creep all week" are different questions.
                @container/@3xl, not lg: a chart card needs roughly 200px of
-               inner width to fit its non-wrapping 30m/1h/12h/24h range group,
-               and this RIGHT COLUMN, not the viewport, is what decides
-               that width. The 290px rail plus its gap can hold the column
-               under 200px well past `lg` (~91px of card width at a 1024px
-               viewport, versus ~194px before the rail existed), which is
-               exactly what a viewport-keyed `lg:grid-cols-3` missed. @3xl
-               (768px of container width) is the narrowest container step
-               that still clears ~200px per card once p-5 padding, borders
-               and gap-4 gutters come out of it. */
+               inner width for its non-wrapping range group, and this RIGHT
+               COLUMN, not the viewport, decides that width. The 290px rail
+               plus its gap can hold the column under 200px well past `lg`,
+               which is what a viewport-keyed `lg:grid-cols-3` missed. */
             <div className="@container">
               <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-3">
                 <div className={card}>
@@ -804,10 +734,6 @@ export function NodeOverview() {
             Guests on this host ({guestCount})
           </h2>
           {guestsState.kind === 'loading' && (
-            // Was a dashed 200px box with the word "Loading…" in the middle of
-            // it, which is neither the size nor the shape of the list that
-            // replaced it, so the page jumped every time. GuestListSkeleton is
-            // the real list box with three rows in it.
             <SkeletonGroup label="Loading guests"><GuestListSkeleton /></SkeletonGroup>
           )}
           {guestsState.kind === 'error' && (
@@ -841,11 +767,9 @@ export function NodeHardware() {
 }
 
 /** /hosts/$hostId, kept alive for every link minted before node detail grew
- *  its node segment (and for anything that only knows a host id).
- *
- *  It resolves to the host's ENTRY node, the one Proxploy connects through,
- *  and renders the same page meanwhile: a redirect that first showed a blank
- *  screen would be a regression for the standalone host this used to serve. */
+ *  its node segment. It resolves to the host's ENTRY node and renders the same
+ *  page meanwhile: a redirect that first showed a blank screen would be a
+ *  regression for the standalone host this used to serve. */
 export function HostEntryRedirect() {
   const { hostId } = useParams({ strict: false }) as { hostId: string }
   const id = Number(hostId)
@@ -893,7 +817,6 @@ export const hostHardwareRoute = createRoute({
   component: NodeHardware,
 })
 
-// Still routed, still works: it redirects to the entry node above.
 export const hostEntryRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/hosts/$hostId',

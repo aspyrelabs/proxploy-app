@@ -22,27 +22,23 @@ const EDGE_GAP_PX = 5
 /** Hard ceiling on cards, however tall the window is. */
 const MAX_VISIBLE = 15
 
-/** Rough height of the shortest possible card plus its gap. Only used for the
- *  first paint, before the real cards can be measured: see useFittingCount. */
+/** Rough height of the shortest possible card plus its gap, used only for the
+ *  first paint, before the real cards can be measured. */
 const CARD_ESTIMATE_PX = 84
 
 /** How much of the viewport the popover cannot use: the topbar it hangs from,
- *  its own sideOffset, and a margin so the last card is not flush to the edge. */
+ *  its sideOffset, and a margin below the last card. */
 const CHROME_PX = 96
 
 /** How many cards fit in the window, measured rather than guessed.
  *
  *  Card height is not constant (a failure's message wraps to however many
- *  lines its error needs), so dividing by a fixed constant either clips the
- *  last card or wastes a slot. This estimates on the first paint, then measures
- *  the cards actually rendered and settles on the real number.
+ *  lines its error needs), so a fixed divisor either clips the last card or
+ *  wastes a slot. The guard against setting an unchanged value is what stops a
+ *  resize from looping.
  *
- *  It converges in one extra pass because a card's height does not depend on
- *  how many are shown; the guard against setting an unchanged value is what
- *  stops a resize from looping.
- *
- *  In jsdom every offsetHeight is 0, so the measurement is skipped entirely and
- *  the ceiling stands: tests assert on MAX_VISIBLE, not on layout. */
+ *  In jsdom every offsetHeight is 0, so the measurement is skipped and the
+ *  ceiling stands. */
 function useFittingCount(
   listRef: React.RefObject<HTMLDivElement | null>,
   open: boolean,
@@ -52,10 +48,8 @@ function useFittingCount(
     Math.max(1, Math.min(MAX_VISIBLE, Math.floor((window.innerHeight - CHROME_PX) / CARD_ESTIMATE_PX))))
 
   /** The count that was tried and did not fit, at one particular window height.
-   *  Without it, growth and shrink fight: adding a card that overflows shrinks
-   *  back, leaving room that looks like space for another card, which gets
-   *  added, which overflows. Forgotten as soon as the window resizes, because a
-   *  different height deserves a fresh attempt. */
+   *  Without it, growth and shrink fight: a card that overflows shrinks back,
+   *  leaving room that looks like space for another. Forgotten on resize. */
   const blocked = useRef<{ available: number; count: number } | null>(null)
 
   useLayoutEffect(() => {
@@ -79,8 +73,8 @@ function useFittingCount(
       }
 
       if (n < measured.length) {
-        // Overflowed. Shrink to what actually fits, and remember that one more
-        // than that does not, so the growth branch cannot immediately undo it.
+        // Overflowed. Shrink to what fits, and remember that one more does
+        // not, so the growth branch cannot immediately undo it.
         blocked.current = { available, count: n + 1 }
         const fitted = Math.max(1, n)
         setCount((cur) => (cur === fitted ? cur : fitted))
@@ -88,14 +82,9 @@ function useFittingCount(
       }
 
       // Everything rendered fits, so the window may have grown. The loop above
-      // can only count cards that are RENDERED, which is why shrinking used to
-      // be a one-way ratchet: the measurement was bounded by its own previous
-      // result, so a window that grew back had nothing new to measure.
-      //
-      // Growing one at a time re-renders, re-measures, and either keeps going
-      // or trips the block above. That converges without guessing the next
-      // card's height, which is unknowable in advance: a failure's message
-      // wraps to however many lines its error needs.
+      // can only count cards that are RENDERED, so growing one at a time is
+      // what gives it something new to measure. The next card's height cannot
+      // be guessed in advance.
       const isBlocked = blocked.current !== null
         && blocked.current.available === available
         && count + 1 >= blocked.current.count
@@ -121,15 +110,8 @@ import type { NotificationSeverity } from './ui/notification-card'
 
 /** The tray's own empty/error placeholder, sized to sit alongside the
  *  NotificationCards it stands in for rather than EmptyState's page-level
- *  `py-20`. EmptyState is a page-level component (11 other callers rely on
- *  that full-height treatment for a whole route going empty); this tray is a
- *  400px popover, and the same box read as a mostly blank rectangle far
- *  taller than any card it replaced. Local to this file rather than a variant
- *  on EmptyState: nothing else needs a compact empty state today, and a
- *  shared variant would be speculative reuse for a problem this file alone
- *  has. Borrows NotificationCard's own chrome (rounded-ctl, border-line,
- *  bg-panel, shadow) so it reads as a card that happens to hold a message
- *  instead of a shape borrowed from a page it isn't. */
+ *  `py-20`, which read as a mostly blank rectangle inside a 400px popover.
+ *  Borrows NotificationCard's chrome so it reads as a card. */
 function TrayEmptyState({ title, note }: { title: string; note: string }) {
   return (
     <div className="rounded-ctl border border-line bg-panel px-3 py-2.5 text-center shadow-lg">
@@ -139,14 +121,8 @@ function TrayEmptyState({ title, note }: { title: string; note: string }) {
   )
 }
 
-/** One notification, as a card.
- *
- *  The user asked for notification cards rather than a list, so this renders
- *  the same NotificationCard the live toasts use (same four severities, same
- *  x) instead of the bespoke row this popover shipped with. Dismiss hides the
- *  card locally: /jobs is a server-side record, not an inbox, so there is
- *  nothing to mark read; the x clears it from view until the query refetches.
- */
+/** Card severity from a job's status. Dismiss hides the card locally: /jobs is
+ *  a server-side record, not an inbox, so there is nothing to mark read. */
 function severityOf(status: string): NotificationSeverity {
   if (status === 'succeeded') return 'success'
   if (status === 'failed') return 'destructive'
@@ -155,19 +131,11 @@ function severityOf(status: string): NotificationSeverity {
 }
 
 /** The message. A failure's reason is the message; anything else states what
- *  happened in a sentence rather than making the reader infer it from a kind
- *  string.
- *
- *  Every branch names the ACTION as well as the target. "Finished on
- *  anytype-server on node1" said what was acted on and never what was done to
- *  it, which is not a sentence, and it doubled the "on" once target_name began
- *  carrying "<guest> on <node>". With the verb in place the same row reads
- *  "Finished installing anytype-server on node1".
- *
- *  `verb` is null for a job kind nobody has written a gerund for, and the
- *  fallbacks below are then the exact sentences this function always wrote.
- *  New kinds arrive backend-side regularly, and a plainer sentence is a better
- *  failure than invented English. */
+ *  happened in a sentence. Every branch names the ACTION as well as the target,
+ *  or the row reads "Finished on anytype-server on node1", which doubles the
+ *  "on" now that target_name carries "<guest> on <node>". `verb` is null for a
+ *  kind nobody has written a gerund for, and new kinds arrive regularly: the
+ *  plainer fallback beats invented English. */
 function messageOf(job: JobRow): string {
   if (job.error) return job.error
   const where = targetLabel(job) ?? 'this cluster'
@@ -201,16 +169,12 @@ function duration(job: JobRow): string | null {
                                              : `${Math.round(ms / 60_000)}m`
 }
 
-/** One line of context under the message. Trimmed from a label/value table
- *  that carried status, requester and schedule too: that much detail buried
- *  the message it was there to support. What survives is what you actually
- *  scan for: what it touched, how far along, and how long ago. */
+/** One line of context under the message: what it touched, how far along, and
+ *  how long ago. More detail than that buried the message it supports. */
 function footerOf(job: JobRow): string {
   const bits: string[] = []
   const where = targetLabel(job)
   if (where) bits.push(where)
-  // A running job's percent used to be folded in here as plain text; it now
-  // renders as NotificationCard's own ring (see `progress` below) instead.
   const took = duration(job)
   if (took) bits.push(took)
   bits.push(ago(job.started_at ?? job.created_at))
@@ -225,10 +189,8 @@ function progressOf(job: JobRow): number | undefined {
 
 /** A job's id counts as already cleared if it is at or below the watermark
  *  ("clear all" as of some earlier moment) or sits in the small list of
- *  individually dismissed ids above it. `state` is undefined before the
- *  first load: nothing is hidden yet rather than everything, the same
- *  fail-open-to-visible choice jobsQuery.data ?? [] makes elsewhere in this
- *  file. */
+ *  individually dismissed ids above it. `state` is undefined before the first
+ *  load: nothing is hidden yet rather than everything. */
 function isPersistedDismissed(state: DismissedState | undefined, jobId: number): boolean {
   if (!state) return false
   if (state.cleared_through_job_id != null && jobId <= state.cleared_through_job_id) return true
@@ -236,45 +198,37 @@ function isPersistedDismissed(state: DismissedState | undefined, jobId: number):
 }
 
 /**
- * The bell's popover: what the activity drawer used to show, without the
- * full-height sheet. Reads GET /jobs, which is the one source carrying the
- * `error` field this surface has to show.
+ * The bell's popover, over GET /jobs, the one source carrying the `error` field
+ * this surface has to show.
  *
- * A popover rather than DropdownMenu: this list holds buttons (Cancel) and
- * an expandable log, and DropdownMenu's role="menu" semantics hijack arrow
- * keys and expect role="menuitem" children, neither of which fits.
+ * A popover rather than DropdownMenu: this list holds buttons and an expandable
+ * log, and DropdownMenu's role="menu" semantics hijack arrow keys and expect
+ * role="menuitem" children.
  */
 export function BellPopover() {
   const [open, setOpen] = useState(false)
-  // Keyed by TrayItem.id ('job:<id>', 'action:...', 'alert:...'), not a
-  // job's numeric id: the tray now holds more than jobs, and unifying the
-  // key lets one dismiss handler (and one Clear all) cover all of it.
+  // Keyed by TrayItem.id ('job:<id>', 'action:...', 'alert:...'), not a job's
+  // numeric id: the tray holds more than jobs, and one key lets one dismiss
+  // handler and one Clear all cover all of it.
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
-  // Which job's transcript is open. Deleting the drawer took the only path to
-  // GET /jobs/{id}/events for a job you did not start in this session; this is
-  // that path, without turning the cards back into a list.
+  // Which job's transcript is open. This is the only path to
+  // GET /jobs/{id}/events for a job you did not start in this session.
   const [logJob, setLogJob] = useState<JobRow | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
   function openChange(next: boolean) {
     setOpen(next)
-    // Opening marks "now" as seen (the badge counts what arrived since),
-    // and tells NotificationSurface to stay quiet while the tray itself is
-    // showing the same information -- there is nothing the brief banner
-    // could add, and it must never sit on top of the popover the user
-    // already opened by hand.
+    // Opening marks "now" as seen (the badge counts what arrived since) and
+    // tells NotificationSurface to stay quiet: a banner must never sit on top
+    // of the popover the user opened by hand.
     setTrayOpen(next)
   }
 
   /** align="end" pins the cards to the BELL's right edge, and the bell is not
-   *  the rightmost control (the account menu is), so that left a wide gap.
-   *
-   *  alignOffset shifts along the alignment axis, and for align="end" it runs
-   *  toward the START: a positive value moves the cards further LEFT, deeper
-   *  into the window, which is the opposite of what is wanted here. Hence the
-   *  negation. Measured, not hardcoded, so a longer display name in the
-   *  account menu or a different tier pill cannot put it back out. */
+   *  the rightmost control, so that left a wide gap. alignOffset runs toward
+   *  the START for align="end", so a positive value moves the cards LEFT: hence
+   *  the negation. Measured, not hardcoded. */
   const [alignOffset, setAlignOffset] = useState(0)
   useLayoutEffect(() => {
     if (!open) return
@@ -291,30 +245,22 @@ export function BellPopover() {
   })
 
 
-  // The badge counts exactly what the tray holds, nothing cleverer. It has
-  // been two other things: running jobs only, then running jobs plus an unread
-  // tally. Both meant the number on the icon described something other than the
-  // list behind it, which is the confusion this tray exists to remove, and the
-  // unread version read as broken because a quiet page with no jobs in flight
+  // The badge counts exactly what the tray holds, nothing cleverer. An unread
+  // tally instead read as broken, because a quiet page with no jobs in flight
   // sat at zero while the tray plainly had items in it.
   const storeItems = useSyncExternalStore(subscribeNotifications, getNotifications, getNotifications)
 
   // GET /jobs already orders newest-first server-side. Do not re-sort here:
-  // string-comparing ISO created_at timestamps client-side reproduces the
-  // zero-microsecond tie bug the backend explicitly avoids (a bare 'Z' sorts
-  // after a fractional-second suffix like '.123456Z', so a zero-microsecond
-  // row would sort as newer than a genuinely later same-second row).
-  // Always enabled, not only while open: the badge counts what the tray holds,
-  // and it cannot know that if the list is only fetched on opening.
+  // string-comparing ISO created_at reproduces the zero-microsecond tie bug the
+  // backend explicitly avoids, since a bare 'Z' sorts after a fractional suffix
+  // like '.123456Z'. Always enabled, not only while open, because the badge
+  // counts what the tray holds.
   const jobsQuery = useJobs()
   const firingAlerts = useFiringAlerts()
 
-  // Server-side memory of what THIS user already cleared, so a clear
-  // survives a reload, a reboot, and a login from a different browser (the
-  // requirement `dismissed` alone -- component state -- cannot meet; see
-  // .superpowers/sdd/persist-cleared-notifications-report.md). Only job-
-  // backed items are covered: a store item is already gone on reload, see
-  // isPersistedDismissed and dismissItem/clearAll below.
+  // Server-side memory of what THIS user already cleared, so a clear survives
+  // a reload, a reboot, and a login from another browser, which component state
+  // alone cannot do. Only job-backed items are covered.
   const dismissedQuery = useDismissedState()
   const dismissJobMutation = useDismissJob()
   const clearAllMutation = useClearAllDismissed()
@@ -323,16 +269,9 @@ export function BellPopover() {
     id: `job:${j.id}`,
     severity: severityOf(j.status),
     // Status in the title, not only in severityOf's colour: a card headed
-    // "App Uninstall" over a red icon leaves the reader working out from the
-    // colour alone whether the container is gone. actionLabel spells it out,
-    // "App Uninstall Failed".
-    //
-    // No "#12" after it. That was the jobs table's primary key, which means
-    // nothing to the person reading the tray and made every routine
-    // housekeeping card read as "Usage Cleanup #215", as though the number
-    // were a version or a count worth noticing. The row still needs a stable
-    // identity, and it has one: TrayItem.id above is `job:<id>`, which is not
-    // rendered.
+    // "App Uninstall" over a red icon leaves the reader working out whether the
+    // container is gone. actionLabel spells it out. No "#12" after it: that is
+    // the jobs table's primary key and means nothing to the reader.
     title: actionLabel(j.kind, j.status),
     description: messageOf(j),
     footer: footerOf(j),
@@ -341,12 +280,11 @@ export function BellPopover() {
     timestamp: new Date(j.created_at).getTime(),
   })
 
-  // Firing alerts, from the server rather than only from SSE. A host the poller
-  // cannot reach and a cluster that has lost quorum both raise one (both have
-  // seeded rules), and until this was here they reached the tray only if the tab
-  // happened to be open when the event fired, and vanished on reload. The
-  // severity mapping is `alertToastSeverity`, the same one LiveProvider uses, so
-  // one alert cannot look different before and after a refresh.
+  // Firing alerts read from the server, not only from SSE: otherwise an
+  // unreachable host or a lost quorum reached the tray only if the tab was open
+  // when the event fired, and vanished on reload. `alertToastSeverity` is the
+  // same mapping LiveProvider uses, so an alert cannot look different before
+  // and after a refresh.
   const alertItems: TrayItem[] = (firingAlerts.data ?? []).map((a) => ({
     // Prefixed `alert:<id>` so notificationMerge can drop the SSE copy of the
     // same alert; the shape matches notificationStore's own ids.
@@ -358,40 +296,28 @@ export function BellPopover() {
     timestamp: a.fired_at ? new Date(a.fired_at).getTime() : Date.now(),
   }))
 
-  // A job delivered once over SSE (LiveProvider pushes it into the store the
-  // instant it lands) and again the next time GET /jobs is polled must
+  // A job delivered once over SSE and again on the next GET /jobs poll must
   // render once, not twice; see notificationMerge.ts.
   const merged = mergeNotifications(jobsQuery.data ?? [], storeItems, toJobItem,
                                     alertItems)
   const undismissed = merged.filter((m) => !dismissed.has(m.id)
     && !(m.jobId != null && isPersistedDismissed(dismissedQuery.data, m.jobId)))
   // Fail open on the LIST, hold on the FILTER. isPersistedDismissed answers
-  // false for every id until GET /dismissed lands, which is the right default
-  // for a request that FAILED (better to show a notification twice than to
-  // swallow one), and the wrong one while it is merely in flight: for that
-  // moment the tray and the badge bring back everything the operator has
-  // already cleared, then take it away again on the next paint.
-  //
-  // The distinction the original reasoning missed is that fail-open on
-  // jobsQuery and fail-open here are not the same choice. An unloaded job list
-  // showing nothing is incomplete. An unloaded dismissal list showing cleared
-  // items is WRONG: it is news the operator already dealt with, presented as
-  // current. Incomplete beats wrong, so the count waits.
-  //
-  // Only `isPending`. A dismissal query that has errored keeps the old
-  // fail-open behaviour, deliberately, because then the state is not coming.
+  // false for every id until GET /dismissed lands, which is right for a request
+  // that FAILED and wrong while one is in flight: for that moment the tray and
+  // the badge bring back everything the operator already cleared. Incomplete
+  // beats wrong, so the count waits, but only on `isPending`: an ERRORED
+  // dismissal query keeps fail-open, because then the state is not coming.
   const dismissalsUnknown = dismissedQuery.isPending
   const count = dismissalsUnknown ? 0 : undismissed.length
-  // The fit loop needs to know how many cards COULD be shown, or it would keep
-  // trying to grow past the end of the list on a tall window with few jobs.
+  // The fit loop needs to know how many cards COULD be shown, or it grows past
+  // the end of the list on a tall window with few jobs.
   const visible = useFittingCount(listRef, open, undismissed.length)
 
-  // `dismissed` hides the card the instant it is clicked, before the write
-  // below has landed -- the round trip must never be what the user waits on.
-  // It is also never rolled back if that write fails: a card that vanished
-  // and then reappeared moments later, unexplained, would be worse than one
-  // that stays gone but risks not surviving a reload. notify.error is the
-  // "not silently" half of that: the failure is surfaced, the hide is not.
+  // `dismissed` hides the card the instant it is clicked: the round trip must
+  // never be what the user waits on. It is never rolled back if that write
+  // fails, since a card that vanished and reappeared unexplained is worse than
+  // one that stays gone. notify.error surfaces the failure instead.
   function dismissItem(item: TrayItem) {
     setDismissed((d) => new Set(d).add(item.id))
     removeNotification(item.id)
@@ -428,10 +354,9 @@ export function BellPopover() {
         className="relative grid h-8 w-8 place-items-center rounded-tile bg-panel-2 text-text-2 hover:bg-elev"
       >
         <Icon name="notifications" />
-        {/* Red, and only when there is something to see: a badge showing 0 is
-            a badge that has stopped meaning anything. text-ink rather than a
-            literal, so the number stays legible on --red in both themes (ink is
-            near black on dark, near white on light). */}
+        {/* Red, and only when there is something to see: a badge showing 0
+            has stopped meaning anything. text-ink keeps the number legible on
+            --red in both themes. */}
         {count > 0 && (
           <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-red px-1 text-center font-mono text-[9px] leading-4 text-ink">
             {count > 99 ? '99+' : count}
@@ -440,11 +365,9 @@ export function BellPopover() {
       </PopoverPrimitive.Trigger>
 
       <PopoverPrimitive.Portal>
-        {/* No panel, no header: a bordered box titled "Activity" wrapping the
-            cards read as an activity list, which is the one thing this was
-            asked not to be. The Content is a transparent, borderless column
-            and each card is its own floating surface: the cards ARE the
-            popover. */}
+        {/* No panel, no header: a bordered box titled "Activity" around the
+            cards read as an activity list, the one thing this was asked not to
+            be. The cards ARE the popover. */}
         <PopoverPrimitive.Content
           ref={listRef}
           align="end"
@@ -453,23 +376,14 @@ export function BellPopover() {
           // Without this the shift above is clamped back by collision
           // detection to Radix's own padding, undoing it.
           collisionPadding={EDGE_GAP_PX}
-          // Radix moves focus to the first TABBABLE element of the content when
-          // the popover opens, and a NotificationCard's icon-only controls open
-          // their tooltip on FOCUS as well as on hover (deliberately: that is
-          // how a keyboard user reads a button that is only an icon). With one
-          // card in the tray the first tabbable is that card's "View log", so
-          // merely clicking the bell popped its tooltip with the pointer nowhere
-          // near it. Two or more cards happened to hide it, because then the
-          // "Clear all" button is first and has no tooltip.
-          //
-          // Focus the content ITSELF instead. Radix's FocusScope puts
-          // tabIndex={-1} on this same element (it is `asChild`, so its props
-          // land on the node listRef points at), and the container precedes its
-          // own children in tab order, so one Tab still walks into the cards and
-          // the tooltip still appears for the keyboard user it exists for.
-          // Focus is deliberately still moved INTO the popover rather than left
-          // on the bell: leaving it on the trigger would tab into the rest of
-          // the topbar instead of into the notifications just opened.
+          // Radix moves focus to the first TABBABLE element of the content on
+          // open, and a NotificationCard's icon-only controls open their tooltip
+          // on FOCUS as well as hover, so clicking the bell popped a tooltip
+          // with the pointer nowhere near it. Focusing the content ITSELF
+          // avoids that: FocusScope already puts tabIndex={-1} here, and a
+          // container precedes its children in tab order, so one Tab still
+          // walks into the cards. Focus must stay INSIDE the popover; on the
+          // bell it would tab into the topbar.
           onOpenAutoFocus={(event) => {
             event.preventDefault()
             listRef.current?.focus()
@@ -477,10 +391,8 @@ export function BellPopover() {
           className="z-30 flex w-[400px] max-w-[92vw] flex-col gap-2 bg-transparent p-0"
         >
           {/* An action notification (nothing to do with /jobs) has to show up
-              here even if /jobs itself is loading or failed to load: the two
-              sources are independent, and a fetch error on one must not hide
-              the other. The loading/error/empty states below are therefore
-              about the MERGED list being empty, not about jobsQuery alone. */}
+              here even if /jobs is loading or failed: the two sources are
+              independent. The states below are about the MERGED list. */}
           {undismissed.length === 0 && jobsQuery.isError ? (
             <TrayEmptyState title="Notifications not readable"
                             note="Proxploy could not reach the backend." />
@@ -492,9 +404,8 @@ export function BellPopover() {
                             note="Installs, lifecycle actions and backups show up here." />
           ) : (
             <>
-              {/* Only shown from two cards up, mirroring the sonner-era
-                  ClearAllToasts this replaces: one card already has its own
-                  x, so a clear-all beside it would be two controls for one
+              {/* Only from two cards up: one card already has its own x, so
+                  a clear-all beside it would be two controls for one
                   action. */}
               {undismissed.length >= 2 && (
                 <Button type="button" variant="ghost" size="sm"
@@ -502,13 +413,12 @@ export function BellPopover() {
                   Clear all ({undismissed.length})
                 </Button>
               )}
-              {/* As many as fit, and no scrollbar: dismissing one is what
-                  reveals the next, so the backlog drains through the x rather
-                  than through a scroll nobody asked for. */}
+              {/* As many as fit, and no scrollbar: dismissing one reveals the
+                  next, so the backlog drains through the x. */}
               {undismissed.slice(0, visible).map((item) => {
-                // Only a job the /jobs poll has actually confirmed has a log
-                // to view; a store entry whose SSE delivery beat the next
-                // poll has no server-confirmed row yet to fetch one from.
+                // Only a job the /jobs poll has confirmed has a log to view;
+                // a store entry whose SSE delivery beat the next poll has no
+                // server row to fetch one from.
                 const job = item.jobId != null
                   ? (jobsQuery.data ?? []).find((j) => j.id === item.jobId)
                   : undefined
@@ -530,17 +440,11 @@ export function BellPopover() {
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
-      {/* `fit` instead of a width: the panel is a transcript viewer and the
-          transcript decides how big it wants to be, up to 80vw/80vh. The 720
-          it used to state was a guess that a one-line failure overshot and a
-          long install run could not use.
-
-          The Close button is the same ghost button every other JobLog dialog
-          ends with (InstallDialog, MigrateDialog, HostPowerDialog, the VM
-          wizard). This one shipped without it, so a log opened from the tray
-          had Escape and the scrim and no visible way out at all. shrink-0
-          keeps it out of the flexbox shrinking that the transcript above it
-          absorbs. */}
+      {/* `fit` instead of a width: the transcript decides how big it wants to
+          be, up to 80vw/80vh. The Close button is the same ghost button every
+          other JobLog dialog ends with; without it a log opened from the tray
+          had no visible way out. shrink-0 keeps it out of the flexbox shrinking
+          the transcript absorbs. */}
       {logJob && (
         <Dialog title={actionLabel(logJob.kind, logJob.status)}
                 description={logJob.error ?? undefined}

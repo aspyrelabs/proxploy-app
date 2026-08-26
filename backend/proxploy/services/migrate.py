@@ -1,55 +1,28 @@
-# backend/proxploy/services/migrate.py
-"""Cross-host app migration, preflight + `migrate.app` job handler (doc 05,
-doc 08 §14, doc 11 §2).
+"""Cross-host app migration: preflight plus the `migrate.app` job handler.
 
 Strategy is decided from LIVE Proxmox state, never from `hosts.cluster_name`:
-grep across the whole tree at plan time turned up nothing that ever writes
-that column, so trusting it would be a silent lie. This preflight is the
-first thing that ever populates it, honestly, as a side effect of the very
-cluster_status() call that justified the choice, for the one strategy
-(`cluster`) where the value is actually true at the moment it's written.
+nothing else in the tree writes that column, so trusting it would be a silent
+lie. This preflight is the first thing that populates it, and only for the
+`cluster` strategy, where the value is true at the moment it is written.
 
-Every number in the response is either a live PVE read or an explicit
-`None` with a note saying why it couldn't be obtained. `est_downtime_s` is
-never a guess dressed up as a number: doc 10's DoD requires "accurate
-downtime shown", and a plausible-looking fabricated estimate is worse than
-an honest "unknown" (doc 11 §2: downtime UX must state the truth).
+Every number in the response is either a live PVE read or an explicit `None`
+with a note saying why: a plausible fabricated estimate is worse than an
+honest "unknown". `est_downtime_s` is an ESTIMATE; the job's `downtime_s` is
+MEASURED wall-clock time from the source guest stopping to the target guest
+confirmed running.
 
-The `migrate.app` job handler (Task 15, below) re-runs `preflight()` itself
-params handed in from the route are only `app_id`/`target_host_id`, never
-the strategy/ctid/storage the route's own preflight call saw, because state
-can change in the gap between an operator clicking "migrate" and the job
-actually running. `est_downtime_s` above is an ESTIMATE; `downtime_s` in the
-job's result is MEASURED wall-clock time from the moment the source guest is
-(or would be) stopped to the moment the target guest is confirmed running, 
-that is the number doc 10's "accurate downtime shown" DoD is actually about.
+The handler re-runs `preflight()` itself. Params from the route are only
+`app_id`/`target_host_id`, never the strategy/ctid/storage the route's own
+preflight saw, because state can change before the job runs.
 
-The transfer strategy (Task 16, no shared cluster, no shared backup storage)
-runs a vzdump on the source into its own local dir storage, streams the
-resulting archive to the target's local dir storage over SFTP through
-`executor/transfer.py::sftp_copy_for_hosts` (the only module outside
-executor/ ever allowed to call it, it hands over host ids and a
+The transfer strategy (no shared cluster, no shared backup storage) vzdumps
+on the source into local dir storage, streams the archive to the target over
+SFTP through `executor/transfer.py::sftp_copy_for_hosts` (the only module
+outside executor/ allowed to call it: it gets host ids and a
 sessionmaker/secretstore, never key bytes), then restores from the
-target-local copy exactly like the shared-storage branch restores from a
-shared one. Both scratch archives (source vzdump output, target copy) are
-transfer plumbing, not real backups; `_cleanup_volume` best-effort deletes
-both on every exit path, success or failure, so a migration never leaves
-either host's storage silently filling up with orphaned dump files.
-
-FAKES vs HARDWARE: every PVE call below goes through `services/proxmox.py`'s
-`ProxmoxClient`, which in every test in this repo is backed by
-`tests/fakes/pve.py::FakePVE`: there is no live Proxmox host here and never
-will be. The transfer strategy additionally goes through
-`app.state.ssh_connect_factory`, backed in every test by
-`tests/fakes/ssh.py::FakeSSHConnection`/`FakeSFTP`; there is no real SSH
-target here either. What the tests prove: the handler's call sequence, its
-honesty properties (measured not estimated downtime, source never destroyed,
-no repoint before a health check passes, transfer artifacts cleaned up on
-both hosts), and its JobFailed/rollback-messaging behaviour, all GIVEN the
-PVE API shapes FakePVE encodes and the SFTP semantics FakeSFTP encodes. What
-they do NOT prove: that a real PVE 8.x/9.x vzdump/restore cycle or a real
-OpenSSH SFTP transfer behaves this way end-to-end on real disks over a real
-network, that needs live hardware.
+target-local copy. Both scratch archives are plumbing, not backups, and
+`_cleanup_volume` deletes both on every exit path so neither host's storage
+silently fills with orphaned dumps.
 """
 from __future__ import annotations
 
@@ -94,18 +67,13 @@ def _serves(row: dict, node: str | None) -> bool:
 
     `cluster_storage()` is `GET /storage`, the cluster-wide CONFIGURATION, so
     it lists every definition regardless of which nodes carry it. Two fields
-    decide, and neither was read: `nodes` restricts a storage to named nodes,
-    and `disable` switches one off entirely.
+    decide: `nodes` restricts a storage to named nodes, `disable` switches one
+    off. Ignoring them offered a pool restricted to another node as the shared
+    storage for a migration, one that `pvesm status` reported disabled on the
+    source in the same minute: the vzdump would then go to a pool the source
+    cannot write. No fixture carries either field.
 
-    Found on real hardware (doc 12 check 7): with `nfs-shared` set to
-    `--nodes node2`, preflight offered it as the shared storage for a migration
-    off `node1`, while `pvesm status` on `node1` reported that same pool
-    `disabled` in the same minute. A STRATEGY_SHARED migration would then vzdump
-    to a pool the source cannot write, refusing on a storage error when a
-    working transfer path was available. No fixture carries either field.
-
-    `node` None means "do not filter", which is what a caller that genuinely
-    wants the cluster's whole config passes.
+    `node` None means "do not filter".
     """
     if row.get("disable"):
         return False
@@ -138,19 +106,17 @@ def _storage_names(rows: list[dict], *, types: frozenset[str] | None,
 def _dir_storage(rows: list[dict], node: str | None = None) -> str | None:
     """Same pick as preflight's `capacity_storage` for the transfer strategy:
     the lexicographically-first dir-type backup storage this NODE serves.
-    Recomputed here (rather than threaded through `preflight()`'s return dict)
-    because `preflight()` already discards this name once it has used it for the
-    capacity check, and route callers never need it."""
+    Recomputed here rather than threaded through `preflight()`'s return dict,
+    because preflight discards the name once it has used it for capacity."""
     names = _storage_names(rows, types=None, dir_only=True, node=node)
     return next(iter(sorted(names)), None)
 
 
 def _storage_path(rows: list[dict], name: str | None) -> str | None:
-    """The dir storage's filesystem root (`/storage`'s `path` field), the
-    physical parent of its `dump/` directory. `None` if the storage wasn't
-    found or carries no `path` (a real PVE dir storage always has one; a
-    hand-built fixture that omits it is treated as "can't transfer", not
-    guessed at)."""
+    """The dir storage's filesystem root (`/storage`'s `path`), the physical
+    parent of its `dump/` directory. `None` if the storage was not found or
+    carries no `path`: a real PVE dir storage always has one, so a fixture that
+    omits it is treated as "cannot transfer", not guessed at."""
     if name is None:
         return None
     for r in rows:
@@ -193,14 +159,12 @@ def _transfer_bytes(db, src_client, source_host_id: int,
 def _downtime_estimate(strategy: str, transfer_bytes: int | None,
                        assumed_bps: float) -> tuple[int | None, str]:
     if strategy == STRATEGY_CLUSTER:
-        # Measured 47s on real hardware (2026-08-17, doc 12 check 7) against
-        # this estimate of 30. The note deliberately no longer says
-        # "network-bound": PVE reported the volume as being on shared storage
-        # and `vzmigrate` finished in ONE second, so the downtime was stopping
-        # and starting the guest, not moving it. On non-shared storage in a
-        # cluster the transfer does dominate, hence both halves below. The 30
-        # stands: one measurement is not a basis for a new constant, and the
-        # job reports the real number afterwards either way.
+        # Measured 47s on real hardware against this estimate of 30, but PVE
+        # had the volume on shared storage and `vzmigrate` finished in one
+        # second, so that downtime was the guest stopping and starting, not
+        # moving. On non-shared storage the transfer does dominate, hence both
+        # halves below. The 30 stands: one measurement is not a new constant,
+        # and the job reports the real number either way.
         return 30, ("offline migrate; downtime is the guest stopping and "
                     "starting, plus the disk copy when the storage is not "
                     "shared. Measured downtime is reported by the job")
@@ -244,10 +208,9 @@ def _capacity_ok(tgt_client, target_node: str, storage_name: str | None,
 def rootfs_candidates(client, node: str) -> list[str]:
     """Every active storage on `node` that can hold a container rootfs.
 
-    `storage_for_content` answers "the first one", which is what the restore
-    needs a default for; this is the whole set, so preflight can offer the
-    choice and the route can refuse a name that is not in it. Same read, same
-    `active` rule.
+    `storage_for_content` answers "the first one", which is the restore's
+    default; this is the whole set, so preflight can offer the choice and the
+    route can refuse a name outside it.
     """
     out = []
     for row in client.storages(node):
@@ -262,19 +225,16 @@ def rootfs_candidates(client, node: str) -> list[str]:
 
 def preflight(app, db, app_row, target_host_id: int,
               chosen_storage: str | None = None) -> dict:
-    """Blocking, called in-request, like api/hosts.py::test_host's own probe.
+    """Blocking, called in-request.
 
     `app_row` and `target_host_id` are assumed already validated by the route
     (app exists, target host exists, target != source, target is connected).
 
-    Every call this function makes (cluster_status, cluster_storage,
-    cluster_resources, cluster_nextid, storages) is a READ, so it runs on
-    the "monitoring" capability deliberately: a preview of a migration must
-    not require the operator to have already configured lifecycle/backup
-    tokens on both hosts just to see the estimate, and monitoring is the
-    one capability every enrolled host is guaranteed to have. The actual
-    `migrate.app` job below resolves lifecycle/backup separately, and only
-    fails on their absence when it is actually about to use them.
+    Every call here is a READ, so it runs on the "monitoring" capability
+    deliberately: previewing a migration must not require lifecycle/backup
+    tokens on both hosts, and monitoring is the one capability every enrolled
+    host has. The job resolves the others separately, and fails on their
+    absence only when it is about to use them.
     """
     source_host = db.get(Host, app_row.host_id)
     target_host = db.get(Host, target_host_id)
@@ -288,13 +248,12 @@ def preflight(app, db, app_row, target_host_id: int,
     warnings: list[str] = []
     blockers: list[str] = []
 
-    # Quorum, before anything else: without it /etc/pve is read-only, so the
-    # restore or the native migrate cannot write a guest config at all, while
-    # /version and /cluster/resources answer perfectly and every other check
-    # here passes (doc 12 check 12). A blocker rather than a warning because the
-    # alternative is stopping the source and finding out afterwards. False only,
-    # never None: NULL means standalone or not yet polled, neither of which is
-    # quorum loss.
+    # Quorum, before anything else: without it /etc/pve is read-only, so no
+    # guest config can be written, while /version and /cluster/resources answer
+    # perfectly and every other check here passes. A blocker rather than a
+    # warning, because the alternative is stopping the source and finding out
+    # afterwards. False only, never None: NULL means standalone or not yet
+    # polled.
     for host, side in ((source_host, "source"), (target_host, "target")):
         if host.quorate is False:
             blockers.append(
@@ -305,9 +264,8 @@ def preflight(app, db, app_row, target_host_id: int,
 
     if src_cluster is not None and src_cluster == tgt_cluster:
         strategy = STRATEGY_CLUSTER
-        # The live check above just PROVED cluster membership: un-deaden the
-        # column honestly now, rather than leaving it permanently stale
-        # (nothing else in the codebase ever writes it).
+        # The live check above just PROVED cluster membership, so write the
+        # column honestly now rather than leave it permanently stale.
         source_host.cluster_name = src_cluster
         target_host.cluster_name = tgt_cluster
         db.commit()
@@ -346,18 +304,18 @@ def preflight(app, db, app_row, target_host_id: int,
     est_downtime_s, est_note = _downtime_estimate(
         strategy, transfer_bytes, app.state.settings.migrate_assumed_bps)
 
-    # Where the restored ROOTFS lands, which is not where the archive is staged:
-    # `capacity_storage` above is the pool that holds the dump, and on a stock
-    # layout that is a dir store carrying no `rootdir` content at all. Checking
-    # only that one could read `capacity_ok: true` while the pool the disk
-    # actually needs is full (doc 12 check 7). Named here so an operator sees it
-    # before committing, and so the job restores where the preview said it would.
+    # Where the restored ROOTFS lands, which is not where the archive is
+    # staged: `capacity_storage` is the pool holding the dump, and on a stock
+    # layout that is a dir store carrying no `rootdir` content at all, so
+    # checking only it could read `capacity_ok: true` while the pool the disk
+    # needs is full. Named so the operator sees it before committing and the
+    # job restores where the preview said.
     rootfs_options = ([] if strategy == STRATEGY_CLUSTER else
                       rootfs_candidates(tgt_client, target_host.node_name))
-    # The operator's pick wins when it is one of the real candidates; otherwise
+    # The operator's pick wins when it is one of the real candidates, otherwise
     # the first candidate is the default. An unusable name is reported rather
-    # than quietly swapped, because silently migrating a guest onto a pool
-    # nobody chose is how it ended up on NFS when its source was local-lvm.
+    # than quietly swapped: silently migrating a guest onto a pool nobody chose
+    # is how one ended up on NFS when its source was local-lvm.
     rootfs_storage = None
     if strategy != STRATEGY_CLUSTER:
         if chosen_storage:
@@ -392,20 +350,15 @@ def preflight(app, db, app_row, target_host_id: int,
     return {
         "strategy": strategy,
         # The GUEST's node on the source side: a CT migrated in the Proxmox UI
-        # sits on a different node than its host row implies, and every stop and
-        # vzdump below is aimed at this value (doc 12 check 18). The target side
-        # is the host's node by definition, since that is where it is going.
+        # sits on a different node than its host row implies, and every stop
+        # and vzdump below aims at this value. The target side is the host's
+        # node by definition.
         "source": {"host_id": source_host.id, "host_name": source_host.name,
                    "node": guest_node(source_host, app_row), "ctid": app_row.ctid},
         "target": {"host_id": target_host.id, "host_name": target_host.name,
                    "node": target_host.node_name, "ctid": target_ctid},
         "shared_storage": shared_storage,
-        # The pool the guest's disk will land on, and (transfer only) the pool
-        # the archive is staged in. Both named so the preview is checkable
-        # against the result rather than being an unexplained number.
         "rootfs_storage": rootfs_storage,
-        # Every pool the disk COULD land on, so the dialog can offer the choice
-        # without a second round trip and the route can refuse a name outside it.
         "rootfs_options": rootfs_options,
         "staging_storage": capacity_storage if strategy == STRATEGY_TRANSFER else None,
         "transfer_bytes": transfer_bytes,
@@ -420,25 +373,21 @@ def preflight(app, db, app_row, target_host_id: int,
     }
 
 
-# --- migrate.app job handler (Task 15) --------------------------------------
-# ponytail: 60s / 1s are module globals, not a settings knob: nobody has
-# asked for a configurable health-check window yet, and a test overrides them
-# with monkeypatch.setattr exactly like pvetask.py's own TASK_TIMEOUT_S/
-# TASK_POLL_S. Promote to a Settings field if a real fleet ever needs longer.
+# ponytail: 60s / 1s are module globals, not a settings knob: nobody has asked
+# for a configurable health-check window yet, and a test overrides them the
+# same way pvetask.py's TASK_TIMEOUT_S/TASK_POLL_S are overridden. Promote to
+# a Settings field if a real fleet ever needs longer.
 HEALTH_CHECK_DEADLINE_S = 60.0
 HEALTH_CHECK_POLL_S = 1.0
 
-# migrate_app is several PVE tasks (and, for the transfer strategy, an SFTP
-# hop) chained into one job. Each of pvetask.py's await_task calls brackets
-# its own task with ctx.progress(start_pct) / ctx.progress(end_pct); left at
-# the module default (10, 100) every phase would report itself as the WHOLE
-# job, so vzdump finishing would hit 100 and then the SFTP transfer's real,
-# honest climb would resume from ~10%, the bug this band table fixes. Every
-# strategy's phases are given their own slice of 0-100 here so the number the
-# job reports only ever goes up. The three strategies use different numbers
-# of phases, so each gets its own row; all of them fold back into the same
-# START_PCT band for the final "start the target guest" task, so that one
-# call site doesn't need to know which strategy ran before it.
+# migrate_app chains several PVE tasks (and for transfer an SFTP hop) into one
+# job. Each await_task brackets its own task with ctx.progress(start_pct) /
+# ctx.progress(end_pct); left at the module default (10, 100) every phase would
+# report itself as the WHOLE job, so vzdump finishing would hit 100 and the
+# SFTP transfer would resume from ~10%. Each strategy's phases get their own
+# slice of 0-100 so the reported number only ever goes up, and all three fold
+# back into START_PCT for the final start, so that call site does not need to
+# know which strategy ran.
 STOP_PCT = (0, 5)
 CLUSTER_MIGRATE_PCT = (5, 90)
 SHARED_VZDUMP_PCT = (5, 45)
@@ -451,27 +400,20 @@ START_PCT = (90, 100)
 
 def _load(app, app_id: int, target_host_id: int,
           chosen_storage: str | None = None) -> dict:
-    """Blocking: fresh in-handler preflight (never the route's stale one) +
-    every client the chosen strategy needs, in one db session. Returns only
-    plain values/client objects, no ORM instance escapes the closed session.
+    """Blocking: fresh in-handler preflight (never the route's stale one) plus
+    every client the strategy needs, in one db session. Returns plain values
+    and client objects only, no ORM instance escapes the closed session.
 
-    Raises JobFailed for anything the route already should have prevented
-    but that may have changed in the gap between "operator clicks migrate"
-    and "this job actually runs" (doc 05 Interfaces note on Task 15). A
-    missing lifecycle/backup token on either host is exactly this class of
-    gap now: `client_for_host` raises `CapabilityNotConfigured` (naming the
-    host and the capability) before any PVE call, caught the same way as
-    every other resolution failure here and turned into one JobFailed line
-    instead of a mid-job 403 (host-token-privileges-step-one-report.md, per-
-    capability-tokens-plan.md §3 point 2).
+    Raises JobFailed for anything the route should have prevented but that may
+    have changed since the operator clicked migrate. A missing lifecycle or
+    backup token is exactly that: `client_for_host` raises
+    `CapabilityNotConfigured`, naming host and capability, before any PVE call,
+    so it becomes one JobFailed line instead of a mid-job 403.
 
-    Non-cluster migration (shared_storage/transfer) genuinely needs TWO
-    capabilities on top of needing two hosts: lifecycle for the stop/start
-    calls, backup for vzdump/restore/storage cleanup. Cluster-native
-    migration needs only lifecycle (PVE's own migrate call), so backup is
-    resolved lazily, only for the strategies that actually use it -- an
-    operator who only wants same-cluster migration must not be forced to
-    configure a backup token they will never touch.
+    Non-cluster migration needs lifecycle for stop/start AND backup for
+    vzdump/restore/cleanup. Cluster-native needs only lifecycle, so backup is
+    resolved lazily: an operator who only migrates inside a cluster must not be
+    forced to configure a backup token they will never touch.
     """
     with app.state.sessionmaker() as db:
         app_row = db.get(App, app_id)
@@ -501,20 +443,15 @@ def _load(app, app_id: int, target_host_id: int,
                                          capability="lifecycle")
             src_backup_client = tgt_backup_client = None
             if pf["strategy"] != STRATEGY_CLUSTER:
-                # vzdump/restore/cleanup: only the two strategies that
-                # actually back up and restore need this token at all.
                 src_backup_client = client_for_host(app, db, source_host,
                                                     capability="backup")
                 tgt_backup_client = client_for_host(app, db, target_host,
                                                     capability="backup")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
-        # Plain strings only, never the ORM rows themselves: used solely by
-        # the transfer strategy's SFTP hop below, which needs the same
-        # host/fingerprint shape appstore.py's SSHExecutor.run_for_host call
-        # already relies on. Cheap to always compute: both rows are already
-        # loaded above for client_for_host, and the other two strategies
-        # simply ignore this key.
+        # Plain strings only, never the ORM rows: used solely by the transfer
+        # strategy's SFTP hop below. Cheap to always compute, both rows are
+        # already loaded above, and the other strategies ignore this key.
         ssh = {"src_address": source_host.address,
               "src_fingerprint": source_host.ssh_host_key_fingerprint,
               "tgt_address": target_host.address,
@@ -535,9 +472,9 @@ def _is_running(client, ctid: int) -> bool:
 
 async def _wait_running(client, ctid: int) -> bool:
     """Poll target `cluster_resources()` until CT `ctid` reports running, or
-    give up at `HEALTH_CHECK_DEADLINE_S`. Read as module globals (not bound
-    into default-argument values) so a test can monkeypatch both down to
-    near-zero instead of actually waiting a minute."""
+    give up at `HEALTH_CHECK_DEADLINE_S`. Both are read as module globals, not
+    bound into default-argument values, so either can be overridden without
+    actually waiting a minute."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + HEALTH_CHECK_DEADLINE_S
     while True:
@@ -562,12 +499,9 @@ async def _cleanup_volume(ctx: JobContext, client, node: str, storage: str | Non
                           volid: str | None, timeout_s: float) -> None:
     """Best-effort delete of one vzdump/SFTP transfer scratch archive.
 
-    Never raises: this runs on both the success path (the archive did its
-    job, keeping it around would look like a real backup nobody asked for)
-    and every failure path (the whole point is that a dead-mid-copy transfer
-    doesn't leave orphaned dump files behind), a cleanup failure must not
-    mask, replace, or block the real outcome of the migration itself, so it
-    is logged and swallowed rather than raised.
+    Never raises. It runs on the success path (the archive did its job) and on
+    every failure path (so a transfer that died mid-copy leaves no orphans),
+    and a cleanup failure must not mask or block the migration's real outcome.
     """
     if storage is None or volid is None:
         return
@@ -577,9 +511,7 @@ async def _cleanup_volume(ctx: JobContext, client, node: str, storage: str | Non
             # Deleting a scratch archive is not forward progress on the
             # migration itself: hold the job's reported percentage exactly
             # where it already was rather than let await_task's own bracket
-            # jump it (its default end_pct is 100, which is the same class
-            # of bug this whole band table exists to fix, see migrate_app's
-            # STOP_PCT/CLUSTER_MIGRATE_PCT/etc comment above).
+            # jump it, since its default end_pct is 100.
             hold = ctx.last_pct
             await await_task(ctx, client, node, upid, timeout_s=timeout_s,
                              start_pct=hold, end_pct=hold)
@@ -589,22 +521,18 @@ async def _cleanup_volume(ctx: JobContext, client, node: str, storage: str | Non
 
 
 async def migrate_app(ctx: JobContext, params: dict) -> dict:
-    """`migrate.app`, cluster-native migrate, shared-storage backup/restore,
-    or (Task 16) vzdump + SFTP transfer + restore for hosts with neither.
+    """`migrate.app`: cluster-native migrate, shared-storage backup/restore, or
+    vzdump + SFTP transfer + restore for hosts with neither.
 
-    Failure ordering IS the safety property (doc 11 §2): every step before
-    the target's health check can raise JobFailed and the source is still
-    the only guest anyone has touched, stopped (if it was running) but
-    never destroyed, and `apps.host_id`/`apps.ctid` are never written until
-    AFTER that health check passes.
+    Failure ordering IS the safety property: every step before the target's
+    health check can raise JobFailed with the source still the only guest
+    touched, stopped but never destroyed, and `apps.host_id`/`apps.ctid` are
+    never written until AFTER that check passes.
     """
     app = ctx.backend.app
     app_id = int(params["app_id"])
     target_host_id = int(params["target_host_id"])
 
-    # The pool the operator picked, carried through so the job restores where the
-    # dialog said it would rather than re-guessing. None means "use the default",
-    # which is what every migration before this parameter existed sent.
     loaded = await asyncio.to_thread(_load, app, app_id, target_host_id,
                                      params.get("storage"))
     pf = loaded["pf"]
@@ -624,13 +552,11 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
     def _restore_storage() -> str:
         """Where the restored rootfs lands on the target.
 
-        Taken from this job's OWN preflight rather than recomputed, so the pool
-        named in the preview is the pool the restore uses. Sending no storage at
-        all lets PVE fall back to `local`, which on a stock layout is a dir
-        store carrying no `rootdir` content, so the restore dies on "storage
-        'local' does not support container directories": that was the whole
-        failure on real hardware after the archive had already crossed the
-        network (doc 12 check 7).
+        Taken from this job's OWN preflight rather than recomputed, so the
+        preview and the restore name the same pool. Sending no storage lets PVE
+        fall back to `local`, which on a stock layout carries no `rootdir`
+        content, so the restore dies on "storage 'local' does not support
+        container directories" after the archive has already crossed the wire.
         """
         picked = pf.get("rootfs_storage")
         if picked is None:
@@ -645,10 +571,10 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             f"on {source_host_name} is left stopped and intact, nothing is "
             f"ever deleted by this handler")
 
-    # Downtime clock: starts here regardless of branch below (doc 11 §2, 
-    # an already-stopped source still has its whole restore/start window
-    # counted, since the app is unavailable on either host until the target
-    # passes its health check).
+    # Downtime clock: starts here regardless of the branch below. An
+    # already-stopped source still has its whole restore/start window counted,
+    # since the app is unavailable on either host until the target passes its
+    # health check.
     t0 = utcnow()
 
     running = await asyncio.to_thread(_is_running, src_mon_client, source_ctid)
@@ -694,12 +620,10 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
         restore_storage = _restore_storage()
         ctx.log(f"restoring {volid} as CT {target_ctid} on "
                 f"{target_host_name}/{target_node}, rootfs on {restore_storage}")
-        # LIFECYCLE, not backup, and the reason is doc 12 check 7: a restore to
-        # a ctid that does not exist yet CREATES a guest, so PVE checks
-        # VM.Allocate, which the Backup role deliberately does not carry. On
-        # real hardware the backup token got a bare "403 Permission check
-        # failed" here, naming no privilege, which is PVE's own message for
-        # this endpoint rather than anything _permission_detail can improve.
+        # LIFECYCLE, not backup: a restore to a ctid that does not exist yet
+        # CREATES a guest, so PVE checks VM.Allocate, which the Backup role
+        # deliberately does not carry. On real hardware the backup token got a
+        # bare "403 Permission check failed" here, naming no privilege.
         upid = await asyncio.to_thread(tgt_client.restore_guest, "lxc", target_node,
                                        target_ctid, {"ostemplate": volid, "restore": 1,
                                                      "storage": restore_storage})
@@ -796,12 +720,11 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                 src_path=src_path, dst_path=dst_path, on_progress=on_progress,
                 connect_factory=app.state.ssh_connect_factory)
         except Exception as e:
-            # SSHHostKeyMismatch, LookupError (no ssh_key credential), a
-            # dropped connection mid-copy: all land here. The source vzdump
-            # archive exists on disk at this point; clean it up rather than
-            # leave it as an orphan. The destination file may or may not
-            # exist depending on how far the copy got: the delete call is a
-            # harmless no-op on real PVE either way (Path never existed).
+            # SSHHostKeyMismatch, LookupError (no ssh_key), a dropped
+            # connection mid-copy: all land here. The source archive exists on
+            # disk by now, so clean it up rather than leave an orphan. The
+            # destination file may or may not exist; the delete is a harmless
+            # no-op either way.
             await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
             await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
@@ -825,11 +748,9 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             await await_task(ctx, tgt_client, target_node, upid, timeout_s=timeout_s,
                              start_pct=TRANSFER_RESTORE_PCT[0], end_pct=TRANSFER_RESTORE_PCT[1])
         # ProxmoxError as well as JobFailed: await_task raises JobFailed for a
-        # task that RAN and failed, but restore_guest itself raises
-        # ProxmoxError when PVE refuses the call outright. Catching only the
-        # first left both scratch archives on disk, 19 MB each on two hosts,
-        # the exact outcome the cleanup below exists to prevent (observed on
-        # real hardware, doc 12 check 7).
+        # task that RAN and failed, but restore_guest raises ProxmoxError when
+        # PVE refuses the call outright. Catching only the first left both
+        # scratch archives on disk on two hosts.
         except (JobFailed, ProxmoxError):
             await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                                   src_volid, timeout_s)
@@ -837,16 +758,12 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
                                   dst_volid, timeout_s)
             raise
 
-        # Restore succeeded from the target's own copy of the archive: both
-        # scratch files (source vzdump output, target-side SFTP copy) were
-        # transfer plumbing, not real backups: remove them on both hosts so
-        # a migration never silently fills either one's storage.
-        # On the BACKUP clients, like every failure path above and like
-        # backupjobs.py::delete_backup's identical storage_delete_volume call:
-        # these are the tokens that wrote the archives, and a host that grants
+        # Both scratch files were transfer plumbing, not backups: remove them
+        # on both hosts. On the BACKUP clients, like every failure path above:
+        # these are the tokens that wrote the archives, and a host granting
         # Datastore.AllocateSpace through the Backup role only would 403 the
-        # lifecycle token here. `_cleanup_volume` swallows that, so the wrong
-        # client leaves multi-GB dumps behind on both hosts and says nothing.
+        # lifecycle token. `_cleanup_volume` swallows that, so the wrong client
+        # leaves multi-GB dumps behind and says nothing.
         await _cleanup_volume(ctx, src_backup_client, source_node, src_storage,
                               src_volid, timeout_s)
         await _cleanup_volume(ctx, tgt_backup_client, target_node, tgt_storage,
@@ -874,18 +791,16 @@ async def migrate_app(ctx: JobContext, params: dict) -> dict:
             f"source CT {source_ctid} on {source_host_name} is stopped but "
             f"intact; the app was NOT repointed to the target")
 
-    # MEASURED, not the preflight estimate: this is the DoD number (doc 10
-    # "accurate downtime shown"). Everything before this line ran with the
-    # source authoritative and the app row untouched; only past this point,
-    # with the target guest proven healthy, is it safe to repoint.
+    # MEASURED, not the preflight estimate. Everything before this line ran
+    # with the source authoritative and the app row untouched; only past this
+    # point, with the target guest proven healthy, is it safe to repoint.
     downtime_s = (utcnow() - t0).total_seconds()
 
     await asyncio.to_thread(_repoint, app, app_id, target_host_id, target_ctid)
-    # Both ends changed: the target host has a CT the poller has never seen and
-    # the source host has one it will not see again. The app row now points at
-    # the target, and everything live on it is read from that host's snapshot,
-    # so without these the migrated app reads "unknown" for up to a poll
-    # interval and the source CT keeps being offered for adoption.
+    # Both ends changed: the target has a CT the poller has never seen and the
+    # source has one it will not see again. Without these the migrated app
+    # reads "unknown" for up to a poll interval and the source CT keeps being
+    # offered for adoption.
     app.state.poller.wake(target_host_id)
     app.state.poller.wake(int(source["host_id"]))
     app.state.bus.publish("resource", {"type": "app", "id": app_id,

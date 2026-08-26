@@ -46,15 +46,14 @@ NODE_POWER_COMMANDS = frozenset({"reboot", "shutdown"})
 # string may be carrying a credential. Nothing derived from it is stored in the
 # clear except what this regex names: user, realm and token name, re-joined by
 # token_public_meta() below. A previous fix banned "=": a denylist, and
-# denylists in this codebase have failed twice already (notifier.kind_for).
+# denylists in this codebase have failed twice already.
 #
 # The user class is deliberately WIDE: LDAP/AD logins legitimately carry spaces
-# and non-ASCII, and rejecting them broke real onboarding. What keeps the secret
-# unrepresentable is structural, not a character blacklist: the three
-# separators "=", "@" and "!" cannot appear inside any component, so a string
-# rebuilt as `user@realm!name` can never carry the `=<secret>` half no matter
-# how wide the user class gets. Control characters (\x00-\x1f, \x7f) stay out
-# because they are header-injection shaped, not because they hide a secret.
+# and non-ASCII, and rejecting them broke real onboarding. What keeps the
+# secret unrepresentable is structural: "=", "@" and "!" cannot appear inside
+# any component, so a string rebuilt as `user@realm!name` can never carry the
+# `=<secret>` half however wide the user class gets. Control characters stay
+# out because they are header-injection shaped, not because they hide a secret.
 _COMPONENT = r"[^=@!\x00-\x1f\x7f]+"
 TOKEN_ID_RE = re.compile(rf"^(?P<user>{_COMPONENT})@(?P<realm>[A-Za-z0-9._-]+)"
                          rf"!(?P<name>[A-Za-z0-9._-]+)$")
@@ -110,20 +109,20 @@ def default_factory(**kwargs):
     return ProxmoxAPI(**kwargs)
 
 
-# Onboarding hands us an operator-supplied address and we open a socket to it, 
-# with CERT_NONE, on the fingerprint path: and the outcome (success, failure,
+# Onboarding hands us an operator-supplied address and we open a socket to it,
+# with CERT_NONE on the fingerprint path, and the outcome (success, failure,
 # latency, the returned fingerprint) comes back to the caller. That is an SSRF
 # primitive unless the target class is constrained.
 #
 # RFC1918 and IPv6 unique-local are DELIBERATELY ALLOWED and always will be:
-# this is a self-hosted LAN product and a node on 192.168.x.x / 10.x.x.x is the
-# normal case, not the attack. Only classes that are never a Proxmox node and
-# are dangerous to reach are refused: chiefly link-local, which is where cloud
-# instance metadata lives (169.254.169.254).
+# this is a self-hosted LAN product and a node on 192.168.x.x is the normal
+# case, not the attack. Only classes that are never a Proxmox node and are
+# dangerous to reach are refused, chiefly link-local, where cloud instance
+# metadata lives (169.254.169.254).
 #
-# Loopback is refused by default but is a legitimate target when Proxploy runs
-# on the PVE node itself, so it has an opt-in escape hatch. Read at import so a
-# test can flip the module attribute; an operator sets the env var.
+# Loopback is refused by default but is legitimate when Proxploy runs on the
+# PVE node itself, so it has an opt-in escape hatch. Read at import so a test
+# can flip the module attribute; an operator sets the env var.
 ALLOW_LOOPBACK_TARGET = os.environ.get("PROXPLOY_ALLOW_LOOPBACK_TARGET") == "1"
 
 _DENIED_CLASSES = (
@@ -202,24 +201,21 @@ class _NamedUpload(io.BufferedReader):
 
 def _classify(exc: BaseException) -> str:
     """Map an underlying transport/auth failure onto a kind the UI can act on.
+
     Substring matching is deliberate and lives HERE rather than in the
-    frontend: proxmoxer and requests do not expose typed failures for these,
-    and one fuzzy match in one place beats the same match spread across
-    call sites in another language.
+    frontend: proxmoxer and requests expose no typed failures for these, and
+    one fuzzy match in one place beats the same match spread across call sites
+    in another language.
 
-    Only reached from `_wrap`, i.e. for exceptions proxmoxer/requests raised
-    that we did not construct ourselves. `resolve_target`'s SSRF refusals and
-    `_connect`'s TLS-fingerprint mismatch are already `ProxmoxError`s raised
-    with an explicit `kind` at the point they are known, self-classifying,
-    so they never reach here and this function does not need to recognize
-    them.
+    Only reached from `_wrap`, for exceptions proxmoxer/requests raised that we
+    did not construct. `resolve_target`'s SSRF refusals and `_connect`'s
+    TLS-fingerprint mismatch already carry an explicit `kind`, so they never
+    reach here.
 
-    A 403 ("permission") used to fall all the way through to "unknown",
-    indistinguishable from a dead node or a broken cert; that is the literal
-    bug the Sys.PowerMgmt gap surfaced as a bare 502 (see
-    node-power-privilege-report.md). It is not special to node power: ANY
-    call a token is too narrow for lands here the same way, so the fix is
-    generic, not a second node_power-shaped special case.
+    A 403 ("permission") used to fall through to "unknown", indistinguishable
+    from a dead node or a broken cert. ANY call a token is too narrow for lands
+    here the same way, so the handling is generic, not a node_power special
+    case.
     """
     text = str(exc).lower()
     if "fingerprint" in text:
@@ -259,13 +255,12 @@ def routable_addresses(raw) -> list[str]:
     """The addresses off one ProxmoxClient.lxc_interfaces() row that can
     actually be reached, in CIDR form ("192.168.50.179/24").
 
-    Loopback and IPv6 link-local are dropped: every container has both on
-    every interface and neither one opens a web UI. Same rule
+    Loopback and IPv6 link-local are dropped: every container has both on every
+    interface and neither opens a web UI. Same rule
     ProxmoxClient.agent_addresses applies to a VM's agent answer.
 
-    Lives here beside lxc_interfaces rather than in api/network.py, where it
-    started, because the poller wants the same rule and the poller must not
-    import the API layer to get it.
+    Lives here rather than in api/network.py because the poller wants the same
+    rule and must not import the API layer to get it.
     """
     out: list[str] = []
     for key in ("inet", "inet6"):
@@ -291,14 +286,13 @@ class ProxmoxClient:
     @property
     def pve_auth_header(self) -> str:
         """`Authorization` value for the two console websocket endpoints, the
-        only PVE calls that do not go through proxmoxer (which sets this
-        header itself on every REST request).
+        only PVE calls that do not go through proxmoxer (which sets this header
+        itself on every REST request).
 
         PVE authenticates the vncwebsocket UPGRADE, not just the termproxy POST
-        that precedes it. Without this header the upgrade is rejected
-        `401 No ticket` on every real node, whatever the ticket says. Verified
-        working for lxc on PVE 9.2.6 (2026-08-10), which also settles doc 11's
-        open question about bugzilla #6079 for the LXC path.
+        before it. Without this header the upgrade is rejected `401 No ticket`
+        on every real node, whatever the ticket says. Verified for lxc on PVE
+        9.2.6.
         """
         return f"PVEAPIToken={self.token_id}={self.token_secret}"
 
@@ -307,19 +301,15 @@ class ProxmoxClient:
 
         `str(e)` is third-party text we do not control, and urllib3 in
         particular interpolates the whole `Authorization` header value into
-        `InvalidHeader`. Every wrapped message below flows outward, to a 502
-        `detail` (api/hosts.py), to the unencrypted `jobs.error` column and its
-        SSE stream (jobs/backend.py::_finish), and to `job_events.message`; so
-        the credential is scrubbed here rather than at each of those sinks.
+        `InvalidHeader`. Every wrapped message flows outward, to a 502 `detail`
+        (api/hosts.py), to the unencrypted `jobs.error` column and its SSE
+        stream, and to `job_events.message`, so the credential is scrubbed here
+        rather than at each of those sinks.
 
-        `kind` lets a caller that already knows more than `_classify` can
-        guess from the raw text (e.g. node_power's own 403 detection below)
-        say so directly, instead of `_classify` re-deriving a coarser answer.
-        A caller-supplied `kind` also means the caller is handing back its
-        own bespoke sentence already, so the generic permission-detail
-        sentence below is skipped for it: node_power's message stays exactly
-        what it is, the generic path exists for every OTHER call site that
-        does not (yet) hand-write one.
+        `kind` lets a caller that already knows more than `_classify` can guess
+        say so directly. A caller-supplied `kind` also means the caller is
+        handing back its own sentence, so the generic permission-detail
+        sentence below is skipped for it.
         """
         text = f"{prefix}: {e}"
         for needle in (self.token_secret, self.token_id):
@@ -331,10 +321,9 @@ class ProxmoxClient:
                 text = text.replace(form, "***")
         resolved_kind = kind or _classify(e)
         if kind is None and resolved_kind == "permission":
-            # Generalizes node_power's own fix to every call site: a 403 is
-            # never again a bare, unlabelled 502 -- it says which privilege
-            # PVE wanted, using PVE's own text as the source of truth rather
-            # than a per-call-site guess.
+            # A 403 is never again a bare, unlabelled 502: it says which
+            # privilege PVE wanted, using PVE's own text as the source of
+            # truth rather than a per-call-site guess.
             detail = _permission_detail(str(e))
             if detail:
                 text += (f" -- the API token is missing {detail}. This will "
@@ -432,26 +421,19 @@ class ProxmoxClient:
         Returns None, NOT a UPID, and that is Proxmox's design, not a failure:
         PVE::API2::Nodes's node_cmd runs the reboot/shutdown straight out of
         the request handler (`returns => { type => "null" }`) instead of
-        forking a task the way vzdump, migrate and every guest action do. A
-        node on its way down cannot host the worker that would write that
-        task's log, so there is nothing for a UPID to point at.
+        forking a task. A node on its way down cannot host the worker that
+        would write that task's log. The annotation says `str | None` because
+        this only relays what Proxmox sends, and a future PVE that did mint a
+        task here would come straight through.
 
-        Every other POST on this client hands back a UPID, so the caller has
-        to be told; the annotation says `str | None` rather than `None`
-        because this only promises to relay what Proxmox sends, and a future
-        PVE that did mint a task here would come straight through.
+        Deliberately separate from guest_action: this acts on the NODE, so
+        callers gate it far harder. It can take down every guest on the node,
+        and Proxploy itself if it runs there.
 
-        The host actions menu's Reboot/Power off. Deliberately separate from
-        guest_action: this acts on the NODE, not a guest, so it is gated far
-        harder by callers (doc 02 §9, doc 08 §1) -- it can take down every
-        guest the node hosts, and if the node is the one Proxploy itself runs
-        on, Proxploy along with it.
-
-        A 403 here almost always means one specific thing: the token lacks
-        Sys.PowerMgmt, which pveum.py never granted before this privilege
-        existed (doc 08 §2/§9). A bare relay of Proxmox's "Permission check
-        failed" left the operator to work that out alone; named explicitly
-        instead, with where to grant it, while keeping Proxmox's own text too.
+        A 403 here almost always means the token lacks Sys.PowerMgmt, which
+        pveum.py never granted before this privilege existed. It is named
+        explicitly below, with where to grant it, keeping Proxmox's own text
+        too.
         """
         if command not in NODE_POWER_COMMANDS:
             raise ProxmoxError(f"{command!r} is not a node power command")
@@ -481,7 +463,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"disk list failed for node {node!r}", e) from e
 
-    # --- the rest of the host page's hardware tab ---------------------------
     # All on demand, never from the poll loop (doc 02 §3 caps a cycle at
     # O(nodes)), and every one of them is refusable on its own: a token without
     # Sys.Audit answers some and rejects others, and a PVE without the path
@@ -543,9 +524,8 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"time read failed for node {node!r}", e) from e
 
-    # --- per-guest, user-triggered calls -----------------------------------
-    # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered by
-    # a human clicking a button and are explicitly outside that budget.
+    # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered
+    # by a human clicking a button and are explicitly outside that budget.
 
     def guest_action(self, kind: str, node: str, vmid: int, action: str) -> str:
         """POST /nodes/{node}/{lxc|qemu}/{vmid}/status/{action} -> UPID."""
@@ -564,23 +544,17 @@ class ProxmoxClient:
                             config: dict) -> None:
         """PUT /nodes/{node}/{lxc|qemu}/{vmid}/config -> nothing.
 
-        NOT long-running, and it never hands back a task id. PVE routes the
-        PUT to `update_vm_api($param, 1)`, the synchronous half, whose schema
+        NOT long-running, and it never hands back a task id. PVE routes the PUT
+        to `update_vm_api($param, 1)`, the synchronous half, whose schema
         declares `returns => { type => 'null' }`; only the POST on the same
-        path is the asynchronous half that returns a UPID. Read off the
-        node's own PVE/API2/Qemu.pm, pve-manager 9.2.11, 2026-08-20.
+        path is the asynchronous half that returns a UPID (PVE/API2/Qemu.pm,
+        pve-manager 9.2.11). So nothing here can tell a caller whether a change
+        landed in the pending section: ask `guest_pending` after the write.
 
-        This used to be documented as "UPID for a running qemu guest, None
-        otherwise", and callers derived "did this land in the pending section"
-        from it. That value is ALWAYS None, so every such caller reported
-        "applied immediately" no matter what actually happened. Whether a
-        change is waiting for a restart is a question only the guest's
-        pending config can answer: call `guest_pending` after the write.
-
-        `delete` is a real PVE parameter here, not a pseudo-key: pass
-        `{"delete": "acpi,kvm"}` to REMOVE those settings, which is how a
-        setting goes back to the Proxmox default. Writing the default value
-        instead pins it, which is a different thing.
+        `delete` is a real PVE parameter, not a pseudo-key: pass
+        `{"delete": "acpi,kvm"}` to REMOVE those settings, which is how one
+        goes back to the Proxmox default. Writing the default value pins it
+        instead.
         """
         try:
             getattr(self._connect().nodes(node), kind)(vmid).config.put(**config)
@@ -594,19 +568,17 @@ class ProxmoxClient:
 
         PVE answers with one row per config key, `{key, value}`, where `value`
         is what the guest is running on right now. A row grows a `pending` key
-        when a new value is waiting for the guest's next boot, and a `delete`
-        key when the waiting change is a removal. Rows with neither are just
-        the current config restated, so they are dropped here.
+        when a new value waits for the next boot, and a `delete` key when the
+        waiting change is a removal. Rows with neither restate the current
+        config and are dropped here.
 
         -> {key: pending value}, with None where the pending change is a
-        removal (the setting goes back to its Proxmox default at next boot).
-        An empty dict therefore means "nothing is waiting", which is the
-        answer for every stopped guest: PVE applies a write to a stopped guest
+        removal. An empty dict means "nothing is waiting", which is the answer
+        for every stopped guest: PVE applies a write to a stopped guest
         straight away and has no pending section to file it under.
 
-        Confirmed against both guest types on pve-manager 9.2.11, 2026-08-20;
-        lxc has this endpoint too, so the NIC editor's qemu/lxc split does not
-        need two code paths.
+        Confirmed on both guest types, pve-manager 9.2.11: lxc has this
+        endpoint too, so the NIC editor needs no qemu/lxc split.
         """
         try:
             rows = getattr(self._connect().nodes(node), kind)(vmid).pending.get()
@@ -618,7 +590,6 @@ class ProxmoxClient:
         return {r["key"]: (None if r.get("delete") else r.get("pending"))
                 for r in rows or [] if r.get("delete") or "pending" in r}
 
-    # --- host network staging (Phase 6 Task 7) -------------------------------
     # PVE writes every one of the three staging calls below into
     # /etc/network/interfaces.new and touches NOTHING live. Only network_apply
     # promotes that file. network_revert deletes it.
@@ -675,8 +646,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"reverting staged network config failed on {node}", e) from e
 
-    # ---- Firewall
-    #
     # Four scopes share one rule schema, so they share one set of methods and
     # differ only in which proxmoxer node they hang off. `loc` is built by
     # services/firewall.py, which is also the only place that decides a caller
@@ -684,8 +653,8 @@ class ProxmoxClient:
     #
     # Measured on pve-manager 9.2.11, 2026-08-21: aliases and ipset exist at
     # cluster and guest scope only, groups at cluster only, log at node and
-    # guest only. This class does not enforce that; a caller asking a scope for
-    # an object it does not have gets PVE's own 501, which says so.
+    # guest only. This class does not enforce that; a caller asking a scope
+    # for an object it does not have gets PVE's own 501, which says so.
 
     def _firewall_root(self, loc: dict):
         """The proxmoxer node under which this scope's firewall objects live."""
@@ -889,12 +858,10 @@ class ProxmoxClient:
         and PVE answers 404 on every member read, update and delete. `safe=""`
         because the default leaves `/` alone, which is the whole bug.
 
-        Now also used for every alias, IP set and security group NAME, which
-        had exactly the same shape of hole and no escaping at all. Note that
-        quoting alone cannot save a name of `..` (a dot is unreserved, so it
-        survives quoting and still means "the parent endpoint"), which is why
-        api/firewall.py::ObjectName refuses one at the route as well. This is
-        the second half of that: one mechanism, both places it is needed.
+        Also used for every alias, IP set and security group NAME, which had
+        the same hole. Quoting alone cannot save a name of `..` (a dot is
+        unreserved and still means "the parent endpoint"), which is why
+        api/firewall.py::ObjectName refuses one at the route as well.
         """
         return quote(str(value), safe="")
 
@@ -1015,7 +982,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"task log failed for {upid}", e) from e
 
-    # --- backups (Phase 6 Task 9) --------------------------------------------
 
     def vzdump(self, node: str, params: dict) -> str:
         """POST /nodes/{node}/vzdump -> UPID. `params` carries `vmid` (a comma
@@ -1073,7 +1039,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"prune failed for {storage} on {node}", e) from e
 
-    # --- console/terminal calls (Phase 5) -----------------------------------
 
     def termproxy(self, kind: str, node: str, vmid: int) -> dict:
         """POST /nodes/{node}/{lxc|qemu}/{vmid}/termproxy -> {user, ticket, port, upid}."""
@@ -1099,31 +1064,22 @@ class ProxmoxClient:
 
         `generate-password=1` is not optional decoration. QEMU's VNC server
         offers exactly one RFB security type on this cluster, type 2 (VNC
-        Authentication), so an RFB client that presents no password cannot
-        finish the handshake at all. Decoded off a live PVE 9.2.10 node:
+        Authentication), decoded off a live PVE 9.2.10 node, so a client that
+        presents no password cannot finish the handshake.
 
-            greeting            b"RFB 003.008\\n"
-            security types      b"\\x01\\x02"   (count 1, type 2)
+        Nothing in the bridge can supply it on the browser's behalf:
+        services/consoleproxy.py is a byte relay and the RFB
+        challenge/response is end to end between QEMU and the browser. So the
+        password must reach the browser, and this parameter decides how much.
 
-        Unlike the termproxy path, nothing in the bridge can supply that
-        password on the browser's behalf: services/consoleproxy.py is a byte
-        relay by design and the RFB challenge/response is end to end between
-        QEMU and the browser. So the password has to reach the browser, and
-        this parameter is what decides HOW MUCH reaches it.
-
-        Without it, PVE's answer carries the vncticket only, and the VNC
-        password is that ticket (RFB truncates a password to 8 bytes, and
-        PVE builds the ticket so its first 8 bytes are the password). Handing
-        the browser the whole ticket would hand it the credential that
-        authenticates the /vncwebsocket upgrade to PVE directly, which is a
-        real widening: the browser could then talk to Proxmox without going
-        through Proxploy at all.
-
-        With it, PVE returns a separate 8 character `password` field, and the
-        rest of the ticket stays server side. The browser gets a secret that
-        is only good for answering one VNC challenge on one already-bridged
-        socket. Same thing Proxmox's own UI ends up holding, minus the part
-        that talks to the API.
+        Without it, PVE returns the vncticket only, and the VNC password IS
+        that ticket (RFB truncates to 8 bytes, and PVE builds the ticket so its
+        first 8 bytes are the password). Handing the browser the whole ticket
+        hands it the credential that authenticates the /vncwebsocket upgrade to
+        PVE directly, so it could talk to Proxmox without going through
+        Proxploy at all. With it, PVE returns a separate 8 character `password`
+        and the rest of the ticket stays server side: a secret good only for
+        one VNC challenge on one already-bridged socket.
         """
         try:
             return self._connect().nodes(node).qemu(vmid).vncproxy.post(
@@ -1133,7 +1089,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"vncproxy failed for qemu/{vmid} on {node}", e) from e
 
-    # --- infra reads (Phase 6) ----------------------------------------------
     # All read-only, all on-demand: nothing here is called from the poll loop,
     # so doc 02 §3's O(nodes) budget is untouched.
 
@@ -1183,17 +1138,17 @@ class ProxmoxClient:
     def agent_addresses(self, node: str, vmid: int) -> list[str] | None:
         """The addresses a VM's guest agent says it actually has, or None.
 
-        None means "cannot tell", and the two reasons are not worth telling
-        apart to a caller: the agent is not installed, or it is installed and not
-        running. Either way Proxploy has no truthful answer, and None is what the
-        UI renders as unknown rather than as "no address".
+        None means "cannot tell", and the two reasons (no agent, or an agent
+        installed and not running) are not worth telling a caller apart: either
+        way there is no truthful answer, and None renders as unknown rather
+        than as "no address".
 
-        This is the only honest read of a VM's address. PVE keeps a container's
-        address on its netN string, so that one is a config read, but a VM's
-        address lives inside the guest: `ipconfigN` is a cloud-init datasource,
-        which a Windows guest ignores entirely unless Cloudbase-Init is installed
-        (see api/network.py::ADDRESS_KEYS). Asking the guest is the difference
-        between reporting what is and reporting what was requested.
+        This is the only honest read of a VM's address. PVE keeps a
+        container's address on its netN string, but a VM's address lives inside
+        the guest: `ipconfigN` is a cloud-init datasource, which a Windows
+        guest ignores entirely unless Cloudbase-Init is installed (see
+        api/network.py::ADDRESS_KEYS). Asking the guest is the difference
+        between reporting what is and what was requested.
 
         Loopback is dropped: every guest has 127.0.0.1 and it answers nothing.
         """
@@ -1224,58 +1179,40 @@ class ProxmoxClient:
     def agent_fsinfo(self, node: str, vmid: int) -> tuple[bool | None, int | None]:
         """One get-fsinfo call, two facts: (agent answered?, bytes used).
 
-        Was agent_disk_used() and returned the bytes alone. It is widened
-        rather than paired with a sibling call because the two facts come out
-        of the SAME request and always agreed anyway: whether a guest agent is
-        installed and answering is exactly what "we could not read the
-        filesystems" already knew and threw away. A second endpoint (ping, or
-        the config's `agent:` line) would be a second per-VM call every cycle
-        for an answer we are holding in our hand. Per-cycle cost is therefore
-        unchanged: still one call, still on the caller's cadence.
+        Both come out of the SAME request: whether the agent is installed and
+        answering is what "we could not read the filesystems" already knew. A
+        second endpoint (ping, or the config's `agent:` line) would be a second
+        per-VM call every cycle for an answer we already hold.
 
-        Why the bytes are needed at all: the hypervisor can only see a block
-        device, not the filesystem inside it. /cluster/resources' `disk` field
-        is meaningful for a container and is routinely a flat 0 for a QEMU
-        guest (measured on the lab cluster, PVE 9.2.10, 2026-08-20: VM 108
+        Why the bytes are needed at all: the hypervisor sees a block device,
+        not the filesystem inside it, so /cluster/resources' `disk` is
+        routinely a flat 0 for a QEMU guest (lab cluster, PVE 9.2.10: VM 108
         running, 32 GiB allocated, `disk: 0`). Only the guest can answer.
 
-        The first element is deliberately THREE-valued, and keeping the three
-        apart is the whole point of returning it:
+        The first element is deliberately THREE-valued:
 
-          * True: the agent answered. Whatever came back is a real answer,
-            even if nothing in it was usable.
-          * False: Proxmox told us this guest has no working agent. The lab VM
-            answers `500 Internal Server Error: No QEMU guest agent
-            configured`, and a guest whose config declares an agent that is
-            not running inside it answers `QEMU guest agent is not running`.
-            Both are Proxmox reporting on the agent, which is a real finding
-            an operator can act on, not a fault of ours.
+          * True: the agent answered, even if nothing in the answer was usable.
+          * False: Proxmox told us this guest has no working agent (`No QEMU
+            guest agent configured`, or `QEMU guest agent is not running`).
+            That is a real finding an operator can act on, not a fault of ours.
           * None: we could not ask. Any other failure (the node refused the
             connection, the token lost its permission, a timeout) says nothing
-            about the guest, and reporting "no agent" off the back of a
-            network error would be a lie that sticks.
+            about the guest, and reporting "no agent" off a network error would
+            be a lie that sticks.
 
-        The split is made on the error text because that is the only thing PVE
-        gives us: every one of these arrives as a 500 with a message, so the
-        status code cannot separate them. Matching on "guest agent" is loose
-        on purpose, since it catches both of PVE's wordings above and anything
-        else it says specifically about the agent, and a message that never
+        The split is made on the error text because every one of these arrives
+        as a 500 with a message, so the status code cannot separate them.
+        Matching on "guest agent" is loose on purpose: a message that never
         mentions the agent is by definition not PVE answering about it.
 
         Summing: one entry per mounted filesystem, deduped on the guest's own
         device name (`name`, e.g. "sda1"), because a bind mount and every
-        subvolume of one btrfs pool report the SAME filesystem more than once
-        and adding those up counts the same bytes twice. Falls back to the
-        mountpoint when an agent omits the name, which at worst double-counts
-        the case the dedupe was meant to catch and never invents storage that
-        is not there. An entry with no `used-bytes` is skipped rather than
-        counted as zero (some filesystems make qemu-ga omit it).
+        subvolume of one btrfs pool report the SAME filesystem more than once.
+        Falls back to the mountpoint when the name is missing. An entry with no
+        `used-bytes` is skipped rather than counted as zero.
 
         An agent that answers with nothing usable returns (True, None), not
-        (True, 0): a VM whose every filesystem was skipped has not been
-        measured, and 0 would draw an empty disk bar under a full one. That
-        pair is also the case the old single return could not express, since
-        it collapsed "no agent" and "no usable answer" into the same None.
+        (True, 0): 0 would draw an empty disk bar under a full one.
         """
         try:
             raw = (self._connect().nodes(node).qemu(vmid)
@@ -1302,17 +1239,15 @@ class ProxmoxClient:
 
         The counterpart to agent_addresses() for VMs, and the answer to the
         same question: a config read reports what was REQUESTED, and for a
-        container on DHCP that is the literal word `dhcp`. PVE does know the
-        lease, and this is where it keeps it. No guest agent involved: the
-        container shares the host kernel, so the node can read its namespace
-        directly. Measured on PVE 9.2.10, 2026-08-20: a CT whose config says
-        `ip=dhcp` answers here with `eth0 ... inet 192.168.50.179/24`, and the
-        hwaddr matches the config's own.
+        container on DHCP that is the literal word `dhcp`. PVE knows the lease
+        and keeps it here. No guest agent involved: the container shares the
+        host kernel, so the node reads its namespace directly. Measured on PVE
+        9.2.10: a CT whose config says `ip=dhcp` answers here with
+        `eth0 ... inet 192.168.50.179/24`.
 
-        None means cannot tell, which is the ordinary case for a STOPPED
-        container: there are no interfaces to report and PVE errors rather
-        than answering empty. Swallowed for the same reason agent_addresses
-        swallows its own: not being able to ask is not an outage.
+        None means cannot tell, the ordinary case for a STOPPED container:
+        there are no interfaces to report and PVE errors rather than answering
+        empty. Swallowed for the same reason agent_addresses swallows its own.
         """
         try:
             return self._connect().nodes(node).lxc(vmid).interfaces.get() or []
@@ -1353,7 +1288,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"snapshot list failed for {kind}/{vmid} on {node}", e) from e
 
-    # --- snapshots (Phase 6, Task 10) ---------------------------------------
 
     def snapshot_create(self, kind: str, node: str, vmid: int, name: str,
                         description: str | None = None,
@@ -1419,7 +1353,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap("cluster nextid read failed", e) from e
 
-    # --- migration (Phase 8 Task 14/15) --------------------------------------
 
     def cluster_status(self) -> list[dict]:
         """GET /cluster/status, cluster membership + node list.
@@ -1474,7 +1407,6 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"migrate of {kind}/{vmid} failed on {node}", e) from e
 
-    # --- guest create / clone / destroy (Phase 6) ---------------------------
 
     def vm_create(self, node: str, params: dict) -> str:
         """POST /nodes/{node}/qemu -> UPID.
@@ -1517,23 +1449,20 @@ class ProxmoxClient:
         except Exception as e:  # noqa: BLE001
             raise self._wrap(f"destroying {kind}/{vmid} failed on {node}", e) from e
 
-    # --- storage content mutations (Phase 6) --------------------------------
 
     def storage_upload(self, node: str, storage: str, content: str,
                        filename: str, path: str) -> str:
         """POST /nodes/{node}/storage/{storage}/upload -> UPID.
 
         `path` is a spooled temp file on the Proxploy host, opened here and
-        streamed by proxmoxer as the multipart part, the bytes are never held
-        in memory by us (see api/storage.py's upload route for the other half).
+        streamed by proxmoxer as the multipart part; the bytes are never held
+        in memory by us.
 
-        proxmoxer/requests derive the multipart part's filename from the file
-        object's `.name` (`requests.utils.guess_filename`), but a plain
-        `open()` result exposes `.name` read-only as the spool path's own
-        basename, assigning to it raises `AttributeError`. `_NamedUpload`
-        wraps the raw stream so `.name` reports the ISO's real filename
-        instead, while still passing `isinstance(_, io.IOBase)` so proxmoxer's
-        streaming-multipart path (large-file handling) still kicks in.
+        proxmoxer/requests derive the part's filename from the file object's
+        `.name`, but a plain `open()` exposes `.name` read-only as the spool
+        path's basename. `_NamedUpload` wraps the raw stream so `.name` reports
+        the ISO's real filename while still passing `isinstance(_, io.IOBase)`,
+        which is what keeps proxmoxer's streaming-multipart path in play.
         """
         try:
             with open(path, "rb", buffering=0) as raw, _NamedUpload(raw, filename) as fh:
@@ -1559,7 +1488,6 @@ class ProxmoxClient:
             raise self._wrap(f"deleting {volid!r} from {storage} on {node} failed",
                              e) from e
 
-    # --- storage definition management (Phase 6) ----------------------------
     # These three hit the CLUSTER-level /storage endpoints, not /nodes/{n}/…:
     # a storage definition lives in /etc/pve/storage.cfg and is cluster-wide.
     # They are SYNCHRONOUS: Proxmox returns no UPID, so there is nothing to

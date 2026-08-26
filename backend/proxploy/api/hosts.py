@@ -1,5 +1,5 @@
-"""Host onboarding. ROUTE TEMPLATE (doc 10 Phase 1 DoD): every mutation stacks
-auth -> RBAC stub -> entitlement -> work -> audit. Later phases copy this shape."""
+"""Host onboarding. ROUTE TEMPLATE: every mutation stacks auth, RBAC stub,
+entitlement, work, audit. Later routes copy this shape."""
 import json as jsonlib
 from urllib.parse import urlparse
 
@@ -23,11 +23,6 @@ router = APIRouter(prefix="/hosts", tags=["hosts"])
 
 # Singletons so FastAPI's dependency cache (keyed on the callable) collapses
 # repeated uses into one call per request.
-#
-# This comment used to say host.sync/credentials/remove had no route here yet
-# and that no plan added them. They exist now (see the bottom of this file,
-# PXP-17); host.console is elsewhere, on the node-shell ticket route in
-# api/consoles.py.
 _read = authorize("host", "read")                      # no host id yet (list)
 _read_scoped = authorize("host", "read", scope_of=scope_host())
 _manage = authorize("host", "manage", scope_of=scope_host())
@@ -74,30 +69,26 @@ class HostIn(ProbeIn):
 
 class HostPatchIn(BaseModel):
     """Partial update: every field is optional and only the ones supplied are
-    changed. Started as just the node-shell opt-in toggle (doc 08 §9) plus
-    team assignment; name/address joined for the host actions menu's Edit
-    dialog. Credentials are deliberately NOT here -- POST
-    /{host_id}/credentials is their own dedicated, already-existing flow
-    (verifies a new token against the node before it replaces the old one),
-    and the Edit dialog composes both calls rather than this route growing a
-    second credential path."""
+    changed. Credentials are deliberately NOT here: POST
+    /{host_id}/credentials is their own flow, which verifies a new token
+    against the node before replacing the old one, and the Edit dialog
+    composes both calls rather than this route growing a second credential
+    path."""
     node_shell_enabled: bool | None = None
     team_id: int | None = None
     name: str | None = None
     address: str | None = None
-    # The re-pin path. A pin is only enforced while verify_tls is false, which
-    # is the normal case for a stock node with a self-signed certificate, so it
-    # is the only integrity those connections have. Nothing could change one
-    # before this, so a routine certificate renewal left a host row nobody
-    # could fix from the UI. Setting it re-pins; setting it to null clears the
-    # pin (see model_fields_set in patch_host: omitted and null differ here the
-    # same way they do for team_id).
+    # The re-pin path. A pin is only enforced while verify_tls is false, the
+    # normal case for a stock self-signed node, so it is the only integrity
+    # those connections have. Nothing could change one before this, so a
+    # routine certificate renewal left a host row nobody could fix from the
+    # UI. Setting it re-pins, null clears the pin (omitted and null differ
+    # here, as for team_id).
     tls_fingerprint: str | None = None
-    # The SSH re-pin path, and the reason it exists is the same one: nothing
-    # could change this before, so a node whose host key rotated (rejoining a
-    # cluster does it) failed every install with no way back but a manual
-    # database write. Omitted leaves it alone; null clears the pin so the next
-    # connection re-learns it (TOFU).
+    # The SSH re-pin path, same reason: nothing could change this before, so a
+    # node whose host key rotated (rejoining a cluster does it) failed every
+    # install with no way back but a manual database write. Omitted leaves it
+    # alone, null clears the pin so the next connection re-learns it (TOFU).
     ssh_host_key_fingerprint: str | None = None
 
     @field_validator("name", "address")
@@ -112,16 +103,13 @@ def _api_addresses(client) -> dict[str, str]:
     """{node name: the address PVE designates for its API}, from
     /cluster/config/join, or {} if that cannot be read.
 
-    `/cluster/status` reports only `ip`, which is corosync's ring0 address.
-    On a cluster whose corosync runs on a dedicated link that is NOT the
-    address the API answers on, so every peer built from it would be
-    unreachable (doc 12 check 13, where the hazard was confirmed real by PVE
-    storing `ring0_addr` and `pve_addr` as separate fields).
+    `/cluster/status` reports only `ip`, corosync's ring0 address. PVE keeps
+    `ring0_addr` and `pve_addr` separate, so where corosync runs on a
+    dedicated link every peer built from `ip` would be unreachable.
 
-    Best effort on purpose: an empty dict means callers fall back to the
-    `/cluster/status` address, which is what they used before this existed and
-    is correct whenever the two coincide. A peer discovery that failed outright
-    because one extra endpoint was unreadable would be a worse trade.
+    Best effort: {} means callers fall back to the `/cluster/status` address,
+    correct whenever the two coincide. Failing discovery over one unreadable
+    endpoint would be the worse trade.
     """
     try:
         info = client.cluster_join_info()
@@ -139,9 +127,8 @@ def _fingerprint_now(address: str) -> str | None:
     """The certificate the node at `address` is presenting right now, or None
     if it could not be fetched.
 
-    Never raises. A pin is worth having, but never worth blocking an enrolment
-    or a connection test over, the same rule cluster_identity already follows
-    in create_host below.
+    Never raises. A pin is worth having, but never worth blocking an
+    enrolment or a connection test over.
     """
     url = urlparse(address)
     try:
@@ -157,14 +144,11 @@ def _client(request: Request, body: ProbeIn) -> ProxmoxClient:
                          factory=request.app.state.proxmox_factory)
 
 
-# Doc 08's ProxployAudit role: the read-only monitoring set, required for the
-# poller to complete a cycle at all. Deliberately only this set: the lifecycle,
-# console and backup roles gate optional features, and a token without them
-# should still enrol.
-#
-# Imported from services/pveum, which is also what generates the script that
-# creates these tokens. One table, so a token the wizard tells you to make
-# always satisfies the check the wizard then runs against it.
+# The read-only monitoring set, required for the poller to complete a cycle at
+# all. Only this set: lifecycle, console and backup gate optional features,
+# and a token without them should still enrol. Imported from services/pveum,
+# which also generates the script that creates these tokens, so what the
+# wizard tells you to make always satisfies the check it then runs.
 from proxploy.services.pveum import (CAPABILITIES, MONITORING_PRIVILEGES,
                                      NODE_POWER_PRIVILEGE, generate_script)
 
@@ -172,13 +156,13 @@ from proxploy.services.pveum import (CAPABILITIES, MONITORING_PRIVILEGES,
 def _missing_privileges(client) -> list[str] | None:
     """Which monitoring privileges this token does not hold anywhere.
 
-    None means "could not tell", which is NOT the same as "none missing": some
-    setups refuse /access/permissions to a token, and reporting unknown as a
-    clean bill of health is how this failed silently in the first place.
+    None means "could not tell", NOT "none missing": some setups refuse
+    /access/permissions to a token, and reporting unknown as a clean bill of
+    health is how this failed silently before.
 
-    A privilege granted on any path counts. Doc 08 supports scoping Proxploy to
-    a pool by granting the roles on /pool/<name> instead of /, so requiring
-    them at "/" would report a working pool-scoped install as broken.
+    A privilege granted on any path counts: Proxploy can be scoped to a pool
+    by granting the roles on /pool/<name>, so requiring them at "/" would
+    call a working pool-scoped install broken.
     """
     granted = granted_privileges(client)
     if granted is None:
@@ -190,10 +174,9 @@ def _node_power_missing(client) -> bool | None:
     """Whether this token lacks Sys.PowerMgmt anywhere. None means "could not
     tell", same reasoning as _missing_privileges.
 
-    Checked unconditionally, unlike Lifecycle/Console/Backup: the host
-    actions menu offers Reboot/Power off on every host regardless of which
-    optional capabilities were chosen, so this is checked the same way
-    monitoring is, not gated behind an opt-in capability having been picked.
+    Checked unconditionally, unlike Lifecycle/Console/Backup: the host actions
+    menu offers Reboot/Power off on every host whatever capabilities were
+    chosen.
     """
     granted = granted_privileges(client)
     if granted is None:
@@ -204,11 +187,11 @@ def _node_power_missing(client) -> bool | None:
 def _capability_state(kinds) -> dict[str, bool]:
     """Which capability tokens this host holds. Presence only.
 
-    Never the token, the token id, or any part of the blob: the UI needs to
-    know whether a capability is configured and nothing more. Keyed off
-    CAPABILITIES so a capability added to services/pveum.py appears here
-    with no second list to maintain, and a host with no credential rows
-    reports every capability False rather than omitting the field.
+    Never the token, the token id, or any part of the blob: the UI only needs
+    to know whether a capability is configured. Keyed off CAPABILITIES so a
+    new capability appears here with no second list, and a host with no
+    credential rows reports every capability False rather than omitting the
+    field.
     """
     stored = set(kinds)
     return {c: f"api_token:{c}" in stored for c in CAPABILITIES}
@@ -237,12 +220,11 @@ class TokenScriptIn(BaseModel):
 
 @router.post("/token-script")
 def token_script(body: TokenScriptIn, user: User = Depends(_manage_global)):
-    """The copy-paste pveum script from doc 08 §2.
+    """The copy-paste pveum script an operator runs to create the tokens.
 
-    POST rather than GET for the structured body, following /probe: it reads
-    nothing and changes nothing on this side. The operator runs the result in
-    a node shell they already own, which is the whole point: Proxploy never
-    asks for root credentials, even transiently.
+    POST rather than GET for the structured body; it reads and changes nothing
+    here. The operator runs the result in a node shell they already own:
+    Proxploy never asks for root credentials, even transiently.
     """
     try:
         script = generate_script(body.capabilities, path=body.path,
@@ -264,9 +246,9 @@ def probe(request: Request, body: ProbeIn,
         v = client.version()
     except ProxmoxError as e:
         raise HTTPException(502, {"error": e.kind, "detail": str(e)})
-    # /version succeeds for a privsep token holding no ACLs at all, so on its
-    # own it proves only that the address and secret are right. The privilege
-    # diff is what makes "Test connection" mean the thing operators read it as.
+    # /version succeeds for a privsep token holding no ACLs at all, so alone
+    # it proves only that the address and secret are right. The privilege diff
+    # is what makes "Test connection" mean what operators read it as.
     return {"ok": True, "version": v.get("version"), "release": v.get("release"),
             "missing_privileges": _missing_privileges(client),
             "node_power_missing": _node_power_missing(client)}
@@ -290,30 +272,27 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     try:
         v = client.version()
     except ProxmoxError as e:
-        # No Host row exists to resolve a name from: the enrolment failed
-        # before one was written. The name the operator typed is what they
-        # will be looking for when they come back to ask why it failed.
+        # No Host row exists yet, the enrolment failed before one was written,
+        # so the name the operator typed is what they will search for later.
         write_audit(db, actor_type="user", actor_id=user.id, action="host.create",
                     target_name=body.name, params=audit_params, result="error",
                     ip=request.client.host if request.client else None)
         raise HTTPException(502, {"error": e.kind, "detail": str(e)})
 
-    # Checked at enrolment, not left for the poller to discover minutes later
-    # as a bare "unreachable". Recorded rather than refused: an under-privileged
-    # token is still worth enrolling, and locking an operator out of their own
-    # host at the final step is the worse failure.
+    # Checked at enrolment, not left for the poller to report minutes later as
+    # a bare "unreachable". Recorded rather than refused: an under-privileged
+    # token is still worth enrolling.
     missing = _missing_privileges(client)
     node_power_missing = _node_power_missing(client)
     try:
         node_name, cluster_name = cluster_identity(client)
     except ProxmoxError:  # enrolment must survive a probe hiccup
         node_name = cluster_name = None
-    # Pin on first use: first use of a host is its enrolment. Only when the
-    # request supplied none, because an operator who pasted a fingerprint has
-    # already said which certificate is right, and probing over the top of that
-    # would replace their answer with whatever the node is presenting.
-    # A failed probe leaves the host unpinned, which is what every host was
-    # before this, rather than blocking enrolment.
+    # Pin on first use, and first use is enrolment. Only when the request
+    # supplied none: an operator who pasted a fingerprint has already said
+    # which certificate is right, and probing over the top would replace their
+    # answer. A failed probe leaves the host unpinned rather than blocking
+    # enrolment.
     fingerprint = body.tls_fingerprint or _fingerprint_now(body.address)
     host = Host(name=body.name, address=body.address, verify_tls=body.verify_tls,
                 tls_fingerprint=fingerprint, status="connected",
@@ -322,22 +301,19 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
                 node_power_missing=node_power_missing,
                 pve_version=v.get("version"), last_seen_at=utcnow())
     db.add(host)
-    # flush, not commit: this needs host.id for the credential rows below, and
-    # they belong to the same enrolment. Committing here left a window where a
-    # crash, or any failure in the ssh_enroll branch, produced a host row with
-    # no credential at all -- a host that shows up enrolled in the UI and
-    # cannot be talked to, with no route that repairs it.
+    # flush, not commit: this needs host.id for the credential rows below,
+    # which belong to the same enrolment. Committing here left a window where
+    # a crash produced a host row with no credential, enrolled in the UI,
+    # unreachable, and repaired by no route.
     db.flush()
 
     ss = request.app.state.secretstore
     blob, ver = ss.encrypt(jsonlib.dumps(
         {"token_id": body.token_id, "token_secret": body.token_secret}).encode())
-    # Enrolment always creates the "monitoring" row: it is the one mandatory
-    # capability (CAPABILITIES["monitoring"].required, services/pveum.py),
-    # and there is only one token pasted at this step of the wizard.
-    # Lifecycle/console/backup tokens are added later via
-    # POST /hosts/{id}/credentials (CredentialRotateIn.capability), a later
-    # step's UI work, not this one.
+    # Enrolment always creates the "monitoring" row: the one mandatory
+    # capability, and the only token pasted at this step of the wizard.
+    # Lifecycle/console/backup tokens arrive later via
+    # POST /hosts/{id}/credentials (CredentialRotateIn.capability).
     db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
                           encrypted_blob=blob, key_version=ver,
                           public_meta=token_public_meta(body.token_id)))
@@ -372,8 +348,7 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
         kinds.setdefault(host_id, set()).add(kind)
     return [{"id": h.id, "name": h.name, "address": h.address,
              # cluster_name so the frontend can tell which enrolled hosts are
-             # nodes of the same cluster. Already on the model, already
-             # returned by POST /hosts.
+             # nodes of the same cluster.
              "node_name": h.node_name, "cluster_name": h.cluster_name,
              "status": h.status,
              "last_error": h.last_error,
@@ -387,10 +362,9 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
              # capability mapped to null means its token could not be read.
              "capability_gaps": h.capability_gaps,
              "team_id": h.team_id,
-             # Same reason the storage defaults used to be here (Task 6): the
-             # install dialog asks the root-execution
-             # tick only while this is null. Re-asking a host that already
-             # acknowledged surfaces no new information; it is just friction.
+             # The install dialog asks the root-execution tick only while this
+             # is null. Re-asking a host that already acknowledged surfaces no
+             # new information, it is just friction.
              "install_consent_at": to_iso(h.install_consent_at),
              "capabilities": _capability_state(kinds.get(h.id, ())),
              "last_seen_at": to_iso(h.last_seen_at)}
@@ -400,20 +374,15 @@ def list_hosts(db=Depends(get_db), user: User = Depends(_read)):
 @router.get("/capabilities")
 def list_capabilities(user: User = Depends(_read)):
     """The static catalogue of optional capabilities the setup script can
-    grant (key, label, why it matters, whether it is required), for the
-    frontend to tell an operator what they give up by unticking one.
+    grant (key, label, why it matters, whether it is required).
 
-    Registered ABOVE the /{host_id} wildcard below: Starlette matches in
-    registration order, and out of order this literal path would be
-    swallowed by GET /{host_id} with host_id="capabilities" (same WARNING
-    as api/vms.py's /{vm_id}/{action} ordering hazard). Confirmed by
-    test_capabilities_route_is_not_shadowed_by_the_host_id_wildcard.
+    Registered ABOVE the /{host_id} wildcard: Starlette matches in
+    registration order, and out of order this literal path is swallowed by
+    GET /{host_id} with host_id="capabilities".
 
     Derived straight from CAPABILITIES, list not dict, so declaration order
-    (monitoring first) survives into the response, and a capability added
-    there needs no edit here. privileges/role/token are deliberately left
-    off: the UI only needs why a capability matters, not the PVE privilege
-    names or the identifiers that build the script.
+    survives into the response. privileges/role/token are left off: the UI
+    needs why a capability matters, not PVE privilege names.
     """
     return [{"key": c.key, "label": c.label, "why": c.why, "required": c.required}
             for c in CAPABILITIES.values()]
@@ -426,20 +395,17 @@ class SelfHostIn(BaseModel):
 @router.put("/self")
 def set_self_host(request: Request, body: SelfHostIn, db=Depends(get_db),
                   user: User = Depends(_manage_self_host)):
-    """Which enrolled host, if any, Proxploy itself runs on (PXP-33):
-    selfguard.is_self_host_node()'s Host-record narrowing, and the second
-    condition inside is_self().
+    """Which enrolled host, if any, Proxploy itself runs on: what narrows
+    selfguard.is_self_host_node() to a Host record.
 
-    A dedicated route rather than a hole in PATCH /settings's allowlist
-    (api/settings.py, PXP-36 note): that route takes free-form values, and
-    self.host_id must name an actually-enrolled host or nothing at all, never
-    an arbitrary string. `host_id: null` is "none of these", the honest
-    answer when Proxploy is not running on any host it manages; set_setting
-    still writes the row (value None), so the onboarding wizard and the
-    settings screen can tell "answered none" apart from "never asked". Every
-    selfguard read already treats an absent key and a None value the same
-    way (fail open), so recording "none" changes nothing about detection,
-    only whether the question gets asked again.
+    A dedicated route rather than a hole in PATCH /settings's allowlist,
+    which takes free-form values: self.host_id must name an enrolled host or
+    nothing, never an arbitrary string.
+
+    `host_id: null` is "none of these", and set_setting still writes the row,
+    so the wizard can tell "answered none" from "never asked". Every
+    selfguard read treats absent and None alike (fail open), so it only stops
+    the question being asked again.
     """
     if body.host_id is not None and db.get(Host, body.host_id) is None:
         raise HTTPException(404, "host not found")
@@ -476,19 +442,16 @@ def list_peers(request: Request, host_id: int, db=Depends(get_db),
                user: User = Depends(_manage)):
     """The other nodes of this host's cluster, and whether each can be added.
 
-    Read only: nothing here writes a host, a credential or an audit row. It
-    reveals node names, addresses and fingerprints, which is the same class of
-    information POST /hosts/probe already returns to an admin.
+    Read only: nothing here writes a host, a credential or an audit row, and
+    it reveals only what POST /hosts/probe already returns to an admin.
 
-    Every peer is probed before this answers, so the caller never renders a
-    row whose reachability is still unknown. A failure against one peer is
-    recorded on that peer's row and never raised: one dead node must not hide
-    the live ones.
+    Every peer is probed before this answers, so no row is rendered with
+    reachability unknown. A failure is recorded on that peer's row and never
+    raised: one dead node must not hide the live ones.
 
-    Every outbound connection still goes through resolve_target(), inside
-    tls_fingerprint_sha256 and ProxmoxClient._connect. That guard matters more
-    here than anywhere else, because the peer address comes from the node
-    rather than from the operator, and it is why no new guard is needed.
+    The peer address comes from the node, not the operator, so the guard that
+    matters is resolve_target() inside tls_fingerprint_sha256 and
+    ProxmoxClient._connect. No new guard is needed here.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -505,18 +468,18 @@ def list_peers(request: Request, host_id: int, db=Depends(get_db),
     out = {"cluster": cluster,
            "team": {"id": team.id, "name": team.name} if team else None,
            # The origin's own api_token:* kinds, so the caller can say what
-           # would be copied. ssh_key is not in here and never will be: it is
-           # a root shell, a different trust decision from an API token.
+           # would be copied. ssh_key is not here and never will be: it is a
+           # root shell, a different trust decision from an API token.
            "capabilities_to_copy": [c for c in CAPABILITIES
                                     if f"api_token:{c}" in kinds],
-           # Mirrors the check create_host makes. A peer is never the first
-           # host, so the entitlement is always required for one.
+           # A peer is never the first host, so the entitlement is always
+           # required for one.
            "multi_host_entitled": request.app.state.entitlements.enabled("hosts.multi"),
            "peers": []}
     if cluster is None:
         # No cluster row means standalone. Its single node row is this host
-        # itself and carries no `local` flag on some versions, so returning
-        # here is what stops a standalone node being offered as its own peer.
+        # itself and carries no `local` flag on some versions, so returning here
+        # is what stops it being offered as its own peer.
         return out
 
     enrolled = db.query(Host).filter(Host.id != h.id).all()
@@ -533,15 +496,13 @@ def list_peers(request: Request, host_id: int, db=Depends(get_db),
                 "tls_fingerprint": None, "already_enrolled_as": None,
                 "error": None}
         # Matched on cluster plus node name, never on address, so a peer
-        # enrolled under a second address or a DNS name is still recognised.
-        # A NULL cluster_name counts too: it means a row from before cluster
-        # detection, or one the poller has not filled in yet, and adding the
-        # same machine twice is the worse failure of the two.
+        # enrolled under a second address or a DNS name is still recognised. A
+        # NULL cluster_name counts too: adding the same machine twice is the
+        # worse failure.
         peer["already_enrolled_as"] = next(
             (e.name for e in enrolled if e.node_name == node
              and e.cluster_name in (cluster, None)), None)
-        # An already enrolled peer is not probed: it cannot be added again, so
-        # the handshake and the /version call would buy nothing.
+        # An already enrolled peer cannot be added again, so it is not probed.
         if peer["already_enrolled_as"] is None:
             try:
                 # Assigned only once both probes pass, so an errored row never
@@ -574,9 +535,7 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
         audit_params["node_shell_enabled"] = h.node_shell_enabled
     # model_fields_set, not `is not None`: null is the only way to say "no
     # team" and this is a partial update, so an omitted field and an explicit
-    # null have to mean different things. Without it the Settings picker's
-    # "Unassigned" option was unimplementable, and a host could be moved
-    # between teams but never out of one.
+    # null have to mean different things.
     if "team_id" in body.model_fields_set:
         if body.team_id is not None and not db.get(Team, body.team_id):
             raise HTTPException(404, "team not found")
@@ -595,9 +554,9 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
         # page), not a second implementation of the same check.
         h.address = body.address
         audit_params["address"] = body.address
-    # model_fields_set for the same reason team_id uses it: null is the only
-    # way to say "stop pinning this host", and an omitted field must leave the
-    # pin alone rather than clearing it on every rename.
+    # model_fields_set again: null means "stop pinning this host", and an
+    # omitted field must leave the pin alone rather than clearing it on every
+    # rename.
     if "tls_fingerprint" in body.model_fields_set:
         h.tls_fingerprint = body.tls_fingerprint
         audit_params["tls_fingerprint"] = body.tls_fingerprint
@@ -605,10 +564,9 @@ def patch_host(host_id: int, body: HostPatchIn, db=Depends(get_db),
         h.ssh_host_key_fingerprint = body.ssh_host_key_fingerprint
         audit_params["ssh_host_key_fingerprint"] = body.ssh_host_key_fingerprint
     db.commit()
-    # Same action name as before when only the node-shell toggle (plus,
-    # historically, team assignment) changed -- test_patch_host_writes_an_
-    # audit_event pins that exact string. A name/address change is different
-    # enough in kind (identity, not a feature flag) to get its own name.
+    # The node-shell toggle keeps its historic action name, which the audit
+    # filters depend on. A name or address change is different enough in kind
+    # (identity, not a feature flag) to get its own name.
     action = ("host.update"
               if {"name", "address", "tls_fingerprint",
                   "ssh_host_key_fingerprint"} & audit_params.keys()
@@ -639,22 +597,21 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
                                factory=request.app.state.proxmox_factory)
         v = client.version()
         h.status, h.pve_version, h.last_seen_at = "connected", v.get("version"), utcnow()
-        # Same re-check reachability already got: an operator who just ran
-        # the extra pveum commands for node power should see it reflected
-        # here, not only on the next full enrolment.
+        # Re-checked here so an operator who just ran the extra pveum commands
+        # for node power sees it now, not only at the next full enrolment.
         h.node_power_missing = _node_power_missing(client)
         # A host that answers /version perfectly can still be unable to accept
-        # a single write, which is what quorum loss looks like from here (doc
-        # 12 check 12). Best effort: a token that cannot read /cluster/status
-        # leaves the previous answer alone rather than claiming standalone.
+        # a single write, which is what quorum loss looks like from here. Best
+        # effort: a token that cannot read /cluster/status leaves the previous
+        # answer alone rather than claiming standalone.
         try:
             h.quorate = cluster_quorate(client.cluster_status())
         except ProxmoxError:
             pass
         # Every configured token against its own role, not just monitoring
-        # against MONITORING_PRIVILEGES: this is where an operator finds out
-        # that a token predating a privilege the product now needs is short of
-        # it, instead of finding out from a 403 mid-job.
+        # against MONITORING_PRIVILEGES: this is where an operator learns a
+        # token predating a privilege the product now needs is short of it,
+        # instead of learning it from a 403 mid-job.
         gaps = capability_gaps(request.app, db, h)
         # Stored, not just returned: an operator who presses Test connection
         # should not be the only one who ever sees this.
@@ -663,17 +620,15 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
         result = "ok"
     except ProxmoxError as e:
         h.status, result = "unreachable", "error"
-        # Only when the pin is what refused the connection. ProxmoxClient.
-        # _connect raises that kind before it sends anything, and it is the one
-        # case the Edit dialog's compare and accept control fires on, so this
-        # is where the certificate the node is presenting is worth a socket. A
-        # node that is simply dead answers with a different kind and gets no
-        # probe, because fetching a certificate from it could only sit out the
-        # full connect timeout on top of the one already spent.
+        # Only when the pin is what refused the connection: _connect raises
+        # that kind before it sends anything, and it is the one case the Edit
+        # dialog's compare and accept control fires on. A node that is simply
+        # dead answers with a different kind and gets no probe, which could
+        # only sit out a second connect timeout.
         #
-        # Known gap, deliberate: with verify_tls true the pin is not enforced
-        # at all, so a changed certificate never raises here and the control
-        # never appears. CA validation is the trust anchor in that mode.
+        # Known gap, deliberate: with verify_tls true the pin is not enforced,
+        # so a changed certificate never raises here and the control never
+        # appears. CA validation is the trust anchor in that mode.
         if e.kind == "tls_fingerprint":
             seen = _fingerprint_now(h.address)
     db.commit()
@@ -690,10 +645,9 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
                      user: User = Depends(_manage)):
     """Prove the enrolled key actually opens a root shell on the node.
 
-    The wizard used to take the operator's word for it, so a mis-pasted
-    authorized_keys line surfaced at the first app install instead of here,
-    far from its cause. `true` is the whole command: this asks one question
-    does the key authenticate and can we run anything, and nothing else.
+    Without it a mis-pasted authorized_keys line surfaces at the first app
+    install, far from its cause. `true` is the whole command: does the key
+    authenticate, and can anything be run.
     """
     host = db.query(Host).filter_by(id=host_id).one_or_none()
     if host is None:
@@ -715,11 +669,10 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
             pinned_fingerprint=host.ssh_host_key_fingerprint,
             on_new_fingerprint=on_new_fingerprint, timeout_s=20.0)
     except SSHHostKeyMismatch as e:
-        # `seen` is what the node is presenting right now. Handing it back is
-        # what makes a re-pin possible without the operator reading it off a
-        # message, exactly as POST /hosts/{id}/test hands back
-        # tls_fingerprint_seen. It is None when no key could be read, which is
-        # not a mismatch and must not be offered as one.
+        # `seen` is what the node is presenting right now. Handing it back
+        # makes a re-pin possible without the operator reading it off a
+        # message. None means no key could be read, which is not a mismatch
+        # and must not be offered as one.
         raise HTTPException(502, {"error": "host_key_mismatch", "detail": str(e),
                                   "ssh_host_key_fingerprint": e.pinned,
                                   "ssh_host_key_fingerprint_seen": e.seen})
@@ -741,10 +694,6 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
     return {"verified": True, "verified_at": to_iso(cred.ssh_verified_at)}
 
 
-# --- removal, credential rotation, forced sync, task passthrough (PXP-17) ---
-# doc 05 lists host.sync / host.credentials / host.remove and the authz matrix
-# has carried all three since Phase 1; no phase ever added the routes. The
-# header comment above used to say so.
 
 _sync = authorize("host", "sync", scope_of=scope_host())
 _credentials = authorize("host", "credentials", scope_of=scope_host())
@@ -755,9 +704,9 @@ _power = authorize("host", "power", scope_of=scope_host())
 class HostRemoveIn(BaseModel):
     confirm: str | None = None
     # apps.host_id is ON DELETE RESTRICT, so a host with apps cannot simply be
-    # dropped. This forgets those app rows (the containers keep running and are
-    # untouched); destroying a container is app uninstall's job, never a
-    # side effect of removing a host.
+    # dropped. This forgets those app rows; the containers keep running.
+    # Destroying one is app uninstall's job, never a side effect of removing a
+    # host.
     forget_apps: bool = False
 
 
@@ -766,18 +715,13 @@ class CredentialRotateIn(BaseModel):
     # credentials for you.
     token_id: str | None = None
     token_secret: str | None = None
-    # Which capability's token this is. None (the default, meaning the field
-    # was left out entirely) falls back to "monitoring" ONLY when the host has
-    # no monitoring credential yet, so a pre-capability-era caller's first
-    # write still lands where it always did with no request change required.
-    # Once a monitoring credential exists, an omitted capability is refused
-    # rather than guessed: two frontend dialogs once posted a token with no
-    # `capability` at all and silently overwrote whatever was in the
-    # monitoring slot, convincing an operator they had configured lifecycle
-    # or backup when they had only ever rewritten monitoring. Validated
-    # against CAPABILITIES the same place token_script's `capabilities` list
-    # already is (ValueError -> 422), not against a separate hand-kept list
-    # that could drift from it.
+    # Which capability's token this is. Left out entirely, it falls back to
+    # "monitoring" ONLY while the host has no monitoring credential, so a
+    # pre-capability-era caller's first write still lands where it always did.
+    # After that an omitted capability is refused, not guessed: guessing
+    # silently overwrote monitoring and convinced operators they had
+    # configured lifecycle or backup. Validated against CAPABILITIES
+    # (ValueError -> 422), never a hand-kept list that could drift.
     capability: str | None = None
     # Regenerate the SSH keypair in-process. The new public key has to be
     # authorized on the node before installs work again, which is why the
@@ -799,9 +743,9 @@ def remove_host(request: Request, host_id: int,
                 user: User = Depends(_remove)):
     """Forget a host and everything Proxploy cached about it.
 
-    Owner-only (authz matrix), and gated on typing the host name back: this
-    drops every app row, VM cache row and stored credential for the host in one
-    call, and the SSH key it deletes cannot be recovered, only re-enrolled.
+    Owner-only, and gated on typing the host name back: this drops every app
+    row, VM cache row and stored credential in one call, and the SSH key it
+    deletes can only be re-enrolled, never recovered.
     """
     body = body or HostRemoveIn()
     h = db.get(Host, host_id)
@@ -883,10 +827,10 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
                 user: User = Depends(_read_scoped)):
     """The node's own view of itself, for the host page.
 
-    On demand, never from the poll loop: doc 02 §3 caps a cycle at O(nodes),
-    and model/cores/kernel/boot mode do not change between polls. The volatile
+    On demand, never from the poll loop: a cycle is capped at O(nodes), and
+    model/cores/kernel/boot mode do not change between polls. The volatile
     figures here (load, wait, memory) are already recorded as metric samples
-    every cycle, so polling this would buy nothing and cost a call per node.
+    every cycle.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -904,10 +848,9 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
     boot = st.get("boot-info") or {}
     return {
         "node": node,
-        # The host actions menu's Reboot/Power off reads this off the SAME
-        # query the identity rail already fetches, so the confirm dialog can
-        # warn BEFORE the operator types anything, not only after a rejected
-        # call (doc 02 §9, doc 08 §1).
+        # Read off the SAME query the identity rail already fetches, so the
+        # confirm dialog can warn BEFORE the operator types anything, not only
+        # after a rejected call.
         "is_self": is_self_host_node(db, h, node),
         "uptime_s": st.get("uptime"),
         "pve_version": st.get("pveversion"),
@@ -919,8 +862,8 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
             "model": cpu.get("model"), "vendor": cpu.get("vendor"),
             "sockets": cpu.get("sockets"), "cores": cpu.get("cores"),
             # PVE's `cpus` is the logical processor count. Renamed to
-            # `threads` here so the UI never has to guess which of the two
-            # numbers is which, which is exactly what "cores" vs "cpus" invites.
+            # `threads` so the UI never has to guess which of the two numbers
+            # is which.
             "threads": cpu.get("cpus"), "mhz": cpu.get("mhz"),
         },
         "load": _loadavg(st.get("loadavg")),
@@ -934,12 +877,10 @@ def node_status(host_id: int, node: str, request: Request, db=Depends(get_db),
 
 class NodePowerIn(BaseModel):
     command: str  # "reboot" | "shutdown", Proxmox's own node-status verbs
-    # Always required, self or not (doc 02 §9, doc 08 §1/§9 row 14): detection
-    # can miss (a relocated install, an ambiguous hostname), so the typed
-    # prompt is the backstop even when self-detection would have said no.
-    # The frontend already gates Confirm on this matching before it ever
-    # sends the request; this is the server-side half of that gate, not
-    # merely a UI nicety.
+    # Always required, self or not: detection can miss (a relocated install,
+    # an ambiguous hostname), so the typed prompt is the backstop. The
+    # frontend gates Confirm on it too; this is the server-side half, not a
+    # UI nicety.
     confirm: str | None = None
 
     @field_validator("command")
@@ -954,22 +895,16 @@ class NodePowerIn(BaseModel):
 @router.post("/{host_id}/nodes/{node}/power", status_code=202)
 def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
                db=Depends(get_db), user: User = Depends(_power)):
-    """Reboot or power off a Proxmox NODE, not a guest (doc 02 §9, doc 08 §1
-    and §9 row 14).
+    """Reboot or power off a Proxmox NODE, not a guest.
 
-    Owner-gated, same severity class as host.remove/host.credentials: this can
-    take the whole node, and every guest it hosts, down. Always requires
-    typing the node's name back, self or not -- GET .../status's `is_self`
-    field lets the confirm dialog say so explicitly BEFORE the operator types
-    anything, but the server enforces the same gate regardless of what the
-    client already showed, since detection can miss.
+    Owner-gated, same severity as host.remove: this takes the node and every
+    guest on it down. The node's name must be typed back, self or not,
+    because self-detection can miss. GET .../status's `is_self` only lets the
+    dialog warn earlier, it does not replace the gate.
 
-    The actual PVE call runs as a job (services/guestjobs.py::run_host_power),
-    the same reasoning as every other destructive PVE action: a synchronous
-    200 with a bare UPID left this with no transcript in `job_events` and
-    nothing to show in the bell popover (GET /jobs), unlike every other
-    action in the product. The confirmation gate above still runs BEFORE
-    anything is enqueued and is unchanged by the move.
+    The PVE call runs as a job (services/guestjobs.py::run_host_power) so it
+    leaves a transcript in `job_events`, like every other destructive action.
+    The gate runs before anything is enqueued.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -1002,12 +937,10 @@ def power_node(host_id: int, node: str, body: NodePowerIn, request: Request,
     return out
 
 
-# The high byte of PVE's raw PCI class code is the PCI-SIG base class, i.e.
-# the heading `lspci` prints. Eleven devices as one flat list is a wall of
-# hex; grouped by this they are four or five short groups. Named here rather
-# than in the UI because it is a property of the protocol, not of the page,
-# and an unrecognised byte falls back to the raw code instead of "Other",
-# which would hide a device class we simply have not listed yet.
+# The high byte of PVE's raw PCI class code is the PCI-SIG base class, the
+# heading `lspci` prints. Named here, not in the UI, because it belongs to
+# the protocol. An unrecognised byte falls back to the raw code rather than
+# "Other", which would hide a class we have not listed yet.
 _PCI_BASE_CLASS = {
     0x00: "Unclassified device", 0x01: "Mass storage controller",
     0x02: "Network controller", 0x03: "Display controller",
@@ -1096,16 +1029,15 @@ def _dns_row(d: dict) -> dict:
 @router.get("/{host_id}/nodes/{node}/hardware")
 def node_hardware(host_id: int, node: str, request: Request, db=Depends(get_db),
                   user: User = Depends(_read_scoped)):
-    """Everything the node will say about itself that is not already on the
-    Overview strip: disks, network interfaces, PCI devices, systemd services,
-    and the subscription/DNS/time facts.
+    """Everything the node says about itself that is not on the Overview
+    strip: disks, network, PCI devices, systemd services, subscription, DNS,
+    time.
 
-    Gathered INDEPENDENTLY, on purpose. Each of these is separately refusable
-    on a real node — a token with a narrow privilege set answers some and
-    rejects others, and a PVE without a given path 501s — so one refusal
-    returns that section as null and names it in `unreadable` rather than
-    costing the tab its other six sections. The 502 is reserved for the case
-    where nothing at all could be read, which is the node being down.
+    Gathered INDEPENDENTLY, on purpose: each is separately refusable on a
+    real node, a narrow token answers some and rejects others, and a PVE
+    without a path 501s. One refusal returns that section as null and names
+    it in `unreadable` rather than costing the tab its other six. The 502 is
+    for nothing at all being readable: the node is down.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -1161,8 +1093,8 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
     """Replace a host's stored API token and/or SSH key.
 
     Owner-only. The new API token is verified against the node BEFORE it
-    replaces the old one: a rotation that stores an unusable credential would
-    take the host offline with no way back except editing the database.
+    replaces the old one: storing an unusable credential would take the host
+    offline with no way back except editing the database.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -1187,10 +1119,9 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
                 "detail": f"the new token did not work against {h.address}, "
                           f"the old one is still in place: {e}"}) from e
         if capability is None:
-            # The default only covers a host with no monitoring credential
-            # yet. Once one exists, guessing "monitoring" for an unlabelled
-            # write is exactly how a lifecycle/console/backup token silently
-            # overwrote it before, so the caller now has to say which slot.
+            # Once a monitoring credential exists, guessing "monitoring" for
+            # an unlabelled write is how a lifecycle/console/backup token
+            # silently overwrote it, so the caller has to say which slot.
             has_monitoring = (db.query(HostCredential)
                               .filter_by(host_id=h.id, kind="api_token:monitoring")
                               .one_or_none() is not None)
@@ -1223,8 +1154,8 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
         rotated.append(kind)
 
     if body.rotate_ssh:
-        # generate_ed25519 returns the private half as bytes already; the
-        # secretstore takes bytes, so there is nothing to encode here.
+        # generate_ed25519 returns bytes and the secretstore takes bytes, so
+        # there is nothing to encode here.
         priv, pub = generate_ed25519(f"proxploy@{h.name}")
         blob, ver = request.app.state.secretstore.encrypt(priv)
         cred = (db.query(HostCredential)
@@ -1248,9 +1179,8 @@ def rotate_credentials(request: Request, host_id: int, body: CredentialRotateIn,
     db.commit()
     audit_params: dict = {"rotated": rotated}
     if body.token_id and body.token_secret:
-        # Which slot the token landed in, named explicitly rather than left
-        # for a future reader to parse out of the "api_token:<capability>"
-        # string in `rotated`.
+        # Name the slot explicitly rather than making a reader parse it out of
+        # the "api_token:<capability>" string in `rotated`.
         audit_params["capability"] = capability
     write_audit(db, actor_type="user", actor_id=user.id, action="host.credentials",
                 target_type="host", target_id=h.id,
@@ -1263,17 +1193,13 @@ class PeerEnrolIn(BaseModel):
     """Node names, never an address.
 
     The addresses come from a fresh /cluster/status read inside the handler,
-    so a confused or hostile caller cannot aim an enrolment at a machine the
-    cluster never named. There is deliberately no address field.
+    so a hostile caller cannot aim an enrolment at a machine the cluster never
+    named. There is deliberately no address field.
 
-    `tls_fingerprints` is a different thing and is allowed for that reason: an
-    address is an instruction, a fingerprint is an assertion about what the
-    operator was shown, and it can aim nothing anywhere. It maps node name to
-    the fingerprint discovery displayed, and it is ONLY ever used to refuse: a
-    node presenting something else by the time the operator confirms is not
-    added. It is never pinned, never a fallback when the probe fails, and
-    never written to the database. Optional per node, so a caller that sends
-    none behaves exactly as it did before the field existed.
+    `tls_fingerprints` can aim nothing anywhere, so it is allowed: node name
+    to the fingerprint discovery displayed, used ONLY to refuse a node
+    presenting something else by the time the operator confirms. Never
+    pinned, never a fallback when the probe fails, never stored.
     """
     nodes: list[str]
     tls_fingerprints: dict[str, str] = {}
@@ -1292,21 +1218,16 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
     """Add the named nodes of this host's cluster as hosts of their own, each
     with its own copy of every API token this host holds.
 
-    The write half of GET /{host_id}/peers above, and owner-scoped rather than
-    admin for that reason: copying stored secrets into new rows is the same
-    severity class as rotating them, which is why it sits next to
-    rotate_credentials rather than next to discovery.
+    The write half of GET /{host_id}/peers, owner-scoped rather than admin
+    because copying stored secrets into new rows is as severe as rotating
+    them.
 
-    One result row per requested node, always 200. The flow is inherently
-    partial and a 502 for the whole request would throw away the record of the
-    peers that did work, so a failure is a row saying what happened to that
-    node, exactly as the frontend already treats one rejected capability token
-    as that capability's failure and not the enrolment's.
+    One row per requested node, always 200: the flow is inherently partial,
+    and a 502 would throw away the record of the peers that did work.
 
-    Never copied: the ssh_key credential, install consent, and the node shell
-    opt-in. The SSH key is a root shell on the node, a different trust
-    decision from an API token, and keeping them separate is the whole reason
-    this route was allowed to exist.
+    Never copied: the ssh_key credential, install consent, the node shell
+    opt-in. The SSH key is a root shell, a different trust decision from an
+    API token, and keeping them separate is why this route exists at all.
     """
     h = db.get(Host, host_id)
     if h is None:
@@ -1335,11 +1256,9 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
         return {"results": results}
 
     cluster = next((r.get("name") for r in rows if r.get("type") == "cluster"), None)
-    # Re-read once for the whole request, because discovery and this call can
-    # be minutes apart. No cluster row means standalone, and a standalone
-    # node's single row carries no `local` flag on some versions, so without
-    # the `cluster and` guard it would offer itself as its own peer (the same
-    # guard list_peers makes, for the same reason).
+    # Re-read once for the whole request: discovery and this call can be
+    # minutes apart. The `cluster and` guard is list_peers's, for the same
+    # reason: a standalone node's row carries no `local` flag on some versions.
     peers = {r.get("name"): r for r in rows
              if cluster and r.get("type") == "node" and not r.get("local")}
     # Pin the origin on the same code path its peers use, so two nodes of one
@@ -1363,11 +1282,9 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
         # operator was shown is the address that gets enrolled.
         ip = api_addresses.get(node) or r.get("ip")
         row["address"] = address = f"https://{ip}:8006"
-        # The skip rules, re-applied here rather than trusted from discovery.
-        # Cluster plus node name, never address, so the same machine enrolled
-        # under a second address or a DNS name is still recognised. A NULL
-        # cluster_name counts too: adding the same machine twice is the worse
-        # failure of the two.
+        # The skip rules, re-applied here rather than trusted from discovery:
+        # cluster plus node name, never address. A NULL cluster_name counts
+        # too, since adding the same machine twice is the worse failure.
         already = next((e for e in db.query(Host).filter(Host.id != h.id)
                         if e.node_name == node and e.cluster_name in (cluster, None)),
                        None)
@@ -1376,10 +1293,10 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
             row["detail"] = (f"{node} is already in Proxploy as {already.name}. "
                              f"Nothing was stored.")
             continue
-        # The skip rules have already excluded the same machine, so a clash on
+        # The skip rules already excluded the same machine, so a clash on
         # hosts.name is a different machine wearing the name. That peer fails
-        # and the rest still enrol; no generated suffix, because a host
-        # silently wearing a name that is not its node name is worse.
+        # and the rest still enrol; no generated suffix, because a host wearing
+        # a name that is not its node name is worse.
         clash = db.query(Host).filter_by(name=node).one_or_none()
         if clash:
             row["detail"] = (f"{node} was not added: Proxploy already has a "
@@ -1395,10 +1312,9 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
         # echoed back, which is only ever compared against it.
         fingerprint = _fingerprint_now(address)
         shown = body.tls_fingerprints.get(node)
-        # Case-insensitively, the way _connect already compares a stored pin.
-        # A probe that could not read the certificate counts as a mismatch:
-        # the operator approved a specific one and Proxploy cannot say this is
-        # it, which is exactly the case not to guess about.
+        # Case-insensitively, the way _connect compares a stored pin. A probe
+        # that could not read the certificate counts as a mismatch: the
+        # operator approved a specific one and Proxploy cannot say this is it.
         if shown and (fingerprint or "").upper() != shown.upper():
             row["detail"] = (
                 f"{node} is presenting a different TLS certificate than the one "
@@ -1496,7 +1412,7 @@ async def sync_host(request: Request, host_id: int, db=Depends(get_db),
 
     Runs the poller's own cycle rather than a parallel implementation, so a
     forced sync and a scheduled one cannot disagree about what they ingest.
-    Operator-level: it changes no configuration; it only refreshes cache.
+    Operator-level: it changes no configuration, only cache.
     """
     import asyncio
 
@@ -1531,9 +1447,9 @@ def host_tasks(request: Request, host_id: int, limit: int = 50,
                db=Depends(get_db), user: User = Depends(_read_scoped)):
     """The node's own task list, including work Proxploy did not start.
 
-    Read-level on purpose: this is the same information the Proxmox UI shows
-    anyone who can log in, and an operator debugging "why did my container
-    restart at 3am" needs the tasks Proxploy did not cause.
+    Read-level on purpose: this is what the Proxmox UI shows anyone who can
+    log in, and an operator debugging "why did my container restart at 3am"
+    needs the tasks Proxploy did not cause.
     """
     h = db.get(Host, host_id)
     if h is None:

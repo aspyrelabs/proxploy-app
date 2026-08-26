@@ -1,11 +1,8 @@
-"""App Store install job handler (doc 10 Phase 4 DoD: pin + diff + consent +
-stream + archive). Mirrors services/lifecycle.py's shape: blocking _resolve
-helper in a thread, ctx.log/ctx.progress narration, JobFailed for expected
-errors, module-bottom HANDLERS registration.
-
-Root-consent gating lives at the API layer (Task 6), this handler assumes
-the caller has already obtained consent and only does the pin + SSH-install
-+ archive work.
+"""App Store install job handler: pin, diff, consent, stream, archive.
+Mirrors services/lifecycle.py's shape: blocking _resolve helper in a thread,
+ctx.log/ctx.progress narration, JobFailed for expected errors, module-bottom
+HANDLERS registration. Root-consent gating lives at the API layer; this
+handler assumes consent and only does the pin, SSH install and archive work.
 """
 from __future__ import annotations
 
@@ -36,20 +33,17 @@ def pinned_ref(db, app_id: int) -> str | None:
 def mark_updates_available(db) -> dict:
     """Recompute `apps.update_available` for every app. Blocking.
 
-    community-scripts publishes no version numbers (doc 01 §3), so the only
-    honest signal is "the commit this app was pinned to is behind the commit
-    the catalog now holds". The column stores the SHORT sha an update would
-    move the app to, which is what doc 06's "Update to vX" renders.
+    community-scripts publishes no version numbers, so the only honest signal
+    is "the pinned commit is behind the commit the catalog now holds". The
+    column stores the SHORT sha an update would move the app to.
 
-    This is DERIVED state, recomputed wholesale rather than latched: an app
-    that updated, or whose catalog entry was rolled back, must stop advertising
-    an update. `cleared` counts exactly that.
+    DERIVED state, recomputed wholesale rather than latched: an app that
+    updated, or whose catalog entry was rolled back, must stop advertising an
+    update. `cleared` counts exactly that.
 
-    Skipped, each for a reason rather than as an oversight:
-      - no `catalog_slug`, a hand-rolled CT adopted in Phase 4 has no upstream;
-      - no `app_scripts` row, an adopted app has no "from" commit, so there is
-        no diff to show and nothing to consent to;
-      - catalog entry with no `upstream_sha`, never successfully refreshed.
+    Skipped, each for a reason: no `catalog_slug`, a hand-adopted CT has no
+    upstream; no `app_scripts` row, so no "from" commit to diff or consent to;
+    a catalog entry with no `upstream_sha`, never successfully refreshed.
     """
     shas = {c.slug: c.upstream_sha
             for c in db.query(CatalogEntry.slug, CatalogEntry.upstream_sha).all()}
@@ -118,38 +112,31 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
                ", letting the node assign the next free CT id"))
     # Refuse to "install" onto a container that already exists: the catalog
     # script would reconfigure or clobber somebody else's CT and this handler
-    # would then file an App row claiming to own it. Nothing to check yet when
-    # no ctid was supplied; the post-check below is what proves which id the
-    # node picked.
+    # would then file an App row claiming to own it. Nothing to check when no
+    # ctid was supplied; the post-check below proves which id the node picked.
     before = await asyncio.to_thread(_lxc_ids, app, host_id)
     if ctid is not None and ctid in before:
         raise JobFailed(f"CT {ctid} already exists on {host.name}; "
                         f"refusing to install over it")
 
-    # Two corrections a real node forced, both invisible to the fakes (PVE
-    # 9.2.6, 2026-08-10):
+    # Three corrections a real node forced, all invisible to the fakes:
     #
     # `mode` is lowercase. build.func reads `CHOICE="${mode:-${1:-}}"` and
-    # never looks at MODE, which this handler exported for five phases: the
-    # menu was therefore always shown, whiptail read EOF from the DEVNULL
-    # stdin, and the script took its `|| exit_script` branch and exited 0
-    # having installed nothing.
+    # never looks at MODE. With MODE the menu was always shown, whiptail read
+    # EOF from the DEVNULL stdin, and the script took `|| exit_script` and
+    # exited 0 having installed nothing.
     #
     # TERM must be a real terminal type. A non-PTY ssh session lands on
     # TERM=dumb, where build.func's early `clear` exits 1 and its error trap
-    # aborts the run ("in line 1018: exit code 1").
+    # aborts the run.
     #
-    # `mode` is also `generated`, not `default`. Both branches of build.func's
-    # case statement are byte-identical apart from METHOD (which reaches
-    # nothing but the telemetry payload) EXCEPT that `default` also runs
-    # `defaults_target="$(ensure_global_default_vars_file)"`, and that is what
-    # reaches ensure_storage_selection_for_vars_file at build.func:3533. On a
-    # host with two or more pools for a content type that function calls
-    # select_storage, whiptail cannot run without a TTY, `|| exit_script`
-    # fires, and exit_script does `exit 0`: a container is never created and
-    # the script reports success. This is the same failure shape as the
-    # uppercase-MODE bug documented above, in a second place. Do not revert
-    # this to `mode=default`: that silently reintroduces the exit 0.
+    # `mode` is `generated`, not `default`. The two branches are identical
+    # apart from METHOD EXCEPT that `default` also runs
+    # `ensure_global_default_vars_file`, which reaches
+    # ensure_storage_selection_for_vars_file at build.func:3533. With two or
+    # more pools for a content type that calls select_storage, whiptail cannot
+    # run without a TTY, `|| exit_script` fires, and exit_script does `exit 0`:
+    # no container, reported as success. Do not revert to `mode=default`.
     env = {"TERM": "xterm", "mode": "generated", "PHS_SILENT": "1"}
     for key, val in overrides.items():
         env[f"var_{key}"] = str(val)
@@ -165,16 +152,13 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
 
     if ctid is not None:
         # Set last so it always wins over an `overrides` entry: the App row
-        # below records this ctid as fact, so the container has to actually
-        # land there. misc/build.func honours it
+        # below records this ctid as fact. misc/build.func honours it
         # (`local requested_id="${var_ctid:-$NEXTID}"`).
         #
-        # When ctid is None the key must be ABSENT from env, never present
-        # and empty: build.func reads it a second time at :1086 with
-        # `[[ -n "${var_ctid:-}" ]]`, which branches on non-empty, and only
-        # absence is honest about "let the node pick" under both that read
-        # and the `:-$NEXTID}` read above. An empty string happens to satisfy
-        # the first reader but not the second.
+        # When ctid is None the key must be ABSENT, never present and empty:
+        # build.func reads it again at :1086 with `[[ -n "${var_ctid:-}" ]]`,
+        # which branches on non-empty. An empty string satisfies the first
+        # reader but not the second, so only absence is honest.
         env["var_ctid"] = str(ctid)
 
     executor = SSHExecutor(connect_factory=app.state.ssh_connect_factory)
@@ -188,36 +172,28 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
-    # Decline community-scripts telemetry BEFORE the install runs, because
+    # Decline community-scripts telemetry BEFORE the install runs:
     # build.func's diagnostics_check() draws an interactive whiptail radiolist
-    # ("TELEMETRY & DIAGNOSTICS") whenever its config file is absent. That is
-    # the same failure shape as select_storage, and it arrived from upstream
-    # with no change on our side.
+    # whenever its config file is absent, the same failure shape as
+    # select_storage.
     #
-    # There is NO environment variable for this, and adding a DIAGNOSTICS=no
-    # to `env` above would be theatre: variables() does a hard
+    # There is NO environment variable for this. variables() does a hard
     # `DIAGNOSTICS="no"` assignment, not `${DIAGNOSTICS:-no}`, so anything we
-    # export is overwritten before diagnostics_check() is reached, and that
-    # function ignores the variable's value anyway when the file is missing.
-    # The file is the only control surface upstream offers.
+    # export is overwritten first, and diagnostics_check() ignores the value
+    # anyway when the file is missing. The file is upstream's only control
+    # surface.
     #
-    # Why we are not already broken: the whiptail call ends in
-    # `|| result="no"`, so a non-TTY session falls through to "no" and then
-    # WRITES the file, which is why only the first install on a node ever saw
-    # the dialog. That is a fallback on failure, not a supported
-    # non-interactive path, and it is one upstream edit away from becoming a
-    # hang. Do not rely on it.
+    # Do not rely on the current escape: the whiptail call ends in
+    # `|| result="no"`, so a non-TTY session falls through and writes the file
+    # itself. That is a fallback on failure, one upstream edit from a hang.
     #
     # Written only when absent, so an operator who opted IN from the node's
-    # own shell keeps their choice; this refuses to answer a question on their
-    # behalf, it only refuses to be ASKED one in a session with no terminal.
+    # own shell keeps their choice.
     #
-    # A separate SSH call rather than a prefix on the install command below:
-    # `env` is inlined as a `KEY=value ...` prefix by executor/ssh.py, and
-    # those assignments only apply to the FIRST simple command, so gluing a
-    # guard on with `;` would silently strip mode/PHS_SILENT/every var_* from
-    # the install itself. Not worth reshaping that command to save a
-    # connection.
+    # A separate SSH call, not a prefix on the install command: `env` is
+    # inlined as a `KEY=value ...` prefix by executor/ssh.py and those
+    # assignments apply only to the FIRST simple command, so gluing a guard on
+    # with `;` would strip mode/PHS_SILENT/every var_* from the install.
     telemetry_dir = "/usr/local/community-scripts"
     opt_out = (f"mkdir -p {telemetry_dir} && "
                f"{{ [ -e {telemetry_dir}/diagnostics ] || "
@@ -233,29 +209,26 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         # a guarantee we could not get.
         ctx.log(f"could not pre-set the telemetry preference: {e}", stream="stderr")
 
-    # Pinned to the exact commit that was ingested, classified and diffed; 
-    # not to `main`, which would be a fresh, possibly-different fetch at
-    # execution time and would make the app_scripts pin decorative.
+    # Pinned to the exact commit that was ingested, classified and diffed, not
+    # to `main`, which would be a fresh fetch at execution time and would make
+    # the app_scripts pin decorative.
     #
-    # RESIDUAL LIMITATION (deliberately not solved here): the pinned ct/*.sh
-    # itself contains a literal `source <(curl -fsSL .../main/misc/build.func)`
-    # line. That line's text is frozen at this commit, but the framework file
-    # it names is still fetched live from `main` at execution time, one level
-    # down. Full transitive vendoring of the community-scripts framework is a
-    # separate, larger piece of work.
+    # RESIDUAL LIMITATION: the pinned ct/*.sh still contains a literal
+    # `source <(curl -fsSL .../main/misc/build.func)`. That line's text is
+    # frozen, but the framework file it names is fetched live from `main` one
+    # level down. Vendoring the framework is separate, larger work.
+    #
     # The URL is quoted, the `$(...)` around it is not: `bash -c "$(curl ...)"`
     # runs the downloaded script, while quoting the whole substitution would
-    # make its output a command *word* instead, which is a different thing.
-    # script_path comes from the upstream catalog, so it is not ours to trust
-    # as a bare word inside the substitution.
+    # make its output a command *word*. script_path comes from the upstream
+    # catalog, so it is not ours to trust as a bare word.
     _url = shlex.quote(raw_url(entry.upstream_sha, entry.script_path))
     command = f"bash -c \"$(curl -fsSL {_url})\""
 
-    # The script's last words are where it prints the finished URL, so they
-    # are kept as they stream rather than read back out of job_events
-    # afterwards. Two reasons: they are already in hand here, and job_events
-    # has no retention policy today, so a parse that depended on rows still
-    # being there would quietly stop working the day someone adds pruning.
+    # The script's last words are where it prints the finished URL, so they are
+    # kept as they stream rather than read back out of job_events: job_events
+    # has no retention policy, so a parse depending on those rows would quietly
+    # stop working the day someone adds pruning.
     tail: deque[str] = deque(maxlen=TAIL_LINES)
 
     def on_line(stream: str, line: str) -> None:
@@ -275,18 +248,16 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     if status != 0:
         raise JobFailed(f"install script exited {status}")
 
-    # Exit status 0 is NOT proof the container was built. build.func's own
-    # cancel path (`|| exit_script`) exits 0, so a script that showed a menu
-    # and gave up looks identical here to one that installed cleanly. Without
-    # this check the handler filed an App row for a CT that does not exist,
-    # which is exactly what happened on the first real-hardware run.
+    # Exit status 0 is NOT proof the container was built. build.func's cancel
+    # path (`|| exit_script`) exits 0, so a script that showed a menu and gave
+    # up looks identical to one that installed cleanly. Without this check the
+    # handler filed an App row for a CT that does not exist.
     after = await asyncio.to_thread(_lxc_ids, app, host_id)
     if ctid is None:
         # No id was pinned, so read back which one build.func picked from the
         # diff of the id sets. This assumes an install creates exactly one
-        # container, true of every ct/ script today, and the failure mode
-        # when that assumption breaks is loud (JobFailed) rather than a
-        # silently wrong id recorded on the App row.
+        # container, true of every ct/ script today, and the failure when that
+        # breaks is loud rather than a silently wrong id on the App row.
         created = sorted(after - before)
         if len(created) != 1:
             raise JobFailed(
@@ -308,17 +279,16 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         with app.state.sessionmaker() as db:
             row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
                       catalog_slug=catalog_slug, category=entry.category,
-                      # No web_protocol: whether this app speaks http or https
-                      # is not something an install knows, and writing "http"
-                      # here is what used to send Open at the wrong scheme.
-                      # Left NULL so the app is asked (services/webui.py).
+                      # No web_protocol: an install does not know whether the
+                      # app speaks http or https, and writing "http" here is
+                      # what used to send Open at the wrong scheme. Left NULL
+                      # so the app is asked (services/webui.py).
                       #
-                      # `installed_url` is what the script printed about
-                      # itself, and it is only read after the run exited 0:
-                      # a failed install can still have printed a URL, for a
-                      # container that was then rolled back. The catalog's
-                      # port corroborates it, so a documentation link printed
-                      # near the end cannot win over the real one.
+                      # `installed_url` is what the script printed, read only
+                      # after exit 0: a failed install can still have printed
+                      # a URL for a container that was rolled back. The
+                      # catalog's port corroborates it, so a documentation
+                      # link near the end cannot win over the real one.
                       installed_url=url_from_install_log(
                           tail, expected_port=entry.port),
                       web_path="/", adopted=True,
@@ -326,14 +296,11 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
             db.add(row)
             db.flush()
             # A freshly created App row can never legitimately own an
-            # app_scripts row yet, so any that exist for this id are stale by
-            # definition. SQLite reissues row ids once a table is empty (or
-            # once older rows are gone), so a leftover row from a deleted app
-            # (an orphan left by a path that bypassed the FK cascade, or from
-            # before db.py started enforcing foreign keys) can collide with
-            # the id this brand new app was just given. One poisoned row must
-            # never be able to brick every future install on
-            # ux_app_scripts, so clear it before writing the real one.
+            # app_scripts row, so any that exist for this id are stale. SQLite
+            # reissues row ids once older rows are gone, so an orphan left by
+            # a path that bypassed the FK cascade can collide with the id this
+            # brand new app was just given. One poisoned row must never brick
+            # every future install on ux_app_scripts, so clear it first.
             db.query(AppScript).filter_by(app_id=row.id).delete()
             db.add(AppScript(app_id=row.id, version=1, content=install_script,
                              content_sha256=hashlib.sha256(install_script.encode()).hexdigest(),
@@ -341,15 +308,12 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
             db.commit()
             app_id, out_slug = row.id, row.slug
     except Exception as e:  # noqa: BLE001
-        # The container is REAL and RUNNING on the node at this point; only
-        # the bookkeeping failed. A raw DB error can carry the full SQL
-        # statement, every bound parameter, and even the install script text
-        # (SQLAlchemy's IntegrityError.__str__ includes all three), and none
-        # of that may ever reach the user. Say plainly what actually
-        # happened instead. Nothing on the node is touched: the container is
-        # not removed, and it will show up as a discovered, not-yet-adopted
-        # container on the Apps page, where it can be adopted to bring it
-        # under management.
+        # The container is REAL and RUNNING; only the bookkeeping failed. A raw
+        # DB error can carry the full SQL, every bound parameter and the
+        # install script text (SQLAlchemy's IntegrityError.__str__ includes all
+        # three), and none of that may reach the user. Nothing on the node is
+        # touched: the container stays and shows up as a discovered container
+        # on the Apps page, where it can be adopted.
         ctx.log(f"could not record the install in the database: {e}", stream="stderr")
         raise JobFailed(
             f"{catalog_slug} was installed on {host.name} as CT {ctid} and is "
@@ -359,12 +323,10 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
             f"under management.") from e
 
     ctx.progress(100)
-    # The App row above is ours to write (identity is Proxploy's, doc 04), but
-    # everything live about it, its status, cpu, memory, address, comes from the
-    # poller's snapshot of /cluster/resources, and the CT this install just made
-    # is not in that snapshot yet. Without the wake a brand new app sits at
-    # "unknown" for up to a poll interval; the CT is readable within tens of
-    # milliseconds of the install finishing (see Poller.wake).
+    # Everything live about an app, its status, cpu, memory and address, comes
+    # from the poller's snapshot of /cluster/resources, and the CT this install
+    # just made is not in it yet. Without the wake a brand new app sits at
+    # "unknown" for up to a poll interval.
     app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "app", "id": app_id, "change": "installed"})
     return {"app_id": app_id, "slug": out_slug}
@@ -397,15 +359,13 @@ def _resolve_update(app, app_id: int):
         latest = (db.query(AppScript).filter_by(app_id=app_id)
                   .order_by(AppScript.version.desc()).first())
         # api/apps.py::put_app_script writes an "edited" row WITHOUT an
-        # upstream_ref, so from_ref would read None below regardless: but
-        # that's an accident of that route, not something to depend on here.
-        # Checked explicitly: if it's ever backfilled with a ref, silently
-        # trusting upstream_ref==None would stop catching this and overwrite
-        # the operator's edits.
+        # upstream_ref, so from_ref would read None below anyway, but that is
+        # an accident of that route. Checked explicitly: if it is ever
+        # backfilled with a ref, trusting the NULL would overwrite the edits.
         if latest is not None and latest.source == "edited":
-            # api/apps.py::revert_app_script (Task 6) is the way out: it pins
-            # a fresh version sourced "upstream" so this guard clears. Point
-            # at it by name rather than making the operator guess.
+            # api/apps.py::revert_app_script is the way out: it pins a fresh
+            # version sourced "upstream" so this guard clears. Point at it by
+            # name rather than making the operator guess.
             raise JobFailed(
                 f"{a.name}'s script was edited locally (version {latest.version}); "
                 f"updating would replace it with the upstream script and discard "
@@ -436,9 +396,9 @@ def _resolve_update(app, app_id: int):
 def _lxc_ids(app, host_id: int) -> set[int]:
     """Blocking: every LXC id currently on the host, straight from PVE.
 
-    One `/cluster/resources` call, the same read the poller makes. Deliberately
-    NOT the poller's cached snapshot: this is a safety check, and a cache up to
-    30 s stale is exactly what would miss a container created seconds ago.
+    One `/cluster/resources` call. Deliberately NOT the poller's cached
+    snapshot: this is a safety check, and a cache up to 30 s stale is exactly
+    what would miss a container created seconds ago.
     """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
@@ -455,14 +415,10 @@ def _lxc_ids(app, host_id: int) -> set[int]:
 def _storage_pools(app, host_id: int, content: str) -> list[str]:
     """Blocking: the pool names on this host's node that carry `content`.
 
-    The API-side equivalent of build.func's `pvesm status -content
-    "$content"`, the query whose result becomes an interactive picker when it
-    returns more than one row. Deliberately NOT the poller's cached snapshot,
-    for the same reason `_lxc_ids` gives: this decides where a container's
-    disk lands, and a 30 s stale cache is the wrong input for that.
-
-    Sorted so a caller comparing two candidate lists gets a stable answer, and
-    so an error message naming them reads the same every time.
+    The API-side equivalent of build.func's `pvesm status -content "$content"`,
+    the query that becomes an interactive picker when it returns more than one
+    row. Not the poller's cached snapshot, same reason `_lxc_ids` gives. Sorted
+    so two candidate lists compare stably and error messages read the same.
     """
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
@@ -494,33 +450,26 @@ _STORAGE_CLASSES = (
 def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
     """The container and template pools for this install, or JobFailed.
 
-    THIS FUNCTION NEVER PICKS. Which pool a container's disk lands on is a
-    question, and choosing one on the operator's behalf is exactly the
+    THIS FUNCTION NEVER PICKS. Choosing a pool on the operator's behalf is the
     interactive-picker problem this design exists to refuse: build.func asks
     that question itself with `pvesm status -content "$content"` whenever it
     finds more than one candidate, and over a non-interactive SSH session that
-    picker cannot be answered, so the run hangs. The order tried here is:
+    picker cannot be answered, so the run hangs. The order is:
 
       1. what the operator supplied for this install (`supplied`)
-      2. the sole candidate, if the node has exactly one. This is not a pick:
-         there is nothing to choose between.
+      2. the sole candidate, if the node has exactly one. Not a pick: there is
+         nothing to choose between.
       3. refuse, naming the candidates so the operator can choose
 
-    Nothing here is remembered across installs (PXP-86 decision): a host
-    with two or more pools for a content type is asked every single time,
-    never silently answered from a prior install on the same host. That is
-    a deliberate simplification, not an oversight; an earlier version of
-    this function also tried a value remembered on Host.default_*_storage
-    between (1) and (2), and PXP-86 removed it.
+    Nothing is remembered across installs: a host with two or more pools for a
+    content type is asked every time, never answered from a prior install.
 
-    Every value taken from (1) is revalidated against the node's current
-    content list before use. A pool name that is stale or was never valid
-    reaches build.func's resolve_storage_preselect, whose failure branch
-    returns 238 and then spins in a `while true` with an empty body: a real
-    hang that our 1800 s SSH timeout would surface as an opaque
-    `TimeoutError: ` with no message. Sending an unvalidated name is worse
-    than sending none, so nothing here is ever trusted without being checked
-    against `_storage_pools` first.
+    Every value from (1) is revalidated against the node's current content list
+    first. A stale or never-valid name reaches build.func's
+    resolve_storage_preselect, whose failure branch returns 238 and then spins
+    in a `while true` with an empty body: a real hang our 1800 s SSH timeout
+    surfaces as an opaque `TimeoutError: `. Sending an unvalidated name is
+    worse than sending none.
     """
     resolved = []
     for key, content in _STORAGE_CLASSES:
@@ -530,9 +479,8 @@ def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
 
         # str(...) first: the API validator constrains override KEYS to a
         # shell-identifier pattern but not value types, so a non-string value
-        # (e.g. {"container_storage": 5}) reaches here and `.strip()` on a
-        # bare int raises AttributeError instead of one of this function's
-        # deliberately-written JobFailed messages.
+        # reaches here and `.strip()` on a bare int raises AttributeError
+        # instead of one of this function's JobFailed messages.
         chosen = str(supplied.get(key) or "").strip() or None
         if chosen:
             if chosen not in candidates:
@@ -552,31 +500,25 @@ def resolve_storage_pools(app, host_id: int, supplied: dict) -> tuple[str, str]:
     return resolved[0], resolved[1]
 
 
-# Job kinds that build a new guest (Task 5 review B1). JobBackend runs up to
-# MAX_CONCURRENT jobs at once, so an id appearing in `after` that wasn't in
-# `before` may belong to one of these running concurrently, not to this
-# update's script taking build.func's install branch.
+# Job kinds that build a new guest. JobBackend runs up to MAX_CONCURRENT jobs
+# at once, so an id appearing in `after` that wasn't in `before` may belong to
+# one of these running concurrently, not to this update's script taking
+# build.func's install branch.
 _GUEST_CREATING_KINDS = ("app.install", "vm.create", "vm.clone")
 
 
 def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
                             window_start, window_end) -> set[int]:
-    """Blocking: ctids from OTHER guest-creating jobs whose run overlapped
-    this job's SSH window, so the stray-CT check doesn't blame; and point an
-    operator at destroying, a legitimate container an unrelated job built at
-    the same time.
+    """Blocking: ctids from OTHER guest-creating jobs whose run overlapped this
+    job's SSH window, so the stray-CT check does not point an operator at
+    destroying a container an unrelated job legitimately built.
 
     Only `app.install`'s target id is knowable without guessing, and only when
-    the operator supplied one: `params["ctid"]` is passed to the remote script
-    as `var_ctid`, so a job that has one built exactly that id, finished or
-    not. A CTID-less install (Task 5 made the field optional; the node then
-    assigns the next free id) contributes NOTHING here, because the id it
-    built is not knowable until it has built it.
-    `vm.create`/`vm.clone` are qemu-only (services/guestjobs.py, doc 05) and
-    can never produce an LXC row in the first place, so nothing is extracted
-    for them, they're queried (per review) alongside app.install for
-    completeness, not because either can contribute an id `_lxc_ids` would
-    ever see.
+    the operator supplied one: `params["ctid"]` reaches the script as
+    `var_ctid`, so a job that has one built exactly that id. A CTID-less
+    install contributes NOTHING, because the id it built is not knowable until
+    it has built it. `vm.create`/`vm.clone` are qemu-only and can never produce
+    an LXC row.
     """
     with app.state.sessionmaker() as db:
         rows = (db.query(Job)
@@ -588,7 +530,7 @@ def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
         ids: set[int] = set()
         for j in rows:
             if j.finished_at is not None and j.finished_at < window_start:
-                continue  # finished before this job's window even opened
+                continue
             if (j.kind == "app.install" and j.params
                     and j.params.get("host_id") == host_id):
                 ctid = j.params.get("ctid")
@@ -598,39 +540,27 @@ def _concurrent_guest_ctids(app, exclude_job_id: int, host_id: int,
 
 
 async def run_update(ctx: JobContext, params: dict) -> dict:
-    """`app.update`, re-run the app's catalog script, pinned to the CURRENT
-    upstream commit, over the same SSH path install uses (doc 10 Phase 7:
-    "same pin/diff/consent/stream/archive path as install").
-
-    Consent and the upstream diff are the API layer's job (Task 6), exactly as
-    install splits them; this handler assumes both were obtained.
+    """`app.update`: re-run the app's catalog script, pinned to the CURRENT
+    upstream commit, over the same SSH path install uses. Consent and the diff
+    are the API layer's job.
 
     Two guards bracket the SSH run. A community-scripts `ct/*.sh` decides for
-    itself whether it is installing or updating, `build.func`'s `start` routes
-    to `update_script()` when it finds the container and to `build_container()`
-    when it does not, and Proxploy cannot see inside that decision. The
-    failure mode when it goes the wrong way is a second container built while
-    the `apps` row still points at the first. So the CT must exist BEFORE
-    (otherwise the script would certainly install fresh), and no new CT may
-    exist AFTER (otherwise it installed anyway, and the job must say so rather
-    than report success over a stray container).
+    itself whether it is installing or updating: `build.func`'s `start` routes
+    to `update_script()` when it finds the container and `build_container()`
+    when it does not, and Proxploy cannot see inside that decision. Going the
+    wrong way builds a second container while the `apps` row still points at
+    the first, so the CT must exist BEFORE and no new CT may exist AFTER.
 
-    RESIDUAL LIMITATION, stated rather than hidden: whether a given entry's
-    update path is non-interactive is a property of that upstream script.
-    services/classifier.py classifies INSTALL feasibility only. An update path
-    that prompts aborts under `catch_errors`' `set -Ee` and this job fails with
-    the full transcript archived, the honest outcome. Classifying update paths
-    is separate, larger work, not attempted here.
+    RESIDUAL LIMITATION: whether an entry's update path is non-interactive is a
+    property of that upstream script, and services/classifier.py classifies
+    INSTALL feasibility only. An update path that prompts aborts under
+    `set -Ee` and this job fails with the transcript archived.
 
-    A SECOND, more severe residual limitation (Task 5 review B4): the post-
-    check is an id-SET comparison (before vs. after), and a set diff is blind
-    to a script that destroys CT <ctid> and rebuilds it at the SAME id, no id
-    is added, none is missing, the diff sees nothing wrong, and this handler
-    reports success and advances the pin over what is now a freshly built,
-    EMPTY container. This is undetected. It is the one failure mode here with
-    real data loss, and nothing in `_lxc_ids`'s id-set approach can catch it;
-    detecting it would need something like a creation-time/uptime marker,
-    deliberately not attempted here.
+    A SECOND, more severe one: the post-check is an id-SET comparison, so it is
+    blind to a script that destroys CT <ctid> and rebuilds it at the SAME id.
+    Nothing is added or missing, so this reports success and advances the pin
+    over a freshly built, EMPTY container. Undetected, and the one failure mode
+    here with real data loss.
     """
     app = ctx.backend.app
     app_id = int(params["app_id"])
@@ -658,23 +588,17 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
                 h.ssh_host_key_fingerprint = fp
                 db.commit()
 
-    # Pinned to the exact commit that was ingested and classified, never to
-    # `main`: identical rule and identical raw_url() helper as run_install,
-    # and it carries the same one-level-down residual: the pinned script's own
-    # `source <(curl ... /main/misc/build.func)` line is frozen text but still
-    # fetches live.
+    # Pinned to the exact commit, never `main`: same rule and same raw_url()
+    # helper as run_install, with the same one-level-down residual.
     #
     # Run it INSIDE the container, not on the host. build.func's start() picks
-    # install-vs-update by where it is running, nothing else:
+    # install-vs-update purely by where it is running:
     #
     #     if command -v pveversion; then install_script        # on the PVE host
     #     elif [ "$PHS_SILENT" == 1 ]; then update_script      # in the CT
     #
-    # `pveversion` exists on the host, so running this over plain host SSH took
-    # the install branch every time and built a SECOND container instead of
-    # updating this one. Verified on PVE 9.2.6, 2026-08-10: host-side produced
-    # a stray CT 100 with a duplicate AdGuard; `pct exec` into the CT reached
-    # the real update path and created nothing. No env var changes that choice.
+    # `pveversion` exists on the host, so plain host SSH took the install
+    # branch every time and built a SECOND container. No env var changes that.
     #
     # The env goes INSIDE the pct exec: the executor's own `env=` is a prefix
     # on the outer host command and does not cross into the container.
@@ -708,13 +632,10 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
         strays -= concurrent
     if strays:
         names = ", ".join(f"CT {s}" for s in sorted(strays))
-        # Never an imperative "remove it" (Task 5 review B1): this is a
-        # whole-cluster snapshot diff and JobBackend runs jobs concurrently,
-        # so a stray id here is not proof this update's script built it: it
-        # could just as well be an unrelated job that landed in the same
-        # window. B2: also tell the truth about retrying: the pin and
-        # update_available are both left untouched below, and a plain retry
-        # hits the same install branch again.
+        # Never an imperative "remove it": this is a whole-cluster snapshot
+        # diff and jobs run concurrently, so a stray id is not proof this
+        # update's script built it. And tell the truth about retrying: the pin
+        # is left untouched below, so a plain retry hits the same branch again.
         raise JobFailed(
             f"{names} appeared on {host['name']} during this update of "
             f"{a['name']} (CT {a['ctid']}) that {'was' if len(strays) == 1 else 'were'} "

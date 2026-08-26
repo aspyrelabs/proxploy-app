@@ -12,70 +12,50 @@ import { Skeleton, SkeletonLine } from './ui/skeleton'
 /**
  * The two inventories on the Hosts page, apps and VMs, as one visual language.
  *
- * They live in ONE file because they are one design that happens to have two
- * data sources: the same cell rhythm, the same status vocabulary, the same
- * grouping. Two files drifted into two row heights the first time anyone
- * touched one of them; a shared cell cannot.
+ * They live in ONE file because they are one design with two data sources: the
+ * same cell rhythm, the same status vocabulary, the same grouping. Two files
+ * drifted into two row heights; a shared cell cannot.
  *
- * The two grids genuinely differ in exactly two places, and those are the two
- * props IconGridCell takes: which menu opens off the artwork (AppIconMenu vs
- * VmActionsMenu), and where the artwork comes from (an app wears the logo of
- * the Store entry it came from, a VM has no such entry and wears its OS).
+ * They differ in exactly two places, which are the two props IconGridCell
+ * takes: which menu opens off the artwork, and where the artwork comes from.
  */
 
 /** auto-fill with a FLOOR, not a fixed column count.
  *
- *  A count (sm:grid-cols-2 xl:grid-cols-4) decided how many columns there were
- *  and let each one be whatever width was left over, so at four across on a
- *  narrow page an app name was cut to a few characters. A floor plus auto-fill
- *  lets the browser fit as many columns as the space allows while keeping any
- *  single column readable.
+ *  A fixed count (sm:grid-cols-2 xl:grid-cols-4) let each column be whatever
+ *  width was left over, so at four across on a narrow page an app name was cut
+ *  to a few characters. A floor plus auto-fill fits as many columns as the
+ *  space allows while keeping any one readable.
  *
- *  The floor is 10rem and the column gap is 12px, down from 13rem and 24px.
- *  These two sections sit in half the page each, which is 570px at a 1440px
- *  window once the sidebar, the page padding and the gap between the two
- *  columns come out. Measured in a browser at that width rather than worked
- *  out on paper: the old pair fitted 2 columns of 256px, the new pair fits 3
- *  of 171px, and none of the app names on the reference fleet truncate at
- *  171px, `changedetection` at fifteen characters included. The cell still
- *  carries `truncate` and a `title` for names longer than that.
+ *  10rem floor, 12px gap, measured in a browser at the 570px each section gets
+ *  on a 1440px window: 3 columns of 171px, and no app name on the reference
+ *  fleet truncates at that width. The cell still carries `truncate` and a
+ *  `title`.
  *
- *  Shared with the skeleton so the placeholder cannot lay out differently from
- *  the thing it stands in for. */
+ *  Shared with the skeleton so the placeholder cannot lay out differently. */
 const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-3 gap-y-4'
 
 /** The card the grids sit in, kept OUT of GRID.
  *
- *  It used to be welded onto the end of the same class string, which was fine
- *  while there was one grid per inventory. There is now one grid per node, and
- *  a card per node would draw five floating boxes for a five node cluster and
- *  read as five separate inventories. One panel with a rule between sections
- *  reads as what it is: a single list of what is installed, grouped by the
- *  machine it runs on. */
+ *  There is one grid per NODE, so a card welded onto the grid string would
+ *  draw five floating boxes for a five node cluster and read as five separate
+ *  inventories. One panel with a rule between sections reads as one list,
+ *  grouped by the machine each guest runs on. */
 const PANEL = 'rounded-card border border-line-soft bg-panel p-4'
 
 /**
  * State, as a glyph and the word, for the icon grid.
  *
- * The COLOURS are StatusPill's, and the WORD is statusLabel's, so this view
- * cannot drift from the status vocabulary the rest of the app uses.
+ * The COLOURS are StatusPill's and the WORD is statusLabel's, so this cannot
+ * drift from the vocabulary the rest of the app uses, and the app cell and the
+ * VM cell share it so one state never reads in two colours.
  *
  * Every status gets its own entry rather than collapsing to running/stopped:
- * paused and unknown are not "not running", and an operator who cannot tell
- * them apart cannot tell a container someone suspended from one PVE has lost
- * track of. `icon:` is the field shape scripts/icon-names.mjs reads, which is
- * why these are literals in a table rather than a computed name.
+ * paused and unknown are not "not running". `icon:` is the field shape
+ * scripts/icon-names.mjs reads, which is why these are literals in a table.
  *
- * `pending` is not one of StatusPill's STYLES keys either (it falls to its
- * `unknown` grey there): it is the optimistic patch useLifecycle applies for
- * the span between a click and the job's own resolution, covered here for
- * the same reason. `connected`/`online` are node-only statuses StatusPill
- * also carries, never a value AppRow.status takes, so they are left out.
- *
- * Shared by the app cell and the VM cell: the two kinds of guest report the
- * same words for the same states, and a VM that read "Stopped" in one colour
- * on one half of the page and another colour on the other half would be the
- * page contradicting itself.
+ * `pending` is not one of StatusPill's STYLES keys: it is the optimistic patch
+ * useLifecycle applies between a click and the job's resolution.
  */
 const STATE: Record<string, { icon: string; cls: string }> = {
   running: { icon: 'play_arrow', cls: 'text-green' },
@@ -102,31 +82,24 @@ type NodeGroup<T> = {
 /**
  * The most guests one inventory draws, across every node in it.
  *
- * 50 for the apps and 50 for the VMs, not 50 each per node: the number that
- * matters is how much of the page a section can take, and that is the total.
- * One host showing 50 apps and two hosts showing 25 apiece cost the operator
- * the same scroll.
- *
- * The cap exists because the sections are uncapped otherwise, and a fleet with
- * three hundred containers turned the Hosts page into a list nobody reads on
- * the way to the thing they came for. Both sections link to their full table,
- * which is where a fleet that size belongs.
+ * 50 for the apps and 50 for the VMs, not 50 per node: what matters is how
+ * much of the page a section can take, and that is the total. Without a cap, a
+ * fleet with three hundred containers turned the Hosts page into a list nobody
+ * reads on the way to what they came for. Both sections link to their full
+ * table.
  */
 const CAP = 50
 
 /**
  * How many rows each node section may draw, dealt round-robin.
  *
- * Round-robin rather than a slice off the front, because a slice is the bug
- * this file already carries a comment about: take the first 50 of a sorted
- * list and node1 eats all of them while node2 renders empty, so an operator
- * reading the page cannot tell a node with no apps from a node that lost the
- * draw. Dealing one at a time gives 25/25 for two even nodes and spends the
- * remainder on whoever still has rows left, so every node is represented
- * before any node is complete.
+ * Not a slice off the front: take the first 50 of a sorted list and node1 eats
+ * all of them while node2 renders empty, so an operator cannot tell a node
+ * with no apps from a node that lost the draw. Dealing one at a time gives
+ * 25/25 for two even nodes and spends the remainder on whoever has rows left.
  *
- * Terminates: every pass either hands out at least one row or every group is
- * already full, and `left` never exceeds the rows that exist.
+ * Terminates: every pass either hands out a row or every group is full, and
+ * `left` never exceeds the rows that exist.
  */
 function quotas(sizes: number[], cap: number): number[] {
   const out = sizes.map(() => 0)
@@ -143,50 +116,42 @@ function quotas(sizes: number[], cap: number): number[] {
 }
 
 /** "4 apps", or "25 of 40 apps" when the cap took the rest. The count is the
- *  only place the page can admit it is not showing everything, so it says the
- *  total rather than quietly drawing a shorter list. */
+ *  only place the page can admit it is not showing everything. */
 function counted(shown: number, total: number, word: string): string {
   const plural = `${word}${total === 1 ? '' : 's'}`
   return shown === total ? `${total} ${plural}` : `${shown} of ${total} ${plural}`
 }
 
-/** Rows with neither a node nor a host name. They are still somebody's guests,
- *  so they get a section of their own at the end rather than being dropped on
- *  the floor, which is what a `if (!node) continue` would have done. */
+/** Rows with neither a node nor a host name. Still somebody's guests, so they
+ *  get a section of their own at the end rather than being dropped by an
+ *  `if (!node) continue`. */
 const UNPLACED = 'Node not reported yet'
 
 /**
  * Guests grouped by the machine they actually run on.
  *
- * The key is the GUEST'S OWN node, not the host it was read through, and that
- * distinction is the whole point of this change. A Host record in Proxploy is
- * one Proxmox API endpoint; on a cluster that one endpoint answers for every
- * node in the cluster, so a container sitting on pve3 arrives with
- * host_name "host-01" because host-01 is the endpoint we asked. Grouping on
- * host_name would file every guest in the cluster under one heading and say
- * "host-01" over a list of containers that are running on three different
- * machines, which is the exact question the operator opened this page to
- * answer.
+ * The key is the GUEST'S OWN node, not the host it was read through. A Host
+ * record is one Proxmox API endpoint, and on a cluster that endpoint answers
+ * for every node, so a container on pve3 arrives with host_name "host-01".
+ * Grouping on host_name would file every guest in the cluster under one
+ * heading, over containers running on three different machines.
  *
- * host_name is the FALLBACK, for the rows where node is null: a standalone
- * host whose poller has not filled the field in yet still belongs somewhere,
- * and its host name is the truest thing we can say about where it lives.
+ * host_name is the FALLBACK for rows where node is null: a standalone host
+ * whose poller has not filled the field in yet still belongs somewhere.
  *
- * Sorted by name, and sorted within each group by name, for the same reason
- * the node cards above are: /apps and /vms answer in no defined order, so an
- * unsorted list reshuffles under the operator on every 30s refetch.
+ * Sorted by name, and within each group by name, because /apps and /vms answer
+ * in no defined order and an unsorted list reshuffles on every 30s refetch.
  */
 function groupByNode<T extends Guest>(rows: T[]): NodeGroup<T>[] {
-  // null is the key of the group for rows with neither, and null cannot
-  // collide with any name a node or a host could have.
+  // null is the key for rows with neither, and it cannot collide with any
+  // name a node or a host could have.
   const groups = new Map<string | null, NodeGroup<T>>()
   for (const r of rows) {
     const node = r.node?.trim() || null
     const host = r.host_name?.trim() || null
     // A row with no node joins the group of its host's name rather than
-    // starting one beside it. On a standalone machine the host record is
-    // usually named after its only node, so keeping them apart would draw two
-    // sections with the same heading over one machine.
+    // starting one beside it: on a standalone machine the host record is
+    // usually named after its only node.
     const key = node ?? host
     let g = groups.get(key)
     if (!g) {
@@ -215,23 +180,19 @@ function NodeSections<T extends Guest>({ rows, word, children }: {
   word: string
   children: (rows: T[]) => React.ReactNode
 }) {
-  // Grouped first, capped second. The cap is a total across the sections, so
-  // it cannot be applied to `rows` before the groups exist without deciding
-  // which node loses out by sort order alone.
+  // Grouped first, capped second: the cap is a total across the sections, so
+  // applying it to `rows` first would decide which node loses out by sort
+  // order alone.
   const groups = groupByNode(rows)
   const share = quotas(groups.map((g) => g.rows.length), CAP)
   return (
     <div className={PANEL}>
       {groups.map((g, i) => {
         // The host is worth saying only when it is a DIFFERENT machine from
-        // the heading: "pve3 · on host-01" tells the operator which endpoint
-        // answers for that node, while "node1 · on node1.lab.local" is
-        // the same box named twice.
-        //
-        // Compared on the first DNS label, not the whole string. A host is
+        // the heading: "node1 · on node1.lab.local" is the same box
+        // named twice. Compared on the first DNS label, since a host is
         // routinely registered by its fully qualified name while PVE reports
-        // the node as the short one, so an exact compare called them different
-        // machines and repeated the name in every heading.
+        // the node as the short one.
         const sameBox = (h: string) =>
           h.split('.')[0].toLowerCase() === g.label.split('.')[0].toLowerCase()
         const via = g.hosts.filter((h) => !sameBox(h))
@@ -241,8 +202,8 @@ function NodeSections<T extends Guest>({ rows, word, children }: {
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="font-mono text-[13px] text-text">{g.label}</h3>
               {/* One string, not two children: split across text nodes it
-                  reads the same on screen and is a great deal harder to assert
-                  on, and it is one sentence either way. */}
+                  reads the same on screen, and it is one sentence either
+                  way. */}
               <span className="text-[11px] text-text-3">
                 {(via.length > 0 ? `on ${via.join(', ')} · ` : '')
                   + counted(share[i], g.rows.length, word)}
@@ -260,9 +221,8 @@ function NodeSections<T extends Guest>({ rows, word, children }: {
  * One guest: its artwork, which is the menu, and its name and state beside it.
  *
  * `menu` is a function rather than a wrapped child because the two menus take
- * different props (AppIconMenu wants the app row, VmActionsMenu the VM row)
- * while both want the SAME trigger, tile size and all. Handing them a trigger
- * this component built is what keeps the two grids on one row rhythm.
+ * different props while both want the SAME trigger, tile size and all, which
+ * is what keeps the two grids on one row rhythm.
  */
 function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen, menu }: {
   name: string
@@ -278,8 +238,8 @@ function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen,
   return (
     <div className="flex items-center gap-3">
       {/* The artwork is the menu. Nothing is drawn ON it: the tile is the
-          guest's own picture and a badge over it would compete with whatever
-          that picture already puts in the corner. */}
+          guest's own picture, and a badge would compete with whatever that
+          picture already puts in the corner. */}
       {menu(
         <button type="button" data-testid={testId}
           aria-label={`Actions for ${name}`}
@@ -306,12 +266,10 @@ function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen,
   )
 }
 
-/** Every installed app up to CAP, grouped under the node it runs on. The page
- *  once showed the first eight in whatever order the API answered, which on a
- *  cluster meant an operator could not tell whether a missing app was stopped,
- *  gone, or simply the ninth. The cap that replaced no cap at all is dealt
- *  across the nodes and stated in each section's count, so neither of those
- *  readings is possible: a section that is holding rows back says so. */
+/** Every installed app up to CAP, grouped under the node it runs on. The cap
+ *  is dealt across the nodes and stated in each section's count, so a section
+ *  holding rows back says so, and a missing app cannot mean "stopped, gone, or
+ *  simply the ninth". */
 export function AppIconGrid({ apps }: { apps: AppRow[] }) {
   const navigate = useNavigate()
   return (
@@ -331,10 +289,9 @@ export function AppIconGrid({ apps }: { apps: AppRow[] }) {
 /** Every VM up to CAP, the same grid, grouped and capped the same way.
  *
  *  A VM has no catalog entry and so no logo. osIconUrl returns null both for
- *  an ostype we do not recognise and for a VM whose ostype PVE has not told us
- *  yet, and IconTile treats a null url as "no artwork" and falls back to the
- *  initials tile, so an unknown OS looks like an app with no logo rather than
- *  like a broken image. */
+ *  an unrecognised ostype and for one PVE has not reported yet, and IconTile
+ *  falls back to the initials tile on a null url, so an unknown OS looks like
+ *  an app with no logo rather than a broken image. */
 export function VmIconGrid({ vms }: { vms: VmRow[] }) {
   const navigate = useNavigate()
   return (
@@ -352,8 +309,7 @@ export function VmIconGrid({ vms }: { vms: VmRow[] }) {
 
 /** The placeholder for either grid, mirroring the section heading, the 32px
  *  tile and the two text lines so the page below does not shift when the rows
- *  land. ONE placeholder for both grids because there is one cell: edited with
- *  IconGridCell, never separately. */
+ *  land. ONE placeholder for both grids because there is one cell. */
 export function IconGridSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className={PANEL}>

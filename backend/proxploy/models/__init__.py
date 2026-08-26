@@ -19,14 +19,12 @@ def utcnow() -> datetime:
 def to_iso(dt: datetime | None) -> str | None:
     """The one way to serialize a datetime for an API response.
 
-    Every timestamp column here is stored as naive UTC (see utcnow() above),
-    so a bare dt.isoformat() carries no offset. A browser's
-    `new Date("...")` reads an offset-less string as LOCAL time, not UTC,
-    which silently shifts every timestamp shown in the UI by the viewer's
-    own timezone. Naive input gets a literal "Z" appended so it reads as
-    UTC unambiguously. A value that already carries a timezone is left as
-    isoformat() renders it (its own offset is already unambiguous), so this
-    never double-suffixes. None passes through as None.
+    Every timestamp column here is stored as naive UTC (see utcnow above), so
+    a bare dt.isoformat() carries no offset, and a browser's `new Date("...")`
+    reads an offset-less string as LOCAL time. That silently shifts every
+    timestamp in the UI by the viewer's own timezone. Naive input gets a
+    literal "Z" appended. A value that already carries a timezone is left as
+    isoformat() renders it, so this never double-suffixes. None stays None.
     """
     if dt is None:
         return None
@@ -46,7 +44,6 @@ class TimestampMixin:
     )
 
 
-# --- Identity & access -----------------------------------------------------
 
 class User(TimestampMixin, Base):
     __tablename__ = "users"
@@ -67,15 +64,13 @@ class User(TimestampMixin, Base):
 
 
 class TotpRecoveryCode(Base):
-    """One row per recovery code (Phase 8 Task 8 amendment: the plan's
-    zero-migration design packed these inside `users.totp_secret_enc`; a
-    real column replaces that so burning a code is an ordinary UPDATE,
-    never a decrypt-mutate-re-encrypt of a blob shared with a concurrent
-    TOTP verify). `code_hash_enc` is the
-    argon2 hash (services/authn.py::hash_password's idiom, never the raw
-    code) Fernet-encrypted at rest via SecretStore, same as
-    `totp_secret_enc`. Burning sets `used_at`; the atomic single-use
-    guarantee is `UPDATE ... WHERE id = ? AND used_at IS NULL`
+    """One row per recovery code. A real column rather than packing these into
+    `users.totp_secret_enc`, so burning a code is an ordinary UPDATE and never
+    a decrypt-mutate-re-encrypt of a blob shared with a concurrent TOTP
+    verify. `code_hash_enc` is the argon2 hash (never the raw code)
+    Fernet-encrypted at rest via SecretStore, same as `totp_secret_enc`.
+    Burning sets `used_at`; the atomic single-use guarantee is
+    `UPDATE ... WHERE id = ? AND used_at IS NULL`
     (services/consoletickets.py::redeem_ticket's exact pattern)."""
     __tablename__ = "totp_recovery_codes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -101,16 +96,15 @@ class TrustedDevice(TimestampMixin, Base):
     """A browser that has already proved the second factor, so the code step
     can be skipped on this device until `expires_at`.
 
-    Deliberately the same shape as `sessions` above, and hashed the same way
-    (services/authn.py::_th): the expiry and revocation semantics of a session
-    are already proven, and a second, subtly different set of rules around a
-    credential that BYPASSES two-factor is exactly where a hole would open.
+    Same shape as `sessions` above and hashed the same way
+    (services/authn.py::_th): a second, subtly different set of rules around a
+    credential that BYPASSES two-factor is exactly where a hole opens.
 
     It is not a session and cannot become one. `resolve_session` reads the
-    sessions table only, so this token grants nothing on its own: it is checked
-    after a password has already been verified, and the most it can do is skip
-    the code. Bound to `user_id` so a device trusted for one account cannot
-    skip the second factor on another.
+    sessions table only, so this token grants nothing on its own: it is
+    checked after a password has already been verified, and the most it can do
+    is skip the code. Bound to `user_id`, so a device trusted for one account
+    cannot skip the second factor on another.
     """
     __tablename__ = "trusted_devices"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -166,7 +160,6 @@ class CasbinRule(Base):
     __table_args__ = (Index("ix_casbin", "ptype", "v0", "v1"),)
 
 
-# --- Infrastructure --------------------------------------------------------
 
 class Host(TimestampMixin, Base):
     __tablename__ = "hosts"
@@ -190,37 +183,30 @@ class Host(TimestampMixin, Base):
     node_shell_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Whether the stored token lacks Sys.PowerMgmt (host reboot/power off),
     # recomputed at enrolment and by POST /hosts/{id}/test, same idiom as
-    # last_error above. NULL means "not checked yet" -- distinct from False
-    # ("checked, and granted") -- so a host enrolled before this existed
-    # reads as unknown rather than a false "granted". Informational only: it
-    # is never used to refuse a power attempt, only to warn ahead of one
-    # (services/pveum.py NODE_POWER_PRIVILEGE, doc 08 §2/§9).
+    # last_error above. NULL means "not checked yet", distinct from False
+    # ("checked, and granted"), so a host enrolled before this existed reads as
+    # unknown rather than a false "granted". Informational only: never used to
+    # refuse a power attempt, only to warn ahead of one (services/pveum.py
+    # NODE_POWER_PRIVILEGE).
     node_power_missing: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # Whether this host's cluster has quorum, read straight off the `quorate`
-    # field of its /cluster/status cluster row every poll cycle. NULL for a
-    # standalone node (no cluster row, so the question does not apply) and for
-    # a host not polled since this existed; False ONLY when PVE said so.
+    # Whether this host's cluster has quorum, read off the `quorate` field of
+    # its /cluster/status cluster row every poll cycle. NULL for a standalone
+    # node (no cluster row, so the question does not apply) and for a host not
+    # polled since this existed; False ONLY when PVE said so.
     #
-    # It is a health fact, not a privilege one: without quorum /etc/pve is
-    # read-only, so every install, storage edit and guest config write fails,
-    # while /cluster/resources and /version keep answering perfectly. Reached
-    # for real on 2026-08-18 (doc 12 check 12) with every host still reading
-    # `connected`, which is the lie this column exists to stop telling.
+    # A health fact, not a privilege one: without quorum /etc/pve is read-only,
+    # so every install, storage edit and guest config write fails, while
+    # /cluster/resources and /version keep answering perfectly and every host
+    # still reads `connected`. That is the lie this column stops telling.
     quorate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # {capability: [missing privilege, ...]}, {} when every configured token is
     # fully granted, NULL when never probed. A capability mapped to null means
     # PVE refused /access/permissions for that token: "could not tell", not
     # clean. Refreshed by the poll loop on a slow cadence and by
     # POST /hosts/{id}/test, because a role gains privileges over time and an
-    # old token's only other symptom is a 403 mid-job (doc 12 checks 17, 18).
+    # old token's only other symptom is a 403 mid-job.
     capability_gaps: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
-    # The pools this host's operator chose, remembered so the question is asked
-    # once rather than on every install. NULL means "not chosen yet", which is
-    # deliberately distinct from any pool name: services/appstore.py's
-    # resolution order treats NULL as "fall through", and a stored name as an
-    # answer to re-validate. Per content type, because a node can have one
-    # rootdir candidate and several vztmpl ones.
     # When this host's operator acknowledged that installs run third-party
     # scripts as root here. Per host rather than per install: the acknowledgement
     # is about the host, and re-asking on every install is friction that
@@ -244,7 +230,6 @@ class HostCredential(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("host_id", "kind", name="ux_host_creds"),)
 
 
-# --- Apps ------------------------------------------------------------------
 
 class App(TimestampMixin, Base):
     __tablename__ = "apps"
@@ -255,11 +240,10 @@ class App(TimestampMixin, Base):
     # (`column name "ctid" conflicts with a system column name`). The Python
     # attribute, the API field and the frontend type all stay `ctid`.
     ctid: Mapped[int] = mapped_column("ct_id", Integer, nullable=False)
-    # The node the CT actually runs on, refreshed every poll cycle. Assumed to be
-    # the host's node before this existed, which is true while installs pick the
-    # host and the migration handler repoints the row, and wrong the moment a CT
-    # is migrated in the Proxmox UI instead (doc 12 check 18, where the VM side of
-    # the same shape broke every action on a clustered pair). NULL falls back to
+    # The node the CT actually runs on, refreshed every poll cycle. Before this
+    # existed it was assumed to be the host's node, which is true while installs
+    # pick the host and the migration handler repoints the row, and wrong the
+    # moment a CT is migrated in the Proxmox UI instead. NULL falls back to
     # Host.node_name, so an unpolled row behaves exactly as before.
     node_name: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -275,12 +259,11 @@ class App(TimestampMixin, Base):
     # the operator to http:// for the apps that only speak https.
     web_protocol: Mapped[str | None] = mapped_column(Text)
     # The URL the install script printed about itself, captured when the
-    # install job finished (services/appstore.py). Kept as the whole URL and
-    # kept SEPARATE from the three fields above, which is what makes "never
-    # overwrite what the operator set" structural rather than a check that can
-    # be got wrong: nothing derived from a log is ever written into a field a
-    # person owns. It is evidence, so it is stored as the installer stated it
-    # rather than as three values picked out of it.
+    # install job finished (services/appstore.py). Kept whole and kept SEPARATE
+    # from the three fields above, which is what makes "never overwrite what
+    # the operator set" structural rather than a check that can be got wrong:
+    # nothing derived from a log is written into a field a person owns. It is
+    # evidence, so it is stored as the installer stated it.
     installed_url: Mapped[str | None] = mapped_column(Text)
     web_path: Mapped[str] = mapped_column(Text, default="/", nullable=False)
     status_cached: Mapped[str | None] = mapped_column(Text)
@@ -295,11 +278,10 @@ class App(TimestampMixin, Base):
     disk_total_bytes_cached: Mapped[int | None] = mapped_column(BigInteger)
     # netin/netout are counters since the container booted, not rates. The raw
     # readings are kept because the next cycle's diff needs them, and
-    # net_sampled_at because the gap between two cycles is not
-    # poll_interval_s: the poll loop backs off exponentially on a failing
-    # host. TimestampMixin.updated_at cannot stand in for it either, since any
-    # other write to this row (a rename, a migration) would move it and
-    # silently shorten the window.
+    # net_sampled_at because the gap between two cycles is not poll_interval_s:
+    # the poll loop backs off exponentially on a failing host.
+    # TimestampMixin.updated_at cannot stand in either, since any other write
+    # to this row would move it and silently shorten the window.
     net_in_cached: Mapped[int | None] = mapped_column(BigInteger)
     net_out_cached: Mapped[int | None] = mapped_column(BigInteger)
     net_in_bps_cached: Mapped[float | None] = mapped_column(Float)
@@ -308,11 +290,10 @@ class App(TimestampMixin, Base):
     update_available: Mapped[str | None] = mapped_column(Text)
     adopted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # When the poller first failed to find this app's CT in a cycle it was
-    # willing to trust (pollers._absence_is_trustworthy). NULL is the normal
-    # state and means "last seen present". Non-NULL is a countdown, not a
-    # verdict: the row is only reaped once the absence has survived
-    # APP_REAP_AFTER_S of further trustworthy cycles, and any cycle that finds
-    # the CT again clears it back to NULL.
+    # willing to trust (pollers._absence_is_trustworthy). NULL means "last seen
+    # present". Non-NULL is a countdown, not a verdict: the row is reaped only
+    # once the absence survives APP_REAP_AFTER_S of further trustworthy cycles,
+    # and any cycle that finds the CT again clears it back to NULL.
     missing_since: Mapped[datetime | None] = mapped_column(DateTime)
     # Table-level constraints name the *physical* column, hence "ct_id".
     __table_args__ = (UniqueConstraint("host_id", "ct_id", name="ux_apps_host_ctid"),)
@@ -343,27 +324,25 @@ class Vm(TimestampMixin, Base):
     node_name: Mapped[str | None] = mapped_column(Text)
     # A PVE TEMPLATE, per /cluster/resources' own flag. PVE allows a linked
     # clone only from one of these, and without knowing, the UI offered Linked
-    # on every guest and PVE refused every time (doc 12 check 18). NULL means
-    # not polled since this column existed and is treated as "not a template".
+    # on every guest and PVE refused every time. NULL means not polled since
+    # this column existed and is treated as "not a template".
     template: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str | None] = mapped_column(Text)
     # PVE's RAW ostype off the guest config ("l26", "win11", "w2k19",
     # "other"), never a collapsed "linux"/"windows": the client maps it for
     # display and the specific value is not recoverable once discarded. Read
-    # once per VM by pollers._refresh_os_type and then left alone, since an
-    # ostype is set at creation and does not drift the way an address does.
-    # NULL means not read yet, or a config read PVE refused.
+    # once per VM by pollers._refresh_os_type, since an ostype is set at
+    # creation and does not drift. NULL means not read yet, or a config read
+    # PVE refused.
     os_type: Mapped[str | None] = mapped_column(Text)
     cpu_cores: Mapped[int | None] = mapped_column(Integer)
     # USED and ALLOCATED, in that order, and read the pair carefully: until
     # migration a1f4d80c3e69 this table had `mem_bytes` and `disk_bytes` and
     # both held the ALLOCATION (PVE's maxmem/maxdisk), while the identically
-    # named columns on App held USAGE. Two guest types disagreeing about what
-    # one name means is how the VMs page ended up able to draw a CPU meter and
-    # nothing else: there was no usage on the row to draw. The names now mean
-    # what they mean on App, everywhere, and the allocation moved to the
-    # explicit `*_total_bytes` columns beside them.
+    # named columns on App held USAGE. The names now mean what they mean on
+    # App, everywhere, and the allocation moved to the explicit
+    # `*_total_bytes` columns beside them.
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger)
     mem_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     # disk_bytes comes from the QEMU guest agent, not from /cluster/resources:
@@ -374,31 +353,25 @@ class Vm(TimestampMixin, Base):
     disk_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     # Exactly App's column names, because pollers._update_net_rates writes
-    # these by attribute and is shared between the two. Same meaning too:
-    # netin/netout are counters since the guest booted, the *_bps pair is the
-    # rate derived from two readings, and net_sampled_at is when the previous
-    # reading was taken (the gap between cycles is not poll_interval_s, since
-    # the poll loop backs off on a failing host).
+    # these by attribute and is shared between the two, and the same meaning
+    # too: see the note on App.net_in_cached.
     net_in_cached: Mapped[int | None] = mapped_column(BigInteger)
     net_out_cached: Mapped[int | None] = mapped_column(BigInteger)
     net_in_bps_cached: Mapped[float | None] = mapped_column(Float)
     net_out_bps_cached: Mapped[float | None] = mapped_column(Float)
     net_sampled_at: Mapped[datetime | None] = mapped_column(DateTime)
     uptime_s: Mapped[int | None] = mapped_column(Integer)
-    # Whether this VM's QEMU guest agent is installed and answering, which is
-    # the same probe disk_bytes above comes from (see
-    # ProxmoxClient.agent_fsinfo). THREE-valued, and the three have to stay
-    # apart because the distinction is the entire value of the column:
+    # Whether this VM's QEMU guest agent is installed and answering, the same
+    # probe disk_bytes above comes from (see ProxmoxClient.agent_fsinfo).
+    # THREE-valued, and the three have to stay apart because the distinction is
+    # the entire value of the column:
     #   True  the agent answered.
-    #   False Proxmox says this guest has no working agent. That is a real
-    #         finding an operator can act on, and it is the reason disk_bytes
-    #         is NULL for this VM: install the agent and both fill in.
+    #   False Proxmox says this guest has no working agent. A real finding an
+    #         operator can act on, and the reason disk_bytes is NULL for this
+    #         VM: install the agent and both fill in.
     #   NULL  nobody knows. Never probed, or stopped (a guest that is not
-    #         running cannot answer, and recording "not installed" for it
-    #         would be a claim we did not make), or the host was unreachable.
-    # Replaced the old `synced_at`, which recorded when the poller last stamped
-    # the row and which nothing computed with: it told an operator the poller
-    # was running, which the rest of the page already showed.
+    #         running cannot answer, and recording "not installed" for it would
+    #         be a claim we did not make), or the host was unreachable.
     guest_agent_ok: Mapped[bool | None] = mapped_column(Boolean)
     __table_args__ = (UniqueConstraint("host_id", "vmid", name="ux_vms"),)
 
@@ -421,7 +394,7 @@ class CatalogEntry(TimestampMixin, Base):
     icon_url: Mapped[str | None] = mapped_column(Text)
     # Terminal install events (success + failed + aborted) from upstream's
     # telemetry service, NEVER their `total` field, which counts intermediate
-    # progress pings: services/catalog_telemetry.py documents why at length.
+    # progress pings (services/catalog_telemetry.py documents why at length).
     # None means we have never had a number for this slug, which is different
     # from 0 and must stay different: telemetry is opt-in upstream, so absence
     # is silence, not evidence that nobody runs it.
@@ -430,40 +403,35 @@ class CatalogEntry(TimestampMixin, Base):
     # these aggregates for 23h, so the value can be a full day old and moves
     # in jumps; the Store labels it "as of" rather than implying it is live.
     popularity_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
-    # Upstream's own dates for the SCRIPT, distinct from every other timestamp
-    # here: `synced_at` is when we last discovered the row, `updated_at` is
-    # when this DB row changed, `upstream_updated_at` is when the PocketBase
-    # RECORD was last edited (a description fix bumps it), and these two are
-    # when the script itself was first published and last changed. They are
-    # real columns rather than reads out of raw["metadata"] because the Store
-    # SORTS on them, and an ORDER BY over json_extract is neither indexable
-    # nor cheap over 585 rows.
+    # Upstream's own dates for the SCRIPT: first published, last changed.
+    # Distinct from `synced_at` (when we last discovered the row), `updated_at`
+    # (when this DB row changed) and `upstream_updated_at` (when the PocketBase
+    # RECORD was last edited, which a description fix bumps). Real columns
+    # rather than reads out of raw["metadata"] because the Store SORTS on them,
+    # and an ORDER BY over json_extract is neither indexable nor cheap.
     # `index=True` matches the indexes migration a4d70e9c31b8 already created
-    # (`ix_catalog_entries_script_created` / `_updated`, which is the name
-    # SQLAlchemy derives here). They were in the database but not declared here,
-    # so `alembic check` proposed dropping two indexes the Store's "newest" and
-    # "updated" sorts depend on.
+    # (`ix_catalog_entries_script_created` / `_updated`), so `alembic check`
+    # stops proposing to drop two indexes the Store's sorts depend on.
     script_created: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     script_updated: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     # The tags community-scripts shows on a card. All FOUR are tri-state and
     # the third state is load bearing: NULL means WE DO NOT KNOW, never "no".
-    # The 9 `unlisted` rows have no upstream record at all, so rendering them
-    # as "not ARM" or "not updateable" would be a claim nothing supports; the
-    # UI must show no chip there rather than a negative one.
+    # An `unlisted` row has no upstream record at all, so rendering it as "not
+    # ARM" or "not updateable" would be a claim nothing supports; the UI must
+    # show no chip there rather than a negative one.
     has_arm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updateable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     privileged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     port: Mapped[int | None] = mapped_column(Integer)
     # Local icon mirror (services/catalog_icons.py), so the Store renders its
     # icons with no network at all. `icon_url` keeps upstream's URL, which is
-    # what the sync writes and what the API falls back to; these four record
-    # the cached copy beside it.
+    # what the sync writes and what the API falls back to.
     #
     # `icon_cache_path` is a BARE FILENAME relative to data_dir/icons, never a
     # path: it is built from our own slug plus an extension allowlist, and
     # api/catalog.py re-checks containment before opening it.
-    # `icon_cache_source` is the upstream URL the cached bytes came FROM, and
-    # it is what makes a logo change detectable: when it stops matching
+    # `icon_cache_source` is the upstream URL the cached bytes came FROM, which
+    # is what makes a logo change detectable: when it stops matching
     # `icon_url`, the file is refetched rather than served forever.
     icon_cache_path: Mapped[str | None] = mapped_column(Text)
     icon_cache_source: Mapped[str | None] = mapped_column(Text)
@@ -472,16 +440,15 @@ class CatalogEntry(TimestampMixin, Base):
     # The evidence behind has_arm, e.g. ["amd64", "arm64"]. Kept alongside the
     # boolean rather than instead of it: the flag is what a chip renders, the
     # list is what an "arm64 only" answer needs, and deriving one from the
-    # other at read time would put upstream's architecture vocabulary into our
-    # query layer.
+    # other at read time would put upstream's vocabulary into our query layer.
     architectures: Mapped[list | None] = mapped_column(JSON)
     upstream_sha: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[dict | None] = mapped_column(JSON)
-    # Tri-state on purpose (catalog expansion, see services/catalog.py header
-    # note): None means "discovered but not yet classified", the state every
-    # ct/ row starts in after a refresh. Discovery is 2 GitHub API calls flat
-    # and never fetches a script pair; classification happens lazily, on
-    # card-open or install-attempt, or via the low-priority backlog job.
+    # Tri-state on purpose (see the services/catalog.py header note): None
+    # means "discovered but not yet classified", the state every ct/ row starts
+    # in after a refresh. Discovery is 2 GitHub API calls flat and never
+    # fetches a script pair; classification happens lazily, on card-open or
+    # install-attempt, or via the low-priority backlog job.
     installable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     unsupported_reason: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -489,62 +456,51 @@ class CatalogEntry(TimestampMixin, Base):
     # turnkey, mechanical per the repo's own layout (services/catalog.py's
     # discover_tree). Only "ct" is ever installable or shown in the Store.
     entry_type: Mapped[str] = mapped_column(Text, nullable=False, default="ct")
-    # Provenance for the presentation-only fields (name, description,
-    # category, icon_url, website, docs_url) that
-    # services/catalog_metadata.py syncs from upstream. "pocketbase" for the
-    # live source, "archive" for the frozen cold-start fallback, and either
-    # with a "-name-match" suffix when the row was joined by normalized NAME
-    # rather than by slug (resolve_name_matches: upstream's catalog slug
-    # sometimes differs from its own script filename, e.g. ct/apache-airflow.sh
-    # against the record slugged `airflow`). The suffix exists so a heuristic
-    # join is visible on the row itself, not only in a log line.
+    # Provenance for the presentation-only fields (name, description, category,
+    # icon_url, website, docs_url) that services/catalog_metadata.py syncs from
+    # upstream. "pocketbase" for the live source, "archive" for the frozen
+    # cold-start fallback, either with a "-name-match" suffix when the row was
+    # joined by normalized NAME rather than by slug (resolve_name_matches).
+    # The suffix exists so a heuristic join is visible on the row itself, not
+    # only in a log line.
     #
-    # Both timestamps null is a NORMAL state, not an error: it means no
-    # upstream record matched this slug, which is true for 37 of our ct/ rows
-    # (mostly alpine-* variants plus mysql). Such a row keeps its
-    # discovery-derived name and its catalog_categories.py heuristic category
-    # and simply renders without a description or icon.
+    # Both timestamps null is a NORMAL state, not an error: no upstream record
+    # matched this slug. Such a row keeps its discovery-derived name and its
+    # catalog_categories.py heuristic category and renders without a
+    # description or icon.
     metadata_source: Mapped[str | None] = mapped_column(Text)
     metadata_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Upstream's own last-modified stamp for the matched record, naive UTC.
     # Distinct from metadata_synced_at, which is when WE last read it.
     upstream_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     # How upstream's catalog answers for this slug, resolved by the metadata
-    # sync (services/catalog_metadata.py::resolve_upstream_state). Our
-    # discovery makes one row per ct/*.sh file; upstream's PocketBase is the
-    # catalog of what they consider an APP, and the two disagree in ways the
-    # Store has to render differently:
+    # sync (services/catalog_metadata.py::resolve_upstream_state). Discovery
+    # makes one row per ct/*.sh file; upstream's PocketBase is the catalog of
+    # what THEY consider an app, and the two disagree in ways the Store has to
+    # render differently:
     #
-    #   "listed"   matched a live upstream record. The normal case.
-    #   "delisted" upstream still HAS the record but flagged is_deleted, so it
-    #              keeps a real name/description/logo and stays installable;
-    #              the Store badges it as retired rather than hiding it.
-    #   "unlisted" no upstream record at all and not a variant: the script is
-    #              still in the repo but upstream dropped the app. Also badged.
-    #   "variant"  an alpine-<parent> row whose parent exists upstream and
-    #              which has no upstream record of its own, i.e. upstream
-    #              models it as an install METHOD of the parent app rather
-    #              than its own app. Kept in the catalog and installable, but
-    #              hidden from the Store grid so Syncthing is one card, not
-    #              two, one of them blank.
+    #   "listed"     matched a live upstream record. The normal case.
+    #   "delisted"   the record is there but flagged is_deleted, so it keeps a
+    #                real name, description and logo and stays installable;
+    #                the Store badges it as retired rather than hiding it.
+    #   "unlisted"   no upstream record at all and not a variant: the script is
+    #                still in the repo but upstream dropped the app. Also
+    #                badged.
+    #   "variant"    an alpine-<parent> row whose parent exists upstream and
+    #                which has no record of its own, i.e. upstream models it as
+    #                an install METHOD of the parent app. Kept in the catalog
+    #                and installable, but hidden from the Store grid so
+    #                Syncthing is one card, not two with one of them blank.
     #   "superseded" a rename leftover: unmatched upstream, not installable,
-    #              and sharing a name with a row that IS listed. Upstream
-    #              renamed netvisor to scanopy and left ct/netvisor.sh in the
-    #              repo with no install script and an APP= line reading
-    #              "Scanopy", so the grid showed two "Scanopy" cards, one
-    #              working and one blank. Also hidden from the grid.
+    #                and sharing a name with a row that IS listed. Also hidden
+    #                from the grid.
     #
-    # NULL means never synced. A `deprecated` boolean used to sit beside
-    # this column, dead since the first migration and never written; it was
-    # dropped (c9a35b71e0d4) rather than overloaded, because a boolean
-    # cannot carry five states and "deprecated" asserts a judgement
-    # upstream has not made.
-    # Visibility only: nothing here ever implies a type or an installability
-    # decision, both of which belong to discovery and the classifier.
+    # NULL means never synced. Visibility only: nothing here ever implies a
+    # type or an installability decision, both of which belong to discovery and
+    # the classifier.
     upstream_state: Mapped[str | None] = mapped_column(Text)
 
 
-# --- Jobs & scheduling -----------------------------------------------------
 
 class Job(TimestampMixin, Base):
     __tablename__ = "jobs"
@@ -557,8 +513,8 @@ class Job(TimestampMixin, Base):
     # Stored rather than looked up at render time because the destructive jobs
     # are exactly the ones whose row is gone by the time anyone reads the
     # history: "vm 3" a month after the delete names nothing anybody remembers.
-    # NULL on jobs created before this column existed, and on targets that have
-    # no name a person would recognise; both render the old "vm 3" way.
+    # NULL on older jobs and on targets with no name a person would recognise;
+    # both render the old "vm 3" way.
     target_name: Mapped[str | None] = mapped_column(Text)
     params: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[dict | None] = mapped_column(JSON)
@@ -599,17 +555,15 @@ class Schedule(TimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 
-# --- Notifications & alerting ----------------------------------------------
 
-# Display label from the Apprise URL scheme (doc 04 `notification_channels.kind`,
-# unencrypted). This is the single source of truth for `kind`'s allowlist:
-# `notifier.kind_for()` imports this dict rather than defining its own copy, and
-# migration 0002 imports `ALLOWED_NOTIFICATION_KINDS` to build the DB-level
-# CHECK constraint: one Python constant, never two literals that can drift.
-# Tokens verified at v1.12.0 via `apprise.plugins.N_MGR.schemas()` / each
-# plugin's `service_name`: not guessed. `http`/`https` are not real Apprise
-# schemes (its generic-webhook plugins are the json/form/xml entries below);
-# MS Teams' current scheme is `workflow(s)` (Power Automate), not `msteams`.
+# Display label from the Apprise URL scheme. The single source of truth for
+# `kind`'s allowlist: `notifier.kind_for()` imports this dict rather than
+# defining its own copy, and migration 0002 imports
+# `ALLOWED_NOTIFICATION_KINDS` to build the DB-level CHECK constraint, so one
+# Python constant can never become two literals that drift. Tokens verified at
+# apprise v1.12.0, not guessed: `http`/`https` are not real Apprise schemes
+# (its generic-webhook plugins are the json/form/xml entries below), and MS
+# Teams' current scheme is `workflow(s)` (Power Automate), not `msteams`.
 KIND_FROM_SCHEME = {
     "ntfy": "ntfy", "ntfys": "ntfy",
     "gotify": "gotify", "gotifys": "gotify",
@@ -663,8 +617,7 @@ class NotificationChannel(TimestampMixin, Base):
     # The individual values the guided picker collected, as encrypted JSON, so
     # an edit can prefill instead of demanding the whole lot again to correct
     # one mistyped password. No new exposure: url_enc already carries every one
-    # of these under the same key. NULL for a channel added by pasting a URL,
-    # and for any row written before this column existed.
+    # of these under the same key. NULL for a channel added by pasting a URL.
     fields_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     key_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     events: Mapped[list] = mapped_column(JSON, default=list)
@@ -703,7 +656,6 @@ class Alert(TimestampMixin, Base):
     __table_args__ = (Index("ix_alerts_state", "state", "fired_at"),)
 
 
-# --- Metrics ---------------------------------------------------------------
 
 class MetricSample(Base):
     __tablename__ = "metric_samples"
@@ -734,7 +686,6 @@ class MetricRollup(TimestampMixin, Base):
     )
 
 
-# --- Backups ---------------------------------------------------------------
 
 class Backup(TimestampMixin, Base):
     __tablename__ = "backups"
@@ -749,20 +700,18 @@ class Backup(TimestampMixin, Base):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     verify_state: Mapped[str | None] = mapped_column(Text)
     # The datastore's PVE type ("pbs", "nfs", "dir", ...) as it was when this
-    # archive was last synced. Recorded rather than looked up because the
+    # archive was last synced. Recorded rather than looked up, because the
     # lookup used to be poller.snapshots, which is empty between boot and the
     # first poll: api/backups.py::_refuse_on_pbs then offered a full read-back
-    # of an archive PBS already verifies, and the sweep did the same to every
-    # PBS archive on the host. sync_host_backups is handed the type by PVE
-    # anyway, so it writes it down.
+    # of an archive PBS already verifies. sync_host_backups is handed the type
+    # by PVE anyway, so it writes it down.
     storage_type: Mapped[str | None] = mapped_column(Text)
     # Which node of the host's cluster this archive is ON, which is not always
     # the node Proxploy is enrolled at. A shared datastore (PBS, NFS, CephFS)
     # answers identically from every node and records the enrolled one; a
     # node-LOCAL dump dir holds different files per node under the SAME volid,
-    # so the node is what tells those apart and is part of the key below.
-    # It is also the node verify and restore have to run on: reading pve2's
-    # archive on pve1 finds nothing.
+    # so the node is what tells those apart and is part of the key below. It is
+    # also the node verify and restore have to run on.
     node: Mapped[str | None] = mapped_column(Text)
     # When Proxploy last checked this archive itself (services/backupjobs.py's
     # backup.verify / backup.test_restore). `verify_state` holds the verdict
@@ -785,7 +734,6 @@ class Backup(TimestampMixin, Base):
     )
 
 
-# --- Audit, entitlements, settings ----------------------------------------
 
 class AuditEvent(Base):
     """Append-only, with one deliberate exception. No ORM update path exists
@@ -864,34 +812,29 @@ class AppSetting(TimestampMixin, Base):
 
 
 class NotificationDismissal(TimestampMixin, Base):
-    """One row per user: the bell tray's server-side memory of what has
-    already been cleared, so a clear survives a reload, a reboot, and a
-    login from a different browser or machine (a per-user fact, not a
-    per-browser one).
+    """One row per user: the bell tray's server-side memory of what has been
+    cleared, so a clear survives a reload, a reboot, and a login from another
+    browser or machine (a per-user fact, not a per-browser one).
 
     `cleared_through_job_id` is a watermark, not a growing list: "clear all"
-    records the highest job id that existed at the moment of the clear, and
-    every job at or below it counts as dismissed from then on, however many
-    thousands of jobs that eventually covers. Job ids are a strictly
-    increasing sequence (autoincrement primary key on `jobs`), so a job
-    created AFTER a clear always has an id above the watermark and is never
-    swallowed by it.
+    records the highest job id that existed at that moment, and every job at or
+    below it counts as dismissed from then on. Job ids strictly increase
+    (autoincrement primary key on `jobs`), so a job created AFTER a clear
+    always has an id above the watermark and is never swallowed by it.
 
     `dismissed_job_ids` covers what the watermark cannot: a single item
     dismissed by its own card, whose job id is above the watermark. It stays
-    bounded because the next "clear all" moves the watermark up past it and
-    the id gets pruned back out (see services/notification_dismissals.py).
+    bounded because the next "clear all" moves the watermark past it and the id
+    gets pruned back out (see services/notification_dismissals.py).
     """
     __tablename__ = "notification_dismissals"
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Declared in __table_args__ below rather than as `unique=True, index=True`
-    # here: that spelling makes SQLAlchemy derive the name
+    # Declared here rather than as `unique=True, index=True` on the column:
+    # that spelling makes SQLAlchemy derive
     # `ix_notification_dismissals_user_id`, while migration d8a1c9f4b2e6 created
-    # it as `ux_notification_dismissals_user_id`, which is this schema's
-    # convention for a unique index (`ux_users_oidc`, `ux_team_members`). Same
-    # column and same uniqueness either way; naming it here is what stops
-    # `alembic check` proposing a drop-and-recreate of an index that is already
-    # correct.
+    # it as `ux_notification_dismissals_user_id`, this schema's convention for a
+    # unique index. Same column and same uniqueness either way; naming it here
+    # is what stops `alembic check` proposing a drop-and-recreate.
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     cleared_through_job_id: Mapped[int | None] = mapped_column(Integer)
     dismissed_job_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)

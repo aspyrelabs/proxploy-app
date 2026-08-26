@@ -20,14 +20,13 @@ type HostRow = {
   // Needed to tell a sibling node of the same cluster apart from an unrelated
   // host when reading GET /storage, which does not key rows by host_id.
   cluster_name?: string | null
-  // "connected" or "unreachable" (backend/proxploy/models: only two values,
-  // "connected" the default). An unreachable host answers every job the
-  // install would enqueue with a failure, so the picker below disables it
-  // instead of letting it be chosen only to fail.
+  // "connected" or "unreachable", the only two values. An unreachable host
+  // fails every job the install would enqueue, so the picker disables it rather
+  // than letting it be chosen only to fail.
   status?: string | null
   // Non-null once this host has acknowledged that installs run a
-  // community-scripts.org script as root (api/catalog.py). Asking again
-  // surfaces no new information, so the tick is only shown while this is null.
+  // community-scripts.org script as root (api/catalog.py), so the tick is only
+  // shown while this is null.
   install_consent_at?: string | null
 }
 
@@ -40,28 +39,22 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [ctid, setCtid] = useState('')
   const [consent, setConsent] = useState(false)
   // Default asks nothing that has an honest default; Advanced expands the
-  // container-customization block Tasks 9-11 fill in. CTID has an honest
-  // default too (blank -> node assigns the next free id) but stays in the
-  // base section: unlike vCPU/RAM/disk, operators commonly want to pick it
-  // even on an otherwise-default install, and Task 12 hangs its collision
-  // check off this same field.
+  // container-customization block. CTID has an honest default too (blank means
+  // the node assigns the next free id) but stays in the base section, since
+  // operators commonly want to pick it.
   const [mode, setMode] = useState<'default' | 'advanced'>('default')
-  // Empty string means "let resolve_storage_pools decide" (backend/proxploy/
-  // services/appstore.py): its one fallback, the sole candidate, is an
-  // honest default, so Default mode never has to touch this state at all.
+  // Empty string means "let resolve_storage_pools decide" (services/
+  // appstore.py): its one fallback is an honest default, so Default mode never
+  // has to touch this state.
   const [storage, setStorage] = useState({ container: '', template: '' })
   // Each field is null until the operator types into it, meaning "still
-  // tracking the derived default computed below." cpu/ram/disk/os/version
-  // derive from the catalog entry's script-parsed default_* columns (Task
-  // 7): NOT raw.metadata.install_methods[].resources, which disagrees for
-  // some slugs (dockge is 2/2048/18 in the script and 0/0/0 in that
-  // metadata). hostname derives from the app name typed above instead,
-  // since there is no script-parsed default for it. unprivileged is null
-  // until toggled and stays null: MOST community-scripts install scripts
-  // default var_unprivileged to 1, but not all (a ct script declaring
-  // var_unprivileged="0" disagrees), and Proxploy has no parsed column for
-  // it. Inventing 1 and then sending it would overrule those scripts merely
-  // because the operator opened Advanced.
+  // tracking the derived default below." cpu/ram/disk/os/version derive from
+  // the entry's script-parsed default_* columns, NOT
+  // raw.metadata.install_methods[].resources, which disagrees for some slugs
+  // (dockge is 2/2048/18 in the script and 0/0/0 there). unprivileged stays
+  // null until toggled: MOST community-scripts scripts default var_unprivileged
+  // to 1 but not all, and inventing 1 would overrule the script merely because
+  // Advanced was opened.
   const [coreOverride, setCoreOverride] = useState<{
     cpu: string | null; ram: string | null; disk: string | null; os: string | null
     version: string | null; hostname: string | null; unprivileged: boolean | null
@@ -69,29 +62,21 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [jobId, setJobId] = useState<number | null>(null)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
-  // Seeded from that row rather than assumed zero, in case that ever changes.
+  // Seeded from that row rather than assumed zero.
   const [progress, setProgress] = useState<number | null>(null)
 
   const host = (hosts.data ?? []).find((h) => h.id === hostId)
   // The node it lands on, falling back to the host record's own name: a
-  // standalone host is usually named after its only node, and on a cluster the
-  // node is the machine the container actually runs on.
+  // standalone host is usually named after its only node.
   const installTarget = host?.node_name ?? host?.name ?? null
-  // Called above the early return, and with the same queryKey StorageFields
-  // uses, so react-query dedupes it against Advanced mode's own fetch rather
-  // than doubling the request.
+  // Called above the early return, with the same queryKey StorageFields uses,
+  // so react-query dedupes it against Advanced mode's own fetch.
   const pools = useStoragePools(hostId, host?.node_name, host?.cluster_name)
 
-  // `return null` here meant the operator pressed Install on a store card and
-  // the screen did nothing at all until the entry arrived, with no way to tell
-  // a slow catalog from a click that missed. The dialog opens immediately
-  // instead, titled with the slug it was opened for, which is already known
-  // from the props and needs nothing fetched.
-  //
-  // The failure branch is here because the placeholder created the need for
-  // it: `!entry` is also true forever after a failed fetch, and a dialog that
-  // pulses for ever is worse than the blank it replaced. Cancel stays live in
-  // both, so a dialog that cannot fill itself in can still be closed.
+  // The dialog opens immediately, titled with the slug from the props:
+  // `return null` here left the operator with no way to tell a slow catalog
+  // from a click that missed. The failure branch is needed because `!entry` is
+  // also true forever after a failed fetch. Cancel stays live in both.
   if (!entry) {
     return (
       <Dialog title={<>Install {slug}</>} width={520} onClose={onClose}>
@@ -102,8 +87,6 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
           </p>
         ) : (
           <SkeletonGroup label="Loading install options" className="mt-4 space-y-3">
-            {/* Default and Advanced, each a radio beside a name and a line of
-                explanation. */}
             <div className="space-y-2">
               {[0, 1].map((i) => (
                 <div key={i} className="flex items-start gap-2">
@@ -115,13 +98,11 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
                 </div>
               ))}
             </div>
-            {/* Host, App name, CTID. `px-3 py-1.5` around a 13px line box
-                inside a 1px border is 33px, which is this dialog's control
-                height and not the 37px the settings forms use. */}
+            {/* Host, App name, CTID. 33px is this dialog's control height,
+                not the 37px the settings forms use. */}
             <Skeleton className="h-[33px] w-full rounded-ctl" />
             <Skeleton className="h-[33px] w-full rounded-ctl" />
             <Skeleton className="h-[33px] w-full rounded-ctl" />
-            {/* The derived-defaults strip: p-2 around one 11px mono line. */}
             <Skeleton className="h-[34px] w-full rounded-ctl" />
             <SkeletonLine className="w-full text-[12px]" />
             <SkeletonLine className="w-2/3 text-[12px]" />
@@ -134,11 +115,9 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     )
   }
 
-  // The values CoreFields actually displays: whatever the operator typed,
-  // else the derived default. Computed here rather than stored directly so
-  // a still-loading `entry` (undefined on the very first render, before
-  // this early return) never gets baked into useState's one-shot initial
-  // value.
+  // The values CoreFields displays: whatever the operator typed, else the
+  // derived default. Computed here rather than stored, so a still-loading
+  // `entry` never gets baked into useState's one-shot initial value.
   const core: CoreFieldsValue = {
     cpu: coreOverride.cpu ?? (entry.default_cpu != null ? String(entry.default_cpu) : ''),
     ram: coreOverride.ram ?? (entry.default_ram_mb != null ? String(entry.default_ram_mb) : ''),
@@ -150,11 +129,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   }
 
   // The one-line summary of what the script would build, with the missing
-  // halves left out instead of printed as bare units. Every default_* column
-  // is nullable (api/catalog.ts) because discovery parses them out of the ct
-  // script and plenty of scripts do not set them, which used to render as
-  // " vCPU · MB RAM · GB disk · ". Same figure()/text() rules the Store
-  // detail page uses, so 0 and "" count as missing there and here alike.
+  // halves left out rather than printed as bare units. Every default_* column
+  // is nullable: discovery parses them out of the ct script and plenty of
+  // scripts do not set them. figure()/text() decide what counts as missing, so
+  // 0 and "" render as nothing here and on the Store detail page alike.
   const defaultsLine = [
     figure(entry.default_cpu) && `${entry.default_cpu} vCPU`,
     figure(entry.default_ram_mb) && `${entry.default_ram_mb}MB RAM`,
@@ -163,27 +141,23 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
       && [text(entry.default_os), text(entry.default_os_version)].filter(Boolean).join(' '),
   ].filter(Boolean).join(' · ')
 
-  // Whether the snapshot behind GET /storage has been read at all. Empty
-  // candidate lists mean two opposite things (this host has no such pool /
-  // we have not looked yet) and only this tells them apart, so it gates
-  // submit: a form that cannot see the pools must not look complete.
+  // Whether the snapshot behind GET /storage has been read at all. An empty
+  // candidate list means two opposite things (no such pool here / we have not
+  // looked yet), and only this tells them apart, so it gates submit.
   const storageUnknown = hostId != null && pools.state !== 'ok'
 
   // The sole candidate is not a real choice, so it is DISPLAYED rather than
-  // asked for. Nothing here is remembered across installs (PXP-86 decision):
-  // knownPool no longer consults anything saved on the host, only the
-  // current candidate list, so a host with two or more pools is asked every
-  // time, never silently answered from a prior install.
+  // asked for. Nothing is remembered across installs: knownPool consults only
+  // the current candidate list, so a host with two or more pools is asked every
+  // time.
   const knownContainer = knownPool(pools.rootdir)
   const knownTemplate = knownPool(pools.vztmpl)
 
-  // Default asks no question THAT HAS AN HONEST DEFAULT. Several candidates
-  // has no default: build.func has none and we do not invent one, so these
-  // are the questions Default has to ask. BOTH content types get asked, not
-  // just rootdir: resolve_storage_pools refuses just as flatly on an
-  // ambiguous vztmpl (one rootdir pool plus `local` and any NFS/dir storage
-  // carrying vztmpl is an ordinary Proxmox layout), and a Default mode with
-  // no field for it fails there forever.
+  // Default asks no question THAT HAS AN HONEST DEFAULT, and several candidates
+  // has none: build.func has none and we do not invent one. BOTH content types
+  // get asked: resolve_storage_pools refuses just as flatly on an ambiguous
+  // vztmpl, an ordinary Proxmox layout (one rootdir pool plus `local` and any
+  // NFS/dir storage carrying vztmpl).
   const asksContainer = !storageUnknown && knownContainer == null && pools.rootdir.length >= 1
   const asksTemplate = !storageUnknown && knownTemplate == null && pools.vztmpl.length >= 1
   const storageSummary = [
@@ -191,9 +165,8 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     knownTemplate && `template ${knownTemplate}`,
   ].filter(Boolean).join(' · ')
 
-  // Asked once per host, then remembered on Host.install_consent_at: re-asking
-  // an operator who already acknowledged surfaces no new information. Also
-  // true (so still asked) while no host is selected.
+  // Asked once per host, then remembered on Host.install_consent_at. Also true,
+  // so still asked, while no host is selected.
   const needsConsent = host?.install_consent_at == null
 
   // CTID is no longer required: blank means the node assigns the next free
@@ -205,15 +178,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
-    // Only send a key the operator actually picked or that a field with an
-    // honest fallback (an empty string) would otherwise mangle. An empty
-    // string for storage would reach resolve_storage_pools as a
-    // supplied-but-blank value; its own `.strip() or None` treats that the
-    // same as absent, but sending nothing is more honest about "the
-    // operator did not choose." Same reasoning for the core fields below:
-    // Default mode never customized anything, so it sends none of these,
-    // and even in Advanced mode a field the operator cleared to blank is
-    // withheld rather than sent as `var_x=""`.
+    // Only send a key the operator actually picked. An empty string would reach
+    // resolve_storage_pools as supplied-but-blank; its `.strip() or None` treats
+    // that as absent anyway, but sending nothing is more honest. Same for the
+    // core fields: a field cleared to blank is withheld, not sent as `var_x=""`.
     const overrides: Record<string, string> = {}
     if (storage.container) overrides.container_storage = storage.container
     if (storage.template) overrides.template_storage = storage.template
@@ -225,8 +193,6 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
       setIfFilled('os', core.os)
       setIfFilled('version', core.version)
       setIfFilled('hostname', core.hostname)
-      // Only once the operator actually toggled it: untouched means "whatever
-      // this app's script declares", which is not ours to answer.
       if (core.unprivileged != null) overrides.unprivileged = core.unprivileged ? '1' : '0'
     }
     install.mutate(
@@ -236,32 +202,26 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   }
 
   return (
-    /* Two states, two widths, one dialog. The form is a column of fields and
-       reads fine at 520. The install transcript is a terminal, and 520 wrapped
-       community-scripts' output mid-line, which is where the useful part
-       lives: the finished URL, the port, and whatever went wrong. 60% of the
-       window is what an operator can actually read, and max() means it is
-       never NARROWER than the form was, so a small window keeps today's
-       behaviour rather than getting worse. The 92vw cap in dialogPanelClass
-       still applies on top. */
+    /* Two states, two widths. The form reads fine at 520; the install
+       transcript is a terminal, and 520 wrapped community-scripts' output
+       mid-line, where the useful part lives: the finished URL, the port, and
+       whatever went wrong. max() keeps it from ever being NARROWER than the
+       form. */
     <Dialog title={<>Install {entry.name ?? slug}</>}
             width={jobId ? 'max(520px, 60vw)' : 520} onClose={onClose}>
 
     {jobId ? (
       <div className="mt-4">
         <div className="mb-3 flex items-center gap-2">
-          {/* Two or three real steps (services/appstore.py), so the ring
-              jumps rather than sweeps: honest, not smoothed. Never shown
-              before the first step, a zero here would read as stalled. */}
+          {/* Two or three real steps (services/appstore.py), so the ring jumps
+              rather than sweeps. Never shown before the first step: a zero
+              would read as stalled. */}
           {progress != null && <Loading value={progress} label="Install progress" size={28} />}
-          {/* The DESTINATION, not the app again. This line used to read
-              "Installing Alpine-IT-Tools…" directly under a title reading
-              "Install Alpine-IT-Tools", which is the same words twice and
-              tells the reader nothing the heading did not. Where it is going
-              is the one thing the dialog does not otherwise say once the form
-              is replaced by the transcript, and on a cluster it is the thing
-              worth checking. Falls back to the bare verb when the host is not
-              readable, rather than printing an empty "on". */}
+          {/* The DESTINATION, not the app again: "Installing Alpine-IT-Tools…"
+              under the title "Install Alpine-IT-Tools" tells the reader nothing
+              the heading did not, and where it is going is the one thing the
+              dialog stops saying once the transcript replaces the form. Bare
+              verb when the host is not readable. */}
           <span className="text-[12.5px] text-text-2">
             {installTarget ? `Installing on ${installTarget}…` : 'Installing…'}
           </span>
@@ -299,10 +259,9 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             value={hostId ?? ''} disabled={hosts.isError || hosts.isLoading}
             onChange={(e) => {
               setHostId(Number(e.target.value) || null)
-              // Storage pools are per host (StorageFields): a pool picked on
-              // the old host is not necessarily valid on the new one, so a
-              // host switch clears the picks instead of letting a name that
-              // may not exist there reach the install as an override.
+              // Storage pools are per host: a pool picked on the old host is
+              // not necessarily valid on the new one, so a host switch clears
+              // the picks.
               setStorage({ container: '', template: '' })
             }}>
             {hosts.isError
@@ -316,13 +275,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               </option>
             ))}
           </select>
-          {/* Labelled, not just placeheld, and asked in BOTH modes. This is
-              what tells two copies of the same app apart: a second install is
-              ordinary (a test one beside a prod one, or an operator's own
-              naming scheme), and once there are two, the name is the only
-              thing distinguishing them in every list Proxploy shows.
-              Deliberately NOT prefilled with the catalog name: the whole
-              reason for a second copy is that it differs from the first. */}
+          {/* Labelled, not just placeheld, and asked in BOTH modes. A second
+              install of the same app is ordinary, and the name is then the only
+              thing telling the two apart. Deliberately NOT prefilled with the
+              catalog name. */}
           <div>
             <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3"
               htmlFor="install-app-name">App name</label>
@@ -334,14 +290,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
           <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             placeholder="Container ID (CTID)" value={ctid}
             onChange={(e) => setCtid(e.target.value)} />
-          {/* Nothing recorded at all means no box, not an empty one: the
-              Store detail page drops the whole section the same way.
-              Default mode only: this line is the APP's own script-parsed
-              defaults, not a summary of what this install will build, and in
-              Advanced mode CoreFields below shows the fields that actually
-              decide that, sometimes with the operator's own numbers typed
-              over these same defaults. Showing both was one true line and one
-              stale one, directly on top of each other. */}
+          {/* Nothing recorded at all means no box, not an empty one. Default
+              mode only: this is the APP's own script-parsed defaults, while
+              Advanced mode's CoreFields shows the fields that actually decide
+              the install. Showing both was one true line and one stale one. */}
           {mode === 'default' && defaultsLine !== '' && (
             <div className="rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
               {defaultsLine}
