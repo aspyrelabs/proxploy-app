@@ -39,9 +39,6 @@ export function VmsPage() {
             {vms ? `${vms.length} VMs · ${running} running` : '…'}
           </div>
         </div>
-        {/* Far right, with the action: this header is the whole toolbar the
-            page has, and the sort belongs at the end of it rather than beside
-            the heading. */}
         <div className="ml-auto flex items-center gap-3">
           <TableSorter sort={sorted.sort} onSort={sorted.setSort}
                        label="virtual machines" />
@@ -60,12 +57,9 @@ export function VmsPage() {
                   emptyNote="QEMU guests on connected hosts are mirrored here by the poller."
                   errorTitle="VMs not readable"
                   errorNote="Proxploy could not reach the backend to list your VMs.">
-        {/* Which row is expanded lives in the URL, so /vms?open=9 opens
-            straight onto that VM the way its own page used to.
-
-            The sorted rows, not the ones handed in: QueryState is still what
-            decides between loading, error, empty and data, it just does not
-            own the order. Both are the same fetch. */}
+        {/* `open` lives in the URL so /vms?open=9 deep-links onto that VM.
+            Pass the sorted rows, not the raw ones: QueryState still owns
+            loading/error/empty, just not the order. */}
         {() => <VmTable vms={sorted.rows} open={search.open}
                         onOpen={(open) => navigate({
                           to: '/vms' as never,

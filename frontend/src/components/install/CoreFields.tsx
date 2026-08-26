@@ -10,18 +10,12 @@ export type CoreFieldsValue = {
 }
 
 /**
- * The core container fields in the install dialog's Advanced block: cpu,
- * ram, disk, os, version, hostname, unprivileged. Each is a plain controlled
- * input; InstallDialog owns the state and computes the displayed value
- * (script-parsed default until the operator types something else).
- *
- * THE FIELD NAMES ARE THE WHOLE RISK. InstallDialog keys `overrides` off
- * this shape's own field names, which are exactly what install.test.tsx's
- * `KNOWN` set pins and the backend prefixes with `var_`. A renamed key here
- * silently stops reaching build.func: it does not error, it just gets
- * ignored and the script falls back to its own default while the operator
- * believes they chose otherwise. Do not rename `cpu`/`ram`/`disk`/`os`/
- * `version`/`hostname`/`unprivileged` without updating that pinned set.
+ * Field names are the whole risk: InstallDialog keys `overrides` off them,
+ * install.test.tsx's `KNOWN` set pins them, and the backend prefixes them
+ * with `var_`. Renaming one silently stops reaching build.func — no error,
+ * just ignored, and the script falls back to its own default while the
+ * operator believes they chose otherwise. Don't rename without updating
+ * that pinned set.
  */
 export function CoreFields({ value, onChange }: {
   value: CoreFieldsValue

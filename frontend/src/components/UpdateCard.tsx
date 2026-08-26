@@ -7,10 +7,8 @@ import { Button, amberLinkCls } from './ui/button'
 import { Progress, ProgressLabel } from './ui/progress'
 import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 
-// Matches backend/proxploy/config.py's update_timeout_s default. The updater
-// restarts the very server that would otherwise report success, so the
-// client can only ever detect success (the version actually changed) or give
-// up and say so honestly -- it must never claim success on a timeout.
+// Matches backend update_timeout_s. The updater restarts the server, so
+// only a real version change counts as success — never a timeout guess.
 const UPDATE_TIMEOUT_MS = 600_000
 const POLL_INTERVAL_MS = 3000
 
@@ -30,8 +28,6 @@ export function UpdateCard() {
     refetchInterval: POLL_INTERVAL_MS,
   })
 
-  // Success: the polled version actually moved off the version we recorded
-  // before applying. Only a real change counts -- never a guess.
   useEffect(() => {
     if (poll === 'polling' && versionPoll.data && versionPoll.data.version !== baseline.current) {
       setNewVersion(versionPoll.data.version)
@@ -39,9 +35,7 @@ export function UpdateCard() {
     }
   }, [poll, versionPoll.data])
 
-  // Timeout: the server may be mid-restart and simply not answering yet.
-  // One timer per polling attempt, cleared the moment polling stops for any
-  // other reason (success, or a fresh update started).
+  // One-shot timeout: cleared when polling stops for any other reason.
   useEffect(() => {
     if (poll !== 'polling') return
     const t = setTimeout(() => setPoll((p) => (p === 'polling' ? 'timeout' : p)), UPDATE_TIMEOUT_MS)
@@ -66,12 +60,6 @@ export function UpdateCard() {
         {status.isError ? (
           <p className="mt-2 text-[12.5px] text-text-3">Could not load update status.</p>
         ) : (
-          // The word "Loading…" was doing a skeleton's job badly: it is a
-          // 12.5px line where a 13px line is about to be, so the card shifted
-          // by a pixel and by a whole button's height the moment the status
-          // arrived. These are the two things that always land, the current
-          // version and either "You're up to date." or the update button, so
-          // the card is already its final size before the answer comes back.
           <SkeletonGroup label="Loading update status">
             <SkeletonLine className="mt-2 w-48 text-[13px]" />
             <Skeleton className="mt-3 h-[35px] w-40 rounded-ctl" />
@@ -112,10 +100,7 @@ export function UpdateCard() {
               </a>
             )}
             {poll === 'polling' && (
-              // Indeterminate on purpose: this waits for the server to come
-              // back on a new version, and there is no percentage anywhere in
-              // that. The bar says "busy" honestly, which is the whole reason
-              // ui/progress.tsx has a null mode.
+              // Indeterminate: no percentage to report while the server restarts.
               <Progress className="mt-3 max-w-sm">
                 <ProgressLabel>Updating Proxploy, it will restart itself</ProgressLabel>
               </Progress>

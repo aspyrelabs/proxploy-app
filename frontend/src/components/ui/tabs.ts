@@ -1,21 +1,10 @@
 /**
- * The underline tab strip, as class strings rather than components.
- *
- * There is no Tabs component here to wrap: routes/firewall.tsx and
- * routes/storage.tsx drive Radix's `Tabs.Root` directly and
- * routes/hosts.tsx uses TanStack `Link`s, so the only thing the three ever
- * shared was the look, and they shared it by having three copies of it.
- * Two were byte-identical; the third differed only in which selector it
- * hangs the active state on.
- *
- * `tabTrigger` therefore carries BOTH selectors. Radix stamps
- * `data-state="active"` on its own trigger; TanStack stamps a plain
- * `.active` class on a Link it considers current. Each selector is inert
- * wherever the other library is in charge, so one string serves both and
- * neither route needs to know which mechanism the other uses.
- *
- * This is a .ts, not a .tsx, for the same reason ui/overlay.ts is: it
- * exports no component, so there is no JSX in it.
+ * The underline tab strip as class strings. `tabTrigger` carries BOTH active
+ * selectors because routes/firewall.tsx and routes/storage.tsx drive Radix's
+ * `Tabs.Root` (stamps `data-state="active"`) while routes/hosts.tsx uses
+ * TanStack `Link`s (stamps `.active`). Each selector is inert wherever the
+ * other library is in charge, so one string serves both. A .ts, not .tsx,
+ * because it exports no component (no JSX).
  */
 
 /** One tab. Muted until it is the current one, then full text with an amber

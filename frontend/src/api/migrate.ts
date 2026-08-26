@@ -1,8 +1,5 @@
-// api/migrate.ts, Cross-host app migration: preflight + the migrate.app job
-// (doc 05 Tasks 14-16, doc 10 §Phase 8). Mirrors backend/proxploy/services/
-// migrate.py's `preflight()` return shape exactly, see that module's own
-// docstring for why every number here is either a live read or an honest
-// `None`, never a guess.
+// Mirrors backend/proxploy/services/migrate.py's `preflight()` return shape
+// exactly: every value here is a live read or an honest `None`, never a guess.
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type { ApiError } from './client'

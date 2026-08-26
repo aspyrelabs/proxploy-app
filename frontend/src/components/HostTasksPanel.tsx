@@ -8,11 +8,7 @@ function fmtTime(epoch: number | null): string {
   return epoch ? new Date(epoch * 1000).toLocaleString() : 'unknown'
 }
 
-/**
- * A passthrough read of the node's own task list (doc: "modest, not a log
- * viewer product"), one level of expansion (task -> its log lines) and no
- * more.
- */
+/** One level of expansion only (task -> its log lines). */
 export function HostTasksPanel({ hostId }: { hostId: number }) {
   const tasks = useHostTasks(hostId)
   const [selected, setSelected] = useState<string | null>(null)
@@ -21,10 +17,7 @@ export function HostTasksPanel({ hostId }: { hostId: number }) {
   return (
     <div className="py-3">
       <QueryState query={tasks}
-                  // This panel opens inside the Hosts table, so the row it
-                  // opens into is already taller than nothing; a placeholder
-                  // of the right height is what stops the table below it from
-                  // jumping twice, once on open and again on arrival.
+                  // Skeleton stops the table below from jumping on open, then again on arrival.
                   loading={<SkeletonGroup label="Loading tasks">
                     {/* Type, Target, User, Status, Started, and the log button. */}
                     <SkeletonTable rows={4} cols={['w-20', 'w-16', 'w-20', 'w-24', 'w-32', 'w-14']} />
@@ -64,11 +57,7 @@ export function HostTasksPanel({ hostId }: { hostId: number }) {
       {selected && (
         <div className="mt-3 border-t border-line-soft pt-3">
           <QueryState query={log}
-                      // The log box is a fixed-looking slab of monospace, so
-                      // the placeholder is the slab: same border, same
-                      // padding, bars where the lines go. A ring here would
-                      // have been a small mark floating in the space the log
-                      // is about to fill.
+                      // Placeholder matches the log slab: same border/padding, bars for lines.
                       loading={<SkeletonGroup label="Loading task log"
                                               className="rounded-ctl border border-line bg-panel-2 p-2">
                         {['w-4/5', 'w-2/3', 'w-11/12', 'w-1/2', 'w-3/4'].map((w) => (

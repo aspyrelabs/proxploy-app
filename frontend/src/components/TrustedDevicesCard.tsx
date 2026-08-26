@@ -7,14 +7,10 @@ import { QueryState } from './QueryState'
 import { Button } from './ui/button'
 import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 
-/** Only rendered when two-factor is on: with no second factor there is nothing
- *  to skip, so the card would be a list that can never have a row in it.
- *
- *  Self-service like SessionsCard, and for the same reason (api/auth.py's
- *  comment on that section): managing your own login state is not an RBAC or
- *  plan question. Separate from Sessions because these are a different thing
- *  with a different risk: revoking a session signs a browser out, revoking one
- *  of these makes a browser prove the second factor again. */
+/** Self-service, not an RBAC or plan question (same reason as SessionsCard;
+ *  see api/auth.py). Separate from Sessions: revoking a session signs a
+ *  browser out, revoking one of these makes a browser prove the second factor
+ *  again. */
 export function TrustedDevicesCard() {
   const qc = useQueryClient()
   // Same ['auth', 'me'] query TotpCard reads, so this shares its cache rather
@@ -58,10 +54,8 @@ export function TrustedDevicesCard() {
                   errorTitle="Trusted devices not readable"
                   errorNote="Proxploy could not reach the backend to list them.">
         {(list) => (
-          /* Every cell but the last gets its gutter here rather than a pr-4
-             repeated on eight of them. Without it a long user-agent ran
-             straight into the date beside it -- always true, just invisible
-             until the section rail narrowed the pane. */
+          /* Long user-agents ran into the date; the table-wide gutter
+             (not per-cell pr-4) fixes it. */
           <table className="w-full text-left text-[13px] [&_td]:pr-4 [&_th]:pr-4 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
             <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
               <th className="pb-2">IP</th><th>Device</th><th>Trusted</th><th>Expires</th><th /></tr></thead>

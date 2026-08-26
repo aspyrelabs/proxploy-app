@@ -1,5 +1,6 @@
-"""Canonical entitlement flag registry (doc 01 §17). 87 keys, all ON while dormant.
-A feature without a key does not merge (doc 07 §3); keys never change once shipped."""
+"""Canonical entitlement flag registry. All flags ON while dormant.
+
+Keys never change once shipped; a feature without a key does not merge."""
 
 FLAG_KEYS: tuple[str, ...] = (
     "hosts.onboard", "hosts.ssh_executor", "hosts.single", "hosts.multi", "hosts.manage",
@@ -34,12 +35,9 @@ FLAG_KEYS: tuple[str, ...] = (
     "platform.onboarding", "platform.self_update", "platform.install", "api.rest",
     "ui.theme", "platform.settings", "platform.error_report",
 )
-# platform.error_report is a NAME ONLY: do not wire it as a gate. Doc 01's
-# feature table lists it and says "never on the entitlement path" in the same
-# row, which reads like a contradiction until you see why. Crash reporting is
-# controlled by PROXPLOY_SENTRY_DSN in the operator's env file and by nothing
-# else (main.py). Gating it on an entitlement would mean an expired licence
-# silently changes what leaves the operator's network, which is not a decision
-# a billing state gets to make.
+# platform.error_report is a NAME ONLY: never wire it as a gate. Crash
+# reporting is controlled solely by PROXPLOY_SENTRY_DSN (main.py); gating on
+# an entitlement would let an expired licence silently change what leaves the
+# operator's network.
 
 DEFAULT_FEATURES: dict[str, bool] = {k: True for k in FLAG_KEYS}

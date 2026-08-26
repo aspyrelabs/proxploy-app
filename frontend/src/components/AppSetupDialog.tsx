@@ -10,9 +10,7 @@ import { Dialog } from './ui/dialog'
 import { IconTile } from './IconTile'
 import { inputCls } from './LoginForm'
 
-/** The tiles an app can wear. Pairs rather than single colours because
- *  IconTile draws a gradient, and picking two that go together is not
- *  something to make anyone do by hand. */
+/** Pairs rather than single colours because IconTile draws a gradient. */
 const PALETTES = [
   { c1: '#F5B544', c2: '#E79126' },
   { c1: '#5B9DF9', c2: '#3C6FD1' },
@@ -22,7 +20,7 @@ const PALETTES = [
   { c1: '#8DC63F', c2: '#5E9A22' },
 ]
 
-/** Two letters off the name, which is what a person would have picked. */
+/** First two letters of the name. */
 function initialsFor(name: string): string {
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean)
   if (words.length === 0) return '??'
@@ -31,17 +29,9 @@ function initialsFor(name: string): string {
 }
 
 /**
- * Finish setting up an app Proxploy did not install.
- *
- * An app from the store arrives knowing its port and wearing its icon. One
- * adopted by hand knows neither, and the row simply hid the Open button, which
- * left the operator with nothing to click and nothing to read: the fix existed
- * only inside Reconfigure, which is not where anyone notices the problem.
- *
- * So the row offers this instead, and it asks for exactly the two things that
- * are missing. Both are optional in the sense that neither is validated
- * against reality: the port is a guess Proxploy is checking with you, and the
- * tile is decoration.
+ * Finish setting up an app Proxploy did not install (adopted by hand, so no
+ * port or icon came from the store). Asks for the port and the tile, both
+ * unvalidated: the port is a guess, the tile is decoration.
  */
 export function AppSetupDialog({ app, onClose }: { app: AppRow; onClose: () => void }) {
   const qc = useQueryClient()
@@ -108,7 +98,6 @@ export function AppSetupDialog({ app, onClose }: { app: AppRow; onClose: () => v
                   </Button>
                 ))}
               </div>
-              {/* The caveat lives with the numbers, every time they are shown. */}
               <p className="mt-1 text-[11.5px] text-text-3">
                 A guess, not a reading from Proxmox, which does not know. Best
                 first. Pick one and check it opens.
@@ -121,10 +110,8 @@ export function AppSetupDialog({ app, onClose }: { app: AppRow; onClose: () => v
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
             Tile
           </span>
-          {/* Initials and a colour, not an upload. The icon a row draws comes
-              from the CATALOG (served_icon_url), so an app with no catalog
-              entry can never have one; the initials tile is the icon it can
-              have, and IconTile already draws it everywhere. */}
+          {/* No catalog entry (served_icon_url) means no icon; the initials
+              tile is the icon it can have, and IconTile draws it everywhere. */}
           <p className="mb-2 text-[12px] text-text-3">
             Apps in the store bring their own logo. This one gets letters.
           </p>

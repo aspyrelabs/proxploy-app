@@ -65,10 +65,8 @@ export function AlertsPage() {
 
   const rulesAllowed = ent.data != null && ent.has('alerts.rules')
   const rules = useAlertRules(rulesAllowed)
-  // Warm the metrics-enum cache as soon as the page opens, not when the rule
-  // form mounts, AlertRuleForm's metric <select> needs its options in place
-  // before "New rule" can be clicked and immediately answered in a test (or
-  // by an impatient user).
+  // Warm the metrics-enum cache before the rule form mounts so AlertRuleForm's
+  // metric <select> already has options when "New rule" is clicked.
   useAlertMetrics(rulesAllowed)
   const [adding, setAdding] = useState(false)
 
@@ -126,10 +124,6 @@ export function AlertsPage() {
               Recently resolved
             </h3>
             <QueryState query={history}
-                        // Only reached once "Recently resolved" is expanded,
-                        // and that click starts the fetch, so this is the one
-                        // moment on the page where somebody is waiting on a
-                        // section they just asked for.
                         loading={<SkeletonGroup label="Loading resolved alerts">
                           {/* Message, and how long ago it resolved. */}
                           <SkeletonTable rows={3} head={false} cols={['w-2/3', 'w-20']} />
@@ -158,9 +152,7 @@ export function AlertsPage() {
         )}
       </section>
 
-      {/* This card's own entitlement-gated first load: not yet known whether
-          the plan includes alerts.rules, then the rules list's own first
-          fetch. `isPending`, not `isFetching`, so it stays quiet on the
+      {/* `isPending`, not `isFetching`, so the overlay stays quiet on the
           invalidation refetches toggleRule/removeRule trigger below. */}
       <CardLoadingOverlay state={{ firstLoad: ent.isPending || (rulesAllowed && rules.isPending) }}>
       <section className={card}>

@@ -13,15 +13,9 @@ const label = 'mb-1 block text-[10.5px] uppercase tracking-wide text-text-3'
 /**
  * Who you are on this installation: email, role, display name.
  *
- * Lifted out of routes/profile.tsx, which rendered this above TotpCard,
- * SessionsCard and TrustedDevicesCard and so was a second, differently-named
- * copy of Settings' own Profile section. One card per file, the same shape
- * TotpCard/SessionsCard/ConsoleCard already have, so Settings composes it the
- * same way it composes them.
- *
- * `busy` is this card's own now, not shared with the password form as it was
- * on the old page: saving a display name has no business greying out "Set new
- * password", and the two calls hit different endpoints.
+ * `busy` is this card's own, not shared with the password form: saving a
+ * display name has no business greying out "Set new password", and the two
+ * calls hit different endpoints.
  */
 export function AccountCard() {
   const { data: me, isPending: mePending } = useMe()
@@ -52,14 +46,12 @@ export function AccountCard() {
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <span className={label}>Email</span>
-          {/* Both readouts print "unknown" for anything falsy, which during
-              the /auth/me fetch is a statement about the reader's own
-              account rather than a wait. Same box either way, so nothing
-              moves when the answer lands. */}
-          {/* A div, not a <p>: SkeletonLine renders a div (its pulse box is
-              one too), and a div cannot legally nest inside a <p> -- React
-              warned about exactly that in the loading state. Tailwind's
-              preflight zeroes margin on both tags, so nothing moves. */}
+          {/* Both readouts print "unknown" for anything falsy, so during the
+              /auth/me fetch the box is a claim about the reader's own account
+              rather than a wait; same box either way, nothing moves. */}
+          {/* A div, not a <p>: SkeletonLine renders a div and a div cannot
+              legally nest inside a <p> -- React warned about exactly that in
+              the loading state. Tailwind's preflight zeroes margin on both. */}
           <div className="rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13.5px] text-text-2">
             {mePending ? <SkeletonLine className="w-48 max-w-full text-[13.5px]" /> : me?.email ?? 'unknown'}
           </div>

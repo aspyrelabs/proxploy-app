@@ -1,4 +1,4 @@
-"""The ONLY app→Aspyre call path (doc 02 §8): activate / refresh / revoke.
+"""The ONLY app→Aspyre call path: activate / refresh / revoke.
 Never called unless a license is configured."""
 import logging
 

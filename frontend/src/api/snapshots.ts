@@ -3,7 +3,7 @@ import { api } from './client'
 import type { ApiError } from './client'
 import type { JobRow } from './jobs'
 
-/** PVE's own snapshot shape (doc 05: "List snapshots (live from Proxmox)"). */
+/** PVE's own snapshot shape (live from Proxmox). */
 export type SnapshotRow = {
   name: string
   description: string | null
@@ -12,9 +12,8 @@ export type SnapshotRow = {
   /** true = the RAM state was captured alongside the disk (qemu only). */
   vmstate: boolean
   parent: string | null
-  // PVE does not report a per-snapshot size for every storage plugin (LVM-thin
-  // and ZFS internal snapshots have no standalone size), so this is optional on
-  // purpose: doc 06 row 48's Size column renders ", " rather than a fake number.
+  // PVE reports no per-snapshot size for every storage plugin (LVM-thin and
+  // ZFS internal snapshots have no standalone size), so this is optional.
   size_bytes?: number | null
 }
 
@@ -53,18 +52,15 @@ function request(v: SnapshotVars) {
 }
 
 /**
- * All three snapshot operations fire jobs, so they follow useLifecycle's
- * onSettled rule: invalidate ['jobs'].
+ * All three operations fire jobs, so invalidate ['jobs'] (useLifecycle's
+ * onSettled rule).
  *
- * They ALSO invalidate ['vms', id, 'snapshots'], which useLifecycle deliberately
- * does not do for ['vms'], and the difference is real, not an inconsistency.
- * ['vms'] is the poller's 30s resource cache holding an optimistic `pending`
- * patch that a refetch would stomp with stale data. ['vms', id, 'snapshots'] is
- * a live read straight off Proxmox with no optimistic patch to protect, so a
- * refetch can only move it closer to the truth. It is best-effort at enqueue
- * time (the job has only been accepted); the terminal `job` SSE delta
- * invalidates the ['vms'] prefix, which matches this key too, and is the
- * backstop that actually shows the finished result.
+ * Also invalidate ['vms', id, 'snapshots'] — a live Proxmox read with no
+ * optimistic patch, so a refetch only moves it closer to the truth. Do NOT
+ * invalidate ['vms']: that is the poller's 30s cache holding an optimistic
+ * `pending` patch a refetch would stomp with stale data. The terminal `job`
+ * SSE delta invalidates the ['vms'] prefix (which matches this key too) and is
+ * the backstop that shows the finished result.
  */
 export function useSnapshotAction() {
   const qc = useQueryClient()

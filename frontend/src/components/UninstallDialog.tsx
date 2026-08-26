@@ -16,9 +16,8 @@ type UninstallResult = { job: JobRow } | { removed: true; ct_kept: true }
  * DELETE /apps/{id} has two outcomes that must never be confused: destroy the
  * CT and its disk (irreversible, typed-confirm gated, async: a job) or forget
  * the app and leave the CT running on PVE untouched (synchronous, no confirm,
- * reversible via re-adopt). Copy keeps the two blocks visually separate
- * rather than one form with a checkbox, so a misclick can't silently switch
- * outcomes.
+ * reversible via re-adopt). Kept as two separate blocks rather than one form
+ * with a checkbox, so a misclick can't silently switch outcomes.
  */
 export function UninstallDialog({ app, onClose }: { app: AppRow; onClose: () => void }) {
   const qc = useQueryClient()

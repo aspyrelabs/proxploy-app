@@ -2,19 +2,16 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import { Icon } from './icon'
 
 /**
- * A small (i) that explains why a figure is missing, or anything else too long
- * to write in the cell it sits in.
+ * An (i) explaining why a figure is missing, or anything too long for the
+ * cell it sits in.
  *
- * Carries its own Tooltip.Provider rather than expecting an ancestor to supply
- * one. SidebarNav wraps its whole rail in a Provider because every item in it
- * wants a tooltip; a lone hint in a table cell has no such rail to hang off,
- * and requiring callers to remember a Provider is how you get a component that
- * silently renders nothing.
+ * Carries its own Tooltip.Provider: without one Radix tooltips silently render
+ * nothing, and a lone table-cell hint has no rail (unlike SidebarNav) to
+ * supply it.
  *
- * The text is ALSO the trigger's accessible name and its native `title`. A
- * Radix tooltip opens on hover and on keyboard focus but not on touch, so on a
- * phone the title attribute is the only thing left; and a screen reader should
- * not have to open a tooltip to find out why a number says "unknown".
+ * `text` is also the trigger's accessible name and native `title`. Radix opens
+ * on hover and focus but not touch, so `title` is all a phone gets; a screen
+ * reader shouldn't have to open a tooltip to learn why a value says "unknown".
  */
 export function InfoHint({ text }: { text: string }) {
   return (

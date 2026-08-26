@@ -38,8 +38,7 @@ export function SessionsCard() {
         )}
       </div>
       <QueryState query={sessions}
-                  // Two rows: whoever is reading this page is one of them, so
-                  // the list is never empty and is rarely long.
+                  // Never empty: the reader is always one of the rows.
                   loading={<SkeletonGroup label="Loading sessions">
                     {/* IP, Device, Started, Last seen, and the Sign out button. */}
                     <SkeletonTable rows={2} cols={['w-28', 'w-40', 'w-32', 'w-32', 'w-16']} />
@@ -49,10 +48,8 @@ export function SessionsCard() {
                   errorTitle="Sessions not readable"
                   errorNote="Proxploy could not reach the backend to list your sessions.">
         {(list) => (
-          /* Every cell but the last gets its gutter here rather than a pr-4
-             repeated on eight of them. Without it a long user-agent ran
-             straight into the date beside it -- always true, just invisible
-             until the section rail narrowed the pane. */
+          /* Gutter on every cell but the last, via the table selector instead
+             of per-cell pr-4 (a long user-agent collided with the date). */
           <table className="w-full text-left text-[13px] [&_td]:pr-4 [&_th]:pr-4 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
             <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
               <th className="pb-2">IP</th><th>Device</th><th>Started</th><th>Last seen</th><th /></tr></thead>

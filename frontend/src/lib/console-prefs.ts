@@ -2,16 +2,14 @@ import type { ITheme } from '@xterm/xterm'
 
 /** How the interactive console is drawn, chosen by the operator in Settings.
  *
- *  Stored per browser in localStorage, the same way lib/theme.ts stores the
- *  app theme. That matters here specifically: the node shell opens with
- *  window.open, and localStorage is shared across same-origin windows, so the
- *  popup reads the choice made in the main window with nothing passed to it.
+ *  Stored per browser in localStorage, like lib/theme.ts. The node shell
+ *  opens with window.open; localStorage is shared across same-origin windows,
+ *  so the popup reads the choice from the main window with nothing passed to
+ *  it.
  *
- *  Doc 06 §c used to say consoles are dark in both themes, full stop. That
- *  still holds for the STATIC log panels (components/TerminalPanel.tsx), which
- *  have no setting and should not follow the app theme. It no longer holds for
- *  the interactive console, which an operator can now set deliberately,
- *  including to a light theme.
+ *  Static log panels (components/TerminalPanel.tsx) do NOT follow this
+ *  setting -- they stay dark regardless of app theme. Only the interactive
+ *  console follows it.
  */
 
 const THEME_KEY = 'pp_console_theme'

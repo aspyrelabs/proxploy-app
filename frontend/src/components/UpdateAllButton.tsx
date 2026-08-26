@@ -4,13 +4,9 @@ import { useEntitlements } from '../api/hooks'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
 
-/** Doc 06 Cluster overview: the "Update all" action. One confirm covers the
- *  whole batch, the backend still requires explicit consent, and enqueues one
- *  job per stale app so each has its own transcript.
- *
- *  It lives in components/ rather than beside a route because it moved off the
- *  Hosts page onto the Apps page, and a control that has already moved once is
- *  not one to leave nested inside whichever route happens to render it today. */
+/** "Update all": one confirm covers the batch, the backend still requires
+ *  explicit consent, and enqueues one job per stale app so each gets its own
+ *  transcript. */
 export function UpdateAllButton() {
   const ent = useEntitlements()
   const qc = useQueryClient()

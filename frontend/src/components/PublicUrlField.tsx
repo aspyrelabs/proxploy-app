@@ -7,15 +7,12 @@ import { inputClass } from './KindFields'
 /**
  * Where this installation lives, for the link at the bottom of a notification.
  *
- * Nothing can derive it. `api_base_url` in the backend config is the licence
- * server, and the Host header is attacker-controllable, so a guess could put a
- * link to somebody else's installation in a message we sent. Unset simply
- * means notifications carry no link, which is better than one that 404s.
- *
- * The suggestion is the address of the browser looking at this page, because
- * whoever is reading it is by definition reached the app at the right URL.
- * Offered as a button rather than saved for them: this is the one screen where
- * the value could be a private LAN address that nobody else can resolve.
+ * Cannot be derived: `api_base_url` in the backend config is the licence
+ * server, and the Host header is attacker-controllable, so a guess could link
+ * to somebody else's installation in a message we sent. The suggestion is the
+ * browser's own origin (whoever reads this page reached the app at the right
+ * URL), offered unsaved because it may be a private LAN address nobody else
+ * can resolve.
  */
 export function PublicUrlField() {
   const qc = useQueryClient()

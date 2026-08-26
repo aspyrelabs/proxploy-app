@@ -17,19 +17,14 @@ export type ChannelRow = {
 /**
  * Pick the service, then answer that service's own questions.
  *
- * This used to be a Name field and one "Apprise URL" box, which meant adding
- * Telegram required already knowing it is tgram://bottoken/ChatID. The 20
- * services we support were only ever a lookup that ran AFTER a URL was pasted,
- * to decide which badge to draw; nothing offered them.
- *
- * The URL is assembled server-side, not here. A password containing "@" or
- * "/" has to be percent-encoded or it rewrites the URL into a different host,
- * and the server can hand the assembled result to Apprise's parser before
+ * The URL is assembled server-side, not here: a password containing "@" or "/"
+ * must be percent-encoded or it rewrites the URL into a different host, and
+ * the server validates the assembled result with Apprise's parser before
  * storing it, so a channel cannot save cleanly and then silently never
  * deliver.
  *
- * `events` posts empty on purpose: which events reach a channel is the Events
- * matrix's job now, and empty already means "every event" server-side.
+ * `events` posts empty on purpose: empty already means "every event"
+ * server-side (routing is the Events matrix's job).
  */
 export function ChannelForm({ onSaved }: { onSaved: () => void }) {
   const kinds = useNotificationKinds()

@@ -1,14 +1,12 @@
-"""Scoped, revocable bearer tokens (doc 04 `api_keys`, doc 08 §6, Task 12).
+"""Scoped, revocable bearer tokens.
 
-Self-service: a user manages only their own keys, no team scoping needed, so
-routes gate on `get_current_user` + `require_entitlement("api.tokens")`
-rather than `authorize()`; there is no (resource, action) pair for "manage
-my own keys". The scope *check* itself lives in `api/deps.py::authorize`,
-folded in right before the casbin decision on every OTHER route.
+Routes gate on `get_current_user` + `require_entitlement` rather than
+`authorize()` — there is no (resource, action) for "manage my own keys".
+The scope check itself lives in `api/deps.py::authorize`.
 
-The raw key (`ppk_...`) exists in exactly one response body, ever: this
-router's create() return value. Only `prefix` + sha256 `key_hash` persist,
-and no write_audit() call in this file ever receives the raw string.
+The raw key (`ppk_...`) appears in exactly one response body: create()'s
+return value. Only `prefix` + sha256 `key_hash` persist; no write_audit()
+call ever receives the raw string.
 """
 from __future__ import annotations
 
@@ -27,11 +25,10 @@ from proxploy.services.authz import PERMISSIONS
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
-# "read", "<matrix-resource-name>:write" (all of that resource's actions,
-# PXP-32 keeps this as shorthand so an existing key never regresses), or
-# "<resource>:<action>" for one of the (resource, action) pairs in the matrix.
-# Doc 04's example ("apps:write") is plural; the matrix's resource name is
-# singular ("app"), so that string is normalised here, not copied verbatim.
+# "read", "<resource>:write" (PXP-32: shorthand so an existing key never
+# regresses), or "<resource>:<action>".
+# Doc example "apps:write" is plural; resource names are singular ("app"),
+# so that string is normalised here, not copied verbatim.
 _SCOPE_RE = re.compile(r"^(read|[a-z]+:[a-z_]+)$")
 _RESOURCES = {resource for resource, _ in PERMISSIONS}
 _ACTION_SCOPES = {f"{resource}:{action}" for resource, action in PERMISSIONS}
@@ -98,10 +95,8 @@ def revoke_api_key(request: Request, key_id: int, db=Depends(get_db),
                    user: User = Depends(get_current_user)):
     row = db.query(ApiKey).filter_by(id=key_id, user_id=user.id).one_or_none()
     if row is None:
-        # Also true of another user's key: 404, not 403: existence of
-        # someone else's key id is not this caller's information either way,
-        # and an admin revokes access by deactivating the user, not by
-        # reaching into another user's keys (doc 04, kept simple).
+        # 404, not 403: existence of another user's key id is not the
+        # caller's information. Admins revoke by deactivating the user.
         raise HTTPException(404, "api key not found")
     row.revoked_at = utcnow()
     db.commit()

@@ -1,4 +1,4 @@
-"""Release manifest parsing and verification (Phase 9a, spec D2).
+"""Release manifest parsing and verification.
 
 Deliberately pure: no network, no filesystem beyond hashing a file the caller
 already has. Everything here is on the path an attacker would need to walk to

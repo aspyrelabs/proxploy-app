@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { BackupRow } from '../api/backups'
 import { useRestoreBackup } from '../api/backups'
-// One 409 unwrapper for the whole phase; it landed with the network page.
+// errBody: the shared unwrapper for 409 error bodies.
 import { errBody } from '../api/network'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'

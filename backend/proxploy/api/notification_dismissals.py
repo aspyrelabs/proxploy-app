@@ -1,13 +1,11 @@
 """Per-user "what have I already cleared" state for the bell tray.
 
-Self-service, same idiom as api/apikeys.py and api/auth.py's session
-routes: gated on get_current_user alone, no authorize() call, no
-services/authz.py PERMISSIONS matrix entry -- reading and writing your OWN
-tray state isn't a role question. Ownership is enforced by scoping every
-read/write on user.id, the same as api_keys and sessions.
+Self-service: gated on get_current_user alone, no authorize() call, no
+PERMISSIONS matrix entry -- reading and writing your OWN tray state isn't a
+role question. Ownership is enforced by scoping every read/write on user.id.
 
-A separate router (not folded into api/notifications.py's /notifications
-prefix) because that router's one dependency (`_manage`, `authorize(
+A separate router, not folded into api/notifications.py's /notifications
+prefix, because that router's one dependency (`_manage`, `authorize(
 "channel", "manage")`) is deliberately the single gate for its whole file
 ("every notifications route is admin, no viewer read tier"); mixing a
 self-service, no-role route into that file would make that comment false.

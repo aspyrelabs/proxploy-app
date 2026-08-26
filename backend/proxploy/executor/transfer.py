@@ -1,5 +1,5 @@
 """vzdump-archive transfer between two hosts that share neither a PVE
-cluster nor a backup storage (doc 08 §4, Phase 8 Task 16). The two nodes
+cluster nor a backup storage. The two nodes
 have no credentials for each other by design; that is the whole point of
 this product, so the archive is streamed host -> Proxploy -> host, one SFTP
 connection to each side, entirely inside this process.
@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 from proxploy.executor.ssh import default_connect_factory, normalize_ssh_host
 
-CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
+CHUNK_SIZE = 4 * 1024 * 1024
 
 
 async def sftp_copy(connect_factory, *, src: dict, dst: dict,

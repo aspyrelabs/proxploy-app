@@ -1,25 +1,13 @@
 import * as Tooltip from '@radix-ui/react-tooltip'
 
 /**
- * The "an update is waiting for this app" mark, in one place.
+ * An orange dot marking an available update — smaller than a text label.
  *
- * A dot, not the word "update": the pill this replaced was as wide as some
- * app names and pushed the row's most important text around.
- *
- * Losing the word means the wording has to be carried by everything BUT the
- * pixels, so this hangs a real tooltip off the dot as well as an accessible
- * name. Same reasoning as InfoHint: the tooltip is for a sighted mouse or
- * keyboard user who cannot guess what an orange dot means, the aria-label is
- * for a screen reader that never opens it, and the title is the last thing
- * left on a touch device, where a Radix tooltip does not open at all. That is
- * also why this is a component rather than a copied span: the markup was
- * duplicated across the apps table, the guest list and the app card, and
- * three copies of an accessible name is three chances for one of them to
- * drift into meaninglessness.
- *
- * tabIndex makes the dot focusable, which is the only way the tooltip can be
- * reached without a pointer. It carries its own Provider for the same reason
- * InfoHint does: a dot in a table row has no ancestor that supplies one.
+ * Three accessibility layers for three interaction modes: tooltip (mouse),
+ * aria-label (screen reader), title (touch — Radix tooltips don't open on
+ * touch). Extracted to a component so the accessible name stays consistent
+ * across every usage site. Own Tooltip.Provider because table rows don't
+ * supply one.
  */
 export function UpdateDot() {
   return (

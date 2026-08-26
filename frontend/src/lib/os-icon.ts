@@ -1,19 +1,14 @@
 /**
- * PVE `ostype` to the icon that stands for it, or null when we cannot tell.
+ * PVE `ostype` → icon, or null when unknown.
  *
- * The backend stores PVE's raw value rather than a collapsed "linux"/"windows"
- * label, deliberately: `win11` and `w2k19` are different facts and the API has
- * no way to recover the specific one once it has been thrown away. Reducing it
- * to a picture is a display decision, so it lives here.
+ * The backend stores PVE's raw value (not a collapsed "linux"/"windows"), so
+ * the specific OS can't be recovered once collapsed — that's why the mapping
+ * lives at the display layer.
  *
- * The values are a closed set that PVE defines:
- *   Linux    l24, l26
- *   Windows  wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, win11
- *   Neither  solaris, other
- * Matching on the leading letter would be shorter and would also quietly claim
- * `solaris` is Windows the day PVE adds an OS starting with w, so the two
- * families are listed out. An unknown value returns null rather than guessing,
- * which drops the tile back to its initials fallback.
+ * Values are a closed set PVE defines. Matching the leading letter would
+ * quietly claim `solaris` is Windows the day PVE adds an OS starting with w,
+ * so both families are listed out and unknown values return null rather than
+ * guess.
  *
  * Paths are absolute because Vite serves `public/` from the site root.
  */
@@ -29,9 +24,8 @@ export function osIconUrl(osType: string | null | undefined): string | null {
   return null
 }
 
-/** What to call the icon out loud. `IconTile` renders the url as an <img> and
- *  uses the guest's own name as its alt text, so this is for anywhere the
- *  family itself needs saying rather than the guest. */
+/** Display name for the OS family. `IconTile` uses the guest's own name as
+ *  the <img> alt text, so this is where the family itself is named. */
 export function osLabel(osType: string | null | undefined): string | null {
   const url = osIconUrl(osType)
   if (url === '/linux.svg') return 'Linux'

@@ -7,7 +7,7 @@ from argon2.exceptions import VerifyMismatchError
 
 from proxploy.models import SessionRow, TrustedDevice, User, utcnow
 
-_ph = PasswordHasher()  # argon2id, library defaults (doc 08 §5)
+_ph = PasswordHasher()
 
 
 def hash_password(pw: str) -> str:
