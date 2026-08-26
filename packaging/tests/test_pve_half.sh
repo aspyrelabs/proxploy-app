@@ -13,6 +13,8 @@ export FAKE_PCT_LOG="$tmp/pct.log"
 ln -s "$PWD/packaging/tests/fake-pct" "$tmp/pct"
 # A non-dry run reads the template catalogue; --dry-run alone never does.
 ln -s "$PWD/packaging/tests/fake-pveam" "$tmp/pveam"
+# A run with no --storage/--template-storage resolves both pools itself.
+ln -s "$PWD/packaging/tests/fake-pvesm" "$tmp/pvesm"
 export PATH="$tmp:$PATH"
 : > "$FAKE_PCT_LOG"
 
@@ -54,4 +56,34 @@ esac
 grep -q '^push 152 .* /root/install.sh --perms 0755' "$FAKE_PCT_LOG" \
   || { echo "FAIL: a piped installer pushed nothing into the CT"; cat "$FAKE_PCT_LOG"; exit 1; }
 echo "OK: a piped installer re-fetches itself to push into the CT"
+
+# --- the advertised one-liner: no flags, both pools resolved here -----------
+# The rootfs pool and the template pool are different pools on a stock node
+# (local-lvm carries rootdir, local carries vztmpl). Resolving one and reading
+# the template catalogue out of it made `pveam list local-lvm` exit non-zero,
+# and `set -euo pipefail` + a discarded stderr turned that into "creating CT
+# ..." followed by a silent exit with no CT created. fake-pvesm models the
+# split and fake-pveam refuses the wrong pool, so that regression fails loudly.
+: > "$FAKE_PCT_LOG"
+bare=$( ./install.sh --pve-only --dry-run \
+          --channel "file://$PWD/packaging/tests/fixture-channel" \
+          --version 1.0.0 2>&1 ) \
+  || { echo "FAIL: a flagless PVE run exited $?:"; echo "$bare"; exit 1; }
+grep -q 'storage local-lvm' "$FAKE_PCT_LOG" \
+  || { echo "FAIL: rootfs did not land on the rootdir pool"; cat "$FAKE_PCT_LOG"; exit 1; }
+grep -q 'rootfs local-lvm:8' "$FAKE_PCT_LOG" \
+  || { echo "FAIL: rootfs size/pool wrong"; cat "$FAKE_PCT_LOG"; exit 1; }
+grep -q 'local:vztmpl/debian-12-standard' "$FAKE_PCT_LOG" \
+  || { echo "FAIL: template did not come from the vztmpl pool"; cat "$FAKE_PCT_LOG"; exit 1; }
+echo "OK: rootfs and template resolve to their own pools"
+
+# Non-dry, so resolve_template really calls pveam with the pool it picked.
+: > "$FAKE_PCT_LOG"
+./install.sh --pve-only --ctid 153 \
+             --channel "file://$PWD/packaging/tests/fixture-channel" \
+             --version 1.0.0 >/dev/null 2>&1 \
+  || { echo "FAIL: a flagless non-dry PVE run exited $?"; exit 1; }
+grep -q '^create 153 local:vztmpl/debian-12-standard' "$FAKE_PCT_LOG" \
+  || { echo "FAIL: pveam was asked for the wrong pool"; cat "$FAKE_PCT_LOG"; exit 1; }
+echo "OK: the template catalogue is read from the vztmpl pool"
 echo "PASS: pve half harness"

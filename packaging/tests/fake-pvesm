@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Test double for pvesm, modelling a stock Proxmox install: no single pool
+# carries both rootdir and vztmpl. `pvesm status -content <type>` prints a
+# header row plus one row per matching pool, which is what resolve_storage and
+# resolve_template_storage read.
+set -euo pipefail
+content=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -content) content="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "Name             Type     Status           Total            Used       Available        %"
+case "$content" in
+  rootdir) printf '%s\n' "local-lvm        lvmthin  active       100000000        1000000        99000000    1.00%" ;;
+  vztmpl)  printf '%s\n' "local            dir      active       100000000        1000000        99000000    1.00%" ;;
+  *)       printf '%s\n' "local            dir      active       100000000        1000000        99000000    1.00%" \
+                         "local-lvm        lvmthin  active       100000000        1000000        99000000    1.00%" ;;
+esac

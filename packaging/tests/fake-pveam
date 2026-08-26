@@ -5,7 +5,16 @@
 # catalog and no network.
 set -euo pipefail
 case "${1:-}" in
-  list) printf '%s\n' "${2:-local}:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst 0 0" ;;
+  # Real pveam exits non-zero on a pool with no vztmpl content ("storage
+  # 'local-lvm' does not support template directory"). Refusing it here is the
+  # whole point of this double: passing the rootdir pool used to kill the
+  # installer in silence, so the fake must not accept any pool handed to it.
+  list)
+    case "${2:-}" in
+      local) printf '%s\n' "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst 0 0" ;;
+      *) echo "storage '${2:-}' does not support template directory" >&2; exit 255 ;;
+    esac
+    ;;
   *)    : ;;
 esac
 exit 0

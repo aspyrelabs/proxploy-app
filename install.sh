@@ -69,6 +69,7 @@ VERSION=""
 PUBKEY=""
 CTID=""
 STORAGE=""
+TEMPLATE_STORAGE=""
 BRIDGE=""
 FQDN=""
 PVE_ONLY=0
@@ -116,7 +117,8 @@ usage() {
 Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
                    [--pubkey <pem>] [--dry-parse]
        install.sh [--pve-only] [--dry-run] [--channel <url>] [--version <v>]
-                   [--ctid <n>] [--storage <name>] [--bridge <name>]
+                   [--ctid <n>] [--storage <name>] [--template-storage <name>]
+                   [--bridge <name>]
 
   --shape    Install shape: systemd (plain host/VM) or lxc (Proxmox CT).
              Omit and it is worked out: on a Proxmox node (pct + /etc/pve
@@ -138,6 +140,11 @@ Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
   --ctid     CT id to create. Default: first free id >= 150.
   --storage  PVE storage for the CT's rootfs. Default: first storage that
              supports rootdir content.
+  --template-storage
+             PVE storage the Debian CT template is read from, and downloaded
+             to when it is not there yet. Default: first storage that supports
+             vztmpl content. Rarely the same pool as --storage: on a stock
+             Proxmox install rootdir is local-lvm and vztmpl is local.
   --bridge   PVE network bridge for the CT. Default: vmbr0.
   --hostname Public DNS name Caddy should request a Let's Encrypt cert for.
              Omit for a LAN install with no public hostname: Caddy still
@@ -159,6 +166,7 @@ while [ $# -gt 0 ]; do
     --pubkey) PUBKEY="$2"; shift 2 ;;
     --ctid) CTID="$2"; shift 2 ;;
     --storage) STORAGE="$2"; shift 2 ;;
+    --template-storage) TEMPLATE_STORAGE="$2"; shift 2 ;;
     --bridge) BRIDGE="$2"; shift 2 ;;
     --hostname) FQDN="$2"; shift 2 ;;
     --pve-only) PVE_ONLY=1; shift ;;
@@ -193,10 +201,23 @@ resolve_ctid() {
   fi
 }
 
+# Two pools, not one. A CT rootfs needs `rootdir` content and a CT template
+# needs `vztmpl`, and on a stock Proxmox install no single pool carries both:
+# local-lvm is rootdir+images, local is vztmpl+iso+backup. Picking the rootdir
+# pool and then reading the template catalogue out of it is what broke the
+# advertised one-liner on a real node. services/appstore.py's _STORAGE_CLASSES
+# keeps the same two content types apart on the API side; this is that split.
 resolve_storage() {
   [ -n "$STORAGE" ] && return 0
-  STORAGE=$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1{print $1; exit}')
+  STORAGE=$(pvesm status -content rootdir | awk 'NR>1{print $1; exit}')
   [ -n "$STORAGE" ] || die "could not find a storage with rootdir content; pass --storage"
+}
+
+resolve_template_storage() {
+  [ -n "$TEMPLATE_STORAGE" ] && return 0
+  TEMPLATE_STORAGE=$(pvesm status -content vztmpl | awk 'NR>1{print $1; exit}')
+  [ -n "$TEMPLATE_STORAGE" ] \
+    || die "could not find a storage with vztmpl content; pass --template-storage"
 }
 
 resolve_bridge() { [ -n "$BRIDGE" ] || BRIDGE="vmbr0"; }
@@ -235,7 +256,11 @@ resolve_template() {  # resolve_template <storage> -> sets TEMPLATE
     TEMPLATE="$storage:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
     return 0
   fi
-  TEMPLATE=$(pveam list "$storage" 2>/dev/null | awk '/debian-12-standard/{print $1; exit}')
+  # `|| TEMPLATE=""`, and no 2>/dev/null: under `set -euo pipefail` a failing
+  # pveam here aborted the whole installer with its reason discarded, which
+  # read as "creating CT ..." followed by a silent exit and nothing created.
+  # Let it say why, and fall through to the download branch either way.
+  TEMPLATE=$(pveam list "$storage" | awk '/debian-12-standard/{print $1; exit}') || TEMPLATE=""
   if [ -z "$TEMPLATE" ]; then
     log "downloading the Debian 12 CT template"
     pveam update
@@ -263,9 +288,11 @@ pve_wait_for_ready() {
 pve_install() {
   resolve_ctid
   resolve_storage
+  resolve_template_storage
   resolve_bridge
-  log "PVE host: creating CT $CTID (storage=$STORAGE bridge=$BRIDGE)"
-  resolve_template "$STORAGE"
+  log "PVE host: creating CT $CTID (storage=$STORAGE" \
+      "template-storage=$TEMPLATE_STORAGE bridge=$BRIDGE)"
+  resolve_template "$TEMPLATE_STORAGE"
 
   pct create "$CTID" "$TEMPLATE" \
     --hostname proxploy \
