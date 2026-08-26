@@ -124,6 +124,7 @@ tar "${tar_nometa[@]}" \
     --exclude='.venv' --exclude='__pycache__' --exclude='tests' \
     --exclude='./data' --exclude='./data/*' \
     --exclude='dod_verify_*' --exclude='mutants' --exclude='.pytest_cache' \
+    --exclude='.ruff_cache' --exclude='.mypy_cache' --exclude='.coverage' \
     --exclude='*.egg-info' --exclude='.git' --exclude='._*' \
     --exclude='.DS_Store' \
     -cf - -C "$backend_dir" . | tar "${tar_nometa[@]}" xf - -C "$stage/backend"
