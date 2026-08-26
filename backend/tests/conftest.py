@@ -75,3 +75,15 @@ def session(tmp_path):
         # SQLAlchemy's own place to hang per-session context.
         db.info["app"] = app
         yield db
+
+
+@pytest.fixture(autouse=True)
+def _no_settle_pause(monkeypatch):
+    """services/lifecycle.py's SETTLE_DELAY_S is two seconds of deliberate
+    waiting per lifecycle action. Real in production, dead weight in a suite
+    that runs hundreds of them: it took test_lifecycle_jobs.py from 4s to 31s
+    on its own. The one test that is ABOUT the pause sets its own value, which
+    still works because it patches the same attribute after this does.
+    """
+    import proxploy.services.lifecycle as lifecycle
+    monkeypatch.setattr(lifecycle, "SETTLE_DELAY_S", 0.0)

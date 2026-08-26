@@ -217,10 +217,6 @@ export const STATUS_LABEL: Record<string, string> = {
   // being acted on right now and its real status is not known until the
   // action reports back.
   pending: 'Working',
-  // Not 'Working': that is Proxploy doing something. This is the guest's own
-  // app still coming up, after Proxmox has already called the container
-  // running. The distinction is the whole point of the state.
-  starting: 'Starting',
   // An app being uninstalled. Its own word rather than "Working", because a
   // removal is the one action that ends with the row gone.
   removing: 'Removing',

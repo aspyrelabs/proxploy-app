@@ -247,6 +247,19 @@ def _record_observed(app, target_type: str, target_id: int,
 # and /cluster/resources agreeing, which is tens to hundreds of milliseconds,
 # not an operation of its own. Anything slower than this is the poller's job.
 OBSERVE_BUDGET_S = 3.0
+
+# An extra pause after Proxmox agrees, before the guest is allowed to read as
+# running or stopped. PVE reporting `running` means the container is up, not
+# that the app inside is listening, so settling the instant it agrees put the
+# pill on Running while the thing was still coming up. Two seconds of Working
+# is the cheap version of that distinction: no probing, no new status, nothing
+# extra to keep correct.
+#
+# Deliberately inside the job rather than in busy_guests' overlay. Held in the
+# overlay, the API would go on answering `pending` after the resource event had
+# already fired, so nothing would tell the browser to look again and the pill
+# would sit on Working until the next poll cycle.
+SETTLE_DELAY_S = 2.0
 OBSERVE_EVERY_S = 0.25
 
 
@@ -394,9 +407,14 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
         # instead of now, and a silent version of exactly this hid a 403 for
         # a whole session.
         ctx.log(f"could not read {name} back ({why}); waiting for the poller")
-    # Woken ONLY when the read above did not already settle it. Waking on a
-    # confirmed guest is what put the 5 second gap in: the targeted read
-    # recorded `stopped` and the hold lifted, then the wake'd cycle read
+    # Held before anything is published, so the guest stays `pending` (the job
+    # is still running, which is the in-flight hold) for the whole pause and
+    # the single event that follows carries the settled answer.
+    await asyncio.sleep(SETTLE_DELAY_S)
+
+    # Woken ONLY when the read above did not already settle it. Waking a guest
+    # the targeted read has just confirmed is what put a 5 second gap in: the
+    # read recorded `stopped` and the hold lifted, then the wake'd cycle read
     # /cluster/resources, which still said `running`, wrote that over the top
     # and re-engaged the hold until the following cycle. Measured on the lab
     # cluster: read at 51.7s, clobbered at 51.8s, correct again at 56.9s.

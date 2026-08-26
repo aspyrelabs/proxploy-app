@@ -17,7 +17,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import or_ as sa_or
 
 from proxploy.services.lifecycle import freshly_confirmed
-from proxploy.services.readiness import Readiness, port_is_open
 from proxploy.models import (App, CatalogEntry, Host, HostCredential, Job,
                              MetricSample, Vm, to_iso, utcnow)
 from proxploy.services.audit import write_audit
@@ -181,32 +180,6 @@ def _refresh_ip(a: App, g: dict, client, checked: dict[int, datetime],
         return False
     a.ip_cached = ip
     return True
-
-
-def _probe_web_port(a: App, g: dict, catalog_port, readiness, events, now) -> None:
-    """Ask whether this app's web port answers, and remember the answer.
-
-    Only asked when it can change something: the guest is running, a port is
-    known, an address is known, and the last answer was no. A settled fleet
-    therefore costs zero connects per cycle, and an app with no web interface
-    is never probed at all (it has nothing to be ready for, and reads Running
-    the moment Proxmox says so).
-
-    A guest that is not running forgets its answer rather than keeping a stale
-    yes: it must re-probe when it comes back, because a DHCP container usually
-    returns on a different address.
-    """
-    if g["status"] != "running":
-        readiness.forget(a.id)
-        return
-    port = a.web_port or catalog_port
-    if not port or not a.ip_cached or not readiness.needs_probe(a.id):
-        return
-    if readiness.mark(a.id, port_is_open(a.ip_cached, int(port)), now):
-        # Says "go and ask" like every other resource event; api/live.ts
-        # refetches and api/apps.py composes the answer.
-        events.append(("resource", {"type": "app", "id": a.id,
-                                    "change": "status"}))
 
 
 # How often a VM's filesystem usage is re-read from its guest agent, and why
@@ -495,18 +468,10 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                  client=None,
                  ip_checked: dict[int, datetime] | None = None,
                  fs_checked: dict[int, datetime] | None = None,
-                 readiness=None,
                  record_samples: bool = True) -> CycleResult:
     # A fresh PoolMemory has nothing to carry forward, so a caller that does
     # not keep one across cycles gets exactly what this cycle's rows say.
     pools = pools if pools is not None else PoolMemory()
-    # A caller with no Readiness of its own (every single-cycle test) gets a
-    # throwaway, so the probe path runs as it does in production rather than
-    # being skipped in exactly the tests meant to cover it.
-    readiness = readiness if readiness is not None else Readiness()
-    # The catalog port is the fallback when an app carries no web_port of its
-    # own. One query, not one per app.
-    entry_ports = {c.slug: c.port for c in db.query(CatalogEntry).all() if c.port}
     # Guests a targeted per-guest read has just confirmed. This cycle's
     # /cluster/resources answer was taken BEFORE that read and lags a finished
     # task by seconds, so writing `status` for these would put them back to
@@ -702,8 +667,6 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # Nothing is lost by writing it. The API never serves this column raw
         # during an action; api/apps.py::_app_out puts busy_guests over the
         # top, which is where "do not show a stale running" is enforced now.
-        _probe_web_port(a, g, entry_ports.get(a.catalog_slug), readiness,
-                        events, now)
         if ("app", a.id) in fresh:
             a.cpu_pct_cached = g["cpu_pct"]
         else:
@@ -890,9 +853,6 @@ class Poller:
     def __init__(self, app) -> None:
         self.app = app
         self.snapshots: dict[int, HostSnapshot] = {}
-        # Whether each app's web port answers yet. In memory beside
-        # snapshots, and read the same way by api/apps.py.
-        self.readiness = Readiness()
         self._tasks: dict[int, asyncio.Task] = {}
         # host_id -> when its tokens were last checked against their roles. In
         # memory on purpose: a restart re-checks straight away.
@@ -1165,7 +1125,6 @@ class Poller:
                                   client=client,
                                   ip_checked=self._ip_checked.setdefault(host_id, {}),
                                   fs_checked=self._fs_checked.setdefault(host_id, {}),
-                                  readiness=self.readiness,
                                   record_samples=record)
             # ingest_cycle owns status/last_seen_at, so this is set after it and
             # committed below with the rest of the cycle. A clean cycle clears

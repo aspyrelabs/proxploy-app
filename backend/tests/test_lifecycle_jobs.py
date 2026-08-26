@@ -731,6 +731,51 @@ def test_the_read_back_gives_up_rather_than_asking_for_ever(tmp_path, monkeypatc
     assert len(asked) < 20                # bounded, not spinning
 
 
+def test_the_guest_stays_working_for_the_settle_pause(tmp_path, monkeypatch):
+    """Two seconds of Working after Proxmox agrees, before Running or Stopped.
+
+    PVE calls a container `running` from the instant `pct start` returns, while
+    the app inside is still coming up, so settling the moment it agrees put the
+    pill on Running over a thing that was not up yet. The pause is the cheap
+    version of that distinction.
+
+    Asserted through busy_guests, because the point is what an operator's
+    refetch sees DURING the pause, not that asyncio.sleep was called.
+    """
+    from proxploy.jobs import JobBackend
+    from proxploy.models import utcnow
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+    import proxploy.services.lifecycle as m
+
+    async def run():
+        fake = FakePVE(resources=[
+            {"type": "lxc", "vmid": 150, "name": "Immich", "node": "pve1",
+             "status": "stopped"}])
+        app = make_job_app(tmp_path, fake=fake)
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            db.get(App, app_id).status_cached = "running"
+            db.commit()
+        monkeypatch.setattr(m, "SETTLE_DELAY_S", 0.4)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        # Mid-pause: Proxmox already says stopped, the operator still sees
+        # Working.
+        await asyncio.sleep(0.2)
+        with app.state.sessionmaker() as db:
+            assert db.get(App, app_id).status_cached == "stopped"
+            assert m.busy_guests(db, utcnow())[("app", app_id)] == "pending"
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert ("app", app_id) not in m.busy_guests(db, utcnow())
+
+    asyncio.run(run())
+
+
 def test_a_finished_action_wakes_the_poller(tmp_path):
     """Load-bearing, not a nicety.
 

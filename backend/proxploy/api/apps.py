@@ -51,23 +51,8 @@ _fw_read = authorize("firewall", "read", scope_of=scope_app())
 _fw_guest = authorize("firewall", "guest", scope_of=scope_app())
 
 
-def _starting(a: App, entry: CatalogEntry | None, readiness) -> str | None:
-    """"starting" while a running app's web port has not answered yet.
-
-    Guarded on a port being known: a container with no web interface has
-    nothing to be ready for and must never be held short of Running. The
-    ceiling and the never-probed case both live in services/readiness.py.
-    """
-    if readiness is None or a.status_cached != "running":
-        return None
-    if not (a.web_port or (entry.port if entry else None)):
-        return None
-    return readiness.state_for(a.id, utcnow())
-
-
 def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
-             busy: dict[tuple[str, int], str] | None = None,
-             readiness=None) -> dict:
+             busy: dict[tuple[str, int], str] | None = None) -> dict:
     """`entry` is the catalog row this app was installed from, or None when it
     has no catalog slug or that slug no longer resolves. Deliberately required
     with no default: it is only used for the icon, and a default of None would
@@ -102,13 +87,7 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
         # is actually running, so answering with it put the pill back to
         # Running mid-action on every refetch. The browser's optimistic patch
         # cannot cover this: it only exists in the tab that clicked.
-        #
-        # Then "starting": Proxmox calls a container `running` from the instant
-        # `pct start` returns, while the app inside is not listening yet, which
-        # is why Open could fail on a guest this list had just called Running.
-        "status": (busy.get(("app", a.id))
-                   or _starting(a, entry, readiness)
-                   or a.status_cached or "unknown"),
+        "status": busy.get(("app", a.id)) or a.status_cached or "unknown",
         "ip": a.ip_cached,
         "cpu_pct": a.cpu_pct_cached, "mem_bytes": a.mem_bytes_cached,
         "mem_total_bytes": g["mem_total_bytes"] if g else None,
@@ -146,9 +125,8 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
     entries = {e.slug: e for e in db.query(CatalogEntry)
                .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
     busy = busy_guests(db, utcnow())
-    readiness = getattr(request.app.state.poller, "readiness", None)
     return [_app_out(a, hosts[a.host_id], request.app.state.poller.snapshots,
-                     entries.get(a.catalog_slug), busy, readiness)
+                     entries.get(a.catalog_slug), busy)
             for a in rows]
 
 
@@ -328,8 +306,7 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
              if a.catalog_slug else None)
     return _app_out(a, host, request.app.state.poller.snapshots, entry,
-                    busy_guests(db, utcnow()),
-                    getattr(request.app.state.poller, "readiness", None))
+                    busy_guests(db, utcnow()))
 
 
 @router.get("/{app_id}/logs")
