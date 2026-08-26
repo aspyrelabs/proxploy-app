@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { AppCardSkeleton } from '../components/AppCard'
 import { NodeCardSkeleton } from '../components/NodeCard'
 import { QueryState } from '../components/QueryState'
 import { StorageCardSkeleton } from '../components/StorageCard'
@@ -38,10 +37,10 @@ describe('Skeleton', () => {
 
   it('is scaffolding, not content: every placeholder is hidden from readers', () => {
     const { container } = render(
-      <SkeletonGroup label="Loading apps"><AppCardSkeleton /></SkeletonGroup>)
+      <SkeletonGroup label="Loading nodes"><NodeCardSkeleton /></SkeletonGroup>)
     const group = screen.getByRole('status')
     expect(group).toHaveAttribute('aria-busy', 'true')
-    expect(group).toHaveAttribute('aria-label', 'Loading apps')
+    expect(group).toHaveAttribute('aria-label', 'Loading nodes')
     // One announcement for the whole group; nothing inside speaks for itself.
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(1)
     for (const bar of container.querySelectorAll('.animate-pulse')) {
@@ -145,7 +144,6 @@ describe('the shaped card placeholders', () => {
   // measured for real in Chromium by e2e/harness (npm run harness), which
   // fails on unequal heights among .rounded-card matches.
   it.each([
-    ['app', <AppCardSkeleton key="a" />, 'p-4'],
     ['node', <NodeCardSkeleton key="n" />, 'p-4'],
     ['storage', <StorageCardSkeleton key="s" />, 'p-5'],
     ['store', <StoreCardSkeleton key="t" />, 'p-4'],
@@ -166,12 +164,11 @@ describe('the shaped card placeholders', () => {
   })
 
   it('draws one meter row per real meter row', () => {
-    // AppCard shows CPU, RAM and Disk; NodeCard shows the same three. A
+    // NodeCard shows CPU, RAM and Disk, so its placeholder owes three rows. A
     // placeholder with the wrong count is a card of the wrong height.
     const meters = (ui: React.ReactNode) =>
       render(ui).container.querySelectorAll('.rounded-full.h-1\\.5, .h-1\\.5.rounded-full').length
     expect(meters(<SkeletonMeterRow />)).toBe(1)
-    expect(meters(<AppCardSkeleton />)).toBe(3)
     expect(meters(<NodeCardSkeleton />)).toBe(3)
   })
 })
@@ -181,10 +178,10 @@ describe('QueryState pending', () => {
     const query = useQuery({ queryKey: ['skeleton-subject'], queryFn: () => promise })
     return (
       <QueryState query={query}
-                  loading={<SkeletonGroup label="Loading apps" className="grid">
-                    <AppCardSkeleton />
+                  loading={<SkeletonGroup label="Loading nodes" className="grid">
+                    <NodeCardSkeleton />
                   </SkeletonGroup>}
-                  emptyTitle="No apps yet" emptyNote="">
+                  emptyTitle="No nodes yet" emptyNote="">
         {(rows) => <p>{rows.join(', ')}</p>}
       </QueryState>
     )
@@ -196,13 +193,13 @@ describe('QueryState pending', () => {
     const { container } = wrap(<Subject promise={promise} />)
 
     // Pending: the placeholder, and none of the other three answers.
-    expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Loading apps')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Loading nodes')
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
-    expect(screen.queryByText('No apps yet')).not.toBeInTheDocument()
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument()
 
-    resolve(['Immich', 'Plex'])
+    resolve(['pve-a', 'pve-b'])
 
-    await waitFor(() => expect(screen.getByText('Immich, Plex')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('pve-a, pve-b')).toBeInTheDocument())
     // Gone, not merely covered: a skeleton left under real content keeps
     // animating forever.
     expect(container.querySelectorAll('.animate-pulse')).toHaveLength(0)
