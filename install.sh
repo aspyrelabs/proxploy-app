@@ -314,16 +314,20 @@ pve_install() {
   pct start "$CTID"
   pve_wait_for_ready "$CTID"
 
-  log "pushing the installer into CT $CTID"
-  # Piped (curl | bash) there is no file of our own to push: bash read this
-  # script off a pipe and it exists nowhere on disk. Re-fetch the published
-  # one instead, which is the same bytes that got us here.
-  local installer="$SCRIPT_DIR/install.sh"
-  if [ ! -r "$installer" ]; then
-    log "no local installer to push, fetching $INSTALLER_URL"
-    installer=$(mktemp)
-    fetch_to "$INSTALLER_URL" "$installer"
-  fi
+  # Always the published installer, never a local file. This used to push
+  # $SCRIPT_DIR/install.sh when one was readable, and neither half of that was
+  # safe. Piped, BASH_SOURCE[0] is unset and $0 is "bash", so SCRIPT_DIR
+  # degrades to the operator's cwd: on a node with an old checkout's
+  # install.sh sitting in /root, `curl ... | bash` shipped THAT into the CT,
+  # which then died on `/root/packaging/lib/common.sh: No such file or
+  # directory`. From a checkout it was worse and unconditional: the unbundled
+  # install.sh needs common.sh beside it, and a fresh CT has no checkout to
+  # find it in. Only the bundled file at INSTALLER_URL stands alone in a CT,
+  # so fetch that every time. Override INSTALLER_URL to stage a build.
+  log "fetching the installer to push into CT $CTID from $INSTALLER_URL"
+  local installer
+  installer=$(mktemp)
+  fetch_to "$INSTALLER_URL" "$installer"
   pct push "$CTID" "$installer" /root/install.sh --perms 0755
 
   if [ "$PVE_ONLY" -eq 1 ]; then
