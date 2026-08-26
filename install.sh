@@ -329,6 +329,23 @@ pve_install() {
   # install.sh needs common.sh beside it, and a fresh CT has no checkout to
   # find it in. Only the bundled file at INSTALLER_URL stands alone in a CT,
   # so fetch that every time. Override INSTALLER_URL to stage a build.
+  # Shell access to the CT. `pct create` sets no password and no key, so root
+  # is locked: the Proxmox console prompts for a login that cannot be
+  # satisfied, and nothing anywhere says so. Rather than invent a password and
+  # print a secret into a terminal, hand the CT the keys that already open this
+  # node, so whoever administers the host administers the container. If root
+  # here has no authorized_keys, nothing is copied and `pct enter` (named in
+  # the closing lines below) stays the way in.
+  if [ -s /root/.ssh/authorized_keys ]; then
+    log "copying this node's root authorized_keys into CT $CTID"
+    pct exec "$CTID" -- mkdir -p -m 0700 /root/.ssh
+    pct push "$CTID" /root/.ssh/authorized_keys /root/.ssh/authorized_keys \
+      --perms 0600
+  else
+    log "this node's root has no authorized_keys, so CT $CTID gets none;" \
+        "pct enter $CTID is the way in"
+  fi
+
   log "fetching the installer to push into CT $CTID from $INSTALLER_URL"
   local installer
   installer=$(mktemp)
@@ -369,7 +386,12 @@ pve_install() {
   local ip
   ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
   log "Proxploy is installed in CT $CTID."
-  [ -z "$ip" ] || log "Browse to https://$ip/ to create the first account."
+  [ -z "$ip" ] || log "Browse to https://$ip/ and create the first account:" \
+      "you pick the email and password there, nothing is preset."
+  # Said out loud because the alternative is a console login prompt with no
+  # answer. root in the CT has no password by design; this is the way in.
+  log "For a shell in the container: pct enter $CTID (root has no password)."
+  log "To set one: pct exec $CTID -- bash -c 'echo root:PASS | chpasswd'"
 }
 
 # --- argument defaults (Task 3, phase 9c) -----------------------------------

@@ -11,6 +11,29 @@
 # main.py sits at <release>/backend/proxploy/main.py.
 set -euo pipefail
 
+# macOS metadata must never reach the tarball, and the reason is not tidiness.
+# Apple's tar stores a file's extended attributes as an AppleDouble sidecar
+# named `._<name>`. Built on a Mac, this release shipped
+# `._c8f2a4b71d90_catalog_upstream_metadata.py` and two more like it inside
+# proxploy/migrations/versions/. alembic globs that directory for *.py and
+# imports what it finds, an AppleDouble file is binary, and the app died on
+# every fresh install with "ValueError: source code string cannot contain null
+# bytes" while the installer reported success. It survived review because
+# extracting on a Mac reabsorbs `._*` back into xattrs, so the files are
+# invisible on the machine that built them and only exist on Linux, which is
+# every machine that installs this.
+#
+# COPYFILE_DISABLE is the documented switch for Apple's tar; the flags below
+# cover libarchive's own xattr and file-flag pax headers (the
+# "Ignoring unknown extended header keyword LIBARCHIVE.xattr.com.apple.*" and
+# SCHILY.fflags lines GNU tar prints during install). GNU tar has neither
+# flag and needs neither, so they are probed rather than assumed.
+export COPYFILE_DISABLE=1
+tar_nometa=()
+for flag in --no-mac-metadata --no-xattrs --no-fflags; do
+  if tar "$flag" --version >/dev/null 2>&1; then tar_nometa+=("$flag"); fi
+done
+
 usage() {
   cat >&2 <<EOF
 usage: $0 --version <semver> --key <ed25519-private-key.pem> --out <dir>
@@ -86,16 +109,33 @@ log "building frontend..."
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
-log "staging backend/ (excluding .venv, __pycache__, tests/, dod_verify_*, mutants, egg-info)..."
+# `data` is the exclude that matters most here, and it was missing. It is the
+# developer's own runtime directory: backend/data/proxploy.db holds every
+# host_credential row (Proxmox API tokens and the SSH private keys that give
+# root on those nodes) and backend/data/master.key is the Fernet key that
+# decrypts them. Both shipped inside proxploy-1.0.0.tar.gz to a public URL,
+# 29 MB of database and the key to it in the same archive, which is no
+# encryption at all. On the target PROXPLOY_DATA_DIR points at
+# /var/lib/proxploy, so nothing in a release ever reads this path: it is pure
+# leak with no upside. The find guard below is what makes sure it stays out.
+log "staging backend/ (excluding .venv, __pycache__, tests/, data/, dod_verify_*, mutants, egg-info)..."
 mkdir -p "$stage/backend"
-tar --exclude='.venv' --exclude='__pycache__' --exclude='tests' \
+tar "${tar_nometa[@]}" \
+    --exclude='.venv' --exclude='__pycache__' --exclude='tests' \
+    --exclude='./data' --exclude='./data/*' \
     --exclude='dod_verify_*' --exclude='mutants' --exclude='.pytest_cache' \
-    --exclude='*.egg-info' --exclude='.git' \
-    -cf - -C "$backend_dir" . | tar xf - -C "$stage/backend"
+    --exclude='*.egg-info' --exclude='.git' --exclude='._*' \
+    --exclude='.DS_Store' \
+    -cf - -C "$backend_dir" . | tar "${tar_nometa[@]}" xf - -C "$stage/backend"
 
 log "staging frontend/dist/..."
 mkdir -p "$stage/frontend"
-cp -r "$frontend_dir/dist" "$stage/frontend/dist"
+# cp -r on macOS copies xattrs too, which become AppleDouble files in the
+# tarball exactly like the backend tree did. Same tar-to-tar pipe as above.
+mkdir -p "$stage/frontend/dist"
+tar "${tar_nometa[@]}" --exclude='._*' --exclude='.DS_Store' \
+    -cf - -C "$frontend_dir/dist" . \
+  | tar "${tar_nometa[@]}" xf - -C "$stage/frontend/dist"
 
 # The installer reads proxploy-update, common.sh, proxploy.service and the
 # Caddyfile template out of the unpacked release rather than out of its own
@@ -105,7 +145,9 @@ cp -r "$frontend_dir/dist" "$stage/frontend/dist"
 # tests/ is the harness, not part of an install.
 log "staging packaging/ (excluding tests/)..."
 mkdir -p "$stage/packaging"
-tar --exclude='tests' --exclude='.DS_Store' -cf - -C "$root/packaging" . | tar xf - -C "$stage/packaging"
+tar "${tar_nometa[@]}" --exclude='tests' --exclude='.DS_Store' \
+    --exclude='._*' -cf - -C "$root/packaging" . \
+  | tar "${tar_nometa[@]}" xf - -C "$stage/packaging"
 
 log "overriding staged version to $version..."
 printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
@@ -141,9 +183,42 @@ open(path, "w").writelines(out)
 POISON
 fi
 
+# The staged tree is what gets signed, so it is what has to be clean. Checked
+# rather than trusted: the excludes above are three separate tar calls and any
+# one of them regressing puts binary files back into migrations/versions/,
+# where the only symptom is a crash on someone else's machine.
+strays=$(find "$stage" \( -name '._*' -o -name '.DS_Store' \) -print)
+[ -z "$strays" ] || {
+  printf 'error: macOS metadata reached the staged release:\n%s\n' "$strays" >&2
+  exit 1
+}
+
+# A release must carry no secret and no database, ever. Named patterns rather
+# than "did the data/ exclude work", because the next leak will arrive by a
+# path nobody predicted: a stray .env, a key copied in for a test, a database
+# opened somewhere new. Refuse to sign it.
+secrets=$(find "$stage" \( -name '*.key' -o -name '*.db' -o -name '*.db-wal' \
+                        -o -name '*.db-shm' -o -name '*.sqlite*' -o -name '.env' \
+                        -o -name '*.env' -o -name 'id_rsa*' -o -name 'id_ed25519*' \) \
+          -not -name 'release_pubkey.pem' -print)
+[ -z "$secrets" ] || {
+  printf 'error: refusing to sign a release containing secrets or databases:\n%s\n' \
+    "$secrets" >&2
+  exit 1
+}
+
 tarball_name="proxploy-$version.tar.gz"
 log "building $tarball_name..."
-tar czf "$out/$tarball_name" -C "$stage" backend frontend packaging
+tar "${tar_nometa[@]}" czf "$out/$tarball_name" -C "$stage" backend frontend packaging
+
+# And check the artifact itself, not just the tree it came from: the flags
+# above are probed, so on a tar that has none of them this is the only thing
+# standing between a Mac build and a broken install.
+strays=$(tar tzf "$out/$tarball_name" | grep -E '(^|/)(\._|\.DS_Store)' || true)
+[ -z "$strays" ] || {
+  printf 'error: macOS metadata reached %s:\n%s\n' "$tarball_name" "$strays" >&2
+  exit 1
+}
 
 size=$(file_size "$out/$tarball_name")
 sha=$(file_sha256 "$out/$tarball_name")
