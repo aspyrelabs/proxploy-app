@@ -106,4 +106,35 @@ echo "OK: rootfs and template resolve to their own pools"
 grep -q '^create 153 local:vztmpl/debian-12-standard' "$FAKE_PCT_LOG" \
   || { echo "FAIL: pveam was asked for the wrong pool"; cat "$FAKE_PCT_LOG"; exit 1; }
 echo "OK: the template catalogue is read from the vztmpl pool"
+
+# --- what the PVE half hands the in-container half -------------------------
+# A full (non --pve-only) run reaches `pct exec`. PUBKEY is empty on this path
+# (the block that fills it is below the branch that exits here), so a literal
+# `--pubkey ""` used to go across; one argument dropped anywhere along pct
+# exec and the far side reads `--pubkey` with no $2 and dies under `set -u`.
+# --hostname was accepted here and never forwarded, so Caddy in the CT stayed
+# on the self-signed fallback with no ACME cert and no explanation.
+: > "$FAKE_PCT_LOG"
+mkdir -p "$tmp/etc/pve"
+PVE_CONF_DIR="$tmp/etc/pve" \
+./install.sh --ctid 154 --storage local-lvm --template-storage local \
+             --bridge vmbr0 --hostname proxploy.example.com \
+             --channel "file://$PWD/packaging/tests/fixture-channel" \
+             --version 1.0.0 >/dev/null 2>&1 \
+  || { echo "FAIL: a full PVE run exited $?"; cat "$FAKE_PCT_LOG"; exit 1; }
+execline=$(grep '^exec 154 ' "$FAKE_PCT_LOG")
+[ -n "$execline" ] \
+  || { echo "FAIL: the in-container half was never run"; cat "$FAKE_PCT_LOG"; exit 1; }
+case "$execline" in
+  *--pubkey*) echo "FAIL: sent an empty --pubkey: $execline"; exit 1 ;;
+esac
+case "$execline" in
+  *"--hostname proxploy.example.com"*) ;;
+  *) echo "FAIL: --hostname never reached the CT: $execline"; exit 1 ;;
+esac
+case "$execline" in
+  *"--shape lxc"*"--version 1.0.0"*) ;;
+  *) echo "FAIL: shape/version wrong: $execline"; exit 1 ;;
+esac
+echo "OK: the in-container half gets shape, version and hostname, and no empty --pubkey"
 echo "PASS: pve half harness"

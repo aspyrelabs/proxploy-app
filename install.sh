@@ -181,7 +181,12 @@ done
 # --pve-only forces this path (used by the fake-pct harness, which has no
 # /etc/pve to auto-detect from). Otherwise: no --shape given, and this looks
 # like a Proxmox node.
-is_pve_host() { command -v pct >/dev/null 2>&1 && [ -d /etc/pve ]; }
+# PVE_CONF_DIR is the same kind of seam INSTALLER_URL already is in this file:
+# a default that is right everywhere real and overridable so the harness can
+# reach the `pct exec` handoff, which --pve-only returns before ever touching.
+is_pve_host() {
+  command -v pct >/dev/null 2>&1 && [ -d "${PVE_CONF_DIR:-/etc/pve}" ]
+}
 
 # resolve_ctid/resolve_storage/resolve_bridge: each is a no-op when the
 # matching flag was already given, so the harness (which passes all three)
@@ -337,11 +342,29 @@ pve_install() {
   fi
 
   log "running the in-container installer inside CT $CTID"
+  # Built as an array, because two of these are conditional.
+  #
+  # --pubkey: PUBKEY is still empty here. The block that fills it from
+  # RELEASE_PUBKEY_PEM lives below the PVE branch, which exits before ever
+  # reaching it, so this used to send a literal `--pubkey ""`. It survived
+  # only because the in-container half re-derives an empty PUBKEY from its own
+  # bundled key: one dropped empty argument anywhere along pct exec and the
+  # parser reads `--pubkey` with no $2 and dies on "unbound variable" under
+  # `set -u`. And a PATH to a temp file on the HOST would be meaningless
+  # inside the CT anyway. Send the flag only when there is something to send.
+  #
+  # --hostname: accepted on the PVE path and then silently dropped, so
+  # `--hostname proxploy.example.com` created the CT and left Caddy on the
+  # self-signed LAN fallback with no ACME cert and no word about why. Caddy is
+  # configured by the in-container half, so the name has to reach it.
+  local args=(--shape lxc --channel "$CHANNEL" --version "$VERSION")
+  [ -z "$PUBKEY" ] || args+=(--pubkey "$PUBKEY")
+  [ -z "$FQDN" ] || args+=(--hostname "$FQDN")
   # PROXPLOY_SELF_CTID lets the in-container half's env file record which CT
   # Proxploy runs in, so main.py can persist self.ctid at boot (Task 4) and
   # services/selfguard.py can recognise Proxploy's own container.
   pct exec "$CTID" -- env "PROXPLOY_SELF_CTID=$CTID" bash /root/install.sh \
-    --shape lxc --channel "$CHANNEL" --version "$VERSION" --pubkey "$PUBKEY"
+    "${args[@]}"
 
   local ip
   ip=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
