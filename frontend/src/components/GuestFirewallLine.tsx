@@ -3,11 +3,6 @@ import { Icon } from './ui/icon'
 import { useOptions, useRules } from '../api/firewall'
 import { quietCls } from './ui/button'
 
-/** One line in a guest's detail panel: is Proxmox filtering this guest, and
- *  how much is configured. It exists because a guest whose traffic is being
- *  filtered by something invisible is the failure this whole feature was built
- *  to end, and the panel is where an operator looks first when an app is
- *  unreachable. */
 export function GuestFirewallLine({ guestType, guestId }: {
   guestType: 'app' | 'vm'; guestId: number
 }) {

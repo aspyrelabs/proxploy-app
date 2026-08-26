@@ -6,11 +6,8 @@ import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 
-/**
- * Create or edit one host bridge. Everything this form does is STAGED: Proxmox
- * writes it to /etc/network/interfaces.new and the live config is untouched
- * until someone presses Apply on the page behind this dialog.
- */
+// STAGED only: writes /etc/network/interfaces.new; live config is untouched
+// until Apply is pressed on the page behind this dialog.
 export function BridgeForm({ hostId, node, iface, onClose }: {
   hostId: number; node: string; iface: Iface | null; onClose: () => void
 }) {

@@ -16,10 +16,10 @@ class SettingsPatch(RootModel[dict[str, object]]):
     pass
 
 
-# What the UI actually PATCHes here: onboarding's "finish" step and nothing
-# else. oidc.* is included for the settings its own route writes through
-# this same key space; a fresh key like self.host_id or license.install_id
-# gets its own dedicated route (PXP-33) instead of a hole in this list.
+# The UI PATCHes only onboarding's "finish" step here. oidc.* is included for
+# settings its own route writes through this same key space; a fresh key like
+# self.host_id or license.install_id gets its own dedicated route instead of a
+# hole in this list.
 _ALLOWED_KEYS = {"onboarding.complete"}
 
 

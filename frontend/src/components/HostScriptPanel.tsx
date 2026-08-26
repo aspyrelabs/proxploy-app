@@ -2,15 +2,10 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import { Button } from './ui/button'
 
-/** The fetch-and-show block for the pveum setup script: a button that POSTs
- *  /hosts/token-script, the returned script in a dark pre block, and a copy
- *  button. Shared by HostForm (add host) and HostEditDialog (existing
- *  host), which used to have no way to reach this generator at all.
- *
- *  Capabilities and the two extra roles are read from the caller on every
+/** Capabilities and the two extra roles are read from the caller on every
  *  click, not copied in once: HostForm's own checkboxes decide them live, so
- *  the script has to reflect whatever is ticked at the moment Generate is
- *  pressed, not whatever they were when this panel first appeared. */
+ *  the script reflects whatever is ticked when Generate is pressed, not what
+ *  was ticked when this panel first appeared. */
 export function HostScriptPanel({ capabilities, nodeShell, nodePower }: {
   capabilities: string[]; nodeShell: boolean; nodePower: boolean
 }) {

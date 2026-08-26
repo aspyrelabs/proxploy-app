@@ -1,8 +1,5 @@
-"""In-process pub/sub bus (doc 02 §11.1): plain asyncio queues, no broker.
-
-Zero subscribers costs nothing; a slow consumer loses deltas, and the UI's
-interval refetch heals it (doc 06 §d, SSE is a hint channel, never the
-source of truth).
+"""In-process pub/sub bus. A slow consumer drops events when its queue is
+full; the UI's interval refetch is the source of truth, not SSE.
 """
 from __future__ import annotations
 

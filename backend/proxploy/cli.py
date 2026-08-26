@@ -1,12 +1,9 @@
 """The `proxploy` command. Currently: `proxploy audit export`.
 
-doc 04 specifies this CLI by name. It exists so an operator can get the audit
-trail out WITHOUT a working web session, which is exactly the situation an
-audit export is most often needed in: nobody can log in, or the admin account
-is locked out, or the box is being decommissioned. It therefore reads the
-database directly rather than calling the API, and shares the row shape and
-filters with `api/audit.py` so a CLI export and a UI export of the same window
-cannot disagree.
+It exists so an operator can get the audit trail out without a working web
+session, so it reads the database directly rather than calling the API, and
+shares the row shape and filters with `api/audit.py` so a CLI export and a UI
+export of the same window cannot disagree.
 
 Being local and direct is also why this is not an authentication bypass worth
 worrying about: anyone who can run it already has the database file and the

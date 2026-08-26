@@ -10,9 +10,7 @@ export const loginRoute = createRoute({
 
 function LoginPage() {
   const navigate = useNavigate()
-  // Plain URLSearchParams read, not a route search schema: this is the one
-  // query param the login page ever looks at (set by GET /auth/oidc/callback's
-  // failure redirect, Task 11), not worth a validateSearch contract.
+  // ?error=oidc is set by GET /auth/oidc/callback's failure redirect.
   const ssoFailed = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('error') === 'oidc'
   return (

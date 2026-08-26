@@ -12,11 +12,6 @@ export function fetchOnboarding(): Promise<Onboarding> {
   return api<Onboarding>('/meta/onboarding')
 }
 
-// --- Task 18: TOTP enrollment + session management --------------------------
-//
-// Mirrors backend/proxploy/api/auth.py's response shapes exactly (see
-// backend/tests/test_totp.py, test_auth_totp_login.py, test_sessions_api.py).
-
 // Just the field TotpCard needs from GET /auth/me -- the full Me shape lives
 // in api/hooks.ts under its own ['me'] query key; this uses a distinct key
 // so the two don't have to agree on a type.
@@ -61,11 +56,6 @@ export function useTrustedDevices(enabled: boolean) {
     enabled,
   })
 }
-
-// --- Task 14: Settings update card -------------------------------------------
-//
-// Mirrors backend/proxploy/api/meta.py's GET/POST /meta/update exactly (see
-// backend/tests/test_update_api.py).
 
 export type UpdateStatus = {
   current: string

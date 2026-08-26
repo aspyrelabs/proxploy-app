@@ -5,11 +5,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useMe } from '../api/hooks'
 
-/** The avatar, and everything that belongs behind it.
- *
- *  It used to be a <span> with a letter in it: no menu, no profile, and
- *  POST /auth/logout was called from nowhere in the frontend, so there was no
- *  way to sign out of the app at all. */
 export function AccountMenu() {
   const { data: me } = useMe()
   const [open, setOpen] = useState(false)
@@ -56,9 +51,6 @@ export function AccountMenu() {
             )}
           </DropdownMenu.Label>
 
-          {/* Was "Profile and security" at /profile, a whole second page
-              rendering the same cards as Settings' own Profile section. One
-              place now, and this menu points at it. */}
           <DropdownMenu.Item asChild>
             <Link to="/settings" search={{ section: 'profile' } as never}
               className="block cursor-pointer px-3 py-2 text-[13px] text-text-2 outline-none

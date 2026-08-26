@@ -13,10 +13,8 @@ export type SearchResult = {
 export type SearchResponse = { query: string; results: SearchResult[] }
 
 /**
- * GET /search backs the command palette. The server LIKE-scans, so this must
- * never fire on every keystroke (caller debounces `q`) and never fires under
- * 2 characters, the endpoint itself returns an empty array for that but there
- * is no reason to round-trip for a result we already know.
+ * GET /search backs the command palette. The server LIKE-scans, so the caller
+ * must debounce `q` and never fire under 2 chars (endpoint returns empty anyway).
  */
 export function useGlobalSearch(q: string, enabled = true) {
   const trimmed = q.trim()

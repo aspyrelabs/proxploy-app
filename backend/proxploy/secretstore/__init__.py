@@ -1,4 +1,4 @@
-"""SecretStore seam (brief §5): Fernet/MultiFernet, master key in a root-only file.
+"""SecretStore seam: Fernet/MultiFernet, master key in a root-only file.
 
 OpenBao is the arm's-length swap-in; nothing outside this module may know the backend.
 """
@@ -24,8 +24,8 @@ class SecretStore:
         if path.exists():
             return
         if db_file_exists:
-            # Doc 11 §9: never silently regenerate a key over an existing DB, 
-            # that would strand every stored credential as ambiguous ciphertext.
+            # Never silently regenerate a key over an existing DB: that would
+            # strand every stored credential as ambiguous ciphertext.
             raise MasterKeyMissing(
                 f"master key {path} is missing but a database already exists. "
                 "Restore the key file from backup, or delete the database to re-onboard."

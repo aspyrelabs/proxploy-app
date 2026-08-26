@@ -13,15 +13,10 @@ API_KEY_SCHEME = "Bearer ppk_"
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
-    """Double-submit CSRF (doc 08 §5). API-key clients are exempt.
-
-    The exemption is keyed on the API-key scheme, not on the mere presence of
-    an Authorization header. A browser can be made to send an Authorization
-    header it did not choose the value of (a stale `Basic` credential the user
-    once entered for the same origin, an extension, a proxy), and any such
-    header used to buy a full CSRF bypass on every mutating route. Only
-    `Bearer ppk_...` does now, which is a value a cross-site page cannot make
-    the browser attach on its own.
+    """Double-submit CSRF. API-key clients exempt, keyed on the scheme
+    (`Bearer ppk_...`), not on the presence of any Authorization header: a
+    browser can attach a header it did not choose (stale Basic, an extension,
+    a proxy), which would otherwise buy a CSRF bypass on every mutating route.
     """
 
     def __init__(self, app, cookie_name: str = "pp_csrf", secure: bool = False):

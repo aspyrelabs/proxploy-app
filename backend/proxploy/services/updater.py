@@ -1,9 +1,7 @@
-"""Update check and install-shape detection (Phase 9a).
+"""Update check and install-shape detection.
 
-`check()` never raises. A self-hosted box may sit behind a proxy, on an
-air-gapped network, or in front of a mirror serving nonsense; none of that is
-a reason for the Settings page to fail. Every failure becomes a string the
-operator can act on.
+`check()` never raises: every failure becomes a string the operator can act on
+instead of a Settings-page crash.
 """
 import os
 import shutil

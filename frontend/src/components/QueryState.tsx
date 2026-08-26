@@ -4,14 +4,10 @@ import { EmptyState } from './EmptyState'
 import { LoadingBlock } from './ui/loading'
 
 /**
- * Loading, error, empty and data are four different answers and must look
- * like four different things.
+ * Four distinct states: loading, error, empty, data.
  *
- * Before this component the codebase spelled every list as `(data ?? []).map`,
- * which renders a failed fetch as "No VMs discovered", the UI stating
- * confidently that you have nothing when the truth is that it has no idea.
- * `isPending` is likewise not `isError`: react-query flips isPending false on
- * failure too, so a `!data` guard shows "Loading…" forever after a hard error.
+ * `isError` must be checked first: a failed query is neither pending nor has
+ * data, so the pending/data guard would otherwise render "Loading…" forever.
  */
 export function QueryState<T>({
   query, children, emptyTitle, emptyNote, emptyAction, empty,

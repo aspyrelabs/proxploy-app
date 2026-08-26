@@ -1,4 +1,4 @@
-"""Metrics range query (doc 05): series for uPlot, raw vs rollup by range."""
+"""Series for uPlot; raw vs rollup chosen by range."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -50,8 +50,7 @@ def metrics_query(request: Request, target: str, metric: str,
     if frm_dt >= to_dt:
         raise HTTPException(422, "from must be before to")
 
-    # metrics.history gates only the deep past (doc 05): inline conditional
-    # check, hosts.multi precedent
+    # metrics.history entitlement gates only the deep past (>48h)
     if (frm_dt < now - timedelta(hours=48)
             and not request.app.state.entitlements.enabled("metrics.history")):
         raise HTTPException(403, {"error": "entitlement_required",

@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 
-/** One row of the Events matrix. Mirrors NotificationType in
- *  backend/proxploy/services/notification_types.py. */
+/** Mirrors NotificationType in backend/proxploy/services/notification_types.py. */
 export type TypeRow = {
   key: string
   /** What the operator reads. Backend spelling never reaches the screen. */

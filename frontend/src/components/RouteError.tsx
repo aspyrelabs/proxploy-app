@@ -3,11 +3,6 @@ import { Button } from './ui/button'
 /**
  * Replaces TanStack Router's built-in ErrorComponent, which styles itself
  * with inline `style={}` and so ignores the theme entirely.
- *
- * An unreachable backend and a bug in the app want different things from the
- * user, one wants a retry, the other wants a way out and (in dev) a stack.
- * Collapsing them into "Something went wrong" is exactly what the built-in
- * fallback already does badly.
  */
 export function RouteError({ error, reset }: { error: unknown; reset?: () => void }) {
   // A fetch that never reached the server throws TypeError('Failed to fetch')

@@ -1,4 +1,4 @@
-"""JobBackend package (doc 09 layout). Import from here, never from .backend."""
+"""Import from here, never from .backend."""
 from proxploy.jobs.backend import (
     HANDLERS, TERMINAL, JobBackend, JobContext, JobFailed, handler,
 )

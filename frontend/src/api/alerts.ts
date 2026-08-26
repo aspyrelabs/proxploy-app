@@ -19,11 +19,10 @@ export type AlertRuleRow = {
   channel_ids: number[]; enabled: boolean
 }
 
-/** GET /alert-rules/metrics, the enum lives on the backend, never twice. */
+/** The metric enum lives on the backend — don't duplicate it. */
 export type MetricSpec = { metric: string; targets: string[]; needs_threshold: boolean }
 
-/** Doc 06 §d: `['alerts','firing']`, 60 s. Backs BellPopover's tray badge and
- *  the Alerts page's live firing list. */
+/** Backs BellPopover's tray badge and the Alerts page's live firing list. */
 export function useFiringAlerts() {
   return useQuery({
     queryKey: ['alerts', 'firing'],

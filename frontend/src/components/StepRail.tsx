@@ -31,9 +31,7 @@ export function StepRail({ steps, view, onSelect }: {
     <ol className="flex gap-1 md:flex-col md:gap-0">
       {steps.map((s, i) => (
         <li key={s.label} className="relative min-w-0 flex-1 md:flex-none">
-          {/* Sizes are the original rail scaled ~30%: dot 16→21px, label
-              11→14px, detail 9.5→12px. The connector's left offset is half the
-              dot, so it tracks the dot size and must move with it. */}
+          {/* Connector offset is half the dot, so it must move with the dot size. */}
           {i < steps.length - 1 && (
             <span aria-hidden
               className={`absolute left-[10px] top-[21px] hidden h-[calc(100%-21px)] w-px origin-top

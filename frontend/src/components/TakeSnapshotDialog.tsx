@@ -3,18 +3,6 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { inputCls } from './LoginForm'
 
-/**
- * "Take snapshot", as a dialog rather than a form permanently parked above the
- * snapshot list.
- *
- * Taking a snapshot is something you do occasionally and deliberately; reading
- * the list is what the panel is for the rest of the time. The form used to sit
- * open above the table, which put three inputs and a paragraph of vmstate
- * caveats between the reader and the thing they came to look at, every time.
- *
- * The RAM caveat stays with the checkbox rather than moving to the list,
- * because it is the answer to "should I tick this", and nowhere else.
- */
 export function TakeSnapshotDialog({ vmName, pending, onSubmit, onClose }: {
   vmName: string
   pending: boolean
@@ -54,8 +42,7 @@ export function TakeSnapshotDialog({ vmName, pending, onSubmit, onClose }: {
 
         <div className="mt-5 flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          {/* Disabled on an empty name for the same reason the inline form was:
-              PVE requires one, and a nameless submit is a guaranteed 400. */}
+          {/* PVE requires a name; a nameless submit is a guaranteed 400. */}
           <Button type="submit" disabled={pending || name.trim() === ''}>
             {pending ? 'Starting…' : 'Take snapshot'}
           </Button>

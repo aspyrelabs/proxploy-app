@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 
-/** Prototype spark look (doc 06 §b): 2px line, gradient fill 35%→0 alpha. */
 export function Sparkline({ ts, values, color, width = 300, height = 52 }: {
   ts: number[]
   values: (number | null)[]
