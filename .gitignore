@@ -10,3 +10,7 @@ node_modules/
 
 # macOS Finder metadata. Tracked by accident, dirty in every git status.
 .DS_Store
+
+# Drafts for the docs.proxploy.com site, parked here out of the deleted docs/
+# tree. Content for another property, not this repo. Move them and delete this.
+.website-drafts/

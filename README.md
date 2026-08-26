@@ -8,24 +8,19 @@ This repository, `proxploy-app`, is **the product**: backend, frontend, and
 installer ship together as one versioned release artifact that installs onto
 a customer's own Proxmox host (or a plain Debian box, or via Docker). It is
 **not** a hosted service and there is nothing here to deploy to Coolify or
-any other PaaS, see `docs/09-repository-structure.md` for why the app,
-API, web, and docs are four separate repos with four separate deployment
-models.
-
-For the product spec, architecture, data model, API surface, and security
-design, start at `docs/00-decision-brief.md` and read `docs/01` through
-`docs/11` in order. Phase-by-phase build notes live in `docs/notes/`.
+any other PaaS: the app, API, web, and docs are four separate repos with
+four separate deployment models.
 
 ## Status, stated plainly
 
 - **The repository is private.** It becomes public when the project is
-  ready to publish a release (`docs/11-risks-open-decisions.md` §6).
+  ready to publish a release.
 - **No release has been published yet.** The installer
   (`curl -fsSL https://proxploy.com/install.sh | bash`) is fully built and
   tested, but there is nothing at that URL to fetch: it will 404. The
   compiled-in release public key at `backend/proxploy/release_pubkey.pem` is
   still a **placeholder** and the matching release private key does not
-  exist. `docs/runbooks/publishing-a-release.md` is the runbook that
+  exist. `packaging/publishing-a-release.md` is the runbook that
   generates the real keypair and cuts the first real release, do that
   before pointing anyone at the one-liner.
 ## Public keys
@@ -58,7 +53,7 @@ from the outside.
 Neither of these is secret. The private halves live elsewhere: the
 entitlement signing key in proxploy-api's `PROXPLOY_API_SIGNING_KEY`, and the
 release signing key in the runbook at
-`docs/runbooks/publishing-a-release.md`. Neither exists in this repo, ever.
+`packaging/publishing-a-release.md`. Neither exists in this repo, ever.
 
 - **The database defaults to SQLite in WAL mode**, with Postgres available
   via `PROXPLOY_DB_URL`. That's deliberate for a self-hosted, single-box
@@ -73,11 +68,11 @@ release signing key in the runbook at
 > above). The commands below are what the finished installer accepts and
 > what Phase 9a proved end-to-end against local fixtures; they are not yet
 > usable against the real `proxploy.com` channel, because there is nothing
-> published there to fetch. `docs/runbooks/publishing-a-release.md` is what
+> published there to fetch. `packaging/publishing-a-release.md` is what
 > makes them real.
 
 Proxploy has three install shapes, all built in Phase 9a
-(`docs/notes/phase-9a-install-update.md`, `install.sh --help`). None of them
+(`install.sh --help`). None of them
 apply to *this* repo as a hosted deployment, they're how the product lands
 on a customer's own hardware, once a release exists.
 
@@ -240,7 +235,7 @@ npx playwright test
 ## Cutting a release
 
 Not part of day-to-day development, see
-`docs/runbooks/publishing-a-release.md` for the full procedure (generate
+`packaging/publishing-a-release.md` for the full procedure (generate
 the release keypair, make the repo public, build the signed artifact with
 `packaging/build_release.sh`, publish the GitHub release, verify against a
 clean box).
