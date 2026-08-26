@@ -13,25 +13,22 @@ const label = 'mb-1 block text-[11.5px] uppercase tracking-wide text-text-3'
 
 type Named = { id: number; name: string; cluster_name?: string | null }
 
-/** Every IANA zone the browser knows, no dependency and no bundled list to go
- *  stale: `Intl.supportedValuesOf` is the platform's own answer (418 zones on
- *  the Node this repo builds with). Guarded because it landed in Safari 15.4,
- *  and the fallback is exactly the free-text field this control replaced.
+/** Every IANA zone the browser knows via `Intl.supportedValuesOf` (no
+ *  dependency, no bundled list). Guarded because it landed in Safari 15.4; the
+ *  fallback is the free-text field this control replaced.
  *
  *  The resolved default is unioned in rather than assumed present: a browser
  *  can resolve to a legacy alias (`Asia/Calcutta`) while the list carries only
- *  the canonical name (`Asia/Kolkata`), and a value with no matching entry is
- *  how a picker silently loses the operator's own zone. */
+ *  the canonical name (`Asia/Kolkata`). */
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const TIMEZONES: string[] = typeof Intl.supportedValuesOf === 'function'
   ? [...new Set([...Intl.supportedValuesOf('timeZone'), BROWSER_TZ])].sort()
   : []
 
-/** The presets, and the cron each one builds. `Schedule.cron` stays the stored
- *  format (jobs/scheduler.py parses nothing else), so these are a way of
- *  WRITING cron, never a second schedule format the backend would have to
- *  learn. "Custom" is the escape hatch for anything they do not cover, and
- *  fmtCron describes whichever of the two is in effect. */
+/** The presets, and the cron each one builds. `Schedule.cron` stays the
+ *  stored format (jobs/scheduler.py parses nothing else), so these are a way
+ *  of WRITING cron, never a second format. "Custom" is the escape hatch for
+ *  anything they do not cover. */
 type Every = 'hour' | 'day' | 'week' | 'custom'
 
 /** The presets, read backwards, so editing a saved job opens on the control
@@ -51,10 +48,9 @@ function presetOf(cron: string): { every: Every; time: string; dow: string } {
   return fallback
 }
 
-/** Create or edit one schedule. `jobKind` pins the kind and hides the picker,
- *  which is how the Backups page's "New job" reuses this without a second
- *  component; `existing` switches the same fields to a PATCH, so editing a job
- *  is the form that made it rather than a second, near-identical one. */
+/** Create or edit one schedule. `jobKind` pins the kind and hides the picker
+ *  (how the Backups page reuses this); `existing` switches the same fields to
+ *  a PATCH. */
 export function ScheduleForm({ jobKind, existing, onSaved }:
   { jobKind?: string; existing?: ScheduleRow; onSaved: () => void }) {
   const qc = useQueryClient()
@@ -76,18 +72,13 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   // after this job is saved".
   const [store, setStore] = useState(String(savedParams.storage ?? ''))
   const [only, setOnly] = useState<Set<string> | null>(null)
-  // Backup and Verify Backup, both on by default and independent of each
-  // other. Together they are one backup.run that chains a check per archive;
-  // Verify alone is a backup.verify sweep over the archives already on the
-  // host, which is a kind SCHEDULABLE has always carried and this form could
-  // not reach while the Backups page pinned it to backup.run.
+  // Backup and Verify Backup, both on by default and independent. Together
+  // they are one backup.run that chains a check per archive; Verify alone is a
+  // backup.verify sweep over the archives already on the host.
   const [doBackup, setDoBackup] = useState(existing?.job_kind !== 'backup.verify')
-  // Chains a check per archive after the run. Read back from the saved job the
-  // same way `storage` is, so an edit does not silently turn it off.
-  // A NEW schedule starts ticked, like the Run now dialog: a backup nobody
-  // reads back is a backup you are guessing about. An EDIT reads the saved job
-  // instead, so opening a job that never verified does not silently turn it
-  // on; a saved backup.verify is a check by definition and reads as ticked.
+  // Chains a check per archive after the run. A NEW schedule starts ticked; an
+  // EDIT reads the saved job instead, so opening a job that never verified does
+  // not silently turn it on (a saved backup.verify reads as ticked).
   const [verifyAfter, setVerifyAfter] = useState(
     existing
       ? existing.job_kind === 'backup.verify' || savedParams.verify === true
@@ -116,13 +107,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   // on host_id/app_id at fire time.
   const effectiveTargetId = targetId || (targets.data?.length === 1 ? String(targets.data[0].id) : '')
 
-  // A scheduled backup used to send nothing but host_id, so it dumped every
-  // guest on the node onto whichever datastore Proxmox felt like: the same two
-  // unanswered questions the ad-hoc Run now dialog already answers, on the runs
-  // nobody is watching. services/backupjobs.py::run_backup reads `vmids` and
-  // `storage` out of params and always has, so this is the form catching up.
-  // Either half of the pair puts this form in backup mode; which of the two
-  // kinds it SAVES is the checkboxes' answer, below.
+  // services/backupjobs.py::run_backup reads `vmids` and `storage` out of
+  // params and always has. Either half of the pair puts this form in backup
+  // mode; which kind it SAVES is the checkboxes' answer, below.
   const backupMode = kind === 'backup.run' || kind === 'backup.verify'
   // Guests and a target storage are a run's questions. A sweep reads back what
   // is already written, so it asks neither.
@@ -133,9 +120,8 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
   const hostId = isBackup && effectiveTargetId ? Number(effectiveTargetId) : null
   const onHost = useHostGuests(hostId)
   // A saved job stores PVE vmids; the tick list is keyed on Proxploy row ids,
-  // so the two are matched up here once the guest list has loaded. Null all the
-  // way through means "everything", which is what an absent `vmids` meant when
-  // the job was saved and must still mean after an edit.
+  // matched up here once the guest list loads. Null throughout means
+  // "everything", what an absent `vmids` meant when saved.
   const savedVmids = Array.isArray(savedParams.vmids)
     ? (savedParams.vmids as number[]) : null
   const selected = only ?? (savedVmids
@@ -163,10 +149,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
         // keys that mean something.
         if (verifyAfter) params.verify = true
       }
-      // PATCH sends the same body: every field on it is one this form owns, so
-      // there is nothing to merge and nothing the edit could silently drop.
-      // `enabled` is deliberately absent on an edit, it belongs to the row's
-      // own Enable/Disable control.
+      // PATCH sends the same body: every field is one this form owns, so there is
+      // nothing to merge. `enabled` is deliberately absent on an edit - it belongs
+      // to the row's own Enable/Disable control.
       return existing
         ? api(`/schedules/${existing.id}`, {
           method: 'PATCH',
@@ -230,9 +215,7 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
             {needs === 'app' ? 'App' : 'Host'}
           </label>
           {/* `isLoading` rather than `isPending`: the query is enabled-gated on
-              `needs`, and a disabled query stays pending for ever. This block
-              only renders when `needs` is set, so here the two agree, but the
-              gated spelling is the one that stays correct if that changes. */}
+          `needs`, and a disabled query stays pending for ever. */}
           <select id="sc-target" className={input} value={effectiveTargetId}
                   disabled={targets.isError || targets.isLoading}
                   onChange={(e) => {
@@ -313,10 +296,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
         </div>
       ) : every !== 'hour' && (
         <div>
-          {/* Native time input rather than two number fields: it already knows
-              the operator's 12/24-hour convention and validates itself. Cron
-              has minute resolution, so the seconds a time input can carry are
-              never asked for. */}
+          {/* Native time input: it knows the operator's 12/24-hour convention and
+          validates itself. Cron has minute resolution, so seconds are never asked
+          for. */}
           <label className={label} htmlFor="sc-time">At</label>
           <input id="sc-time" type="time" className={input} value={time} required
                  onChange={(e) => setTime(e.target.value || '00:00')} />
@@ -336,13 +318,11 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
 
       <div>
         <label className={label} htmlFor="sc-tz">Timezone</label>
-        {/* A select, not the input+datalist this was: a datalist has no
-            affordance at all, so the field sat next to two real dropdowns
-            looking like a label that happened to say Asia/Calcutta, and the
-            418 zones behind it were invisible. BROWSER_TZ is unioned into the
-            list (see TIMEZONES) precisely so the resolved zone always has an
-            entry to be selected. The free-text fallback stays for a browser
-            with no supportedValuesOf, where there is no list to pick from. */}
+        {/* A select, not the input+datalist this was: a datalist has no affordance,
+        so the field looked like a label and the zones behind it were invisible.
+        BROWSER_TZ is unioned into the list (see TIMEZONES) so the resolved zone
+        always has an entry. The free-text fallback stays for a browser with no
+        supportedValuesOf. */}
         {TIMEZONES.length > 0 ? (
           <select id="sc-tz" className={`${input} font-mono`} value={tz} required
                   onChange={(e) => setTz(e.target.value)}>

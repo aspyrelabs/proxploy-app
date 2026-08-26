@@ -19,19 +19,10 @@ const td = 'px-4 py-3 align-middle'
 
 /**
  * The Virtual Machines list: every VM as a row that expands in place.
- *
- * This is AppTable's twin, deliberately, down to the columns: same set, same
- * order, same bars in the same colours. The two lists used to disagree because
- * a VM row genuinely reported less, no memory total, no disk total and no
- * network counters, so those columns would have been permanently empty. The
- * API now fills all of them, and the reason to keep the tables apart went with
- * it. An operator reading both pages should not have to relearn which column
- * is which halfway across.
- *
- * There is no VM detail PAGE any more: a row expands and floats the rows
- * below it down. `open` is the id of the one row showing its detail, and it is
- * owned by whoever renders this table (VmsPage keeps it in the URL, so
- * /vms?open=9 is still a link you can send someone).
+ * AppTable's twin, same columns in the same order (the API now fills every
+ * column a VM row reports). There is no VM detail page: a row expands and
+ * floats the rows below it down. `open` is the id of the one row showing its
+ * detail, owned by whoever renders this table (VmsPage keeps it in the URL).
  */
 export function VmTable({ vms, open, onOpen }: {
   vms: VmRow[]
@@ -41,28 +32,17 @@ export function VmTable({ vms, open, onOpen }: {
 }) {
   const box = useRef<HTMLDivElement>(null)
 
-  // Click-away, and the two things it must NOT close on. Same listener
-  // AppTable carries, for the same three reasons:
-  //
-  // The listener is on `pointerdown`, not `click`, and the ref is on the whole
-  // table rather than on the open panel. Both of those are about ordering.
-  // React attaches its handlers at the root container, which is itself inside
-  // `document`, so a row's own onClick runs BEFORE a bubbling document click
-  // listener sees the same event: with the ref on the panel, clicking a
-  // different row would open that row and then this listener, told the click
-  // landed outside the (old) panel, would close it again. With the ref on the
-  // table, every row-to-row switch is inside the container and the row's own
-  // onClick is left to do the switching.
-  //
-  // Radix menus portal to document.body, so a click on a menu item is outside
-  // this container by DOM position while being inside the table by intent.
-  // @radix-ui/react-popper wraps that portalled content in an element carrying
-  // `data-radix-popper-content-wrapper`, which is the marker checked here.
-  //
-  // Dialogs portal the same way and are not popper-wrapped, so they need their
-  // own marker. Clone, Backup and Delete all open one from the row's own menu,
-  // and without this a click anywhere inside that dialog collapsed the panel
-  // sitting behind it.
+  // Click-away, and the two things it must NOT close on (same listener AppTable
+  // carries):
+  // 
+  // `pointerdown` not `click`, and the ref on the whole table not the panel:
+  // React handlers run at the root (inside document), so a row's onClick fires
+  // before a bubbling document listener; with the ref on the panel a row switch
+  // would open then immediately close again.
+  // 
+  // Radix menus portal to body, wrapped in `data-radix-popper-content-wrapper`
+  // (the marker checked here). Dialogs portal unwrapped, so they carry their own
+  // marker; without it a click inside a dialog collapsed the panel behind it.
   useEffect(() => {
     if (open == null) return
     const away = (e: PointerEvent): void => {

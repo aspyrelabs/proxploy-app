@@ -1,18 +1,16 @@
-"""JobBackend, the in-process asyncio job runner (brief §5, doc 02 §3, doc 03).
+"""In-process asyncio job runner. Every state-changing operation that takes time
+is a job: a `jobs` row, log/progress lines in `job_events`, one asyncio task.
+Enqueue / status / cancel / log-stream is the seam; nothing outside this
+module may know how a job is executed (Celery+Redis is the swap-in if
+multi-worker matters).
 
-Every state-changing operation that takes time is a job: a `jobs` row, log and
-progress lines in `job_events`, executed as one asyncio task. Enqueue / status /
-cancel / log-stream is the seam; Celery+Redis is the swap-in if multi-worker
-ever matters, nothing outside this module may know how a job is executed.
+The DB is the transcript: every line is written before it is fanned out, so a
+browser attaching mid-job reads the backlog then follows live. Zero subscribers
+costs nothing; the write always happens.
 
-The DB is the transcript. Every line is written before it is fanned out, so a
-browser attaching mid-job reads the backlog from `job_events` and then follows
-live (doc 02 §6). Zero subscribers costs nothing; the write always happens.
-
-Restart semantics (doc 02 §3, verbatim): orphaned `running` jobs are marked
-`interrupted` on boot and are NEVER resumed, half-run root scripts do not get
-a second, blind execution.
-"""
+Restart semantics: orphaned `running` jobs are marked `interrupted` on boot and
+are NEVER resumed -- half-run root scripts do not get a second, blind
+execution."""
 from __future__ import annotations
 
 import asyncio
@@ -60,15 +58,10 @@ class JobContext:
         self.backend = backend
         self.job_id = job_id
         self._seq = 0
-        # Safety net, not the fix: a job's phases are expected to band their
-        # own calls into a monotonic sequence (services/migrate.py, the
-        # start_pct/end_pct a caller passes to services/pvetask.py's
-        # await_task). This only guards against a handler bug reporting a
-        # value lower than one it already reported; it clamps UP to the last
-        # value rather than reflecting a genuinely lower number, so it must
-        # never be relied on to make a badly-banded job look right, a job
-        # whose real next phase starts low would freeze at the earlier
-        # phase's high-water mark instead of showing honest progress.
+        # Safety net, not the fix: guards a handler bug reporting a value lower than
+        # one it already reported, clamping UP to the last value. Never rely on it to
+        # make a badly-banded job look right -- a real next phase starting low would
+        # freeze at the earlier phase's high-water mark.
         self._last_pct = 0
 
     def _next_seq(self) -> int:
@@ -77,11 +70,9 @@ class JobContext:
 
     @property
     def last_pct(self) -> int:
-        """The last value this job reported, for a caller that wants to hold
-        progress steady rather than move it (services/migrate.py's best-effort
-        scratch-file cleanup: deleting a transfer artifact is not forward
-        progress on the migration, but bracketing it through await_task with
-        no band would still jump to that helper's own default end_pct)."""
+        """The last value this job reported, for a caller that wants to hold progress
+                steady rather than move it (e.g. deleting a transfer artifact is not
+                forward progress)."""
         return self._last_pct
 
     def log(self, message: str, stream: str = "stdout") -> None:
@@ -116,38 +107,24 @@ class JobBackend:
         self._subs: dict[int, set[asyncio.Queue]] = {}
         self._sem = asyncio.Semaphore(MAX_CONCURRENT)
         self._side: set[asyncio.Task] = set()  # keeps fire-and-forget tasks alive
-        # doc 02 §3 DoD "a cancelled job stops cleanly" needs three small pieces
-        # of bookkeeping beyond _tasks:
-        # - _pending: enqueued, `_spawn` hasn't had its loop turn yet (the same
-        #   call_soon_threadsafe gap the `wait()` fix above works around): a
-        #   cancel() that lands in this window has no Task to call .cancel() on.
-        # - _cancel_requested: job ids cancelled while still in _pending; _run
-        #   checks this before acquiring the semaphore and finishes the
-        #   job as canceled instead of ever invoking the handler.
-        # - _done: one Event per in-flight job, set (and popped) in _run's
-        #   finally. wait() awaits this instead of polling _tasks, which also
-        #   fixes the busy-spin and lets both dicts stay bounded to in-flight
-        #   jobs only (see the finally block in _run).
+        # "A cancelled job stops cleanly" needs three pieces of bookkeeping beyond
+        # _tasks:
+        # - _pending: enqueued, `_spawn` hasn't had its loop turn yet (the
+        # call_soon_threadsafe gap): a cancel() in this window has no Task to cancel.
+        # - _cancel_requested: job ids cancelled while still in _pending; _run checks
+        # this before the semaphore and finishes as canceled.
+        # - _done: one Event per in-flight job, set/popped in _run's finally; wait()
+        # awaits this instead of polling _tasks.
         self._pending: set[int] = set()
         self._cancel_requested: set[int] = set()
         self._done: dict[int, asyncio.Event] = {}
 
-    # --- lifecycle ---------------------------------------------------------
 
     def sweep_orphans(self) -> int:
-        """Boot-time reconciliation (doc 02 §3). Marks; never resumes.
-
-        Called from lifespan startup once the loop is running (main.py sets
-        `app.state.loop` just before this). `job.interrupted` still owes the
-        orphans a Notifier courtesy, but Apprise is blocking (~8s/channel
-        worst case) and a restart can orphan an arbitrarily large backlog, 
-        one `_notify` per orphan would queue that many blocking sends onto
-        the loop's shared default executor (poller, metrics loop and SSE
-        auth hops all use it too) all at once. Send a single aggregate
-        notification instead: one send regardless of backlog size, and a
-        better message for a human than N separate pings. Never awaited
-        here either way, so it can't stall startup.
-        """
+        """Boot-time reconciliation. Marks; never resumes. Orphans get a single
+                aggregate Notifier message: Apprise is blocking (~8s/channel) and
+                per-orphan sends would queue many blocking sends on the shared default
+                executor at once. Never awaited, so it can't stall startup."""
         with self.app.state.sessionmaker() as db:
             orphans = (db.query(Job.id, Job.kind)
                        .filter(Job.status.in_(("queued", "running")))
@@ -170,7 +147,6 @@ class JobBackend:
             task.cancel()
         self._tasks.clear()
 
-    # --- enqueue / cancel --------------------------------------------------
 
     def enqueue(self, db, *, kind: str, target_type: str | None = None,
                 target_id: int | None = None, params: dict | None = None,
@@ -178,13 +154,10 @@ class JobBackend:
                 schedule_id: int | None = None,
                 target_name: str | None = None) -> Job:
         """Called from sync (threadpool) route handlers; hops to the loop to spawn.
-
-        Every job in the app is created here, so this is where the target's
-        name gets captured: a route that forgets to pass one still records it.
-        It has to happen now rather than when the history is read, because a
-        destroy job outlives the row it names. Callers pass `target_name`
-        explicitly only when the target has no name to look up.
-        """
+                Every job in the app is created here, so this is where the target's
+                name gets captured -- a destroy job outlives the row it names. Callers
+                pass `target_name` explicitly only when the target has no name to look
+                up."""
         if kind not in HANDLERS:
             raise KeyError(f"no handler registered for job kind {kind!r}")
         job = Job(kind=kind, status="queued", target_type=target_type,
@@ -227,14 +200,9 @@ class JobBackend:
         return False  # never enqueued here, or already terminal
 
     async def wait(self, job_id: int, timeout: float = 30.0) -> bool:
-        """Test/DoD helper: block until the job settles. Returns True if it
-        did, False on timeout; lets a caller tell "settled" from "gave up".
-
-        Waits on a per-job Event set (and popped) in `_run`'s finally, rather
-        than polling `_tasks`, that dict is pruned on completion (see `_run`)
-        so a poll-based wait would busy-spin its full timeout on a job that
-        already finished.
-        """
+        """Block until the job settles. Returns True if it did, False on timeout.
+                Waits on a per-job Event (set/popped in `_run`'s finally) rather than
+                polling `_tasks`, which is pruned on completion and would busy-spin."""
         ev = self._done.get(job_id)
         if ev is None:
             return True  # unknown to this backend, or already cleaned up: settled
@@ -244,7 +212,6 @@ class JobBackend:
         except TimeoutError:
             return False
 
-    # --- per-job fanout ----------------------------------------------------
 
     def subscribe(self, job_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=1000)
@@ -266,39 +233,29 @@ class JobBackend:
                 pass  # slow consumer loses frames; the DB transcript is intact
 
     def _publish(self, job_id: int, **fields) -> None:
-        """Global `job` delta for every open tab (doc 05 §Streaming 4)."""
+        """Global `job` delta for every open tab."""
         self.app.state.bus.publish("job", {"id": job_id, **fields})
 
-    # --- the runner --------------------------------------------------------
 
     async def _run(self, job_id: int, kind: str, params: dict,
                     target_type: str | None = None) -> None:
         ctx = JobContext(self, job_id)
         try:
-            # Checked BEFORE the semaphore acquire, not inside it: a job
-            # cancelled while still in `_pending` (the `_spawn` call_soon_
-            # threadsafe gap) only ever sets `_cancel_requested`: nothing
-            # re-checks it once the pool is full, so gating this check on
-            # having already acquired a slot means a pre-spawn cancel of a
-            # job stuck behind MAX_CONCURRENT running jobs is silently
-            # never honoured (the row sits `queued` forever) even though
-            # `cancel()` already told the caller "canceled". A cancel that
-            # arrives AFTER this point finds the job in `_tasks` and calls
-            # `task.cancel()` directly instead (see `cancel()`), which
-            # raises CancelledError out of the semaphore acquire below, 
-            # that path is unaffected by hoisting this check.
+            # Checked BEFORE the semaphore acquire, not inside: a pre-spawn cancel of a
+            # job still in `_pending` only sets `_cancel_requested`, and nothing re-checks
+            # it once the pool is full -- gating on acquire would strand the row `queued`
+            # forever. A cancel after this point finds the job in `_tasks` and calls
+            # `task.cancel()` directly, raising CancelledError out of the acquire.
             if job_id in self._cancel_requested:
                 self._cancel_requested.discard(job_id)
                 self._finish(ctx, kind, "canceled", error="canceled by user",
                              target_type=target_type)
                 return
-            # `try` wraps the semaphore acquire itself: a job cancelled while
-            # still queued behind MAX_CONCURRENT running jobs raises
-            # CancelledError out of `await self._sem.acquire()`, before the
-            # `with` block below is entered. If `try` only wrapped the body,
-            # that CancelledError escaped uncaught and the row was stranded
-            # in `queued` forever: no finished_at, no status event, no
-            # terminal frame for any subscriber.
+            # `try` wraps the acquire itself: a job cancelled while queued behind
+            # MAX_CONCURRENT raises CancelledError out of `await self._sem.acquire()`
+            # before the `with` block is entered. If `try` only wrapped the body, that
+            # escape stranded the row in `queued` forever (no finished_at, status event,
+            # or terminal frame).
             async with self._sem:
                 self._set_running(job_id)
                 self._publish(job_id, status="running", kind=kind, target_type=target_type)
@@ -315,17 +272,11 @@ class JobBackend:
         else:
             self._finish(ctx, kind, "succeeded", result=result or {}, target_type=target_type)
         finally:
-            # `spool_path`: a file the route staged on this machine for the job
-            # to consume (api/storage.py spools an upload body to
-            # data_dir/uploads and hands over the path). The job owns deleting
-            # it, and that cannot live in the handler, because the handler does
-            # not always run: both cancel paths above (a `_cancel_requested`
-            # job that returns before the semaphore, and a CancelledError out
-            # of the acquire itself) settle the job without ever calling
-            # HANDLERS[kind], and the file then sits there until the next boot
-            # clears the directory. Here it is removed on every exit, handler
-            # or no handler. Suppressed because a failed unlink must not turn a
-            # succeeded job into a failed one; the work itself is already done.
+            # `spool_path`: a file the route staged for the job (api/storage.py spools an
+            # upload body to data_dir/uploads). The job owns deleting it, and it cannot
+            # live in the handler because the handler doesn't always run: both cancel
+            # paths settle without calling HANDLERS[kind]. Removed here on every exit.
+            # Suppressed: a failed unlink must not turn a succeeded job into a failed one.
             spool = params.get("spool_path")
             if spool:
                 with contextlib.suppress(OSError):
@@ -398,17 +349,10 @@ class JobBackend:
     def _notify(self, job_id: int, kind: str, status: str, error: str | None,
                 facts: dict) -> None:
         """Route the terminal result to the Notifier, off the event loop.
-
-        The job kind used to be dropped here and every outcome went out as
-        `job.{status}`, which is why "App install failed" could not be its own
-        switch. The registry maps (kind, status) onto exactly one row, so a
-        named kind never also fires the generic one.
-
-        The title is the row's own label, not the job kind. "Proxploy:
-        vm.create failed" put a backend identifier in an email subject line;
-        "Proxploy: Job failed" is what the operator sees in the Events matrix
-        and is the same words in both places.
-        """
+                The registry maps (kind, status) onto exactly one row, so a named kind
+                never also fires the generic one. The title is the row's own label,
+                not the job kind, so the Events matrix reads the same words as the
+                subject line."""
         from proxploy.services.notification_body import (
             compose, human_duration, job_facts)
         from proxploy.services.notification_types import BY_KEY, type_for_job

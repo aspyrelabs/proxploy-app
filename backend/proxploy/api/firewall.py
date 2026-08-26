@@ -1,16 +1,8 @@
-"""Firewall rules, options and objects at cluster, node, guest and security
-group scope.
+"""Firewall rules, options and objects at cluster, node, guest and security group scope.
 
-Live passthrough, exactly as api/network.py's bridge reads are: no model, no
-cache, no migration, and nothing in the poller. Firewall rules are
-configuration rather than telemetry, and reading them per guest on a schedule
-would break the O(nodes) call budget in doc 02 section 3. Rules load when a
-page asks for them.
+Reads are live passthrough: no model, cache, or poller; rules load when a page asks for them.
 
-These are NOT jobs. Every firewall write returns null rather than a UPID
-(measured on pve-manager 9.2.11, 2026-08-21), so there is no PVE task to
-follow. Same call shape as api/network.py::set_guest_nic.
-"""
+Writes are NOT jobs: every firewall write returns null rather than a UPID (measured pve-manager 9.2.11, 2026-08-21), so there is no PVE task to follow."""
 from __future__ import annotations
 
 import re
@@ -29,8 +21,7 @@ from proxploy.services.proxmox import ProxmoxError
 router = APIRouter(prefix="/firewall", tags=["firewall"])
 
 # Singleton first in dependencies=[...] and reused as the parameter dep, so
-# auth runs before the entitlement gate and FastAPI collapses the two
-# (deps.py idiom; test_route_auth_invariant.py enforces it).
+# auth runs before the entitlement gate and FastAPI collapses the two.
 _read = authorize("firewall", "read", scope_of=scope_host())
 _manage = authorize("firewall", "manage", scope_of=scope_host())
 
@@ -142,17 +133,9 @@ def scope_object_or_404(loc: dict, obj: str) -> dict:
 class _Body(BaseModel):
     """What every firewall body model is configured the same way for.
 
-    extra="forbid" because a misspelled key is not a harmless key. A rule
-    posted with `dportt` used to be accepted with a 201 and the key dropped on
-    the floor, so the operator was told a rule limiting port 22 had been
-    created when what had actually been created was wide open. PVE's own API
-    refuses a parameter it does not know, and so does this.
+    extra="forbid": a misspelled key is not a harmless key - a rule posted with `dportt` used to be accepted with a 201 and the key dropped, so a port-22 rule was actually created wide open. PVE's own API refuses unknown parameters, and so does this.
 
-    populate_by_name so `icmp-type` is accepted under BOTH its alias and its
-    field name. Forbidding extras does not narrow that: pydantic counts a
-    field's alias AND its name as known keys while this is on, which
-    test_the_icmp_type_field_is_accepted_under_either_spelling pins.
-    """
+    populate_by_name so `icmp-type` is accepted under BOTH its alias and its field name (pydantic counts a field's alias AND its name as known keys)."""
     model_config = {"extra": "forbid", "populate_by_name": True}
 
 
@@ -218,7 +201,6 @@ def rule_params(model: BaseModel, *, partial: bool = False) -> dict:
                             exclude_none=True)
 
 
-# ---------------------------------------------------------------- rules
 
 def _unreadable(what: str) -> HTTPException:
     """A 502, because a Proxmox answer nobody can parse is a gateway failure.
@@ -240,15 +222,9 @@ def _unreadable(what: str) -> HTTPException:
 
 
 def _rules_digest(rules) -> str | None:
-    """PVE returns the digest on each rule ROW rather than on the collection,
-    so the first row is where a rules digest lives. Surfacing it gives the
-    client something to send back on a write without it having to know that.
+    """PVE returns the digest on each rule ROW rather than on the collection, so the first row is where a rules digest lives. Surfacing it gives the client something to send back on a write without it having to know that.
 
-    Shape-checked rather than assumed: `rules[0].get(...)` used to be one of
-    the two crashes in this file, answering a bare 500 with no sentence in it
-    when a row was not an object. An empty list is not malformed, it is a
-    scope with no rules yet.
-    """
+    Shape-checked rather than assumed: `rules[0].get(...)` on a non-object row answered a bare 500 with no sentence. An empty list is not malformed, it is a scope with no rules yet."""
     if not isinstance(rules, list) or any(not isinstance(r, dict) for r in rules):
         raise _unreadable("rules")
     return rules[0].get("digest") if rules else None
@@ -333,9 +309,8 @@ def cluster_rule_move(request: Request, host_id: int, pos: RulePos, body: MoveIn
                       db=Depends(get_db), user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
     # rule_params, so the digest the move was made against is RECORDED and not
-    # only sent: after a lost update the trail has to show which version of the
-    # rule list each move was against. Every other firewall write records its
-    # own digest, and for a while these four did not.
+    # only sent: after a lost update the trail must show which version of the
+    # rule list each move was against.
     params = rule_params(body)
     _rules_write(request, db, user, host, fw.cluster_loc(),
                  action="firewall.rule_move",
@@ -361,8 +336,6 @@ def cluster_rule_delete(request: Request, host_id: int, pos: RulePos,
     return {"deleted": True}
 
 
-# ------------------------------------------------------- security group rules
-#
 # A security group IS a rule list (PVE documents GET on the group as "List
 # rules"), so these are the cluster handlers above pointed at a different
 # location, not a second implementation.
@@ -439,7 +412,6 @@ def group_rule_delete(request: Request, host_id: int, group: ObjectName, pos: Ru
     return {"deleted": True}
 
 
-# ----------------------------------------------------------------- node rules
 
 @router.get("/node/{host_id}/{node}/rules",
             dependencies=[Depends(_read),
@@ -517,18 +489,14 @@ def node_rule_delete(request: Request, host_id: int, node: str, pos: RulePos,
     return {"deleted": True}
 
 
-# ------------------------------------------------------------------- options
-#
-# What PVE does when an option is ABSENT, transcribed from `pvesh usage` on
-# pve-manager 9.2.11 on 2026-08-21. This exists for one reason: the warning
-# shown when an operator enables a firewall has to say what will actually
-# happen, and an absent policy_in is not "no policy", it is DROP. Reading an
-# empty options object as "nothing is configured, so nothing will be blocked"
-# is the exact misreading that got the NIC toggle removed in the first place.
-#
-# Only the options that change behaviour are listed. Conntrack sizing and
-# timeouts are omitted deliberately: they tune a firewall, they do not decide
-# whether traffic passes.
+# What PVE does when an option is ABSENT (transcribed from `pvesh usage` on
+# pve-manager 9.2.11, 2026-08-21): an absent policy_in is not "no policy", it
+# is DROP, so the warning shown when a firewall is enabled must say what will
+# actually happen.
+# 
+# Only the options that change behaviour are listed; conntrack sizing and
+# timeouts are omitted because they tune a firewall rather than decide whether
+# traffic passes.
 OPTION_DEFAULTS: dict[str, dict] = {
     "cluster": {"enable": 0, "ebtables": 1, "policy_in": "DROP",
                 "policy_out": "ACCEPT", "policy_forward": "ACCEPT"},
@@ -638,10 +606,8 @@ def node_options_update(request: Request, host_id: int, node: str,
                           label=f"firewall on {node}", body=body)
 
 
-# ------------------------------------------------------- aliases and IP sets
-#
-# Cluster and guest scope only: a node has neither (measured, 9.2.11). The
-# helpers take a location so Task 9's guest routes reuse them unchanged.
+# Aliases and IP sets are cluster and guest scope only: a node has neither
+# (measured, 9.2.11).
 
 class AliasIn(_Body):
     name: str
@@ -856,7 +822,6 @@ def cluster_ipset_member_delete(request: Request, host_id: int, name: ObjectName
                              fw.cluster_loc(), name, cidr, digest))
 
 
-# --------------------------------------- security groups, references, macros
 
 class GroupIn(_Body):
     group: str
@@ -947,15 +912,11 @@ def node_log(request: Request, host_id: int, node: str, start: int = 0,
     return {"lines": lines, "start": start, "limit": limit}
 
 
-# ------------------------------------------------------------- guest handlers
-#
-# These are NOT routes on this router. They are mounted by api/apps.py and
+# These are NOT routes on this router: they are mounted by api/apps.py and
 # api/vms.py, because scope_app() and scope_vm() resolve a row's team from
-# request.path_params and nothing else (api/deps.py). A guest id carried as a
-# query parameter would reach these handlers with no team scope at all, so the
-# guest lives in the path of the router that already owns it. Same reason
-# guest_nics and set_guest_nic live in api/network.py and are called from
-# there.
+# request.path_params and nothing else (api/deps.py). A guest id in a query
+# parameter would reach these handlers with no team scope at all, so the guest
+# lives in the path of the router that already owns it.
 
 def _guest_label(kind: str, vmid: int, row) -> str:
     name = getattr(row, "name", None)

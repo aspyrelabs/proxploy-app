@@ -1,40 +1,14 @@
 """Which scheme an app's web interface actually speaks.
 
-UPSTREAM DOES NOT TELL US, AND THIS WAS CHECKED RATHER THAN ASSUMED. The
-catalog we ingest is db.community-scripts.org's `script_scripts` collection
-(services/catalog_metadata.py). Fetched whole on 2026-08-21: 700 records, and
-the union of every key any record carries is 39 fields with no protocol,
-scheme, tls or ssl among them. `port` is the only thing said about the web
-interface at all. Actual Budget's record is exactly:
+Upstream does not tell us: the catalog records only a `port` and a `website`
+(the project's homepage, not the container's), with no scheme/tls field. So
+we ask the app: one TCP connect to the port, then a TLS ClientHello; a TLS
+server completes the handshake, a plain HTTP server does not. That is a
+definitive answer from the only party that knows.
 
-    "name": "Actual Budget", "slug": "actualbudget", "port": 5006,
-    "notes": [], "website": "https://actualbudget.org/"
-
-`website` is the PROJECT's homepage, not the container's, so it says nothing
-about the guest. `notes` is free text and sometimes contains a worked example
-URL, but only 36 of the 700 records have one and Actual Budget is not among
-them. Meanwhile its install script calls community-scripts' own
-`create_self_signed_cert` helper and writes
-
-    "https": { "key": "/etc/ssl/actualbudget/actualbudget.key",
-               "cert": "/etc/ssl/actualbudget/actualbudget.crt" }
-
-into its config, so it serves TLS on 5006. Nothing we ingest records that,
-and the port is 5006 rather than 443, so no inference from the catalog could
-have found it either.
-
-SO WE ASK THE APP. One TCP connect to the port the interface answers on, then
-a TLS ClientHello: a TLS server completes the handshake, a plain HTTP server
-does not (it either closes the connection or replies with a plaintext 400,
-and both fail the handshake). That is a definitive answer from the only party
-that actually knows, where every hint the catalog could have offered would
-still have been a guess.
-
-The alternative that was NOT taken: defaulting to http, which is what shipped
-before this and is what sent the operator to `http://<ip>:5006` for an app
-that only speaks https. A wrong scheme is not a degraded answer, it is a
-browser error page, so "we could not tell" is raised to the caller instead of
-being papered over with a default.
+A wrong scheme is a browser error page, not a degraded answer, so when the
+probe cannot tell, it raises rather than defaulting to http (which is what
+shipped before and sent operators to `http://<ip>:5006` for a https-only app).
 """
 from __future__ import annotations
 
@@ -89,22 +63,16 @@ def probe_scheme(address: str, port: int, timeout: float = PROBE_TIMEOUT_S) -> s
 def scheme_for(app, address: str, port: int) -> tuple[str | None, str]:
     """The scheme to open this app with, and how that was decided.
 
-    Three sources, in the order of how much each one actually knows:
+    Three sources, in priority order:
 
-    1. `web_protocol`, which only a person can have written, in Reconfigure.
-       It is never probed over and never overwritten. NULL is the normal
-       state; it used to be the literal string "http" written by install and
-       adopt, which is why every app looked like a deliberate choice and none
-       of them was.
+    1. `web_protocol`, which only a person can have written (in Reconfigure);
+       never probed over, never overwritten, NULL by default.
     2. `installed_url`, the URL the install script printed about itself.
-       Second rather than first because it is a statement about the moment of
-       install, and an operator who has since changed the app is correcting
-       exactly that.
-    3. the probe, which is the only source left for an app Proxploy did not
-       install and nobody has edited.
+    3. the probe, the only source left for an app Proxploy did not install and
+       nobody has edited.
 
-    Never a fourth branch that returns a bare "http". The second return value
-    names which of the three answered, so a wrong open stays traceable.
+    Never a fourth branch returning a bare "http". The second return value names
+    which source answered, so a wrong open stays traceable.
     """
     if app.web_protocol:
         return app.web_protocol, "set on the app"
@@ -114,37 +82,26 @@ def scheme_for(app, address: str, port: int) -> tuple[str | None, str]:
     return probe_scheme(address, port), "asked the app"
 
 
-# --- what the installer itself said ----------------------------------------
-#
-# A community-scripts install script ends by printing the finished URL, and
-# that is the app declaring its own scheme, port and path rather than us
-# inferring any of them. The tail of a real successful install (job 231 in the
-# dev database, Actual Budget) is, byte for byte:
-#
-#   '  \U0001f680  \x1b[m\x1b[1;92mActual Budget setup has been successfully initialized!\x1b[m'
-#   '  \U0001f4a1  \x1b[m\x1b[33mAccess it using the following URL:\x1b[m'
-#   '  \U0001f310  \x1b[m\x1b[4;92mhttps://192.168.50.194:5006\x1b[m'
-#
-# So the escapes come off first, and the emoji is just text in the way.
+# A community-scripts install script ends by printing the finished URL, the
+# app declaring its own scheme, port and path. That banner is ANSI-escaped
+# with emoji, so the escapes come off first and the emoji is just text in the
+# way.
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _URL = re.compile(r"https?://[^\s\"'<>)\]]+")
 
 # The banner is the last thing a script prints, but the exact distance varies
-# with how many blank and status lines follow it (5 lines back on one install
-# in the dev database, 3 on another). Wide enough to cover that, and the
-# disagreement rule below is what actually keeps a stray URL out.
+# with trailing blank/status lines. The window is wide enough to cover that,
+# and the disagreement rule below is what actually keeps a stray URL out.
 TAIL_LINES = 20
 
 
 def _candidate(url: str) -> bool:
     """A URL is only a candidate if its host is an IP literal.
 
-    Deliberately strict. Community-scripts prints the container's own address,
-    never a name, so anything with a hostname is a link to somewhere else:
-    a project homepage, a discussion thread, the docs. Several scripts print
-    one of those a line or two from the end, and without this rule a
-    single-candidate log could record `https://github.com/...` as the app's
+    Deliberately strict: community-scripts prints the container's own address,
+    never a name, so anything with a hostname is a link somewhere else (a project
+    homepage, a thread, the docs) and could otherwise be recorded as the app's
     own web interface.
     """
     try:
@@ -174,10 +131,7 @@ def url_from_install_log(lines, *, expected_port: int | None = None,
     the wrong URL is a stored wrong answer that outlives the log it came from.
 
     `expected_port` (the catalog's port) and `guest_address` only break ties.
-    They cannot be required, because both are routinely absent or stale: two
-    of the apps in the dev database have no port on their row at all, and
-    Dashy's install printed 192.168.50.188 for a container that now holds
-    192.168.50.191, its DHCP lease having moved since.
+    They cannot be required, because both are routinely absent or stale.
     """
     seen: list[str] = []
     for raw in list(lines)[-TAIL_LINES:]:
@@ -195,14 +149,14 @@ def url_from_install_log(lines, *, expected_port: int | None = None,
 
 
 def installed_parts(url: str | None) -> tuple[str | None, int | None, str | None]:
-    """(scheme, port, path) out of a stored install URL. All None if there is none.
+    """(scheme, port, path) out of a stored install URL. All None if there is
+    none.
 
-    The HOST in that URL is deliberately not returned and must never be used
-    to open the app. It is the address the container held at install time, and
-    on DHCP it moves: three of the five URLs recovered from the dev database's
-    own install logs already name an address their container no longer has,
-    and one of them now belongs to a different app. The live NIC read is the
-    only honest source for the address.
+    The HOST in that URL is deliberately not returned and must never be used to
+    open the app: it is the address the container held at install time, and on
+    DHCP it moves (recovered dev-database URLs already name addresses their
+    containers no longer have). The live NIC read is the only honest source for
+    the address.
     """
     if not url:
         return None, None, None

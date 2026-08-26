@@ -26,9 +26,8 @@ users_router = APIRouter(prefix="/users", tags=["users"])
 # OIDC IdP config is an "own flow" settings.py's `.enc`-key refusal points at.
 _oidc_manage = authorize("settings", "manage")
 
-# GET /users (Task 6, doc 05): the member-picker source, ("user", "read")
-# global (any-team admin, no scope_of): same status as ("user", "manage")
-# in create_user below.
+# GET /users: the member-picker source, ("user", "read") global (any-team
+# admin, no scope_of), same status as ("user", "manage") in create_user below.
 _users_read = authorize("user", "read")
 
 
@@ -64,14 +63,13 @@ def _issue_session(request: Request, response: Response, db, user: User,
     return {"ok": True, "user": _user_out(db, user)}
 
 
-# --- Pending-2FA store (Task 9) ---------------------------------------------
-#
-# NOT a session and cannot be turned into one by any request other than
-# POST /auth/totp: resolve_session()/get_current_user never look at
-# app.state.pending_totp, so holding a pending token grants access to
-# exactly one route, and that route only completes or burns it. Single-use
-# (popped on success), TTL-bounded (pruned on every access), and capped at
-# PENDING_MAX_ATTEMPTS wrong codes before the entry is discarded outright.
+# --- Pending-2FA store ---
+# 
+# NOT a session and cannot be turned into one except by POST /auth/totp:
+# resolve_session()/get_current_user never look at app.state.pending_totp, so a
+# pending token grants access to exactly one route, which only completes or
+# burns it. Single-use (popped on success), TTL-bounded (pruned on every
+# access), capped at PENDING_MAX_ATTEMPTS wrong codes.
 PENDING_MAX_ATTEMPTS = 5
 
 
@@ -142,10 +140,8 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
 @router.post("/totp")
 @limiter.limit("10/minute")
 def totp_login(request: Request, body: TotpLoginIn, response: Response, db=Depends(get_db)):
-    # PUBLIC (test_route_auth_invariant.py) and UNGOVERNED (test_rbac_invariant.py):
-    # this route IS the second half of acquiring a session, so it can carry
-    # neither get_current_user nor authorize(): see both files' allowlist
-    # comments for this path.
+    # PUBLIC and UNGOVERNED: this route IS the second half of acquiring a session,
+    # so it can carry neither get_current_user nor authorize().
     ip = request.client.host if request.client else None
     _prune_pending(request)
     store = request.app.state.pending_totp
@@ -212,16 +208,14 @@ def me(db=Depends(get_db), user: User = Depends(get_current_user)):
     return _user_out(db, user)
 
 
-# --- TOTP (Task 8: enrollment; login-step + session mgmt is Task 9) --------
-#
+# --- TOTP (enrollment; login-step + session mgmt is below) ---
+# 
 # Self-service on the caller's own account, same shape as api/apikeys.py:
-# `dependencies=[Depends(get_current_user), Depends(require_entitlement(...))]`
-# in that order (route-ordering invariant: auth before entitlement, so an
-# anonymous caller 401s, never a flag-leaking 403), plus get_current_user
-# again as a function parameter to get the User back (cached per-request,
-# not a second DB hit). No authorize() call: this isn't an RBAC-gated admin
-# action; it's a user managing their own 2FA, so it isn't in
-# services/authz.py's PERMISSIONS matrix either.
+# dependencies=[Depends(get_current_user), Depends(require_entitlement(...))] in
+# that order (route-ordering invariant: auth before entitlement, so an
+# anonymous caller 401s, never a flag-leaking 403), plus get_current_user as a
+# parameter to get the User back. No authorize(): a user managing their own
+# 2FA, not an RBAC-gated admin action.
 _totp_ent = require_entitlement("auth.totp")
 
 
@@ -302,15 +296,13 @@ def totp_regenerate_recovery_codes(request: Request, body: TotpDisableIn, db=Dep
     return {"recovery_codes": codes}
 
 
-# --- Session management (Task 9) --------------------------------------------
-#
+# --- Session management ---
+# 
 # Self-service on the caller's own sessions, same idiom as api/apikeys.py:
 # gated on get_current_user alone (no authorize(): "list/revoke my own
-# sessions" has no (resource, action) pair in services/authz.py's PERMISSIONS
-# matrix, and doesn't need one: this is not a role question, viewer and
-# owner alike may always manage their own login state). Ownership is
-# enforced by filtering the query on user_id=user.id, so a caller can never
-# even discover another user's session id, let alone revoke it.
+# sessions" has no (resource, action) pair and needs none). Ownership is
+# enforced by filtering on user_id=user.id, so a caller can never discover
+# another user's session id, let alone revoke it.
 
 @router.get("/sessions")
 def list_sessions(request: Request, db=Depends(get_db),
@@ -456,7 +448,7 @@ def list_users(db=Depends(get_db), user: User = Depends(_users_read)):
             for u in db.query(User).order_by(User.id)]
 
 
-# --- OIDC (Task 11: routes over services/oidc.py's Task-10 begin()/complete()) ---
+# --- OIDC (routes over services/oidc.py's begin()/complete()) ---
 
 
 class OIDCConfigIn(BaseModel):
@@ -481,9 +473,8 @@ def _oidc_redirect_uri(request: Request) -> str:
 
 @router.get("/oidc/login", name="oidc_login")
 async def oidc_login(request: Request, db=Depends(get_db)):
-    # PUBLIC (test_route_auth_invariant.py): 404, never 403: an anonymous
-    # caller has no session to leak role/entitlement state through, and this
-    # route is how a session gets created in the first place.
+    # PUBLIC: 404, never 403 — an anonymous caller has no session to leak
+    # role/entitlement state through, and this route is how a session gets created.
     if not (oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")):
         raise HTTPException(404, {"error": "oidc_not_configured"})
     url = await oidc.begin(request.app, db, _oidc_redirect_uri(request))
@@ -546,9 +537,7 @@ def oidc_config_delete(db=Depends(get_db), user: User = Depends(_oidc_manage)):
     return {"ok": True}
 
 
-# --- user administration (PXP-17) -------------------------------------------
-# Create and list existed; deactivate, delete and admin password reset never
-# did, in either the API or the UI. ("user","manage") already covered them.
+# --- user administration ---
 
 _users_manage = authorize("user", "manage")
 

@@ -1,10 +1,9 @@
-# backend/proxploy/api/backups.py
-"""Backups page endpoints (doc 05 §Backups, doc 01 §7).
+"""Backups page endpoints.
 
-The list is served from the `backups` cache table, never live from Proxmox; 
+The list is served from the `backups` cache table, never live from Proxmox;
 listing storage content is a per-storage call and this page is polled. The
-`backup.sync` job is what fills it, and the GET below fires one when the cache
-has gone stale so a fresh install is never permanently blank.
+`backup.sync` job fills it, and the GET below fires one when the cache is
+stale so a fresh install is never permanently blank.
 """
 from __future__ import annotations
 
@@ -29,10 +28,10 @@ from proxploy.services.settings import get_setting
 router = APIRouter(prefix="/backups", tags=["backups"])
 
 # Singleton first in dependencies=[...] and reused as the parameter dep so
-# FastAPI collapses them and auth runs before the entitlement check
-# (test_route_auth_invariant.py). host_id/backup_id arrive as a body field or
-# a query param on every route below except restore/delete, which carry
-# {backup_id} in the path: scope_backup()'s default param matches it.
+# FastAPI collapses them and auth runs before the entitlement check.
+# host_id/backup_id arrive as a body field or a query param on every route
+# below except restore/delete, which carry {backup_id} in the path:
+# scope_backup()'s default param matches it.
 _read = authorize("backup", "read")
 _run = authorize("backup", "run")                 # host_id is body-carried
 _restore = authorize("backup", "restore", scope_of=scope_backup())
@@ -82,12 +81,10 @@ BACKUPS_MAX = 200
 def _stats(db) -> dict:
     """The summary block, computed with aggregates over the WHOLE table.
 
-    Deliberately not derived from the page of rows the route returns: a
-    datastore with a year of daily archives is thousands of rows, and totals
-    counted from the newest 200 of them would quietly under-report every
-    number on the page. Four scalar aggregates cost less than serialising the
-    table did.
-    """
+        Not derived from the clamped page of rows the route returns: a datastore
+        with a year of daily archives is thousands of rows, and totals counted
+        from the newest 200 would quietly under-report every number on the page.
+        """
     stores: dict[str, dict] = {}
     for storage, count, size in (db.query(Backup.storage, func.count(Backup.id),
                                           func.coalesce(func.sum(Backup.size_bytes), 0))
@@ -107,17 +104,11 @@ def _stats(db) -> dict:
     # The fallback for a PVE-only setup. `verify_state` is written by Proxmox
     # BACKUP SERVER and by nothing else, so on a plain NFS or directory store
     # every archive is "none" for ever and the rate above is null on a system
-    # whose backups are running perfectly well. What we do know there is
-    # whether the runs themselves finished, which is a different question and
-    # is labelled as one by the caller: a completed vzdump says an archive was
-    # written, never that it can be restored.
-    #
-    # A succeeded run that wrote NOTHING is excluded from both sides rather
-    # than counted as a win. vzdump over a node with no guests finishes with
-    # exitstatus OK having written zero bytes, so the job status alone reported
-    # three completed backups on a system holding one archive. The handler
-    # records `guests` for exactly this; a run from before it did is counted,
-    # since "no answer" is not the same as "wrote nothing".
+    # whose backups are running fine. A succeeded run that wrote NOTHING is
+    # excluded from both sides rather than counted as a win: vzdump over a node
+    # with no guests finishes exitstatus OK having written zero bytes. Runs from
+    # before `guests` was recorded are counted, since "no answer" is not the same
+    # as "wrote nothing".
     run_ok = run_bad = 0
     for status, result in db.query(Job.status, Job.result).filter(
             Job.kind == "backup.run", Job.created_at >= cutoff,
@@ -150,11 +141,9 @@ def _stats(db) -> dict:
 def list_backups(request: Request, db=Depends(get_db), limit: int = BACKUPS_MAX,
                  user: User = Depends(_read)):
     # Same clamp the other list reads use (audit.py, jobs.py, alerts.py,
-    # cluster.py). This page polls every 60s and can be open in several tabs;
-    # a PBS datastore with a year of daily per-guest snapshots is tens of
-    # thousands of rows, and it used to send all of them every time. The
-    # newest `limit` are what the "Recent backups" table shows; `stats` below
-    # still covers everything.
+    # cluster.py). A PBS datastore with a year of daily per-guest snapshots is
+    # tens of thousands of rows. The newest `limit` are what the "Recent backups"
+    # table shows; `stats` below still covers everything.
     limit = max(1, min(limit, BACKUPS_MAX))
     hosts = {h.id: h.name for h in db.query(Host).all()}
     rows = db.query(Backup).order_by(Backup.taken_at.desc()).limit(limit).all()
@@ -176,7 +165,6 @@ def list_backups(request: Request, db=Depends(get_db), limit: int = BACKUPS_MAX,
     }
 
 
-# --- mutations (Phase 6 Task 9) ---------------------------------------------
 # Literal-segment routes (/run, /prune-preview, /prune) are declared BEFORE any
 # /{backup_id} route: Starlette matches path operations in registration order,
 # so a numeric-looking literal segment must never land after a param route.
@@ -199,12 +187,11 @@ class RunIn(BaseModel):
 
 def _resolve_guests(db, body: RunIn) -> tuple[int, list[int], list[str]]:
     """-> (host_id, vmids, names). One vzdump call runs on one node, so a
-    selection spanning hosts is a client error, not a silent partial backup.
+        selection spanning hosts is a client error, not a silent partial backup.
 
-    `names` is empty for a whole-host run and carries one label per guest
-    otherwise, so the job can say what it is backing up rather than naming the
-    node it runs on: "backing up node1" was the feed's line for a run over a
-    single VM, which reads as a backup of the whole node."""
+        `names` is empty for a whole-host run and carries one label per guest
+        otherwise, so the job says what it is backing up rather than naming the
+        node it runs on."""
     if body.guests == "all":
         hosts = db.query(Host).all()
         if body.host_id is None:
@@ -355,8 +342,7 @@ def restore_backup_route(request: Request, backup_id: int,
     # either used to accept the job and fail inside the handler. No network call
     # happens here: client_for_host raises CapabilityNotConfigured on a missing
     # credential alone, and main.py turns that into a 409 naming the capability
-    # and where to add it. Same shape as catalog.py checking for an `ssh_key`
-    # before an install (doc 11 open item 3).
+    # and where to add it.
     host = db.get(Host, b.host_id)
     if host is not None:
         for capability in ("backup", "lifecycle"):
@@ -383,10 +369,10 @@ def _refuse_on_pbs(request: Request, b: Backup) -> None:
     refuse = lambda: HTTPException(  # noqa: E731
         409, "Proxmox Backup Server checks this archive itself, on its own "
              "schedule.")
-    # The row's own type first. This used to read poller.snapshots only, which
-    # is empty between boot and the first poll, so in that window every archive
-    # looked like a plain store and a PBS one was accepted for a full
-    # read-back. sync_host_backups records the type PVE gave it.
+    # The row's own type first: poller.snapshots is empty between boot and the
+    # first poll, so in that window every archive looked like a plain store and a
+    # PBS one was accepted for a full read-back. sync_host_backups records the
+    # type PVE gave it.
     if b.storage_type:
         if b.storage_type == "pbs":
             raise refuse()
@@ -434,15 +420,12 @@ def verify_sweep_route(request: Request, body: VerifySweepIn,
                        db=Depends(get_db), user: User = Depends(_run)):
     """Check the archives on one host that nobody has checked yet.
 
-    The other half of "back up now, verify separately". The sweep handler
-    shipped with the schedule that fires it and had no door of its own, so a
-    Verify Backup with no single archive to name could be scheduled and never
-    run once. Same handler either way: `backup.verify` reads a missing
-    `backup_id` as "sweep this host", oldest first, capped, PBS left alone.
+        The other half of "back up now, verify separately". `backup.verify` reads
+        a missing `backup_id` as "sweep this host", oldest first, capped, PBS left
+        alone.
 
-    `_run`, matching the per-archive route: anyone who may create archives may
-    find out whether they are any good.
-    """
+        `_run`, matching the per-archive route.
+        """
     host = db.get(Host, body.host_id)
     if host is None:
         raise HTTPException(404, "host not found")
@@ -496,14 +479,13 @@ def test_restore_route(request: Request, backup_id: int,
     _refuse_on_pbs(request, b)
     _refuse_a_second_check(db, b.host_id)
     # Same door restore_backup_route stands behind, and for the same reason: a
-    # host missing the token accepted the job and then failed inside the
-    # handler. `lifecycle` ALONE, unlike /restore, which also names `backup`:
-    # this one creates a guest and never reads the archive itself, PVE does
-    # that, so test_restore_backup asks for exactly one client and asking for
-    # a backup token here would refuse hosts that can run the job perfectly
+    # host missing the token accepted the job and then failed inside the handler.
+    # `lifecycle` ALONE, unlike /restore, which also names `backup`: this one
+    # creates a guest and never reads the archive itself, PVE does that, so asking
+    # for a backup token here would refuse hosts that can run the job perfectly
     # well. No network call happens: client_for_host raises
-    # CapabilityNotConfigured on a missing credential alone, and main.py turns
-    # that into a 409 naming the capability and where to add it.
+    # CapabilityNotConfigured on a missing credential alone, and main.py turns that
+    # into a 409 naming the capability and where to add it.
     host = db.get(Host, b.host_id)
     if host is not None:
         client_for_host(request.app, db, host, capability="lifecycle")
@@ -513,10 +495,6 @@ def test_restore_route(request: Request, backup_id: int,
                              params={"backup_id": b.id, "storage": body.storage})
 
 
-# services/selfguard.py is deliberately untouched by this task: DESTRUCTIVE
-# holds guest *lifecycle verbs* and its only consumer is enqueue_lifecycle,
-# which backup routes never call: see this task's brief header note.
-# test_selfguard_destructive_set_is_unchanged locks it.
 
 KEEP_FIELDS = ("keep_last", "keep_daily", "keep_weekly", "keep_monthly", "keep_yearly")
 

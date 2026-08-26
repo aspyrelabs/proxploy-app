@@ -1,52 +1,26 @@
 """Local icon cache for the App Store, so the Store works offline.
 
-THE GAP THIS CLOSES. The Store's metadata is cache-first: it lives in SQLite
-and renders from there, so it is instant and works with no network. The icons
-were not. `catalog_entries.icon_url` held upstream's URL verbatim and every
-card fetched cdn.jsdelivr.net at render time, so a firewalled or air-gapped
-Proxmox host rendered 556 initials tiles. Mirroring the bytes into the durable
-data dir alongside the DB is what makes the second half of "instant and works
-offline" true.
+The metadata is cache-first (SQLite) but icons were hot-linked from
+cdn.jsdelivr.net, so an air-gapped host rendered initials tiles; mirroring the
+bytes into the durable data dir closes that gap.
 
-LICENCE, and this was checked before a byte was downloaded. 537 of the 549
-store-visible icons come from github.com/selfhst/icons, which is licensed
-**CC BY 4.0** (Creative Commons Attribution 4.0 International, LICENSE at the
-repo root). That permits redistribution, including in modified form and
-commercially, on condition of attribution, and upstream's own README documents
-self-hosting the collection as a supported thing to do. Attribution is
-discharged where the redistribution happens: `api/catalog.py`'s icon route
-sets `Link: rel="license"` and `rel="author"` headers on every file served
-from that collection.
+LICENCE: 537 of 549 store-visible icons come from github.com/selfhst/icons
+(CC BY 4.0), which permits redistribution with attribution. Attribution is
+discharged where the redistribution happens: api/catalog.py's icon route sets
+`Link: rel="license"` and `rel="author"` headers. Vendor brand marks are
+nominative use, the same as the old hot-linking.
 
-CC BY 4.0 section 2(b)(2) is explicit that "Patent and trademark rights are
-not licensed under this Public License", and every icon in the set is some
-vendor's brand mark. That is not an obstacle here and it is worth writing down
-why: showing a vendor's logo to identify that vendor's software is nominative
-use, which is exactly what the Store already did by hot-linking. Serving the
-same bytes from the operator's own node changes who transmits them, not what
-they are used for. The dozen icons that come from vendor domains directly
-(cinny.in, getgrav.org and friends) are the same question with the same
-answer, minus the CC BY grant, and they are cached on the same reasoning.
+COST: a slug is skipped outright when its cached file exists AND upstream's URL
+is unchanged AND the cache entry is younger than REVALIDATE_AFTER, so the
+normal sync costs ZERO requests; past that it revalidates with If-None-Match
+(304, no body). This module must never add an api.github.com call: the
+refresh's flat 2-call GitHub API ceiling is untouched (cdn.jsdelivr.net and
+raw.githubusercontent.com are not the GitHub API).
 
-COST. This runs on the 6-hourly catalog refresh, so a steady-state sync must
-not re-download 549 files. A slug is skipped outright when its cached file
-exists AND upstream's URL is unchanged AND the cache entry is younger than
-REVALIDATE_AFTER, which makes the normal sync cost ZERO requests. Past that
-window it revalidates with `If-None-Match`, so upstream answers 304 and sends
-no body. That is what keeps a logo change from being sticky forever without
-paying 549 round-trips every six hours of someone else's bandwidth.
-
-Different host from api.github.com, so the refresh's flat 2-call GitHub API
-ceiling (services/catalog.py header note) is untouched: this module must never
-add an api.github.com call of any kind. cdn.jsdelivr.net and
-raw.githubusercontent.com are not the GitHub API.
-
-FAILURE POLICY, the same posture as the metadata sync and stricter in one
-place. A download that fails leaves the previously cached file exactly where
-it is and the row keeps pointing at it; a slug that has never been cached
-falls back to the upstream URL, which is what the Store did before this module
-existed. Nothing here ever deletes a good cached icon because a refetch
-failed, and a total network outage is a logged no-op, not an emptied cache.
+FAILURE POLICY: a failed download leaves the previously cached file and row
+untouched; a never-cached slug falls back to the upstream URL. Nothing here
+deletes a good cached icon because a refetch failed, and a total network
+outage is a logged no-op, not an emptied cache.
 """
 from __future__ import annotations
 
@@ -69,11 +43,9 @@ logger = logging.getLogger(__name__)
 _CONCURRENCY = 8
 
 # How long a cached icon is trusted without asking upstream anything at all.
-# The trade is explicit: shorter means fresher logos and more requests against
-# someone else's CDN, longer means a rebranded app keeps its old icon for
-# longer. 30 days is chosen because an app logo changing is a rare event that
-# nobody is waiting on, while 549 conditional requests every 6 hours is 2,196
-# a day, forever, to learn nothing.
+# Shorter means fresher logos and more CDN requests; longer means a rebranded
+# app keeps its old icon. 30 days: a logo change is a rare event nobody is
+# waiting on, while 549 conditional requests every 6 hours is 2,196 a day.
 REVALIDATE_AFTER = timedelta(days=30)
 
 # Extensions we are willing to write to disk and serve back. An allowlist, not
@@ -130,19 +102,13 @@ def _extension(url: str) -> str | None:
 def cache_filename(slug: str, url: str) -> str | None:
     """`<slug>.<ext>`, or None when we cannot name a file for this URL.
 
-    Slug-keyed rather than content-addressed, and the reason is the staleness
-    requirement rather than aesthetics. Content addressing would make a
-    changed logo a NEW file and leave the old one behind forever, so the cache
-    would grow monotonically and need its own garbage collector. Keyed on the
-    slug, a changed logo overwrites in place and the cache is the same size as
-    the catalog, permanently.
-
-    The slug is ours (it is a `ct/<slug>.sh` filename from tree discovery, not
-    an upstream string) and the extension comes from a fixed allowlist, so the
-    result cannot contain a path separator or a traversal sequence whatever
-    upstream serves. api/catalog.py checks containment again at serve time
-    anyway; this is the first of the two locks, not the only one.
-    """
+        Slug-keyed rather than content-addressed so a changed logo overwrites in
+        place and the cache never grows (content addressing would orphan the old
+        file). The slug is ours (a `ct/<slug>.sh` filename, not an upstream string)
+        and the extension comes from a fixed allowlist, so the result cannot
+        contain a path separator or a traversal sequence whatever upstream serves.
+        api/catalog.py re-checks containment at serve time anyway.
+        """
     ext = _extension(url)
     if ext is None or not slug or "/" in slug or "\\" in slug or slug.startswith("."):
         return None
@@ -197,17 +163,13 @@ def _cache_one(row_data: tuple[int, str, str, str | None, str | None, str | None
     out = {"id": row_id, "slug": slug, "status": "failed",
            "filename": filename, "etag": etag, "content": None}
     headers = {}
-    # Revalidate ONLY when the etag we hold actually describes THIS url and
-    # the file it names is really on disk. Both halves are load bearing:
-    #
-    # - An etag from a DIFFERENT url is not a weak validator, it is a wrong
-    #   one. Upstream would compare it against the new resource, and a CDN
-    #   that happens to serve the same etag for both (a versioned asset path,
-    #   say) would answer 304 and we would keep serving the OLD logo forever
-    #   while believing we had refreshed it. That is the exact staleness this
-    #   cache is supposed to prevent, arrived at by trying to be clever.
-    # - An etag for a file we no longer have would earn a 304 and leave us
-    #   with nothing on disk at all.
+    # Revalidate ONLY when the etag we hold actually describes THIS url and the
+    # file it names is really on disk. Both halves are load bearing:
+    # 
+    # - An etag from a DIFFERENT url could get a 304 and leave us serving the OLD
+    # logo forever while believing we had refreshed it.
+    # - An etag for a file we no longer have would earn a 304 and leave us with
+    # nothing on disk at all.
     if etag and filename and source == url and (directory / filename).exists():
         headers["If-None-Match"] = etag
     try:
@@ -237,20 +199,15 @@ def _cache_one(row_data: tuple[int, str, str, str | None, str | None, str | None
 def sync_icons(db, data_dir: Path, on_progress=None) -> dict:
     """Mirror every catalog icon into the local cache. Best effort throughout.
 
-    Returns an outcome dict for the caller to log; it does not raise. Rows are
-    only ever moved FORWARD: a failure leaves `icon_cache_path` and the file it
-    names exactly as they were, so the worst case for any row is that it keeps
-    serving the icon it already had, or falls back to the upstream URL if it
-    never had one.
+        Returns an outcome dict for the caller to log; it does not raise. Rows are
+        only ever moved FORWARD: a failure leaves `icon_cache_path` and the file it
+        names exactly as they were, so the worst case for any row is that it keeps
+        serving the icon it already had, or falls back to the upstream URL if it
+        never had one.
 
-    `on_progress(done, total)` is called as downloads land, and exists because
-    this is the longest phase of a catalog refresh and used to report nothing
-    at all. A steady-state sync fetches zero files and finishes instantly, but
-    a cold cache fetches every icon: measured at 8.0s of an 11.0s refresh,
-    629 files over 631 requests, with the job's bar frozen at 82% throughout.
-    That is what "stuck at 82%" was. It is called from the POOL's thread, so a
-    caller that touches the event loop has to marshal it itself.
-    """
+        `on_progress(done, total)` is called from the POOL's thread, so a caller
+        that touches the event loop has to marshal it itself.
+        """
     directory = icon_dir(data_dir)
     try:
         directory.mkdir(parents=True, exist_ok=True)
@@ -326,21 +283,15 @@ def sync_icons(db, data_dir: Path, on_progress=None) -> dict:
 
 def served_icon_url(entry: CatalogEntry | None) -> str | None:
     """The URL an icon is SERVED at: ours when a local copy exists, upstream's
-    when it does not, None when there is nothing to show.
+        when it does not, None when there is nothing to show.
 
-    A serve-time swap and nothing else. `icon_url` on the row always holds
-    upstream's URL (the metadata sync owns that column, this module owns the
-    mirror), so which of the two a caller should hand the browser is decided
-    here, once. It is shared by the Store's catalog rows and by installed apps
-    resolving the entry they were installed from, because "which URL" has
-    exactly one right answer and so is not a decision to distribute across
-    callers, let alone down to the frontend.
+        `icon_url` on the row always holds upstream's URL (the metadata sync owns
+        that column, this module owns the mirror), so which of the two a caller
+        should hand the browser is decided here, once.
 
-    None covers both honest absences: no entry at all (an app whose catalog
-    slug no longer resolves) and an entry upstream has no logo for. Both are
-    the initials tile the UI already falls back to when an <img> fails, not an
-    error.
-    """
+        None covers both honest absences: no entry at all and an entry upstream
+        has no logo for; both fall back to the initials tile, not an error.
+        """
     if entry is None:
         return None
     return (f"/api/v1/catalog/{entry.slug}/icon" if entry.icon_cache_path

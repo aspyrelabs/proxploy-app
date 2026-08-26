@@ -1,20 +1,11 @@
-# backend/proxploy/api/network.py
-"""Network reads + guest NIC edit (doc 05 §Network, doc 01 §6).
+"""Network reads + guest NIC edit.
 
-Doc 05 calls /network/bridges a "live passthrough" and this is exactly that:
-no model, no cache, no migration; one GET /nodes/{node}/network per node of
-the requested host(s), served straight back. Throughput is the opposite: it is
-NOT a passthrough; it comes from the `host` target's existing `net_in_bps` /
-`net_out_bps` MetricSample rows the poller has been writing since Phase 2,
-read through services/metrics.py::query_series, the same reader
-api/metrics.py::metrics_query uses. There is deliberately no second metrics
-path in this codebase.
+GET /network/bridges is a live passthrough from PVE; no model, no cache.
+Throughput comes from the MetricsStore rows the poller already writes,
+read through services/metrics.py::query_series — the same reader
+api/metrics.py::metrics_query uses. No second metrics path exists.
 
-Deviation from doc 05 recorded in the phase notes: doc 05 leaves the
-entitlement column blank on both GETs. Doc 01 §6 defines `network.view` as a
-real feature with a real key and doc 07 §3 says a feature without a key does
-not merge, so both reads are gated on it. Functionally identical today (the
-key defaults ON).
+Both reads are gated on `network.view` (doc 01 §6, doc 07 §3).
 """
 from __future__ import annotations
 
@@ -38,11 +29,9 @@ from proxploy.services.proxmox import ProxmoxError, routable_addresses
 
 router = APIRouter(prefix="/network", tags=["network"])
 
-# Singleton first in dependencies=[...] and reused as the parameter dep, so
-# auth runs before the entitlement gate and FastAPI collapses the two
-# (deps.py idiom; test_route_auth_invariant.py enforces it). Both reads below
-# take `host` as a query param, not a path param, so there is nothing for
-# scope_host() to resolve: global, same as before this had a scope.
+# Singleton first in dependencies=[...] so auth runs before the entitlement
+# gate. `host` is a query param, not a path param, so scope_host() has
+# nothing to resolve: global domain.
 _read = authorize("network", "read")
 
 NET_KEY = re.compile(r"^net\d+$")
@@ -151,12 +140,9 @@ class NicIn(BaseModel):
     gw: str | None = None
     ip6: str | None = None
     gw6: str | None = None
-    # The UI offers this again (components/NicForm.tsx). Proxploy manages the
-    # firewall itself now: rules, policies, aliases, IP sets and security
-    # groups at cluster, node, guest and security group scope (api/firewall.py).
-    # A guest's rules do nothing unless BOTH this flag and the guest's own
-    # `enable` option are set, so this flag has to be settable for rule
-    # management to mean anything.
+    # Proxploy manages the firewall itself (api/firewall.py). A guest's rules
+    # do nothing unless BOTH this flag and the guest's `enable` option are set,
+    # so this flag must be settable for rule management to mean anything.
     firewall: bool | None = None
     rate: float | None = None
     mtu: int | None = None
@@ -233,21 +219,13 @@ def guest_nics(request: Request, db, host: Host, kind: str, vmid: int,
 def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                   target_id: int, host: Host, kind: str, vmid: int,
                   iface: str, body: NicIn, row=None) -> dict:
-    """Read-modify-write one netN. NOT a job, see ProxmoxClient.guest_config_update.
+    """Read-modify-write one netN. NOT a job.
 
     TWO clients, and the split is load-bearing. The read half
-    (`guest_config`) needs monitoring's VM.Audit; the write half
-    (`guest_config_update`) needs VM.Config.Network, a lifecycle privilege.
-    Neither role carries the other's, so running both halves through one
+    (`guest_config`) needs VM.Audit (monitoring); the write half
+    (`guest_config_update`) needs VM.Config.Network (lifecycle).
+    Neither role carries the other, so running both halves through one
     client 403s whichever half that client is not entitled to.
-
-    This used to run both on the lifecycle client, on the reasoning that the
-    write is the privileged half. Against a real narrow token that fails at the
-    READ, before anything is even attempted on the guest:
-    `403 (/vms/100, VM.Audit)`, PVE 9.2.10, 2026-08-18 (doc 12 check 18).
-    Reads on monitoring is what services/migrate.py already does and monitoring
-    is the one capability every enrolled host is guaranteed to have, so this
-    also needs no token regenerated.
     """
     if not NET_KEY.match(iface):
         raise HTTPException(422, "iface must look like net0")
@@ -281,14 +259,11 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
     changes = body.model_dump(exclude_unset=True)
 
     # Addressing, and the guest type decides whether it is even expressible.
-    # A container carries ip/gw on this very netN string, so it merges in below
-    # like any other key. A VM's netN has no such field: PVE addresses VMs
-    # through the cloud-init key `ipconfigN`, which does nothing unless the VM
-    # has a cloud-init drive AND something in the guest reads it. Windows has no
-    # cloud-init at all (Cloudbase-Init is a third-party port), and nothing here
-    # can see inside a guest to know. So this refuses rather than writing a key
-    # whose effect it cannot state. The VM path is READ ONLY today: guest_nics
-    # reports the addresses the agent says the guest actually has.
+    # A container carries ip/gw on netN, so it merges in like any other key.
+    # A VM's netN has no such field: PVE addresses VMs through the cloud-init
+    # key `ipconfigN`, which does nothing without a cloud-init drive. So VM
+    # addressing is READ ONLY: guest_nics reports what the agent says the
+    # guest actually has.
     addressing = [k for k in ADDRESS_KEYS if k in changes]
     if addressing and kind != "lxc":
         raise HTTPException(409, {
@@ -330,15 +305,9 @@ def set_guest_nic(request: Request, db, user: User, *, target_type: str,
                 params={"iface": iface, **changes}, ip=ip)
 
     # Whether the running guest already has this NIC is a question ONLY the
-    # guest's pending config can answer, so it is asked, after the write.
-    #
-    # This used to be `upid is not None`, on the belief that PVE returns a task
-    # id when it files a config change under the pending section. It does not:
-    # the PUT handler is the synchronous one and its schema returns null, so
-    # that expression was always False and this route told every operator
-    # "applied immediately, no reboot needed" even when the new bridge was
-    # sitting in pending and the guest was still on the old one. See
-    # ProxmoxClient.guest_config_update.
+    # guest's pending config can answer, so it is asked after the write.
+    # The PUT handler is synchronous and returns no task id, so `upid is not
+    # None` was always False — the pending config must be read explicitly.
     try:
         pending_reboot = iface in reader.guest_pending(kind, node, vmid)
         unknown = False
@@ -430,10 +399,8 @@ def list_bridges(request: Request, host: int | None = None, db=Depends(get_db),
             node = h.node_name or ""
             # Apps are read at their host's node (an app row IS its host's).
             # VMs carry their own node and are deduped across the cluster: the
-            # mirror holds one row per (host, vmid), so this used to read the
-            # same guest once per enrolled host AND read it at the wrong node
-            # for every host but the owning one, which raised and dropped that
-            # whole host's attachments into `errors` (doc 12 check 18).
+            # mirror holds one row per (host, vmid), so reading once per enrolled
+            # host would double-count and read at wrong nodes.
             guests = ([("app", a.id, a.name, "lxc", a.ctid, node)
                        for a in db.query(App).filter_by(host_id=h.id).order_by(App.name)]
                       + [("vm", v.id, v.name, "qemu", v.vmid, guest_node(h, v))
@@ -475,8 +442,8 @@ def throughput(request: Request, hours: int = 1, db=Depends(get_db),
     """Per-host in/out series from the MetricsStore rows the poller already writes.
 
     Same reader as /metrics/query (services/metrics.py::query_series); this
-    endpoint only exists so the Network page can ask for both metrics across
-    every host in one round trip instead of 2N.
+    endpoint exists so the Network page can fetch both metrics across every
+    host in one round trip instead of 2N.
     """
     if not 1 <= hours <= 48:
         raise HTTPException(422, "hours must be between 1 and 48")

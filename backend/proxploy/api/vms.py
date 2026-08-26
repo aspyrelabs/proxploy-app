@@ -1,5 +1,4 @@
-"""VM read + lifecycle endpoints (doc 05, Phase 2/3 rows). Pure cache mirror +
-snapshot cpu."""
+"""VM read + lifecycle endpoints. Pure cache mirror + snapshot cpu."""
 from __future__ import annotations
 
 import re
@@ -26,10 +25,9 @@ from proxploy.services.selfguard import is_self
 
 router = APIRouter(prefix="/vms", tags=["vms"])
 
-# Singletons so FastAPI's dependency cache (keyed on the callable) collapses
-# repeated uses into one call per request, and so route-level dependencies=[...]
-# and the parameter-level copy run the same auth check first (doc 10 "auth
-# before entitlement" ordering invariant). scope_vm()'s default param "vm_id"
+# Singletons so FastAPI's dependency cache collapses repeated uses into one
+# call per request, and route-level and parameter-level copies run the same
+# auth check first (auth before entitlement). scope_vm()'s "vm_id" default
 # matches every {vm_id} path segment in this router.
 _read = authorize("vm", "read", scope_of=scope_vm())
 _lifecycle = authorize("vm", "lifecycle", scope_of=scope_vm())
@@ -63,17 +61,13 @@ def _vm_out(v: Vm, host: Host, snapshots,
         "os_type": v.os_type,
         "cpu_cores": v.cpu_cores,
         "cpu_pct": g["cpu_pct"] if g else None,
-        # Identical shape and identical meaning to apps.py::_app_out, which is
-        # the whole point: memory and storage are each a used/allocated PAIR so
-        # a card can draw a bar, and network is two rates with no denominator
-        # because there is no link speed to divide by. These used to be one
-        # number each here, holding the ALLOCATION under names that meant
-        # USAGE on an app, so the VMs page could draw a CPU meter and nothing
-        # else. See the Vm model and migration a1f4d80c3e69.
-        #
-        # Null is normal on every one of them and is not an error: a VM the
-        # poller has not reached yet, a stopped guest, and (permanently, for
-        # disk_bytes) a VM with no QEMU guest agent installed all land here.
+        # Identical shape and meaning to apps.py::_app_out: memory and storage are
+        # each a used/allocated PAIR so a card can draw a bar, and network is two
+        # rates with no denominator (no link speed to divide by).
+        # 
+        # Null is normal on every one and is not an error: a VM the poller has not
+        # reached yet, a stopped guest, and (permanently, for disk_bytes) a VM with
+        # no QEMU guest agent installed all land here.
         "mem_bytes": v.mem_bytes, "mem_total_bytes": v.mem_total_bytes,
         "disk_bytes": v.disk_bytes, "disk_total_bytes": v.disk_total_bytes,
         "net_in_bps": v.net_in_bps_cached, "net_out_bps": v.net_out_bps_cached,
@@ -99,9 +93,9 @@ def list_vms(request: Request, host: int | None = None, db=Depends(get_db),
     query = db.query(Vm)
     if host is not None:
         query = query.filter(Vm.host_id == host)
-    # Deduped for the same reason the Hosts page is: the mirror holds one row
-    # per (host, vmid) and a cluster reports every guest to every member, so
-    # this listed each VM once per enrolled host (doc 12 check 18).
+    # Deduped for the same reason the Hosts page is: the mirror holds one row per
+    # (host, vmid) and a cluster reports every guest to every member, so this
+    # listed each VM once per enrolled host.
     rows = dedupe_vms(query.all(), hosts)
     rows.sort(key=lambda v: (v.name or "", v.id))
     busy = busy_guests(db, utcnow())
@@ -129,10 +123,8 @@ def _vm_and_host(db, vm_id: int):
     return v, host
 
 
-# Registered ABOVE the /{vm_id}/{action} wildcard below: Starlette matches in
-# registration order, and although that wildcard is POST-only today, doc 05's
-# future two-segment siblings are not. Same WARNING as apps.py:266-271.
-# test_network_api.py asserts this ordering by route index.
+# Registered ABOVE the /{vm_id}/{action} wildcard: Starlette matches in
+# registration order. Same WARNING as apps.py:266-271.
 @router.get("/{vm_id}/network",
             dependencies=[Depends(_read),
                           Depends(require_entitlement("network.guest_config"))])
@@ -358,19 +350,16 @@ def vm_fw_log(request: Request, vm_id: int, start: int = 0, limit: int = 500,
                            limit=limit, since=since, until=until)
 
 
-# --- VM Options ----------------------------------------------------------
-#
-# The settings on PVE's own Options tab that Proxploy can actually write, read
-# off pve-manager 9.2.11's apidoc.js, PVE/API2/Qemu.pm and PVE/QemuServer.pm on
-# 2026-08-20. Anything not named here is refused rather than forwarded: the
-# config dict below is unpacked into a proxmoxer kwargs call, so the key space
-# is a trust boundary, and a typo reaching PVE comes back as an unhelpful 500.
-#
-# There is deliberately NO table here of which key applies to a running guest
-# and which waits for a restart. That is presentation, it changes with the
-# guest's own `hotplug` setting, and the honest answer for any single write is
-# whatever PVE's pending config says AFTER the write, which is what the PUT
-# reports. A table here would be a second, staler source for the same fact.
+# VM Options: settings Proxploy can write on PVE's Options tab, read off
+# pve-manager 9.2.11's apidoc.js and PVE/API2/Qemu.pm. Anything not named
+# here is refused rather than forwarded: the config dict below is unpacked
+# into a proxmoxer kwargs call, so the key space is a trust boundary and a
+# typo reaching PVE comes back as an unhelpful 500.
+# 
+# Deliberately no table of which key applies to a running guest and which
+# waits for a restart: it changes with the guest's `hotplug` setting, and the
+# honest answer for any single write is what PVE's pending config says after
+# the write (which the PUT reports). A table would be a second, staler source.
 OPTION_KEYS = (
     "name", "onboot", "startup", "ostype", "boot", "tablet", "hotplug", "acpi",
     "kvm", "freeze", "localtime", "startdate", "smbios1", "agent", "protection",
@@ -406,18 +395,14 @@ def _pve_scalar(value):
 def _merge_option(key: str, existing: str, changes: dict) -> str:
     """Fold `changes` into the property string PVE already holds for `key`.
 
-    Merged, never rebuilt, for the reason services/netconfig.py exists: a
-    property string carries sub-keys this code does not model, and rebuilding
-    drops them silently. `smbios1` is the case that matters most. It usually
-    holds nothing but `uuid=`, the identifier a guest's operating system reads
-    as its machine id, and rewriting it from a form's fields would hand the
-    guest a new identity: Windows deactivates, licences bound to it stop
-    matching, and anything keyed on the machine id treats it as a new host.
-    So parse, change the named sub-keys only, join back in the same order.
+    Merged, never rebuilt: a property string carries sub-keys this code does not
+    model (e.g. `smbios1` holds the guest's machine-id `uuid=`), and rebuilding
+    drops them silently. Parse, change the named sub-keys only, join back in the
+    same order.
 
-    A sub-key set to null is removed. If that empties the string there is
-    nothing left to write, and the caller turns "" into a delete of the whole
-    key, because PVE has no representation for an empty property string.
+    A sub-key set to null is removed. If that empties the string the caller turns
+    "" into a delete of the whole key, because PVE has no representation for an
+    empty property string.
     """
     parts = parse_net(existing)
     default_sub = OPTION_DEFAULT_SUBKEY.get(key)
@@ -456,13 +441,10 @@ def vm_options(request: Request, vm_id: int, db=Depends(get_db),
                user: User = Depends(_read)):
     """Every Options-tab setting Proxploy can write, plus what is waiting.
 
-    `values` carries ONLY the keys PVE actually holds, and that absence is
-    information, not a gap to fill in. A setting missing from a VM's config is
-    the setting at Proxmox's own default, which is not the same as the setting
-    written to that default value: `qm set --acpi 1` pins acpi to 1 forever,
-    while no acpi line at all means "whatever this Proxmox version defaults
-    to". Reporting a missing key as its default would erase that distinction
-    and the next save would pin every default the operator never touched.
+    `values` carries ONLY the keys PVE actually holds; absence is information,
+    not a gap. A missing key means the setting is at Proxmox's default, distinct
+    from having written that default: reporting a missing key as its default
+    would pin every default the operator never touched on the next save.
     """
     v, host = _vm_and_host(db, vm_id)
     node = guest_node(host, v)
@@ -495,20 +477,15 @@ def vm_options_update(request: Request, vm_id: int,
                       user: User = Depends(_configure)):
     """Sparse edit of the Options tab. Absent leaves alone, null resets.
 
-    Three-way on purpose, and the third way is the one that is easy to get
-    wrong. A key ABSENT from the body is untouched. A key with a value is
-    written. A key sent as null is DELETED from the VM's config, which is the
-    only way to give a setting back to Proxmox's default: writing the default
-    value instead records a decision the operator did not make, and it sticks
-    even if a later Proxmox changes what the default is. PVE spells that
-    removal `delete=<key>` on the same PUT, so both halves go in one call and
-    the operator gets one atomic change rather than two.
+    A key ABSENT from the body is untouched; with a value, written; null,
+    DELETED from the VM's config. Null is the only way to hand a setting back to
+    Proxmox's default: writing the default records a decision the operator did
+    not make, and sticks if a later Proxmox changes the default. PVE spells
+    removal `delete=<key>` on the same PUT, so both halves go in one atomic call.
 
     Not a job: PVE writes a guest config synchronously, so there is no task to
-    follow and reporting one would be theatre. Whether the change is live or
-    waiting for a restart comes from the guest's own pending config, read
-    after the write; see ProxmoxClient.guest_config_update for why it cannot
-    be read off the write's return value.
+    follow. Whether the change is live or waiting for a restart comes from the
+    guest's pending config, read after the write.
     """
     v, host = _vm_and_host(db, vm_id)
     ip = request.client.host if request.client else None
@@ -639,11 +616,10 @@ class VmCreateIn(BaseModel):
     storage: str = "local-lvm"
     iso: str | None = None
     bridge: str = "vmbr0"
-    # Task 17's wizard has a VLAN field on its Network step. Pydantic ignores
-    # unknown keys rather than rejecting them, so omitting this here would
-    # silently drop the operator's tag and build an untagged NIC: a wrong
-    # result that looks like a success. Declared, validated, and threaded
-    # through to net0 below.
+    # The wizard has a VLAN field on its Network step. Pydantic ignores unknown
+    # keys rather than rejecting them, so omitting this here would silently drop
+    # the operator's tag and build an untagged NIC: a wrong result that looks
+    # like a success. Declared, validated, and threaded through to net0 below.
     vlan_tag: int | None = None
     ostype: str = "l26"
     start: bool = False
@@ -697,8 +673,7 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
 
 # Registered ABOVE the /{vm_id}/{action} wildcard: see the WARNING on that
 # route. Out of order, `POST /vms/3/snapshots` lands in vm_lifecycle with
-# action="snapshots" and 422s (test_post_snapshots_is_not_swallowed_by_the_
-# lifecycle_wildcard proves it stays this way).
+# action="snapshots" and 422s.
 
 # PVE's own pve-configid shape, plus its 40-char ceiling. Enforced here because
 # the value is interpolated into a Proxmox path segment, and because "current"
@@ -730,12 +705,11 @@ def _snapshot_out(s: dict) -> dict:
                           Depends(require_entitlement("vms.snapshots"))])
 def list_vm_snapshots(request: Request, vm_id: int, db=Depends(get_db),
                       user: User = Depends(_read)):
-    """Live read on every request (doc 05: "List snapshots (live from
-    Proxmox)"); there is no snapshot table and this phase adds none.
+    """Live read on every request; there is no snapshot table.
 
-    PVE always includes a synthetic `current` entry describing the running
-    state. It is not a snapshot, has no snaptime, and cannot be rolled back to
-    or deleted, so it is dropped here rather than in the UI; otherwise every
+    PVE always includes a synthetic `current` entry describing the running state.
+    It is not a snapshot, has no snaptime, and cannot be rolled back to or
+    deleted, so it is dropped here rather than in the UI; otherwise every
     consumer of this endpoint has to know the same trivia.
     """
     v, host = _vm_and_host(db, vm_id)
@@ -847,16 +821,9 @@ def clone_vm_route(request: Request, vm_id: int,
                    user: User = Depends(_clone)):
     """A linked clone is refused here, not by PVE.
 
-    The upgrade path this docstring used to describe is now taken: the poller
-    mirrors `/cluster/resources`'s `template` flag onto `Vm`, so a linked clone
-    of an ordinary guest is refused with a sentence naming templates instead of
-    PVE's `500 Linked clone feature is not supported for '<volume>' (scsi0)`,
-    which never mentions them. Its trigger condition was "if PVE's rejection
-    proves confusing in practice", and doc 12 check 18 is that evidence.
-
-    Historical note, kept because it explains the shape: PVE permits a linked
-    clone (`full=false`) only from a template, and Proxploy could not tell
-    templates apart, so `full` was passed through unvalidated.
+    PVE permits a linked clone (`full=false`) only from a template, and its own
+    refusal (`500 Linked clone feature is not supported for '<volume>' (scsi0)`)
+    never names templates, so Proxploy refuses it with a sentence that does.
     """
     v, host = _vm_and_host(db, vm_id)
     if body.name is not None and not VM_NAME_RE.match(body.name):
@@ -903,11 +870,10 @@ class VmDeleteIn(BaseModel):
 def delete_vm_route(request: Request, vm_id: int,
                     body: VmDeleteIn = Body(default=VmDeleteIn()),
                     db=Depends(get_db), user: User = Depends(_remove)):
-    """The most destructive route in this phase: the guest and its disks are
-    gone, and nothing here backs them up first. Doc 05 puts it at owner, one
-    rung above every other VM route; on top of that it takes the same
-    typed-confirmation path as a self-targeted stop, and refuses a running
-    guest outright rather than forcing it down first.
+    """The most destructive route here: the guest and its disks are gone, and
+    nothing backs them up first. It sits at owner, one rung above every other VM
+    route; takes the same typed-confirmation path as a self-targeted stop; and
+    refuses a running guest outright rather than forcing it down first.
     """
     v, _host = _vm_and_host(db, vm_id)
     name = v.name or f"VM {v.vmid}"

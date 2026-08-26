@@ -1,28 +1,15 @@
-# backend/proxploy/services/hostclient.py
 """The one decrypt-then-construct helper: a Host row -> a ProxmoxClient.
 
-api/consoles.py and services/lifecycle.py each carried their own copy of these
-five lines; consoles.py's copy even carried a comment naming a 4th call site as
-the tip-over point for extracting it. Phase 6 adds three routers and twelve job
-handlers that all need it, so it is one function now and the copies are gone.
+Raises ProxmoxError, never HTTPException, never JobFailed: a route turns it
+into a 409, a job handler into a JobFailed. That translation stays at each
+call site, keeping this module free of both FastAPI and the job engine.
 
-It raises ProxmoxError, never HTTPException, never JobFailed; because both
-kinds of caller live here: a route turns it into a 409, a job handler into a
-JobFailed. That translation is one line at each call site and keeps this module
-free of both FastAPI and the job engine.
-
-Not used by api/hosts.py::test_host, deliberately: that route also needs the
-HostCredential row itself (to stamp `last_used_at`), which this helper does not
-return, so folding it in would mean widening the return type for one caller.
-
-Step one of the per-capability host token work (host-token-privileges-
-step-one-report.md) put the capability into `client_for_host` itself: storage
-is `host_credentials.kind = "api_token:<capability>"` (monitoring/lifecycle/
-console/backup), never a second WHERE clause threaded through every caller,
-and `UniqueConstraint(host_id, kind)` already enforces one token per
-capability with no schema change. `capability` defaults to "monitoring"
-because that is the one every host is guaranteed to have (it is mandatory at
-enrolment); every other call site names the capability it actually needs.
+Storage is `host_credentials.kind = "api_token:<capability>"`
+(monitoring/lifecycle/console/backup), never a WHERE clause threaded through
+every caller, and `UniqueConstraint(host_id, kind)` enforces one token per
+capability. `capability` defaults to "monitoring" because every host has one
+(it is mandatory at enrolment); other call sites name the capability they
+actually need.
 """
 from __future__ import annotations
 
@@ -34,18 +21,14 @@ from proxploy.services.pveum import CAPABILITIES
 
 
 class CapabilityNotConfigured(ProxmoxError):
-    """Raised the moment a call site asks for a capability this host has no
-    token for, before any network call is made.
+    """Raised when a call site asks for a capability this host has no token for,
+    before any network call is made.
 
-    A `ProxmoxError` subclass on purpose: every existing `except
-    ProxmoxError` block across the codebase (routes turning it into an
-    HTTPException, job handlers turning it into a JobFailed) catches this
-    without any changes, while `kind == "capability_missing"` and the
-    `.capability` attribute let a caller that wants to say something more
-    specific (e.g. a structured 400 naming where to add the token) do so.
-    Same shape as api/catalog.py's `install_catalog_entry` checking for an
-    `ssh_key` row before ever reaching the executor, generalized to four
-    capabilities instead of one always-or-never credential.
+    A `ProxmoxError` subclass on purpose: every existing `except ProxmoxError`
+    block (routes turning it into an HTTPException, job handlers into a JobFailed)
+    catches this unchanged, while `kind == "capability_missing"` and the
+    `.capability` attribute let a caller that wants a more specific message (e.g.
+    a structured 400) do so.
     """
 
     def __init__(self, host_name: str, capability: str):
@@ -70,15 +53,13 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
 
 def cluster_scope(host: Host) -> tuple:
     """Groups Hosts that are genuinely the same Proxmox cluster, for any
-    dedupe/lookup keyed on a node name or a ctid: both are only unique WITHIN
-    a cluster, not across two registered clusters (or two standalone hosts).
+    dedupe/lookup keyed on a node name or a ctid: both are unique only WITHIN a
+    cluster, not across two registered clusters (or two standalone hosts).
 
-    `cluster_name` is None for a standalone host, and None is a real value
-    meaning "not clustered" (pollers/__init__.py's UNREAD comment), not
-    "unknown cluster", two standalone hosts must never merge with each
-    other just because they share that None. Keyed by host.id in that case,
-    since a standalone host is its own one-node cluster and nothing else
-    can legitimately share its scope.
+    `cluster_name` is None for a standalone host, and None is a real value meaning
+    "not clustered" (pollers/__init__.py's UNREAD comment), not "unknown cluster":
+    two standalone hosts must never merge just because they share that None. Keyed
+    by host.id in that case, since a standalone host is its own one-node cluster.
     """
     return (host.cluster_name,) if host.cluster_name is not None else ("standalone", host.id)
 
@@ -88,20 +69,16 @@ def dedupe_vms(rows, hosts: dict) -> list:
 
     `/cluster/resources` answers for the whole cluster from any member, so every
     polled host mirrors every VM in the cluster: a two-host cluster produced two
-    rows for one guest, each with its own id. Observed on real hardware, where
-    it also made half of every action fail before `vms.node_name` existed (doc 12
-    check 18).
+    rows for one guest, each with its own id. Observed on real hardware, where it
+    also made half of every action fail before `vms.node_name` existed.
 
-    Keyed on `cluster_scope`, not on host id, for the reason that helper exists:
-    a vmid is unique only within a cluster. The row kept is the one belonging to
-    the host registered AT the node the guest runs on, falling back to the lowest
-    id, so the choice is deterministic rather than dependent on which host's poll
-    landed first.
+    Keyed on `cluster_scope`, not host id: a vmid is unique only within a cluster.
+    The row kept is the one belonging to the host registered AT the node the guest
+    runs on, falling back to the lowest id, so the choice is deterministic.
 
     A guest on a cluster node Proxploy has not enrolled is still returned, by
     whichever host reported it: hiding it would remove working functionality,
-    since a cluster-wide token acts on any member's guest through any node
-    (proven when the node fix was verified).
+    since a cluster-wide token acts on any member's guest through any node.
     """
     def rank(v, host) -> tuple:
         owns = bool(v.node_name) and host.node_name == v.node_name
@@ -140,22 +117,19 @@ def capability_gaps(app, db, host) -> dict[str, list[str] | None]:
 
     `api/hosts.py::_missing_privileges` only ever checked the MONITORING set,
     because that is the one a poll cycle needs. The other three tokens were never
-    checked against anything, and privilege drift is not hypothetical: two
-    privileges were added to the Lifecycle role on 2026-08-18 alone
-    (`SDN.Use` for a guest NIC on a PVE 9 bridge, `VM.Config.HWType` for a VM
-    create), each found only when a real token met real PVE (doc 12 checks 7,
-    17 and 18). Every token an operator generated before that is short of them
-    and nothing said so: the symptom is a 403 halfway through a job.
+    checked, and privilege drift is not hypothetical: privileges were added to the
+    Lifecycle role (e.g. `SDN.Use` for a guest NIC on a PVE 9 bridge,
+    `VM.Config.HWType` for a VM create), each found only when a real token met
+    real PVE. Every token an operator generated before is short of them and
+    nothing said so: the symptom is a 403 halfway through a job.
 
-    A value of None for a capability means "could not tell" (the token is
-    refused `/access/permissions`), never "nothing missing", the same rule
-    `_missing_privileges` follows. A capability with no token configured is
-    absent from the result rather than reported as fully missing, since not
+    None means "could not tell" (the token is refused `/access/permissions`),
+    never "nothing missing" — the same rule `_missing_privileges` follows. A
+    capability with no token configured is absent from the result, since not
     configuring one is a legitimate choice.
 
-    Costs one `/access/permissions` per configured token, so callers control
-    the cadence: the test route runs it per press, and the poll loop runs it
-    at a slow interval rather than every cycle.
+    Costs one `/access/permissions` per configured token; callers control the
+    cadence (the test route per press, the poll loop at a slow interval).
     """
     gaps: dict[str, list[str] | None] = {}
     for key, cap in CAPABILITIES.items():
@@ -176,16 +150,15 @@ def capability_gaps(app, db, host) -> dict[str, list[str] | None]:
 def cluster_quorate(rows: list[dict]) -> bool | None:
     """Is this cluster quorate, per its own `/cluster/status` cluster row?
 
-    None for a standalone node (no cluster row, so the question does not
-    apply) and None if the field is absent rather than guessing True.
+    None for a standalone node (no cluster row, the question does not apply) and
+    None if the field is absent rather than guessing True.
 
-    This exists because on 2026-08-18 a real cluster was driven into actual
-    quorum loss (doc 12 check 12) and NOTHING in the product noticed: every
-    host still read `connected`, `POST /hosts/{id}/test` still returned a PVE
-    version, and `/cluster/resources` still listed guests, while `/etc/pve`
-    was read-only and every write failed with "cluster not ready - no quorum?".
-    The one honest signal was `quorate: 0` on this row, from BOTH nodes, and no
-    code read it.
+    Exists because a real cluster was driven into actual quorum loss and NOTHING
+    in the product noticed: every host still read `connected`, `POST
+    /hosts/{id}/test` still returned a PVE version, and `/cluster/resources` still
+    listed guests, while `/etc/pve` was read-only and every write failed with
+    "cluster not ready - no quorum?". The one honest signal was `quorate: 0` on
+    this row, from BOTH nodes, and no code read it.
     """
     for row in rows:
         if row.get("type") == "cluster":
@@ -198,15 +171,14 @@ def cluster_member_count(rows: list[dict]) -> int | None:
     """How many nodes this cluster is CONFIGURED to have, per its own
     `/cluster/status` cluster row.
 
-    The point is that this number does not move when a node goes down: it
-    comes from corosync's config, not from liveness, so it is the only thing
-    that can tell "this cluster has two nodes and I can see one" from "this
-    cluster has one node". /cluster/resources cannot: a member that drops out
-    during a split leaves no row behind to notice, which is what let a partial
-    read pass as a complete one and halve every cluster-wide sum.
+    Does not move when a node goes down: it comes from corosync's config, not
+    liveness, so it is the only thing that can tell "two nodes, I see one" from
+    "one node". `/cluster/resources` cannot: a member that drops out during a
+    split leaves no row behind to notice, which is what let a partial read pass as
+    complete and halve every cluster-wide sum.
 
-    None for a standalone node (no cluster row, so nothing is missing by
-    definition) and None if the field is absent rather than guessing.
+    None for a standalone node and None if the field is absent rather than
+    guessing.
     """
     for row in rows:
         if row.get("type") == "cluster":
@@ -219,15 +191,15 @@ def guest_node(host, row=None) -> str:
     """The node a GUEST runs on, which is not always its host's own node.
 
     `/cluster/resources` answers for the whole cluster from any member, so on a
-    cluster every polled host mirrors every VM, and using the host's node
-    reaches the wrong one for every row but the owning node's: PVE answers
+    cluster every polled host mirrors every VM, and using the host's node reaches
+    the wrong one for every row but the owning node's: PVE answers
     `500 Configuration file 'nodes/<other>/qemu-server/<id>.conf' does not
-    exist`, observed on PVE 9.2.10 (doc 12 check 18).
+    exist`, observed on PVE 9.2.10.
 
-    `Vm.node_name` carries the answer; `App` has no such column and does not
-    need one today, because an app's row is repointed by the migration handler
-    and installs choose their host. Falls back to the host's node, which is
-    both correct for a standalone host and the behaviour that predates this.
+    `Vm.node_name` carries the answer; `App` has no such column and does not need
+    one today, because an app's row is repointed by the migration handler and
+    installs choose their host. Falls back to the host's node, correct for a
+    standalone host and the behaviour that predates this.
     """
     return getattr(row, "node_name", None) or host.node_name or ""
 
@@ -236,26 +208,22 @@ def cluster_identity(client) -> tuple[str | None, str | None]:
     """(node name, cluster name) for this address.
 
     `/cluster/status` is the only honest answer: on a cluster it marks the node
-    you are talking to with `local: 1`, which a `/nodes` listing cannot tell
-    you. A standalone node returns exactly one node row. Anything unexpected
-    leaves it NULL and the poller fills it in as before, so a surprising
-    cluster shape can never block enrolment.
+    you are talking to with `local: 1`, which a `/nodes` listing cannot tell you.
+    A standalone node returns exactly one node row. Anything unexpected leaves it
+    NULL and the poller fills it in, so a surprising cluster shape cannot block
+    enrolment.
 
     The SAME response carries cluster membership, in its `{"type": "cluster"}`
     row (a standalone node has no such row -> None), so recording
     `hosts.cluster_name` costs no extra round trip beyond this one call.
 
     Lives here rather than in api/hosts.py because BOTH the enrolment route and
-    the poll loop need it, and the poll loop must not import from the API
-    layer. Takes a client rather than a Host so the caller decides which
-    capability's client to spend.
+    the poll loop need it, and the poll loop must not import from the API layer.
 
-    RAISES rather than swallowing, and that is load-bearing now that the poll
-    loop calls it every cycle. A swallowed failure returns cluster=None, which
-    is indistinguishable from "this node is standalone", so a single probe
-    hiccup would clear a real cluster name and every node card would claim
-    standalone until something else happened to fix it. Enrolment still cannot
-    fail on a probe hiccup; it catches this itself.
+    RAISES rather than swallowing, and that is load-bearing now that the poll loop
+    calls it every cycle: a swallowed failure returns cluster=None, which is
+    indistinguishable from "this node is standalone", so a single probe hiccup
+    would clear a real cluster name. Enrolment catches this itself.
     """
     return cluster_identity_from(client.cluster_status())
 

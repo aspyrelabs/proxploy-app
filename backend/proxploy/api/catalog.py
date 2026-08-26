@@ -1,10 +1,9 @@
-"""Catalog browse + refresh routes (doc 05 Phase 4; catalog expansion plan,
-.superpowers/sdd/app-store-catalog-plan.md). Read routes are viewer-level;
-refresh is admin-gated. A refresh costs exactly 2 api.github.com calls flat,
-regardless of catalog size (services/catalog.py::run_discovery); per-entry
-script pairs are fetched lazily by ensure_classified, from
-raw.githubusercontent.com (a different host, no GitHub rate limit), the
-moment a card is opened here or an install is attempted."""
+"""Catalog browse + refresh routes. Read routes are viewer-level; refresh is
+admin-gated. A refresh costs exactly 2 api.github.com calls flat, regardless
+of catalog size (services/catalog.py::run_discovery); per-entry script pairs
+are fetched lazily by ensure_classified from raw.githubusercontent.com (a
+different host, no GitHub rate limit) the moment a card is opened or an
+install is attempted."""
 from __future__ import annotations
 
 import re
@@ -43,20 +42,14 @@ _refresh = authorize("catalog", "refresh")
 _install = authorize("app", "install")
 
 
-# The complete set of orderings the Store may ask for, as an ALLOWLIST of
-# prebuilt criteria. A sort key is a query parameter, so it is caller
-# controlled, and the only safe shape for caller-controlled ordering is one
-# that never reaches SQL as a string: an unknown key selects the default here
-# rather than being interpolated, quoted or trusted.
-#
-# NULLS ALWAYS LAST on every descending sort, and this is the trap the whole
-# table exists to avoid. SQLite orders NULL FIRST ascending, so a bare
-# `popularity DESC` puts every row we have no number for at the BOTTOM, which
-# is right, while a bare `popularity ASC` or any NULLS-default flip would put
-# them at the top of "most popular": 84 rows claiming to be the most installed
-# apps in the catalog on the strength of having no measurement at all. Same
-# for "newest" over the 9 unlisted rows that have no script_created. Name is
-# the tiebreak everywhere so equal values do not shuffle between requests.
+# Allowlist of prebuilt orderings: a sort key is caller-controlled, so the
+# only safe shape is one that never reaches SQL as a string (an unknown key
+# selects the default, never interpolated).
+# 
+# NULLS ALWAYS LAST on every descending sort: SQLite orders NULL FIRST
+# ascending, so a bare `popularity ASC` would crown the 84 unmeasured rows
+# "most popular" (same for `newest` over the 9 unlisted rows). Name is the
+# tiebreak everywhere so equal values don't shuffle between requests.
 _SORTS = {
     "name": lambda: (CatalogEntry.name.asc(),),
     "popularity": lambda: (nulls_last(CatalogEntry.popularity.desc()),
@@ -77,73 +70,37 @@ def _serialize(r: CatalogEntry) -> dict:
         # not. services/catalog_icons.py::served_icon_url owns that swap, and
         # api/apps.py resolves an installed app's icon through the same call,
         # so a card and the app installed from it can never disagree.
-        #
-        # Chosen because it needs NO frontend change: StoreCard already
-        # renders `entry.icon_url` and already falls back to an initials tile
-        # on error, so a cached icon, an uncached one and a broken one all
-        # already work. The alternative, a second `icon_local_url` field, would
-        # have made every consumer decide which to prefer, which is a decision
-        # with exactly one right answer and therefore not one to distribute.
         "icon_url": served_icon_url(r),
-        # `docs_url` rides alongside `website` because they are the same kind
-        # of thing and now come from the same place (upstream's `website` and
-        # `documentation`, services/catalog_metadata.py). Serving one and
-        # withholding the other would mean a card that links the vendor site
-        # while silently sitting on the docs link for the ~616 matched rows
-        # that have one. The provenance columns (metadata_source,
-        # metadata_synced_at, upstream_updated_at) deliberately stay
-        # unserved: they are sync bookkeeping, and the freshness signal the UI
-        # actually shows already has its own route in /catalog/status.
+        # `docs_url` rides alongside `website`: they come from the same upstream
+        # place (services/catalog_metadata.py), and serving one without the other
+        # would sit on the docs link for the ~616 rows that have one. Provenance
+        # columns (metadata_source, metadata_synced_at, upstream_updated_at) stay
+        # unserved: sync bookkeeping, not card content.
         "popularity": r.popularity, "website": r.website, "docs_url": r.docs_url,
-        # The one sync timestamp that IS served, and it has to be: popularity
-        # comes from upstream's telemetry service through a 23h server-side
-        # cache (services/catalog_telemetry.py), so the number can be a full
-        # day old while the name and icon beside it are minutes old. A raw
-        # count with no "as of" next to it would present stale data as live.
+        # The one sync timestamp that IS served: popularity comes through a 23h
+        # server-side cache (services/catalog_telemetry.py), so a raw count with no
+        # "as of" would present stale data as live.
         "popularity_synced_at": to_iso(r.popularity_synced_at),
-        # "listed" | "delisted" | "unlisted" | "variant" | null. The one
-        # metadata-sync column that IS served, because it changes what the
-        # card says rather than how fresh it is: "delisted" and "unlisted"
-        # both mean upstream retired the app while the script is still in the
-        # repo, which the Store badges. "variant" rows never reach the grid
-        # (see list_catalog), so the value is only ever visible on the
-        # unfiltered full-catalog call and on a direct by-slug lookup.
+        # "listed" | "delisted" | "unlisted" | "variant" | null. Served because it
+        # changes what the card says: "delisted"/"unlisted" mean upstream retired
+        # the app while the script stays in the repo (Store badges them). "variant"
+        # rows never reach the grid (see list_catalog), so this value only shows on
+        # the unfiltered full-catalog call and a direct by-slug lookup.
         "upstream_state": r.upstream_state,
         "default_cpu": r.default_cpu, "default_ram_mb": r.default_ram_mb,
         "default_disk_gb": r.default_disk_gb, "default_os": r.default_os,
         "default_os_version": r.default_os_version,
         "installable": r.installable, "unsupported_reason": r.unsupported_reason,
         "synced_at": to_iso(r.synced_at),
-        # The verifiable answer to "what will Proxploy actually run?". These
-        # two are only meaningful together: the path names the exact file and
-        # the sha pins the exact revision of it, which is the same
-        # pin-diff-consent posture install and update already hold themselves
-        # to (services/appstore.py runs raw_url(upstream_sha, script_path) and
-        # nothing else).
-        #
-        # `script_path` is SERVED, never derived, and the reason is worth
-        # stating precisely because the obvious reason is wrong. All 585 ct
-        # rows DO match `ct/<slug>.sh`, including the addon-delegated five and
-        # the rename leftovers, and not by luck: discovery takes the slug FROM
-        # the path (services/catalog.py::_ct_slug), so for ct rows the two
-        # cannot diverge by construction. A derivation would pass any test
-        # written only against the grid.
-        #
-        # It breaks on the 84 rows this same serializer returns from the
-        # UNFILTERED catalog call, where the slug is not the filename: 35 pve
-        # (`tools/pve/add-iptag.sh`), 32 addon, 16 vm (`vm/debian-13-vm.sh`)
-        # and `turnkey` at `turnkey/turnkey.sh`. The addon rows are the sharp
-        # case, because there discovery deliberately INVENTS a slug that
-        # differs from the file: dual-variant collision detection renames
-        # `tools/addon/coolify.sh` to `coolify-addon` so it cannot shadow the
-        # ct row. Any rule that reconstructs a path from a slug has to know
-        # about that, which is precisely the coupling this column exists to
-        # avoid. Discovery owns it; this is a read of it, and nothing here is
-        # added to WRITABLE_FIELDS.
-        #
-        # Either being null is normal and serves null: a row discovery has not
-        # pinned yet has no honest link to offer, and a default would be a
-        # link to the wrong file rather than no link.
+        # `script_path` is SERVED, never derived. The slug is not the filename for
+        # the 84 unfiltered rows: 35 pve (`tools/pve/add-iptag.sh`), 32 addon, 16 vm
+        # (`vm/debian-13-vm.sh`), `turnkey` (`turnkey/turnkey.sh`). The addon rows
+        # are the sharp case: discovery renames `tools/addon/coolify.sh` to
+        # `coolify-addon` (dual-variant collision detection) so it can't shadow the
+        # ct row. Any rule reconstructing a path from a slug must know this, which is
+        # the coupling this column exists to avoid. Discovery owns it; this is a read
+        # of it. Either null is normal and serves null: an unpinned row has no honest
+        # link, and a default would be a link to the wrong file.
         "script_path": r.script_path, "upstream_sha": r.upstream_sha,
         # Upstream's dates for the SCRIPT itself, which is what the Store's
         # "newest" and "recently updated" sorts mean. Not to be confused with
@@ -152,12 +109,10 @@ def _serialize(r: CatalogEntry) -> dict:
         # a description fix bumps). ISO or null.
         "script_created": to_iso(r.script_created),
         "script_updated": to_iso(r.script_updated),
-        # The card tags. ALL FOUR ARE TRI-STATE AND NULL MEANS UNKNOWN, NEVER
-        # "NO". The 9 `unlisted` rows have no upstream record at all, so we do
-        # not know whether they are ARM-capable, updateable or privileged, and
-        # a UI that renders null as a negative chip ("not ARM") would be
-        # asserting something nothing here supports. No chip is the honest
-        # rendering of null; a negative chip is not.
+        # The card tags. ALL FOUR ARE TRI-STATE AND NULL MEANS UNKNOWN, NEVER "NO":
+        # the 9 `unlisted` rows have no upstream record, so we don't know whether
+        # they're ARM-capable/updateable/privileged. No chip is the honest rendering
+        # of null; a negative chip is not.
         "has_arm": r.has_arm, "architectures": r.architectures,
         "updateable": r.updateable, "privileged": r.privileged,
         "port": r.port,
@@ -169,37 +124,27 @@ def _serialize(r: CatalogEntry) -> dict:
 def list_catalog(category: str | None = None, q: str | None = None,
                  entry_type: str | None = None, sort: str = DEFAULT_SORT,
                  db=Depends(get_db), user: User = Depends(_read)):
-    """Backs both the Store grid (always `entry_type=ct`, decision: non-LXC
-    entries never appear there) and, unfiltered, the full catalog table every
-    discovered entry lands in regardless of type.
-
-    Both surfaces are real, which is why the variant exclusion below hangs off
-    the `entry_type=ct` filter and not off the query as a whole: the grid must
-    not show 28 blank duplicate cards, and the full catalog table must still
-    account for every row discovery created.
+    """Backs the Store grid (always `entry_type=ct`; non-LXC entries never
+    appear) and, unfiltered, the full catalog table every discovered entry
+    lands in. The variant exclusion hangs off the `entry_type=ct` filter, not
+    the query as a whole: the grid must not show 28 blank duplicate cards, and
+    the full table must still account for every row discovery created.
 
     `sort` is one of `_SORTS`: name (default), popularity, newest, updated.
-    Anything else falls back to the default rather than erroring, because the
-    Store rendering in the wrong order is a far better failure than the Store
-    not rendering; the value never reaches SQL either way.
+    Anything else falls back to the default (never errors; never reaches SQL).
 
-    Ordering here is about CORRECTNESS, not paging: the frontend fetches every
-    ct row and slices client side, so this decides which rows the user sees
-    first, not which rows they receive.
-    """
+    Ordering is about CORRECTNESS, not paging: the frontend fetches every ct
+    row and slices client side, so this decides which rows the user sees
+    first, not which rows they receive."""
     query = db.query(CatalogEntry)
     if category:
         query = query.filter(CatalogEntry.category == category)
     if q:
         query = query.filter(CatalogEntry.name.ilike(f"%{q}%"))
     if entry_type == "ct":
-        # The Store grid. `store_visible()` is the ONE definition of what the
-        # Store may show (services/catalog_metadata.py), shared with the
-        # command palette's store group in api/search.py. It is a shared
-        # helper rather than a predicate written here because it was once
-        # written twice, and the copy in search.py never got the variant
-        # exclusion: the palette offered 28 hidden alpine phantoms and 84
-        # non-ct rows, each linking to a /store/<slug> that opened Not Found.
+        # The Store grid. `store_visible()` is the ONE definition of what the Store
+        # may show (services/catalog_metadata.py), shared with the command palette's
+        # store group (api/search.py).
         query = query.filter(store_visible())
     elif entry_type:
         query = query.filter(CatalogEntry.entry_type == entry_type)
@@ -210,40 +155,26 @@ def list_catalog(category: str | None = None, q: str | None = None,
 @router.get("/status", dependencies=[Depends(_read),
                                      Depends(require_entitlement("store.catalog"))])
 def catalog_status(request: Request, db=Depends(get_db), user: User = Depends(_read)):
-    """How old the catalog cache is, for doc 01's staleness indicator.
+    """How old the catalog cache is.
 
     MUST stay registered above `/{slug}`: Starlette matches in registration
     order, so declaring it after would make this a lookup for a catalog entry
-    named "status" and 404 forever (same trap api/apps.py documents around its
-    lifecycle wildcard).
+    named "status" and 404 forever.
 
     A separate route rather than a field on `GET /catalog` because that route
-    returns a bare list and wrapping it now would break every existing caller
-    for a banner.
-
-    Staleness is a real signal, not decoration: the catalog is refreshed by a
-    system schedule, so a stale cache means that schedule is off or has been
-    failing, and every install decision the operator makes is being taken
-    against pinned scripts that upstream may have moved past.
-    """
+    returns a bare list and wrapping it now would break every existing caller."""
     from sqlalchemy import func
 
     # `entries` counts what the operator can actually SEE, through the same
-    # store_visible() predicate list_catalog and search.py use. It used to
-    # count every ct row and reported 585 against a grid showing 556: the same
-    # class of bug as the search one, a rule applied in one place and not
-    # another, which is why this is the shared helper and not a third copy.
+    # store_visible() predicate list_catalog and search.py use.
     total = db.query(CatalogEntry).filter(store_visible()).count()
 
-    # `synced_at` is deliberately NOT narrowed the same way, and the two
-    # answer different questions on purpose. The count answers "how many cards
-    # do I have"; this answers "is the refresh schedule alive". Discovery
-    # stamps every discovered row in the same pass, so a hidden row is exactly
-    # as good a witness to that as a visible one, and restricting the sample
-    # would buy nothing while introducing a real failure mode: an install
-    # whose ct rows were all hidden would report "never refreshed" seconds
-    # after a successful refresh. Scoped to ct because a vm/pve/turnkey row's
-    # freshness has never been part of this signal.
+    # `synced_at` is deliberately NOT narrowed: the count answers "how many
+    # cards", this answers "is the refresh schedule alive". Discovery stamps
+    # every row in one pass, so a hidden row witnesses that as well as a
+    # visible one, and narrowing would report "never refreshed" for an install
+    # whose ct rows were all hidden. Scoped to ct: vm/pve/turnkey freshness was
+    # never part of this signal.
     newest = db.query(func.max(CatalogEntry.synced_at)).filter(
         CatalogEntry.entry_type == "ct").scalar()
     stale_after_s = request.app.state.settings.catalog_stale_after_s
@@ -306,11 +237,9 @@ def get_catalog_entry(slug: str, db=Depends(get_db),
     row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
     if row is None:
         raise HTTPException(404, "not found")
-    # Lazy classification (decision 2): opening a card is one of the two
-    # moments a ct/ entry's script pair gets fetched, never during discovery.
-    # Wrapped so a failed upstream fetch (404, network hiccup, rate limit on
-    # raw.githubusercontent.com) degrades to "not yet classified" rather than
-    # 500ing a card the user is just trying to look at.
+    # Lazy classification: opening a card is one of the two moments a ct/ entry's
+    # script pair gets fetched, never during discovery. A failed upstream fetch
+    # degrades to "not yet classified" rather than 500ing a card.
     if row.entry_type == "ct" and row.installable is None:
         try:
             ensure_classified(db, slug)
@@ -336,8 +265,7 @@ class InstallIn(BaseModel):
     host_id: int
     name: str
     # Optional: blank means build.func assigns the next free id via
-    # `${var_ctid:-$NEXTID}`. Requiring one was a bug; there is nothing an
-    # operator can usefully say here that the node cannot say better.
+    # `${var_ctid:-$NEXTID}`.
     ctid: int | None = None
     overrides: dict = {}
     consent: bool = False
@@ -355,14 +283,12 @@ class InstallIn(BaseModel):
         return v
 
 
-# This route triggers the single most security-relevant action in the whole
-# phase: SSH as root into a node and run a community-scripts.org script. Two
-# independent gates, and either can 400 first (order doesn't matter; both are
-# exercised in tests/test_catalog_install_api.py): root-consent for THIS HOST
-# (mirrors hosts.py's CONSENT_NOTE shape, but asked once per host and
-# remembered on Host.install_consent_at rather than re-ticked on every
-# install) and an already-enrolled `ssh_key` HostCredential: no key, no
-# route, regardless of consent.
+# This route triggers the single most security-relevant action: SSH as root
+# into a node and run a community-scripts.org script. Two independent gates,
+# either can 400 first: root-consent for THIS HOST (asked once per host,
+# remembered on Host.install_consent_at, not re-ticked per install) and an
+# already-enrolled `ssh_key` HostCredential: no key, no route, regardless of
+# consent.
 @router.post("/{slug}/install", status_code=202,
              dependencies=[Depends(_install),
                           Depends(require_entitlement("store.install"))])
@@ -389,10 +315,10 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if entry.entry_type != "ct":
         raise HTTPException(400, f"not an installable LXC app: {entry.unsupported_reason}")
     if entry.installable is None:
-        # Lazy classification (decision 2): the second of the two moments a
-        # ct/ entry's script pair gets fetched, on demand, right here, not
-        # during discovery. A fetch failure here is a real 400, not a 500:
-        # the caller asked to install something the server could not verify.
+        # Lazy classification: the second of the two moments a ct/ entry's script
+        # pair gets fetched, on demand, not during discovery. A fetch failure here is
+        # a real 400, not a 500: the caller asked to install something the server
+        # could not verify.
         try:
             ensure_classified(db, slug)
             db.refresh(entry)
@@ -416,13 +342,11 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if host.install_consent_at is None and body.consent:
         host.install_consent_at = utcnow()
     db.commit()
-    # The App row does not exist yet: the job below creates it. So there is no
-    # app id for resolve_target_name to look up, and left alone the audit row
-    # takes the name of the HOST it points at, i.e. the trail reads "App
-    # Install / pve1" and never says which app. Record what was REQUESTED
-    # instead, which is knowable right here and is what someone reading the
-    # history a month later is looking for. The ctid is optional: blank means
-    # the node picks the next free one, and it is not knowable until it does.
+    # The App row does not exist yet (the job below creates it), so there is no
+    # app id for resolve_target_name to look up, and the audit row would take the
+    # HOST's name ("App Install / pve1") and never say which app. Record what was
+    # REQUESTED instead. The ctid is optional: blank means the node picks the
+    # next free one, not knowable until it does.
     where = f"{body.name} (CT {body.ctid})" if body.ctid else body.name
     requested = f"{where} on {host.name}"
     job = request.app.state.jobs.enqueue(

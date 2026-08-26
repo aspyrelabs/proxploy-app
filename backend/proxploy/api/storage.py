@@ -1,20 +1,8 @@
-# backend/proxploy/api/storage.py
-"""Storage routes (doc 05 §Storage, doc 01 §5).
+"""Storage routes.
 
-Reads only, in this task. The LIST is served from the poller's in-memory
-`HostSnapshot.storage`: doc 05 calls it a "live-refreshed cache", and since the
-poll loop's single `cluster_resources()` already carries every field the page
-needs, listing costs zero PVE calls. Detail and content are on-demand
-passthroughs, one PVE call each, triggered by a human opening a datastore.
-There is no storage table and none is added: doc 04 defines no storage entity.
+Reads only. The LIST is served from the poller's in-memory `HostSnapshot.storage`, so listing costs zero PVE calls; detail and content are on-demand passthroughs, one PVE call each. There is no storage table and none is added.
 
-Entitlements: doc 05 leaves the column blank on all three reads. Doc 01 §5
-names `storage.view` (datastore overview) and `storage.content` (content
-browser) as real features, and doc 07 §3 says a feature without a key does not
-merge, so the reads are gated with their doc-01 keys rather than left ungated.
-Functionally identical today (every flag defaults ON); recorded as a doc-05
-amendment in the phase notes.
-"""
+Reads are gated on `storage.view` (datastore overview) and `storage.content` (content browser)."""
 from __future__ import annotations
 
 import contextlib
@@ -38,12 +26,9 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 
 # Reused as BOTH the route-level dependency and the parameter-level one so
 # FastAPI's dependency cache (keyed on the callable) collapses them into a
-# single call that runs FIRST. A bare `dependencies=[Depends(require_entitlement(...))]`
-# lands at position 0 and runs BEFORE auth, answering an anonymous caller with
-# 403 instead of 401: see tests/test_route_auth_invariant.py. scope_host()'s
-# default param "host_id" matches every {host_id} path segment in this router;
-# on GET "" (no host id in the path) the resolver returns None and enforce()
-# falls back to "any of the user's teams", same as before this had a scope.
+# single call that runs FIRST, before auth. scope_host()'s default param
+# "host_id" matches every {host_id} path segment in this router; on GET "" the
+# resolver returns None and enforce() falls back to "any of the user's teams".
 _read = authorize("storage", "read", scope_of=scope_host())
 _content = authorize("storage", "content", scope_of=scope_host())
 _manage_global = authorize("storage", "manage")          # POST "" (host_id in body)
@@ -54,12 +39,7 @@ UPLOAD_CHUNK = 1024 * 1024
 
 
 class StorageAttachIn(BaseModel):
-    """`config` is a free-form passthrough because the key set is per-plugin
-    (dir wants `path`, nfs wants `server`+`export`, pbs wants `server`+
-    `datastore`+`username`+`password`+`fingerprint`) and Proxmox is the
-    authority on what is valid, mirroring it here would be a second schema to
-    keep in sync and a new way to reject a storage type Proxmox supports.
-    It may carry a live credential; see the module note on where it does NOT go."""
+    """`config` is a free-form passthrough: the key set is per-plugin (dir wants `path`, nfs `server`+`export`, pbs `server`+`datastore`+`username`+`password`+`fingerprint`) and Proxmox is the authority on what is valid. It may carry a live credential; see the module note on where it does NOT go."""
     host_id: int
     storage: str
     type: str
@@ -71,30 +51,13 @@ class StorageEditIn(BaseModel):
 
 
 def _resync_snapshot(request: Request, db, host: Host) -> None:
-    """The LIST above is served from the poll snapshot, so a change PVE has
-    already applied stays invisible for up to a whole poll interval: unticking
-    `backup` on a datastore left the Backups page still counting it, until the
-    poller came round and it changed under the operator's hands. One
-    cluster_resources() call, the same one the poller makes, is enough for the
-    next read to tell the truth.
+    """The LIST above is served from the poll snapshot, so a change PVE has already applied stays invisible until the next poll. One cluster_resources() call refreshes it.
 
-    Read on MONITORING, never on the lifecycle client these routes write with.
-    /cluster/resources returns only what the token may audit, and the Lifecycle
-    role deliberately carries no Datastore.Audit (services/pveum.py), so that
-    client sees an EMPTY cluster: reading through it wiped every datastore off
-    the Storage page for a whole poll interval after any edit.
+    Read on MONITORING, never on the lifecycle client these routes write with: /cluster/resources returns only what the token may audit, and the Lifecycle role carries no Datastore.Audit (services/pveum.py), so that client sees an EMPTY cluster.
 
-    Written to EVERY enrolled member of the same cluster, not just the host the
-    write went to. /cluster/resources answers for the whole cluster, so each
-    member's snapshot holds its own copy of these same rows, and the LIST above
-    dedupes across all of them keeping whichever it sees FIRST. Refreshing one
-    host therefore fixed nothing on a two-node cluster whenever the peer's
-    stale copy won that race.
+    Written to EVERY enrolled member of the same cluster, not just the host written to; the LIST dedupes across them keeping whichever it sees first.
 
-    Best effort in both directions: the write has already succeeded by the time
-    this runs, so a failure here must not fail the request, and the poller
-    corrects the snapshots within the cycle regardless.
-    """
+    Best effort: the write already succeeded, so a failure here must not fail the request, and the poller corrects snapshots within the cycle."""
     snaps = request.app.state.poller.snapshots
     try:
         rows = storage_snapshot_rows(
@@ -210,18 +173,11 @@ def list_storage(request: Request, db=Depends(get_db),
         if host is None:
             continue  # host deleted between poll and request
         for st in snap.storage:
-            # A shared datastore is reported once per node and is ONE
-            # datastore; a local one with the same name on two nodes is two.
-            # No host_id in the key: two Hosts can be two nodes of the SAME
-            # cluster, and cluster_resources() returns the whole cluster from
-            # either one, so both snapshots carry every datastore. host_id
-            # in the key made each polling host's copy look like a distinct
-            # datastore; the surviving row is just whichever host's poll was
-            # seen first, which is fine since any host in the cluster can
-            # serve it. cluster_scope(host) IS still needed: a node name and
-            # a datastore name are only unique within one cluster, so two
-            # different clusters (or two standalone hosts) with a same-named
-            # node or datastore must not collapse into one row.
+            # A shared datastore is reported once per node and is ONE datastore; a
+            # local one with the same name on two nodes is two. No host_id in the key:
+            # two Hosts can be nodes of the same cluster and both snapshots carry every
+            # datastore, so host_id made each poll's copy look distinct. cluster_scope(host)
+            # IS still needed: a node/datastore name is only unique within one cluster.
             key = (cluster_scope(host), pool_key(st))
             seen.setdefault(key, _row(host, st))
     return sorted(seen.values(),
@@ -278,21 +234,9 @@ def storage_content(request: Request, host_id: int, name: str,
 def _refuse_silent_overwrite(request, db, host, node: str, storage: str,
                              content: str, filename: str,
                              overwrite: bool) -> None:
-    """An upload whose name already exists REPLACES the existing volume, and
-    PVE does it without a word: the second of two uploads under one name simply
-    wins (observed on PVE 9.2.6, 2026-08-10). An ISO a VM is booting from can be
-    swapped out from under it that way.
+    """An upload whose name already exists REPLACES the existing volume, and PVE does it without a word: the second upload under one name simply wins (observed PVE 9.2.6, 2026-08-10). A brand-new name stays frictionless; a collision stops and asks once, and `overwrite=true` is the whole answer - a plain boolean, not the typed confirm_phrase backups.py and vms.py use (those guard unrecoverable deletions).
 
-    A brand-new name stays frictionless; nothing is being destroyed there. A
-    collision stops and asks once, and `overwrite=true` is the whole answer:
-    deliberately a plain boolean the UI drives from a Replace/Skip/Cancel
-    dialog, NOT the typed confirm_phrase that backups.py and vms.py use. Those
-    guard deletions, which are unrecoverable; replacing a file the operator is
-    in the middle of uploading is not in that class.
-
-    Checked BEFORE the body is spooled, so a multi-GB upload is not read to
-    disk only to be rejected.
-    """
+    Checked BEFORE the body is spooled, so a multi-GB upload is not read to disk only to be rejected."""
     if overwrite:
         return
     volid = f"{storage}:{content}/{filename}"
@@ -327,16 +271,9 @@ def upload_content(request: Request, host_id: int, name: str,
                    file: UploadFile = File(...), content: str = Form("iso"),
                    node: str | None = Form(None), overwrite: bool = Form(False),
                    db=Depends(get_db), user: User = Depends(_content)):
-    """Spool the body to disk, then hand the PATH to a job (doc 05 §Storage).
+    """Spool the body to disk, then hand the PATH to a job.
 
-    Never slurp the whole upload in one call: FastAPI's UploadFile already
-    spools to a SpooledTemporaryFile, and reading it all at once would
-    materialise a multi-GB ISO in this process's RAM. The 1 MiB loop below
-    keeps peak memory flat regardless of file size. The cost, stated in
-    services/storagejobs.py's docstring too: the ISO crosses the wire twice
-    (browser -> here -> PVE) and the Proxploy host needs transient free disk
-    equal to the file size.
-    """
+    Never slurp the whole upload: reading it all at once would materialise a multi-GB ISO in this process's RAM. The 1 MiB loop below keeps peak memory flat. Cost: the ISO crosses the wire twice (browser -> here -> PVE) and the Proxploy host needs transient free disk equal to the file size."""
     host = _host_or_404(db, host_id)
     node = _resolve_node(request, host, name, node)
     _refuse_silent_overwrite(request, db, host, node, name, content,
@@ -399,23 +336,13 @@ def delete_content(request: Request, host_id: int, name: str, volid: str,
                            Depends(require_entitlement("storage.manage"))])
 def attach_storage(request: Request, body: StorageAttachIn, db=Depends(get_db),
                    user: User = Depends(_manage_global)):
-    """Attach a storage definition (doc 05 §Storage, doc 01 §5 "Add/edit storage").
+    """Attach a storage definition.
 
-    Synchronous: Proxmox returns no UPID for /storage, so there is no job and
-    therefore no `jobs.params` row holding `body.config`. The audit row is the
-    only durable trace, and write_audit runs it through redact(); nested
-    `config.password` included.
+    Synchronous: Proxmox returns no UPID for /storage, so there is no job and no `jobs.params` row holding `body.config`; the audit row is the only durable trace, and write_audit runs it through redact() (nested `config.password` included).
 
-    The response deliberately echoes NO config: a credential the caller just
-    sent must not come back out of a GET the browser might cache or a screenshot
-    someone pastes into a ticket.
+    The response deliberately echoes NO config: a credential the caller just sent must not come back out of a GET the browser might cache.
 
-    `capability="lifecycle"`: attaching/editing/detaching a storage POOL
-    DEFINITION needs Datastore.Allocate, a node-infrastructure privilege
-    none of the four capabilities carried until the per-capability token
-    sweep found the gap (host-token-privileges-step-one-report.md), the
-    same class of bug Sys.PowerMgmt was.
-    """
+    `capability="lifecycle"`: attaching/editing/detaching a storage POOL DEFINITION needs Datastore.Allocate."""
     host = _host_or_404(db, body.host_id)
     ip = request.client.host if request.client else None
     # target_id here is the HOST's id, not a storage row's, so

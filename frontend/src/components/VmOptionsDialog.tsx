@@ -32,29 +32,19 @@ type SaveResult = {
 }
 
 /**
- * The settings that only take hold once the VM has been shut down and
- * started again. `agent`, `hotplug` and `tablet` are deliberately NOT here:
- * each of those is conditional (the agent's fstrim on clone applies at once,
- * hotplug applies at once unless CPU or memory is involved, and the tablet
- * applies at once when USB hotplug is on), so each carries its own sentence
- * instead of this blanket one.
+ * Settings that only take hold after a full shutdown and start.
+ * `agent`, `hotplug` and `tablet` are NOT here: each is conditional
+ * and carries its own sentence.
  */
 const NEXT_BOOT = new Set([
   'ostype', 'localtime', 'boot', 'acpi', 'kvm', 'freeze', 'startdate', 'smbios1',
 ])
 
 /**
- * What Proxmox does when the key is absent from the config file entirely.
- *
- * This is the whole reason the form below tracks "unset" as its own state
- * rather than folding it into false. `acpi`, `kvm` and `tablet` are ON when
- * absent, so reading a missing key as false would show three switches off
- * that are really on, and saving would then write those wrong values into
- * the guest's config for good.
- *
- * `localtime` is not in this table on purpose: it has no fixed default,
- * Proxmox derives it from the OS type (on for Windows, off otherwise), so it
- * gets a three-way control of its own rather than a switch.
+ * What Proxmox does when the key is absent from the config file.
+ * `acpi`, `kvm` and `tablet` are ON when absent, so reading a missing
+ * key as false would show three switches off that are really on.
+ * `localtime` has no fixed default, so it gets a three-way control.
  */
 const BOOL_DEFAULT: Record<string, boolean> = {
   onboot: false, protection: false, acpi: true, kvm: true, tablet: true, freeze: false,
@@ -84,8 +74,8 @@ const HOTPLUG_FLAGS: [string, string][] = [
   ['usb', 'USB devices'],
   ['cloudinit', 'Cloud-init drive'],
 ]
-// Proxmox's own default for a config with no hotplug line at all. Another
-// case where absent is not off: three of the six are already on.
+// Proxmox's own default for a config with no hotplug line at all.
+// Absent is not off: three of the six are already on.
 const HOTPLUG_DEFAULT = 'network,disk,usb'
 
 const SMBIOS_FIELDS: [string, string][] = [
@@ -139,9 +129,8 @@ type Form = {
   smbios1: Props
 }
 
-/** A Proxmox property string, `a=1,b=2`, as an object. Bare tokens with no
- *  `=` are dropped: the one shape that uses them here is `agent: 1`, which
- *  parseAgent handles before this is reached. */
+/** A Proxmox property string, `a=1,b=2`, as an object. Bare tokens with
+ *  no `=` are dropped. */
 function parseProps(raw: unknown): Props {
   const out: Props = {}
   if (raw == null) return out
@@ -155,8 +144,8 @@ function parseProps(raw: unknown): Props {
 function parseAgent(raw: unknown): Props {
   if (raw == null) return {}
   const s = String(raw)
-  // Proxmox writes the short form `agent: 1` when only the on/off part was
-  // ever set, and the full property string once any sub-setting is added.
+  // Proxmox writes `agent: 1` when only on/off was set, and the full
+  // property string once any sub-setting is added.
   if (s === '0' || s === '1') return { enabled: s }
   return parseProps(s)
 }
@@ -172,8 +161,7 @@ function hotplugOn(raw: string): Set<string> {
 
 function hotplugString(on: Set<string>): string {
   const list = HOTPLUG_FLAGS.map(([f]) => f).filter((f) => on.has(f))
-  // Proxmox spells "nothing is hot-pluggable" as the single character 0, not
-  // as an empty value.
+  // Proxmox spells "nothing is hot-pluggable" as the single character 0.
   return list.length ? list.join(',') : '0'
 }
 
@@ -181,9 +169,9 @@ function bootOrder(devs: BootDev[]): string {
   return devs.filter((d) => d.on).map((d) => d.dev).join(';')
 }
 
-/** The sub-keys worth sending for `agent`. Applied to BOTH the loaded config
- *  and the edited one, so a VM that already reads `agent: 0` does not open
- *  looking as if something had been changed. */
+/** The sub-keys worth sending for `agent`. Applied to BOTH the loaded
+ *  config and the edited one, so a VM that reads `agent: 0` does not
+ *  open looking as if something had been changed. */
 function agentBody(a: Props): Props {
   const out: Props = {}
   if (a.enabled !== '1') return out
@@ -231,15 +219,11 @@ function toForm(values: Record<string, unknown>): Form {
 }
 
 /**
- * The sparse body for PUT /vms/{id}/options: a key absent means leave it
- * alone, a key with a value sets it, and a key set to null DELETES it so the
- * setting goes back to whatever Proxmox does by default.
- *
- * Everything is diffed against the config as it was loaded, so a control
- * nobody touched contributes nothing, and a control put back to its Proxmox
- * default sends null rather than the default value. Writing a default back
- * would bake it into the guest's config file for good, which is a real
- * change dressed up as a no-op.
+ * The sparse body for PUT /vms/{id}/options: a key absent means leave
+ * it alone, a key with a value sets it, and a key set to null DELETES it
+ * so the setting goes back to Proxmox's default. Everything is diffed
+ * against the config as loaded. Writing a default back would bake it
+ * into the guest's config file for good.
  */
 function buildBody(base: Form, form: Form): Record<string, unknown> {
   const body: Record<string, unknown> = {}
@@ -265,8 +249,7 @@ function buildBody(base: Form, form: Form): Record<string, unknown> {
   }
 
   // Never null: deleting `boot` restores Proxmox's "try anything" order,
-  // which is a different intention from an operator who switched every
-  // device off on purpose.
+  // which is a different intention from switching every device off.
   if (bootOrder(base.boot) !== bootOrder(form.boot)) {
     body.boot = { order: bootOrder(form.boot) }
   }
@@ -293,23 +276,17 @@ function pendingText(v: unknown): string {
   return String(v)
 }
 
-/** The change gutter, the one piece of visual language this dialog invents.
- *
- *  A save here is a diff against `/etc/pve/qemu-server/<vmid>.conf`: some lines
- *  get written, one may get removed, the rest of the file is untouched. So a
- *  row you have altered is marked in the gutter and its label goes amber, and
- *  the footer counts them. It encodes exactly what the Save button will do,
- *  which is why it earns the ink; nothing else in the dialog is decorated. */
+/** The change gutter. A save here is a diff against the guest's config
+ *  file: some lines get written, one may get removed. A row you have
+ *  altered is marked in the gutter and its label goes amber, and the
+ *  footer counts them. */
 const ROW = 'group relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 '
           + 'border-l-2 py-3 ps-3 pe-1'
 
 /** "next boot" as nine characters, not a sentence.
- *
- *  Eight of these settings only land on a full shutdown and start, and saying
- *  so under every one of them was most of what made this dialog unreadable.
- *  The chip carries the fact; the tooltip carries the sentence, including the
- *  part people get wrong, which is that a reset or a reboot from inside the
- *  guest does NOT count. */
+ *  Eight of these settings only land on a full shutdown and start.
+ *  The chip carries the fact; the tooltip carries the sentence,
+ *  including that a reset or guest reboot does NOT count. */
 function Effect({ optionKey, running, pending }: {
   optionKey: string
   running: boolean
@@ -318,12 +295,10 @@ function Effect({ optionKey, running, pending }: {
   const held = optionKey in pending
   if (!held && (!running || !NEXT_BOOT.has(optionKey))) return null
   // pendingText, not String(): a held value for a property-string setting
-  // such as agent or smbios1 is an object, and String() renders it as
-  // [object Object] in the one place the operator needs to read it.
+  // such as agent is an object, and String() renders it as [object Object].
   const value = held ? pendingText(pending[optionKey]) : null
   // The data- attributes are the semantic half of this chip: which settings
-  // are deferred is a fact about the VM, not a style, and it is what the tests
-  // assert on rather than reading colours.
+  // are deferred is a fact about the VM, not a style.
   return (
     <span
       data-next-boot={held ? undefined : optionKey}
@@ -344,16 +319,12 @@ function Effect({ optionKey, running, pending }: {
 }
 
 /** One setting: what it is on the left, the control on the right.
- *
- *  Every row in the dialog is this shape, so the controls line up in a single
- *  column an eye can run down. `hint` is the long explanation and lives behind
- *  the (i) rather than on the page; `warn` is for the two settings whose
- *  consequence has to be unmissable, and is the only prose that stays inline. */
-/** A heading inside one section's pane. Advanced carries seven unrelated
- *  rows, from hot-plug to SMBIOS identity, and a flat column of them says
- *  nothing about which belong together. The markup is what the "Set by
- *  Proxmox only" group was already using inline; naming it keeps the three
- *  groups identical by construction rather than by copy. */
+ *  Every row is this shape, so the controls line up. `hint` lives
+ *  behind the (i); `warn` is for settings whose consequence must be
+ *  unmissable. */
+/** A heading inside one section's pane. Advanced carries seven
+ *  unrelated rows; a flat column says nothing about which belong
+ *  together. */
 function SubHeading({ children }: { children: React.ReactNode }) {
   return (
     <p className="mb-1 ps-3 pt-3 text-[11px] uppercase tracking-wide text-text-3">
@@ -418,10 +389,8 @@ const smallLabel = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
 
 /**
  * Every setting on a VM's Options page, in one dialog.
- *
- * Loads the config first (GET), because half of what this form has to show
- * is which keys Proxmox actually holds a line for. Nothing is guessed from
- * the VM row.
+ * Loads the config first (GET), because half of what this form shows
+ * is which keys Proxmox actually holds a line for.
  */
 export function VmOptionsDialog({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
   const q = useQuery({
@@ -447,10 +416,8 @@ function OptionsForm({ vm, data, onClose }: {
   vm: VmRow; data: VmOptions; onClose: () => void
 }) {
   const qc = useQueryClient()
-  // `base` is the config as Proxmox last confirmed it, and the only thing the
-  // form is ever diffed against. It moves forward on a successful save so the
-  // dialog can stay open showing what is pending without offering to send the
-  // same change twice.
+  // `base` is the config as Proxmox last confirmed it, and the only thing
+  // the form is ever diffed against. It moves forward on a successful save.
   const [base, setBase] = useState<Form>(() => toForm(data.values))
   const [form, setForm] = useState<Form>(() => toForm(data.values))
   const [pending, setPending] = useState<Record<string, unknown>>(data.pending ?? {})
@@ -458,7 +425,7 @@ function OptionsForm({ vm, data, onClose }: {
   const [section, setSection] = useState('general')
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }))
-  // A switch put back to what Proxmox does anyway becomes unset, which is what
+  // A switch put back to what Proxmox does anyway becomes unset, which
   // makes buildBody send a delete instead of writing the default down.
   const setBool = (k: keyof Form, v: boolean) =>
     set(k, (v === BOOL_DEFAULT[k as string] ? undefined : v) as Form[keyof Form])
@@ -527,11 +494,9 @@ function OptionsForm({ vm, data, onClose }: {
 
   return (
     <div className="mt-3">
-      {/* Two panes, not one scroll. Nineteen settings in a single column is
-          what made the first version unreadable: there was no way to find one
-          without reading all of them. The rail also carries a change count per
-          section, so unsaved work cannot hide in a section you are not
-          looking at. */}
+      {/* Two panes, not one scroll. The rail carries a change count per
+                section, so unsaved work cannot hide in a section you are not
+                looking at. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)]">
         <nav aria-label="Option sections"
           className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
@@ -653,8 +618,7 @@ function OptionsForm({ vm, data, onClose }: {
               <OptionRow label="Boot order" changed={changed('boot')}
                 hint="Proxmox tries these in order. Only devices already in the boot order are listed, because Proxmox does not report the rest here."
                 // Switching every device off is a VM that will not boot, and
-                // Proxmox will accept it without complaint. Say so here rather
-                // than let it be discovered at the next start.
+                // Proxmox will accept it without complaint. Say so here.
                 warn={form.boot.length > 0 && form.boot.every((d) => !d.on)
                   ? <span className="text-red">
                       Nothing is left to boot from, so this VM will not boot.
@@ -782,9 +746,9 @@ function OptionsForm({ vm, data, onClose }: {
 
               </div>
 
-              {/* Locked, not hidden. These three exist in Proxmox and an operator
-                  who knows that would otherwise wonder where they went; saying
-                  why costs one line and answers the question before it is asked. */}
+              {/* Locked, not hidden. These three exist in Proxmox and an
+                                operator who knows that would otherwise wonder where
+                                they went. */}
               {restricted.length > 0 && (
                 <div>
                   <SubHeading>Set by Proxmox only</SubHeading>

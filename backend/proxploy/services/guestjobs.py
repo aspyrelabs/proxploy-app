@@ -1,15 +1,11 @@
-"""Guest- and node-shaped job handlers (doc 10 Phase 6).
+"""Guest- and node-shaped job handlers.
 
-Shared home for every Phase 6 handler that is not storage or backups:
-`network.apply` lands here first; Tasks 10 and 11 append `vm.snapshot_*`,
-`vm.create`, `vm.clone` and `vm.delete` to this same module rather than
-starting new ones. Shape is services/lifecycle.py's: a blocking `_resolve` in
-a thread, ctx.log/ctx.progress narration, the shared await_task poll loop,
-module-bottom HANDLERS registration.
+Shape is services/lifecycle.py's: a blocking `_resolve` in a thread,
+ctx.log/ctx.progress narration, the shared await_task poll loop, module-bottom
+HANDLERS registration.
 
-Registration is by import side effect, main.py's lifespan imports this module
-with a `# noqa: F401`, and without that import none of these kinds exist.
-"""
+Registration is by import side effect: main.py's lifespan imports this module
+with a `# noqa: F401`, and without that import none of these kinds exist."""
 from __future__ import annotations
 
 import asyncio
@@ -24,12 +20,9 @@ from proxploy.services.pvetask import await_task
 def _resolve_host(app, host_id: int, capability: str = "monitoring"):
     """Blocking: host_id -> (ProxmoxClient, host name). Runs in a thread.
 
-    Shared by `run_network_apply` (needs "lifecycle": staging/applying a
-    bridge is Sys.Modify) and `run_host_power` (deliberately left at the
-    "monitoring" default -- node power is its own capability dimension,
-    landing separately per per-capability-tokens-plan.md §3 footnote 3;
-    changing what it resolves to is out of scope for this sweep).
-    """
+    Shared by `run_network_apply` (needs "lifecycle": applying a bridge is
+    Sys.Modify) and `run_host_power` (left at the "monitoring" default; node
+    power is its own capability dimension)."""
     with app.state.sessionmaker() as db:
         host = db.get(Host, host_id)
         if host is None:
@@ -46,12 +39,10 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
     """Promote /etc/network/interfaces.new on one node (PUT /nodes/{node}/network).
 
     The confirmation gate lives at the API layer (api/network.py::apply_network);
-    by the time this runs the operator has already typed the node name back.
-    A failure here can mean the node is unreachable rather than that the apply
-    failed, await_task raising on a lost connection is the honest outcome
-    either way, and the transcript keeps the UPID so an operator at the console
-    can look the task up locally.
-    """
+    by the time this runs the operator has already typed the node name back. A
+    failure here can mean the node is unreachable rather than that the apply
+    failed; the transcript keeps the UPID so an operator at the console can look
+    the task up locally."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
     node = str(params["node"])
@@ -59,12 +50,11 @@ async def run_network_apply(ctx: JobContext, params: dict) -> dict:
         _resolve_host, app, host_id, "lifecycle")
     ctx.log(f"applying staged network config on node {node} ({host_name})")
     # Said BEFORE the call, so the transcript carries it even if this job never
-    # gets to write another line. On real hardware an apply that moved vmbr0's
-    # address returned a UPID in 0.1 seconds and the node then vanished for 193
-    # seconds, and the very same UPID reported TASK OK once it returned (doc 12
-    # check 8). So a failure below is genuinely ambiguous, and the transcript has
-    # to say which readings are possible rather than leaving the operator to
-    # assume the safest one.
+    # writes another line. On real hardware an apply that moved vmbr0's address
+    # returned a UPID in 0.1 s and the node then vanished for 193 s, and that
+    # same UPID reported TASK OK once it returned. So a failure below is
+    # genuinely ambiguous, and the transcript has to say which readings are
+    # possible.
     ctx.log("if this change costs the node its own network, this job will report "
             "a failure it cannot distinguish from a real one: the apply may have "
             "succeeded. The task id above is readable on the node itself.")
@@ -82,51 +72,37 @@ HANDLERS["network.apply"] = run_network_apply
 
 
 async def run_host_power(ctx: JobContext, params: dict) -> dict:
-    """Reboot or power off a Proxmox NODE (host actions menu, doc 02 §9,
-    doc 08 §1 and §9 row 14).
+    """Reboot or power off a Proxmox NODE (host actions menu).
 
     The typed-confirmation gate, including the self-guard warning that the
-    target can be the node Proxploy itself runs on, lives entirely at the API
-    layer (api/hosts.py::power_node); by the time this job runs the operator
-    has already typed the node's name back.
+    target can be the node Proxploy itself runs on, lives at the API layer
+    (api/hosts.py::power_node); by the time this job runs the operator has
+    already typed the node's name back.
 
-    If the node this runs on turns out to be the one Proxploy itself is on,
-    the job engine dies mid-poll along with everything else on that machine:
-    there is no in-process way to catch that, the whole process disappears
-    with no chance to write a terminal row. Nothing here needs to handle it.
-    JobBackend.sweep_orphans already marks any job still `queued`/`running`
-    as `interrupted` on the next boot, the same as an ordinary ungraceful
-    restart catches any other job mid-flight; a row stuck showing `running`
-    forever would be its own kind of lie, and this needs no special case to
-    avoid that, the existing sweep already covers it.
+    If the node this runs on is the one Proxploy itself is on, the job engine
+    dies mid-poll along with everything else on that machine: there is no
+    in-process way to catch that. JobBackend.sweep_orphans marks any job still
+    `queued`/`running` as `interrupted` on the next boot, so no special case is
+    needed here.
 
-    No percentage progress is reported (`report_progress=False`): the only
-    thing this job can measure is whether Proxmox accepted the command and
-    the issuing task finished, which usually happens in well under a second,
-    long before the node itself has actually gone anywhere. That says
-    nothing about whether the node has finished rebooting or come back up,
-    so reporting a percentage (even a 10 -> 100 jump) would claim more
-    certainty than this job actually has.
-    """
+    No percentage progress is reported (`report_progress=False`): the only thing
+    this job can measure is whether Proxmox accepted the command and the issuing
+    task finished, well before the node has actually gone anywhere, so a
+    percentage would claim more certainty than this job has."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
     node = str(params["node"])
     command = str(params["command"])
-    # Deliberately the "monitoring" default, not "lifecycle": node power is
-    # its own capability dimension and does not exist as one of the four
-    # `kind="api_token:<capability>"` rows this sweep encodes (see
-    # _resolve_host's docstring). Unchanged behaviour, out of scope here.
+    # Deliberately the "monitoring" default, not "lifecycle": node power is its
+    # own capability dimension.
     client, host_name = await asyncio.to_thread(_resolve_host, app, host_id)
     verb = "rebooting" if command == "reboot" else "powering off"
     ctx.log(f"{verb} node {node} ({host_name})")
     upid = await asyncio.to_thread(client.node_power, node, command)
-    # Proxmox answers this one with null, not a UPID: node_cmd reboots or
-    # shuts the node down inside the request handler rather than forking a
-    # task (see ProxmoxClient.node_power). Feeding that None to await_task
-    # asked the node for the log of a task called "None", so every real power
-    # off ended as a failed job reading "task log failed for None: 400 Bad
-    # Request" while the node powered off perfectly well behind it. Only
-    # follow a task when Proxmox actually gave us one.
+    # Proxmox answers this one with null, not a UPID: node_cmd reboots/shuts the
+    # node down inside the request handler rather than forking a task (see
+    # ProxmoxClient.node_power). Only follow a task when Proxmox actually gave us
+    # one.
     exitstatus = None
     if upid:
         status = await await_task(ctx, client, node, upid, report_progress=False,
@@ -150,10 +126,8 @@ HANDLERS["host.shutdown"] = run_host_power
 def _vm_target(app, vm_id: int):
     """Blocking: vms.id -> (client, node, vmid, name, host_id). Runs in a thread.
 
-    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch; 
-    everything in this module is qemu-only (doc 05 puts snapshots, create and
-    clone under /vms).
-    """
+    Same shape as services/lifecycle.py::_resolve, minus the app/CT branch;
+    everything in this module is qemu-only."""
     with app.state.sessionmaker() as db:
         v = db.get(Vm, vm_id)
         if v is None:
@@ -165,13 +139,13 @@ def _vm_target(app, vm_id: int):
             client = client_for_host(app, db, host, capability="lifecycle")
         except ProxmoxError as e:
             raise JobFailed(str(e)) from e
-        # The GUEST's node, not the host's. On a cluster every polled host
-        # mirrors every VM (/cluster/resources answers for the whole cluster),
-        # so host.node_name is the wrong node for every row but the owning
-        # one, and PVE answered each action with `500 Configuration file
-        # 'nodes/<other>/qemu-server/<id>.conf' does not exist` (doc 12 check
-        # 18). Falls back to the host's node for a row not polled since
-        # vms.node_name existed, which is exactly the old behaviour.
+        # The GUEST's node, not the host's. On a cluster every polled host mirrors
+        # every VM (/cluster/resources answers for the whole cluster), so
+        # host.node_name is the wrong node for every row but the owning one, and PVE
+        # answered each action with `500 Configuration file
+        # 'nodes/<other>/qemu-server/<id>.conf' does not exist`. Falls back to the
+        # host's node for a row not polled since vms.node_name existed, which is
+        # exactly the old behaviour.
         return (client, guest_node(host, v),
                 int(v.vmid), v.name or f"VM {v.vmid}", host.id)
 
@@ -261,11 +235,9 @@ def _host_client(app, host_id: int):
 def _create_params(params: dict) -> dict:
     """The one place Proxploy's create spec becomes PVE's qemu parameters.
 
-    Deliberately opinionated defaults rather than a passthrough of arbitrary
-    PVE keys: virtio-scsi-single + a virtio NIC is what the Proxmox UI's own
-    defaults produce, and a create wizard that lets a caller post raw qemu
-    config would be an unvalidated write to the hypervisor.
-    """
+    Deliberately opinionated defaults rather than a passthrough of arbitrary PVE
+    keys: a caller posting raw qemu config would be an unvalidated write to the
+    hypervisor."""
     iso = params.get("iso")
 
     def _net0(p: dict) -> str:
@@ -298,20 +270,15 @@ def _create_params(params: dict) -> dict:
 async def create_vm(ctx: JobContext, params: dict) -> dict:
     """`vm.create`, post the spec, poll the task, nudge the UI.
 
-    No `Vm` row is written here. `vms` is the poller's droppable mirror (doc 04:
-    Proxmox is the truth) and writing one from this side would create a row the
-    next poll cycle either confirms or deletes, a second, worse source of
-    truth. The resource publish below is the same nudge run_lifecycle emits, so
-    an open tab refetches instead of waiting out the 30 s interval.
+    No `Vm` row is written here: `vms` is the poller's droppable mirror, and
+    writing one from this side would create a second, worse source of truth the
+    next poll cycle either confirms or deletes. The resource publish below is the
+    same nudge run_lifecycle emits, so an open tab refetches instead of waiting
+    out the 30 s interval.
 
-    That nudge on its own bought nothing, though: the refetch it triggers reads
-    the mirror, which the poller has not refreshed yet, so the tab got the same
-    stale list back and the VM still took a poll interval to appear. The
-    poller.wake() below is the missing half. It is measured as sufficient: the
-    guest is in /cluster/resources ~18 ms after the task finishes (see
-    Poller.wake), so the cycle it asks for actually finds it, and that cycle
-    publishes its own vm/list event once the mirror is fresh.
-    """
+    The nudge alone isn't enough: the refetch reads the mirror before the poller
+    refreshes it, so the poller.wake() below is the missing half that makes the
+    cycle actually find the new guest."""
     app = ctx.backend.app
     host_id = int(params["host_id"])
     client, host_node, host_name = await asyncio.to_thread(_host_client, app,
@@ -377,13 +344,8 @@ async def delete_vm(ctx: JobContext, params: dict) -> dict:
     drop: deleting it here would beat the poller to a state Proxmox has not
     confirmed yet.
 
-    A destroy needs no more than the wake either, and specifically no targeted
-    row deletion from this side. Unlike apps, `vms` has no missing_since grace
-    period (see the sweep in pollers/__init__.py: "a trustworthy cycle still
-    deletes at once"), so the very next cycle drops the row, and the guest is
-    measured out of /cluster/resources 27 to 39 ms after the destroy task
-    finishes. `_absence_is_trustworthy` is untouched and still decides.
-    """
+    Unlike apps, `vms` has no missing_since grace period, so the very next poll
+    cycle drops the row; `_absence_is_trustworthy` is untouched and still decides."""
     app = ctx.backend.app
     vm_id = int(params["vm_id"])
     client, node, vmid, vm_name, host_id = await asyncio.to_thread(

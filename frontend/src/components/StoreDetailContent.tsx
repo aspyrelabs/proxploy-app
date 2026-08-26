@@ -14,11 +14,9 @@ import {
 import { EmptyState } from '../components/EmptyState'
 import { IconTile } from '../components/IconTile'
 
-// Code-split: react-markdown plus its unified/micromark tree is 35.7 kB
-// gzipped, and it is needed only when someone opens an app that has release
-// notes. Splitting it keeps that off the initial load for every other page.
-// The fallback is the raw text, which is exactly what this box rendered
-// before, so a slow chunk degrades to the old behaviour rather than a gap.
+// Code-split: react-markdown is 35.7 kB gzipped and needed only when an app
+// has release notes. The fallback is the raw text, so a slow chunk degrades
+// to the old behaviour rather than a gap.
 const Markdown = lazy(() => import('../components/ui/markdown'))
 import { KVGrid } from '../components/KVGrid'
 import { Button } from '../components/ui/button'
@@ -30,33 +28,23 @@ import { fmtBytes } from '../lib/format'
 import { amberLinkCls } from './ui/button'
 
 /**
- * The App Store detail page: everything about one catalog entry that does not
- * fit on a card.
+ * Two sources, one page, and they are not interchangeable:
  *
- * TWO SOURCES, ONE PAGE, AND THEY ARE NOT INTERCHANGEABLE (2026-08-13 upstream
- * metadata design, "Ownership split"):
- *
- *  - DISCOVERY owns what this thing is and whether it can run: `slug`,
- *    `type`, `script_path`, `installable`, `unsupported_reason` and the
- *    resource defaults parsed out of the ct script. All top-level fields of
- *    the serialized row. Everything on this page that decides or reports
- *    feasibility reads from there and only from there.
+ *  - DISCOVERY owns feasibility: `slug`, `type`, `script_path`,
+ *    `installable`, `unsupported_reason`, and the resource defaults parsed
+ *    from the ct script. Everything that decides or reports feasibility
+ *    reads from there and only from there.
  *  - UPSTREAM METADATA (`raw.metadata`, the cached PocketBase record) owns
  *    presentation: notes, install profiles, changelog, links, credentials,
  *    ARM/privileged flags. It never decides what runs.
  *
- * Reading feasibility out of metadata is the specific mistake the design
- * forbids by name: upstream types coolify/runtipi/dockge/komodo/dokploy as
- * "addon" while we type them "ct", so trusting `metadata.type` would misreport
- * five real LXC apps.
+ * Never read feasibility from metadata: upstream types coolify/runtipi/
+ * dockge/komodo/dokploy as "addon" while we type them "ct", so trusting
+ * `metadata.type` would misreport five real LXC apps.
  *
- * A FIELD WITH NO DATA RENDERS NOTHING. Not a blank row, not "unknown", not a
- * dash: whole sections disappear when they have no content. That is not
- * tidiness, it is the only way this page can serve both the 548 rows with a
- * full upstream record and the 9 `unlisted` rows that have no metadata at all
- * and must still produce a usable page from discovery alone.
- *
- * No install flow lives here, by scope. Installing is still the grid's job.
+ * A field with no data renders nothing; whole sections disappear. That is
+ * how the 9 `unlisted` rows with no metadata still produce a usable page
+ * from discovery alone.
  */
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
@@ -85,11 +73,9 @@ function when(iso: string | null | undefined, dateOnly = false): string | null {
   if (raw == null) return null
   const d = new Date(raw.replace(' ', 'T'))
   if (Number.isNaN(d.getTime())) return null
-  // Format pinned to en-US, identically to components/StoreCard.tsx, which
-  // renders the same "as of" date beside the same install count; see the note
-  // there. Month as a word so the date cannot be read back to front. Only the
-  // format is pinned, not the instant: the time zone stays local, as the doc
-  // comment above says.
+  // Format pinned to en-US, matching StoreCard; month as a word so the date
+  // cannot be read back to front. Only the format is pinned, not the instant:
+  // the time zone stays local.
   const fmt: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' }
   return dateOnly
     ? d.toLocaleDateString('en-US', fmt)
@@ -102,10 +88,9 @@ function ram(mb: number | null): string | null {
   return mb == null ? null : fmtBytes(mb * 1024 * 1024)
 }
 
-/** The ct-script parse yields "debian", upstream's record says "Debian", and
- *  they sit two cards apart on this page. Casing only: no name is translated,
- *  substituted or guessed at, so an OS this parser has never seen still shows
- *  up as whatever the script called it. */
+/** The ct-script parse yields "debian", upstream's record says "Debian".
+ *  Casing only: no name is translated, substituted or guessed, so an OS this
+ *  parser has never seen still shows up as whatever the script called it. */
 function osName(os: string): string {
   return os.charAt(0).toUpperCase() + os.slice(1)
 }
@@ -139,56 +124,46 @@ function Chip({ children, tone = 'neutral', title }: {
 }
 
 /**
- * What Proxploy can actually do with this entry, and nothing upstream says
- * about it. Discovery and the lazy classifier own every value here.
+ * What Proxploy can actually do with this entry. Discovery and the lazy
+ * classifier own every value here.
  *
- * `installable` is TRI-STATE and null means "not established yet", never "no".
- * Opening this page is one of the two moments the backend classifies a ct row
- * (api/catalog.py::get_catalog_entry calls ensure_classified), so null on
- * arrival means that attempt did not produce an answer, e.g. upstream was
- * unreachable. Rendering that as "not installable" would state a conclusion
- * nothing here supports, so it says what is true (we do not know yet) and
- * offers the retry, which re-runs classification server-side.
+ * `installable` is TRI-STATE; null means "not established yet", never "no".
+ * Opening this page is one of the two moments the backend classifies a ct
+ * row (ensure_classified), so null on arrival means that attempt produced no
+ * answer, e.g. upstream was unreachable. Rendering that as "not installable"
+ * would state a conclusion nothing supports, so it says "we do not know yet"
+ * and offers the retry, which re-runs classification server-side.
  */
 /** Repo the catalog is discovered from. The blob view of a path at a commit.
  *  Not built from the slug: see the note in ScriptProvenance. */
 const BLOB_BASE = 'https://github.com/community-scripts/ProxmoxVE/blob'
 
 /**
- * The verifiable answer to "what will Proxploy actually run on my node?"
+ * The verifiable answer to "what will Proxploy actually run on my node?". A
+ * provenance fact, so it sits with the discovery-owned facts in Availability
+ * rather than with the vendor links.
  *
- * This is a provenance fact, not a vendor link, so it sits with the other
- * discovery-owned facts in Availability rather than with the upstream website
- * and documentation links further down.
- *
- * The path is SERVED, never derived, and the reason is sharper than "it might
- * not match". For ct rows it cannot NOT match: discovery takes the slug from
- * the path (services/catalog.py::_ct_slug), so `ct/<slug>.sh` is guaranteed
- * rather than merely true today, and a derivation would pass every test
- * written against the Store forever. It breaks on the non-ct rows this same
- * route can be opened for, most sharply on the 5 addon rows whose slug
- * discovery invents: `tools/addon/coolify.sh` is stored as `coolify-addon` so
- * it cannot shadow the standalone `ct/coolify.sh`, and slug and filename
- * share nothing recoverable. The value here is the same `script_path` the
+ * The path is SERVED, never derived. For ct rows it cannot not match:
+ * discovery takes the slug from the path (services/catalog.py::_ct_slug), so
+ * `ct/<slug>.sh` is guaranteed, not merely true today. It breaks on non-ct
+ * rows — most sharply the 5 addon rows whose slug discovery invents
+ * (`tools/addon/coolify.sh` stored as `coolify-addon`, so slug and filename
+ * share nothing recoverable). The value is the same `script_path` the
  * executor uses.
  *
- * PINNED, always. The href carries `upstream_sha`, which is the repo HEAD
- * commit discovery read the catalog at, and it is the same (sha, path) pair
- * that services/catalog.py::raw_url builds for the fetch that classifies the
- * script and for the fetch that runs it. A link to `main` would resolve to a
- * different file tomorrow and would make this row worse than absent.
+ * PINNED, always: the href carries `upstream_sha`, the HEAD commit discovery
+ * read the catalog at, the same (sha, path) pair the executor fetches. A link
+ * to `main` would resolve to a different file tomorrow.
  *
- * Blob rather than raw: raw serves the file as plain text for download, blob
- * renders it with syntax highlighting, line numbers and linkable lines, which
- * is what someone auditing a root shell script actually wants. Both address
- * identical bytes at this sha.
+ * Blob rather than raw: both serve identical bytes at this sha, but blob
+ * renders with syntax highlighting and line numbers — what someone auditing a
+ * root shell script wants.
  */
 function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
   const path = text(entry.script_path)
   const sha = text(entry.upstream_sha)
-  // No path, no row. Nothing here is worth inventing, and a guessed filename
-  // presented as "what runs as root" would be the worst possible thing to be
-  // wrong about.
+  // No path, no row. A guessed filename presented as "what runs as root" would
+  // be the worst possible thing to be wrong about.
   if (path == null) return null
   return (
     <div className="mt-3">
@@ -199,10 +174,9 @@ function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
             <a href={`${BLOB_BASE}/${sha}/${path}`} target="_blank" rel="noreferrer noopener"
               className={`font-mono ${amberLinkCls}`}>{path}</a>
           )
-          // Path but no commit to pin it to. The path is still a true,
-          // discovery-owned fact and is shown, but as TEXT: an unpinned link
-          // would point at whatever `main` holds when it is clicked, which is
-          // exactly the claim this row exists to avoid making.
+          // Path but no commit to pin it to. Shown as TEXT: an unpinned link would
+          // point at whatever `main` holds when clicked, exactly the claim this row
+          // exists to avoid making.
           : <span className="font-mono text-text">{path}</span>}
         {sha && (
           <span className="text-text-3"> at <span className="font-mono text-text-2" title={sha}>
@@ -220,26 +194,18 @@ function ScriptProvenance({ entry }: { entry: CatalogEntryDetail }) {
 }
 
 /**
- * The primary action, in the three states it actually has.
+ * The primary action, in its three states. Exported because the two shells
+ * place it differently and neither should re-implement it.
  *
- * Exported because the two shells place it differently and neither should
- * re-implement it: the route puts it in this component's own page header, and
- * the Store popup pins it in the dialog's title row (routes/store.tsx), which
- * is OUTSIDE the scroll body and therefore stays put while the body scrolls.
- *
- * `installable === false` deliberately renders NOTHING here. A disabled
- * primary action with its explanation somewhere else reads worse than no
- * action at all, so the reason stays in Availability where there is room for
- * the sentence.
+ * `installable === false` renders NOTHING here: a disabled primary action
+ * with its reason elsewhere reads worse than none, so the reason stays in
+ * Availability.
  *
  * `installable === null` DOES get the button, matching StoreCard. Null is
- * "not classified yet", not "no": classification is lazy (decision 2) and
- * runs on demand at exactly two moments, opening this page
- * (GET /catalog/{slug}) and starting an install
- * (POST /catalog/{slug}/install). So the install itself re-checks
- * feasibility before it does anything, and refuses in words if the check
- * fails or comes back negative. Withholding the button here only blocked
- * the one action that would have resolved the state.
+ * "not classified yet": classification is lazy and runs on demand at opening
+ * this page and at starting an install, so the install itself re-checks
+ * feasibility and refuses in words if it fails. Withholding the button here
+ * only blocked the one action that would have resolved the state.
  */
 export function InstallAction({ entry, installCount, onInstall }: {
   entry: { slug: string; installable: boolean | null }
@@ -268,22 +234,15 @@ function Feasibility({ entry, onRecheck, rechecking }: {
   const reason = text(entry.unsupported_reason)
   return (
     <Section title="Availability">
-      {/* The install affordance follows exactly the same three rules as
-          StoreCard, because the two must never disagree about whether an app
-          can be installed:
-            true  -> Install, or a disabled "Installed" if it already is
-            false -> the reason, and NO button
-            null  -> Install, and the sentence below saying feasibility is
-                     not confirmed yet
-          The null case used to withhold the button here while the card
-          offered it, which is the disagreement those first two lines exist
-          to prevent. The card is right: classification is lazy, and the
-          install request classifies before it runs, so the button is what
-          settles the question rather than a claim that it is already
-          settled. Nothing is promised that the backend will not check. */}
-      {/* The button that used to live here is now at the top right, where a
-          primary action belongs; this section keeps the STATEMENT of
-          feasibility, which is what it was always for. */}
+      {/* Mirrors StoreCard exactly — the two must never disagree about whether an
+         app can be installed:
+           true  -> Install, or a disabled "Installed" if it already is
+           false -> the reason, and NO button
+           null  -> Install, plus the sentence below saying feasibility is not
+                    confirmed yet
+         Classification is lazy, and the install request classifies before it runs,
+         so the button settles the question rather than claiming it is settled.
+         Nothing is promised that the backend will not check. */}
       {entry.installable === true && (
         <p className="text-[13px] text-green">Installable.</p>
       )}
@@ -319,10 +278,9 @@ function Feasibility({ entry, onRecheck, rechecking }: {
 }
 
 /** The container sizing Proxploy would use, parsed out of the ct script by
- *  discovery. Distinct from the install profiles below, which are upstream's
- *  published figures: this is the one that comes from the script we would run.
- *  Absent for rows whose script could not be parsed, and then absent from the
- *  page too. */
+ *  discovery. Distinct from the install profiles below (upstream's published
+ *  figures). Absent for rows whose script could not be parsed, and then
+ *  absent from the page too. */
 function DiscoveryDefaults({ entry }: { entry: CatalogEntryDetail }) {
   const items: [string, ReactNode][] = []
   const cpu = figure(entry.default_cpu)
@@ -344,10 +302,9 @@ function DiscoveryDefaults({ entry }: { entry: CatalogEntryDetail }) {
 
 /** The figures and paths one profile can actually show. Pulled out so the
  *  section can drop profiles that would render empty BEFORE deciding whether
- *  it has a section at all: a heading over nothing is exactly the blank row
- *  this page is not allowed to produce. Upstream writes 0/0/0 resources for a
- *  script that installs into an existing container rather than creating one,
- *  and "0 vCPU" would be a claim, not a blank. */
+ *  it has a section at all. Upstream writes 0/0/0 resources for a script that
+ *  installs into an existing container — "0 vCPU" would be a claim, not a
+ *  blank. */
 function profileItems(method: UpstreamInstallMethod): {
   items: [string, ReactNode][]; configPath: string | null
 } {
@@ -407,10 +364,9 @@ function InstallProfiles({ meta }: { meta: UpstreamMetadata }) {
   )
 }
 
-/** Upstream's post-install notes, verbatim. They are the difference between a
- *  container that works and one that sits there: where the generated
- *  credentials landed, which URL to register on, what breaks if you skip a
- *  step. Rendered as plain text, never as markup. */
+/** Upstream's post-install notes, verbatim — where credentials landed, which
+ *  URL to register on, what breaks if you skip a step. Rendered as plain
+ *  text, never markup. */
 function Notes({ notes }: { notes: UpstreamNote[] }) {
   const usable = notes.filter((n) => text(n.text) != null)
   if (usable.length === 0) return null
@@ -435,21 +391,16 @@ function Notes({ notes }: { notes: UpstreamNote[] }) {
   )
 }
 
-/**
- * First-run facts: the port the app answers on and the credentials upstream
- * ships it with.
- *
- * These are PUBLISHED defaults, the same ones printed in upstream's own docs,
- * not a secret of anyone's installation, which is why they are shown rather
- * than masked. The warning next to them is the point of showing them at all.
- */
+/** First-run facts: the port the app answers on and the credentials upstream
+ *  ships it with. PUBLISHED defaults, the same ones in upstream's own docs,
+ *  not any installation's secret — which is why they are shown rather than
+ *  masked. The warning next to them is the point of showing them at all. */
 function FirstRun({ meta, port }: { meta: UpstreamMetadata; port: number | null }) {
   const user = text(meta.default_user)
   const passwd = text(meta.default_passwd)
-  // Upstream repeats the app's config path on the record AND on each install
-  // method, identically in almost every case. Printing it in both places
-  // would read as two different paths that happen to look the same, so the
-  // profile keeps it (it is per-variant there) and this only shows a path no
+  // Upstream repeats the app's config path on the record AND each install
+  // method. Printing it in both places would read as two different paths, so
+  // the profile keeps it (it is per-variant) and this only shows a path no
   // profile already showed.
   const shownByProfile = new Set(
     asList(meta.install_methods).map((m) => text(m.config_path)).filter((p) => p != null))
@@ -506,16 +457,11 @@ function Changelog({ github }: { github: NonNullable<UpstreamMetadata['github_da
         </div>
       )}
       {/* Rendered markdown, not literal characters, but still untrusted: see
-          components/ui/markdown.tsx for why that is safe without a sanitizer
-          (React elements, never an HTML string, so there is no innerHTML sink
-          to filter). `plainText` above still normalizes the \r\n the real
-          data carries, because a stray \r inside a list item breaks the
-          parse into a paragraph.
-
-          The box keeps its own max-h-72 scroller. That containment is what
-          stops a 300-line release note from fighting the dialog's 70vh cap:
-          the changelog scrolls inside itself, the dialog body scrolls around
-          it. */}
+         components/ui/markdown.tsx for why that is safe without a sanitizer
+         (React elements, never an HTML string, so no innerHTML sink). `plainText`
+         normalizes the CRLF the real data carries — a stray CR inside a list item
+         breaks the parse. The box keeps its own max-h-72 scroller so a 300-line
+         note doesn't fight the dialog's 70vh cap. */}
       {changelog && (
         <div className="mt-3 max-h-72 overflow-auto break-words rounded-tile
                         border border-line-soft bg-panel-2 p-3 text-[11.5px] text-text-2">
@@ -531,24 +477,22 @@ function Changelog({ github }: { github: NonNullable<UpstreamMetadata['github_da
 /**
  * The tri-state chips. NULL MEANS UNKNOWN AND RENDERS NOTHING.
  *
- * The 9 unlisted rows have no upstream record, so we do not know whether they
- * are ARM-capable, updateable or privileged. A chip reading "not ARM" would be
- * asserting something nothing here supports; no chip is the honest rendering.
+ * The 9 unlisted rows have no upstream record, so whether they are
+ * ARM-capable, updateable or privileged is unknown. A chip reading "not ARM"
+ * would assert what nothing supports; no chip is the honest rendering.
  */
 function Capabilities({ meta, served }: { meta: UpstreamMetadata; served: ServedPresentation }) {
-  // Both the serialized columns and the cached record carry these, and they
-  // are the same presentation facts from the same sync: the columns are
-  // written FROM this record. The column wins when it has a value, and the
-  // record fills in the rows a column-adding migration has not backfilled yet.
+  // Both the serialized columns and the cached record carry these, and the
+  // columns are written FROM the record. The column wins when it has a value;
+  // the record fills rows a column-adding migration has not backfilled yet.
   const pick = <T,>(column: T | null | undefined, cached: T | null | undefined): T | null =>
     column ?? cached ?? null
   const hasArm = pick(served.has_arm, meta.has_arm)
   const privileged = pick(served.privileged, meta.privileged)
   const updateable = pick(served.updateable, meta.updateable)
   // Deduplicated: upstream's arrays are third-party data and not guaranteed
-  // unique (a repeated "amd64" has shown up in the wild), and a chip row
-  // repeating the same word is redundant even before the repeat collides
-  // with itself as a React key.
+  // unique (a repeated "amd64" has shown up in the wild), and a repeated word
+  // collides with itself as a React key.
   const architectures = [...new Set(asList(pick(served.architectures, meta.architectures))
     .map((a) => text(a)).filter((a): a is string => a != null))]
   const platforms = [...new Set(asList(meta.platforms)
@@ -611,11 +555,6 @@ function Popularity({ entry, served }: {
 
 /** One upstream link. The whole row is the anchor, label AND address.
  *
- *  The ADDRESS is the link; the label is plain text. It was the other way
- *  round, so clicking the visible URL did nothing. Making BOTH the anchor
- *  fixed that and introduced a worse one: a whole row of prose that turns out
- *  to be a link once the pointer crosses it.
- *
  *  noopener as well as noreferrer: these point at third-party project sites,
  *  and a new tab opened without it gets a live `window.opener` handle back
  *  into Proxploy.
@@ -635,9 +574,9 @@ export function LinkRow({ label, href }: { label: string; href: string }) {
 function Links({ meta, entry, served }: {
   meta: UpstreamMetadata; entry: CatalogEntryDetail; served: ServedPresentation
 }) {
-  // website and docs_url are already served as top-level columns (mapped from
-  // upstream's `website` and `documentation`), so those two prefer the column
-  // and fall back to the cached record; the rest exist only in the record.
+  // website and docs_url are already served as top-level columns, so those two
+  // prefer the column and fall back to the cached record; the rest exist only
+  // in the record.
   const rows: { label: string; href: string }[] = []
   const push = (label: string, href: string | null | undefined) => {
     const h = text(href)
@@ -671,10 +610,9 @@ function Links({ meta, entry, served }: {
 
 export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }: {
   slug: string
-  /** Called with the slug when the operator asks to install. The CALLER
-   *  owns what happens next, which is what keeps this component usable in
-   *  both shells: the route opens InstallDialog beside itself, and the
-   *  Store popup closes ITSELF first and then opens InstallDialog, so two
+  /** Called with the slug when the operator asks to install. The CALLER owns
+   *  what happens next, which keeps this usable in both shells: the route opens
+   *  InstallDialog beside itself, the Store popup closes itself first — so two
    *  overlays with two focus traps are never mounted at once. */
   onInstall: (slug: string) => void
   /** Render the Install action in this component's own header. The Store
@@ -689,13 +627,11 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
     queryKey: ['apps', {}],
     queryFn: () => api<AppRow[]>('/apps'),
   })
-  // Array.isArray rather than `(apps ?? [])`: this component renders inside a
-  // Dialog over the Store grid, and a /apps response that is not a list (an
-  // error envelope, a shape change) would otherwise throw inside render and
-  // take the whole popup down over a secondary detail. Not knowing whether
-  // it is installed is survivable; a blank overlay is not.
-  // A count, not a boolean: a second copy of an app is an ordinary thing to
-  // install (see InstallAction), so this reports how many exist.
+  // Array.isArray rather than `(apps ?? [])`: a non-list /apps response (an
+  // error envelope, a shape change) would throw inside render and take down the
+  // whole popup over a secondary detail. Not knowing whether it is installed is
+  // survivable; a blank overlay is not. A count, not a boolean: a second copy of
+  // an app is an ordinary thing to install.
   const installCount = Array.isArray(apps)
     ? apps.filter((a) => a.catalog_slug === slug).length : 0
 
@@ -717,16 +653,11 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
     )
   }
   if (entryQuery.isPending || entryQuery.data === undefined) {
-    // The header, then the first two of the stacked cards below it. Not all
-    // nine: the sections drop themselves when the entry has nothing to put in
-    // them (an unlisted row renders a much shorter page), so a placeholder
-    // that promised nine would be a promise this component cannot keep. Two
-    // is what every entry has.
-    //
-    // This runs in two frames: the page at /store/$slug, and the popup over
-    // the Store grid, which is why the header action is drawn only when the
-    // caller says it renders one. The popup pins its own Install button in
-    // the dialog title row, outside this component.
+    // Skeleton: the header, then the first two of the stacked cards below it. Not
+    // all nine — the sections drop themselves when the entry has nothing to put in
+    // them, and two is what every entry has. Runs in two frames (the /store/$slug
+    // page and the popup over the grid), so the header action is drawn only when
+    // the caller says it renders one.
     return (
       <SkeletonGroup label="Loading catalog entry">
         <SkeletonAvatar className="mt-2 mb-5 gap-4" tile="h-14 w-14 rounded-tile"
@@ -775,10 +706,9 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
             <p className="mt-2 max-w-3xl text-[13px] text-text-2">{description}</p>
           )}
         </div>
-        {/* Top right of the page header. The POPUP does not use this: its
-            shell pins the same action in the dialog's own title row, which
-            sits outside the scroll body and so cannot scroll away. Rendering
-            both would put two controls named Install on one screen. */}
+        {/* Top right of the page header. The POPUP does not use this: its shell pins
+           the same action in the dialog's own title row, outside the scroll body.
+           Rendering both would put two controls named Install on one screen. */}
         {showHeaderAction && (
           <div className="shrink-0">
             <InstallAction entry={entry} installCount={installCount} onInstall={onInstall} />
@@ -793,11 +723,10 @@ export function StoreDetailContent({ slug, onInstall, showHeaderAction = true }:
         <DiscoveryDefaults entry={entry} />
         <InstallProfiles meta={meta ?? {}} />
         <Notes notes={notes} />
-        {/* `meta ?? {}` rather than a guard: an uncovered row still has a port
-            from the served column, and still has website/docs_url columns and
-            script dates worth linking. These sections drop themselves when
-            they find nothing, which is what makes the unlisted rows render a
-            shorter page rather than a broken one. */}
+        {/* `meta ?? {}` rather than a guard: an uncovered row still has a served port
+           and website/docs_url columns and script dates worth linking. These sections
+           drop themselves when they find nothing, which is what makes unlisted rows
+           render a shorter page rather than a broken one. */}
         <FirstRun meta={meta ?? {}} port={port} />
         {github && <Changelog github={github} />}
         <Capabilities meta={meta ?? {}} served={served} />

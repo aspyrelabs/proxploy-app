@@ -13,18 +13,15 @@ import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
  * a capability with no token fails at the moment the operator tries to use
  * the feature, far from any explanation.
  *
- * Fetches GET /hosts/{id} itself on the ['hosts', id] key rather than taking
- * the state through props, so no call site has to thread it down. The rows
- * come from the response's own `capabilities` map, which the backend keys off
- * services/pveum.py::CAPABILITIES -- there is deliberately no capability list
- * in this file to drift from it.
+ * Fetches GET /hosts/{id} itself on the ['hosts', id] key; the rows come from
+ * the response's own `capabilities` map (services/pveum.py::CAPABILITIES).
+ * There is deliberately no capability list in this file to drift from it.
  */
 type HostCapabilities = { capabilities?: Record<string, boolean> }
 
-// Title-case beats a label table, which would be exactly the second list the
-// spec forbids. Ceiling: this only capitalizes the first character, so a
-// future multi-word key (e.g. "node_power") would render as "Node_power".
-// Fine for the four keys that exist today; revisit if one lands.
+// Title-case beats a second list. Ceiling: only capitalizes the first char,
+// so a future multi-word key (e.g. "node_power") renders "Node_power". Fine
+// for the four keys today; revisit if one lands.
 const labelOf = (key: string) => key.charAt(0).toUpperCase() + key.slice(1)
 
 // The other enrolled hosts of this host's cluster, by the node name Proxmox
@@ -37,10 +34,10 @@ const listOf = (names: string[]) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 
 /**
- * What the operator is told once Save has finished writing (plan section 5).
- * `stored` starts with the origin, because the origin is written first and a
- * peer's refusal never takes it back: every outcome here either added a
- * working token or changed nothing.
+ * What the operator is told once Save has finished writing. `stored` starts
+ * with the origin, because the origin is written first and a peer's refusal
+ * never takes it back: every outcome here either added a working token or
+ * changed nothing.
  */
 const outcome = (label: string, origin: string, stored: string[], refused: string[]) =>
   refused.length === 0
@@ -57,20 +54,8 @@ function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
 }) {
   const qc = useQueryClient()
   const label = labelOf(name)
-  // Closed on both sides now, stored or not.
-  //
-  // This file used to open a missing capability straight into its fields, on
-  // the reasoning that the gap IS the prompt. That held while the row's only
-  // control was a Rotate that appeared once a token existed: with nothing
-  // stored there was no button to press, so the fields had to be the
-  // invitation. Add is that invitation now, so the open fields were saying
-  // the same thing a second time, and four capabilities meant a dialog that
-  // opened with eight inputs already unrolled.
-  //
-  // Both buttons therefore reveal, and neither state shows a field until
-  // asked. Replacing a working token is still never one stray keystroke
-  // away, which was the other half of the original reasoning and is
-  // unchanged.
+  // Closed on both sides now, stored or not. Fields only appear on request, so
+  // replacing a working token is never one stray keystroke away.
   const [open, setOpen] = useState(false)
   const [tokenId, setTokenId] = useState('')
   const [tokenSecret, setTokenSecret] = useState('')
@@ -82,36 +67,18 @@ function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
   const [alsoPeers, setAlsoPeers] = useState(true)
   const [result, setResult] = useState('')
   const halfFilled = Boolean(tokenId) !== Boolean(tokenSecret)
-  // Ids are prefixed with hostId: routes/settings.tsx can render the add-host
-  // form (Task 2, unprefixed `cap-${key}-id`) alongside this per-host dialog
-  // at the same time, and duplicate DOM ids silently break label/input
-  // association.
+  // Ids are prefixed with hostId so routes/settings.tsx's add-host form
+  // (unprefixed `cap-${key}-id`) can render alongside this dialog; duplicate
+  // DOM ids silently break label/input association.
   const idFieldId = `cap-${hostId}-${name}-id`
   const secretFieldId = `cap-${hostId}-${name}-secret`
   const idRef = useRef<HTMLInputElement>(null)
 
-  // What the row's two buttons do, and it is the same thing for both: show
-  // the fields and put the caret in the first one.
-  //
-  // WHY THEY SHARE A HANDLER. Only one of the pair is ever enabled (see the
-  // group below), so the enabled one IS the row's action, and the fields it
-  // opens submit as Add or Rotate accordingly. There is no third behaviour
-  // for a second handler to carry.
-  //
-  // WHY IT FOCUSES. An unconfigured row is already open (`open` starts at
-  // `!stored`), so its Add button would otherwise be a control that visibly
-  // does nothing when clicked, which is the same trap as a live-looking
-  // Rotate with no token to rotate. Moving the caret into the token id field
-  // is a real answer to "I clicked Add", and in a dialog listing four
-  // capabilities, eight inputs deep, it is a useful one. When the fields are
-  // closed the ref is null and the click just opens them, which is feedback
-  // enough on its own.
-  // Focus in an effect, not inside the click handler. `setOpen(true)` does not
-  // render synchronously, so focusing on the next line reached for an input
-  // that did not exist yet and silently did nothing. That went unnoticed while
-  // an unstored row started open, because then the ref happened to be live
-  // already, and the one state that still needed it (Rotate on a stored row)
-  // was the one state nobody focus-tested.
+  // Both buttons share one handler: only one of the pair is ever enabled, so
+  // the enabled one is the row's action, and the fields submit as Add or Rotate.
+  // 
+  // Focus in an effect, not the click handler: setOpen(true) doesn't render
+  // synchronously, so the input doesn't exist yet on the next line.
   useEffect(() => { if (open) idRef.current?.focus() }, [open])
   const reveal = () => { setResult(''); setOpen(true) }
 
@@ -140,16 +107,12 @@ function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
     },
     onSuccess: ({ message, written }) => {
       setTokenId(''); setTokenSecret(''); setError(''); setOpen(false); setResult(message)
-      // Patch every host that took the token, this one and each peer, in
-      // place -- we already know the result, no need to round-trip a GET for
-      // it. The peers matter as much as the origin here: queries are fresh
-      // for 15 seconds (main.tsx), so a peer's Edit dialog opened right after
-      // this would otherwise show the capability it just gained as still
-      // missing. A host whose detail was never fetched has no cache entry and
-      // is left to fetch it when something asks. The hosts table's separate
-      // ['hosts'] query is invalidated (exact, not a prefix match) so it
-      // refetches next time it's active without also re-fetching these same
-      // detail queries out from under the row we just closed.
+      // Patch every host that took the token in place -- no GET round-trip. Peers
+      // matter: queries are fresh for 15 seconds (main.tsx), so a peer's dialog
+      // would otherwise show the just-gained capability as still missing. A host
+      // whose detail was never fetched has no cache entry and is left to fetch it.
+      // The ['hosts'] query is invalidated exact (not prefix) so it refetches
+      // without re-fetching these detail queries.
       for (const id of written) {
         qc.setQueryData<HostCapabilities>(['hosts', id], (old) =>
           old ? { ...old, capabilities: { ...old.capabilities, [name]: true } } : old)
@@ -167,41 +130,22 @@ function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
       <div className="flex items-center justify-between gap-3">
         <span className="text-[13px] text-text">{label}</span>
         {/*
-          * Add and Rotate as one welded pair, one per capability. Exactly one
-          * of them is live at a time, and WHICH one is how the row reports
-          * its state: there is no separate "stored" / "not configured" label
-          * any more, because it said the same thing twice as soon as Add
-          * started reading "Stored".
-          *
-          * Both reveal the same fields; which one you get is decided by
-          * whether a token exists, not by what the fields do.
-          *
-          * ROTATE IS DISABLED WITH NOTHING STORED. There is no credential to
-          * replace on an unconfigured capability, so a live Rotate could only
-          * open the very fields Add already opens: two buttons, one outcome,
-          * and the operator left guessing which was meant for them. Disabled
-          * is also what the backend does, POST /credentials on an unknown
-          * capability is the same route either way, so the difference is
-          * purely which word describes it honestly. Mirrors Stored disabling
-          * Add from the other side, so the pair always reads as "this one, not
-          * that one".
-          *
-          * STORED IS NOT DIMMED. Everything else disabled here goes to
-          * `disabled:opacity-50`; this one holds `text-green` at full
-          * strength, because it is not a control being withheld, it is the
-          * row's status readout that happens to sit in the control's place,
-          * and it is the same green the status text used before it.
-          */}
+         * Add and Rotate as one welded pair, one per capability. Exactly one is live
+         * at a time; which one is how the row reports state -- no separate label.
+         *
+         * ROTATE IS DISABLED WITH NOTHING STORED: no credential to replace, and
+         * disabled mirrors the backend (POST /credentials is the same route either
+         * way). Mirrors Stored disabling Add, so the pair reads "this one, not that
+         * one".
+         *
+         * STORED IS NOT DIMMED. Other disabled controls get `disabled:opacity-50`;
+         * this one holds `text-green` at full strength -- it is the row's status
+         * readout in the control's place, not a withheld control. */}
         <ButtonGroup>
           <Button type="button" variant="ghost" size="sm" disabled={stored}
-            /* `text-green!`, with the important modifier, and it is not
-             * belt-and-braces. Button composes `${variants[variant]}
-             * ${className}`, so this lands after ghost's `text-text` in the
-             * class ATTRIBUTE, but two utilities of equal specificity are
-             * resolved by their order in the generated stylesheet, not by
-             * attribute order, and `text-text` was winning. The button
-             * rendered the same near-white as Add, while a test asserting the
-             * class was present passed, because the class WAS present. */
+            /* `text-green!` is not belt-and-braces: two utilities of equal specificity
+             * resolve by order in the generated stylesheet, not attribute order, and
+             * ghost's `text-text` was winning. */
             className={stored ? 'text-green! disabled:opacity-100' : ''}
             aria-label={stored
               ? `${label} token already stored`
@@ -256,34 +200,17 @@ function CapabilityRow({ hostId, name, stored, cluster, originNode, peers }: {
             </label>
           )}
           {/*
-            * `size="sm"`, not the default md, is the "make the Add button 30%
-            * smaller" ask. This submit is the only Add button that existed
-            * before the group above, so it is the one that shrank.
-            *
-            * xs is the size the scale already had (the App Store card's
-            * Install button) and it lands where the ask does without a
-            * bespoke class: text 13px -> 9px is -30.8%, and text size is what
-            * reads as "how big is this button". Padding comes along at -35.7%
-            * horizontal and -25% vertical. Whole pixels throughout, because
-            * ui/button.tsx's own note is that a fractional font size renders
-            * blurry, and a literal 30% of 13px would be 9.1px.
-            *
-            * Cancel goes with it. The two are one pair at the foot of the
-            * fields, and a full-height Cancel beside a 25px Add would read as
-            * the primary action, which is backwards.
-            */}
+           * `size="sm"` is the "make the Add button 30% smaller" ask; xs lands at
+           * ~-30% text size without a bespoke class. Whole pixels throughout: a
+           * fractional font size renders blurry (ui/button.tsx). Cancel matches it. */}
           <div className="flex justify-end gap-2">
             {stored && (
               <Button type="button" variant="ghost" size="sm"
                 onClick={() => { setOpen(false); setError('') }}>Cancel</Button>
             )}
-            {/* "Save", not "Add"/"Rotate" any more. Those two words now name
-              * the buttons that OPEN this form, and repeating one of them on
-              * the control that commits it made the same word mean "show me
-              * the fields" and "write this token" in one row. This button has
-              * one job either way, which is to save what was typed. The
-              * aria-label keeps the capability, since several of these forms
-              * can be open at once. */}
+            {/* "Save", not "Add"/"Rotate": those words now name the buttons that open
+             * this form. aria-label keeps the capability, since several forms can be
+             * open at once. */}
             <Button type="button" size="sm"
               aria-label={`Save ${label} token`}
               disabled={!tokenId || !tokenSecret || save.isPending}
@@ -353,15 +280,10 @@ export function HostCapabilityList({ hostId }: { hostId: number }) {
             <CapabilityRow key={name} hostId={hostId} name={name}
               cluster={cluster} originNode={origin?.node_name || origin?.name || ''}
               peers={peers}
-              // monitoring is required=True and the host cannot exist without it,
-              // so it is rotate-only and never shown as a gap. Forcing `stored`
-              // is still the whole mechanism under the button group: its Add
-              // reads Stored and is disabled, its Rotate is the live one, and
-              // its fields stay closed until asked for. That is the correct
-              // reading even in the case the flag exists for, a backend that
-              // reports monitoring: false for a host that demonstrably
-              // connected, where offering Add would invite a second token for
-              // a capability that already has one.
+              // monitoring is required=True, so it is rotate-only and never shown as a gap.
+              // Forcing `stored` keeps its Add disabled and Rotate live. Correct even when
+              // a backend reports monitoring: false for a host that demonstrably connected
+              // -- offering Add would invite a second token.
               stored={stored || name === 'monitoring'} />
           ))}
         </div>

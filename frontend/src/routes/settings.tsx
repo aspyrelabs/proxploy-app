@@ -37,8 +37,7 @@ import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
 // The rail, the ?section= contract and the command palette all read the same
-// table; it lives in lib/ so CommandPalette can import it without closing a
-// cycle back through routes/shell.tsx. See lib/settings-sections.ts.
+// table; it lives in lib/ so CommandPalette can import it without a cycle.
 import {
   DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, SETTINGS_SECTION_IDS,
 } from '../lib/settings-sections'
@@ -47,8 +46,7 @@ export const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/settings',
   // Same shape apps.tsx and vms.tsx use. An unrecognised ?section= falls back
-  // to Hosts rather than rendering an empty pane: a stale bookmark from before
-  // a section was renamed must land somewhere real.
+  // to Hosts rather than rendering an empty pane.
   validateSearch: (s: Record<string, unknown>) => ({
     section: typeof s.section === 'string' && SETTINGS_SECTION_IDS.has(s.section)
       ? s.section : undefined,
@@ -56,15 +54,9 @@ export const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
-/** The section list. Same vocabulary as components/SidebarNav.tsx (10.5px
- *  uppercase group captions, rounded-tile rows, an amber bar on the active
- *  one) but borderless and inside the page, so it reads as part of Settings
- *  rather than as a second app rail.
- *
- *  Horizontal and scrollable below `md`, where SidebarNav has already hidden
- *  itself: a column of ten rows there would push every setting a screen down.
- *  The group captions go with it, since they only separate anything in a
- *  column.
+/** The section list. Same vocabulary as SidebarNav.tsx but borderless
+ *  and inside the page, so it reads as part of Settings rather than as a
+ *  second app rail. Horizontal and scrollable below `md`.
  */
 function SectionRail({ active }: { active: string }) {
   return (
@@ -110,17 +102,13 @@ function Card({ title, children, action }: { title: string; children: React.Reac
 }
 
 /**
- * Every schedule, or just the kinds one page owns: the Backups page shows the
- * `backup.run` rows with `only`, so scheduled jobs are managed where they are
- * read rather than only in Settings. One card, one set of row actions.
+ * Every schedule, or just the kinds one page owns: the Backups page shows
+ * `backup.run` rows with `only`, so scheduled jobs are managed where they
+ * are read. One card, one set of row actions.
  */
-/** The schedules table, its own component ONLY so it can hold a hook: the
- *  card above renders it from an Async render prop, and a hook called in there
- *  would be called conditionally on the loading state.
- *
- *  Ten to a page, and the same six column widths the Recent backups table
- *  uses, because the two sit one above the other on /backups and were sizing
- *  their columns independently. */
+/** The schedules table, its own component so it can hold a hook called
+ *  from an Async render prop. Ten to a page, same six column widths as
+ *  the Recent backups table. */
 function ScheduleTable({ rows, editing, setEditing, setAdding, windowsAllowed,
                         remove, runNow, toggle }: {
   rows: ScheduleRow[]
@@ -216,9 +204,9 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
   const schedules = useSchedules()
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ScheduleRow | null>(null)
-  // Wait for the first entitlements fetch before deciding (alerts.tsx
-  // precedent), POST/PATCH /schedules require sched.windows, so offering
-  // "New schedule"/"Run now" to everyone flashes controls that always 403.
+  // Wait for the first entitlements fetch before deciding. `has()` defaults
+  // to false until then, which would 403 the query and open a form that always
+  // errors.
   const windowsAllowed = ent.data != null && ent.has('sched.windows')
 
   const toggle = useMutation({
@@ -289,15 +277,12 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
   )
 }
 
-/** Which enrolled host, if any, Proxploy itself runs on (PXP-33). Onboarding
- *  asks this once for a new install; an install that already finished
- *  onboarding before this existed has no other prompt, so it lives here too.
- *  "None of these" is a real, storable answer: not every install manages the
- *  host it runs on, and self-detection already fails open (never blocks) when
- *  nothing is recorded. */
+/** Which enrolled host, if any, Proxploy itself runs on. Onboarding
+ *  asks this once for a new install; an existing install has no other
+ *  prompt. "None of these" is a real, storable answer.
+ */
 // The same two class strings HostActionsMenu, VmActionsMenu and AppIconMenu
-// already share, destructive vocabulary included: text-red/bg-red-dim tokens,
-// never a literal hex (src/tests/no-hardcoded-colors.test.ts).
+// share, destructive vocabulary included.
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
              + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text'
 const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t border-line-soft '
@@ -305,18 +290,10 @@ const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t bord
 
 /**
  * Edit, Tasks and Remove for one enrolled host, behind one trigger.
- *
- * Four named buttons measured 277px, and with the section rail taking 216px
- * the seven-column table wanted 1,054px in an 898px pane: Tasks and Remove
- * were reachable only by scrolling the card sideways, which on macOS shows no
- * scrollbar until you are already scrolling. Sync stays out here because it is
- * the one with a pending state worth watching ("Syncing…"), and it is the
- * action an operator repeats.
- *
- * Not HostActionsMenu: that one is the host PAGE's menu and carries Reboot and
- * Power off, which are node power and have their own typed-confirmation gate.
- * These three are enrolment management and belong to this table. Same Radix
- * primitive and the same two class strings, so they read as one family.
+ * Sync stays out here because it is the one with a pending state worth
+ * watching and the action an operator repeats. Not HostActionsMenu:
+ * that one carries Reboot and Power off. Same Radix primitive and class
+ * strings, so they read as one family.
  */
 function HostRowMenu({ name, onEdit, onTasks, onRemove, tasksOpen }: {
   name: string
@@ -370,12 +347,9 @@ function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   })
 
-  // The QUESTION is static and waits for nothing; only the answer to it is in
-  // flight. Returning null for the whole strip meant the Hosts card drew its
-  // table and then, a moment later, grew a bordered row above it and pushed
-  // every host row down, under whatever the cursor was already reaching for.
-  // Same rule routes/network.tsx's Throughput card follows: keep what is
-  // already known on screen, stand in only for what is not.
+  // The QUESTION is static; only the answer is in flight. Returning null
+  // for the whole strip pushed every host row down when the answer arrived.
+  // Same rule routes/network.tsx's Throughput card follows.
   if (settings.isPending) {
     return (
       <div className={selfRow}>
@@ -413,9 +387,8 @@ function SelfHostRow({ hosts }: { hosts: HostRow[] }) {
 }
 
 export function SettingsPage() {
-  // `strict: false` matches apps.tsx: this component is rendered directly by
-  // tests as well as by the router, and a strict read throws when there is no
-  // matched route above it.
+  // `strict: false` matches apps.tsx: the component may be rendered without
+  // a matched route above it.
   const search = useSearch({ strict: false }) as { section?: string }
   const active = search.section && SETTINGS_SECTION_IDS.has(search.section)
     ? search.section : DEFAULT_SETTINGS_SECTION
@@ -424,10 +397,9 @@ export function SettingsPage() {
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
-  // The only editable host field (doc 08 §9's deliberate second, admin-only
-  // opt-in gate on top of RBAC), NodeDetailPage's node-shell section reads
-  // this same value, so invalidating the 'hosts' query key here (a prefix
-  // match in TanStack Query v5) keeps both in sync without a second fetch.
+  // The only editable host field, admin-only opt-in gate on top of RBAC.
+  // NodeDetailPage's node-shell section reads this same value, so invalidating
+  // the 'hosts' query key keeps both in sync.
   const toggleNodeShell = useMutation({
     mutationFn: (h: HostRow) => api(`/hosts/${h.id}`, {
       method: 'PATCH', body: JSON.stringify({ node_shell_enabled: !h.node_shell_enabled }),
@@ -436,10 +408,8 @@ export function SettingsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   })
 
-  // Host lifecycle ops (PXP-17): sync is synchronous despite the route name
-  // (it runs a poller cycle inline and can take a while), tracked per host by
-  // comparing the pending mutation's own variables rather than a separate
-  // "which host" state.
+  // Host lifecycle ops: sync is synchronous despite the route name. Tracked
+  // per host by comparing the pending mutation's own variables.
   const [editingHost, setEditingHost] = useState<HostRow | null>(null)
   const [removingHost, setRemovingHost] = useState<HostRow | null>(null)
   const [tasksHostId, setTasksHostId] = useState<number | null>(null)
@@ -452,10 +422,8 @@ export function SettingsPage() {
   })
 
   // Both host reads return team_id, so this select shows the host's CURRENT
-  // team rather than being a write-only reassignment control. Same teams.rbac gate as
-  // TeamsCard: every /teams route requires it, so fetching before the first
-  // entitlements resolve would 403 for every plan, and TanStack Query
-  // dedupes this against TeamsCard's identical ['teams'] query.
+  // team. Same teams.rbac gate as TeamsCard; TanStack Query dedupes against
+  // TeamsCard's identical ['teams'] query.
   const teamsAllowed = ent.data != null && ent.has('teams.rbac')
   const teams = useTeams(teamsAllowed)
   const assignTeam = useMutation({
@@ -463,8 +431,7 @@ export function SettingsPage() {
       api(`/hosts/${host.id}`, {
         method: 'PATCH',
         // teamId null is sent, not dropped: the route reads model_fields_set,
-        // so an explicit null is what unassigns and an omitted key means
-        // "leave the team alone".
+        // so an explicit null unassigns and an omitted key means "leave alone".
         body: JSON.stringify({ node_shell_enabled: host.node_shell_enabled,
                                team_id: teamId }),
       }),
@@ -506,9 +473,8 @@ export function SettingsPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['notifications', 'channels'] }),
   })
   const removeChannel = (ch: ChannelRow) => {
-    // The URL is genuinely unrecoverable once deleted (never shown again
-    // after creation), one misclick next to Test would otherwise cost a
-    // bot token with no undo.
+    // The URL is genuinely unrecoverable once deleted, one misclick next to
+    // Test would cost a bot token with no undo.
     if (window.confirm(`Remove notification channel "${ch.name}"? This cannot be undone.`)) {
       deleteChannel.mutate(ch.id)
     }
@@ -564,10 +530,8 @@ export function SettingsPage() {
         {hosts.data && hosts.data.length > 0 && <SelfHostRow hosts={hosts.data} />}
         <QueryState query={hosts}
                     // Wrapped in the same overflow-x-auto the loaded branch
-                    // uses, and the same min-w: seven columns do not fit a
-                    // narrow card either way, and a placeholder that fits
-                    // where the table will not is a placeholder of the wrong
-                    // width.
+                    // uses, and the same min-w: seven columns don't fit a
+                    // narrow card either way.
                     loading={<SkeletonGroup label="Loading hosts" className="overflow-x-auto">
                       <div className="min-w-[860px]">
                         {/* Host, Address, PVE, Status, Node shell, Team, actions. */}
@@ -582,12 +546,6 @@ export function SettingsPage() {
                     errorTitle="Hosts not readable"
                     errorNote="Proxploy could not reach the backend to list your hosts.">
           {(rows) => (
-            // Seven columns plus four action buttons overflow a narrow card, and a
-            // table that shrinks to fit collides its own headers. Scroll instead.
-            // 860px is what the seven columns measure with Sync and the row
-            // menu; 620 was set when this card had the whole page. The wrapper
-            // still scrolls, but only below roughly a 1,300px window rather
-            // than on every laptop.
             <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-[13px]">
               <thead><tr className="whitespace-nowrap text-[10.5px] uppercase tracking-wide text-text-3">
@@ -613,12 +571,10 @@ export function SettingsPage() {
                       <td className="pr-4">
                         {teamsAllowed ? (
                           // Until GET /teams lands there is no option matching a
-                          // host's team_id, so the browser falls back to the
-                          // first one and this column read "Unassigned" for
-                          // every host, including the assigned ones. `isLoading`
-                          // rather than `isPending` because useTeams is
-                          // entitlement-gated and a disabled query stays pending
-                          // for ever.
+                          // host's team_id, so the browser falls back to the first
+                          // one. `isLoading` rather than `isPending` because
+                          // useTeams is entitlement-gated and a disabled query
+                          // stays pending for ever.
                           <select aria-label={`team for ${h.name}`} value={h.team_id ?? ''}
                             disabled={assignTeam.isPending || teams.isLoading}
                             onChange={(e) => {

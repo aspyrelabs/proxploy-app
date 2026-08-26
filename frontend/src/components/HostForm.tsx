@@ -11,11 +11,8 @@ import { Loading } from './ui/loading'
 export type HostCreated = {
   id: number; name: string; ssh_public_key?: string
   authorized_keys_line?: string; consent_note?: string
-  // Both come from POST /hosts and are only used by the peer panel below:
-  // the node name is what the cluster calls this host, and the cluster name
-  // is what the panel says it is checking while discovery is in flight.
-  // Either can be null when the probe could not read /cluster/status, which
-  // is why discovery is asked regardless of what they say.
+  // Both come from POST /hosts and are only used by the peer panel below.
+  // Either can be null when the probe could not read /cluster/status.
   node_name?: string | null; cluster_name?: string | null
 }
 
@@ -38,48 +35,42 @@ const errText = (e: unknown) => {
   const body = e.body as { error?: string; detail?: string | { error?: string } } | null
   const kind = body?.error
   // KIND_COPY says what to DO about a kind. The server's `detail` says what
-  // actually happened, and only it can: which privilege Proxmox refused
-  // (services/proxmox.py::_permission_detail), or which fingerprint was pinned
-  // against which was presented. Returning the advice alone threw the
-  // diagnosis away, which mattered most for tls_fingerprint, where the two
-  // fingerprints ARE the finding. Both, in that order: act on the first
-  // sentence, verify with the second.
+  // actually happened, and only it can: which privilege Proxmox refused, or
+  // which fingerprint was pinned against which was presented. Both, in that
+  // order: act on the first sentence, verify with the second.
   const detail = typeof body?.detail === 'string' ? body.detail : null
   if (kind && KIND_COPY[kind]) {
     return detail ? `${KIND_COPY[kind]} ${detail}` : KIND_COPY[kind]
   }
-  // 409 and 403 keep their own wording with no detail appended: there the
-  // server's detail restates the same fact, and "already exists. host name
-  // already exists" reads worse than either half.
+  // 409 and 403 keep their own wording with no detail appended: the server's
+  // detail restates the same fact, and "already exists. host name already
+  // exists" reads worse than either half.
   if (e.status === 409) return 'A host with that name already exists.'
   if (e.status === 403) return 'Managing more than one host needs a paid tier.'
   return detail ?? 'Request failed.'
 }
 
-// docs.proxploy.com is the shipping docs site (proxploy-docs' astro `site`).
-// It does not resolve until the docs are published; docs.proxploy.dev is the
-// staging mirror and is deliberately NOT linked here, because a link that is
-// right in dev and wrong for every customer is the worse failure.
+// docs.proxploy.com is the shipping docs site. The staging mirror
+// (docs.proxploy.dev) is deliberately NOT linked — a link that is right
+// in dev and wrong for every customer is the worse failure.
 const TOKEN_DOCS = 'https://docs.proxploy.com/getting-started/proxmox-token/'
 
-// Monitoring is deliberately absent: it is mandatory and the generator emits
-// it whether or not it is asked for, so offering it as a checkbox would be
-// offering a choice that does not exist.
-//
-// Labels and the "why" explanation normally come from GET /hosts/capabilities
-// (useHostCapabilityCatalog), the same list the setup script is generated
-// from. This hand-written copy is only the fallback while that request is
-// still loading or has failed: an operator must be able to add a host
-// without it, so the checkboxes fall back to this rather than disappearing
-// or blocking the form.
+// Monitoring is deliberately absent: it is mandatory and the generator
+// emits it whether or not it is asked for, so offering it as a checkbox
+// would be offering a choice that does not exist.
+// 
+// Labels and the "why" explanation normally come from
+// useHostCapabilityCatalog. This hand-written copy is the fallback while
+// that request is still loading or has failed: the form must work without
+// it.
 const CAPABILITY_FALLBACK: { key: string; label: string; why?: string }[] = [
   { key: 'lifecycle', label: 'Lifecycle' },
   { key: 'console', label: 'Console' },
   { key: 'backup', label: 'Backup' },
 ]
 
-// Only the two fields that ask for something the operator must go and create
-// somewhere else. Name and Address explain themselves.
+// Only the two fields that ask for something the operator must go and
+// create somewhere else. Name and Address explain themselves.
 const FIELD_HELP: Partial<Record<string, React.ReactNode>> = {
   token_id: <>
     Proxmox names a token <code className="text-text-2">user@realm!name</code>, for
@@ -122,36 +113,28 @@ function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const qc = useQueryClient()
   const [f, setF] = useState({ name: '', address: 'https://', token_id: '',
-    // Off by default, deliberately diverging from doc 08 §"TLS to Proxmox"
-    // ("verification on by default"). A stock Proxmox node serves a
-    // self-signed certificate, so verifying by default failed the first
-    // connection for almost every operator, and the only escape hatch this
-    // form offers is this same checkbox. The doc's better answer, pinning the
-    // node's fingerprint instead of disabling verification, is implemented in
-    // the backend (HostIn.tls_fingerprint) but not yet collected here.
+    // Off by default: a stock Proxmox node serves a self-signed certificate,
+    // so verifying by default failed the first connection for almost every
+    // operator. Fingerprint pinning (HostIn.tls_fingerprint) is implemented
+    // in the backend but not yet collected here.
     token_secret: '', verify_tls: false, ssh_enroll: false })
   const [probe, setProbe] = useState('')
   const [missing, setMissing] = useState<string[] | null>(null)
   const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
-  // Off by default, same reasoning as Sys.Console/node_shell just below:
-  // Sys.PowerMgmt can take the whole node down, so it is never on unless the
-  // operator explicitly ticks it, and it is independent of `caps` (doc 08
-  // §2/§9, services/pveum.py NODE_POWER_PRIVILEGE) -- Reboot/Power off is
-  // offered on every host regardless of which capabilities were chosen.
+  // Off by default: Sys.PowerMgmt can take the whole node down, so it is
+  // never on unless the operator explicitly ticks it. Independent of `caps`
+  // — Reboot/Power off is offered on every host regardless.
   const [nodePower, setNodePower] = useState(false)
-  // One token per capability the operator ticked above, because the pveum
-  // script prints one per capability and until now three of them had nowhere
-  // to go. Keyed by capability so the retry path can tell which one the node
-  // rejected.
+  // One token per capability the operator ticked above. Keyed by capability
+  // so the retry path can tell which one the node rejected.
   const [capTokens, setCapTokens] =
     useState<Record<string, { id: string; secret: string } | undefined>>({})
   // The host, once POST /hosts has succeeded. Non-null means a retry must NOT
   // create it again (409 host name already exists).
   const [created, setCreated] = useState<HostCreated | null>(null)
-  // The host and its tokens are stored, so the peer panel takes over: it asks
-  // whether this host has other cluster nodes, and onCreated waits for its
-  // answer. On a standalone host it renders nothing and calls onCreated
-  // immediately, which is exactly what used to happen here.
+  // The host and its tokens are stored, so the peer panel takes over: it
+  // asks whether this host has other cluster nodes. On a standalone host it
+  // renders nothing and calls onCreated immediately.
   const [peerStage, setPeerStage] = useState(false)
   const [storedCaps, setStoredCaps] = useState<string[]>([])
   const [capErrors, setCapErrors] = useState<Record<string, string>>({})
@@ -197,10 +180,9 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           method: 'POST',
           body: JSON.stringify({ ...f, ssh_consent: f.ssh_enroll }) })
         // Invalidate as soon as the host exists on the server, not only in
-        // onCreated: if the operator abandons this panel after a rejected
-        // token (below) instead of clicking Retry or Continue, the host must
-        // still show up in the list -- otherwise re-opening the form and
-        // submitting the same name 409s with no visible reason why.
+        // onCreated: if the operator abandons this panel after a rejected token
+        // instead of clicking Retry or Continue, the host must still show up in
+        // the list.
         qc.invalidateQueries({ queryKey: ['hosts'] })
       }
       setCreated(h)
@@ -250,19 +232,14 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           </span>
         </span>
       </label>
-      {/* One box for all four capability tokens, monitoring included: it used
-          to sit alone above this box under a generic "API token" label, which
-          read as an unrelated, duplicate field. Monitoring is mandatory and
-          creates the host, so its row always renders here; the other three
-          are optional and only appear once ticked. */}
+      {/* One box for all four capability tokens. Monitoring is mandatory and
+              creates the host, so its row always renders; the other three are
+              optional and only appear once ticked. */}
       <div className="rounded-ctl border border-line bg-panel-2 p-3">
         <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
-        {/* Doc 08 §2 step 1: monitoring is mandatory, the rest are the
-            operator's call. Anything left unticked gets no role and no token
-            at all, rather than a broad one it never uses. Unticking one
-            shows what it would have covered, right under it, so the
-            trade-off is visible while deciding instead of discovered later
-            as something that quietly does not work. */}
+        {/* Monitoring is mandatory, the rest are the operator's call. Anything
+                  left unticked gets no role and no token at all. Unticking one
+                  shows what it would have covered, right under it. */}
         <div className="mt-2 space-y-1.5">
           <p className="text-[11.5px] text-text-3">Read-only monitoring is always included.</p>
           {capChoices.map(({ key, label, why }) => {
@@ -289,12 +266,9 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
           })}
         </div>
         {/* Monitoring's row always renders below, it is mandatory and creates
-            the host, so it is bound to f.token_id/f.token_secret, not
-            capTokens. These three are optional: a field only for capabilities
-            still ticked, not all three always visible, since an unticked
-            capability got no role and no token from the script. All four
-            become visible, stored vs missing, once the host exists (see the
-            edit dialog) -- there is no state to show before that. */}
+                  the host. Optional capabilities only show when ticked: an
+                  unticked capability got no role and no token from the script.
+                  All four are visible once the host exists. */}
         <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
           {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
               it drops onto its own line under the label. Without wrapping it
@@ -361,10 +335,10 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </>
           )}
         </div>
-        {/* Independent of the capability row above on purpose (doc 08 §2/§9):
-            Sys.PowerMgmt gets its own role and token, not a widening of
-            Lifecycle's, and Reboot/Power off is offered on every host
-            regardless of which capabilities were chosen. */}
+        {/* Independent of the capability row above: Sys.PowerMgmt gets its own
+                  role and token, not a widening of Lifecycle's, and Reboot/Power
+                  off is offered on every host regardless of which capabilities
+                  were chosen. */}
         <label className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-text-2">
           <input type="checkbox" checked={nodePower} className="mt-0.5"
             onChange={e => setNodePower(e.target.checked)} />
@@ -411,9 +385,8 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         </div>
       )}
       {/* The host exists and its tokens are stored by now, so the form's own
-          controls are done: the panel owns the rest of the flow, including
-          when onCreated fires. It renders nothing at all for a standalone
-          host, so that case ends here exactly as it did before. */}
+              controls are done: the panel owns the rest of the flow. It renders
+              nothing for a standalone host, so that case ends here. */}
       {peerStage && created ? (
         <PeerEnrolmentPanel hostId={created.id} node={created.node_name ?? created.name}
           cluster={created.cluster_name} onDone={() => onCreated(created)} />

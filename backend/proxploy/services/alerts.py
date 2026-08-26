@@ -1,27 +1,26 @@
-"""Alert evaluation (doc 04 `alert_rules` / `alerts`, doc 10 Phase 7).
+"""Alert evaluation.
 
-Reads only the DB. No HTTP, no Apprise, no event bus; it opens and closes
-`alerts` rows and returns the TRANSITIONS. Task 10's notifier and Task 11's
-poll-loop hook do everything outward-facing, so a change to how alerts are
-delivered never touches how they are decided.
+Reads only the DB: no HTTP, no Apprise, no event bus. It opens and closes
+`alerts` rows and returns the TRANSITIONS; the notifier and poll-loop hook do
+everything outward-facing, so how alerts are delivered never touches how they
+are decided.
 
 Semantics, once, so nothing has to guess:
 
-  * `duration_s` means CONTINUOUSLY breaching for at least that long, the
-    doc 04 prototype phrase is "85% CPU for 5 minutes", and a five-minute
-    average that dipped to 10% in the middle is not that. Implemented by
-    walking samples newest-first and taking the breaching prefix.
+  * `duration_s` means CONTINUOUSLY breaching for at least that long (e.g.
+    "85% CPU for 5 minutes"); a five-minute average that dipped to 10% in the
+    middle is not that. Implemented by walking samples newest-first and
+    taking the breaching prefix.
   * A rule holds at most ONE open alert per concrete target. A still-breaching
-    rule yields no transition, which is what stops a 30 s poll cadence from
+    rule yields no transition, which stops a 30 s poll cadence from
     re-notifying twice a minute.
   * Recovery resolves automatically on the first non-breaching cycle. An
-    acknowledged alert still resolves, ack silences, it does not pin.
+    acknowledged alert still resolves; ack silences, it does not pin.
   * No samples is not a breach. Absence of data is not evidence of a problem,
     and a freshly-added host must not alarm on its first cycle.
   * `host_offline` and `backup_failed` have nothing to compare, so they ignore
     `operator` and `threshold`. `duration_s` still applies to `host_offline`
-    (via `hosts.last_seen_at`) so a PVE restart blip is not an outage.
-"""
+    (via `hosts.last_seen_at`) so a PVE restart blip is not an outage."""
 from __future__ import annotations
 
 import logging
@@ -33,22 +32,21 @@ from proxploy.models import Alert, AlertRule, App, Host, Job, MetricSample, Vm, 
 logger = logging.getLogger(__name__)
 
 # Which target kinds each metric can honestly be evaluated against. `disk_pct`
-# is hosts-only: /cluster/resources reports `maxdisk` (allocated, not used) for
-# guests and a `disk` figure that is routinely 0 for QEMU, so a guest disk_pct
-# would be confidently wrong. api/alerts.py rejects the unsupported pairs at
-# rule-creation time rather than accepting a rule that can never fire.
+# is hosts-only: /cluster/resources reports `maxdisk` (allocated, not used)
+# for guests and a `disk` figure routinely 0 for QEMU, so a guest disk_pct
+# would be confidently wrong. api/alerts.py rejects unsupported pairs at
+# rule-creation time.
 METRIC_TARGETS: dict[str, tuple[str, ...]] = {
     "cpu_pct": ("host", "app", "vm"),
     "mem_pct": ("host", "app", "vm"),
     "disk_pct": ("host",),
     "host_offline": ("host",),
     "backup_failed": ("host",),
-    # Quorum loss is host-shaped here because that is where the flag lives, but
-    # the condition belongs to the CLUSTER behind the host, so every enrolled
-    # member of one cluster reports it and an "any host" rule fires once per
-    # member. Added because a cluster losing quorum is invisible otherwise: it
-    # answers every read, refuses every write, and no existing metric moves
-    # (doc 12 check 12).
+    # Quorum loss is host-shaped here (where the flag lives), but the condition
+    # belongs to the CLUSTER behind the host, so every enrolled member of a
+    # cluster reports it and an "any host" rule fires once per member. A cluster
+    # losing quorum is invisible otherwise: it answers every read, refuses every
+    # write, and no existing metric moves.
     "quorum_lost": ("host",),
 }
 SUPPORTED_METRICS: tuple[str, ...] = tuple(METRIC_TARGETS)
@@ -79,7 +77,6 @@ def _human_duration(seconds: int) -> str:
 def render_message(rule_name: str, label: str, metric: str, operator: str,
                    threshold: float, duration_s: int, value: float | None,
                    state: str) -> str:
-    """Doc 05's SSE example: "host-02 CPU > 85% for 5m"."""
     if metric == "host_offline":
         body = f"{label} has been offline"
         if duration_s:
@@ -104,13 +101,12 @@ def render_message(rule_name: str, label: str, metric: str, operator: str,
 
 
 # The two conditions an operator should never have to configure to be told
-# about, because both mean "Proxploy cannot do its job on this host" and neither
-# moves any other metric: a host the poller cannot reach at all, and a cluster
-# that answers every read and refuses every write (doc 12 check 12).
-#
+# about: a host the poller cannot reach at all, and a cluster that answers
+# every read and refuses every write.
+# 
 # `operator`/`threshold` are required columns and meaningless for a status
-# metric, which is why the API's own validator skips them here; the values below
-# are the inert defaults the create route uses for the same reason.
+# metric, so the API's validator skips them here; the values below are the
+# inert defaults the create route uses.
 DEFAULT_RULES: tuple[dict, ...] = (
     {"name": "Host unreachable", "metric": "host_offline", "severity": "critical",
      # Five minutes, so a PVE restart or a brief network blip is not an incident.
@@ -130,13 +126,7 @@ def seed_default_alert_rules(db) -> int:
 
     Seeded ONLY when no rule exists at all, which makes this one-way in the same
     sense `seed_system_schedules` is: a rule the operator deleted stays deleted,
-    and "I do not want to be told about unreachable hosts" remains expressible.
-
-    Without this, `alerts` fired for nothing on a new install: both conditions
-    were available as metrics and neither had a rule, so a dead host produced a
-    red sidebar footer and no notification anywhere (and nothing at all for
-    anyone not looking at that corner of the screen).
-    """
+    and "I do not want to be told about unreachable hosts" remains expressible."""
     if db.query(AlertRule.id).first() is not None:
         return 0
     for spec in DEFAULT_RULES:
@@ -150,8 +140,7 @@ def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
     """Concrete `(target_type, target_id, label)` triples this rule covers.
 
     `target_type == "any"` expands across every target kind the metric supports
-    (doc 04: "`host` | `app` | `vm` | `any`", target_id NULL when any).
-    """
+    (target_id NULL when any)."""
     kinds = METRIC_TARGETS.get(rule.metric, ())
     if rule.target_type != "any":
         if rule.target_type not in kinds:
@@ -168,8 +157,8 @@ def targets_for(db, rule: AlertRule) -> list[tuple[str, int, str]]:
         out += [("app", a.id, a.name) for a in db.query(App).all()]
     if "vm" in kinds:
         # Deduped: the mirror holds one row per (host, vmid), so on a cluster an
-        # "any vm" rule expanded to the same guest once per enrolled host and
-        # would fire, and notify, twice for one breach (doc 12 check 18).
+        # "any vm" rule expanded to the same guest once per enrolled host and would
+        # fire, and notify, twice for one breach.
         out += [("vm", v.id, v.name) for v in
                 dedupe_vms(db.query(Vm).all(), {h.id: h for h in db.query(Host).all()})]
     return out
@@ -344,9 +333,8 @@ def evaluate(db, now: datetime | None = None) -> list[dict]:
 
 
 def sse_frame(t: dict) -> dict:
-    """The `alert` SSE delta, doc 05 §Streaming 4, verbatim:
-    {"id":12,"state":"firing","severity":"warning","message":"host-02 CPU …"}
-    """
+    """The `alert` SSE delta:
+        {"id":12,"state":"firing","severity":"warning","message":"host-02 CPU …"}"""
     return {"id": t["alert_id"], "state": t["state"],
             "severity": t["severity"], "message": t["message"]}
 
@@ -354,14 +342,12 @@ def sse_frame(t: dict) -> dict:
 def notify_transitions(app, transitions: list[dict]) -> int:
     """Fan transitions out through the Notifier. Blocking; returns sends made.
 
-    Event names are `alert.fired` / `alert.resolved`, which is what doc 04's
-    `notification_channels.events` example subscribes to. A rule's
-    `channel_ids` overrides that subscription (see notifier.channels_for).
+    Event names are `alert.fired` / `alert.resolved`. A rule's `channel_ids`
+    overrides that subscription (see notifier.channels_for).
 
-    Notification is a courtesy and must never be able to fail evaluation, so
-    every send is isolated inside notifier.notify already; this only has to not
-    raise on its own account.
-    """
+    Notification is a courtesy and must never be able to fail evaluation: every
+    send is isolated inside notifier.notify already, so this only has to not raise
+    on its own account."""
     from proxploy.services.links import absolute
     from proxploy.services.notification_body import compose
     from proxploy.services.notifier import notify
