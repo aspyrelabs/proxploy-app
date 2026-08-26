@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     # 04:00 UTC, so 48h means "two consecutive refreshes have not landed",
     # which is a real fault rather than one unlucky night.
     catalog_stale_after_s: float = 172800.0
+    # Licensing lease. The heartbeat is what tells the service which
+    # installation currently holds the seat, so it also bounds how long a
+    # clone can run unnoticed. Configurable rather than scattered through the
+    # code because the right value depends on how tolerant of an outage the
+    # deployment needs to be.
+    license_heartbeat_interval_s: float = 21600.0   # 6h, token exp is 72h
+    # After this long without reaching the service, refuse to keep renewing
+    # on the cached token alone. Well beyond grace_until, so it only bites an
+    # install that has been unreachable for a season, which is the backstop
+    # against permanently-offline copies rather than a check on outages.
+    license_revalidation_days: float = 90.0
+
     poll_enabled: bool = True
     # 5s, not 30s. Everything a cycle reads out of /cluster/resources (node and
     # guest CPU, memory, status, and the guest netin/netout counters the guest

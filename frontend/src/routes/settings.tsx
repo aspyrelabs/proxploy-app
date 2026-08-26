@@ -6,6 +6,7 @@ import { shellRoute } from './shell'
 import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
+import { LicenseCard } from '../components/LicenseCard'
 import { useSchedules } from '../api/schedules'
 import { actionLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
@@ -542,12 +543,15 @@ export function SettingsPage() {
             Could not check your plan, try reloading.
           </p>
         ) : (
-          <p className="text-[13.5px] text-text-2">
-            <span className="font-mono text-amber">{tier === 'builtin' ? 'FREE' : tier.toUpperCase()}</span>
-            {', '}all features are enabled. Licensing is dormant; entering a license key
-            activates against the Proxploy licensing service.
-            {grace?.in_grace && <span className="text-amber"> License refresh failing, working offline until {grace.grace_until}.</span>}
-          </p>
+          <div className="flex flex-col gap-3">
+            <LicenseCard tier={tier === 'builtin' ? 'free' : tier}
+                         licensed={tier !== 'builtin'} />
+            {grace?.in_grace && (
+              <p className="text-[13.5px] text-amber">
+                License refresh failing, working offline until {grace.grace_until}.
+              </p>
+            )}
+          </div>
         )}
         {clockSkew && (
           <p className="mt-2 text-[13.5px] text-amber">

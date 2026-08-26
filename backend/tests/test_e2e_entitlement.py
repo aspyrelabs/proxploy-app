@@ -145,10 +145,17 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
         "PROXPLOY_API_SIGNING_CERT": _mint_cert(root_private_pem, "e2e-root",
                                                 "e2e-kid", pub_pem),
     }
-    license_key = subprocess.run(
+    # Two labelled lines since the licence gained a recovery code: the key
+    # alone can no longer take a seat, so the script has two secrets to emit.
+    minted = subprocess.run(
         [py, str(API_REPO / "scripts/create_license.py"), "--tier", "pro",
          "--db-url", api_dsn],
-        check=True, capture_output=True, text=True, env=env).stdout.strip()
+        check=True, capture_output=True, text=True, env=env).stdout
+    secrets_out = dict(
+        (k.strip(), v.strip())
+        for k, _, v in (ln.partition(":") for ln in minted.splitlines() if ":" in ln))
+    license_key = secrets_out["license key"]
+    recovery_code = secrets_out["recovery code"]
 
     port = _free_port()
     proc = subprocess.Popen(
@@ -192,8 +199,48 @@ def test_roundtrip_against_real_dormant_api(tmp_path, api_dsn, csrf_header,
                             headers=csrf_header(client))
             assert r.status_code == 200 and r.json()["tier"] == "pro"
             ent = client.get("/api/v1/entitlements").json()
-            assert ent["tier"] == "pro" and len(ent["features"]) == 82
+            # Against the registry, not a literal: this said 82 while the
+            # registry carried 87. A count assertion is exactly what cannot
+            # notice a key added on one side only.
+            from proxploy.entitlements.registry import FLAG_KEYS
+            assert ent["tier"] == "pro"
+            assert set(ent["features"]) == set(FLAG_KEYS)
             assert all(ent["features"].values())  # dormant api: all entitled
+
+        # A SECOND install, same licence key, against the same live service.
+        # Separate app + master key, so it has its own installation identity.
+        second = tmp_path / "second"
+        second.mkdir()
+        s2 = Settings(db_url=f"sqlite:///{second}/app.db", data_dir=second,
+                      master_key_file=second / "master.key",
+                      api_base_url=f"http://127.0.0.1:{port}",
+                      ent_extra_roots_file=roots_file)
+        with TestClient(create_app(s2)) as client2:
+            bootstrap_admin(client2)
+            r = client2.post("/api/v1/entitlements/license",
+                             json={"license_key": license_key},
+                             headers=csrf_header(client2))
+            assert r.status_code == 409, "the key alone must not take a live seat"
+            # problem+json: a dict detail is merged into the body top level
+            # (main.py::problem_handler), so occupant is not nested.
+            occupant = r.json()["occupant"]
+            assert occupant["installation_id"] and occupant["last_seen_at"]
+
+            assert client2.post("/api/v1/entitlements/license/transfer",
+                                json={"license_key": license_key,
+                                      "recovery_code": "wrong"},
+                                headers=csrf_header(client2)).status_code == 502
+
+            r = client2.post("/api/v1/entitlements/license/transfer",
+                             json={"license_key": license_key,
+                                   "recovery_code": recovery_code},
+                             headers=csrf_header(client2))
+            assert r.status_code == 200 and r.json()["tier"] == "pro"
+
+            history = client2.get("/api/v1/entitlements/activations").json()
+            assert len(history["activations"]) == 2
+            assert sum(1 for a in history["activations"] if a["current"]) == 1
+            assert any(a["status"] == "transferred" for a in history["activations"])
     finally:
         proc.terminate()
         proc.wait(timeout=10)
