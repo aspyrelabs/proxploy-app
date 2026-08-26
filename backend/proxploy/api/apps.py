@@ -4,8 +4,10 @@ from __future__ import annotations
 import difflib
 import hashlib
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import (APIRouter, Body, Depends, File, HTTPException, Request,
+                     UploadFile)
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from proxploy.api import firewall as fwapi
@@ -19,6 +21,8 @@ from proxploy.api.network import NicIn, guest_nics, set_guest_nic
 from proxploy.models import App, AppScript, CatalogEntry, Host, User, to_iso, utcnow
 from proxploy.services import migrate as migrate_service
 from proxploy.executor import SSHExecutor
+from proxploy.services import app_icons
+from proxploy.services.app_identity import monogram, pick_colors, valid_colors
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import pinned_payload_script
 from proxploy.services.catalog_icons import served_icon_url
@@ -52,7 +56,8 @@ _fw_guest = authorize("firewall", "guest", scope_of=scope_app())
 
 
 def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
-             busy: dict[tuple[str, int], str] | None = None) -> dict:
+             busy: dict[tuple[str, int], str] | None = None,
+             data_dir=None) -> dict:
     """`entry` is the catalog row this app was installed from, or None when it
     has no catalog slug or that slug no longer resolves. Deliberately required
     with no default: it is only used for the icon, and a default of None would
@@ -72,7 +77,12 @@ def _app_out(a: App, host: Host, snapshots, entry: CatalogEntry | None,
         # time upstream rebrands or the catalog refreshes. Null is normal and
         # is NOT an error: no catalog slug, a dropped slug, or an entry with no
         # logo all land here and all fall back to the icon_initials tile.
-        "icon_url": served_icon_url(entry),
+        # An uploaded icon wins over the catalog's. The operator chose it
+        # for this specific app, which is a stronger statement than the slug
+        # this app happens to be matched to; and for an app with no slug at
+        # all it is the only real icon available.
+        "icon_url": (app_icons.custom_icon_url(data_dir, a.id) if data_dir else None)
+                    or served_icon_url(entry),
         "web_port": a.web_port, "web_protocol": a.web_protocol,
         "web_path": a.web_path,
         # Read-only, and shown so the operator can see what the install script
@@ -125,8 +135,9 @@ def list_apps(request: Request, host: int | None = None, q: str | None = None,
     entries = {e.slug: e for e in db.query(CatalogEntry)
                .filter(CatalogEntry.slug.in_(slugs))} if slugs else {}
     busy = busy_guests(db, utcnow())
+    data_dir = request.app.state.settings.data_dir
     return [_app_out(a, hosts[a.host_id], request.app.state.poller.snapshots,
-                     entries.get(a.catalog_slug), busy)
+                     entries.get(a.catalog_slug), busy, data_dir)
             for a in rows]
 
 
@@ -212,6 +223,12 @@ def adopt_apps(body: AdoptIn, request: Request, db=Depends(get_db),
                   catalog_slug=item.catalog_slug, web_path="/",
                   category=entry.category if entry else None,
                   web_port=entry.port if entry else None,
+                  # The tile this app wears until it is given a logo. Assigned
+                  # HERE rather than left to the frontend so the colour is
+                  # stable: a name-derived colour would change under a rename,
+                  # and a render-time random one would change on every reload.
+                  icon_initials=monogram(item.name),
+                  icon_colors=pick_colors(),
                   adopted=True)
         db.add(row)
         try:
@@ -306,7 +323,8 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
     entry = (db.query(CatalogEntry).filter_by(slug=a.catalog_slug).one_or_none()
              if a.catalog_slug else None)
     return _app_out(a, host, request.app.state.poller.snapshots, entry,
-                    busy_guests(db, utcnow()))
+                    busy_guests(db, utcnow()),
+                    request.app.state.settings.data_dir)
 
 
 @router.get("/{app_id}/logs")
@@ -1009,6 +1027,19 @@ class ReconfigureIn(BaseModel):
     icon_initials: str | None = Field(default=None, max_length=3)
     icon_colors: dict | None = None
 
+    @field_validator("icon_colors")
+    @classmethod
+    def _colors_are_hex(cls, v):
+        # The frontend interpolates these into a `style` attribute, so an
+        # unvalidated dict is a CSS injection: `{"dark": "red;background:url(
+        # //evil/x)"}` would have been stored and rendered verbatim. The
+        # column is free-form JSON and this schema types it as `dict`, so the
+        # shape is enforced here or nowhere.
+        if v is not None and not valid_colors(v):
+            raise ValueError('icon_colors must be {"dark": "#RRGGBB", '
+                             '"light": "#RRGGBB"}')
+        return v
+
 
 @router.delete("/{app_id}", dependencies=[Depends(_remove),
                                           Depends(require_entitlement("apps.uninstall"))])
@@ -1190,3 +1221,77 @@ def app_lifecycle(request: Request, app_id: int, action: str,
     job = enqueue_lifecycle(request, db, user, target_type="app", target=a,
                             action=action, name=a.name, confirm=body.confirm)
     return {"job": job_out(job)}
+
+
+# --- custom app icons -------------------------------------------------------
+# Guarded by app:configure, the same permission that already renames an app and
+# sets its tile letters: an icon is presentation, and splitting it into its own
+# permission would make the Set-up dialog need two.
+
+@router.put("/{app_id}/icon", dependencies=[Depends(_configure)])
+async def upload_icon(app_id: int, request: Request,
+                      file: UploadFile = File(...), db=Depends(get_db),
+                      user: User = Depends(_configure)):
+    """Replace this app's icon with an uploaded image.
+
+    PUT and not POST: an app has exactly one icon and uploading twice must
+    leave one icon, not two. The whole file is read into memory rather than
+    spooled to disk the way storage.py does, because storage.py is streaming
+    multi-gigabyte ISOs onward to PVE and this is capped at 8 MB and has to be
+    fully decoded anyway to be validated at all.
+    """
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+
+    raw = await file.read()
+    try:
+        app_icons.store(request.app.state.settings.data_dir, app_id, raw)
+    except app_icons.BadImage as e:
+        # 422, not 400: the request is well-formed, its content is not.
+        raise HTTPException(422, str(e)) from e
+
+    write_audit(db, actor_type="user", actor_id=user.id, action="app.icon_set",
+                target_type="app", target_id=a.id,
+                params={"bytes": len(raw), "filename": file.filename},
+                ip=request.client.host if request.client else None)
+    db.commit()
+    request.app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                               "change": "reconfigured"})
+    return {"icon_url": app_icons.custom_icon_url(
+        request.app.state.settings.data_dir, app_id)}
+
+
+@router.delete("/{app_id}/icon", dependencies=[Depends(_configure)])
+def delete_icon(app_id: int, request: Request, db=Depends(get_db),
+                user: User = Depends(_configure)):
+    """Drop the uploaded icon; the app falls back to its catalog logo if it has
+    one, and to its monogram tile otherwise."""
+    a = db.get(App, app_id)
+    if a is None:
+        raise HTTPException(404, "app not found")
+    removed = app_icons.remove(request.app.state.settings.data_dir, app_id)
+    if removed:
+        write_audit(db, actor_type="user", actor_id=user.id,
+                    action="app.icon_cleared", target_type="app", target_id=a.id,
+                    ip=request.client.host if request.client else None)
+        db.commit()
+        request.app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                                   "change": "reconfigured"})
+    return {"removed": removed}
+
+
+@router.get("/{app_id}/icon", dependencies=[Depends(_read_scoped)])
+def get_icon(app_id: int, request: Request):
+    """Serve the uploaded icon.
+
+    No DB lookup: the file either exists or it does not, and _read_scoped has
+    already decided this caller may look at this app. The `v` query parameter
+    the serializer appends is not read here — it exists only to give the URL a
+    new identity when the file changes, so a cached copy is not reused.
+    """
+    path = app_icons.icon_path(request.app.state.settings.data_dir, app_id)
+    if not path.is_file():
+        raise HTTPException(404, "no custom icon for this app")
+    return FileResponse(path, media_type="image/webp",
+                        headers={"Cache-Control": "public, max-age=86400"})

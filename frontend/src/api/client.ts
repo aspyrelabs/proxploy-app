@@ -17,7 +17,11 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const method = (opts.method ?? 'GET').toUpperCase()
   const headers: Record<string, string> = { ...(opts.headers as Record<string, string>) }
-  if (opts.body != null) headers['Content-Type'] = 'application/json'
+  // Never for FormData: the browser has to set multipart/form-data itself so
+  // it can put the boundary in, and an explicit Content-Type overwrites it.
+  if (opts.body != null && !(opts.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json'
+  }
   if (MUTATING.has(method)) headers['X-CSRF-Token'] = cookie('pp_csrf')
   const r = await fetch('/api/v1' + path, { credentials: 'include', ...opts, method, headers })
   const body = r.status === 204 ? null : await r.json().catch(() => null)

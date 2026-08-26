@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api, apiErrorDetail } from '../api/client'
@@ -9,24 +9,7 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { IconTile } from './IconTile'
 import { inputCls } from './LoginForm'
-
-/** Pairs rather than single colours because IconTile draws a gradient. */
-const PALETTES = [
-  { c1: '#F5B544', c2: '#E79126' },
-  { c1: '#5B9DF9', c2: '#3C6FD1' },
-  { c1: '#34D3C6', c2: '#1FA192' },
-  { c1: '#B389F5', c2: '#8257D1' },
-  { c1: '#F58A8A', c2: '#D14F4F' },
-  { c1: '#8DC63F', c2: '#5E9A22' },
-]
-
-/** First two letters of the name. */
-function initialsFor(name: string): string {
-  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean)
-  if (words.length === 0) return '??'
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-  return (words[0][0] + words[1][0]).toUpperCase()
-}
+import { RAMP, monogram } from '../lib/app-identity'
 
 /**
  * Finish setting up an app Proxploy did not install (adopted by hand, so no
@@ -37,9 +20,39 @@ export function AppSetupDialog({ app, onClose }: { app: AppRow; onClose: () => v
   const qc = useQueryClient()
   const detect = useDetectPorts(app.id)
   const [port, setPort] = useState(app.web_port != null ? String(app.web_port) : '')
-  const [initials, setInitials] = useState(app.icon_initials ?? initialsFor(app.name))
-  const [colors, setColors] = useState(app.icon_colors ?? PALETTES[0])
+  const [initials, setInitials] = useState(app.icon_initials ?? monogram(app.name))
+  const [colors, setColors] = useState(app.icon_colors ?? RAMP[0])
   const [error, setError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+  // The uploaded icon, once there is one, is what IconTile draws instead of
+  // the monogram. Held locally so the tile updates the instant the upload
+  // returns rather than after the apps query refetches.
+  const [iconUrl, setIconUrl] = useState<string | null>(
+    app.icon_url?.startsWith(`/api/v1/apps/${app.id}/icon`) ? app.icon_url : null)
+
+  const upload = useMutation({
+    mutationFn: (f: File) => {
+      const form = new FormData()
+      form.append('file', f)
+      return api<{ icon_url: string }>(`/apps/${app.id}/icon`,
+                                       { method: 'PUT', body: form })
+    },
+    onSuccess: (r) => {
+      setError('')
+      setIconUrl(r.icon_url)
+      qc.invalidateQueries({ queryKey: ['apps'] })
+    },
+    onError: (e) => setError(apiErrorDetail(e, 'Could not use that image.')),
+  })
+
+  const clearIcon = useMutation({
+    mutationFn: () => api(`/apps/${app.id}/icon`, { method: 'DELETE' }),
+    onSuccess: () => {
+      setIconUrl(null)
+      qc.invalidateQueries({ queryKey: ['apps'] })
+    },
+    onError: (e) => setError(apiErrorDetail(e, 'Could not remove the image.')),
+  })
 
   const save = useMutation({
     mutationFn: () => api(`/apps/${app.id}`, {
@@ -113,23 +126,54 @@ export function AppSetupDialog({ app, onClose }: { app: AppRow; onClose: () => v
           {/* No catalog entry (served_icon_url) means no icon; the initials
               tile is the icon it can have, and IconTile draws it everywhere. */}
           <p className="mb-2 text-[12px] text-text-3">
-            Apps in the store bring their own logo. This one gets letters.
+            {iconUrl
+              ? 'Your image is what this app shows. The letters and colour '
+                + 'below are what it falls back to if you remove it.'
+              : 'Apps from the store bring their own logo. This one gets three '
+                + 'letters and a colour. Change either, or upload an image.'}
           </p>
           <div className="flex items-center gap-3">
-            <IconTile name={app.name} iconUrl={null} size={40}
+            <IconTile name={app.name} iconUrl={iconUrl} size={40}
                       initials={initials} colors={colors} />
             <input className={`${inputCls} w-20`} maxLength={3} aria-label="Tile letters"
                    value={initials}
                    onChange={(e) => setInitials(e.target.value.toUpperCase())} />
             <div className="flex flex-wrap gap-1">
-              {PALETTES.map((p) => (
-                <button key={p.c1} type="button" aria-label={`Tile colour ${p.c1}`}
+              {RAMP.map((p) => (
+                <button key={p.dark} type="button" aria-label={`Tile colour ${p.dark}`}
                         onClick={() => setColors(p)}
-                        className={`h-6 w-6 rounded-tile border ${
-                          p.c1 === colors.c1 ? 'border-amber' : 'border-line'}`}
-                        style={{ background: `linear-gradient(150deg, ${p.c1}, ${p.c2})` }} />
+                        className={`mono-tile h-6 w-6 rounded-tile ${
+                          p.dark === colors.dark
+                            ? 'ring-2 ring-text ring-offset-2 ring-offset-panel'
+                            : ''}`}
+                        style={{ '--mono-dark': p.dark,
+                                 '--mono-light': p.light } as React.CSSProperties} />
               ))}
             </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input ref={fileRef} type="file" className="hidden"
+                   accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+                   onChange={(e) => {
+                     const f = e.target.files?.[0]
+                     if (f) upload.mutate(f)
+                     e.target.value = ''
+                   }} />
+            <Button variant="ghost" size="sm" disabled={upload.isPending}
+                    onClick={() => fileRef.current?.click()}>
+              {upload.isPending ? 'Uploading…'
+                : iconUrl ? 'Replace image' : 'Upload an image'}
+            </Button>
+            {iconUrl && (
+              <Button variant="ghost" size="sm" disabled={clearIcon.isPending}
+                      onClick={() => clearIcon.mutate()}>
+                Remove image
+              </Button>
+            )}
+            <span className="text-[11.5px] text-text-3">
+              PNG, JPEG, WebP, GIF or BMP. Resized to 512x512.
+            </span>
           </div>
         </div>
 

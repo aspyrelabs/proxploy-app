@@ -40,6 +40,12 @@ dependencies = [
   "casbin>=1.43,<2",
   "Authlib>=1.7,<2",
   "pyotp>=2.10,<3",
+  # Custom app icons ONLY (services/app_icons.py): decode whatever image the
+  # operator uploaded and re-encode it to one 512x512 WebP, so the tile in the
+  # grid is the same weight whether the source was a 40px favicon or a 12 MP
+  # photo. Also the only thing here that can safely decide an upload really is
+  # an image: neither the filename nor the Content-Type is evidence.
+  "Pillow>=10.4",
 ]
 
 [project.scripts]

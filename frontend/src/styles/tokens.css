@@ -122,6 +122,19 @@
   --color-background:var(--background);
 }
 
+/* The monogram tile an app wears when it has no logo. --mono-dark/--mono-light
+   arrive inline from the app row (services/app_identity.py stores both, so a
+   theme flip needs no server round trip); this is the only place that decides
+   which one a theme uses.
+
+   `color: var(--ink)` and nothing else: --ink is already near-black in dark and
+   near-white in light, so one declaration gives the glyph the right contrast in
+   both themes. A solid fill rather than the tint used by StatusPill, because
+   these tiles sit in a row beside real full-colour logos and a 13% tint reads
+   as disabled next to them. */
+.mono-tile { background: var(--mono-dark); color: var(--ink); }
+[data-theme="light"] .mono-tile { background: var(--mono-light); }
+
 body {
   @apply bg-ink text-text font-ui text-[14px] leading-[1.45];
   background-image:

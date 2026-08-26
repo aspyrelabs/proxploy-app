@@ -3,7 +3,7 @@ import type { AppRow, VmRow } from '../api/hooks'
 import { statusLabel } from '../lib/activityDisplay'
 import { osIconUrl } from '../lib/os-icon'
 import { AppIconMenu } from './AppIconMenu'
-import { IconTile } from './IconTile'
+import { IconTile, type IconColors } from './IconTile'
 import { linkCls } from './ui/button'
 import { VmActionsMenu } from './VmActionsMenu'
 import { Icon } from './ui/icon'
@@ -229,7 +229,7 @@ function IconGridCell({ name, testId, iconUrl, initials, colors, status, onOpen,
   testId: string
   iconUrl: string | null
   initials?: string | null
-  colors?: { c1: string; c2: string } | null
+  colors?: IconColors | null
   status: string
   onOpen: () => void
   menu: (trigger: React.ReactNode) => React.ReactNode

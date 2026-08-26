@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
+import type { IconColors } from '../components/IconTile'
 
 export type Me = { id: number; email: string; display_name: string | null; role: string }
 export type Entitlements = {
@@ -70,7 +71,7 @@ export type NodeRow = {
 export type AppRow = {
   id: number; name: string; slug: string; host_id: number; host_name: string
   node: string; ctid: number; category: string | null; catalog_slug: string | null
-  icon_initials: string | null; icon_colors: { c1: string; c2: string } | null
+  icon_initials: string | null; icon_colors: IconColors | null
   // The icon of the catalog entry this app was installed from, resolved by the
   // backend through the Store's own pipeline (services/catalog_icons.py). Null
   // whenever there is nothing to show -- no catalog slug, a slug the catalog no
