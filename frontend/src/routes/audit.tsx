@@ -221,10 +221,9 @@ export function AuditPage() {
                           {/* job_id matters here and nowhere else: it marks a
                               row that recorded a REQUEST, written when the job
                               was queued, so the row is about the asking and
-                              not about the finishing. The activity feed drops
-                              these rows entirely, the audit log keeps them, so
-                              this is the only surface that has to say which it
-                              is. */}
+                              not about the finishing. The audit log is the
+                              only surface that keeps these rows, so it is the
+                              only one that has to say which it is. */}
                           {actionLabel(r.action, r.result)}
                           <span className="block font-mono text-[11px] text-text-3">{r.action}</span>
                         </td>

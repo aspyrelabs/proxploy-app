@@ -23,15 +23,6 @@ export type JobRow = {
 
 export type JobEventRow = { seq: number; ts: string; stream: string; message: string }
 
-export type ActivityRow = {
-  kind: 'job' | 'audit' | 'alert'; id: number; at: string; title: string
-  status: string | null; target_type: string | null; target_id: number | null
-  /** As JobRow.target_name; null on an alert row, which labels itself. */
-  target_name?: string | null
-  actor: string | null; job_id: number | null; progress_pct: number | null
-  severity: string | null; message: string | null
-}
-
 /** The one line a job toast shows. The raw pair (`app.start succeeded`) was
  *  the last place the product handed a user a stored identifier and a stored
  *  status verbatim. Doc 13 names both: the kind neutrally, so no status word
@@ -117,17 +108,16 @@ export function useRunningJobOfKind(kind: string, enabled: boolean) {
   })
 }
 
-export function useActivity(limit = 20) {
-  return useQuery({
-    queryKey: ['cluster', 'activity', limit],
-    refetchInterval: 30_000,
-    queryFn: () => api<ActivityRow[]>(`/cluster/activity?limit=${limit}`),
-  })
-}
-
-/** The activity feed row's Cancel control (doc 05 `POST /jobs/{id}/cancel`).
- *  Invalidates both `jobs` and the activity feed's own key so the row
- *  reflects the cancellation without waiting for the 30s poll. */
+/** `POST /jobs/{id}/cancel` (doc 05).
+ *
+ *  Nothing mounts this today. The activity feed's Cancel control was its only
+ *  caller and that surface is gone, but the endpoint is real and a cancel
+ *  control is still wanted, so the hook stays rather than being written again
+ *  from scratch when one lands. Whatever mounts it gets the invalidate for
+ *  free.
+ *
+ *  It used to invalidate the activity feed's key alongside `jobs`; that key no
+ *  longer exists, so a caller sees the cancellation on the jobs list only. */
 export function useCancelJob() {
   const qc = useQueryClient()
   return useMutation<{ id: number; status: string }, ApiError, number>({
@@ -135,7 +125,6 @@ export function useCancelJob() {
       api<{ id: number; status: string }>(`/jobs/${id}/cancel`, { method: 'POST' }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 }
@@ -184,7 +173,6 @@ export function useLifecycle() {
     onError: (_e, v) => { qc.invalidateQueries({ queryKey: [key(v.target)] }) },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 }

@@ -70,7 +70,6 @@ export function useMigrate() {
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 }

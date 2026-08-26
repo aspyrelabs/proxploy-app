@@ -70,13 +70,12 @@ export function useBackups() {
 }
 
 // Every mutation below fires a job. Per api/jobs.ts::useLifecycle's documented
-// rule they invalidate ['jobs'] and ['cluster','activity'] only, never
-// ['backups'] on success. The handler's own `_resync` + the `resource`
-// {type:'backup'} SSE delta are what refresh the list, once the archive
-// actually exists upstream rather than while the job is still queued.
+// rule they invalidate ['jobs'] only, never ['backups'] on success. The
+// handler's own `_resync` + the `resource` {type:'backup'} SSE delta are what
+// refresh the list, once the archive actually exists upstream rather than
+// while the job is still queued.
 const jobSettled = (qc: ReturnType<typeof useQueryClient>) => () => {
   qc.invalidateQueries({ queryKey: ['jobs'] })
-  qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
 }
 
 /**
@@ -120,8 +119,8 @@ export function useRunBackup() {
 }
 
 /** Read one archive back and record whether it is intact. Settles like every
- *  other job mutation here: ['jobs'] and the activity feed, never ['backups'],
- *  which the handler's own resource delta refreshes once the verdict exists. */
+ *  other job mutation here: ['jobs'], never ['backups'], which the handler's
+ *  own resource delta refreshes once the verdict exists. */
 export function useVerifyBackup() {
   const qc = useQueryClient()
   return useMutation<{ job: JobRow }, ApiError, number>({

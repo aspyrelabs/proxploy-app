@@ -100,12 +100,12 @@ export function SkeletonGroup({ label, className = '', children }: {
  *
  * and it is worth having as a shape because this app draws that arrangement
  * everywhere: the IconTile on an app card, a Store entry or an app detail
- * header, and the three-letter kind badge on an ActivityFeed row are all "a
- * small square-ish thing, then a name, then a quieter line under the name".
+ * header are all "a small square-ish thing, then a name, then a quieter line
+ * under the name".
  *
  * `tile` rather than a boolean, because the round part is only round half the
- * time here. IconTile is `rounded-tile` (9px), the ActivityFeed badge is the
- * same, and a genuine avatar would be `rounded-full`; the caller names the one
+ * time here. IconTile is `rounded-tile` (9px) and a genuine avatar would be
+ * `rounded-full`; the caller names the one
  * it is standing in for, and its SIZE with it, since a 28px badge and a 56px
  * logo are not interchangeable. `rounded-full` is the default only because
  * that is what upstream draws.

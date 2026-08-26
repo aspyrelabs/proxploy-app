@@ -176,12 +176,11 @@ export function useApplyNetwork() {
         method: 'POST',
         body: JSON.stringify(v.confirm ? { confirm: v.confirm } : {}),
       }),
-    // Job-firing mutation: jobs + activity only, never ['network'] on success
+    // Job-firing mutation: ['jobs'] only, never ['network'] on success
     // (api/jobs.ts::useLifecycle's documented rule). The apply's own terminal
     // `resource` delta is what refreshes the interface list.
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
     },
   })
 }

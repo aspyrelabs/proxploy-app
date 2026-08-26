@@ -25,6 +25,9 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "proxploy"
 #                             (PXP-17 tracks the missing features themselves)
 #   baseline                  every tier has it, so a gate would never fire;
 #                             it exists to describe the product, not restrict it
+#   feature was removed       the code it gated is gone, but the key stays in
+#                             the registry because keys never change once
+#                             shipped (registry.py)
 #   structural                cannot be enforced as written
 UNENFORCED = {
     # feature does not exist yet
@@ -38,6 +41,10 @@ UNENFORCED = {
     "hosts.onboard", "hosts.manage", "cluster.overview", "cluster.node_detail",
     "jobs.engine", "rbac.roles", "secrets.store", "ent.client", "ent.manage",
     "hosts.ssh_executor",
+    # feature was removed: the ActivityFeed component, GET /cluster/activity
+    # and the query key that fed them were all deleted together. The key stays
+    # registered so the shipped flag list does not change under a licence.
+    "cluster.activity_feed",
     # structural
     "hosts.single",           # the complement of hosts.multi, which IS enforced
     "terminal.ct",            # permanently 501 by design, nothing to gate

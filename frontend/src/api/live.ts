@@ -99,8 +99,8 @@ type JobDelta = {
 type ToastFn = (t: { kind: 'ok' | 'err' | 'info'; text: string; jobId: number; detail?: string }) => void
 
 /** SSE `job` event → patch ['jobs'] (list AND detail shapes), and on a
- *  terminal state invalidate the affected resource + activity feed and raise
- *  a toast (doc 06 §d, doc 05 §Streaming 4; the payload carries target_type). */
+ *  terminal state invalidate the affected resource and raise a toast
+ *  (doc 06 §d, doc 05 §Streaming 4; the payload carries target_type). */
 export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   let wasTerminal = false
   const patch = (r: any) => {
@@ -118,7 +118,6 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   // changes) would otherwise re-invalidate and re-toast for nothing.
   if (wasTerminal) return
   qc.invalidateQueries({ queryKey: ['jobs'] })
-  qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
   // ['vms'] is a prefix match, so a vm.snapshot_* job invalidates
   // ['vms', id, 'snapshots'] here for free; Task 16 adds no wiring.
   const resourceKey = d.target_type ? RESOURCE_KEY[d.target_type] : undefined
@@ -175,7 +174,6 @@ export function alertToastSeverity(kind: 'ok' | 'err', payloadSeverity: AlertDel
  *  is the only signal that an earlier toast is stale. */
 export function applyAlert(qc: QueryClient, d: AlertDelta, toast?: AlertToastFn) {
   qc.invalidateQueries({ queryKey: ['alerts', 'firing'] })
-  qc.invalidateQueries({ queryKey: ['cluster', 'activity'] })
   if (d.state === 'resolved') {
     toast?.({ kind: 'ok', text: d.message, alertId: d.id })
     return
