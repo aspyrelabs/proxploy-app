@@ -3,16 +3,8 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { UNKNOWN, fmtBps, fmtBytes } from '../../lib/format'
 
-/** A real chart: labelled axes, a y scale that knows its unit, a hover
- *  readout, and a width taken from the container instead of a prop.
- *
- *  Deliberately NOT an upgrade of `Sparkline`. A spark is defined by having no
- *  axes and no cursor (doc 06 §b) and several places still want exactly that;
- *  what went wrong was using one at 480x120 as the CPU/memory/storage chart on
- *  the host page, where the reader has no way to tell 3% from 100%, no idea
- *  what "2161287168" was, and a hard-coded 480px canvas that spilled out of a
- *  card narrower than that.
- */
+/** Not an upgrade of `Sparkline`: a spark is defined by having no axes and
+ *  no cursor (doc 06 §b), and several places still want exactly that. */
 
 /** What the y values MEAN. Nothing else in here decides that; a chart handed
  *  raw byte counts and told `percent` will happily draw nonsense, which is the

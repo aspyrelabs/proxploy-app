@@ -2,11 +2,9 @@
 one (besides executor/keys.py) allowed to import asyncssh, enforced by
 scripts/check_executor_isolation.py.
 
-Stdin is always closed (asyncssh.DEVNULL), never left open: the Phase 4
-entry-gate spike proved that an unguarded upstream `read` prompt hard-aborts
-under closed stdin but hangs forever under an open, idle stdin; closed stdin
-is the only choice that fails fast instead of parking a JobBackend semaphore
-slot indefinitely.
+Stdin is always closed (asyncssh.DEVNULL): an open, idle stdin makes an
+unguarded upstream `read` prompt hang forever, parking a JobBackend semaphore
+slot; closed stdin fails fast instead.
 """
 from __future__ import annotations
 
@@ -105,19 +103,9 @@ async def default_connect_factory(host: str, private_key_pem: bytes, *,
         # validate_host_public_key below.
         known_hosts=b"", connect_timeout=CONNECT_TIMEOUT_S,
     )
-    # The connection is the authoritative source, and the callback above is only
-    # a fallback. asyncssh does not always invoke validate_host_public_key:
-    # against the real two-node `lab-cluster` cluster it fired on the node that
-    # negotiated ssh-rsa and NOT on the one that negotiated ssh-ed25519, even
-    # though both offer the same algorithms and the repo's own in-process test
-    # server (ed25519) does fire it. get_server_host_key() returned the correct
-    # key on both.
-    #
-    # That mattered because comparing an EMPTY capture against a pin reported a
-    # host key CHANGE ("saw None") when the truth was "we never read a key" --
-    # telling an operator to suspect an attack over an internal detail, and
-    # blocking every install on that host. "Could not tell" and "changed" are
-    # different answers, the same distinction _missing_privileges keeps.
+    # The connection is authoritative; asyncssh does not always call
+    # validate_host_public_key (it skipped the ed25519 node on the `lab-cluster`
+    # cluster), so an empty capture is "could not read", never "changed".
     host_key = conn.get_server_host_key()
     seen = (host_key.get_fingerprint() if host_key is not None
             else captured.get("fingerprint"))

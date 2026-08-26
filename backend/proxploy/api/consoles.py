@@ -104,10 +104,7 @@ def _auth_header_for(app, db, host: Host | None) -> str | None:
 # row.kind -> callable resolving the Host.id the ticket's node/guest lives on,
 # or None if the ticket's own target row was deleted during the ticket's TTL
 # window (a real race, not just theoretical -- doc 08's short TTL narrows but
-# doesn't close it). "node_shell" is Task 6's kind (a ticket minted directly
-# against a host), kept here so _run_pty_ws already dispatches on it without
-# Task 6 touching this function at all -- it only needs to add the POST/WS
-# routes that mint that kind.
+# doesn't close it).
 def _app_console_host_id(db, row):
     a = db.get(App, row.target_id)
     return a.host_id if a is not None else None

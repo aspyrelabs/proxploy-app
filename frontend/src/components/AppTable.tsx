@@ -20,16 +20,14 @@ const td = 'px-4 py-3 align-middle'
  * The Apps section's list view: every app as a row, carrying the same
  * measurements the detailed card shows.
  *
- * NOT an extension of GuestList. That component exists to merge apps and VMs
- * into ONE row shape, and its Guest type is deliberately lossy (memory
- * pre-formatted to a string, no disk, no network) because VMs have no data
- * for those columns. Widening it to fit this view would put permanently empty
- * columns on every VM row.
+ * NOT an extension of GuestList. That component merges apps and VMs into ONE
+ * row shape, and its Guest type is deliberately lossy (memory pre-formatted
+ * to a string, no disk, no network) because VMs have no data for those
+ * columns. Widening it would put permanently empty columns on every VM row.
  *
- * There is no app detail PAGE any more: a row expands in place and floats the
- * rows below it down. `open` is the id of the one row showing its detail, and
- * it is owned by whoever renders this table (AppsPage keeps it in the URL, so
- * /apps?open=3 is still a link you can send someone).
+ * There is no app detail PAGE: a row expands in place. `open` is the id of
+ * the one row showing its detail, owned by whoever renders this table
+ * (AppsPage keeps it in the URL, so /apps?open=3 is still shareable).
  */
 export function AppTable({ apps, open, onOpen }: {
   apps: AppRow[]
@@ -42,24 +40,18 @@ export function AppTable({ apps, open, onOpen }: {
   // Click-away, and the two things it must NOT close on.
   //
   // The listener is on `pointerdown`, not `click`, and the ref is on the whole
-  // table rather than on the open panel. Both of those are about ordering.
-  // React attaches its handlers at the root container, which is itself inside
-  // `document`, so a row's own onClick runs BEFORE a bubbling document click
-  // listener sees the same event: with the ref on the panel, clicking a
-  // different row would open that row and then this listener, told the click
-  // landed outside the (old) panel, would close it again. With the ref on the
-  // table, every row-to-row switch is inside the container and the row's own
-  // onClick is left to do the switching.
+  // table rather than the open panel — both are about ordering. React attaches
+  // handlers at the root container, so a row's own onClick runs BEFORE a
+  // bubbling document listener sees the same event: with the ref on the panel,
+  // clicking a different row would open it and then this listener (seeing the
+  // click land outside the old panel) would close it again. Ref on the table
+  // leaves every row-to-row switch inside the container.
   //
   // Radix menus portal to document.body, so a click on a menu item is outside
-  // this container by DOM position while being inside the table by intent.
-  // @radix-ui/react-popper wraps that portalled content in an element carrying
-  // `data-radix-popper-content-wrapper`, which is the marker checked here.
-  //
-  // Dialogs portal the same way and are not popper-wrapped, so they need their
-  // own marker. Migrate, Reconfigure, Backup and Delete all open one from the
-  // row's own menu, and without this a click anywhere inside that dialog
-  // collapsed the panel sitting behind it.
+  // this container by DOM position while being inside the table by intent;
+  // `data-radix-popper-content-wrapper` is the marker checked here. Dialogs
+  // portal the same way and are not popper-wrapped, so they get their own
+  // `[role="dialog"]` marker.
   useEffect(() => {
     if (open == null) return
     const away = (e: PointerEvent): void => {
@@ -111,8 +103,7 @@ function AppTableRow({ app, open, onToggle }: {
         onClick={onToggle}>
       <td className={td}>
         {/* The same tile the icon grid and the app card draw, at the grid's
-            own 32px: an app is recognised by its logo before its name, and a
-            table that dropped it made every row look alike. */}
+            own 32px: an app is recognised by its logo before its name. */}
         <div className="flex items-center gap-2.5">
           <Icon name="expand_more" size={16}
                 className={`shrink-0 text-text-3 transition-transform motion-reduce:transition-none
@@ -121,8 +112,8 @@ function AppTableRow({ app, open, onToggle }: {
                     initials={app.icon_initials} colors={app.icon_colors} />
           {/* No onClick of its own: the whole row toggles, and a handler here
               would fire once for the button and again as the click bubbled to
-              the row, cancelling itself out. It stays a real button so the
-              row is reachable and announced from the keyboard. */}
+              the row, cancelling itself out. It stays a real button so the row
+              is reachable and announced from the keyboard. */}
           <button type="button" aria-expanded={open}
             className={`text-left font-mono text-[13px] ${linkCls}`}>
             {app.name}
@@ -144,12 +135,10 @@ function AppTableRow({ app, open, onToggle }: {
             : fmtBytes(app.disk_bytes)}
         </div>
       </td>
-      {/* No bar: a rate has no denominator to draw one against.
-          Stacked rather than side by side: the two rates ran together on one
-          line as a single run of digits and arrows, and at four significant
-          figures each the cell was the widest thing in the row. Down over up,
-          in that order, with a hairline between so the pair reads as two
-          readings rather than one number that wrapped. */}
+      {/* No bar: a rate has no denominator to draw one against. Stacked
+          rather than side by side so the two rates don't run together as one
+          run of digits — down over up, hairline between, reads as two
+          readings. */}
       <td className={`${td} font-mono text-[11px] text-text-2`}>
         <div className="whitespace-nowrap">↓ {fmtBps(app.net_in_bps)}</div>
         <div className="mt-1 whitespace-nowrap border-t border-line-soft pt-1">
@@ -168,9 +157,8 @@ function AppTableRow({ app, open, onToggle }: {
     {/* The expander. `grid-template-rows: 0fr -> 1fr` on a wrapper whose child
         is `overflow-hidden` is the one way to animate to a height nobody has
         measured: the grid track resolves to the content's natural height at
-        1fr, and the browser interpolates the fraction. Measuring the panel in
-        JS to animate a pixel height would re-measure on every resize and on
-        every metric that lands inside it.
+        1fr, and the browser interpolates the fraction (measuring in JS would
+        re-measure on every resize and metric).
 
         The row is always in the DOM, empty and zero-height while closed,
         because a transition cannot run on an element that was not there for

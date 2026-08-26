@@ -65,14 +65,10 @@ class Settings(BaseSettings):
     license_revalidation_days: float = 90.0
 
     poll_enabled: bool = True
-    # 5s, not 30s. Everything a cycle reads out of /cluster/resources (node and
-    # guest CPU, memory, status, and the guest netin/netout counters the guest
-    # rates are diffed from) is as fresh as this number, so the tables and
-    # cards move at 5s now. The two things that do NOT are deliberate and live
-    # in pollers/__init__.py: node network throughput comes from PVE's RRD,
-    # which buckets at 60s and cannot go faster whatever we do here, and
-    # MetricSample recording stays on 30s so the charts' storage does not grow
-    # sixfold to draw the same lines.
+    # 5s, not 30s: guest CPU/mem/status/net counters (and the rates diffed from
+    # them) are as fresh as this. Node net throughput (PVE RRD, 60s buckets)
+    # and MetricSample recording (30s) deliberately stay coarser — see
+    # pollers/__init__.py.
     poll_interval_s: float = 5.0
     poll_timeout_s: float = 20.0
     console_ticket_ttl_s: float = 30.0
@@ -81,56 +77,36 @@ class Settings(BaseSettings):
     # so this caps BOTH the request body and the transient free disk the
     # Proxploy host must have. 16 GiB covers a Windows Server ISO with room.
     storage_upload_max_bytes: int = 16 * 1024 ** 3
-    # Wall-clock ceiling every Phase 6 job handler passes to
-    # services/pvetask.py::await_task. services/lifecycle.py keeps its own
-    # module constant instead: a start/stop that needs five minutes is a
-    # different animal from a restore that needs fifty, and lifecycle's
-    # timeout is already exercised by tests that monkeypatch it.
-    # 3600s (1h), not lifecycle's 300s: every Phase 6 handler that reaches
-    # this setting is disk-copy-bound (vm.clone, backup.run/restore/prune,
-    # storage.upload) rather than a status flip, and a multi-hundred-GB clone
-    # or vzdump routinely needs far longer than five minutes. 300s was
-    # inherited from TASK_TIMEOUT_S's start/stop-shaped default and never
-    # revisited for these: see BLOCKING 4 in the Phase 6 final review.
+    # Wall-clock ceiling for Phase 6 handlers passed to pvetask.await_task.
+    # 3600s (1h), not lifecycle's 300s: these are disk-copy-bound (vm.clone,
+    # backup.run/restore/prune, storage.upload), so multi-hundred-GB clones
+    # need far more than five minutes.
     pve_task_timeout_s: float = 3600.0
     backup_sync_stale_s: float = 900.0
-    # Scheduler (doc 10 Phase 7). The tick is the resolution floor: a cron
-    # expression cannot be finer than one minute, so 30s is already twice as
-    # often as it needs to be and costs one indexed SELECT.
+    # The scheduler tick is the resolution floor: a cron expression cannot be
+    # finer than one minute, so 30s is already twice as often as it needs to be.
     scheduler_enabled: bool = True
     scheduler_tick_s: float = 30.0
     # Alert evaluation rides the poll cycle (services/alerts.py); off means the
     # poller still writes samples, nothing evaluates them.
     alerts_enabled: bool = True
-    # OIDC JIT provisioning policy (doc 10 Task 10 + gap review). An IdP's user
-    # population is not automatically the application's authorized population
-    #, auto-admitting every directory identity is the accidental-access
-    # failure mode. None (default) means a first-time OIDC sign-in provisions
-    # the user but mints NO team_members row and leaves is_active=False: since
-    # services/authz.py derives every permission from team_members and is
-    # fail-closed, that account can do nothing until an admin activates it and
-    # assigns a role through the existing users/teams API: deny-with-an-
-    # explanation, not a silent lockout. Set this to opt into auto-provisioning
-    # a real role instead; validated against ROLE_ORDER at first use
-    # (services/oidc.py) and raises loudly (never silently falls back) on an
-    # unknown value.
+    # OIDC JIT provisioning. None (default) is fail-closed: first sign-in mints
+    # no team_members row and leaves is_active=False, so (authz deriving every
+    # permission from team_members) the account can do nothing until an admin
+    # activates it — deny with an explanation, not a silent lockout. Set a role
+    # to opt into auto-provisioning; validated against ROLE_ORDER and raises
+    # loudly on an unknown value.
     oidc_default_role: str | None = None
     oidc_default_team_slug: str = "default"
-    # Task 9: how long a pending-2FA token (issued by password-correct login
-    # for a totp_enabled user) stays redeemable at POST /auth/totp before it
-    # must be discarded and the user re-logs in with their password. Kept
-    # short: this is a live login in progress, not a remember-me window.
+    # How long a pending-2FA token stays redeemable before the user re-logs in.
+    # Kept short: this is a live login in progress, not a remember-me window.
     totp_pending_ttl_s: float = 300.0
-    # Migration preflight (doc 08 §14, doc 11 §2): the only number honesty lets
-    # us assume rather than measure: everything else in the estimate (transfer
-    # size, strategy) comes from a live PVE call. 80 MB/s is a conservative LAN
-    # sustained-transfer figure; the job itself reports MEASURED downtime once
-    # it runs (services/migrate.py's est_note says so explicitly).
+    # Migration preflight: the only number assumed rather than measured (the
+    # rest comes from a live PVE call); 80 MB/s is a conservative LAN figure,
+    # and the job reports MEASURED downtime once it runs.
     migrate_assumed_bps: float = 80e6
-    # Phase 9a. The release channel is a base URL holding manifest.json,
-    # manifest.json.sig and the tarball. https:// in production; the test
-    # harnesses point it at a file:// directory so no test ever needs the
-    # network or a real release.
+    # Base URL holding manifest.json, manifest.json.sig and the tarball. Test
+    # harnesses point this at a file:// directory so no test needs the network.
     release_channel_url: str = "https://github.com/aspyrelabs/proxploy-app/releases/latest/download"
     release_pubkey_file: Path | None = None   # None = the key shipped in the package
     # Set by the installer in /etc/proxploy/proxploy.env. Unset means a dev

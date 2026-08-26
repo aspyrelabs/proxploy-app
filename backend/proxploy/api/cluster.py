@@ -18,13 +18,8 @@ _read = authorize("host", "read")
 def _pct(used: float, total: float) -> float | None:
     """None when nothing was measured, never 0.0.
 
-    A total of zero means no data reached this cycle (a degraded poll, a host
-    that answered /version and refused the storage read) or genuinely no
-    capacity, and both are "unknown", not "0% used". Seen for real while a
-    cluster had lost quorum: the dashboard drew calm 0% rings and
-    `0.0 B / 0.0 B` storage over an unwritable cluster (doc 12 check 12). The
-    Ring component already had an `unknown` state for a failed query; this is
-    the same claim for an empty answer.
+    A total of zero means no data reached this cycle or genuinely no capacity;
+    both are "unknown", not "0% used".
     """
     return round(used / total * 100, 1) if total else None
 

@@ -1,23 +1,12 @@
-"""Scheduler seam (brief §5, doc 02 §3, doc 04 `schedules`); cron triggers
-feeding the JobBackend.
+"""Scheduler seam: cron triggers feeding the JobBackend. This module reads
+`schedules` on every tick and enqueues what is ripe; APScheduler contributes
+only `CronTrigger` (cron parsing + DST-correct next-fire arithmetic), not a
+second registry to reconcile on CRUD writes. Ships on the stable 3.11 line
+(there is no "APScheduler 4" release).
 
-Doc 04, verbatim: "APScheduler's own state is reconstructed from these rows at
-boot; this table is authoritative." Taken literally there is no second registry
-to reconstruct, this module reads `schedules` on every tick and enqueues what
-is ripe. APScheduler contributes `CronTrigger` and nothing else: cron parsing
-and DST-correct next-fire arithmetic, the one part of scheduling that must
-never be hand-rolled. Its BaseScheduler/AsyncIOScheduler/jobstores would be a
-second source of truth to reconcile on every CRUD write, which is exactly what
-doc 04's sentence rules out.
-
-Docs 02/03/04/09/10 name "APScheduler 4". No 4.x release exists, only
-4.0.0a1..a6 (verified against PyPI 2026-08-01), and doc 03 marks Scheduling
-"Provisional (seam: `Scheduler`)", so this ships on the stable 3.11 line.
-
-Failure policy: one malformed row must never stop the other schedules. A row
-whose cron/timezone no longer parses, or whose `job_kind` has no registered
-handler, is DISABLED with an audit row rather than retried forever or allowed
-to raise out of the tick.
+Failure policy: one malformed row must never stop the other schedules — a row
+whose cron/timezone no longer parses, or whose `job_kind` has no handler, is
+DISABLED with an audit row rather than retried forever.
 """
 from __future__ import annotations
 
@@ -49,9 +38,8 @@ def next_fire(cron: str, tz: str, after: datetime) -> datetime:
     try:
         trigger = CronTrigger.from_crontab(cron, timezone=tz)
     except (ValueError, KeyError) as e:
-        # ValueError: field count / range errors.
-        # KeyError: zoneinfo.ZoneInfoNotFoundError subclasses it, so an unknown
-        # tz lands here rather than escaping as a 500.
+        # KeyError also catches zoneinfo.ZoneInfoNotFoundError (it subclasses
+        # KeyError), so an unknown tz lands here rather than escaping as a 500.
         raise BadSchedule(f"{cron!r} @ {tz!r}: {e}") from e
     # Passing `after` as BOTH previous_fire_time and now forces "strictly
     # after": with previous_fire_time=None, CronTrigger treats `now` as a
@@ -79,17 +67,10 @@ _PREFIX_TARGET = {
 
 
 def _target(job_kind: str, params: dict | None) -> tuple[str, int | None]:
-    """Job target from the job kind's dotted prefix, so a scheduled run
-    invalidates the same UI caches an ad-hoc one does (doc 05 §Streaming: the
-    `job` delta carries `target_type`, and api/live.ts routes on it).
-
-    The prefix, not a param key name, is authoritative: `job_kind` is what
-    selects the handler (`HANDLERS[job_kind]`), so it cannot disagree with
-    itself. Param key names vary per handler, lifecycle's `run_lifecycle`
-    reads a bare `target_id` (api/apps.py), `backup.run` reads `host_id`; so
-    sniffing keys instead of the prefix silently mis-derives the type for
-    whichever handler doesn't use the sniffed name (this broke every
-    `app.*`/`vm.*` lifecycle kind before this fix).
+    """Job target from the job kind's dotted prefix (matching the ad-hoc run's
+    `target_type`). The prefix, not a param key, is authoritative: `job_kind`
+    selects the handler, and param key names vary per handler, so sniffing
+    keys silently mis-derives the type.
     """
     prefix = job_kind.split(".", 1)[0]
     target_type = _PREFIX_TARGET.get(prefix, "system")
@@ -103,22 +84,12 @@ def _target(job_kind: str, params: dict | None) -> tuple[str, int | None]:
 
 
 def _disable(db, s: Schedule, reason: str) -> None:
-    """The scheduler giving up on a row it cannot run at all.
+    """Automatic give-up on a row the scheduler cannot run. `actor_type` and
+    this action id are the AUTOMATIC disable only; a person disabling goes
+    through api/schedules.py as `schedule.update`.
 
-    `actor_type="system"` and this action identifier belong to the AUTOMATIC
-    give-up only. A person switching a schedule off goes through
-    api/schedules.py and lands in the log as `schedule.update`, so the two are
-    never confused in the record. The frontend labels this one "Schedule
-    Disabled Automatically" for the same reason.
-
-    `result="ok"`, not "error", and the distinction is not pedantry: `result`
-    is the outcome of THIS action, and this action, disabling the row, is the
-    thing that worked. What failed is the schedule itself, and that failure is
-    `params["reason"]`, which is the part an operator actually needs (an
-    unparseable cron reads differently from a job kind that vanished across an
-    upgrade). Recording "error" also made every surface that titles a row from
-    its result announce "Schedule Disable Failed", i.e. exactly the opposite
-    of what happened: the row IS disabled.
+    `result="ok"`, not "error": `result` is the outcome of THIS action (the
+    disable, which succeeded); the schedule's failure is `params["reason"]`.
     """
     s.enabled = False
     s.next_run_at = None
@@ -162,21 +133,12 @@ def due(db, now: datetime) -> list[Schedule]:
 
 
 def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
-    """Enqueue one schedule's job and advance the row.
+    """Enqueue one schedule's job and advance the row. Returns None only when
+    no job was enqueued (row disabled); still returns a dict when enqueue
+    succeeded but the follow-up `next_fire()` broke (a job really was created).
 
-    Returns None ONLY when no job was enqueued at all, `s.job_kind` has no
-    registered handler, `app.state.jobs.enqueue` raised, and the row is
-    disabled with an audit trail. It does NOT mean "the row was disabled": if
-    enqueue succeeds but the schedule's own cron/timezone then breaks on the
-    following `next_fire()` call, a job really was created and the caller
-    needs its id, so the dict is returned even though the row is also
-    disabled in that path (both a `schedule.fire` and a `schedule.disable`
-    audit row are written).
-
-    `next_run_at` advances from `now`, NOT from the stale `next_run_at`: after
-    a week of downtime the schedule owes exactly one catch-up run, not one per
-    missed occurrence. Skipped occurrences are visible as the gap in the job
-    history, which is the honest record.
+    `next_run_at` advances from `now`, not the stale value: after downtime a
+    schedule owes one catch-up run, not one per missed occurrence.
     """
     params = dict(s.params or {})
     target_type, target_id = _target(s.job_kind, params)
@@ -185,9 +147,8 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
             db, kind=s.job_kind, target_type=target_type, target_id=target_id,
             params=params, requested_by=None, schedule_id=s.id)
     except KeyError as e:
-        # JobBackend.enqueue raises this for an unregistered kind: a job kind
-        # can genuinely disappear across an upgrade, and retrying it every tick
-        # forever would be the wrong answer.
+        # Unregistered kind (a kind can vanish across an upgrade): disable,
+        # don't retry every tick forever.
         _disable(db, s, f"no handler for job kind {s.job_kind!r}: {e}")
         return None
 
@@ -228,19 +189,13 @@ def tick(app, now: datetime | None = None) -> list[dict]:
     return fired
 
 
-# --- system schedules -------------------------------------------------------
-
-# Rows Proxploy owns. Seeded by name at boot if absent, never re-created or
-# re-enabled once the operator has touched them (see seed_system_schedules).
 # `catalog.refresh` is what keeps `apps.update_available` honest: without it
 # an auto-update window would never see a new upstream commit.
 SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Catalog refresh", "job_kind": "catalog.refresh",
      "cron": "0 */6 * * *", "timezone": "UTC", "params": {}},
-    # Renamed from "Metrics maintenance" (migration c7a1e4f80b93 carries the
-    # existing row across). seed_system_schedules keys on `name` and only ever
-    # inserts, so changing this string without that migration would seed a
-    # SECOND row running the same job kind rather than rename the first.
+    # Do not rename: seed keys on `name` and only inserts, so a rename would
+    # seed a SECOND row running the same job kind rather than rename the first.
     {"name": "Usage cleanup", "job_kind": "metrics.maintain",
      "cron": "7 * * * *", "timezone": "UTC", "params": {}},
 )
@@ -264,8 +219,6 @@ def seed_system_schedules(db) -> int:
         db.commit()
     return created
 
-
-# --- the loop ---------------------------------------------------------------
 
 class Scheduler:
     """One tick loop, shaped like pollers.Poller: the supervisor never dies.

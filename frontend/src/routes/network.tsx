@@ -61,7 +61,6 @@ function BridgesCard({ nodes, pending }: { nodes: NodeIfaces[]; pending: boolean
            "No bridges reported yet" for the whole of it -- an answer, given
            before anyone had looked. */
         <SkeletonGroup label="Loading bridges">
-          {/* Bridge, Node, Subnet, Zone, Ports. */}
           <SkeletonTable rows={4} cols={['w-20', 'w-24', 'w-28', 'w-20', 'w-24']} />
         </SkeletonGroup>
       ) : rows.length === 0 ? (
@@ -110,14 +109,8 @@ function ThroughputCard() {
   // 1h window, matching the cluster page's network card.
   const { data, isPending } = useThroughput(1)
   const hosts = data?.hosts ?? []
-  // Deduped by cluster, not summed across hosts, and the same combineThroughput
-  // the Hosts page's tile uses. Both halves of this card were wrong in
-  // different directions: the charts drew the FIRST host and said so, while the
-  // figures added every host up and said nothing. A Host row is one API
-  // endpoint and the poller records that endpoint's view of the WHOLE cluster,
-  // so on a two-host cluster the figures were reporting twice the traffic that
-  // existed. One combined series now feeds both, so they cannot disagree and
-  // neither needs a caveat under it.
+  // Deduped by cluster, not summed across hosts. One combined series feeds
+  // both charts and figures so they cannot disagree.
   const { data: nodes } = useNodes()
   const clusterOf = (hostId: number) =>
     (nodes ?? []).find((n) => n.host_id === hostId)?.cluster ?? null
@@ -182,7 +175,6 @@ function AttachmentMap({ attachments, nodes, pending }: {
           while the card under it claims to be empty of the same fetch. */}
       {pending ? (
         <SkeletonGroup label="Loading guest attachments">
-          {/* Guest, NIC, Bridge, VLAN, Firewall, MAC, and the Edit button. */}
           <SkeletonTable rows={4}
             cols={['w-32', 'w-16', 'w-20', 'w-12', 'w-16', 'w-32', 'w-12']} />
         </SkeletonGroup>
@@ -325,20 +317,13 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <SkeletonLine className="w-20 text-[13px]" />
                 <SkeletonLine className="w-28 text-[11.5px]" />
-                {/* Add bridge, Discard staged, Apply staged config, all
-                    size="sm". h-8 (32px) is measured off a real rendered sm ghost in
-                    Chromium, not computed: the old 26px here was arithmetic on
-                    `px-2 py-1 text-[11px]`, which those buttons carried as a
-                    className and which never applied at all (it collides with
-                    the component's own size classes and loses in the emitted
-                    CSS), so the control this stood in for was really 37px. */}
+                {/* h-8 matches real rendered sm ghost button height. */}
                 <div className="ml-auto flex gap-2">
                   <Skeleton className="h-8 w-20 rounded-ctl" />
                   <Skeleton className="h-8 w-28 rounded-ctl" />
                   <Skeleton className="h-8 w-36 rounded-ctl" />
                 </div>
               </div>
-              {/* Interface, Type, Subnet, Ports, State, and the two buttons. */}
               <SkeletonTable rows={5}
                 cols={['w-20', 'w-16', 'w-28', 'w-20', 'w-10', 'w-28']} />
             </SkeletonGroup>

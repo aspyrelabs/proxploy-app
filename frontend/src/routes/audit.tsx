@@ -184,7 +184,6 @@ export function AuditPage() {
                       // page going away. Every re-filter and every page turn
                       // comes back through here.
                       loading={<SkeletonGroup label="Loading audit events">
-                        {/* Date, User, Action, Item, Result, IP. */}
                         <SkeletonTable cols={['w-32', 'w-20', 'w-28', 'w-20', 'w-12', 'w-24']} />
                       </SkeletonGroup>}
                       emptyTitle="No audit events match."

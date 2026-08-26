@@ -19,14 +19,8 @@ const card = 'rounded-card border border-line-soft bg-panel-2 p-4'
 const NO_AGENT = 'Storage usage reads unknown for this VM because only the '
                + 'guest agent can report how full its disk is.'
 
-/**
- * One VM's detail, as it appears inside the VMs table rather than on a page
- * of its own.
- *
- * The row object is already in hand by the time this renders, so `vm` is a
- * prop and there is no query for it here. The page this replaced fetched
- * /vms/{id} a second time purely because a URL was all it had.
- */
+/** One VM's detail row inside the VMs table. `vm` is already in hand, so it
+ *  is a prop and there is no query for it here. */
 export function VmDetailPanel({ vm }: { vm: VmRow }) {
   const memPct = vm.mem_bytes != null && vm.mem_total_bytes
     ? (vm.mem_bytes / vm.mem_total_bytes) * 100 : null

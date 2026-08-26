@@ -1,14 +1,11 @@
-"""Lifecycle job handlers (doc 10 Phase 3, doc 01 §2/§4, doc 05 Apps/VMs rows).
+"""Lifecycle job handlers. Proxploy's verbs are not Proxmox's: `restart` is
+Proxmox's `reboot`, `pause` is `suspend` (the mapping lives once, in PVE_VERB
+below). `stop` is the hard kill; `shutdown` is the graceful ACPI/init one.
 
-Proxploy's verbs are not Proxmox's verbs, `restart` is Proxmox's `reboot`,
-`pause` is `suspend`. The mapping is stated once, here, and nowhere else.
-`stop` is the hard kill; `shutdown` is the graceful ACPI/init one, matching
-Proxmox's own distinction.
-
-Every action is: one status POST (which returns a UPID), then poll the node's
-task status and stream its task log into `job_events` until the task stops.
-These are per-guest calls, deliberately outside the poller's O(nodes) budget
-(doc 02 §3); they are triggered by a human, not by a clock.
+Every action is: one status POST (returns a UPID), then poll the node's task
+status and stream its task log into `job_events` until the task stops. These
+are per-guest calls, deliberately outside the poller's O(nodes) budget; they
+are triggered by a human, not a clock.
 """
 from __future__ import annotations
 
@@ -43,13 +40,11 @@ def busy_guests(db, now):
     """{(target_type, target_id): status} for guests with a job in flight.
 
     The value is what the guest should READ as, not the job kind: "removing"
-    for an uninstall, "pending" for everything else. A removal deserves its own
-    word because it is the one that ends with the row gone, and "Working" on a
-    thing that is about to disappear tells you less than "Removing" does.
+    for an uninstall (the one that ends with the row gone), "pending" otherwise.
 
-    One query, for a whole list or a whole poll cycle. `started_at` is NULL
-    while a job is still queued, which is the moment it most deserves the
-    hold, so a missing stamp counts as fresh.
+    One query for a whole list or poll cycle. `started_at` is NULL while a job
+    is queued — the moment it most deserves the hold — so a missing stamp
+    counts as fresh.
     """
     from datetime import timedelta
 
@@ -91,15 +86,9 @@ RESULT_STATUS = {
 
 def _settle_status(app, target_type: str, target_id: int, status: str) -> None:
     """Write the known outcome of a finished action to the cached status
-    column, before the resource event that tells open tabs to refetch it.
-
-    This does not contradict doc 04's "Proxmox is the truth": the poller
-    stays the sole authority on ongoing state and this write does not
-    pre-empt it, it is not a reading we invented between polls. It is
-    Proxmox itself, via the task result, telling us the action finished, and
-    is corrected by the poller's next cycle the same as any other value in
-    this column. Only the status field is touched; cpu/mem/disk/net stay
-    whatever the poller last measured.
+    column, before the resource event that makes open tabs refetch (a refetch
+    before this write reads the poller's stale pre-action value). Corrected by
+    the poller's next cycle; only the status field is touched.
     """
     with app.state.sessionmaker() as db:
         model = App if target_type == "app" else Vm
@@ -130,11 +119,8 @@ def _resolve(app, target_type: str, target_id: int):
         try:
             client = client_for_host(app, db, host, capability="lifecycle")
         except ProxmoxError as e:
-            # Same sentence as before the extraction: a job reports a missing
-            # credential as a failed job, never as a 502. Now also covers a
-            # host with monitoring configured but no lifecycle token: the
-            # message names lifecycle specifically (CapabilityNotConfigured),
-            # not a bare 403 relay.
+            # A missing credential is a failed job, not a 502; the message names
+            # lifecycle specifically (CapabilityNotConfigured), not a bare 403.
             raise JobFailed(str(e)) from e
         kind = "lxc" if target_type == "app" else "qemu"
         vmid = row.ctid if target_type == "app" else row.vmid
@@ -163,11 +149,8 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
                 f"captured to track it", stream="stderr")
         raise
     except ProxmoxError as e:
-        # Stopping something already stopped is the outcome the caller wanted,
-        # not a failure. PVE answers "CT 502 not running" / "VM 600 not
-        # running" with a 500, which surfaced in the UI as a red failed job for
-        # a no-op (PVE 9.2.6, 2026-08-10). run_app_uninstall already tolerated
-        # exactly this case; the same reasoning belongs here.
+        # "not running" + 500 is a no-op, not a failure (the outcome the
+        # caller wanted).
         #
         # ponytail: matched on PVE's message text, since there is no status
         # read on the client and adding a /cluster/resources round trip before
@@ -192,14 +175,10 @@ async def run_lifecycle(ctx: JobContext, target_type: str, action: str,
     status = await await_task(ctx, client, node, upid,
                               timeout_s=TASK_TIMEOUT_S, poll_s=TASK_POLL_S)
 
-    # await_task raises JobFailed on anything but a successful exitstatus, so
-    # reaching this line means PVE has confirmed the action completed. Write
-    # the resulting status now, before publishing the resource event: the
-    # event tells every open tab to refetch, and without this write that
-    # refetch would read the poller's stale pre-action value, since the
-    # poller's own cycle can be up to 30 seconds away (this was the "stop
-    # flashes back to running" bug). This is not a guess at unpolled state,
-    # it is what the task result just told us; see _settle_status.
+    # await_task raises JobFailed unless PVE confirmed success, so reaching
+    # here means the action completed. Write status before the resource event:
+    # a refetch before this write reads the poller's stale value ("stop
+    # flashes back to running" bug).
     await asyncio.to_thread(_settle_status, app, target_type, target_id,
                             RESULT_STATUS[action])
     app.state.bus.publish("resource", {"type": target_type, "id": target_id,
@@ -223,19 +202,11 @@ for _verb in VM_ACTIONS:
 
 
 async def run_app_uninstall(ctx: JobContext, params: dict) -> dict:
-    """Destroy an app's CT on PVE, then forget the app row.
-
-    Ordering is deliberate. PVE refuses to destroy a running container, so the
-    stop comes first; and the row is deleted only AFTER PVE confirms the
-    destroy, because a row deleted first with a failed destroy leaves an
-    orphaned CT that Proxploy no longer knows about, which is the one outcome
-    with no recovery path through the UI. The reverse (CT gone, row lingering)
-    is self-correcting: the poller marks it missing and the operator can forget
-    it.
-
-    A stop failure is logged and the destroy is attempted anyway: an already-
-    stopped container reports one, and so does a container PVE considers
-    wedged, which is exactly when someone reaches for uninstall.
+    """Destroy an app's CT on PVE, then forget the app row. Stop first (PVE
+    refuses to destroy a running CT); delete the row only AFTER PVE confirms
+    the destroy — deleting first with a failed destroy leaves an orphaned CT
+    with no recovery path. A stop failure is logged and the destroy still
+    attempted.
     """
     app = ctx.backend.app
     target_id = int(params["target_id"])

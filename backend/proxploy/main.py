@@ -126,13 +126,8 @@ def create_app(
 
         import asyncio
 
-        # PXP-31: the loop itself now lives in api/entitlements.py next to
-        # apply_new_token, with a start_refresh_loop(app) entry point that is
-        # idempotent (skips if app.state.refresh_task is already running).
-        # Boot only starts it when a license is already on file; the
-        # license-activation route (api/entitlements.py:set_license) calls
-        # the same function so a fresh activation gets auto-refresh without
-        # waiting for a restart.
+        # start_refresh_loop is idempotent; boot starts it only when a license
+        # is already on file (the activation route calls it too).
         from proxploy.api.entitlements import start_refresh_loop
 
         with app.state.sessionmaker() as db:
@@ -188,11 +183,8 @@ def create_app(
                 prime(db, utcnow())
             scheduler_task = asyncio.create_task(app.state.scheduler.run())
 
-        # Phase 9a: the installer knows which CT it built Proxploy into and
-        # puts it in the env file; persist it once so services/selfguard.py
-        # can recognise our own container. Write-once: a later operator
-        # correction (Proxploy moved) must survive restarts, so an existing
-        # value wins.
+        # Persist the installer-supplied CT id once (write-once: an existing
+        # value wins) so services/selfguard.py can recognise our own container.
         if settings.self_ctid is not None:
             from proxploy.services.settings import get_setting, set_setting
             with app.state.sessionmaker() as db:

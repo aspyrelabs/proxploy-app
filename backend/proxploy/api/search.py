@@ -1,26 +1,13 @@
-"""Global search, the data behind doc 06's command palette (PXP-17).
+"""Global search backend (doc 06's command palette, PXP-17): one query, results
+grouped by kind, so the palette is a UI concern only.
 
-`ui.global_search` was a registered entitlement flag with nothing behind it,
-and doc 06's cmdk palette was dropped rather than reimplemented when the
-frontend stack was substituted (see doc 06's amendment). This is the backend
-half: one query, results grouped by kind, so the palette is a UI concern only.
+Deliberately not a full-text index: a LIKE per table answers in milliseconds
+at this catalog size, and an index would be a second source of truth. Every
+result is scoped by the same authz the resource's own routes use — search must
+never leak a host a viewer cannot read.
 
-Deliberately NOT a full-text index. Everything searchable here lives in tables
-Proxploy already owns: the catalog is the big one at ~669 rows, plus however
-many apps and VMs the operator runs. A LIKE per table answers in milliseconds
-at that size, and an index would be a second source of truth to keep in sync
-with no measurable benefit.
-
-Every result is scoped by the same authz the resource's own routes use: search
-must never be the one place a viewer discovers a host they cannot read.
-
-TWO GATES, NOT ONE. This endpoint is no longer entitlement-gated as a whole.
-The App Store's own search box is gone, and it was never behind
-`ui.global_search`, so a plan carrying `store.catalog` without
-`ui.global_search` would have lost the ability to search the store at all: a
-capability removal, dressed up as a UI cleanup. Instead each group carries its
-own entitlement (see `search`), so the palette degrades to store-only rather
-than to nothing, and the app/VM/host groups stay gated exactly as they were.
+Not entitlement-gated as a whole: each group carries its own entitlement (see
+`search`), so the palette degrades to store-only rather than to nothing.
 """
 from __future__ import annotations
 
@@ -42,14 +29,9 @@ _read = authorize("app", "read")
 # thrown away by the UI.
 PER_KIND = 8
 
-# The store is the exception, and it earns it. The other three groups are
-# navigation: you know the app exists and you are jumping to it, so 8 covers
-# every realistic ambiguity. The store is a 557-entry catalog people BROWSE,
-# and it is losing its own search box, so this is now the only way to search
-# it. At 8, a two or three letter query silently truncates to near-nothing and
-# the palette looks like the catalog does not contain what it plainly does.
-# 25 is about a screenful in one group and still two orders of magnitude below
-# returning the catalog, which is the thing that must never happen here.
+# The store is browsed (557-entry catalog) and has lost its own search box, so
+# it gets more than the 8 the nav groups get: 8 truncates short queries to
+# near-nothing, 25 is a screenful and still far from returning the catalog.
 STORE_PER_KIND = 25
 
 
@@ -60,26 +42,14 @@ def _visible(request: Request, db, user: User, resource: str, action: str) -> bo
 @router.get("", dependencies=[Depends(_read)])
 def search(request: Request, q: str = "", db=Depends(get_db),
            user: User = Depends(_read)):
-    """Fuzzy-ish search across apps, VMs, hosts and store entries.
+    """Search across apps, VMs, hosts and store entries. Empty/single-char
+    queries return nothing.
 
-    An empty or single-character query returns nothing rather than everything:
-    a palette that dumps the whole inventory on first keystroke is noise, and
-    the operator has a nav for browsing.
-
-    ENTITLEMENTS ARE PER GROUP, and the route-level dependency is deliberately
-    gone. `ui.global_search` still gates apps, VMs and hosts, exactly as it
-    gated the whole endpoint before; `store.catalog` gates the store group, the
-    same flag the Store's own routes use (api/catalog.py). A caller with
-    neither is 403ed on `ui.global_search`, which is the response this route
-    already gave that caller, so nothing that could see this endpoint before
-    loses anything.
-
-    Moving the check inside is what makes store-only possible at all, and it
-    is the one restructuring with a real hazard: the four groups must stay
-    independently gated, so that dropping the route-level dependency cannot
-    hand an app, VM or host row to a caller who could not have seen this
-    endpoint at all a moment ago. Both halves of every group's condition, the
-    entitlement AND `_visible`, are load bearing.
+    Entitlements are per group: `ui.global_search` gates apps/VMs/hosts,
+    `store.catalog` the store group; a caller with neither gets 403 (as
+    before). The four groups must stay independently gated — dropping the
+    route-level dependency must not leak an app/VM/host to someone who could
+    not have seen this endpoint.
     """
     entitlements = request.app.state.entitlements
     palette = entitlements.enabled("ui.global_search")
@@ -126,36 +96,16 @@ def search(request: Request, q: str = "", db=Depends(get_db),
                   .order_by(Host.name).limit(PER_KIND)):
             out.append({"kind": "host", "id": h.id, "label": h.name,
                         "sublabel": h.node_name or h.address,
-                        # /settings/hosts/{id} was never a route. The frontend
-                        # router has /settings and nothing under it, so this
-                        # link has always dead-ended; the palette navigates to
-                        # a path TanStack cannot match. Settings grew a section
-                        # rail on 2026-08-22, so the page this wanted now has a
-                        # real URL. Not per-host (there is still no such page),
-                        # but the section that lists every enrolled host.
+                        # No per-host page exists; link to the settings section
+                        # that lists every enrolled host.
                         "href": "/settings?section=hosts", "status": h.status})
 
     if store and _visible(request, db, user, "catalog", "read"):
-        # Name OR slug OR description, mirroring the rule the Store's own grid
-        # filters by (frontend/src/routes/store.tsx), because this now has to
-        # stand in for the box that used it.
-        #
-        # Description is the half that changed the answer: 617 rows carry a
-        # real upstream description as of the metadata sync, 548 of them ct
-        # (services/catalog_metadata.py), and a palette matching names only
-        # would have made every one of them unsearchable the day they landed.
-        # Slug stays in the haystack for the opposite case: the 9 "unlisted"
-        # rows have no description at all, and their slug is often the name
-        # anyone would actually type.
-        #
-        # `store_visible()` FIRST, and it is not optional. Every result here
-        # emits `href: /store/<slug>`, so this query must return exactly the
-        # rows the Store grid can render and nothing else. It did not, and a
-        # user found it: searching "alpine" returned 25 results of which 20
-        # were unopenable, every one of them a hidden alpine-<parent> variant
-        # or a non-ct row, and each opened Not Found. The predicate is shared
-        # with list_catalog rather than repeated here precisely because
-        # repeating it is what caused that.
+        # Name OR slug OR description (mirrors the Store grid's filter), and
+        # `store_visible()` first: every result emits `/store/<slug>`, so this
+        # must return exactly the rows the Store can render (searching "alpine"
+        # once returned 20 unopenable hidden variants). Predicate is shared with
+        # list_catalog, not repeated — repeating it caused that bug.
         for e in (db.query(CatalogEntry)
                   .filter(store_visible())
                   .filter(or_(CatalogEntry.name.ilike(like),

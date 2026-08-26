@@ -9,21 +9,14 @@ import {
 } from './overlay'
 
 /**
- * The one modal in the product. Everything that used to hand-roll a scrim and
- * a panel comes through here.
+ * The one modal in the product. Radix owns the hard parts — Escape, focus
+ * trap, focus restore, aria-modal, scroll lock; we own only the look.
  *
- * Radix owns the parts that were missing from all 18 hand-rolled versions and
- * that are genuinely hard to get right: Escape, focus trap, focus restore to
- * whatever opened the dialog, aria-modal, and scroll lock. We own only the
- * look, which is the existing tokens unchanged.
- *
- * Mounting model matches the call sites it replaces: render it when it should
- * be open, unmount it to close. onClose fires for Escape, for the X in a
- * standard dialog, and (for the palette only, see below) for an outside
- * click. A standard dialog no longer closes on an outside click: a stray
- * click on browser UI that has nothing to do with the app, such as a
- * password manager's save prompt, used to dismiss the dialog and lose
- * whatever had been typed into it.
+ * Mounting model: render it when open, unmount to close. onClose fires for
+ * Escape, the X, and (palette only) an outside click. A standard dialog no
+ * longer closes on an outside click: a stray click on browser UI (e.g. a
+ * password manager's save prompt) used to dismiss it and lose whatever had
+ * been typed.
  */
 
 export function Dialog({
@@ -48,23 +41,17 @@ export function Dialog({
   /** 'palette' sits high and hides its heading (the command palette names
    *  itself through its input). */
   variant?: 'center' | 'palette'
-  /** Sits on the title's row, pushed right. The store's detail dialog uses it
-   *  for a status tag so converting did not have to move it below the heading. */
+  /** Sits on the title's row, pushed right. */
   headerRight?: ReactNode
   /** Caps the panel height and scrolls the BODY, leaving the heading in place.
-   *  Opt-in on purpose: this is shared by InstallDialog, the VM create wizard,
-   *  the schedule dialogs and the rest, and a dialog that fits on screen must
-   *  not grow a scroll container it never needed. A dialog that does not pass
-   *  this renders exactly as it did before the prop existed. The cap itself
-   *  lives in overlay.ts, so a call site cannot pick its own. */
+   *  Opt-in: a dialog that fits on screen must not grow a scroll container it
+   *  never needed. The cap lives in overlay.ts, so a call site cannot pick
+   *  its own. */
   scrollBody?: boolean
-  /** Drops `width` entirely and sizes the panel to its content, capped at
-   *  80vw/80vh (dialogFitPanelClass). For the job log, whose size is whatever
-   *  the transcript turned out to be. Unlike scrollBody this does NOT wrap the
-   *  children in a scroller: the body child owns the scrolling, because the
-   *  thing that has to stay scrolled to the newest line is TerminalPanel
-   *  itself. A `fit` child must therefore carry min-h-0 and its own overflow,
-   *  which is what `<JobLog height="fill">` passes down. */
+  /** Drops `width` and sizes the panel to its content, capped at 80vw/80vh
+   *  (dialogFitPanelClass). Unlike scrollBody this does NOT wrap the children
+   *  in a scroller: the body child owns the scrolling, so a `fit` child must
+   *  carry min-h-0 and its own overflow. */
   fit?: boolean
   onClose: () => void
   children: ReactNode
@@ -75,11 +62,9 @@ export function Dialog({
   const shrink = scrollBody || fit ? ' shrink-0' : ''
   const isPalette = variant === 'palette'
   // The palette is a deliberate exception, not an oversight: it hides its
-  // heading and names itself through its input, and a command palette
-  // conventionally dismisses on an outside click, the way this one always
-  // has. It also has no header row to hang an X on. Every other dialog gets
-  // the new behaviour: outside clicks are blocked, and the X is the only
-  // pointer-driven way out.
+  // heading, names itself through its input, and conventionally dismisses on
+  // an outside click. It has no header row to hang an X on. Every other
+  // dialog blocks outside clicks; the X is the only pointer way out.
   const closeButton = isPalette ? null : (
     // DialogPrimitive.Close rather than an onClick calling onClose directly,
     // so this goes through the same context.onOpenChange -> requestClose path

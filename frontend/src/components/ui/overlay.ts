@@ -10,72 +10,49 @@ export const dialogOverlayClass =
   'fixed inset-0 z-30 grid place-items-center bg-scrim backdrop-blur-[3px]'
 
 /**
- * max-w-[92vw] lives in the shared panel class, not at the call sites. Four
- * dialogs shipped a raw w-[520px] with no cap and overflowed a phone by 130px;
- * baking the cap in here means a call site cannot forget it, whatever width it
- * asks for. The widths themselves range 380 to 560, so they stay a number
- * rather than a name that would fit none of them.
- */
+ * max-w-[92vw] lives here, not at call sites: a raw fixed width with no cap
+ * overflowed a phone by 130px. Baking the cap in means a call site cannot
+ * forget it, whatever width it asks for. */
 const dialogPanelChrome = 'rounded-card border border-line bg-panel p-5'
 
 export const dialogPanelClass = `max-w-[92vw] ${dialogPanelChrome}`
 
 /**
- * The other sizing model: no width at all, take the content's, and stop at 80%
- * of the window in BOTH axes.
+ * The other sizing model: no width at all, take the content's, stop at 80vw
+ * and 80vh. For the job log there is no honest number to pass as `width` — a
+ * transcript is one component whether it's two lines or four hundred, so
+ * `w-fit` hands the decision to the content.
  *
- * For the job log there is no honest number to pass as `width`. The panel holds
- * a transcript, and a two-line "storage is full" and a 400-line install run are
- * the same component; a fixed 720 was too wide for the first and too narrow for
- * the second. `w-fit` hands the decision to the content: the panel comes out as
- * wide as the longest log line and as tall as the transcript, and shrinks below
- * both when there is less to show.
+ * 80vw/80vh is a ceiling, not a size, and tighter than the shared 92vw: one
+ * long line can push this panel flush to the window edge, where it stops
+ * reading as a dialog. The height cap earns its place the same way — an
+ * uncapped panel taller than the viewport overhangs the top with no way to
+ * scroll back.
  *
- * 80vw/80vh is the ceiling, and it is a ceiling rather than a size: it only
- * bites once the content asks for more than that. It is tighter than the shared
- * 92vw because this panel can be pushed to it by one long line, and a dialog
- * flush to the window edge stops reading as a dialog. The height cap earns its
- * place for the same reason 70vh does above: `place-items-center` cannot centre
- * a panel taller than the viewport, so an uncapped one overhangs the top with
- * no way to scroll back to it.
- *
- * flex-col is what makes the cap survivable. The body child carries min-h-0 and
- * its own overflow (TerminalPanel already does), so when the transcript is
- * taller than 80vh the flexbox shrinks that child and it scrolls, while the
- * heading and the Close button stay put.
- */
+ * flex-col makes the cap survivable: the body child carries min-h-0 and its
+ * own overflow, so when the transcript is taller than 80vh that child shrinks
+ * and scrolls while the heading and Close stay put. */
 export const dialogFitPanelClass = `flex w-fit max-h-[80vh] max-w-[80vw] flex-col ${dialogPanelChrome}`
 
 /**
- * Opt-in height cap and scroll container, for a dialog whose body is long
- * enough to outgrow the viewport.
+ * Opt-in height cap and scroll container for a dialog whose body can outgrow
+ * the viewport. The number lives here for the same reason max-w-[92vw] does:
+ * a call site that passes its own cap is one that can forget it. `Dialog`
+ * takes a boolean, not a height.
  *
- * The numbers live HERE rather than at the call site, for the same reason
- * max-w-[92vw] does: a call site that passes its own cap is a call site that
- * can forget one. `Dialog` takes a boolean, not a height.
- *
- * 70vh is the cap: the App Store's detail popup was rendering at full content
- * height, which for that content is taller than the screen, and a panel taller
- * than the viewport cannot be centred by `place-items-center` because there is
- * no free space to distribute. So it overhung the top with no way to scroll
- * back to it. Capping the height is what restores the centring; no centring
- * code was added or needed.
- *
- * The panel becomes a flex column so the heading can stay put while only the
- * body scrolls. A dialog whose heading scrolls away leaves the reader with no
- * anchor and nothing to aim the close button at.
- */
+ * 70vh is the cap: a panel taller than the viewport cannot be centred by
+ * `place-items-center` (no free space to distribute), so it overhangs the top
+ * with no way to scroll back. Capping restores the centring. flex-col keeps
+ * the heading put while only the body scrolls — a heading that scrolls away
+ * leaves the reader with no anchor and nothing to aim the close button at. */
 export const dialogScrollPanelClass = 'flex max-h-[70vh] flex-col'
 
 /** min-h-0 is load bearing: a flex child's default min-height is auto, which
  *  refuses to shrink below its content, so the container would grow past the
- *  cap instead of scrolling.
- *
- *  pp-scroll-hidden (styles/tokens.css) hides the bar itself while leaving
- *  every scrolling mechanism intact: wheel, trackpad, touch, arrow keys,
- *  Page Up/Down, Home/End, and focus moving to an offscreen control. It is
- *  scoped to this one class, so no other scroll surface in the app loses its
- *  bar. */
+ *  cap instead of scrolling. pp-scroll-hidden (styles/tokens.css) hides the
+ *  bar while leaving every scrolling mechanism intact (wheel, trackpad,
+ *  touch, keys, focus moving to an offscreen control); it's scoped to this
+ *  one class. */
 export const dialogScrollBodyClass = 'min-h-0 flex-1 overflow-y-auto pp-scroll-hidden'
 
 /** The command palette sits high on the screen rather than centred, so it does
@@ -87,15 +64,11 @@ export const palettePanelClass = 'max-w-[92vw] rounded-card border border-line b
 
 /**
  * Every call site renders its dialog conditionally and unmounts it to close,
- * so the naive wiring is onOpenChange -> onClose -> parent unmounts us. That
- * tears Radix down mid-close and focus lands on document.body instead of the
- * control that opened the dialog, which is one of the four defects this whole
- * change exists to fix.
- *
- * So the primitive owns closing: flip Radix's own open flag first, let it run
- * its close sequence and restore focus, and only then tell the parent. The
- * parent's unmount happens on the following effect, after focus has landed.
- */
+ * so the naive onOpenChange -> onClose -> parent-unmounts-us wiring tears
+ * Radix down mid-close and focus lands on document.body, not the opener. So
+ * the primitive owns closing: flip Radix's open flag first, let it run its
+ * close sequence and restore focus, then tell the parent — whose unmount
+ * happens on the following effect, after focus has landed. */
 export function useRadixClose(onClose: () => void) {
   const [open, setOpen] = useState(true)
 

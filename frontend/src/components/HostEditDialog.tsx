@@ -16,45 +16,21 @@ type HostCapabilities = { capabilities?: Record<string, boolean>; node_name?: st
 type SshRotateResult = { public_key?: string; consent_note?: string }
 
 /**
- * The single Edit dialog for a host: name, address, capability tokens, the
- * setup script, and SSH key regeneration, in one popup card (`Dialog`, which
- * already brings Escape/focus-trap/focus-restore -- see
- * components/ui/dialog.tsx). Save runs PATCH /hosts/{id} for name/address
- * (proxploy/api/hosts.py `patch_host`, extended for this: it used to only
- * take node_shell_enabled/team_id). Opened from both the node detail page's
- * actions menu (HostActionsMenu) and the Settings hosts row, so there is one
- * Edit dialog rather than one per entry point.
+ * The single Edit dialog for a host, opened from both the node detail page's
+ * actions menu and the Settings hosts row -- one dialog, not one per entry
+ * point. Save PATCHes /hosts/{id} for name/address.
  *
- * Token management for every capability, including monitoring, lives below
- * in `HostCapabilityList`, not here. The "Generate setup script" panel used
- * to live in the now-deleted HostTokensDialog (Settings only); it is here so
- * that affordance is not lost now that Settings opens this dialog instead.
- * SSH key regeneration used to live in the now-deleted HostRotateDialog; it
- * is the only place in the frontend that can do it, so it moved here too
- * rather than being dropped. Its token id/secret fields did not come across:
- * that is capability token rotation, and HostCapabilityList's monitoring row
- * already does it, duplicating it there was a real bug.
+ * Capability-token management lives in `HostCapabilityList`, not here.
  *
  * Changing the address can break a live connection, so "Test connection"
- * (POST /hosts/{id}/test, already built for the host page) is offered both
- * standing alone -- check the CURRENT connection before touching anything --
- * and automatically after a successful Save, so a broken result is seen here
- * rather than discovered later as a silently unreachable host.
+ * (POST /hosts/{id}/test) is offered both standalone and automatically after
+ * a successful Save. That test also reports the stored TLS pin vs the
+ * certificate the node presents now; accepting the new one is the only way to
+ * change a pin, and hosts are pinned at enrolment.
  *
- * That test also reports the host's stored TLS pin and the certificate the
- * node is presenting right now. When they differ, the dialog shows both in
- * full and offers to accept the new one, which is the only way to change a
- * pin. Hosts are pinned at enrolment, and without this a renewed certificate
- * would leave a host row nobody could fix from the UI.
- *
- * The same peer panel HostForm shows after adding a host is mounted here too,
- * so a host enrolled before that shipped gets the same offer without being
- * removed and re-added. It renders nothing at all on a standalone host. It sits below the
- * occasional-maintenance half of the dialog and above the certificate
- * warning, which stays next to the Test connection button that produces it,
- * because that warning is the one thing here someone may need to act on
- * urgently. No Skip and no Continue: this dialog is not a wizard and has
- * nothing to continue to, so the panel is given no onDone.
+ * PeerEnrolmentPanel (the panel HostForm shows after adding a host) renders
+ * nothing at all on a standalone host. It gets no onDone: this dialog is not
+ * a wizard and has nothing to continue to.
  */
 export function HostEditDialog({ hostId, host, onClose }: {
   hostId: number
@@ -264,10 +240,8 @@ export function HostEditDialog({ hostId, host, onClose }: {
         <div className="rounded-ctl border border-line bg-panel-2 p-3">
           <HostScriptPanel capabilities={defaultCapabilities} nodeShell={false} nodePower={false} />
         </div>
-        {/* SSH key regeneration, the one thing the deleted HostRotateDialog
-            did that HostCapabilityList cannot: it has no SSH handling at
-            all. Kept small and below the main form -- this is an occasional
-            maintenance action, not a primary field. */}
+        {/* Kept below the main form: occasional maintenance action, not a
+            primary field. */}
         <div className="border-t border-line-soft pt-3">
           <label className="flex items-center gap-2 text-[13px] text-text-2">
             <input type="checkbox" checked={rotateSsh}
