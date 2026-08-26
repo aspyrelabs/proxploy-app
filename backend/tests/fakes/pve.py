@@ -376,11 +376,35 @@ class _ActionLeaf:
         return self._owner._record_action(self._kind, self._vmid, self._action)
 
 
+class _GuestStatusCurrentLeaf:
+    """nodes(n).<kind>(vmid).status.current.get(): the one guest's own status.
+
+    Answers out of `resources`, so a test says what Proxmox thinks by setting
+    that list and nothing else. Without this, `current` fell through to
+    __getattr__ below and came back an _ActionLeaf, which has post() and no
+    get(): services/lifecycle.py's post-action read caught the AttributeError,
+    returned None, and silently took the slow path in every test.
+    """
+
+    def __init__(self, owner, kind, vmid):
+        self._owner, self._kind, self._vmid = owner, kind, vmid
+
+    def get(self, **kwargs):
+        if self._owner.fail:
+            raise ConnectionError("fake PVE unreachable")
+        for r in self._owner.resources:
+            if r.get("type") == self._kind and r.get("vmid") == self._vmid:
+                return {"status": r.get("status"), "vmid": self._vmid}
+        return {}
+
+
 class _GuestStatusNS:
     def __init__(self, owner, kind, vmid):
         self._owner, self._kind, self._vmid = owner, kind, vmid
 
     def __getattr__(self, action):
+        if action == "current":
+            return _GuestStatusCurrentLeaf(self._owner, self._kind, self._vmid)
         return _ActionLeaf(self._owner, self._kind, self._vmid, action)
 
 

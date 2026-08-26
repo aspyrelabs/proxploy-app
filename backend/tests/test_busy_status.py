@@ -46,6 +46,7 @@ def _job(app, target_type, target_id, kind, status="running", age_s=0):
         db.commit()
         if age_s:
             j.started_at = utcnow() - timedelta(seconds=age_s)
+            j.created_at = utcnow() - timedelta(seconds=age_s)
             db.commit()
 
 
@@ -91,13 +92,73 @@ def test_a_vm_being_shut_down_reads_as_working(tmp_path, bootstrap_admin):
         assert _vm_status(c, vm_id) == "pending"
 
 
-def test_a_settled_job_gives_the_status_back(tmp_path, bootstrap_admin):
+def _set_app_status(app, app_id, status):
+    """Stand in for the poller's next cycle writing what PVE actually says."""
+    with app.state.sessionmaker() as db:
+        db.get(App, app_id).status_cached = status
+        db.commit()
+
+
+def test_a_succeeded_stop_still_reads_as_working_until_pve_agrees(
+        tmp_path, bootstrap_admin):
+    """The one this file was written for, and the half it missed.
+
+    A finished job is not a finished action. `app.stop` completes in about a
+    second (1.2s measured on the dev cluster) while /cluster/resources goes on
+    reporting `running` for seconds after, so releasing the hold when the JOB
+    ends handed the pill straight back to a stale `running`: Working, running,
+    stopping, which is the flicker reported four times.
+    """
     app = make_app(tmp_path)
     with TestClient(app) as c:
         bootstrap_admin(c)
         app_id, _ = _seed(app)
         _job(app, "app", app_id, "app.stop", status="succeeded")
-        assert _app_status(c, app_id) == "running"
+        # The row still says running because no poll has happened yet.
+        assert _app_status(c, app_id) == "pending"
+
+
+def test_the_hold_ends_when_the_poller_sees_the_asked_for_state(
+        tmp_path, bootstrap_admin):
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        app_id, _ = _seed(app)
+        _job(app, "app", app_id, "app.stop", status="succeeded")
+        _set_app_status(app, app_id, "stopped")
+        assert _app_status(c, app_id) == "stopped"
+
+
+def test_the_newest_job_owns_the_guest_not_an_older_one(tmp_path, bootstrap_admin):
+    """A succeeded `start` must not keep claiming `running` over a later
+    `stop`, or the two holds fight and whichever query came back last wins."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        app_id, _ = _seed(app)
+        _job(app, "app", app_id, "app.start", status="succeeded")
+        _job(app, "app", app_id, "app.stop", status="succeeded")
+        assert _app_status(c, app_id) == "pending"
+        _set_app_status(app, app_id, "stopped")
+        assert _app_status(c, app_id) == "stopped"
+
+
+def test_an_action_that_never_took_effect_reads_as_an_error(tmp_path,
+                                                            bootstrap_admin):
+    """Past the ceiling with the guest still not there: we asked, Proxmox said
+    the task succeeded, and it did not happen. Saying `running` would hide
+    that; holding `pending` for ever would be a lie of a different kind."""
+    app = make_app(tmp_path)
+    with TestClient(app) as c:
+        bootstrap_admin(c)
+        app_id, _ = _seed(app)
+        _job(app, "app", app_id, "app.stop", status="succeeded",
+             age_s=LIFECYCLE_HOLD_S + 60)
+        assert _app_status(c, app_id) == "error"
+        # And it clears itself the moment reality catches up, so no second
+        # timer is needed and no row is stranded.
+        _set_app_status(app, app_id, "stopped")
+        assert _app_status(c, app_id) == "stopped"
 
 
 def test_a_backup_on_a_guest_does_not_make_it_read_as_working(tmp_path,

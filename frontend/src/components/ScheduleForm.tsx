@@ -83,6 +83,11 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
     existing
       ? existing.job_kind === 'backup.verify' || savedParams.verify === true
       : true)
+  // Ticked is what the scheduler has always done: a firing whose moment passed
+  // while nothing was running still fires, once, when it comes back. Unticked
+  // rolls the job forward to its next occurrence instead. Absent means ticked,
+  // so every job saved before this control existed keeps its behaviour.
+  const [catchUp, setCatchUp] = useState(savedParams.catch_up !== false)
 
   const spec = SCHEDULABLE.find((s) => s.kind === kind)
   const needs = spec?.needs ?? null
@@ -149,6 +154,9 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
         // keys that mean something.
         if (verifyAfter) params.verify = true
       }
+      // The other way round from `verify`, because the default is on: only the
+      // opted-out job needs to say so.
+      if (!catchUp) params.catch_up = false
       // PATCH sends the same body: every field is one this form owns, so there is
       // nothing to merge. `enabled` is deliberately absent on an edit - it belongs
       // to the row's own Enable/Disable control.
@@ -315,6 +323,14 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
           </select>
         </div>
       )}
+
+      <div className="sm:col-span-2">
+        <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+          <input type="checkbox" checked={catchUp}
+                 onChange={(e) => setCatchUp(e.target.checked)} />
+          Run a task as soon as possible after a scheduled start is missed
+        </label>
+      </div>
 
       <div>
         <label className={label} htmlFor="sc-tz">Timezone</label>

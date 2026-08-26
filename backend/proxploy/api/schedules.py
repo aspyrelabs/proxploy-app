@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.jobs import HANDLERS
-from proxploy.jobs.scheduler import BadSchedule, _target, next_fire
+from proxploy.jobs.scheduler import BadSchedule, _target, job_params, next_fire
 from proxploy.models import Job, Schedule, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
 
@@ -186,7 +186,9 @@ def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
     """
     row = _get(db, schedule_id)
     _check_auto_update(request, row.job_kind)
-    params = dict(row.params or {})
+    # An explicit ask, so `catch_up` has nothing to say here; job_params drops
+    # it for the same reason a tick-fired run does.
+    params = job_params(row)
     target_type, target_id = _target(row.job_kind, params)
     try:
         job = request.app.state.jobs.enqueue(

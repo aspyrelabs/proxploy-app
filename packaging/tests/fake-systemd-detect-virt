@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test double for systemd-detect-virt. Answers whatever FAKE_VIRT says, which
+# is how the shape-detection test stands in for "inside an LXC container"
+# without one. Real systemd exits 1 and prints "none" when not virtualised;
+# install.sh's detect_shape treats both the same, so the double does too.
+set -euo pipefail
+printf '%s\n' "${FAKE_VIRT:-none}"
+[ "${FAKE_VIRT:-none}" = "none" ] && exit 1
+exit 0

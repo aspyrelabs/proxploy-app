@@ -527,6 +527,35 @@ class ProxmoxClient:
     # Doc 02 §3 forbids per-guest calls in the POLL LOOP; these are triggered
     # by a human clicking a button and are explicitly outside that budget.
 
+    def guest_status(self, kind: str, node: str, vmid: int) -> str | None:
+        """GET /nodes/{node}/{lxc|qemu}/{vmid}/status/current -> "running" etc.
+
+        One guest, one call, which is the point. A full poll cycle reads RRD
+        series, guest IPs and disk usage for every guest on the host and takes
+        seconds; this is the same `status` string for the one guest that just
+        had an action run on it, and it is what lets the pill settle in well
+        under a second instead of at the end of the next cycle.
+
+        Needs VM.Audit, so it must be called with the MONITORING credential.
+        The lifecycle token holds VM.PowerMgmt and can act on a guest without
+        being able to read it: asking with that one returns
+        `403 Permission check failed (/vms/106, VM.Audit)`, verified against
+        the lab cluster. An earlier version of this swallowed that exception
+        and returned None, so the optimisation was dead in production and
+        looked exactly like it was working.
+
+        Raises like every other method here. The caller decides that a failed
+        read is not a failed job; hiding the reason inside is what cost a
+        session.
+        """
+        try:
+            body = getattr(self._connect().nodes(node), kind)(vmid).status.current.get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001  (one wrap point, like guest_action)
+            raise self._wrap(f"{kind}/{vmid} status read failed on {node}", e) from e
+        return (body or {}).get("status")
+
     def guest_action(self, kind: str, node: str, vmid: int, action: str) -> str:
         """POST /nodes/{node}/{lxc|qemu}/{vmid}/status/{action} -> UPID."""
         allowed = LXC_ACTIONS if kind == "lxc" else QEMU_ACTIONS

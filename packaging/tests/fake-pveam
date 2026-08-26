@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Test double for pveam, the companion to fake-pct. Only the `list` path
+# matters: install.sh's resolve_template takes the template from it and skips
+# the update/available/download branch entirely, so a non-dry PVE run needs no
+# catalog and no network.
+set -euo pipefail
+case "${1:-}" in
+  list) printf '%s\n' "${2:-local}:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst 0 0" ;;
+  *)    : ;;
+esac
+exit 0

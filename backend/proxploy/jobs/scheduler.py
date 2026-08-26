@@ -60,6 +60,36 @@ def validate(cron: str, tz: str, job_kind: str) -> None:
     next_fire(cron, tz, utcnow())
 
 
+# Missed means NEVER TRIGGERED, and never by seconds: a firing has to be owed
+# for half an hour before this counts it as missed. `due()` cannot tell a row
+# owed since last Tuesday from one owed twenty seconds ago, both just have a
+# next_run_at in the past, and the tick only looks every `scheduler_tick_s`
+# (30s), so a firing is routinely late by a little. Half an hour is long enough
+# that nothing but real downtime reaches it.
+#
+# A job that WAS triggered on time and is still running, or still queued behind
+# MAX_CONCURRENT, is not missed and nothing here looks at it: `next_run_at`
+# advances at trigger time (jobs/backend.py::enqueue returns without waiting on
+# the handler), so an in-flight run cannot make the next occurrence look late.
+#
+# Only rows with `catch_up: false` in their params consult any of this;
+# everything else runs the missed occurrence, which is what Proxploy has
+# always done.
+MISFIRE_GRACE_S = 1800.0
+
+
+def job_params(s: Schedule) -> dict:
+    """The params a firing actually hands the handler.
+
+    `catch_up` is the scheduler's own flag and no handler's business; stripping
+    it here rather than at each call site keeps it out of `jobs.params`, where
+    it would show up in the job detail UI as a knob that does nothing.
+    """
+    params = dict(s.params or {})
+    params.pop("catch_up", None)
+    return params
+
+
 _PREFIX_TARGET = {
     "app": "app", "vm": "vm",
     "backup": "host", "storage": "host", "network": "host", "host": "host",
@@ -137,10 +167,34 @@ def fire_one(app, db, s: Schedule, now: datetime) -> dict | None:
     no job was enqueued (row disabled); still returns a dict when enqueue
     succeeded but the follow-up `next_fire()` broke (a job really was created).
 
+    Returns None when no job was enqueued: an unregistered kind (the row is
+    disabled with an audit trail), or a row that opted out of catch-up runs
+    whose firing was late enough to count as missed, where `next_run_at` just
+    moves on.
+
     `next_run_at` advances from `now`, not the stale value: after downtime a
     schedule owes one catch-up run, not one per missed occurrence.
     """
-    params = dict(s.params or {})
+    # A start that never happened, not one serviced a little late. Ticked in
+    # the form (and absent from every job saved before this existed) means run
+    # it anyway, so the default here is True.
+    late = (now - s.next_run_at).total_seconds() if s.next_run_at else 0.0
+    if not (s.params or {}).get("catch_up", True) and late > MISFIRE_GRACE_S:
+        try:
+            s.next_run_at = next_fire(s.cron, s.timezone, now)
+        except BadSchedule as e:
+            _disable(db, s, str(e))
+            return None
+        db.commit()
+        # Audited, because the alternative is an operator finding no backup and
+        # no record of why not.
+        write_audit(db, actor_type="system", action="schedule.skip",
+                    target_type="schedule", target_id=s.id,
+                    params={"name": s.name, "job_kind": s.job_kind,
+                            "late_s": int(late)})
+        return None
+
+    params = job_params(s)
     target_type, target_id = _target(s.job_kind, params)
     try:
         job = app.state.jobs.enqueue(

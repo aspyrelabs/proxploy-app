@@ -59,7 +59,30 @@ const BACKOFF_MS = [1000, 2000, 4000]
  *  ticket POST that never succeeded (no socket opened to drop). The
  *  entitlement 403 is checked first because its body carries the reason in
  *  `error` and leaves `detail` generic. */
+
+
+/** The 409 api/consoles.py::_refuse_if_not_running raises, or null.
+ *
+ *  Shared with console-window.tsx's shellFailure: the two used to disagree,
+ *  the shell path blaming a missing Sys.Console privilege for what was only a
+ *  stopped container. Its `detail` names the guest and state, so it is not
+ *  pasted back at the operator. */
+export function guestNotRunning(e: unknown): { title: string; note: string } | null {
+  const body = e instanceof ApiError && e.body && typeof e.body === 'object'
+    ? e.body as { error?: string; detail?: string } : null
+  if (body?.error !== 'guest_not_running') return null
+  // Three states reach here (stopped, paused, suspended) and only one is
+  // "powered off": telling someone to power on a paused container sends them
+  // looking for a button that is not there.
+  const off = /\bstopped\b/i.test(body.detail ?? '')
+  return off
+    ? { title: 'This guest is powered off', note: 'Start it, then open the console again.' }
+    : { title: 'This guest is not running', note: 'Resume it, then open the console again.' }
+}
+
 export function consoleFailure(e: unknown): { title: string; note: string } {
+  const stopped = guestNotRunning(e)
+  if (stopped) return stopped
   if (e instanceof ApiError && (e.body as { error?: string } | null)?.error
       === 'entitlement_required') {
     return {

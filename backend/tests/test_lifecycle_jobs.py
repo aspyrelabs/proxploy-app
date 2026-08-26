@@ -19,6 +19,13 @@ def _seed_host(app, fake_token="s3cret"):
         db.add(HostCredential(host_id=host.id, kind="api_token:lifecycle",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!life"))
+        # A real host has both. run_lifecycle reads the guest back after the
+        # action with the MONITORING credential, because reading needs
+        # VM.Audit and the lifecycle token does not hold it (a real 403 on the
+        # lab cluster: "Permission check failed (/vms/106, VM.Audit)").
+        db.add(HostCredential(host_id=host.id, kind="api_token:monitoring",
+                              encrypted_blob=blob, key_version=ver,
+                              public_meta="proxploy@pve!mon"))
         db.commit()
         return host.id
 
@@ -588,7 +595,176 @@ def test_a_stop_that_fails_for_any_other_reason_still_fails(tmp_path):
 # succeeds, and left untouched when it does not.
 
 
-def test_successful_stop_settles_the_app_row_to_stopped(tmp_path):
+def test_the_guest_is_read_back_from_pve_without_waiting_for_a_poll(tmp_path):
+    """The pill must settle in well under a second, not at the end of a cycle.
+
+    Reported as "dashy stopped in 3-4 seconds but Proxploy keeps spinning for
+    30". The hold lifts on an OBSERVATION, and the only observation on offer
+    was the next full poll cycle, which reads RRD series, guest IPs and disk
+    usage for every guest on the host. This reads one field for one guest.
+
+    Note what is asserted: the status Proxmox reports, not RESULT_STATUS. The
+    old `_settle_status` wrote the latter, which is a belief, and the next poll
+    overwrote it. This is a reading, which is why busy_guests may release on
+    it.
+    """
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(resources=[
+            {"type": "lxc", "vmid": 150, "name": "Immich", "node": "pve1",
+             "status": "stopped"}])
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        from proxploy.models import utcnow
+        from proxploy.services.lifecycle import busy_guests
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        with app.state.sessionmaker() as db:
+            db.get(App, app_id).status_cached = "running"
+            db.commit()
+        # No poller cycle runs in this test at all.
+        app.state.poller.wake = lambda *_: None
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(App, app_id).status_cached == "stopped"
+            # And because that reading matches what was asked for, the hold is
+            # already gone: no spinner left behind.
+            assert ("app", app_id) not in busy_guests(db, utcnow())
+
+    asyncio.run(run())
+
+
+def test_a_guest_pve_has_not_caught_up_on_stays_held(tmp_path, monkeypatch):
+    """PVE still saying `running` right after the task must not end the hold.
+
+    This is the safe direction of the read-do-not-assume rule: we record what
+    Proxmox said, the guest keeps reading as working, and the wake'd cycle
+    settles it."""
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE(resources=[
+            {"type": "lxc", "vmid": 150, "name": "Immich", "node": "pve1",
+             "status": "running"}])
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle as lifecycle_mod
+        from proxploy.models import utcnow
+        from proxploy.services.lifecycle import busy_guests
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        # PVE never agrees in this test, so the re-ask loop would sit out its
+        # whole budget. Shortened rather than waited on: what is under test is
+        # that it GIVES UP holding, not how long it is willing to wait.
+        monkeypatch.setattr(lifecycle_mod, "OBSERVE_BUDGET_S", 0.05)
+        monkeypatch.setattr(lifecycle_mod, "OBSERVE_EVERY_S", 0.01)
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(App, app_id).status_cached == "running"
+            assert busy_guests(db, utcnow())[("app", app_id)] == "pending"
+
+    asyncio.run(run())
+
+
+def test_the_read_back_asks_again_until_proxmox_agrees(tmp_path, monkeypatch):
+    """One read is not enough, and that is what "it went slow again" was.
+
+    A task reporting done means the command was accepted; /cluster/resources
+    can still answer with the PRE-action state for a moment afterwards. A
+    single read landing in that moment records the old value, the hold stays,
+    and settling falls back to the next full poll cycle: seconds, for
+    something that is actually tens of milliseconds away.
+    """
+    import asyncio as aio
+
+    import proxploy.services.lifecycle as m
+
+    answers = ["stopped", "stopped", "running"]   # PVE catching up
+    asked = []
+
+    def fake_record(app, target_type, target_id, kind, node, vmid):
+        asked.append(1)
+        return answers[min(len(asked) - 1, len(answers) - 1)], None
+
+    monkeypatch.setattr(m, "_record_observed", fake_record)
+    monkeypatch.setattr(m, "OBSERVE_EVERY_S", 0.01)
+    monkeypatch.setattr(m, "OBSERVE_BUDGET_S", 1.0)
+
+    observed, why = aio.run(
+        m._observe_until(None, "app", 1, "lxc", "pve1", 150, "running"))
+    assert observed == "running" and why is None
+    assert len(asked) == 3, f"expected three asks, got {len(asked)}"
+
+
+def test_the_read_back_gives_up_rather_than_asking_for_ever(tmp_path, monkeypatch):
+    """A guest that never arrives must not hold the job open. The wake and the
+    300s ceiling cover it from there."""
+    import asyncio as aio
+
+    import proxploy.services.lifecycle as m
+
+    asked = []
+
+    def never_arrives(app, target_type, target_id, kind, node, vmid):
+        asked.append(1)
+        return "stopped", None
+
+    monkeypatch.setattr(m, "_record_observed", never_arrives)
+    monkeypatch.setattr(m, "OBSERVE_EVERY_S", 0.01)
+    monkeypatch.setattr(m, "OBSERVE_BUDGET_S", 0.05)
+
+    observed, _ = aio.run(
+        m._observe_until(None, "app", 1, "lxc", "pve1", 150, "running"))
+    assert observed == "stopped"          # last reading recorded, hold stays
+    assert len(asked) < 20                # bounded, not spinning
+
+
+def test_a_finished_action_wakes_the_poller(tmp_path):
+    """Load-bearing, not a nicety.
+
+    busy_guests lifts its hold when the poller OBSERVES the new state, so with
+    no wake the guest spins for the rest of the 30s cycle after an action
+    Proxmox finished in three seconds. Reported as "dashy stopped in 3-4
+    seconds but Proxploy kept spinning for 30". /cluster/resources reflects a
+    finished task within 17 to 39 ms, so the re-poll returns the new state.
+    """
+    from proxploy.jobs import JobBackend
+    from tests.fakes.pve import FakePVE
+    from tests.support import make_job_app
+
+    async def run():
+        fake = FakePVE()
+        app = make_job_app(tmp_path, fake=fake)
+        import proxploy.services.lifecycle  # noqa: F401
+        backend = JobBackend(app)
+        host_id = _seed_host(app)
+        app_id = _seed_app(app, host_id)
+        woken = []
+        app.state.poller.wake = woken.append
+        with app.state.sessionmaker() as db:
+            job_id = backend.enqueue(db, kind="app.stop", target_type="app",
+                                     target_id=app_id, params={"target_id": app_id}).id
+        await backend.wait(job_id, timeout=10)
+        with app.state.sessionmaker() as db:
+            assert db.get(Job, job_id).status == "succeeded"
+        assert woken == [host_id], f"expected one wake for host {host_id}, got {woken}"
+
+    asyncio.run(run())
+
+
+def test_successful_stop_leaves_the_row_to_the_poller_and_holds(tmp_path):
     from proxploy.jobs import JobBackend
     from tests.fakes.pve import FakePVE
     from tests.support import make_job_app
@@ -610,12 +786,21 @@ def test_successful_stop_settles_the_app_row_to_stopped(tmp_path):
         await backend.wait(job_id, timeout=10)
         with app.state.sessionmaker() as db:
             assert db.get(Job, job_id).status == "succeeded"
-            assert db.get(App, app_id).status_cached == "stopped"
+            assert db.get(App, app_id).status_cached == "running"
+            # The status column is the POLLER's to write. run_lifecycle used
+            # to stamp the expected outcome here, which put our belief in the
+            # readings column and let the next poll (whose PVE reading still
+            # said the old value, because /cluster/resources lags a finished
+            # task by seconds) overwrite it: the "stop flashes back to
+            # running" flicker. The hold below covers that window instead.
+            from proxploy.models import utcnow
+            from proxploy.services.lifecycle import busy_guests
+            assert busy_guests(db, utcnow())[("app", app_id)] == "pending"
 
     asyncio.run(run())
 
 
-def test_successful_start_settles_the_app_row_to_running(tmp_path):
+def test_successful_start_leaves_the_row_to_the_poller_and_holds(tmp_path):
     from proxploy.jobs import JobBackend
     from tests.fakes.pve import FakePVE
     from tests.support import make_job_app
@@ -637,7 +822,16 @@ def test_successful_start_settles_the_app_row_to_running(tmp_path):
         await backend.wait(job_id, timeout=10)
         with app.state.sessionmaker() as db:
             assert db.get(Job, job_id).status == "succeeded"
-            assert db.get(App, app_id).status_cached == "running"
+            assert db.get(App, app_id).status_cached == "stopped"
+            # The status column is the POLLER's to write. run_lifecycle used
+            # to stamp the expected outcome here, which put our belief in the
+            # readings column and let the next poll (whose PVE reading still
+            # said the old value, because /cluster/resources lags a finished
+            # task by seconds) overwrite it: the "stop flashes back to
+            # running" flicker. The hold below covers that window instead.
+            from proxploy.models import utcnow
+            from proxploy.services.lifecycle import busy_guests
+            assert busy_guests(db, utcnow())[("app", app_id)] == "pending"
 
     asyncio.run(run())
 
@@ -671,7 +865,7 @@ def test_a_failed_task_does_not_write_any_status(tmp_path):
     asyncio.run(run())
 
 
-def test_already_stopped_noop_settles_the_row_to_stopped(tmp_path):
+def test_already_stopped_noop_holds_rather_than_writing_a_status(tmp_path):
     """The ProxmoxError "not running" branch never runs a task, but stopped
     is still the outcome the caller wanted, so it settles the row too.
 
@@ -699,12 +893,21 @@ def test_already_stopped_noop_settles_the_row_to_stopped(tmp_path):
                                      target_id=app_id, params={"target_id": app_id}).id
         await backend.wait(job_id, timeout=10)
         with app.state.sessionmaker() as db:
-            assert db.get(App, app_id).status_cached == "stopped"
+            assert db.get(App, app_id).status_cached == "running"
+            # The status column is the POLLER's to write. run_lifecycle used
+            # to stamp the expected outcome here, which put our belief in the
+            # readings column and let the next poll (whose PVE reading still
+            # said the old value, because /cluster/resources lags a finished
+            # task by seconds) overwrite it: the "stop flashes back to
+            # running" flicker. The hold below covers that window instead.
+            from proxploy.models import utcnow
+            from proxploy.services.lifecycle import busy_guests
+            assert busy_guests(db, utcnow())[("app", app_id)] == "pending"
 
     asyncio.run(run())
 
 
-def test_successful_stop_settles_the_vm_row_too(tmp_path):
+def test_successful_stop_holds_the_vm_row_too(tmp_path):
     """Same fix, the VM side: Vm's own field is `status`, not
     `status_cached`, so this pins the two do not drift apart."""
     from proxploy.jobs import JobBackend
@@ -724,6 +927,15 @@ def test_successful_stop_settles_the_vm_row_too(tmp_path):
         await backend.wait(job_id, timeout=10)
         with app.state.sessionmaker() as db:
             assert db.get(Job, job_id).status == "succeeded"
-            assert db.get(Vm, vm_id).status == "stopped"
+            assert db.get(Vm, vm_id).status == "running"
+            # The status column is the POLLER's to write. run_lifecycle used
+            # to stamp the expected outcome here, which put our belief in the
+            # readings column and let the next poll (whose PVE reading still
+            # said the old value, because /cluster/resources lags a finished
+            # task by seconds) overwrite it: the "stop flashes back to
+            # running" flicker. The hold below covers that window instead.
+            from proxploy.models import utcnow
+            from proxploy.services.lifecycle import busy_guests
+            assert busy_guests(db, utcnow())[("vm", vm_id)] == "pending"
 
     asyncio.run(run())

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { createRoute, useParams } from '@tanstack/react-router'
 import { ApiError } from '../api/client'
 import type { ConsoleKind } from '../api/consoles'
-import { consoleWsPath, consoleWsUrl, useReconnectingTicket } from '../api/consoles'
+import { consoleWsPath, consoleWsUrl, guestNotRunning, useReconnectingTicket } from '../api/consoles'
 import { Terminal } from '../components/terminal/Terminal'
 import { rootRoute } from './shell'
 
@@ -66,6 +66,10 @@ export function shellFailure(e: unknown, kind: ConsoleKind = 'host'):
           + 'accident. Turn it on in Settings → Hosts, then reopen this window.',
     }
   }
+  // Answered before the Sys.Console branch below: a stopped guest is the
+  // commonest 409 by far and has nothing to do with token privileges.
+  const stopped = guestNotRunning(e)
+  if (stopped) return stopped
   if (status === 409 || status === 502) {
     return {
       title: 'Proxmox refused to open a shell',

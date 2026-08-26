@@ -10,3 +10,6 @@ node_modules/
 
 # macOS Finder metadata. Tracked by accident, dirty in every git status.
 .DS_Store
+
+# Release artifacts from packaging/build_release.sh. Signed tarballs, not source.
+/dist/

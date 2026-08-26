@@ -32,16 +32,28 @@ describe('applyMetrics', () => {
 })
 
 describe('applyResource', () => {
-  it('patches status deltas into list and detail caches', () => {
+  // This used to patch `d.status` straight into the cache, and that is what
+  // kept the stop/start flicker alive through four fixes. The event carries a
+  // RAW Proxmox reading; what a guest should display mid-action is that
+  // reading with services/lifecycle.py's hold over it, and only the API
+  // composes the two. Painting the raw value walked over the hold: mid-start
+  // the guest read back `stopped` for an instant and the pill went Working,
+  // Stopped, Running.
+  it('refetches on a status delta rather than painting the raw reading', () => {
     const qc = client()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
     applyResource(qc, { type: 'app', id: 5, change: 'status', status: 'running' })
-    expect((qc.getQueryData(['apps', { host: undefined, q: undefined }]) as any)[0].status).toBe('running')
-    expect((qc.getQueryData(['apps', 5]) as any).status).toBe('running')
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['apps'] })
+    // Deliberately NOT written into the cache: the refetch brings the value
+    // the API composed, hold included.
+    expect((qc.getQueryData(['apps', 5]) as any).status).toBe('stopped')
   })
-  it('leaves unrelated rows untouched', () => {
+  it('routes a vm status delta to the vms key, never to apps', () => {
     const qc = client()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
     applyResource(qc, { type: 'vm', id: 999, change: 'status', status: 'paused' })
-    expect((qc.getQueryData(['vms', {}]) as any)[0].status).toBe('running')
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['vms'] })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['apps'] })
   })
 })
 

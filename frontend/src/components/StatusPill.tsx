@@ -10,6 +10,9 @@ const STYLES: Record<string, string> = {
   stopped: 'bg-red-dim text-red',
   paused: 'bg-amber-dim text-amber',
   pending: 'bg-amber-dim text-amber',
+  // Container up, app inside not listening yet. Amber and spinning like
+  // pending: it changes on its own.
+  starting: 'bg-amber-dim text-amber',
   removing: 'bg-red-dim text-red',
   unreachable: 'bg-red-dim text-red',
   error: 'bg-red-dim text-red',
@@ -18,6 +21,7 @@ const STYLES: Record<string, string> = {
 
 export function StatusPill({ status }: { status: string }) {
   const working = status === 'pending' || status === 'removing'
+    || status === 'starting'
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10.5px] uppercase ${STYLES[status] ?? STYLES.unknown}`}>
       {working

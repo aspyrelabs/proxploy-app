@@ -5,13 +5,35 @@ from typing import Any, Literal
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# PROXPLOY_ENV picks the default API base URL below (dev is the default when
-# unset or empty); an explicit PROXPLOY_API_BASE_URL always wins over this
-# map, so the map only decides what happens when nobody said otherwise.
+# PROXPLOY_ENV picks the domain pair below (dev is the default when unset or
+# empty); an explicit PROXPLOY_API_BASE_URL / PROXPLOY_RELEASE_CHANNEL_URL
+# always wins over these maps, so they only decide what happens when nobody
+# said otherwise.
+#
+# install.sh carries the same two-row table in its WEB_BASE_URL case, because
+# it has to resolve the install URL before any of this Python exists. Those
+# two are the ONLY places either domain is written down: adding a third
+# environment is one line in each, never a search-and-replace.
 API_BASE_URL_BY_ENV: dict[str, str] = {
     "dev": "https://api.proxploy.dev",
     "prod": "https://api.proxploy.com",
 }
+WEB_BASE_URL_BY_ENV: dict[str, str] = {
+    "dev": "https://web.proxploy.dev",
+    "prod": "https://proxploy.com",
+}
+
+
+def _release_channel_url(env: str) -> str:
+    """Where `proxploy-update` and services/updater.py look for a release.
+
+    The same site that serves install.sh, under a path holding the newest
+    manifest.json, manifest.json.sig and tarball. Deliberately not GitHub
+    Releases: the source repo is private, and private release assets need an
+    authenticated fetch that an installer has no credential for.
+    """
+    base = WEB_BASE_URL_BY_ENV.get(env, WEB_BASE_URL_BY_ENV["dev"])
+    return f"{base}/releases/latest"
 
 
 class Settings(BaseSettings):
@@ -105,9 +127,11 @@ class Settings(BaseSettings):
     # rest comes from a live PVE call); 80 MB/s is a conservative LAN figure,
     # and the job reports MEASURED downtime once it runs.
     migrate_assumed_bps: float = 80e6
-    # Base URL holding manifest.json, manifest.json.sig and the tarball. Test
-    # harnesses point this at a file:// directory so no test needs the network.
-    release_channel_url: str = "https://github.com/aspyrelabs/proxploy-app/releases/latest/download"
+    # Base URL holding manifest.json, manifest.json.sig and the tarball.
+    # Defaults from `env` (see _release_channel_url); an explicit
+    # PROXPLOY_RELEASE_CHANNEL_URL keeps winning, which is how the harnesses
+    # point it at a file:// directory so no test needs the network.
+    release_channel_url: str | None = None
     release_pubkey_file: Path | None = None   # None = the key shipped in the package
     # Set by the installer in /etc/proxploy/proxploy.env. Unset means a dev
     # checkout: check works, apply refuses, because there is no managed
@@ -121,15 +145,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _default_api_base_url(cls, data: Any) -> Any:
+    def _default_urls_from_env(cls, data: Any) -> Any:
         # Runs on the merged-but-unvalidated settings sources: if the caller
         # (init kwarg or PROXPLOY_API_BASE_URL) already supplied a value it
         # is left untouched. `env`'s own Literal validation still runs after
         # this and raises on an invalid value, regardless of what default we
         # pick here.
-        if isinstance(data, dict) and data.get("api_base_url") is None:
-            env = data.get("env", "dev")
+        if not isinstance(data, dict):
+            return data
+        env = data.get("env", "dev")
+        if data.get("api_base_url") is None:
             data = {**data, "api_base_url": API_BASE_URL_BY_ENV.get(env, API_BASE_URL_BY_ENV["dev"])}
+        if data.get("release_channel_url") is None:
+            data = {**data, "release_channel_url": _release_channel_url(env)}
         return data
 
 

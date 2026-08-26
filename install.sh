@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Proxploy installer (Phase 9a).
 #
-# The one-liner is `curl -fsSL https://proxploy.com/install.sh | bash`. On a
+# The one-liner is `curl -fsSL <install URL> | bash`, where the host comes from
+# PROXPLOY_ENV (the WEB_BASE_URL case below). On a
 # Proxmox node that means: create a CT and re-run this script inside it
 # (the PVE-host half, below). Everywhere else: a plain Debian box, or
 # inside the CT that half creates: this script IS the install: OS deps,
@@ -17,26 +18,50 @@ set -euo pipefail
 # file at all, and under `set -u` the bare form aborts on line 16 with
 # "BASH_SOURCE[0]: unbound variable" before anything can explain itself.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
+
+# PROXPLOY_ENV picks the domain pair, exactly the way config.py's
+# API_BASE_URL_BY_ENV picks the licence server: dev is the .dev pair, prod is
+# the .com pair. Never hardcode either one anywhere else in this script, and
+# never search-and-replace between them: adding a THIRD environment should be
+# one more line here and nothing else.
+#
+#   dev   web.proxploy.dev   api.proxploy.dev
+#   prod  proxploy.com       api.proxploy.com
+#
+# Resolved before the bundle markers below deliberately: the guard inside them
+# prints INSTALLER_URL, and under `set -u` an unbound variable would abort
+# with that instead of the advice. The strict dev|prod check is further down,
+# after common.sh gives us `die`, so an unrecognised value falls back to the
+# dev host for that one message and is refused a few lines later.
+: "${PROXPLOY_ENV:=dev}"
+case "$PROXPLOY_ENV" in
+  prod) WEB_BASE_URL="https://proxploy.com" ;;
+  *)    WEB_BASE_URL="https://web.proxploy.dev" ;;
+esac
+# Where the published single-file installer lives. The PVE half re-fetches
+# itself from here when it has no file of its own to push.
+INSTALLER_URL="${INSTALLER_URL:-$WEB_BASE_URL/install.sh}"
+
+# >>> BUNDLE:common.sh >>>
+# packaging/bundle_install.sh replaces everything between these two markers
+# with the contents of packaging/lib/common.sh, and THAT single file is what
+# gets published at the install URL. Piped to bash there is no directory to
+# source from, so the published installer cannot have this dependency at all.
+# The two-file form below is what runs from a checkout, and is what keeps
+# common.sh a real file for packaging/proxploy-update and build_release.sh.
 # shellcheck source=packaging/lib/common.sh
 if [ ! -r "$SCRIPT_DIR/packaging/lib/common.sh" ]; then
-  # The advertised one-liner (`curl ... | bash`) lands here: a piped script has
-  # no directory of its own, so this relative source cannot resolve and the
-  # installer dies two lines in with a path nobody can act on. Say what to do
-  # instead. The real fix is a release-time bundle that splices common.sh into
-  # a single-file install.sh; common.sh is shared with packaging/proxploy-update
-  # and packaging/build_release.sh, so it cannot simply be inlined here.
   printf 'error: %s\n' \
-    "install.sh needs packaging/lib/common.sh beside it and cannot find it." \
+    "install.sh could not find packaging/lib/common.sh beside it." \
     "" \
-    "This happens when the script is piped (curl ... | bash), which leaves it" \
-    "with no directory to look in. Download the release and run it from there:" \
+    "This copy is the unbundled one from a source checkout, which needs that" \
+    "file. The published installer has it spliced in and needs nothing:" \
     "" \
-    "  curl -fsSLO https://proxploy.com/proxploy-install.tar.gz" \
-    "  tar xzf proxploy-install.tar.gz && cd proxploy-install" \
-    "  sudo ./install.sh" >&2
+    "  curl -fsSL $INSTALLER_URL | bash" >&2
   exit 1
 fi
 . "$SCRIPT_DIR/packaging/lib/common.sh"
+# <<< BUNDLE:common.sh <<<
 
 SHAPE=""
 CHANNEL=""
@@ -50,18 +75,26 @@ PVE_ONLY=0
 DRY_RUN=0
 DRY_PARSE=0
 
-# Default channel for the bare one-liner (`curl -fsSL https://proxploy.com/
-# install.sh | bash`, no flags). --channel overrides this for a private
-# channel, a staging build, or the test harnesses' file:// fixtures.
-# Matches config.py's release_channel_url default: releases ship from
-# GitHub Releases in both dev and prod, that is not part of the
-# PROXPLOY_ENV switch below.
-DEFAULT_CHANNEL="https://github.com/aspyrelabs/proxploy-app/releases/latest/download"
+# Default channel for the bare one-liner (`curl -fsSL $INSTALLER_URL | bash`,
+# no flags). --channel overrides this for a staging build or the test
+# harnesses' file:// fixtures.
+#
+# The same site that serves this script, which is why it derives from
+# WEB_BASE_URL rather than naming a host of its own. Not GitHub Releases: the
+# source repo is private, and private release assets need an authenticated
+# fetch that an installer has no credential for. Matches config.py's
+# _release_channel_url, so the installer and the in-app updater read the same
+# three files from the same place.
+DEFAULT_CHANNEL="$WEB_BASE_URL/releases/latest"
 
-# PROXPLOY_ENV: dev|prod, default dev, same contract as config.py's `env`
-# setting. Honour it if already exported by the caller; the installed app
-# gets it from the env file written in step 5 below.
-: "${PROXPLOY_ENV:=dev}"
+# Defaulted above (it has to be, the install URL derives from it). Validated
+# here rather than there because `die` arrives with common.sh.
+#
+# The default is dev, and stays dev until the prod licence server at
+# api.proxploy.com is actually live: `env` is what picks it (config.py's
+# API_BASE_URL_BY_ENV), so defaulting to prod today would point every install
+# at an API that does not answer. Flipping this line is the switch when it
+# does; `export PROXPLOY_ENV=prod` is how to install against it before then.
 case "$PROXPLOY_ENV" in
   dev|prod) ;;
   *) die "PROXPLOY_ENV must be dev or prod, got: $PROXPLOY_ENV" ;;
@@ -75,7 +108,7 @@ esac
 # places. Replacing this block is step 1 of
 # packaging/publishing-a-release.md.
 RELEASE_PUBKEY_PEM='-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGZ/rStVno38RgOMWbVnHIRHHSk0WGVwhb4hMJnUkj/k=
+MCowBQYDK2VwAyEAJqEnPBMju159D0/dRLAVrfwIJZzdgHjhahCt8abJqx0=
 -----END PUBLIC KEY-----'
 
 usage() {
@@ -86,11 +119,13 @@ Usage: install.sh [--shape systemd|lxc] [--channel <url>] [--version <v>]
                    [--ctid <n>] [--storage <name>] [--bridge <name>]
 
   --shape    Install shape: systemd (plain host/VM) or lxc (Proxmox CT).
-             Omit on a Proxmox node (pct + /etc/pve present) to instead
-             create a CT and run the installer inside it.
+             Omit and it is worked out: on a Proxmox node (pct + /etc/pve
+             present) this creates a CT and runs the installer inside it;
+             anywhere else it installs here, as lxc inside a container and
+             systemd otherwise. Pass it only to override that.
   --channel  Base URL of a release channel holding manifest.json,
              manifest.json.sig and the tarball (file:// or https://).
-             Default: https://proxploy.com/releases/latest
+             Default: the latest GitHub release of aspyrelabs/proxploy-app
   --version  The version to install; must match the channel's manifest.
              Default: whatever version the fetched manifest.json reports.
   --pubkey   Path to the release public key (PEM) to verify the manifest
@@ -253,7 +288,16 @@ pve_install() {
   pve_wait_for_ready "$CTID"
 
   log "pushing the installer into CT $CTID"
-  pct push "$CTID" "$SCRIPT_DIR/install.sh" /root/install.sh --perms 0755
+  # Piped (curl | bash) there is no file of our own to push: bash read this
+  # script off a pipe and it exists nowhere on disk. Re-fetch the published
+  # one instead, which is the same bytes that got us here.
+  local installer="$SCRIPT_DIR/install.sh"
+  if [ ! -r "$installer" ]; then
+    log "no local installer to push, fetching $INSTALLER_URL"
+    installer=$(mktemp)
+    fetch_to "$INSTALLER_URL" "$installer"
+  fi
+  pct push "$CTID" "$installer" /root/install.sh --perms 0755
 
   if [ "$PVE_ONLY" -eq 1 ]; then
     log "CT $CTID is up with the installer staged at /root/install.sh;" \
@@ -289,9 +333,37 @@ if [ "$PVE_ONLY" -eq 1 ] || { [ -z "$SHAPE" ] && is_pve_host; }; then
   exit 0
 fi
 
+# Not a Proxmox host, so this box IS the install target. Which of the two
+# shapes it is, is a thing to look up rather than a thing to ask: the advertised
+# one-liner passes no flags, and someone who made their own CT and ran it
+# inside would otherwise be stopped by a question the URL never mentions.
+#
+# The two labels differ only as a record. Nothing in this script branches on
+# them past writing PROXPLOY_INSTALL_SHAPE, and services/updater.py puts both
+# in CAN_SELF_APPLY; the distinction that matters there is `docker`, which
+# this script never installs. So a wrong guess costs a wrong word in the env
+# file, not a broken install, which is why guessing beats refusing.
+detect_shape() {
+  local v=""
+  # systemd-detect-virt is systemd's own answer and this installer requires
+  # systemd anyway. --container, not bare: a VM is not what is being asked.
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    v=$(systemd-detect-virt --container 2>/dev/null) || v=""
+  fi
+  # Present in an LXC container even when systemd-detect-virt is not installed
+  # yet (step 1 has not run; a minimal template may lack it).
+  if [ -z "$v" ] || [ "$v" = "none" ]; then
+    [ -r /run/systemd/container ] && v=$(cat /run/systemd/container 2>/dev/null)
+  fi
+  case "$v" in
+    lxc|lxc-libvirt|systemd-nspawn) printf 'lxc' ;;
+    *) printf 'systemd' ;;
+  esac
+}
+
 if [ -z "$SHAPE" ]; then
-  usage
-  die "--shape is required (systemd|lxc); this does not look like a Proxmox host, so it cannot be auto-detected"
+  SHAPE=$(detect_shape)
+  log "no --shape given, detected $SHAPE"
 fi
 case "$SHAPE" in
   systemd|lxc) ;;
@@ -390,7 +462,8 @@ if [ -z "$PUBKEY" ]; then
 fi
 
 if [ "$DRY_PARSE" -eq 1 ]; then
-  log "dry parse ok: shape=$SHAPE channel=$CHANNEL version=$VERSION pubkey=$PUBKEY"
+  log "dry parse ok: shape=$SHAPE env=$PROXPLOY_ENV installer=$INSTALLER_URL" \
+      "channel=$CHANNEL version=$VERSION pubkey=$PUBKEY"
   exit 0
 fi
 
@@ -441,6 +514,14 @@ else
   rm -rf "$work"
   trap - EXIT
 fi
+
+# Everything below installs out of the release just unpacked, not out of
+# $SCRIPT_DIR: a piped installer has no directory, and these four files are
+# covered by the manifest signature here in a way a working-tree copy never
+# was. build_release.sh stages packaging/ into the tarball for this.
+PP_PKG="$PP_RELEASES/$VERSION/packaging"
+[ -d "$PP_PKG" ] || die "release $VERSION has no packaging/ directory;\
+ it predates the installer reading its own support files out of the release"
 
 # --- 5. env file (written once; an update must never clobber operator settings) --
 if [ -f "$PP_ENV" ]; then
@@ -494,8 +575,8 @@ fi
 
 # --- 7. install the updater and its shared library --------------------------
 log "installing the updater"
-install -m 0755 "$SCRIPT_DIR/packaging/proxploy-update" "$PP_BIN/proxploy-update"
-install -m 0644 "$SCRIPT_DIR/packaging/lib/common.sh" "$PP_LIB/common.sh"
+install -m 0755 "$PP_PKG/proxploy-update" "$PP_BIN/proxploy-update"
+install -m 0644 "$PP_PKG/lib/common.sh" "$PP_LIB/common.sh"
 
 # --- 8. point current at this release (atomic-ish symlink swap) -------------
 log "switching current -> releases/$VERSION"
@@ -504,7 +585,7 @@ mv -T "$PP_CURRENT.tmp" "$PP_CURRENT"
 
 # --- 9. systemd unit ----------------------------------------------------------
 log "installing the systemd unit"
-install -m 0644 "$SCRIPT_DIR/packaging/proxploy.service" \
+install -m 0644 "$PP_PKG/proxploy.service" \
   /etc/systemd/system/proxploy.service
 systemctl daemon-reload
 # enable is idempotent; --now only starts a unit that is not already
@@ -564,7 +645,7 @@ configure_tls() {
   log "writing /etc/caddy/Caddyfile for $site_address"
   sed -e "s|{\$PROXPLOY_SITE_ADDRESS}|$site_address|g" \
       -e "s|{\$PROXPLOY_TLS_DIRECTIVE}|$tls_directive|g" \
-      "$SCRIPT_DIR/packaging/caddy/Caddyfile.tmpl" > /etc/caddy/Caddyfile
+      "$PP_PKG/caddy/Caddyfile.tmpl" > /etc/caddy/Caddyfile
 
   # PROXPLOY_COOKIE_SECURE=true is already in the env block written in step 5
   # above; verified there rather than written a second time here.

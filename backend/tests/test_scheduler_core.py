@@ -4,7 +4,7 @@ These are the pure pieces, cron math, due selection, one firing pass. The
 loop that calls `tick` lives in Task 2 and is tested separately.
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -166,6 +166,69 @@ def test_fire_one_enqueues_stamps_and_advances(tmp_path):
             assert row.actor_type == "system"
             assert row.actor_id is None
             assert row.job_id == out["job_id"]
+
+    asyncio.run(go())
+
+
+def test_fire_one_skips_a_missed_start_when_catch_up_is_off(tmp_path):
+    """Unticked, and late by more than the grace window: no job, and the row
+    moves on to its next occurrence rather than owing one for ever."""
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        now = datetime(2026, 8, 1, 12, 0)
+        with app.state.sessionmaker() as db:
+            s = _sched(db, params={"catch_up": False},
+                       next_run_at=datetime(2026, 7, 25, 3, 0))
+            assert fire_one(app, db, s, now) is None
+            assert db.query(Job).count() == 0
+            db.refresh(s)
+            assert s.enabled is True
+            assert s.last_run_at is None
+            assert s.next_run_at == datetime(2026, 8, 2, 3, 0)
+            assert (db.query(AuditEvent)
+                    .filter_by(action="schedule.skip", target_id=s.id).one())
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("late", [
+    timedelta(seconds=20),      # one tick's latency
+    timedelta(minutes=29),      # slow, still inside the half hour
+])
+def test_fire_one_runs_a_late_start_inside_the_grace_window(tmp_path, late):
+    """Late is not missed, and never by seconds. `due()` only ever hands back
+    rows whose moment has passed, so with too tight a window every firing would
+    look missed and an unticked job would never run at all."""
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        due_at = datetime(2026, 8, 1, 12, 0)
+        now = due_at + late
+        with app.state.sessionmaker() as db:
+            s = _sched(db, params={"catch_up": False}, next_run_at=due_at)
+            out = fire_one(app, db, s, now)
+            assert out is not None
+            # The scheduler's own flag never reaches the handler.
+            assert "catch_up" not in (db.get(Job, out["job_id"]).params or {})
+
+    asyncio.run(go())
+
+
+def test_fire_one_runs_a_missed_start_by_default(tmp_path):
+    """No `catch_up` key at all, which is every job saved before the control
+    existed: a week of downtime still owes exactly one run."""
+    async def go():
+        app = make_job_app(tmp_path)
+        from proxploy.jobs import JobBackend
+        app.state.jobs = JobBackend(app)
+        now = datetime(2026, 8, 1, 12, 0)
+        with app.state.sessionmaker() as db:
+            s = _sched(db, next_run_at=datetime(2026, 7, 25, 3, 0))
+            assert fire_one(app, db, s, now) is not None
+            assert db.query(Job).count() == 1
 
     asyncio.run(go())
 

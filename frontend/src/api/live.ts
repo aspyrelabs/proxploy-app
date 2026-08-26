@@ -52,19 +52,21 @@ export function applyResource(qc: QueryClient, d: ResourceEvent) {
   }
   const key = RESOURCE_KEY[d.type]
   if (!key) return
-  // Guests only. A storage/backup/network event's `id` is a HOST id and those
-  // caches hold no `id` column, running the row patch there would edit
-  // whichever unrelated row happened to collide.
-  if (d.change === 'status' && d.id != null && (d.type === 'app' || d.type === 'vm')) {
-    qc.setQueriesData({ queryKey: [key] }, (v: unknown) => {
-      if (Array.isArray(v)) {
-        return v.map((r: any) => (r.id === d.id ? { ...r, status: d.status } : r))
-      }
-      const row = v as { id?: number } | undefined
-      return row && row.id === d.id ? { ...row, status: d.status } : v
-    })
-    return
-  }
+  // A guest's status is NOT patched in from the event, and this is the whole
+  // reason the stop/start flicker kept coming back.
+  //
+  // `d.status` is a raw Proxmox reading. What a guest should DISPLAY while an
+  // action is in flight is that reading with services/lifecycle.py's hold over
+  // the top ("pending" until Proxmox is seen agreeing with what was asked
+  // for), and that composition happens in api/apps.py::_app_out. Painting the
+  // raw value straight into the cache walked over it: mid-start the guest read
+  // back as `stopped` for a moment and the pill went Working, Stopped,
+  // Running. Mid-stop it did the same with `running`.
+  //
+  // So the event is treated as "this guest changed, go and ask", never as the
+  // answer itself. One extra GET per transition, against a class of bug that
+  // no amount of care at the publishing end can rule out: any publisher that
+  // sends a true-but-unheld reading reintroduces it.
   if (d.change === 'discovered') {
     qc.invalidateQueries({ queryKey: ['apps', 'discovered'] })
     return

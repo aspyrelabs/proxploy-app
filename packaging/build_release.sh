@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds a signed Proxploy release: proxploy-<version>.tar.gz, manifest.json,
-# manifest.json.sig: the artifact set packaging/tests/channel_fixture.sh
+# manifest.json.sig, plus the bundled single-file install.sh that gets served
+# at the install URL: the artifact set packaging/tests/channel_fixture.sh
 # serves and packaging/lib/common.sh's install_release() consumes.
 #
 # The tarball's top-level entries are backend/ and frontend/dist/ as
@@ -19,8 +20,8 @@ usage: $0 --version <semver> --key <ed25519-private-key.pem> --out <dir>
                backend/proxploy/__init__.py so the artifact, the manifest
                and the tag cannot disagree
   --key        Ed25519 private key (PEM) to sign manifest.json with
-  --out        directory to write proxploy-<version>.tar.gz, manifest.json
-               and manifest.json.sig into
+  --out        directory to write proxploy-<version>.tar.gz, manifest.json,
+               manifest.json.sig and the bundled install.sh into
   --channel    manifest "channel" field (default: stable)
   --notes-url  manifest "notes_url" field (default: none)
   --poison     insert a startup-raising line into the staged main.py, 
@@ -55,6 +56,22 @@ if [ -z "$version" ] || [ -z "$key" ] || [ -z "$out" ]; then usage; fi
 
 log() { printf '  %s\n' "$*" >&2; }
 
+# This script runs on whoever is cutting the release's own machine, unlike
+# install.sh and common.sh which only ever run on the Debian target and can
+# assume GNU coreutils. macOS ships BSD versions under the same names, so the
+# two places it matters get a fallback rather than a "command not found" after
+# the frontend build has already burned two minutes.
+file_size() {  # file_size <path>
+  stat -c%s "$1" 2>/dev/null || stat -f%z "$1"
+}
+file_sha256() {  # file_sha256 <path>
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1   # macOS
+  fi
+}
+
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$script_dir/.." && pwd)"
 backend_dir="$root/backend"
@@ -80,6 +97,16 @@ log "staging frontend/dist/..."
 mkdir -p "$stage/frontend"
 cp -r "$frontend_dir/dist" "$stage/frontend/dist"
 
+# The installer reads proxploy-update, common.sh, proxploy.service and the
+# Caddyfile template out of the unpacked release rather than out of its own
+# directory, which is what lets a piped one-liner (curl | bash) work at all:
+# it has no directory. Shipping them here also puts them under the manifest
+# signature, where copying them from an unsigned working tree never was.
+# tests/ is the harness, not part of an install.
+log "staging packaging/ (excluding tests/)..."
+mkdir -p "$stage/packaging"
+tar --exclude='tests' --exclude='.DS_Store' -cf - -C "$root/packaging" . | tar xf - -C "$stage/packaging"
+
 log "overriding staged version to $version..."
 printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
 
@@ -96,16 +123,30 @@ openssl pkey -in "$key" -pubout -out "$stage/backend/proxploy/release_pubkey.pem
 
 if [ "$poison" -eq 1 ]; then
   log "poisoning staged main.py (rollback fixture only)..."
-  sed -i '/^) -> FastAPI:$/a\    # POISONED BY channel_fixture.sh, intentional startup failure for the rollback harness (Task 13). Never in a real release.\n    raise RuntimeError("POISONED BY channel_fixture.sh")' \
-    "$stage/backend/proxploy/main.py"
+  # python3, not `sed -i`: GNU's `a\` append syntax is not BSD sed's, and
+  # this runs on the machine cutting the release, which may be either.
+  python3 - "$stage/backend/proxploy/main.py" <<'POISON'
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines(keepends=True)
+out, marker = [], ") -> FastAPI:\n"
+for line in lines:
+    out.append(line)
+    if line == marker:
+        out.append('    # POISONED BY channel_fixture.sh, intentional startup '
+                   'failure for the rollback harness (Task 13). '
+                   'Never in a real release.\n')
+        out.append('    raise RuntimeError("POISONED BY channel_fixture.sh")\n')
+open(path, "w").writelines(out)
+POISON
 fi
 
 tarball_name="proxploy-$version.tar.gz"
 log "building $tarball_name..."
-tar czf "$out/$tarball_name" -C "$stage" backend frontend
+tar czf "$out/$tarball_name" -C "$stage" backend frontend packaging
 
-size=$(stat -c%s "$out/$tarball_name")
-sha=$(sha256sum "$out/$tarball_name" | cut -d' ' -f1)
+size=$(file_size "$out/$tarball_name")
+sha=$(file_sha256 "$out/$tarball_name")
 released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -132,6 +173,14 @@ cat > "$out/manifest.json" <<JSON
   }
 }
 JSON
+
+# The single file served at the install URL. Not in the manifest and not
+# signed: it is the thing that arrives BEFORE there is a key to check anything
+# against, so its only trust is the TLS the user's curl already provides. It
+# is built here so the published installer and the release it installs are
+# never a version apart.
+log "bundling install.sh..."
+bash "$script_dir/bundle_install.sh" "$out/install.sh"
 
 log "signing manifest.json..."
 openssl pkeyutl -sign -inkey "$key" -rawin -in "$out/manifest.json" -out "$out/manifest.json.sig"

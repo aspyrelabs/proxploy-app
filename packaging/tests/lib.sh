@@ -43,16 +43,26 @@ container_start() {
     "apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null"
 }
 
-# install_in_container <version>: copies the repo and runs the real
-# in-container installer (--shape systemd) against $CH/<version>. Uses the
-# global $name set by the caller, matching the harnesses' own convention.
+# install_in_container <version>: runs the real installer (--shape systemd)
+# against $CH/<version>. Uses the global $name set by the caller, matching the
+# harnesses' own convention.
+#
+# The BUNDLED installer, copied in alone with no packaging/ beside it, because
+# that is the artifact users actually run: one file off a URL. This used to
+# copy /src/install.sh AND /src/packaging in together, which quietly proved
+# the one shape nobody installs from. Everything the installer needs after
+# that comes out of the release tarball it fetches and verifies.
 install_in_container() {
-  local version="$1"
+  local version="$1" bundle
+  bundle=$(mktemp)
+  bash packaging/bundle_install.sh "$bundle" >/dev/null
   # shellcheck disable=SC2154 # $name is the container name, set by the
   # sourcing harness (test_install.sh / test_upgrade_rollback.sh) before
   # calling this: a deliberate shared-global convention, not an unbound var.
+  docker cp "$bundle" "$name:/tmp/install.sh"
+  rm -f "$bundle"
   docker exec "$name" bash -c \
-    "cp -r /src/install.sh /src/packaging /tmp/ && cd /tmp && \
+    "chmod 0755 /tmp/install.sh && cd /tmp && \
      ./install.sh --shape systemd --channel file:///channel/$version --version $version \
                   --pubkey /channel/release.pem"
 }

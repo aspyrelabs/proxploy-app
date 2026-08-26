@@ -172,6 +172,10 @@ export const ACTION_LABEL: Record<string, string> = {
   'schedule.disable': 'Schedule Auto-Disable',
   'schedule.fire': 'Schedule Trigger',
   'schedule.run': 'Schedule Run',
+  // jobs/scheduler.py::fire_one, on a job whose catch-up box is unticked and
+  // whose start was missed by more than the grace window. Auto- for the same
+  // reason schedule.disable carries it: nobody chose this, the scheduler did.
+  'schedule.skip': 'Schedule Auto-Skip',
   'schedule.update': 'Schedule Update',
   'settings.update': 'Settings Update',
   'storage.create': 'Storage Add',
@@ -213,6 +217,10 @@ export const STATUS_LABEL: Record<string, string> = {
   // being acted on right now and its real status is not known until the
   // action reports back.
   pending: 'Working',
+  // Not 'Working': that is Proxploy doing something. This is the guest's own
+  // app still coming up, after Proxmox has already called the container
+  // running. The distinction is the whole point of the state.
+  starting: 'Starting',
   // An app being uninstalled. Its own word rather than "Working", because a
   // removal is the one action that ends with the row gone.
   removing: 'Removing',
