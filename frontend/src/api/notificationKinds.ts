@@ -20,9 +20,8 @@ export type KindField = {
   /** What to show when the rule refuses. Never the pattern itself. */
   hint: string
   /** A realistic value for the (i) beside the label. Falls back to the
-   *  placeholder server-side, so it is never empty. It matters most on secret
-   *  fields, where a password box shows no placeholder at all and "what am I
-   *  meant to paste here" has nowhere else to be answered. */
+   *  placeholder server-side, so never empty. Matters most on secret fields,
+   *  where a password box shows no placeholder. */
   example: string
 }
 

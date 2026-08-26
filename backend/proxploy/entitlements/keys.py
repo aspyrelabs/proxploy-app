@@ -36,10 +36,6 @@ BUNDLED_ROOT_KEYS: dict[str, str] = {
     # a networked machine, the public half replacing this entry. See
     # proxploy-api/docs/runbooks/rotating-the-signing-key.md, which carries
     # the full procedure next to the release-signing ceremony.
-    #
-    # Replaced the unusable "root-placeholder-2026-08": nobody ever held that
-    # entry's private key, so nothing could be minted under it and the dev
-    # API could not produce a certificate at all.
     "dev-root-2026-08": "MCowBQYDK2VwAyEA3NOMW8kyo7nHgNnqglZiqEjDI68uy/ZTMdbOQhiC9U0=",
 }
 

@@ -130,31 +130,19 @@ export function FirewallOptionsPanel({ scope, canEdit }: {
               })}
             </div>
 
-            {/* Warn, never block. Proxmox itself lets an operator do this, and a
-                refusal here would be a control Proxploy invented. What it owes them
-                is an accurate sentence about what happens next, which is why the
-                backend sends PVE's defaults alongside the stored values.
-
-                Gated on the PENDING state (willBeOn), not shown unconditionally:
-                an untouched, already-off scope resolves to DROP by Proxmox's own
-                default, so an always-on warning here would fire on every visit to
-                every scope nobody has asked to change, and a warning nobody can
-                turn off is a warning nobody reads. It shows once the operator
-                ticks the box, or whenever the firewall is already on and this is
-                describing something actually happening. */}
+            {/* Warn, never block — Proxmox lets operators do this. Gated on
+                willBeOn, not unconditional: an untouched off scope resolves to DROP
+                by Proxmox's default, so an always-on warning fires on every visit and
+                a warning nobody can turn off is one nobody reads. */}
             {willBeOn && warning && (
               <p className="rounded-ctl border border-amber/40 bg-amber/10 p-2.5 text-[12.5px] text-text-2">
                 {warning}
               </p>
             )}
 
-            {/* No inline copy of the failure. useScopeMutation's onError already
-                notifies, through apiErrorDetail, which reads every body shape the
-                backend uses (nested 502, FastAPI's validation array, problem+json)
-                and says whose side failed on a 502. The hand-rolled dig that used
-                to sit here read one of those shapes, so the two renderings could
-                describe the same failure differently and the operator read the
-                worse one first. */}
+            {/* No inline copy of the failure — apiErrorDetail already reads every
+                backend body shape (nested 502, FastAPI validation, problem+json).
+                Duplicating it here would describe the same failure differently. */}
             {canEdit && (
               <div className="flex justify-end">
                 <Button disabled={save.isPending || Object.keys(patch).length === 0}

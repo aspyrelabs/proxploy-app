@@ -9,19 +9,11 @@ import { Switch } from './ui/switch'
 import { PublicUrlField } from './PublicUrlField'
 
 /**
- * What Proxploy tells you about, and where each thing goes.
- *
- * Rows are notification types, columns are a master switch followed by one per
- * configured channel. The master switch is the half that works with nothing
- * configured at all: off means you are never told, not even a toast, which is
- * what makes "the nightly housekeeping notification is annoying" a one-click
- * fix on an install that has no channels and does not want any.
- *
- * A cell is `notification_channels.events` transposed, which is why this
- * needed no migration. The one wrinkle is that an empty events list means
- * "every event" server-side: such a channel renders fully ticked, and the
- * first edit writes out the concrete list so it keeps receiving exactly what
- * it was receiving before, minus the box just cleared.
+ * Rows are notification types; columns are a master switch then one per
+ * channel. A cell transposes `notification_channels.events` (hence no
+ * migration). An empty events list means "every event" server-side: such a
+ * channel renders fully ticked, and the first edit writes out the concrete
+ * list so it keeps receiving exactly what it was.
  */
 export function EventsMatrix() {
   const qc = useQueryClient()
@@ -29,9 +21,8 @@ export function EventsMatrix() {
   const types = useNotificationTypes()
   const setTypes = useSetNotificationTypes()
 
-  // Same wait-for-first-fetch pattern as ChannelForm used to carry: has()
-  // defaults to false until /entitlements resolves, so gating on it directly
-  // would lock the columns for every plan during the initial fetch.
+  // Wait for first fetch: has() defaults false until /entitlements resolves,
+  // so gating on it directly would lock the columns for every plan on load.
   const routingAllowed = ent.data == null || ent.has('notify.routing')
 
   const channels = useQuery({
@@ -66,8 +57,8 @@ export function EventsMatrix() {
   }
 
   if (types.isPending) {
-    // Nineteen rows, so a single line of text under-describes what is coming
-    // and the section jumps when it lands.
+    // Skeleton group: a single text line under-describes nineteen rows and
+    // the section would jump when they land.
     return (
       <SkeletonGroup label="Loading notification types" className="space-y-2">
         <Skeleton className="h-[14px] w-40" />
@@ -98,10 +89,8 @@ export function EventsMatrix() {
 
       <div className="overflow-x-auto">
         {/* w-auto, not w-full: stretched to the card, the label column
-            absorbed every spare pixel and the switch ended up hundreds of
-            pixels from the row it belongs to. Hugging the content keeps a
-            name and its controls next to each other, and the wrapper above
-            scrolls once there are enough channels to need it. */}
+            absorbed every spare pixel and pushed the switch hundreds of
+            pixels from its row. */}
         <table className="w-auto text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px] text-text-3">
@@ -132,15 +121,13 @@ export function EventsMatrix() {
                   {chans.map((c) => (
                     <td key={c.id} className="px-3 py-1.5">
                       <input type="checkbox"
-                             // No per-cell accent utility here any more:
-                             // tokens.css sets accent-color on :root, so every
-                             // native control in the app inherits the amber.
+                             // No accent utility needed: tokens.css sets
+                             // accent-color on :root, so native controls
+                             // inherit the amber.
                              className="size-[15px] disabled:opacity-40"
                              aria-label={`Send ${r.label} to ${c.name}`}
-                             // A row that is off reaches nobody, so showing
-                             // its cells ticked would claim a delivery that
-                             // cannot happen. Greyed-but-ticked said exactly
-                             // that: "never" on the left, "yes" on the right.
+                             // A row that is off reaches nobody, so ticking its
+                             // cells would claim a delivery that cannot happen.
                              checked={r.enabled && ticked(c, r.key)}
                              disabled={!r.enabled || !routingAllowed}
                              onChange={() => toggleCell(c, r.key)} />
@@ -153,9 +140,7 @@ export function EventsMatrix() {
         </table>
       </div>
 
-      {/* Sits here rather than in a general settings section because
-          notifications are its only consumer: the link at the bottom of the
-          messages this page decides to send. */}
+      {/* Notifications are PublicUrlField's only consumer, so it lives here. */}
       <PublicUrlField />
     </div>
   )

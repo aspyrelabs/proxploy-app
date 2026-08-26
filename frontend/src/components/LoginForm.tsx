@@ -7,12 +7,8 @@ import Logo from './Logo'
 export const inputCls =
   'w-full rounded-ctl border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-text-3 focus:border-amber focus:outline-none'
 
-// The real brand mark, replacing the gradient "P" tile and the Prox/ploy
-// split that stood in for it. Two artwork files rather than currentColor,
-// because the mark is multi-coloured; Logo.tsx picks by theme.
-//
-// Nothing is competing for space on a sign-in screen, so this is the one place
-// the mark is allowed to be large.
+// Two artwork files rather than currentColor because the mark is
+// multi-coloured; Logo.tsx picks by theme.
 export function Brand() {
   return <Logo className="h-12 w-auto" />
 }
@@ -35,13 +31,10 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   // caller/test) and needs nothing beyond "does the SSO button show".
   useEffect(() => { fetchOnboarding().then(o => setOidc(o.oidc)).catch(() => {}) }, [])
 
-  // Both branches below return a <form> with the same child element types in
-  // the same positions and no key, so React reuses the DOM nodes and patches
-  // the email input into the code input rather than mounting a new one.
-  // autoFocus only fires on mount, so it never ran and the operator had to
-  // click the box. Focusing from a ref does not depend on mount timing, and
-  // it is the only mechanism here now: autoFocus was dropped rather than
-  // left as a second path a browser may decline to honour anyway.
+  // Both branches return a <form> with the same child types and no key, so
+  // React reuses the DOM nodes and patches the email input into the code
+  // input rather than mounting a new one. autoFocus only fires on mount, so
+  // it never ran; focusing from a ref does not depend on mount timing.
   useEffect(() => { codeRef.current?.focus() }, [pending])
 
   async function submitPassword(e: React.FormEvent) {
@@ -73,14 +66,10 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     } catch {
       // Pending token is deliberately kept (not cleared): a wrong code
       // re-shows this same screen, matching the backend's attempt-capped
-      // pending store, only 5 wrong guesses burn it, not 1 (Task 9).
+      // pending store — only 5 wrong guesses burn it, not 1.
       setError('That code was not accepted, try again or use a recovery code.')
-      // The same annoyance as the first step, one screen later: submitting put
-      // focus on the Verify button, so a retry meant clicking back into the box.
-      // The effect above cannot cover this, `pending` is unchanged by a rejected
-      // code (deliberately, see the comment above). Selected rather than
-      // cleared, so typing replaces a stale code while a recovery code can still
-      // be pasted over it.
+      // Selected rather than cleared: typing replaces a stale code, while a
+      // recovery code can still be pasted over it.
       codeRef.current?.focus()
       codeRef.current?.select()
     } finally { setBusy(false) }

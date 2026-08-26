@@ -190,15 +190,15 @@ def set_license(request: Request, body: LicenseIn, db=Depends(get_db),
         # cached one (see test_a_token_the_install_cannot_verify_does_not_destroy_the_cached_one).
         raise HTTPException(
             502, f"licensing service returned a token this install cannot verify: {e}")
-    # doc note (Task 8 review): refresh_credential is null on an idempotent
-    # same-install reactivation: only non-null on first-ever activation for
-    # this license. Keep whatever we already have on file in that case.
+    # refresh_credential is null on an idempotent same-install reactivation:
+    # only non-null on first-ever activation for this license. Keep whatever
+    # we already have on file in that case.
     cred = out.get("refresh_credential")
     if cred:
         enc, _ = request.app.state.secretstore.encrypt(cred.encode())
         _set_setting(db, "license.refresh_credential.enc", enc.decode())
-    # PXP-31: boot only starts the loop when a license is already on file, so
-    # an install that just activated its first license would otherwise get no
+    # Boot only starts the loop when a license is already on file, so an
+    # install that just activated its first license would otherwise get no
     # auto-refresh until a restart. start_refresh_loop is idempotent, so this
     # is a no-op on a reactivation that finds the loop already running.
     start_refresh_loop(request.app)

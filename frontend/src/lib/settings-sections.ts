@@ -1,12 +1,7 @@
 /**
- * The Settings page's sections: the rail, the ?section= contract, and what the
- * command palette can jump to.
- *
- * In lib/ rather than in routes/settings.tsx because CommandPalette needs it
- * too, and importing the route would close a cycle: settings.tsx imports
- * shellRoute from routes/shell.tsx, which renders AppShell, which mounts
- * CommandPalette. Same hazard routes/cluster.tsx and routes/shell.tsx already
- * carry warnings about.
+ * Lives in lib/ (not routes/settings.tsx) because CommandPalette imports it
+ * too, and importing the route would close a cycle: settings.tsx → shell.tsx
+ * → AppShell → CommandPalette.
  */
 
 export type SettingsSection = {
@@ -17,22 +12,11 @@ export type SettingsSection = {
 }
 
 /**
- * Grouped by WHO a setting belongs to, which is the split the cards already
- * make in the code and never made on screen: six configure the installation,
- * two configure you, two describe the Proxploy application itself.
- *
- * The account half is split where the subject changes, not per card.
- * `profile` is who you are and how you prove it: your email and display name,
- * your password, your second factor. `sessions` is what is currently allowed
- * in on that basis: live sessions, and the browsers trusted to skip the second
- * factor. Trusted devices sits with Sessions rather than with Two-factor
- * because revoking a session and forgetting the browser that would walk
- * straight back in are the same job, done together.
- *
- * `keywords` is what keeps that grouping from costing findability. Cards
- * folded under a section name lose their own name from the rail's text, so
- * without these an operator searching "trusted devices" or "change password"
- * would find nothing at all.
+ * Grouped by WHO a setting belongs to. Trusted devices sits with Sessions
+ * rather than Two-factor because revoking a session and forgetting the browser
+ * that would walk straight back in are the same job. `keywords` keeps cards
+ * folded under a section name findable, since they lose their own name from
+ * the rail's text.
  */
 export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = [
   { group: 'General', items: [
@@ -47,10 +31,9 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
     { id: 'api-keys', label: 'API keys',
       keywords: ['token', 'api token', 'integration', 'revoke key'] },
   ] },
-  // Notifications is its own group rather than one crowded card, because the
-  // two halves answer different questions: Channels is WHERE anything goes,
-  // Events is WHAT gets sent at all. Events is useful with no channel
-  // configured, which is the case the old single card could not express.
+  // Split into its own group because Channels is WHERE anything goes and
+  // Events is WHAT gets sent; Events is useful with no channel configured,
+  // which the old single card could not express.
   { group: 'Notifications', items: [
     { id: 'channels', label: 'Channels',
       keywords: ['ntfy', 'gotify', 'telegram', 'email', 'smtp', 'slack',
@@ -84,14 +67,9 @@ export const SETTINGS_SECTION_IDS = new Set(
 export const DEFAULT_SETTINGS_SECTION = 'hosts'
 
 /**
- * Sections matching a typed query, each with the group it came from so the
- * palette can say "Profile · Your account" rather than a bare "Profile".
- *
- * Plain case-insensitive substring, no ranking: ten sections is a list an
- * operator reads in full, and a relevance score over ten rows would be
- * machinery dressed up as an answer. An empty query matches nothing rather
- * than everything, so the palette's own "type to search" state still reads
- * as the empty state it is.
+ * Sections matching a typed query, tagged with their group so the palette can
+ * render "Profile · Your account". Plain substring, no ranking, and an empty
+ * query matches nothing so the palette's "type to search" state stays empty.
  */
 export function matchSettingsSections(query: string): (SettingsSection & { group: string })[] {
   const q = query.trim().toLowerCase()

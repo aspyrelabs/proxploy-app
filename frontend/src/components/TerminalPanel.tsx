@@ -17,35 +17,27 @@ const STREAM_CLASS: Record<string, string> = {
 
 /** Strips ANSI color/cursor escape sequences before a line is rendered.
  *
- *  community-scripts installs print raw ANSI (color codes, spinner cursor
- *  moves); the API forwards those bytes as-is, correctly, because a real
- *  terminal would render them as color. The browser does not interpret ESC,
- *  so left alone a line like `\x1b[m\x1b[1m\x1b[32mRAM Size: \x1b[4;92m2048
- *  MiB\x1b[m` shows the bracket codes as literal text. This is the one place
- *  every log consumer (JobLog, AppLogs) renders a line through, so the strip
- *  happens once here rather than at each call site.
+ *  community-scripts installs print raw ANSI and the API forwards those bytes
+ *  as-is (a real terminal would render them as color); the browser does not
+ *  interpret ESC, so left alone the bracket codes show as literal text. This
+ *  is the one place all log consumers render a line through, so the strip
+ *  lives here.
  *
- *  The ESC is REQUIRED, not optional: community-scripts logs are full of
- *  ordinary bracketed text with no ESC in front of it -- `[INFO] installing
- *  packages`, `[OK] done`, `msg_ok [ERROR] failed`. A leading `\x1b?` would
- *  eat the `[` of that real content as if it were a color code, mangling
- *  lines that were never ANSI. Requiring the ESC gives the same result on
- *  the real ANSI case above and leaves every plain `[...]` line untouched. */
+ *  The ESC is REQUIRED, not optional: those logs also contain plain bracketed
+ *  text like `[INFO] installing packages` with no ESC in front, and a leading
+ *  `\x1b?` would eat the `[` of that real content. */
 function stripAnsi(s: string): string {
   // eslint-disable-next-line no-control-regex -- the ESC (0x1b) IS what this matches
   return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
 }
 
-/** Static-mode log panel (doc 06 `TerminalPanel`). Live mode = xterm.js, Phase 5.
+/** Static-mode log panel (doc 06 `TerminalPanel`); live mode is xterm.js.
  *
- *  `height` is a maxHeight: the box is already as short as its content and only
- *  starts scrolling past this. 'fill' hands that decision to a flex parent
- *  instead, for the log dialog, which sizes ITSELF to the transcript and needs
- *  the panel to take whatever is left under the 80vh cap. min-h-0 is what lets
- *  flexbox shrink it that far (a flex child's default min-height is auto, which
- *  refuses to go below its content); scrolling is already on, so the panel goes
- *  on following the newest line rather than handing that job to an outer
- *  scroller that cannot autoscroll. */
+ *  `height` is a maxHeight: the box is already as short as its content and
+ *  only starts scrolling past this. 'fill' hands sizing to a flex parent (the
+ *  log dialog, which sizes itself to the transcript under the 80vh cap);
+ *  min-h-0 is what lets flexbox shrink it, since a flex child's default
+ *  min-height refuses to go below its content. */
 export function TerminalPanel({ lines, height = 260 }:
   { lines: TermLine[]; height?: number | 'fill' }) {
   const fill = height === 'fill'

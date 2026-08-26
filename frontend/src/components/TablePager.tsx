@@ -9,17 +9,11 @@ import {
 export const PAGE_SIZE = 10
 
 /**
- * The six columns of the Scheduled jobs and Recent backups tables, pinned so
- * the two line up with each other.
+ * Six columns pinned so the Scheduled jobs and Recent backups tables line up.
  *
- * They did not. Both are six columns of `w-full text-left text-[13px]`, but
- * with table-layout auto each sized to its own content, so the slack landed
- * after Next in one and after Status in the other and the pair read as two
- * unrelated grids stacked on a page.
- *
- * `table-fixed` plus one colgroup is what actually aligns them: auto layout
- * cannot, because the columns hold different things. The last column is the
- * actions, sized to hold them and no wider.
+ * `table-fixed` plus one colgroup is what aligns them: auto layout cannot,
+ * because the columns hold different things. The last column holds the
+ * actions, sized for them and no wider.
  *
  * The cost is that a column no longer grows for its content, so anything long
  * (a guest name, a cron expression) truncates instead of pushing its
@@ -32,9 +26,9 @@ export const SIX_COL = (
     <col className="w-[15%]" />
     <col className="w-[13%]" />
     <col className="w-[11%]" />
-    {/* The widest of the six, because it is the one with a hard floor: Recent
-        backups puts four buttons here (Verify, Test restore, Restore, Delete)
-        and Scheduled jobs three. Sized for the four. */}
+    {/* The widest of the six, because it has a hard floor: Recent backups
+        puts four buttons here (Verify, Test restore, Restore, Delete) and
+        Scheduled jobs three. */}
     <col className="w-[26%]" />
   </colgroup>
 )

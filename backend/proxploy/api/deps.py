@@ -14,11 +14,8 @@ ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2, "owner": 3}
 
 def get_db(request: Request):
     db = request.app.state.sessionmaker()
-    # The app handle rides on the session so services/audit.py can fire the
-    # `audit.error` notification without every one of the ~25 routes that
-    # audits a failure having to thread an `app=` argument down to it. A route
-    # that forgets an argument notifies nothing and says so nowhere, which is
-    # the failure mode this avoids.
+    # The app handle rides on the session so services/audit.py can fire
+    # `audit.error` without every route threading an `app=` argument down.
     db.info["app"] = request.app
     try:
         yield db
@@ -27,11 +24,11 @@ def get_db(request: Request):
 
 
 def get_current_user(request: Request, db=Depends(get_db)) -> User:
-    """Cookie session by default; `Authorization: Bearer ppk_...` resolves
-    through api_keys instead (Task 12). Bearer is never a second, weaker
-    login path: same fail-closed 401 shape, same is_active gate, and the
-    resolved row is stashed on request.state.api_key so authorize() can
-    narrow the session's own role by the key's scopes below."""
+    """Cookie session by default; `Authorization: Bearer ***` resolves through
+    api_keys instead. Bearer is never a second, weaker login path: same
+    fail-closed 401 shape, same is_active gate, and the resolved row is stashed
+    on request.state.api_key so authorize() can narrow the session's own role
+    by the key's scopes."""
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
         raw = auth[7:]
@@ -100,13 +97,10 @@ def _team_of_host(db, host_id) -> int | None:
 def _as_id(raw) -> int | None:
     """The path param as an int, or None if it is not one.
 
-    These resolvers run as sub-dependencies and read `request.path_params`,
-    which holds the raw matched string: the route signature's `int` annotation
-    is validated separately and does not reach here first. A bare `int(raw)`
-    therefore turned `/hosts/abc/...` into a ValueError escaping the dependency
-    as a 500. None means "no scope", which is the same answer these resolvers
-    already give for a target row that does not exist, and it lets the route's
-    own validation return the 422 the client should have got.
+    These resolvers read `request.path_params` (the raw matched string) as
+    sub-dependencies; the route's `int` annotation is validated separately and
+    does not reach here first, so a bare `int(raw)` turned `/hosts/abc/...`
+    into a 500. None means "no scope" and lets the route return its own 422.
     """
     try:
         return int(raw)
@@ -147,7 +141,7 @@ def scope_backup(param: str = "backup_id"):
 
 def authorize(resource: str, action: str, *, scope_of=None):
     """Doc 08 §6 enforcement point, the only authorization path in the
-    product (the Phase-1 require_role RBAC stub is retired). Fail-closed
+    product. Fail-closed
     twice over: an unregistered (resource, action) pair refuses to even
     build a dependency (so an ungoverned route cannot be registered), and
     the enforcer denies anything it does not recognise.
@@ -170,10 +164,9 @@ def authorize(resource: str, action: str, *, scope_of=None):
         # below, which is keyed on the *user*, not the key.
         key = getattr(request.state, "api_key", None)
         if key is not None and key.scopes:
-            # PXP-32: resource:write is shorthand for every action on that
-            # resource (backward compat: a pre-existing key holding it keeps
-            # authorizing everything it always did), resource:action grants
-            # only that one action.
+            # resource:write is shorthand for every action on that resource
+            # (backward compat: a pre-existing key holding it keeps authorizing
+            # everything it always did); resource:action grants only that one.
             allowed = ("read" in key.scopes and action == "read") or \
                       (f"{resource}:write" in key.scopes) or \
                       (f"{resource}:{action}" in key.scopes)
@@ -192,5 +185,5 @@ def authorize(resource: str, action: str, *, scope_of=None):
             raise HTTPException(403, "Your role does not allow this.")
         return user
 
-    dep.__proxploy_authz__ = (resource, action)   # Task 7's meta-test marker
+    dep.__proxploy_authz__ = (resource, action)   # meta-test marker
     return dep

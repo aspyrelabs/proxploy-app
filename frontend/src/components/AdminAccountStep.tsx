@@ -40,14 +40,8 @@ export function AdminAccountStep({ existing, onCreated }: {
 
   async function createAdmin() {
     setError('')
-    // TWO try blocks, and the error is the SERVER's, not a guess. One try
-    // wrapped both calls and reported every failure as "password: 12+
-    // characters", so a rejected EMAIL (a .local address, say, which the
-    // validator refuses as a reserved name) told the operator their password
-    // was too short while they stared at a perfectly good one. Reported from
-    // onboarding on a fresh install, 2026-08-26. profile-password.test.tsx
-    // already fixed exactly this for the password panel below; the wizard kept
-    // its copy.
+    // Two try blocks so a rejected email (a .local address, say) surfaces the
+    // SERVER's error, not a guessed "password too short".
     try {
       await api('/users', { method: 'POST', body: JSON.stringify(admin) })
     } catch (e) {
@@ -61,11 +55,8 @@ export function AdminAccountStep({ existing, onCreated }: {
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: admin.email, password: admin.password }) })
     } catch {
-      // A FIXED message, not the server's detail: by here the account exists,
-      // and that is the thing the operator most needs to know. Surfacing a raw
-      // "boom" from the login call loses it and reads like the signup failed,
-      // which is how they end up trying to create it a second time. Same
-      // choice the password panel below makes, for the same reason.
+      // A fixed message, not the server's detail: by here the account exists,
+      // and a raw login error would read like the signup failed.
       setError('The account was created, but signing in failed. '
                + 'Sign in with the password you just chose.')
       return
@@ -150,10 +141,8 @@ function EditPanel({ existing }: { existing: Existing }) {
       setError(apiErrorDetail(e, 'Could not set the password.'))
       return
     }
-    // The reset revokes every session, this one included. Logging straight
-    // back in is what stops the wizard dropping you at the login screen. Its
-    // own try: the password HAS changed by here, and saying otherwise sends
-    // someone to change a password that is already what they wanted.
+    // The reset revokes every session, this one included, so log straight back
+    // in. Its own try: the password has already changed here.
     try {
       await api('/auth/login', { method: 'POST',
         body: JSON.stringify({ email: existing.email, password: pw }) })

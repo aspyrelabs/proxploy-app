@@ -35,9 +35,8 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
   const update = useUpdateRule(scope)
   const remove = useDeleteRule(scope)
 
-  // "No rules here" and "Proxploy could not find out" are opposite answers to
-  // the only question this table exists to answer, so they are never the same
-  // screen. QueryState is what keeps them apart.
+  // QueryState keeps "no rules" and "could not read" apart — opposite
+  // answers, never the same screen.
   return (
     <QueryState query={q}
       empty={(d) => (d.rules ?? []).length === 0}
@@ -116,15 +115,11 @@ export function FirewallRuleTable({ scope, canEdit, onEdit, onAdd }: {
                         {canEdit && (
                           <div className="flex items-center justify-end gap-1">
                             {i > 0 && (
-                              /* pos arithmetic rather than the neighbour's pos, and they are the same
-                                 thing: PVE's pos is a dense array index, not a stable id, and it is
-                                 renumbered on every delete. Measured on pve-manager 9.2.11, 2026-08-21:
-                                 creating three rules then deleting the middle one renumbered
-                                 0,1,2 to 0,1. The guard above is index-based because the ARRAY is what
-                                 tells us there is a neighbour to swap with.
-
-                                 New rules are PREPENDED by PVE, so a rule added from this table lands at
-                                 pos 0 and takes precedence over everything below it. */
+                              /* PVE's pos is a dense array index, not a stable id: renumbered on
+                                 every delete (pve-manager 9.2.11: deleting the middle of three
+                                 renumbered 0,1,2 to 0,1). The guard is index-based because the array
+                                 is what tells us there's a neighbour. New rules are PREPENDED, so an
+                                 added rule lands at pos 0. */
                               <Button type="button" variant="icon" size="icon-xs"
                                 aria-label={`Move rule ${r.pos} up`}
                                 onClick={() => move.mutate({

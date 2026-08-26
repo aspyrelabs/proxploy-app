@@ -119,9 +119,7 @@ export function useHostPeers(hostId: number | null) {
 
 export function useHostTaskLog(hostId: number | null, upid: string | null) {
   // Encoded outside the template literal: a UPID is full of characters that
-  // must not reach the path raw, and the cast this used to need inline is
-  // what the route-coverage audit (backend/tests/test_openapi_surface.py)
-  // choked on, silently reading the call as /hosts/{}/tasks/{} with no /log.
+  // must not reach the path raw.
   const upidPath = upid == null ? '' : encodeURIComponent(upid)
   return useQuery({
     queryKey: ['hosts', hostId, 'tasks', upid, 'log'],

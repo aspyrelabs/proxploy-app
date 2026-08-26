@@ -12,10 +12,7 @@ import { Dialog } from './ui/dialog'
 const copyText = (text: string) => { void navigator.clipboard?.writeText(text) }
 
 // Shared by the enrollment panel, the activation confirm dialog, and the
-// regenerate-codes result -- three places that all show the same ten codes
-// with the same once-only warning and copy control. One presentation, so the
-// three cannot drift apart the way TotpCard.tsx's own docstring above the QR
-// code warns about for the QR's colors.
+// regenerate-codes result, so the three can't drift apart.
 function RecoveryCodesBlock({ codes }: { codes: string[] }) {
   return (
     <>
@@ -39,25 +36,21 @@ function RecoveryCodesBlock({ codes }: { codes: string[] }) {
   )
 }
 
-// Lazily imported: qrcode.react added ~6 kB gzip to the main bundle, and this
-// card's QR only renders inside the enroll flow, which most sessions never
+// qrcode.react adds ~6 kB gzip; this card's QR only renders in the enroll
+// flow, which most sessions never enter.
 import { QRCodeSVG } from 'qrcode.react'
 
 export function TotpCard() {
   const ent = useEntitlements()
-  // Same wait-for-first-fetch pattern as ApiKeysCard/TeamsCard: fetching
-  // /auth/me before auth.totp resolves true would still succeed (it's not
-  // gated by an entitlement itself) but would render the enroll button for
-  // a sliver of a second on plans that don't include TOTP at all.
+  // Wait for the entitlement fetch: rendering the enroll button before
+  // auth.totp resolves would flash it on plans without TOTP.
   const totpAllowed = ent.data != null && ent.has('auth.totp')
   const qc = useQueryClient()
   const me = useTotpStatus(totpAllowed)
 
   const [enrollment, setEnrollment] = useState<TotpEnrollment | null>(null)
   const [confirmCode, setConfirmCode] = useState('')
-  // Set once the code is submitted for review, before confirm.mutate() ever
-  // fires -- activation itself only happens from inside that dialog, once
-  // ackSaved is checked, see the Dialog below.
+  // Activation happens only from inside the confirm dialog below.
   const [showActivateConfirm, setShowActivateConfirm] = useState(false)
   const [ackSaved, setAckSaved] = useState(false)
   const [disabling, setDisabling] = useState(false)
@@ -79,9 +72,6 @@ export function TotpCard() {
       method: 'POST', body: JSON.stringify({ code: confirmCode }),
     }),
     onSuccess: () => {
-      // The recovery codes were shown once, above -- once TOTP is confirmed
-      // enabled there is nothing left to show, so the enrollment panel goes
-      // away rather than lingering with stale codes on screen.
       setEnrollment(null)
       setConfirmCode('')
       setShowActivateConfirm(false)
@@ -108,9 +98,7 @@ export function TotpCard() {
       method: 'POST', body: JSON.stringify({ password: regenPassword }),
     }),
     onSuccess: (r) => {
-      // Same shape as enrollment: the old codes are gone server-side (the
-      // service deletes them before issuing new ones), so these are shown
-      // once, right here, the same as a fresh enrollment's codes are.
+      // Old codes are already deleted server-side, so these are shown once, here.
       setRegeneratedCodes(r.recovery_codes)
       setRegenerating(false)
       setRegenPassword('')
@@ -120,13 +108,11 @@ export function TotpCard() {
 
   return (
     <CardLoadingOverlay state={{
-      // Not-yet-known-if-entitled, then /auth/me's own first fetch.
-      // `isPending`, not `isFetching`, so it stays quiet on the
-      // invalidateQueries refetch each mutation below triggers.
+      // `isPending`, not `isFetching`: stay quiet on the invalidateQueries
+      // refetch each mutation below triggers.
       firstLoad: ent.isPending || (totpAllowed && me.isPending),
-      // Every mutation defined on this card swaps it between its major
-      // states (not-enrolled / enrolling / enabled / regenerating), the
-      // exact "content jumps" case the veil exists for.
+      // Any mutation swaps the card between major states -- the content-jump
+      // case the veil exists for.
       mutating: enroll.isPending || confirm.isPending || disable.isPending || regenerate.isPending,
     }}>
     <section className="rounded-card border border-line-soft bg-panel p-5">
@@ -140,10 +126,9 @@ export function TotpCard() {
           </p>
         )
       ) : me.isError ? (
-        // Security-relevant: me.data is undefined on error same as on a
-        // genuine "not enrolled" response, so without this branch a failed
-        // /auth/me read would fall straight to "Enable two-factor", offering
-        // to enroll a user who may already have TOTP on.
+        // Security: me.data is undefined on error, same as a genuine
+        // "not enrolled", so without this branch a failed read would offer to
+        // enroll a user who may already have TOTP on.
         <p className="text-[12.5px] text-text-3">
           Could not check two-factor status, try reloading.
         </p>
@@ -220,18 +205,8 @@ export function TotpCard() {
             Scan this with your authenticator app, or enter the secret below manually.
           </p>
           <div className="mt-3 flex justify-center">
-            {/*
-              Fixed white background and black modules, not theme tokens. This
-              app is dark-themed by default, and a QR rendered in the app's own
-              foreground/background pair would put light modules on a dark page
-              (or vice versa depending on which token lands where) -- low
-              contrast at best, and most phone camera scanners simply fail to
-              lock onto it. A QR code's colors are a scanability requirement,
-              not a design choice, so they stay pinned to black-on-white in both
-              themes. `marginSize` adds the spec-required quiet zone (blank
-              modules around the code) that scanners also rely on; the padding
-              below adds further breathing room against the panel's border.
-            */}
+            {/* QR colors pinned to black-on-white in both themes: scanability
+              requirement, not a design choice. marginSize = spec quiet zone. */}
             <div className="rounded-ctl bg-white p-3">
                 <QRCodeSVG value={enrollment.otpauth_uri} size={176} bgColor="#FFFFFF"
                   fgColor="#000000" marginSize={4} level="M"
@@ -271,9 +246,8 @@ export function TotpCard() {
                 placeholder="123456"
                 className="rounded-ctl border border-line bg-panel-2 px-3 py-1.5 text-[13px] text-text" />
             </div>
-            {/* Submitting the code does not activate on the spot -- it opens
-               the confirm dialog below, which is the only place confirm.mutate()
-               is ever called from. */}
+            {/* Submitting only opens the confirm dialog below, the only place
+               confirm.mutate() is called. */}
             <Button disabled={!confirmCode || confirm.isPending}
               onClick={() => setShowActivateConfirm(true)}>
               Confirm

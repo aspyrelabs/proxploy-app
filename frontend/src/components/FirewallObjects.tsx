@@ -15,9 +15,8 @@ const input = 'w-full rounded-ctl border border-line-soft bg-elev px-2 py-1.5 te
 const th = 'pb-2 text-[11px] font-medium uppercase tracking-wide text-text-3'
 const td = 'py-2.5 text-[13px] text-text-2'
 
-/** The alias create/edit form. Shared between "Add alias" and editing a row,
- *  because the two only differ in whether `alias` carries a digest to PUT
- *  with. */
+/** Create/edit form; the two only differ in whether `alias` carries a digest
+ *  to PUT with. */
 function AliasForm({ scope, alias, onClose }: {
   scope: ObjectScope
   alias: Alias | null
@@ -77,9 +76,8 @@ function AliasForm({ scope, alias, onClose }: {
   )
 }
 
-/** Alias, address or range, comment. Aliases are cluster- or guest-scoped
- *  names for a CIDR, so a rule can reference "office" instead of repeating
- *  10.0.0.0/24 everywhere it applies. */
+/** Aliases are cluster- or guest-scoped names for a CIDR, so a rule can say
+ *  "office" instead of repeating 10.0.0.0/24 everywhere it applies. */
 export function AliasTable({ scope, canEdit }: { scope: ObjectScope; canEdit: boolean }) {
   const q = useAliases(scope)
   const remove = useDeleteAlias(scope)
@@ -145,9 +143,8 @@ export function AliasTable({ scope, canEdit }: { scope: ObjectScope; canEdit: bo
   )
 }
 
-/** One set's members, shown once its "Open" button has been clicked. Deleting
- *  the set itself is a separate two-step control below the member list, not
- *  here, because it acts on the set as a whole rather than on one member. */
+/** One set's members. Deleting the set itself is a separate two-step control
+ *  below, not here, because it acts on the whole set, not one member. */
 function IpSetMembers({ scope, name, canEdit }: {
   scope: ObjectScope; name: string; canEdit: boolean
 }) {
@@ -244,9 +241,8 @@ function IpSetMembers({ scope, name, canEdit }: {
   )
 }
 
-/** List of IP sets, each expandable to its members. Deleting a set is a
- *  two-step confirm rather than an immediate delete, because Proxmox refuses
- *  a populated set without `force`, and sending that unasked would discard
+/** Deleting a set is a two-step confirm, not immediate: Proxmox refuses a
+ *  populated set without `force`, and sending that unasked would discard
  *  entries the operator never looked at. */
 export function IpSetPanel({ scope, canEdit }: { scope: ObjectScope; canEdit: boolean }) {
   const q = useIpSets(scope)
@@ -362,11 +358,9 @@ export function IpSetPanel({ scope, canEdit }: { scope: ObjectScope; canEdit: bo
   )
 }
 
-/** Security groups are cluster-wide named rule bundles, listed here so a
- *  rule form's "action" can offer one and a page can edit a group's own
- *  rules once selected. Deleting one is a plain delete: Proxmox itself
- *  refuses if some other rule still references it, which is the right
- *  place for that check, not a guess made here. */
+/** Security groups are cluster-wide named rule bundles. Deleting one is a
+ *  plain delete: Proxmox itself refuses if some other rule still references
+ *  it, which is the right place for that check, not a guess made here. */
 export function SecurityGroupList({ hostId, canEdit, selected, onSelect }: {
   hostId: number
   canEdit: boolean

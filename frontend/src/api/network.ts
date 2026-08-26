@@ -1,4 +1,3 @@
-// api/network.ts, Network page server state (doc 05 §Network, doc 06 §a row 44).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type { JobRow } from './jobs'
@@ -46,10 +45,8 @@ export type Attachment = {
   rate: string | null; mtu: string | null; link_down: boolean
 }
 
-/** One host list_bridges() could not read (api/network.py: unreachable, or
- * missing its API token credential, a routine state, not an outage). The
- * rest of the page still renders; this is what tells the operator a host is
- * silently missing rather than the fleet just being smaller than they think. */
+/** One host list_bridges() could not read (unreachable, or missing its API
+ * token — a routine state, not an outage). The rest of the page still renders. */
 export type BridgeError = { host_id: number; host_name: string; error: string }
 
 export type Bridges = { nodes: NodeIfaces[]; attachments: Attachment[]; errors: BridgeError[] }
@@ -61,14 +58,10 @@ export type HostThroughput = {
 export type Throughput = { hours: number; resolution: string; hosts: HostThroughput[] }
 
 /**
- * Read a 4xx body.
- *
  * Every dict-bodied `HTTPException` in this app arrives FLAT: `main.py`'s
- * `problem_handler` does `body.update(exc.detail)`, so `HTTPException(409,
- * {"error": "confirm_required", ...})` serialises as
- * `{type, title, status, error, confirm_phrase, detail}`: `detail` is the
- * human-readable string, not a nested object. That is why `LifecycleActions`
- * reads `e.body.error` directly and why it works for Phase 6's routes too.
+ * `problem_handler` does `body.update(exc.detail)`, so `detail` is the
+ * human-readable string, not a nested object, and `error`/`confirm_phrase`
+ * sit top-level. Callers read `e.body.error` directly.
  */
 export function errBody(e: unknown): Record<string, unknown> | null {
   return e instanceof ApiError ? (e.body as Record<string, unknown> | null) : null
@@ -86,7 +79,7 @@ export function useBridges(hostId?: number) {
 export function useThroughput(hours = 1) {
   return useQuery({
     queryKey: ['network', 'throughput', hours],
-    refetchInterval: false, // SSE-invalidated, like every other metrics read (doc 06 §d)
+    refetchInterval: false, // SSE-invalidated, like every other metrics read
     queryFn: () => api<Throughput>(`/network/throughput?hours=${hours}`),
   })
 }
@@ -122,8 +115,7 @@ export function useSetNic() {
         { method: 'PUT', body: JSON.stringify(v.patch) }),
     // A config PUT is not a job (api/network.py::set_guest_nic writes the file
     // synchronously), so useLifecycle's "never invalidate the resource key"
-    // rule does not apply; there is no optimistic patch to stomp and the
-    // attachment map is exactly what changed.
+    // rule does not apply.
     onSettled: () => { qc.invalidateQueries({ queryKey: ['network'] }) },
   })
 }

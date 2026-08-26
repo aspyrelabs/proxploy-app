@@ -51,20 +51,16 @@ def enqueue_and_audit(request: Request, db, user: User, *, kind: str,
                       target_type: str | None, target_id: int | None,
                       params: dict, action: str | None = None,
                       target_name: str | None = None) -> dict:
-    """Enqueue a job, write the audit row that points at it, return the 202 body.
+    """Enqueue a job, write the audit row pointing at it, return the 202 body.
 
-    api/apps.py::enqueue_lifecycle is this same shape plus the self-guard and
-    the fixed `{target_type}.{action}` kind; this is the plain version every
-    Phase 6 mutation route uses. `action` overrides the audit action when the
-    job kind is not the right name for the audit trail (a `backup.run` job
-    fired from the restore route, say); it defaults to `kind`.
+    `action` overrides the audit action when the job kind is not the right
+    name for the audit trail (a `backup.run` job fired from the restore route,
+    say); it defaults to `kind`. Both `params` copies are redacted at their own
+    sink: JobBackend.enqueue before `jobs.params`, write_audit before
+    `audit_events.params`.
 
-    Both `params` copies are redacted at their own sink: JobBackend.enqueue
-    redacts before writing `jobs.params`, write_audit before `audit_events.params`.
-
-    `target_name` is normally left alone: JobBackend.enqueue reads the target's
-    name off its row, and the job and the audit row then carry the same one.
-    Pass it only for a target whose row cannot be looked up from
+    `target_name` is normally left for JobBackend.enqueue to read off the
+    target row; pass it only for a target whose row cannot be looked up from
     `(target_type, target_id)`, e.g. storage, whose target_id is a host id.
     """
     job = request.app.state.jobs.enqueue(

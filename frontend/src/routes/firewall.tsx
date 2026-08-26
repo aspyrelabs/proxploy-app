@@ -104,8 +104,7 @@ function RulesTab({ scope, hostId, canEdit }: { scope: Scope; hostId: number; ca
   )
 }
 
-/** The cluster (or standalone host) firewall: /firewall. Rules, Security
- *  groups, Aliases, IP sets, Options. */
+/** The cluster (or standalone host) firewall: /firewall. */
 export function FirewallClusterPage() {
   const nodesQuery = useClusterNodes()
   const switcherId = useId()
@@ -197,9 +196,8 @@ function FirewallClusterEntry({ entries, selected, switcherId, onSelect }: {
   )
 }
 
-/** A single node's firewall: /firewall/node/$hostId/$node. Rules, Options,
- *  Log; a node has no aliases or IP sets of its own (PVE keeps those at
- *  cluster scope only). */
+/** A single node's firewall: /firewall/node/$hostId/$node. A node has no
+ *  aliases or IP sets of its own (PVE keeps those at cluster scope only). */
 export function FirewallNodePage() {
   const { hostId: hostIdParam, node } = useParams({ strict: false }) as
     { hostId: string; node: string }
@@ -259,8 +257,7 @@ function useGuestIdentity(guestType: 'app' | 'vm', guestId: number) {
   return { name: vm?.name ?? null, hostId: vm?.host_id ?? null }
 }
 
-/** A guest's firewall: /firewall/guest/$guestType/$guestId. Rules, Aliases,
- *  IP sets, Options, Log. */
+/** A guest's firewall: /firewall/guest/$guestType/$guestId. */
 export function FirewallGuestPage() {
   const { guestType, guestId: guestIdParam } = useParams({ strict: false }) as
     { guestType: 'app' | 'vm'; guestId: string }

@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import type { AppRow } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
 import { TERMINAL } from '../api/jobs'
-// One 409 unwrapper for the whole phase; it landed with the network page.
+// One 409 unwrapper for the whole phase.
 import { errBody } from '../api/network'
 import type { MigrateStrategy, Preflight } from '../api/migrate'
 import { useMigrate, usePreflight } from '../api/migrate'
@@ -25,19 +25,13 @@ const STRATEGY_LABEL: Record<MigrateStrategy, (pf: Preflight) => string> = {
 }
 
 /**
- * Cross-host migration (backend/proxploy/services/migrate.py, doc 05 Tasks
- * 14-16). Pick a target host, run the real preflight, show the honest
- * strategy/size/downtime picture, blockers refuse submission, warnings
- * don't, then fire the job and follow it with the existing JobLog.
+ * Cross-host migration (backend/proxploy/services/migrate.py).
  *
- * The preflight's `est_downtime_s` is an ESTIMATE derived from an assumed
- * transfer rate (`est_note`/`downtime_statement` say so themselves). Once
- * the job is running, this dialog polls it and; on completion, shows the
- * job's own `result.downtime_s`, which is MEASURED wall-clock time, right
- * next to the estimate. The two numbers are never merged into one: an
- * estimate presented as a measurement would be exactly the kind of
- * plausible-looking lie doc 10's "accurate downtime shown" DoD exists to
- * rule out.
+ * The preflight's est_downtime_s is an ESTIMATE derived from an assumed
+ * transfer rate. After the job completes, result.downtime_s is MEASURED
+ * wall-clock time. The two numbers are never merged: an estimate presented
+ * as a measurement would violate the "accurate downtime shown" acceptance
+ * criterion.
  */
 export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => void }) {
   const [targetHostId, setTargetHostId] = useState<number | null>(null)
@@ -70,9 +64,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
   const measuredDowntime = job.data?.result?.downtime_s as number | undefined
 
   // The rootfs pool the operator picked. Null means "whatever preflight
-  // defaults to", which is every migration before this choice existed; the
-  // default is the first candidate and was previously the ONLY outcome, so a
-  // guest could land on NFS when its source disk was on local-lvm.
+  // defaults to" (the first candidate).
   const [storage, setStorage] = useState<string | null>(null)
 
   const runPreflight = (hostId: number, pick: string | null = null) => {
@@ -208,7 +200,7 @@ export function MigrateDialog({ app, onClose }: { app: AppRow; onClose: () => vo
                   </div>
                 )}
                 <div>
-                  {/* Covers BOTH pools now: the archive's and the disk's. */}
+                  {/* Covers both pools: the archive's and the disk's. */}
                   target capacity:{' '}
                   {pf.capacity_ok == null ? 'unknown' : pf.capacity_ok ? 'OK' : 'insufficient'}
                 </div>

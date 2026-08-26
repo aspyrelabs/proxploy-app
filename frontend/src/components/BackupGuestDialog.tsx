@@ -12,18 +12,14 @@ import { JobLog } from './JobLog'
 
 /**
  * What the dialog needs to know about the guest it is backing up, and nothing
- * more. Deliberately NOT `AppRow | VmRow`: those two rows agree on almost
- * nothing (an app has `ctid`, a VM has `vmid`; an app has memory and disk
- * totals and an IP, a VM has none of them), so a component taking the union
- * would have to sniff which fields exist to decide what it is looking at, and
- * every new field on either row becomes another branch in here. The caller
- * already knows which kind of guest it holds, so it does the one translation
- * and this dialog stays a single code path.
+ * more. Deliberately NOT `AppRow | VmRow`: those rows agree on almost nothing
+ * (an app has `ctid`, a VM has `vmid`), so a union would force field-sniffing
+ * and a new branch per field. The caller already knows the guest kind, so it
+ * does the one translation and this dialog stays a single code path.
  *
- * `label` is the identity line an operator reads on the Proxmox side, "CT 150"
- * for an app or "VM 100" for a VM. It is passed in rather than built from
- * `type` and an id field because the two rows spell that id differently, which
- * is the exact sniffing this shape exists to avoid.
+ * `label` is the identity line an operator reads on the Proxmox side ("CT 150"
+ * or "VM 100"), passed in rather than built from `type` + an id field because
+ * the two rows spell that id differently.
  */
 export type BackupGuestTarget = {
   type: 'app' | 'vm'
@@ -36,19 +32,16 @@ export type BackupGuestTarget = {
 }
 
 /**
- * The one-guest sibling of routes/backups.tsx's RunDialog. That dialog runs one
- * vzdump job over every guest on a chosen host; this one runs the same job
- * kind over exactly one guest, the app or VM it was opened from. The host is
- * already known (`guest.hostId`), so there is no host picker, and there is
- * nothing to enumerate: the guest list is the single guest.
+ * The one-guest sibling of routes/backups.tsx's RunDialog: same vzdump job
+ * kind over exactly one guest, host already known (no host picker, nothing to
+ * enumerate).
  *
- * `servedTo`, not `s.host_id === guest.hostId`: GET /storage drops host_id
- * from its dedupe key, so on a cluster a datastore reported by a sibling node
- * comes back owned by whichever host polled first. RunDialog hit this first;
- * see pools.ts::servedTo for the full explanation. `guest.hostId` alone
- * cannot answer that, so this dialog also fetches /hosts (the same
- * ['hosts'] cache RunDialog and Settings already populate) purely to read
- * that host's cluster_name.
+ * Uses `servedTo`, not `s.host_id === guest.hostId`: GET /storage drops
+ * host_id from its dedupe key, so on a cluster a datastore reported by a
+ * sibling node comes back owned by whichever host polled first (see
+ * pools.ts::servedTo). `guest.hostId` alone cannot answer that, so this dialog
+ * also fetches /hosts (the ['hosts'] cache RunDialog and Settings populate)
+ * purely to read that host's cluster_name.
  */
 export function BackupGuestDialog({ guest, onClose }: {
   guest: BackupGuestTarget

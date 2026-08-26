@@ -22,8 +22,8 @@ import { shellRoute } from './shell'
 import { tabList, tabTrigger } from '../components/ui/tabs'
 
 const card = 'rounded-card border border-line-soft bg-panel p-5'
-// Hoisted so the loading placeholder lays out in the SAME grid as the cards it
-// stands in for. Two copies of the string is one copy too many.
+// Hoisted so the loading placeholder lays out in the SAME grid as the cards
+// it stands in for.
 const STORAGE_GRID = 'grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'
 
 // PVE's content classes, in the order the browser shows them. The tab strip is
@@ -120,11 +120,8 @@ export function ContentBrowser({ row, onClose, onManage }:
 
       {/* Four of these six come off the row that was already on screen and
           need no placeholder. Free and Nodes come from GET the datastore's own
-          detail, and both were misreporting during that fetch: Free printed
-          the unknown form, and Nodes claimed the single node this row happens
-          to be listed under, which on a shared datastore is a smaller and
-          wrong answer rather than an absent one. KVGrid values are nodes, so
-          the bar goes straight in the cell and the grid never resizes. */}
+          detail. KVGrid values are nodes, so the bar goes straight in the cell
+          and the grid never resizes. */}
       <KVGrid items={[
         ['Status', row.status],
         ['Used', fmtBytes(row.used_bytes)],
@@ -163,9 +160,7 @@ export function ContentBrowser({ row, onClose, onManage }:
             ) : isPending ? (
               // Every tab click is a fresh query key with nothing cached, so
               // without this each one showed "Nothing stored here yet" first
-              // and the volumes second. Told once about an empty ISO store,
-              // an operator uploads a second copy of an image that was
-              // already there.
+              // and the volumes second.
               <SkeletonGroup label="Loading volumes">
                 {/* Volume, Format, Size, Guest, Created, Delete. */}
                 <SkeletonTable rows={4}

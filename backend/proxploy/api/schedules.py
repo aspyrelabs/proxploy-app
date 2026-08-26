@@ -1,12 +1,10 @@
-"""Schedules CRUD (doc 05 §Schedules).
+"""Schedules CRUD.
 
-The `schedules` table is authoritative (doc 04) and `jobs/scheduler.py` reads
-it every tick, so there is nothing to register or de-register here: a write
-that lands is live within one tick. The only obligation is that a row this
-router accepts must be one the tick can actually fire, hence `_validated()`
-(the same checks as Task 1's `validate()`, split out so a 422 can name which
-of cron/timezone/job_kind actually failed) on every write, rather than
-discovering a bad cron when the schedule silently disables itself hours later.
+The `schedules` table is authoritative and `jobs/scheduler.py` reads it every
+tick, so a write is live within one tick and there is nothing to register or
+de-register. Every write runs `_validated()` (the same checks as `validate()`,
+split out so a 422 names which of cron/timezone/job_kind failed) rather than
+discovering a bad cron when the schedule silently disables itself later.
 """
 from __future__ import annotations
 
@@ -23,15 +21,14 @@ from proxploy.services.audit import write_audit
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 
 # One singleton per permission so FastAPI's dependency cache collapses the
-# route-level and parameter-level uses, and so authorize always runs before
-# require_entitlement (tests/test_route_auth_invariant.py).
+# route-level and parameter-level uses, and authorize always runs before
+# require_entitlement.
 _read = authorize("schedule", "read")
 _run = authorize("schedule", "run")
 _manage = authorize("schedule", "manage")
 
-# Doc 05: "`sched.windows`; `store.auto_update` when `job_kind=app.update`".
-# Enforced in the body rather than as a route dependency because it depends on
-# the payload: a dependency cannot see `job_kind`.
+# Enforced in the body rather than a route dependency: the entitlement depends
+# on the payload's job_kind, which a dependency cannot see.
 AUTO_UPDATE_KIND = "app.update"
 
 
@@ -79,10 +76,9 @@ def _check_auto_update(request: Request, job_kind: str) -> None:
 
 
 def _validated(cron: str, tz: str, job_kind: str) -> None:
-    """Same checks as `validate()` (Task 1), but discriminating which of the
-    three axes failed, because a flat `str(BadSchedule)` doesn't always name the
-    axis (e.g. a bad cron's message never contains the word "cron"), and a
-    human (or a test) needs to know whether to fix the trigger or the kind."""
+    """Same checks as `validate()`, but discriminating which axis failed: a flat
+    `str(BadSchedule)` doesn't always name it (a bad cron's message never says
+    "cron"), and the caller needs to know whether to fix the trigger or the kind."""
     if job_kind not in HANDLERS:
         raise HTTPException(422, f"no job handler registered for kind {job_kind!r}")
     try:
@@ -93,10 +89,8 @@ def _validated(cron: str, tz: str, job_kind: str) -> None:
 
 @router.get("", dependencies=[Depends(_read)])
 def list_schedules(db=Depends(get_db), user: User = Depends(_read)):
-    # Ascending, same convention as notifications.py::list_channels: this is
-    # a small, admin-curated config list (unlike GET /jobs' append-only
-    # execution log, where newest-first is the right read), and stable
-    # ordering matters more here than surfacing new rows first.
+    # Ascending: a small admin-curated config list, where stable ordering
+    # matters more than surfacing new rows (unlike /jobs' append-only log).
     return [_out(s) for s in db.query(Schedule).order_by(Schedule.id).all()]
 
 

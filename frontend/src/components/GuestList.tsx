@@ -42,27 +42,15 @@ export function toGuests(apps: AppRow[], vms: VmRow[]): Guest[] {
     ...vms.map((v): Guest => ({
       kind: 'vm', id: v.id, host_id: v.host_id, name: v.name, label: `VM ${v.vmid}`,
       status: v.status, cpu_pct: v.cpu_pct,
-      // The same "used / allocated" the app rows above get, and for the first
-      // time the same meaning behind it: a VM's mem_bytes used to be the
-      // memory ASSIGNED, so this line printed an allocation where the app
-      // lines printed a usage and the column read as two different numbers.
       mem: v.mem_total_bytes
         ? `${fmtBytes(v.mem_bytes)} / ${fmtBytes(v.mem_total_bytes)}`
         : fmtBytes(v.mem_bytes),
-      // VmRow has no update concept at all: not "no update available", but
-      // nothing to report either way.
       update: null,
     })),
   ]
 }
 
-/** One row shape for both kinds of guest.
- *
- *  This page used to show its two kinds of guest two different ways, a card
- *  grid for the apps beside a bare three-column table for the VMs. The
- *  unification went upward on purpose: VMs gained the CPU bar, the lifecycle
- *  controls and the console that apps already had, rather than apps being
- *  flattened to name/id/status to match the VMs. */
+/** One row shape for both kinds of guest. */
 export function GuestList({ guests }: { guests: Guest[] }) {
   return (
     <div role="list" className="rounded-card border border-line-soft bg-panel">
@@ -71,11 +59,8 @@ export function GuestList({ guests }: { guests: Guest[] }) {
   )
 }
 
-/** The same list box with the same row rhythm, for the moment before
- *  /apps?host= and /vms?host= have both answered. Co-located with GuestRow so
- *  the two move together: this mirrors the row's OUTER box (px-4 py-3 between
- *  border-t rules) and the pieces tall enough to set its height, which is what
- *  decides whether the page below shifts when the guests land. */
+/** Co-located with GuestRow so the skeleton and real rows stay in sync when
+ *  the row layout changes. */
 export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="rounded-card border border-line-soft bg-panel">
@@ -94,9 +79,7 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
           </div>
           <SkeletonLine className="w-24 text-[11px]" />
           {/* LifecycleActions at size="sm", then the Console ghost. Both are
-              32px (h-8), measured off a real rendered sm button. The 30px and
-              24px here were each a different guess at a control whose size
-              classes were being dropped on the floor. */}
+              32px (h-8), measured off a real rendered sm button. */}
           <div className="ms-auto flex items-center gap-2">
             <Skeleton className="h-8 w-24 rounded-ctl" />
             <Skeleton className="h-8 w-16 rounded-ctl" />
@@ -109,9 +92,6 @@ export function GuestListSkeleton({ rows = 3 }: { rows?: number }) {
 
 function GuestRow({ guest: g }: { guest: Guest }) {
   const navigate = useNavigate()
-  // Neither kind has a detail page any more: both are a row that expands on
-  // its own table, and `open` is which one. Same search param on both sides,
-  // different table.
   const open = () => navigate(g.kind === 'app'
     ? { to: '/apps' as never, search: { open: g.id } as never }
     : { to: '/vms' as never, search: { open: g.id } as never })
@@ -140,9 +120,8 @@ function GuestRow({ guest: g }: { guest: Guest }) {
       <span className="font-mono text-[11px] text-text-2">{g.mem}</span>
       <div className="ml-auto flex items-center gap-2">
         <LifecycleActions target={g.kind} id={g.id} name={g.name} status={g.status} hostId={g.host_id} size="sm" />
-        {/* A window of its own, never a route: the in-page console tabs are
-            gone (lib/console-window.ts). g.kind is already 'app' | 'vm', which
-            is exactly the ConsoleKind the opener takes. */}
+        {/* A window of its own, never a route. g.kind is already 'app' | 'vm',
+            exactly the ConsoleKind the opener takes. */}
         <ConsoleButton hostId={g.host_id}
           onClick={() => openConsoleWindow(g.kind, g.id)} />
       </div>

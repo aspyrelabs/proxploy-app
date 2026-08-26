@@ -15,10 +15,8 @@ router = APIRouter(prefix="/meta", tags=["meta"])
 
 _read = authorize("meta", "read")
 _manage = authorize("settings", "manage")
-# doc 01 lists self-update as gated on `platform.self_update`; only RBAC was
-# enforced, so the documented gate did not exist. Always listed AFTER the auth
-# dependency, or an anonymous caller gets 403 instead of 401 and learns which
-# flags are armed (tests/test_route_auth_invariant.py).
+# Always listed AFTER the auth dependency: otherwise an anonymous caller gets
+# 403 instead of 401 and learns which entitlement flags are armed.
 _self_update = require_entitlement("platform.self_update")
 
 COMPOSE_HINT = "docker compose pull && docker compose up -d"
@@ -35,12 +33,9 @@ def health():
 
 @router.get("/version")
 def version(request: Request, user=Depends(_read)):
-    # "reporting" is "off" (the shipped default), "on", or "error: <type>".
-    # An operator who put PROXPLOY_SENTRY_DSN in proxploy.env has no other way
-    # to tell whether it took: a DSN that arrived blank or mangled behaves
-    # exactly like one that was never set. Behind `_read` rather than on the
-    # unauthenticated /meta/health, since nothing about this install's
-    # configuration is a stranger's business.
+    # "reporting" is "off" (shipped default), "on", or "error: <type>". The
+    # only way an operator can tell a blank/mangled DSN from an unset one.
+    # Behind `_read` (not /meta/health): this install's config isn't public.
     return {"version": __version__,
             "db_backend": request.app.state.engine.dialect.name,
             "reporting": request.app.state.reporting}
@@ -48,34 +43,21 @@ def version(request: Request, user=Depends(_read)):
 
 @router.get("/onboarding")
 def onboarding(request: Request, db=Depends(get_db)):
-    """Where setup has got to.
+    """Pre-session onboarding state, PUBLIC by necessity.
 
-    PUBLIC by necessity, so it answers a stranger with the three booleans the
-    pre-session screens genuinely cannot work without and nothing else:
-    `admin_exists` (step 1 of the wizard, and whether this is a fresh
-    install), `complete` (the redirect both shell.tsx and the wizard route
-    make before any session exists) and `oidc` (whether the login page draws
-    an SSO button).
-
-    `host_added` and `ssh_pending` are a different kind of fact: they say
-    this install manages Proxmox hosts and that a root SSH key is enrolled
-    but not yet working, which is reconnaissance for anyone who can reach the
-    port. The wizard only reads them from step 2 onwards, and step 1 signs
-    the new admin in before it gets there (components/AdminAccountStep.tsx
-    posts /users then /auth/login), so a session always exists by the time
-    they matter. Absent rather than faked for everyone else: a hardcoded
-    False would send a signed-out caller to the wrong wizard step.
+    `admin_exists`/`complete`/`oidc` are safe to expose anonymously.
+    `host_added`/`ssh_pending` are host reconnaissance, so they're returned
+    only once a session exists (the wizard signs the admin in at step 1) and
+    are absent -- not False -- otherwise, so a signed-out caller can't be sent
+    to the wrong wizard step.
     """
     body = {"admin_exists": db.query(User).count() > 0,
             "complete": bool(get_setting(db, "onboarding.complete", False)),
-            # Task 11: login page's pre-session SSO-button gate.
             "oidc": oidc.configured(db) and request.app.state.entitlements.enabled("auth.oidc")}
     raw = request.cookies.get(request.app.state.settings.session_cookie)
     if raw and resolve_session(db, raw):
         body["host_added"] = db.query(Host).count() > 0
-        # An enrolled-but-unverified key is the wizard's authorize step
-        # still being owed an answer (Task 2). Verified or absent, there
-        # is nothing left to ask.
+        # Enrolled-but-unverified key = wizard's authorize step still owed.
         body["ssh_pending"] = (db.query(HostCredential).filter_by(kind="ssh_key")
                                .filter(HostCredential.ssh_verified_at.is_(None))
                                .count() > 0)
@@ -100,17 +82,15 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Dep
     settings = request.app.state.settings
     shape = updater.detect_shape(settings)
     if shape not in updater.CAN_SELF_APPLY:
-        # Not a failure: a deliberate capability boundary (spec D3). The
-        # container never rewrites its own image.
+        # Deliberate capability boundary: the container never rewrites its own image.
         raise HTTPException(409, {"error": "docker_shape", "compose_hint": COMPOSE_HINT})
     status = updater.check(settings)
     if status["error"]:
         raise HTTPException(502, {"error": "channel_unavailable",
                                   "detail": status["error"]})
     if status["latest"] != body.version:
-        # The operator clicked on a version they were shown; the channel has
-        # since moved. Installing something they never saw is worse than an
-        # error they can re-check.
+        # The operator was shown this version; the channel has moved on.
+        # Installing something they never saw is worse than a re-checkable error.
         raise HTTPException(409, {"error": "no_such_version",
                                   "latest": status["latest"]})
     if not Path(settings.update_script).exists():

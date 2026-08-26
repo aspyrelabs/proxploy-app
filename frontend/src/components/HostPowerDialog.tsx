@@ -11,25 +11,13 @@ import { SkeletonGroup, SkeletonLine } from './ui/skeleton'
 type PowerResult = { job: { id: number; kind: string; status: string }; is_self: boolean }
 
 /**
- * Reboot / power off ONE Proxmox node (backend/proxploy/api/hosts.py
- * `power_node`), doc 02 §9 and doc 08 §1/§9 row 14.
+ * Reboot or power off ONE Proxmox node via typed confirmation.
  *
- * Always the typed-confirmation gate, self or not -- a plain "are you sure"
- * is not enough for an action that can take a whole node, and every guest on
- * it, down. `is_self` comes off the SAME `.../status` query the identity rail
- * already fetches, so this reads it from cache (or fetches it once, if the
- * rail has not yet) rather than adding a second round trip, and the warning
- * it produces is visible BEFORE Confirm is even reachable -- never only
- * discovered after a rejected call.
- *
- * Reboot/power off run as a job now, not a synchronous call (doc 05 §Jobs):
- * once confirmed, this holds the returned job id and mounts JobLog, the same
- * shape InstallDialog/UninstallDialog use, rather than closing on a bare
- * success toast. There is deliberately no progress ring here: a reboot has
- * no honest percentage (services/guestjobs.py::run_host_power never calls
- * ctx.progress), so the log is the whole story and the job's own SSE event
- * (LiveProvider) is what raises the notification card, this dialog does not
- * also toast on success, that would double it.
+ * Runs as a job — once confirmed, this holds the returned job id and mounts
+ * JobLog. There is no progress ring: a reboot has no honest percentage
+ * (services/guestjobs.py::run_host_power never calls ctx.progress). The job's
+ * SSE event (LiveProvider) raises the notification card; this dialog does not
+ * also toast on success.
  */
 export function HostPowerDialog({ hostId, node, command, onClose }: {
   hostId: number
@@ -76,20 +64,11 @@ export function HostPowerDialog({ hostId, node, command, onClose }: {
     )
   }
 
-  // Held until /status answers, and this one is not cosmetic.
-  //
-  // `isSelf` falls back to false while the query is in flight, so for the
-  // length of that fetch this dialog rendered the ORDINARY warning: complete
-  // looking, quietly missing the sentence that says powering this node off can
-  // end Proxploy with no way back in. An operator who reads fast and types the
-  // node name has then confirmed a destructive action against a warning that
-  // was still loading. A placeholder is the honest answer: the reader can see
-  // that something is still being established, rather than being shown a
-  // partial warning as though it were the whole one.
-  //
-  // Deliberately NOT solved by defaulting isSelf to true: that would put the
-  // scariest possible warning on every ordinary node reboot for a moment and
-  // then take it away, which trains people to ignore it.
+  // Held until /status answers: `isSelf` falls back to false while the query
+  // is in flight, so showing the ordinary warning here would let an operator
+  // confirm a destructive action against a warning that was still loading.
+  // Deliberately NOT defaulting isSelf to true — flashing the scariest warning
+  // on every reboot and then taking it away trains people to ignore it.
   if (statusQuery.isPending) {
     return (
       <Dialog title={`${verb} ${node}?`} onClose={onClose}>

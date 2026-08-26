@@ -40,9 +40,8 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
     upload.mutate({ hostId, storage, node, content, file, overwrite }, {
       onSuccess: (r) => setJobId(r.job.id),
       onError: (e) => {
-        // The operator's own Cancel button, not a real failure, see
-        // api/storage.ts's uploadForm. Nothing to tell them that they do
-        // not already know.
+        // The operator's own Cancel button, not a real failure: nothing to
+        // tell them they don't already know.
         if (e instanceof DOMException && e.name === 'AbortError') return
         const body = e instanceof ApiError ? (e.body as any) : null
         if (e instanceof ApiError && e.status === 409 && body?.error === 'volume_exists') {
@@ -55,16 +54,13 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   }
 
   const handleCancel = () => {
-    // Closing the dialog used to leave the upload running in the background,
-    // fetch's streaming body had no abort. XHR does, so Cancel now means it.
+    // Cancel means it now: XHR supports abort (fetch's streaming body did not).
     if (upload.isPending) upload.abort()
     onClose()
   }
 
-  // Speed, smoothed over SPEED_WINDOW_MS rather than read from the raw delta
-  // between two progress events, which arrive close together and jitter
-  // badly. Resets whenever upload.progress goes back to null, at the start
-  // of every attempt (api/storage.ts's mutationFn does that).
+  // Speed, smoothed over SPEED_WINDOW_MS; resets when upload.progress goes
+  // null at the start of each attempt.
   const [speed, setSpeed] = useState<number | null>(null)
   const samples = useRef<{ t: number; loaded: number }[]>([])
   useEffect(() => {
@@ -82,9 +78,8 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
     setSpeed((list[list.length - 1].loaded - list[0].loaded) / (span / 1000))
   }, [upload.progress])
 
-  // The event only carries a percentage when lengthComputable said so; the
-  // file's own size (known the moment it is picked, independent of the
-  // network) is what "X of Y" always shows.
+  // The event only carries a percentage when lengthComputable said so; "X of
+  // Y" uses the file's own size, known the moment it is picked.
   const pct = upload.progress?.total != null
     ? Math.round((upload.progress.loaded / upload.progress.total) * 100)
     : null

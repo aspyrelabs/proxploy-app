@@ -23,14 +23,9 @@ function fmtWhen(t: number | null | undefined): string {
 }
 
 /**
- * Doc 06 §(a) row 48: "Snapshots: table (Name/Created/Size) with Rollback +
- * Delete row actions and 'Take snapshot'". The with-RAM (vmstate) checkbox is
- * doc 01 §4's "with-RAM option surfaced".
- *
- * This panel only ever mounts inside a VM's row on /vms, i.e. qemu guests,
- * which is why
- * the vmstate checkbox is unconditional, PVE rejects vmstate for LXC, so an
- * LXC consumer would have to hide it before reusing this component.
+ * Only ever mounts inside a VM's row on /vms, i.e. qemu guests, so the vmstate
+ * checkbox is unconditional. PVE rejects vmstate for LXC — an LXC consumer
+ * would have to hide it before reusing this component.
  */
 export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }) {
   const ent = useEntitlements()
@@ -48,10 +43,7 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   // is not a snapshot and cannot be rolled back to or deleted.
   const rows: SnapshotRow[] = (data ?? []).filter((s) => s.name !== 'current')
 
-  // `create` carries the dialog's fields; rollback and delete carry none. They
-  // used to read the open form's state whichever op was running, so typing a
-  // description and then pressing Rollback sent that description with the
-  // rollback. Nothing downstream read it, but it was never true.
+  // `create` carries the dialog's fields; rollback and delete carry none.
   const fire = (
     op: 'create' | 'rollback' | 'delete',
     target: string,
@@ -99,14 +91,8 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
 
   return (
     <>
-      {/* The panel is a LIST now. Taking a snapshot moved into a dialog behind
-          this button: it is an occasional, deliberate act, and the form used to
-          sit permanently open above the table, putting three inputs and a
-          paragraph of vmstate caveats between the reader and the rollback
-          points they came to look at.
-
-          No card of its own here. VmDetailPanel already wraps this in one, and
-          two nested cards drew two borders around the same content. */}
+      {/* Take Snapshot lives in a dialog (occasional act), keeping the form out
+          of the reader's way. No card of its own — VmDetailPanel wraps this. */}
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-[11px] uppercase tracking-wide text-text-3">Snapshots</h3>
         <Button size="sm" disabled={denied || run.isPending} title={planTitle}
@@ -124,7 +110,6 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
             somebody is here to check. */}
         {isPending ? (
           <SkeletonGroup label="Loading snapshots">
-            {/* Name, Created, Size, and the Rollback/Delete pair. */}
             <SkeletonTable rows={3} cols={['w-32', 'w-32', 'w-16', 'w-36']} />
           </SkeletonGroup>
         ) : rows.length === 0 ? (

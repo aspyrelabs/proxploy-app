@@ -113,9 +113,6 @@ export function NicForm({ nic, bridges, onClose }: {
               <label className={label} htmlFor="nic-cidr">Address and prefix</label>
               <input id="nic-cidr" className={inputCls} placeholder="192.168.1.50/24"
                      value={ipCidr} onChange={(e) => setIpCidr(e.target.value)} />
-              {/* Proxmox wants the prefix, and rejects a bare address. Said here
-                  rather than only in the error, since the error costs a round
-                  trip to learn something the field could have told you. */}
               <p className="mt-1 text-[11.5px] text-text-3">
                 Include the prefix length. Proxmox does not accept a bare address.
               </p>
@@ -130,12 +127,10 @@ export function NicForm({ nic, bridges, onClose }: {
           )}
         </>
       ) : (
-        /* A VM's address is not editable here: qm set --netN has no ip or gw
-           field at all, so a field would silently do nothing. It is shown when
-           Proxmox knows it (the guest agent, else a static cloud-init address)
-           and the whole block is absent when Proxmox does not. A DHCP VM with
-           no agent is the ordinary case, and it has nothing to say for itself:
-           an explanation of an absence nobody asked about is still clutter. */
+        /* A VM's address is not editable here: `qm set --netN` has no ip or gw
+           field. Shown only when Proxmox knows it (the guest agent, else a
+           static cloud-init address); absent otherwise (e.g. a DHCP VM with no
+           agent). */
         nic.addresses?.length ? (
           <div className="rounded-ctl border border-line-soft bg-elev p-2">
             <div className={label}>Address</div>
@@ -145,15 +140,8 @@ export function NicForm({ nic, bridges, onClose }: {
           </div>
         ) : null
       )}
-      {/* The toggle is back, and it had to be: a guest's firewall rules do
-          nothing unless BOTH this flag and the guest's own `enable` option are
-          set, so leaving the flag unmanageable would ship a rule table that
-          silently has no effect.
-
-          It was removed on 2026-08-18 because turning it on could leave a
-          guest unreachable with nothing in this product able to permit traffic
-          again. That is no longer true: rules, policies and the whole firewall
-          for this guest are on its Firewall page, linked below. */}
+      {/* A guest's firewall rules do nothing unless BOTH this flag and the
+          guest's own `enable` option are set. */}
       <div className="flex items-center gap-2">
         <input id="nic-firewall" type="checkbox"
           checked={firewall}
