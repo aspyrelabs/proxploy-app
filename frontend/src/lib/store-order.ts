@@ -19,14 +19,14 @@ import type { CatalogRow } from '../api/catalog'
  */
 export const STORE_SORTS = {
   name: 'Name (A to Z)',
-  popularity: 'Most installed',
+  popularity: 'Popularity',
   newest: 'Newest',
   updated: 'Recently updated',
 } as const
 
 export type StoreSort = keyof typeof STORE_SORTS
 
-export const DEFAULT_SORT: StoreSort = 'name'
+export const DEFAULT_SORT: StoreSort = 'popularity'
 
 /** Own keys only. `'toString' in STORE_SORTS` is true, because `in` walks the
  *  prototype chain, so the obvious version of this accepts "?sort=toString"

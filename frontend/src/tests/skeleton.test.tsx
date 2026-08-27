@@ -157,10 +157,10 @@ describe('the shaped card placeholders', () => {
   })
 
   it('pins the Store card placeholder to the real card\'s fixed height', () => {
-    // StoreCard is h-[240px] by a budget derived in that file. The placeholder
+    // StoreCard is h-[208px] by a budget derived in that file. The placeholder
     // has to be the same number or the Store grid jumps when the catalog lands.
     const { container } = render(<StoreCardSkeleton />)
-    expect(container.firstElementChild!.className).toContain('h-[240px]')
+    expect(container.firstElementChild!.className).toContain('h-[208px]')
   })
 
   it('draws one meter row per real meter row', () => {

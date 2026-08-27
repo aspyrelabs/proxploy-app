@@ -18,11 +18,12 @@ const row = (over: Partial<CatalogRow> & { slug: string }): CatalogRow => ({ ...
 const slugs = (rows: CatalogRow[]) => rows.map((r) => r.slug)
 
 describe('store sort keys', () => {
-  it('offers exactly the four keys the server allowlists, defaulting to name', () => {
+  it('offers exactly the four keys the server allowlists, defaulting to popularity', () => {
     // These names are the URL contract and are shared with GET /catalog's own
-    // `sort` allowlist. Renaming one here silently desyncs the two.
+    // `sort` allowlist. Renaming one here silently desyncs the two, so the
+    // "Most installed" -> "Popularity" relabel deliberately left the KEY alone.
     expect(Object.keys(STORE_SORTS)).toEqual(['name', 'popularity', 'newest', 'updated'])
-    expect(DEFAULT_SORT).toBe('name')
+    expect(DEFAULT_SORT).toBe('popularity')
   })
 
   it('rejects anything outside the allowlist, including the empty string', () => {

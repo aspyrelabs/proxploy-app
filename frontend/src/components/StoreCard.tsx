@@ -6,40 +6,6 @@ import { Button, amberLinkCls, linkCls } from './ui/button'
 import { Icon } from './ui/icon'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 
-// Everything the Store renders is entry_type "ct" (the API call is pinned to
-// it), so this is really a label. Kept as a lookup rather than a literal so a
-// card stays honest if that ever changes.
-const TYPE_LABEL: Record<CatalogRow['type'], string> = {
-  ct: 'LXC', vm: 'VM', pve: 'Host', addon: 'Add-on', turnkey: 'Turnkey',
-}
-
-// "delisted" (upstream soft-deleted it, so its metadata still arrives) and
-// "unlisted" (upstream dropped it, so the card is bare) are two facts about
-// upstream's data and one fact to the reader: community-scripts does not list
-// this app any more. So they share one badge.
-//
-// The badge does not say deprecated, abandoned, broken or unsafe. The install
-// script is still in the repo and still runs, which is why it is neutral
-// chrome and does not gate Install.
-/**
- * The tag chips, and why there are only three.
- *
- * has_arm and updateable are true on 87% and 97% of the 556 store-visible ct
- * rows, so a chip on the common side would be furniture. Those two render on
- * the RARE side, where the information is. `privileged` is informative on
- * `true` and is the security-relevant one.
- *
- * Every condition is an explicit === true or === false. Null means upstream
- * has no record for the slug and must render NOTHING: `has_arm: null` is not
- * "x86 only" and `privileged: null` is not "unprivileged".
- */
-const CHIP = 'inline-block rounded border border-line bg-panel-2 px-1.5 py-0.5 text-[10px] text-text-2'
-
-const UNLISTED_TITLE =
-  'community-scripts no longer lists this app. Its install script is still in '
-  + 'the repository and still installs. This is about the upstream catalog, '
-  + 'not a judgement about the app itself.'
-
 /**
  * The install count, shown as the number it actually is. No banding, no
  * percentile, no rounding to "126k": an invented tier is a judgement the
@@ -125,7 +91,6 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
   }
 
   const name = entry.name ?? entry.slug
-  const unlisted = entry.upstream_state === 'delisted' || entry.upstream_state === 'unlisted'
   const reason = entry.unsupported_reason
   return (
     /**
@@ -157,7 +122,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
     <div
       onPointerDown={(e) => { pressAt.current = { x: e.clientX, y: e.clientY } }}
       onClick={openFromCardBody}
-      className="flex h-[240px] cursor-pointer flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+      className="flex h-[208px] cursor-pointer flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
       <div className="flex shrink-0 items-start justify-between gap-2">
         <IconTile name={name} iconUrl={entry.icon_url} size={40} />
         {entry.popularity != null && (
@@ -243,32 +208,6 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
           </>
         )}
       </div>
-      <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5">
-        <span className="inline-block rounded bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-3">
-          {TYPE_LABEL[entry.type]}
-        </span>
-        {unlisted && (
-          <span title={UNLISTED_TITLE} className={CHIP}>Not listed upstream</span>
-        )}
-        {entry.privileged === true && (
-          <span className={CHIP}
-            title="This script builds a privileged container. That is upstream's own choice for this app, and it means the container has more access to the host than an unprivileged one.">
-            Privileged
-          </span>
-        )}
-        {entry.has_arm === false && (
-          <span className={CHIP}
-            title="Upstream lists no ARM build for this script, so it needs an amd64 node.">
-            x86 only
-          </span>
-        )}
-        {entry.updateable === false && (
-          <span className={CHIP}
-            title="Upstream ships no update path for this script, so a new version means reinstalling rather than updating in place.">
-            No in-place update
-          </span>
-        )}
-      </div>
       {/* Whatever is left over. It is the drift absorber that keeps all three
           action states at one height: the not-installable arm is text (~17px)
           where the other two are a ~25px control. */}
@@ -280,7 +219,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
 /**
  * StoreCard's placeholder.
  *
- * `h-[240px]`, the same as the real card, so the Store grid does not resize
+ * `h-[208px]`, the same as the real card, so the Store grid does not resize
  * when the catalog lands; that equality is checked in real Chromium rather
  * than asserted from a class name.
  *
@@ -289,7 +228,7 @@ export function StoreCard({ entry, onInstall, onOpenDetail, installCount }: {
  */
 export function StoreCardSkeleton() {
   return (
-    <div className="flex h-[240px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
+    <div className="flex h-[208px] flex-col overflow-hidden rounded-card border border-line-soft bg-panel p-4">
       <div className="flex shrink-0 items-start justify-between gap-2">
         <Skeleton className="h-10 w-10 rounded-tile" />
         {/* The install count: a 23px glyph beside a 14px figure. */}
@@ -306,10 +245,6 @@ export function StoreCardSkeleton() {
         <SkeletonLine className="w-16 text-[11.5px]" />
         {/* size="xs" Button: py-1.5 around a 9px line box, ~25px tall. */}
         <Skeleton className="ml-auto h-[25px] w-14 rounded-ctl" />
-      </div>
-      <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5">
-        <Skeleton className="h-[18.5px] w-10" />
-        <Skeleton className="h-[20.5px] w-24" />
       </div>
       <div className="flex-1" />
     </div>

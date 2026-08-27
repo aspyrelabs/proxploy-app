@@ -197,7 +197,7 @@ describe('StoreCard', () => {
     expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
   })
 
-  it('renders cleanly with just name, type and an initial tile when nothing was scraped', () => {
+  it('renders cleanly with just a name and an initial tile when nothing was scraped', () => {
     // Scripts are the source of truth; the community-scripts.org scrape is
     // best-effort decoration only (catalog expansion plan, decision 1). A
     // card must never look broken just because none of it landed.
@@ -206,7 +206,6 @@ describe('StoreCard', () => {
     render(<StoreCard entry={bare} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText('redis')).toBeInTheDocument()  // falls back to slug
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
-    expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge
     expect(screen.getByText('RED')).toBeInTheDocument()  // initials tile, no <img>
     expect(screen.queryByRole('img')).toBeNull()
     // still fully interactive despite having nothing scraped
@@ -249,41 +248,41 @@ describe('StoreCard', () => {
 
   const BADGE = 'Not listed upstream'
 
-  it('badges nothing for a row upstream still lists, or has not classified', () => {
-    const { rerender } = render(<StoreCard entry={REDIS} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.queryByText(BADGE)).toBeNull()
-    // null is the pre-sync state, not a signal: it must not badge either.
-    rerender(<StoreCard entry={{ ...REDIS, upstream_state: null }}
-                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.queryByText(BADGE)).toBeNull()
+  it('carries no chips at all, whatever upstream says about the row', () => {
+    // The card used to badge unlisted/delisted rows and chip privileged,
+    // x86-only and no-in-place-update beside a type label. All of it moved to
+    // the detail popup, which has room to say it properly: the card is the
+    // grid, and a row of never-clickable labels was paying for itself in
+    // height on every tile. StoreDetailContent still renders every one.
+    for (const state of [null, 'listed', 'unlisted', 'delisted'] as const) {
+      const { unmount } = render(
+        <StoreCard entry={{ ...REDIS, upstream_state: state, privileged: true,
+                            has_arm: false, updateable: false }}
+                   onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
+      for (const chip of [BADGE, 'LXC', 'Privileged', 'x86 only', 'No in-place update']) {
+        expect(screen.queryByText(chip)).toBeNull()
+      }
+      expect(screen.queryByTitle(/no longer lists this app/i)).toBeNull()
+      unmount()
+    }
   })
 
-  it('badges an unlisted row, and still lets you install it', () => {
-    // The 9 rows upstream dropped outright: no metadata to have, so the card
-    // is bare apart from the badge. The script is still in the repo, so the
-    // badge is a fact about upstream, never a block on installing.
+  it('still installs a row upstream dropped, and still shows what metadata it has', () => {
+    // Losing the badge must not cost the two things that were never about it:
+    // the script is still in the repo, so Install stays live, and a delisted
+    // row arrives fully populated and has to render like any other card.
     const gone = { ...REDIS, upstream_state: 'unlisted' as const,
       name: null, description: null, icon_url: null, category: null, popularity: null }
-    render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.getByText(BADGE)).toBeInTheDocument()
+    const { unmount } = render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.getByText('RED')).toBeInTheDocument()  // initials tile, no icon to show
     expect(screen.queryByRole('img')).toBeNull()
-    expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge keeps its place
-    // Honest about what we actually know, and never the word "deprecated".
-    expect(screen.getByTitle(/no longer lists this app/i)).toBeInTheDocument()
-    expect(screen.queryByText(/deprecated/i)).toBeNull()
-  })
+    unmount()
 
-  it('badges a delisted row that still has all its metadata', () => {
-    // The 5 soft-deleted upstream rows arrive fully populated, so the badge
-    // has to read correctly next to a real icon and description too, not just
-    // on a blank card.
     const soft = { ...REDIS, upstream_state: 'delisted' as const,
       icon_url: 'https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/minio.webp',
       name: 'MinIO', description: 'S3 compatible object storage.' }
     render(<StoreCard entry={soft} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('img')).toHaveAttribute('src', soft.icon_url)
     expect(screen.getByText('S3 compatible object storage.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
@@ -483,49 +482,14 @@ describe('StoreCard', () => {
     expect(screen.queryByText('0')).toBeNull()
   })
 
-  it('chips only the rare, actionable side of each upstream boolean', () => {
-    // has_arm is true on 87% of rows and updateable on 97%, so chipping those
-    // would be furniture. The exceptions carry the information.
-    const ordinary = { ...REDIS, privileged: false, has_arm: true, updateable: true }
-    const { rerender } = render(
-      <StoreCard entry={ordinary} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.queryByText('Privileged')).toBeNull()
-    expect(screen.queryByText('Unprivileged')).toBeNull()  // dropped deliberately
-    expect(screen.queryByText('x86 only')).toBeNull()
-    expect(screen.queryByText('No in-place update')).toBeNull()
-
-    rerender(<StoreCard entry={{ ...REDIS, privileged: true, has_arm: false, updateable: false }}
-                        onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.getByText('Privileged')).toBeInTheDocument()
-    expect(screen.getByText('x86 only')).toBeInTheDocument()
-    expect(screen.getByText('No in-place update')).toBeInTheDocument()
-  })
-
-  it('claims nothing about a row upstream has no record for', () => {
-    // THE null case. All three booleans are null on the 9 unlisted rows, and
-    // null means "we do not know", never "no". A falsiness check here would
-    // label every one of them x86 only and un-updatable, which upstream has
-    // not said and we cannot know.
-    const unknown = { ...REDIS, upstream_state: 'unlisted' as const,
-      privileged: null, has_arm: null, updateable: null }
-    render(<StoreCard entry={unknown} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.queryByText('x86 only')).toBeNull()
-    expect(screen.queryByText('No in-place update')).toBeNull()
-    expect(screen.queryByText('Privileged')).toBeNull()
-    // the one thing we DO know about it still shows
-    expect(screen.getByText('Not listed upstream')).toBeInTheDocument()
-  })
-
-  it('reads coherently when a row is both unlisted and not installable', () => {
-    // Two different facts, kept in two different places rather than argued
-    // out on one line: the badge sits with the type chip and speaks about
-    // upstream's catalog, the note sits in the action row and speaks about
-    // whether we can run the script unattended. The existing upstream link
-    // still works.
+  it('still says a row is not installable, unlisted or not', () => {
+    // The upstream-catalog fact now lives in the detail popup; what the card
+    // still owes the reader is whether we can run the script unattended. The
+    // existing upstream link stays put.
     const both = { ...REDIS, upstream_state: 'unlisted' as const, installable: false,
       unsupported_reason: 'install script requires interactive input, no non-interactive entrypoint' }
     render(<StoreCard entry={both} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
-    expect(screen.getByText(BADGE)).toBeInTheDocument()
+    expect(screen.queryByText(BADGE)).toBeNull()
     expect(screen.getByText(/Not installable/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByRole('link', { name: /upstream/i })).toHaveAttribute('href', 'https://redis.io/')
@@ -1067,31 +1031,37 @@ describe('Store sort and popularity band', () => {
     withQuery(<StorePage />)
     fireEvent.click(screen.getByRole('combobox', { name: /sort by/i }))
     const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
-    expect(options).toEqual(['Name (A to Z)', 'Most installed', 'Newest', 'Recently updated'])
+    expect(options).toEqual(['Name (A to Z)', 'Popularity', 'Newest', 'Recently updated'])
   })
 
-  it('defaults to name order and keeps the default out of the URL', async () => {
-    await mockEntries([app('zabbix'), app('adguard'), app('plex')])
+  it('defaults to Popularity and keeps the default out of the URL', async () => {
+    // Distinct counts on purpose: every row here shares REDIS's popularity
+    // unless told otherwise, and equal counts tiebreak by name, which would
+    // pass this test just as happily under an alphabetical default.
+    await mockEntries([app('zabbix', { popularity: 4 }), app('adguard', { popularity: 126196 }),
+                       app('plex', { popularity: 1001 })])
     withQuery(<StorePage />)
     expect(shownOrder()).toEqual(['adguard', 'plex', 'zabbix'])
     expect(mockSearch.sort).toBeUndefined()
   })
 
-  it('reorders the grid by install count, and resets to page 1', async () => {
-    // Page 7 of an alphabetical list is not page 7 of a popularity one, so
+  it('reorders the grid away from Popularity, and resets to page 1', async () => {
+    // Page 7 of a popularity list is not page 7 of an alphabetical one, so
     // holding the page number across a sort change would land the operator
-    // somewhere arbitrary.
+    // somewhere arbitrary. Sorting AWAY from the default is what can be
+    // observed now that Popularity is where the grid already starts.
     await mockEntries([app('quiet', { popularity: 4 }), app('docker', { popularity: 126196 }),
                        app('middling', { popularity: 1001 })])
     mockSearch = { page: 2 }
     withQuery(<StorePage />)
+    expect(shownOrder()).toEqual(['docker', 'middling', 'quiet'])
 
     fireEvent.click(screen.getByRole('combobox', { name: /sort by/i }))
-    fireEvent.click(await screen.findByRole('option', { name: 'Most installed' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Name (A to Z)' }))
 
-    await waitFor(() => expect(mockSearch.sort).toBe('popularity'))
+    await waitFor(() => expect(mockSearch.sort).toBe('name'))
     expect(mockSearch.page).toBeUndefined()
-    expect(shownOrder()).toEqual(['docker', 'middling', 'quiet'])
+    expect(shownOrder()).toEqual(['docker', 'middling', 'quiet'].sort())
   })
 
   it('puts rows with no measurement last, not first, when sorting by newest', async () => {
@@ -1107,10 +1077,11 @@ describe('Store sort and popularity band', () => {
     expect(shownOrder()).toEqual(['newest', 'older', 'unlisted-row'])
   })
 
-  it('falls back to name order for a sort key the allowlist does not have', async () => {
+  it('falls back to the default order for a sort key the allowlist does not have', async () => {
     // A hand-typed ?sort=toString used to reach the comparator as a real key
-    // and throw, taking the page down with it.
-    await mockEntries([app('zabbix'), app('adguard')])
+    // and throw, taking the page down with it. Distinct counts so this pins
+    // the fallback at Popularity rather than passing on a name tiebreak.
+    await mockEntries([app('zabbix', { popularity: 4 }), app('adguard', { popularity: 126196 })])
     mockSearch = { sort: 'toString' }
     withQuery(<StorePage />)
     expect(shownOrder()).toEqual(['adguard', 'zabbix'])
@@ -1156,7 +1127,7 @@ describe('Store grid sizing', () => {
     const { container } = withQuery(<StorePage />)
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[240px]')
+    for (const card of cards) expect(card.className).toContain('h-[208px]')
   })
 
   it('keeps that one height across all three action states', async () => {
@@ -1181,7 +1152,7 @@ describe('Store grid sizing', () => {
     await waitFor(() => expect(screen.getByText('Installed')).toBeInTheDocument())
     const cards = Array.from(container.querySelectorAll('.rounded-card'))
     expect(cards).toHaveLength(3)
-    for (const card of cards) expect(card.className).toContain('h-[240px]')
+    for (const card of cards) expect(card.className).toContain('h-[208px]')
     // and the three states really are all present: plain installable, the
     // same plus an Installed chip, and not-installable with no control at all.
     // The chip is the height risk now, since it sits on the button's own row.
@@ -1202,36 +1173,30 @@ describe('Store grid sizing', () => {
     const note = screen.getByText(/Not installable/)
     expect(note.className).toContain('truncate')
     expect(note).toHaveAttribute('title', `Not installable, ${reason}`)
-    expect(container.querySelector('.rounded-card')?.className).toContain('h-[240px]')
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[208px]')
     // no Install control on a row that cannot be installed, and the way out
     // to upstream survives
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
     expect(screen.getByRole('link', { name: /upstream/i })).toBeInTheDocument()
   })
 
-  it('puts Install on the Read more row, leaving the chip row a full line of its own', async () => {
-    // The height came from deleting a row, not from squeezing content. Install
-    // shares the Read more line; the chip row stays full width because that is
-    // what keeps it to one line. Measured: the widest real chip set is ~281px
-    // and an xs Install is ~53px plus an 8px gap, which is 342 against a
-    // ~295px lane on a single-column card, i.e. it would wrap there. A wrapped
-    // chip row is the one thing the fixed height cannot absorb.
+  it('keeps Install on the Read more row, with no chip row left under it', async () => {
+    // Install used to share the Read more line while a full-width chip row sat
+    // below it, because the widest real chip set (~281px) plus an xs Install
+    // (~53px + 8px gap) would wrap in a ~295px single-column lane. The chips
+    // are gone, so the only thing left to pin is that Install did not drift
+    // off that row and nothing grew back beneath it.
     await mockEntries([{ ...REDIS, slug: 'a', name: 'A', privileged: true,
       has_arm: false, updateable: false }])
     const { container } = withQuery(<StorePage />)
 
     const install = screen.getByRole('button', { name: 'Install' })
     const readMore = screen.getByRole('button', { name: 'Read more' })
-    // same row
     expect(install.parentElement).toBe(readMore.parentElement)
-    // and that row is NOT the chip row: every chip is somewhere else
-    const chipRow = screen.getByText('Privileged').parentElement
-    expect(chipRow).not.toBe(install.parentElement)
     for (const chip of ['LXC', 'Privileged', 'x86 only', 'No in-place update']) {
-      expect(chipRow).toContainElement(screen.getByText(chip))
+      expect(screen.queryByText(chip)).toBeNull()
     }
-    expect(chipRow).not.toContainElement(install)
-    expect(container.querySelector('.rounded-card')?.className).toContain('h-[240px]')
+    expect(container.querySelector('.rounded-card')?.className).toContain('h-[208px]')
   })
 
   it('drops the separator rule that used to divide the action row', async () => {
