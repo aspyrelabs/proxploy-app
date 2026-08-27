@@ -12,6 +12,8 @@ import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
 const UPDATE_TIMEOUT_MS = 600_000
 const POLL_INTERVAL_MS = 3000
 
+const CHANGELOG_URL = 'https://proxploy.com/changelog.txt'
+
 type PollState = 'idle' | 'polling' | 'success' | 'timeout'
 
 export function UpdateCard() {
@@ -93,12 +95,10 @@ export function UpdateCard() {
             <Button disabled={apply.isPending || poll === 'polling'} onClick={startUpdate}>
               {poll === 'polling' ? 'Updating…' : `Update to ${s.latest}`}
             </Button>
-            {s.notes_url && (
-              <a href={s.notes_url} target="_blank" rel="noopener noreferrer"
-                className={`ml-3 text-[12px] ${amberLinkCls}`}>
-                Release notes
-              </a>
-            )}
+            <a href={s.notes_url ?? CHANGELOG_URL} target="_blank" rel="noopener noreferrer"
+              className={`ml-3 text-[12px] ${amberLinkCls}`}>
+              Release notes
+            </a>
             {poll === 'polling' && (
               // Indeterminate: no percentage to report while the server restarts.
               <Progress className="mt-3 max-w-sm">

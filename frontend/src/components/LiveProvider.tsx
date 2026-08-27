@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { alertToastSeverity, applyAlert, applyJob, applyMetrics, applyResource, jobToastSeverity } from '../api/live'
 import { useEntitlements } from '../api/hooks'
 import { useNotificationTypes } from '../api/notificationTypes'
-import { pushAlertEvent, pushJobEvent } from '../lib/notificationStore'
+import { pushAction, pushAlertEvent, pushJobEvent } from '../lib/notificationStore'
 
 const LiveCtx = createContext<{ lastEventAt: number | null }>({ lastEventAt: null })
 
@@ -92,6 +92,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // terminal outcome carries a type, and reading absent as off would
         // silence every running job.
         if (d.notify_type && typeEnabled.current[d.notify_type] === false) return
+        if (d.kind === 'update.check') return
         // Keyed by jobId, not a fresh push: notificationStore.pushJobEvent and
         // notificationMerge.ts are what keep this job from ever rendering
         // twice once GET /jobs carries the same terminal delta.
@@ -101,6 +102,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // or a failure the backend gave no message for).
         pushJobEvent(t.jobId, jobToastSeverity(t.kind), t.text, t.detail ?? `job #${t.jobId}`)
       }))
+      wire('update', (d) => {
+        qc.invalidateQueries({ queryKey: ['meta', 'update'] })
+        if (!inApp.current) return
+        if (typeEnabled.current['update.available'] === false) return
+        pushAction('info', `Proxploy ${d.latest} is available`,
+                   `Current version ${d.current}`)
+      })
       wire('alert', (d) => applyAlert(qc, d, (t) => {
         if (!inApp.current) return   // notify.inapp gates the surface, not the data
         const key = d.state === 'resolved' ? 'alert.resolved' : 'alert.fired'

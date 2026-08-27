@@ -157,6 +157,9 @@ async def check_update(ctx, params: dict) -> dict:
         return out
 
     ctx.log(f"update available: {status['current']} -> {status['latest']}")
+    app.state.bus.publish("update", {"current": status["current"],
+                                     "latest": status["latest"],
+                                     "notes_url": status.get("notes_url")})
 
     def send() -> int:
         from proxploy.services.links import absolute
