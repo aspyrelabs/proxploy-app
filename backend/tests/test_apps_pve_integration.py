@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 
 import pytest
 
@@ -28,6 +29,10 @@ from tests.livepve import live_only
 pytestmark = pytest.mark.pve_integration
 
 SLUG = os.environ.get("PROXPLOY_TEST_PVE_APP_SLUG", "adguard")
+
+QUIET_S = 2.0
+WAKE_BUDGET_S = 30.0
+ECHO_S = 8.0
 
 
 def _storage_overrides() -> dict:
@@ -175,21 +180,55 @@ async def _console_round_trip(app, host_id, ctid: int) -> None:
     try:
         marker = "proxploy-console-probe"
         seen = buffered
+        frames, went_quiet = 0, False
+        started = last_seen = time.monotonic()
         await send("\n")
-        for _ in range(10):
+        while time.monotonic() - started < WAKE_BUDGET_S:
             try:
-                seen += text(await asyncio.wait_for(ws.recv(), timeout=2))
+                seen += text(await asyncio.wait_for(ws.recv(), timeout=QUIET_S))
             except asyncio.TimeoutError:
+                went_quiet = True
                 break
+            frames += 1
+            last_seen = time.monotonic()
+
+        def observed() -> str:
+            now = time.monotonic()
+            return (f"waited {now - started:.1f}s of a {WAKE_BUDGET_S:.0f}s budget, "
+                    f"needed {QUIET_S:.1f}s of silence to call it quiet, "
+                    f"read {frames} frame(s), "
+                    f"last one {now - last_seen:.1f}s ago, "
+                    f"{'went quiet' if went_quiet else 'never went quiet'}")
+
+        if not went_quiet:
+            raise AssertionError(
+                f"the console never stopped talking, so the shell was never "
+                f"idle enough to type at: {observed()}. Tail: {seen[-300:]!r}")
         if not seen.rstrip().endswith(("#", "$")):
             raise AssertionError(
-                f"the console never reached a shell prompt: {seen[-300:]!r}")
+                f"the console fell quiet without reaching a shell prompt: "
+                f"{observed()}. Tail: {seen[-300:]!r}")
+
+        quiet_for = time.monotonic() - last_seen
         await send(f"echo {marker}\n")
+        sent_at = time.monotonic()
         for _ in range(25):
-            seen += text(await asyncio.wait_for(ws.recv(), timeout=8))
+            try:
+                seen += text(await asyncio.wait_for(ws.recv(), timeout=ECHO_S))
+            except asyncio.TimeoutError:
+                raise AssertionError(
+                    f"the console said nothing at all for {ECHO_S:.0f}s after the "
+                    f"command was sent, {time.monotonic() - sent_at:.1f}s ago. The "
+                    f"prompt had been idle {quiet_for:.1f}s first, which on node1 "
+                    f"was enough: that PTY discards input for ~200ms after the "
+                    f"keystroke that wakes it (see this function's docstring). If "
+                    f"this machine needs longer, that gap is the thing to raise, "
+                    f"and this number is the data point. Tail: {seen[-300:]!r}") from None
             if seen.count(marker) >= 2:      # the typed line AND its output
                 return
-        raise AssertionError(f"no echo came back from the console: {seen[-200:]!r}")
+        raise AssertionError(
+            f"the console answered but never echoed {marker!r} twice in 25 frames, "
+            f"{time.monotonic() - sent_at:.1f}s after the command. Tail: {seen[-300:]!r}")
     finally:
         await ws.close()
 
