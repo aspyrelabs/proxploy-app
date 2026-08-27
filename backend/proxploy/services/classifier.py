@@ -111,10 +111,33 @@ def _is_guarded(preceding: list[str], targets: set[str]) -> bool:
 # The prompt sentence a script shows a human, recovered from `read -p`. This
 # is the ONLY description of the value that exists: there is no schema, no
 # help text, nothing upstream declares. The variable name is not a substitute
+# (see SENSITIVE_PROMPT_RE below for why).
 # `-\w*p` because short flags combine: `read -rp "..."` is as common upstream
 # as `read -r -p "..."`, and matching only the spaced form lost the label on a
 # quarter of all prompts, silently falling back to the variable name.
 PROMPT_TEXT_RE = re.compile(r"""-\w*p\s+(?:"([^"]*)"|'([^']*)')""")
+
+# Whether the value should be masked in the UI and routed to the secretstore
+# instead of jobs.params, decided from the PROMPT TEXT and never from the
+# variable name.
+#
+# The name is chosen by whoever wrote the upstream installer and carries no
+# reliable signal. Measured against the real catalog on 2026-08-27: of 15
+# prompts asking for something sensitive, 11 have a name services/audit.py's
+# heuristic does not catch, including `ziti_pwd` for an admin password and
+# `prompt` for an openziti enrollment JWT. The sentence next to that last one
+# reads "Please paste an identity enrollment token(JTW)", which is the signal.
+#
+# This is still a heuristic, and it is allowed to be, because of what it now
+# decides. Since the secretstore landed it chooses whether a field is MASKED
+# and stored encrypted, not whether it is written to the database in clear.
+# A false negative is a value shown in a transcript, not a plaintext secret at
+# rest. Do not move this back onto the variable name to "make it consistent"
+# with audit.py: those two are answering different questions about different
+# data whose names we control to different degrees.
+SENSITIVE_PROMPT_RE = re.compile(
+    r"\b(?:password|passwd|passphrase|secret|api[ _-]?key|access[ _-]?key|"
+    r"token|credential|private[ _-]?key|client[ _-]?secret)\b", re.I)
 
 # Enumerated choices the prompt spells out, e.g. "(15/16/17/18)" or
 # "[1=agent, 2=agent2]". Recovered so the UI can offer a select rather than a
@@ -177,6 +200,7 @@ def extract_prompts(install_script: str) -> list[dict]:
         out.append({
             "variable": name,
             "label": text or name,
+            "sensitive": bool(SENSITIVE_PROMPT_RE.search(text)),
             "kind": "yesno" if yesno else ("choice" if choices else "text"),
             "choices": choices.group(1).split("/") if choices else None,
             "default": default,
