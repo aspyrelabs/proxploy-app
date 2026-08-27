@@ -276,8 +276,13 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     answers_handle = params.get("answers_handle")
     with app.state.sessionmaker() as db:
         secret_answers = installanswers.load(db, app.state.secretstore, answers_handle)
-    command = apply_answers(ctx, env, command,
-                            params.get("answers") or {}, secret_answers)
+    # Defaults underneath, the operator's answers on top: a prompt nobody was
+    # asked about still needs a value, or the install meets it and blocks.
+    # answerable_without_asking refuses a gate, so no consent question can pick
+    # up a default here however it is shaped.
+    plain = {**installanswers.defaults_for(entry.prompts),
+             **(params.get("answers") or {})}
+    command = apply_answers(ctx, env, command, plain, secret_answers)
 
     # The script's last words are where it prints the finished URL, so they are
     # kept as they stream rather than read back out of job_events: job_events

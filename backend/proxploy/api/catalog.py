@@ -16,6 +16,7 @@ from sqlalchemy import nulls_last
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.models import App, CatalogEntry, Host, HostCredential, User, to_iso, utcnow
+from proxploy.services import installanswers
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
 from proxploy.services.catalog_icons import (CONTENT_TYPES,
@@ -269,6 +270,11 @@ class InstallIn(BaseModel):
     ctid: int | None = None
     overrides: dict = {}
     consent: bool = False
+    # One entry per prompt the install script asks that build.func cannot
+    # answer from the environment, keyed by the variable the prompt assigns
+    # into. Validated against the catalog row's own `prompts`, so a caller
+    # cannot use this to export an arbitrary variable into a root shell.
+    answers: dict[str, str] = {}
 
     @field_validator("overrides")
     @classmethod
@@ -327,6 +333,15 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
                                      "upstream; try again or refresh the catalog")
     if not entry.installable:
         raise HTTPException(400, f"not installable: {entry.unsupported_reason}")
+    # Split before anything is written. `secret` never touches jobs.params:
+    # it is staged encrypted below and params carries only the handle, because
+    # params is redacted by KEY NAME and these names come from upstream
+    # (see services/installanswers for the measurements).
+    try:
+        plain_answers, secret_answers = installanswers.prepare(entry.prompts,
+                                                               body.answers)
+    except installanswers.AnswerError as e:
+        raise HTTPException(400, str(e)) from e
     # Pre-flight the (host_id, ctid) uniqueness the DB enforces anyway. Without
     # it a repeat install runs the whole script to completion on the real node
     # and only then hits IntegrityError inside the job handler: leaving an
@@ -349,13 +364,20 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     # next free one, not knowable until it does.
     where = f"{body.name} (CT {body.ctid})" if body.ctid else body.name
     requested = f"{where} on {host.name}"
+    answers_handle = installanswers.stage(db, request.app.state.secretstore,
+                                          secret_answers)
     job = request.app.state.jobs.enqueue(
         db, kind="app.install", requested_by=user.id, target_name=requested,
         params={"catalog_slug": slug, "host_id": body.host_id, "name": body.name,
-               "ctid": body.ctid, "overrides": body.overrides})
+               "ctid": body.ctid, "overrides": body.overrides,
+               "answers": plain_answers, "answers_handle": answers_handle})
     write_audit(db, actor_type="user", actor_id=user.id, action="app.install",
                 target_type="host", target_id=body.host_id, job_id=job.id,
                 target_name=requested,
-                params={"catalog_slug": slug, "name": body.name, "ctid": body.ctid},
+                params={"catalog_slug": slug, "name": body.name, "ctid": body.ctid,
+                        # NAMES only. The values are the operator's answers,
+                        # audit_events.params is unencrypted, and the sensitive
+                        # ones are not here to write down in the first place.
+                        "answered": sorted(body.answers)},
                 ip=request.client.host if request.client else None)
     return {"job": job_out(job)}

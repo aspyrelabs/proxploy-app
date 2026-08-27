@@ -24,12 +24,14 @@ should not have to be typed again to apply a patch release.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from datetime import timedelta
 
 from sqlalchemy import select
 
 from proxploy.models import InstallAnswer, utcnow
+from proxploy.services.classifier import answerable_without_asking
 
 # How long an unbound row may sit before the sweeper takes it. Long enough to
 # cover a slow install (build_container plus a large image pull), short enough
@@ -118,3 +120,77 @@ def sweep_orphans(db) -> int:
         db.commit()
     return len(rows)
 
+
+# Affirmative answers to a consent gate. Anything else, including empty and
+# including "n", is a refusal, and a refusal means do not install.
+AFFIRMATIVE = {"y", "yes", "true", "1", "on"}
+
+# A shell variable name we are willing to export. The names come from the
+# catalog, which is upstream data, and they land in the environment of a root
+# shell on the operator's node. Anything outside this cannot be an identifier
+# a `read` assigns into, so refusing it costs nothing real.
+_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+class AnswerError(ValueError):
+    """A refusal the route turns into a 400, never a 500."""
+
+
+def prepare(prompts: list[dict] | None, answers: dict[str, str] | None
+            ) -> tuple[dict, dict]:
+    """Validate answers against the prompts, split into (plain, secret).
+
+    `plain` may ride jobs.params; `secret` must be staged and referenced by
+    handle. Raises AnswerError on anything the operator has to fix.
+
+    Every rule here is a refusal rather than a repair. A missing answer that we
+    guess at produces an install that hangs or aborts halfway, which is worse
+    than one that never started, and a value we quietly drop produces an app
+    configured differently from what was asked for.
+    """
+    prompts = prompts or []
+    answers = answers or {}
+    by_name = {p["variable"]: p for p in prompts}
+
+    unknown = sorted(set(answers) - set(by_name))
+    if unknown:
+        # Not pedantry: these become environment variables in a root shell on
+        # the node. Only names this script actually asks about may pass.
+        raise AnswerError(f"not asked by this install script: {', '.join(unknown)}")
+
+    plain: dict[str, str] = {}
+    secret: dict[str, str] = {}
+    for name, prompt in by_name.items():
+        if not _NAME_RE.fullmatch(name):
+            raise AnswerError(f"unusable variable name in the catalog: {name!r}")
+        given = answers.get(name)
+        if given is None or str(given) == "":
+            if prompt.get("gate"):
+                raise AnswerError(
+                    f"{name}: this install asks for confirmation and cannot be "
+                    f"answered on your behalf")
+            if not answerable_without_asking(prompt):
+                raise AnswerError(f"{name}: an answer is required ({prompt['label']})")
+            continue          # a default covers it; the handler fills it in
+        value = str(given)
+        if prompt.get("gate") and value.strip().lower() not in AFFIRMATIVE:
+            raise AnswerError(f"{name}: not confirmed, so nothing was installed")
+        (secret if prompt.get("sensitive") else plain)[name] = value
+    return plain, secret
+
+
+def defaults_for(prompts: list[dict] | None) -> dict[str, str]:
+    """What the handler fills in for prompts nobody was asked about.
+
+    A gate is absent by construction: answerable_without_asking refuses one, so
+    it can never acquire a default here however it is shaped.
+    """
+    out: dict[str, str] = {}
+    for p in prompts or []:
+        if not answerable_without_asking(p):
+            continue
+        if p["kind"] == "yesno":
+            out[p["variable"]] = p.get("default") or "n"
+        elif p.get("default") is not None:
+            out[p["variable"]] = str(p["default"])
+    return out
