@@ -212,14 +212,12 @@ function AttachmentMap({ attachments, nodes, pending }: {
                 </td>
                 <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? 'unknown'}</td>
                 <td className="py-2.5 text-right">
-                  <ButtonGroup>
-                    <Button size="sm" variant="ghost"
-                            disabled={denied}
-                            title={denied ? 'Not included in your plan' : undefined}
-                            onClick={() => setEditing(a)}>
-                      Edit
-                    </Button>
-                  </ButtonGroup>
+                  <Button size="sm" variant="ghost"
+                          disabled={denied}
+                          title={denied ? 'Not included in your plan' : undefined}
+                          onClick={() => setEditing(a)}>
+                    Edit
+                  </Button>
                 </td>
               </tr>
             ))}

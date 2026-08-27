@@ -65,6 +65,14 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
 export const SETTINGS_SECTION_IDS = new Set(
   SETTINGS_SECTIONS.flatMap(g => g.items.map(i => i.id)))
 
+const RENAMED_SECTIONS: Record<string, string> = { schedules: 'maintenance' }
+
+export function resolveSettingsSection(id: unknown): string | undefined {
+  if (typeof id !== 'string') return undefined
+  const current = RENAMED_SECTIONS[id] ?? id
+  return SETTINGS_SECTION_IDS.has(current) ? current : undefined
+}
+
 export const DEFAULT_SETTINGS_SECTION = 'hosts'
 
 /**

@@ -44,6 +44,7 @@ import { useTeams } from '../api/teams'
 // table; it lives in lib/ so CommandPalette can import it without a cycle.
 import {
   DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, SETTINGS_SECTION_IDS,
+  resolveSettingsSection,
 } from '../lib/settings-sections'
 
 export const settingsRoute = createRoute({
@@ -52,8 +53,7 @@ export const settingsRoute = createRoute({
   // Same shape apps.tsx and vms.tsx use. An unrecognised ?section= falls back
   // to Hosts rather than rendering an empty pane.
   validateSearch: (s: Record<string, unknown>) => ({
-    section: typeof s.section === 'string' && SETTINGS_SECTION_IDS.has(s.section)
-      ? s.section : undefined,
+    section: resolveSettingsSection(s.section),
   }),
   component: SettingsPage,
 })
