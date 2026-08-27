@@ -138,7 +138,14 @@ def apply_answers(ctx: JobContext, env: dict, command: str,
         env[str(name)] = str(value)
     env["PXP_ANSWERED"] = " ".join(str(k) for k in answers)
     ctx.hide(*[str(v) for v in secret.values()])
-    return READ_SHIM + command
+    # WRAPPED, not prefixed. executor/ssh.py builds `NAME=value ... <command>`,
+    # and a shell FUNCTION DEFINITION cannot follow an environment prefix:
+    # `VAR=x read() { ... }` is a syntax error, which is what a real node said
+    # on 2026-08-27 ("syntax error near unexpected token `('"). Wrapping keeps
+    # a genuine command in that position. The prefix assignments still reach
+    # the script, because they are exported into this bash's environment and
+    # inherited by the one it starts.
+    return f"bash -c {shlex.quote(READ_SHIM + command)}"
 
 
 async def run_install(ctx: JobContext, params: dict) -> dict:

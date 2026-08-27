@@ -57,18 +57,20 @@ def test_a_bare_read_with_no_p_flag_is_asked_under_its_variable_name():
     ct, install = _load("probe-bare-read")
     assert classify_install_feasibility(ct, install) == (True, None)
     p = extract_prompts(install)[0]
-    assert p["variable"] == "answer" and p["label"] == "answer"
+    # Original case, because this name is exported into a shell and matched by
+    # the read shim: `answer=x` does not answer a script that reads into ANSWER.
+    assert p["variable"] == "ANSWER" and p["label"] == "ANSWER"
 
 
 def test_a_silent_read_is_sensitive_by_construction():
     """`read -s` suppresses the echo, so the script author has already declared
     the value too sensitive to show on a terminal. That outranks the wording
     heuristic and is why it works here at all: this probe has no prompt text,
-    so its label is the bare variable "pass", which matches no sentence rule."""
+    so its label is the bare variable "PASS", which matches no sentence rule."""
     ct, install = _load("probe-silent-read")
     assert classify_install_feasibility(ct, install) == (True, None)
     p = extract_prompts(install)[0]
-    assert p["label"] == "pass"
+    assert p["label"] == "PASS"
     assert p["sensitive"] is True
 
 

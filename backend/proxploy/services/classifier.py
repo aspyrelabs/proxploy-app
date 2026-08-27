@@ -57,6 +57,9 @@ UNSUPPORTED_INTERACTIVE = "install script requires interactive input, no non-int
 UNSUPPORTED_UNNAMED_PROMPT = (
     "install script prompts without assigning the answer to a variable, "
     "so there is nothing to answer")
+UNSUPPORTED_REUSED_VARIABLE = (
+    "install script asks several different questions through one variable, "
+    "so a single answer cannot mean different things to each of them")
 UNSUPPORTED_RETRY_LOOP = (
     "install script re-prompts until the answer validates, which a supplied "
     "answer cannot satisfy without hanging")
@@ -86,6 +89,31 @@ def addon_delegation_slug(ct_script: str) -> str | None:
 def _unquoted(line: str) -> str:
     """Line with quoted strings and trailing comments stripped."""
     return re.sub(r'"[^"]*"|\'[^\']*\'', "", line).split("#", 1)[0]
+
+
+def _read_target_name(bare: str) -> str | None:
+    """The variable a `read` assigns into, IN ITS ORIGINAL CASE.
+
+    Deliberately not _read_targets below, which lowercases so a guard naming
+    `${ADMIN_EMAIL:-}` correlates with a `read admin_email`. Case does not
+    matter for that comparison and matters completely here: the name is
+    exported into a shell and matched by the read shim, and `confirm=y` does
+    not answer a script that reads into CONFIRM. A real node found this after
+    the lowercased name silently failed to match, fell through to
+    `builtin read`, met the closed stdin and aborted the install.
+
+    The LAST non-flag token, matching how the shim picks its target: `-p` has
+    already lost its quoted argument to _unquoted, so what remains is flags
+    and the variable.
+    """
+    _, _, after = bare.partition("read")
+    found = None
+    for token in after.split():
+        if token.startswith("-"):
+            continue
+        if IDENT_RE.fullmatch(token):
+            found = token
+    return found
 
 
 def _read_targets(bare: str) -> set[str]:
@@ -272,7 +300,7 @@ def extract_prompts(install_script: str) -> list[dict]:
         # ${TAB3} and friends are layout, not words: upstream indents prompts
         # with them and they would render as literal noise in a form label.
         text = re.sub(r"\$\{?\w+\}?", "", text).strip()
-        name = sorted(targets)[0] if targets else None
+        name = _read_target_name(bare) if targets else None
         if not name:
             continue
         yesno = YESNO_RE.search(text)
@@ -324,9 +352,24 @@ def classify_install_feasibility(ct_script: str, install_script: str) -> tuple[b
     # The bar is EVERY prompt, not most. One prompt we cannot answer blocks the
     # whole install behind a closed stdin, and a card that says installable and
     # then hangs is worse than one that honestly says unsupported.
-    for prompt in extract_prompts(install_script):
+    prompts = extract_prompts(install_script)
+    for prompt in prompts:
         if prompt["in_loop"]:
             return False, UNSUPPORTED_RETRY_LOOP
+
+    # One variable, several different questions. Answers reach the script BY
+    # VARIABLE, so one export answers all of them, and the questions are not
+    # interchangeable: docker reads "add Docker Compose?", "add the Portainer
+    # Agent?" and "expose the Docker TCP socket?" all into `prompt`. Ticking
+    # the first would expose the socket, which is precisely the answer that
+    # must stay separate. Found on node1 on 2026-08-27; the install was safe
+    # only because every default declined.
+    #
+    # Answerable in principle by rewriting the script we run, which is a much
+    # bigger promise than answering the questions it asks.
+    names = [p["variable"] for p in prompts]
+    if len(names) != len(set(names)):
+        return False, UNSUPPORTED_REUSED_VARIABLE
 
     # extract_prompts drops a prompt it cannot name, so a count mismatch means
     # this script asks something we would never present. Compared rather than

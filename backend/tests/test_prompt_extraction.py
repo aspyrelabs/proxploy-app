@@ -110,7 +110,7 @@ def test_extraction_and_feasibility_agree_on_the_same_script():
     # question now, not a refusal. What still refuses is a prompt extraction
     # cannot turn into a question, which test_prompt_gates.py covers.
     assert (ok, reason) == (True, None)
-    assert [p["variable"] for p in extract_prompts(asks)] == ["confirm"]
+    assert [p["variable"] for p in extract_prompts(asks)] == ["CONFIRM"]
 
     clean = 'build_container\napt-get install -y nginx\n'
     assert classify_install_feasibility("build_container\n", clean) == (True, None)
@@ -125,4 +125,19 @@ def test_prompts_come_back_in_source_order():
         'read -r -p "second? [y/N] " TWO',
         'read -r -p "third? [y/N] " THREE',
     ])
-    assert [p["variable"] for p in extract_prompts(script)] == ["one", "two", "three"]
+    assert [p["variable"] for p in extract_prompts(script)] == ["ONE", "TWO", "THREE"]
+
+
+def test_the_variable_keeps_the_case_the_script_wrote_it_in():
+    """Shell variables are case-sensitive and this name is exported into one.
+    Lowercasing it, which the guard-correlation helper does for its own
+    comparison, made `confirm=y` fail to answer a script reading into CONFIRM:
+    the shim found no match, fell through to `builtin read`, met the closed
+    stdin and aborted the install. Found on node1, not in a fixture."""
+    assert one('read -r -p "Do you want to continue? [y/N]: " CONFIRM')["variable"] == "CONFIRM"
+    assert one('read -rp "Enter version: " ver')["variable"] == "ver"
+
+
+def test_the_variable_is_the_last_token_not_the_alphabetically_first():
+    """Matches how the shim picks its target, which is what has to agree."""
+    assert one('read -r -p "two of them: " ZEBRA')["variable"] == "ZEBRA"

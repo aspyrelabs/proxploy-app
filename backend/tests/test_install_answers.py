@@ -148,7 +148,13 @@ def test_apply_answers_allowlists_only_what_it_was_given(tmp_path):
         env: dict = {}
         out = apply_answers(ctx, env, "bash -c run", {"VER": "17"},
                             {"TMDBKEY": SENTINEL})
-        assert out.startswith(READ_SHIM)
+        # Wrapped rather than prefixed. executor/ssh.py puts `NAME=value ...`
+        # in front of whatever this returns, and a function definition cannot
+        # follow an environment prefix: a real node answered
+        # "syntax error near unexpected token `('" to the prefixed version.
+        assert out.startswith("bash -c ")
+        assert READ_SHIM in out and out.endswith("'")
+        assert not out.startswith(READ_SHIM), "prefixing is the bug, not the fix"
         assert env["VER"] == "17" and env["TMDBKEY"] == SENTINEL
         assert set(env["PXP_ANSWERED"].split()) == {"VER", "TMDBKEY"}
         # The secret is hidden; the version number stays readable, because a
