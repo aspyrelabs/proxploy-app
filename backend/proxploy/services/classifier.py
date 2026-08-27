@@ -50,6 +50,16 @@ UNSUPPORTED_ADDON_DELEGATED = (
     "no install script upstream; it installs via an addon script "
     "run inside the container")
 UNSUPPORTED_INTERACTIVE = "install script requires interactive input, no non-interactive entrypoint"
+# Narrower refusals, for the two shapes an answer still cannot reach. Kept
+# distinct from UNSUPPORTED_INTERACTIVE because they say different things to
+# an operator reading a card: one is "nobody can drive this unattended", the
+# other two are "we can drive it but not this particular question".
+UNSUPPORTED_UNNAMED_PROMPT = (
+    "install script prompts without assigning the answer to a variable, "
+    "so there is nothing to answer")
+UNSUPPORTED_RETRY_LOOP = (
+    "install script re-prompts until the answer validates, which a supplied "
+    "answer cannot satisfy without hanging")
 
 
 def addon_delegation_slug(ct_script: str) -> str | None:
@@ -135,6 +145,13 @@ PROMPT_TEXT_RE = re.compile(r"""-\w*p\s+(?:"([^"]*)"|'([^']*)')""")
 # rest. Do not move this back onto the variable name to "make it consistent"
 # with audit.py: those two are answering different questions about different
 # data whose names we control to different degrees.
+# `read -s` suppresses the echo, which means the script author has already
+# declared this value too sensitive to appear on a terminal. That is a
+# statement of intent, not a guess about wording, so it outranks the sentence
+# heuristic below and applies even when there is no prompt text to read: a
+# bare `read -s PASS` labels itself "pass", which matches nothing.
+SILENT_READ_RE = re.compile(r"\bread\b(?:\s+-\w+)*\s+-\w*s\b")
+
 SENSITIVE_PROMPT_RE = re.compile(
     r"\b(?:password|passwd|passphrase|secret|api[ _-]?key|access[ _-]?key|"
     r"token|credential|private[ _-]?key|client[ _-]?secret)\b", re.I)
@@ -174,6 +191,21 @@ DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
 GATE_WINDOW = 8
 EXIT_RE = re.compile(r"\bexit\b")
 
+# A prompt inside a retry loop, which the read shim cannot safely answer.
+#
+# The shim answers from the environment EVERY time the script calls read, so a
+# loop that re-prompts until the answer validates never sees a different value.
+# Give it something the loop rejects and it spins forever: the install hangs
+# rather than failing, which is the worst outcome available. Falling through to
+# `builtin read` on the retry does not help either, since EOF leaves the value
+# empty and empty is rejected too.
+#
+# 8 of the 70 blocked scripts have one. They stay unsupported until the answer
+# can be validated against something the loop is known to accept, which is
+# possible for an enumerated choice and not for free text.
+LOOP_OPEN_RE = re.compile(r"^\s*(?:while|until)\b")
+LOOP_CLOSE_RE = re.compile(r"^\s*done\b")
+
 
 def answerable_without_asking(prompt: dict) -> bool:
     """True when the prompt can be satisfied with no operator input.
@@ -200,8 +232,15 @@ def extract_prompts(install_script: str) -> list[dict]:
     """
     out: list[dict] = []
     lines = install_script.splitlines()
+    loop_depth = 0
     for i, line in enumerate(lines):
         bare = _unquoted(line)
+        # Tracked before the prompt checks so a `while read` header, which
+        # NOT_A_PROMPT_RE already discards, still opens its loop.
+        if LOOP_OPEN_RE.match(bare):
+            loop_depth += 1
+        elif LOOP_CLOSE_RE.match(bare):
+            loop_depth = max(0, loop_depth - 1)
         if WHIPTAIL_RE.search(bare):
             targets: set[str] = set()
         elif READ_RE.search(bare) and not NOT_A_PROMPT_RE.search(bare):
@@ -240,7 +279,9 @@ def extract_prompts(install_script: str) -> list[dict]:
             "variable": name,
             "label": text or name,
             "gate": gate,
-            "sensitive": bool(SENSITIVE_PROMPT_RE.search(text)),
+            "in_loop": loop_depth > 0,
+            "sensitive": bool(SILENT_READ_RE.search(bare)
+                              or SENSITIVE_PROMPT_RE.search(text)),
             "kind": "yesno" if yesno else ("choice" if choices else "text"),
             "choices": choices.group(1).split("/") if choices else None,
             "default": default,
@@ -252,6 +293,32 @@ def classify_install_feasibility(ct_script: str, install_script: str) -> tuple[b
     if len(BUILD_CONTAINER_RE.findall(ct_script)) != 1:
         return False, UNSUPPORTED_MULTI_CT
 
+    # An unguarded prompt no longer refuses the script outright. If every one of
+    # them can be turned into a question, the operator answers it in the install
+    # dialog and services/appstore's read shim supplies the answer BY VARIABLE.
+    #
+    # The bar is EVERY prompt, not most. One prompt we cannot answer blocks the
+    # whole install behind a closed stdin, and a card that says installable and
+    # then hangs is worse than one that honestly says unsupported.
+    for prompt in extract_prompts(install_script):
+        if prompt["in_loop"]:
+            return False, UNSUPPORTED_RETRY_LOOP
+
+    # extract_prompts drops a prompt it cannot name, so a count mismatch means
+    # this script asks something we would never present. Compared rather than
+    # trusted: a silent drop is exactly how a script becomes installable and
+    # then blocks on the question nobody was shown.
+    if _unanswerable_prompt_count(install_script):
+        return False, UNSUPPORTED_UNNAMED_PROMPT
+
+    return True, None
+
+
+def _unanswerable_prompt_count(install_script: str) -> int:
+    """Unguarded prompts that yield no variable to answer, so extract_prompts
+    could not offer them. whiptail/dialog menus are the whole population here:
+    they assign nothing, so there is no name to key an answer on."""
+    count = 0
     lines = install_script.splitlines()
     for i, line in enumerate(lines):
         bare = _unquoted(line)
@@ -261,10 +328,10 @@ def classify_install_feasibility(ct_script: str, install_script: str) -> tuple[b
             targets = _read_targets(bare)
         else:
             continue
-        if "||" in bare:  # e.g. `read ... || nvidia_reply=""`
+        if "||" in bare:
             continue
         if _is_guarded(lines[max(0, i - 3):i], targets):
             continue
-        return False, UNSUPPORTED_INTERACTIVE
-
-    return True, None
+        if not targets:
+            count += 1
+    return count

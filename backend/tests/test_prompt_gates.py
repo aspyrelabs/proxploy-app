@@ -88,7 +88,67 @@ def test_a_gate_survives_the_round_trip_through_the_catalog_row(tmp_path):
     script = "build_container\n" + PIHOLE_GATE
     ok, reason = classify_install_feasibility("build_container\n", script)
     prompts = extract_prompts(script)
-    assert ok is False and "interactive" in reason
+    # A gate is answerable, by the operator and only by the operator, so the
+    # script is installable. What it is NOT is auto-answerable, which is the
+    # assertion below and the one the route enforces.
+    assert (ok, reason) == (True, None)
+    assert answerable_without_asking(prompts[0]) is False
     # JSON is what the column holds; a flag that does not survive the encode is
     # a flag the route and the UI never see.
     assert json.loads(json.dumps(prompts))[0]["gate"] is True
+
+
+def test_a_script_whose_prompts_can_all_be_answered_is_installable_now():
+    """The point of the whole exercise. An unguarded prompt used to refuse the
+    script outright; it now becomes a question the operator answers."""
+    from proxploy.services.classifier import classify_install_feasibility
+    ok, reason = classify_install_feasibility(
+        "build_container\n", 'read -rp "Add Unbound? <y/N> " prompt')
+    assert (ok, reason) == (True, None)
+
+
+def test_a_prompt_inside_a_retry_loop_keeps_the_script_unsupported():
+    """The shim answers from the environment EVERY time read is called, so a
+    loop that re-prompts until the answer validates never sees a new value.
+    Give it something the loop rejects and it spins forever: the install hangs
+    instead of failing, which is the worst outcome available."""
+    from proxploy.services.classifier import (UNSUPPORTED_RETRY_LOOP,
+                                              classify_install_feasibility)
+    script = '\n'.join([
+        'while true; do',
+        '  read -rp "Enter PostgreSQL version (15/16/17/18): " ver',
+        '  case "$ver" in 15|16|17|18) break ;; *) echo invalid ;; esac',
+        'done',
+    ])
+    ok, reason = classify_install_feasibility("build_container\n", script)
+    assert ok is False and reason == UNSUPPORTED_RETRY_LOOP
+    assert extract_prompts(script)[0]["in_loop"] is True
+
+
+def test_a_prompt_that_names_no_variable_keeps_the_script_unsupported():
+    """whiptail assigns nothing, so there is no name to key an answer on and
+    nothing the dialog could show. extract_prompts drops it, and a dropped
+    prompt is exactly how a script becomes installable and then blocks on a
+    question nobody was ever shown, so the count is compared rather than
+    trusted."""
+    from proxploy.services.classifier import (UNSUPPORTED_UNNAMED_PROMPT,
+                                              classify_install_feasibility)
+    script = 'whiptail --title "Pick one" --menu "choose" 12 60 3 a A b B'
+    assert extract_prompts(script) == []
+    ok, reason = classify_install_feasibility("build_container\n", script)
+    assert ok is False and reason == UNSUPPORTED_UNNAMED_PROMPT
+
+
+def test_one_unanswerable_prompt_condemns_the_whole_script():
+    """EVERY prompt, not most. One prompt we cannot answer blocks the install
+    behind a closed stdin no matter how many others we got right."""
+    from proxploy.services.classifier import classify_install_feasibility
+    script = '\n'.join([
+        'read -rp "Add Unbound? <y/N> " prompt',
+        'read -rp "Enter your name: " NAME',
+        'whiptail --menu "and this one cannot be answered" 12 60 2 a A b B',
+    ])
+    ok, _ = classify_install_feasibility("build_container\n", script)
+    assert ok is False
+    # The two answerable ones are still recovered, so a card can say WHY.
+    assert [p["variable"] for p in extract_prompts(script)] == ["prompt", "name"]

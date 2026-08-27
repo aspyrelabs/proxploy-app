@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from proxploy.services.classifier import classify_install_feasibility
+from proxploy.services.classifier import (answerable_without_asking,
+                                          classify_install_feasibility,
+                                          extract_prompts)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "community_scripts"
 
@@ -16,18 +18,26 @@ def test_fully_silent_script_is_installable():
     assert (installable, reason) == (True, None)
 
 
-def test_unconditional_prompt_with_no_default_is_unsupported():
+def test_an_unconditional_prompt_is_now_a_question_rather_than_a_refusal():
+    """Was unsupported. An unguarded prompt is recovered and asked instead, so
+    long as every prompt in the script can be. postgresql's version prompt
+    spells its options out, so it arrives as a choice."""
     ct, install = _load("postgresql")
-    installable, reason = classify_install_feasibility(ct, install)
-    assert installable is False
-    assert reason == "install script requires interactive input, no non-interactive entrypoint"
+    assert classify_install_feasibility(ct, install) == (True, None)
+    p = extract_prompts(install)[0]
+    assert p["variable"] == "ver" and p["kind"] == "choice"
 
 
-def test_multiple_unconditional_prompts_are_unsupported():
+def test_several_unconditional_prompts_are_all_recovered():
+    """docker is the most installed app in the catalog and was blocked by
+    three prompts. Its TCP socket question is a choice with no default, so it
+    reaches the operator rather than being answered for them."""
     ct, install = _load("docker")
-    installable, reason = classify_install_feasibility(ct, install)
-    assert installable is False
-    assert reason == "install script requires interactive input, no non-interactive entrypoint"
+    assert classify_install_feasibility(ct, install) == (True, None)
+    prompts = extract_prompts(install)
+    assert [p["variable"] for p in prompts] == ["prompt", "prompt_agent", "socket_choice"]
+    socket = prompts[-1]
+    assert socket["kind"] == "choice" and answerable_without_asking(socket) is False
 
 
 def test_env_var_guarded_prompt_is_still_installable():
@@ -40,25 +50,37 @@ def test_env_var_guarded_prompt_is_still_installable():
 # and GUARD_RE too loose (any `${X:-}` within 3 lines guarded any prompt).
 
 
-def test_bare_read_with_no_p_flag_is_unsupported():
+def test_a_bare_read_with_no_p_flag_is_asked_under_its_variable_name():
+    """Still detected as a prompt, which was the original point of this probe.
+    It has no sentence to label the field with, so the variable name is all the
+    operator gets. Answerable, just not well explained."""
     ct, install = _load("probe-bare-read")
-    installable, reason = classify_install_feasibility(ct, install)
-    assert installable is False
-    assert reason == "install script requires interactive input, no non-interactive entrypoint"
+    assert classify_install_feasibility(ct, install) == (True, None)
+    p = extract_prompts(install)[0]
+    assert p["variable"] == "answer" and p["label"] == "answer"
 
 
-def test_silent_read_is_unsupported():
+def test_a_silent_read_is_sensitive_by_construction():
+    """`read -s` suppresses the echo, so the script author has already declared
+    the value too sensitive to show on a terminal. That outranks the wording
+    heuristic and is why it works here at all: this probe has no prompt text,
+    so its label is the bare variable "pass", which matches no sentence rule."""
     ct, install = _load("probe-silent-read")
-    installable, reason = classify_install_feasibility(ct, install)
-    assert installable is False
-    assert reason == "install script requires interactive input, no non-interactive entrypoint"
+    assert classify_install_feasibility(ct, install) == (True, None)
+    p = extract_prompts(install)[0]
+    assert p["label"] == "pass"
+    assert p["sensitive"] is True
 
 
 def test_an_unrelated_nearby_env_default_does_not_guard_a_prompt():
+    """The guard has to name the variable the read assigns into. This probe has
+    an unrelated ${FOO:-} a line above, which must not count. Asserted now on
+    the prompt still being RECOVERED, since an unguarded prompt no longer
+    refuses the script: if the correlation broke, the prompt would be treated
+    as satisfied from the environment and silently disappear from the dialog."""
     ct, install = _load("probe-unrelated-guard")
-    installable, reason = classify_install_feasibility(ct, install)
-    assert installable is False
-    assert reason == "install script requires interactive input, no non-interactive entrypoint"
+    assert classify_install_feasibility(ct, install) == (True, None)
+    assert [p["variable"] for p in extract_prompts(install)] == ["admin_email"]
 
 
 def test_a_guard_naming_the_reads_own_variable_still_counts():
@@ -218,23 +240,29 @@ def test_the_capture_cannot_walk_out_of_tools_addon():
     assert addon_delegation_slug(escaping) is None
 
 
-def test_the_detector_still_reports_interactive_input_for_these_scripts():
-    """The interactive-input finding is TRUE and stays exactly as it was. The
-    real addon scripts prompt `Install ${APP}? (y/N)` with a bare `read -r` on
-    the fresh-install path, and their only non-interactive entrypoint is
-    type=update, which updates rather than installs.
+def test_an_addon_script_is_refused_at_the_call_site_not_by_this_function():
+    """These apps are unsupported because of WHERE they install, not because
+    they prompt.
 
-    It is simply not what makes these apps unsupported. The verdict is fixed
-    at the call site (services/catalog.py::ensure_classified) because the
-    addon script is not what an install runs; softening THIS function to make
-    them installable would be the wrong fix twice over."""
+    The prompt is real and is still recovered: "Install ${APP}? (y/N)" reads
+    into `install_prompt` and is a gate, since declining exits. Now that an
+    answerable prompt no longer refuses a script, this function returns
+    installable for it, which makes the layering explicit rather than
+    accidental. The verdict that matters is fixed in
+    services/catalog.py::ensure_classified, because the addon script is not
+    what an install runs: build_container curls install/<var_install>.sh,
+    that URL 404s for these apps, and `bash -c ""` exits 0 having built an
+    empty container. Softening THIS function was never the risk; relying on it
+    to carry the addon verdict would be.
+    """
     ct = DELEGATING_CT.format(slug="dockge", name="Dockge")
 
-    installable, reason = classify_install_feasibility(ct, INTERACTIVE_ADDON)
+    assert classify_install_feasibility(ct, INTERACTIVE_ADDON) == (True, None)
 
-    assert installable is False
-    assert reason == ("install script requires interactive input, "
-                      "no non-interactive entrypoint")
+    prompt = extract_prompts(INTERACTIVE_ADDON)[0]
+    assert prompt["variable"] == "install_prompt"
+    assert prompt["gate"] is True, "declining exits, so it is consent"
+    assert answerable_without_asking(prompt) is False
 
 
 def test_the_detector_is_content_driven_and_not_a_blanket_refusal():

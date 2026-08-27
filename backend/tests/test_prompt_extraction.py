@@ -104,10 +104,13 @@ def test_extraction_and_feasibility_agree_on_the_same_script():
     """One walk, one set of guards. A script the classifier calls unsupported
     must yield the prompts that made it unsupported, and an installable one
     must yield none."""
-    blocked = 'build_container\nread -r -p "Do you want to continue? [y/N]: " CONFIRM\n'
-    ok, reason = classify_install_feasibility("build_container\n", blocked)
-    assert ok is False and "interactive" in reason
-    assert [p["variable"] for p in extract_prompts(blocked)] == ["confirm"]
+    asks = 'build_container\nread -r -p "Do you want to continue? [y/N]: " CONFIRM\n'
+    ok, reason = classify_install_feasibility("build_container\n", asks)
+    # Installable BECAUSE the prompt was recovered: an unguarded prompt is a
+    # question now, not a refusal. What still refuses is a prompt extraction
+    # cannot turn into a question, which test_prompt_gates.py covers.
+    assert (ok, reason) == (True, None)
+    assert [p["variable"] for p in extract_prompts(asks)] == ["confirm"]
 
     clean = 'build_container\napt-get install -y nginx\n'
     assert classify_install_feasibility("build_container\n", clean) == (True, None)
