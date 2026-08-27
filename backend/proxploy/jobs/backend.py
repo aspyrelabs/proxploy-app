@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 from collections.abc import Callable
 
@@ -43,6 +44,65 @@ def handler(kind: str):
     return register
 
 
+# Values registered by ctx.hide for jobs that are still running, keyed by job
+# id so a finished job stops costing anything. Read by the log record
+# factory below, which is the sink ctx cannot reach on its own.
+#
+# This exists because the stdlib logging module is a sink ctx cannot see. A
+# handler that logs directly, or a library that logs an exception carrying the
+# failing command line, reaches around JobContext entirely, and the failing
+# command line is exactly where an interpolated answer shows up.
+_ACTIVE_SECRETS: dict[int, list[str]] = {}
+
+
+def _scrub_values(text: str) -> str:
+    values = {v for vs in _ACTIVE_SECRETS.values() for v in vs}
+    for v in sorted(values, key=len, reverse=True):
+        text = text.replace(v, "[redacted]")
+    return text
+
+
+_scrub_installed = False
+
+
+def _install_log_scrubber() -> None:
+    """Wrap the log record factory, once, the first time a job hides anything.
+
+    A record FACTORY rather than a Filter on the root logger, which was the
+    first attempt and does not work: logger-level filters only run for records
+    logged directly to that logger, never for ones propagated up from a child,
+    so anything logged to `proxploy.<anything>` sailed straight past it. The
+    factory runs for every record from every logger before any handler sees it.
+
+    Not installed at import: a deployment that never uses install answers
+    should not pay this on every record it emits, and while no job has hidden
+    anything the wrapper is a single empty-dict check.
+
+    Residual, deliberately not solved here: an exception TRACEBACK is rendered
+    from record.exc_info by the handler, long after this runs, so a secret
+    inside a traceback frame is not covered. The job error path is scrubbed in
+    _finish, which is where a handler's exception actually reaches an operator.
+    """
+    global _scrub_installed
+    if _scrub_installed:
+        return
+    _scrub_installed = True
+    previous = logging.getLogRecordFactory()
+
+    def factory(*args, **kwargs):
+        record = previous(*args, **kwargs)
+        if _ACTIVE_SECRETS:
+            msg = record.getMessage()
+            out = _scrub_values(msg)
+            if out != msg:
+                # Collapsed into msg because getMessage() already interpolated
+                # args; leaving args in place would re-expand the original.
+                record.msg, record.args = out, ()
+        return record
+
+    logging.setLogRecordFactory(factory)
+
+
 class JobContext:
     """The only way a handler emits output. Handed in by JobBackend._run.
 
@@ -57,6 +117,7 @@ class JobContext:
     def __init__(self, backend: JobBackend, job_id: int) -> None:
         self.backend = backend
         self.job_id = job_id
+        self._hidden: list[str] = []
         self._seq = 0
         # Safety net, not the fix: guards a handler bug reporting a value lower than
         # one it already reported, clamping UP to the last value. Never rely on it to
@@ -75,7 +136,63 @@ class JobContext:
                 forward progress)."""
         return self._last_pct
 
+    # The minimum length a value must have before `hide` will accept it.
+    # A one or two character "secret" matches everywhere and would turn the
+    # transcript into [redacted] soup while telling an attacker nothing they
+    # could not guess, so those are refused loudly rather than scrubbed.
+    MIN_HIDE_LEN = 4
+
+    def hide(self, *values: str | None) -> None:
+        """Register literal values to strip from everything this job emits.
+
+        BY VALUE, NEVER BY NAME, and that is the whole point. services/audit.py
+        redacts a params dict by inspecting KEY NAMES, which works there
+        because we choose those keys. The install answers do not work that way:
+        the variable a prompt assigns into is named by whoever wrote the
+        upstream community-scripts installer, and that name carries no reliable
+        signal. Measured against the real catalog on 2026-08-27: of 15 prompts
+        whose text asks for something sensitive, 11 have a variable name the
+        audit heuristic does not catch, including `ziti_pwd` holding an admin
+        password, four API keys named `*key` (which `REDACT_SUBSTRINGS` excludes
+        deliberately, see the note there), and an openziti enrollment JWT read
+        into a variable literally called `prompt`.
+
+        No substring list can catch `prompt`. Do not "simplify" this back into
+        one. The caller knows the exact strings it injected, and matching those
+        cannot miss.
+        """
+        for v in values:
+            if v and len(v) >= self.MIN_HIDE_LEN and v not in self._hidden:
+                self._hidden.append(v)
+        if self._hidden:
+            _install_log_scrubber()
+            _ACTIVE_SECRETS[self.job_id] = list(self._hidden)
+
+    def scrub(self, text: str | None) -> str | None:
+        """Every registered value replaced, longest first so an overlapping
+        pair cannot leave a fragment of the longer one behind."""
+        if not text or not self._hidden:
+            return text
+        for v in sorted(self._hidden, key=len, reverse=True):
+            text = text.replace(v, "[redacted]")
+        return text
+
+    def scrub_obj(self, obj):
+        """scrub() over a result dict, which a handler may build out of the
+        same answers it was given."""
+        if isinstance(obj, dict):
+            return {k: self.scrub_obj(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self.scrub_obj(v) for v in obj]
+        if isinstance(obj, str):
+            return self.scrub(obj)
+        return obj
+
     def log(self, message: str, stream: str = "stdout") -> None:
+        # Scrubbed ONCE, before either sink. The row and the frame carry the
+        # same text by construction, so a secret cannot be cleaned out of the
+        # database while still being streamed live to a browser.
+        message = self.scrub(message) or ""
         seq = self._next_seq()
         ts = utcnow()
         with self.backend.app.state.sessionmaker() as db:
@@ -284,6 +401,7 @@ class JobBackend:
             # Bound _tasks/_done to in-flight jobs only: otherwise a daemon
             # running for months holds every completed Task (and its retained
             # result/exception) and every Event forever.
+            _ACTIVE_SECRETS.pop(job_id, None)
             self._tasks.pop(job_id, None)
             ev = self._done.pop(job_id, None)
             if ev is not None:
@@ -301,6 +419,15 @@ class JobBackend:
                 target_type: str | None = None) -> None:
         """Synchronous on purpose: the cancel path cannot await (see JobContext)."""
         job_id = ctx.job_id
+        # The terminal path is the OTHER half of ctx.hide, and the half the
+        # analysis said actually leaks. An install script interpolates an
+        # answer straight into a command (kometa-install.sh puts the TMDb key
+        # into a `sed`), so the value shows up in error text and under xtrace
+        # rather than on the happy path. From here `error` reaches five sinks:
+        # jobs.error, a job_events row, the per-job fanout, the global publish
+        # and the outbound notification. Scrub once, above all five.
+        error = ctx.scrub(error)
+        result = ctx.scrub_obj(result) if result else result
         # Captured while the row is loaded, because the notification is sent
         # after this session closes and re-reading it there would be a second
         # query for facts already in hand.
